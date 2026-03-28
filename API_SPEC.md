@@ -65,7 +65,7 @@
 
 **Response `200`:**
 ```json
-{ "data": { "user": { "id": 1, "email": "user@example.com", "username": "Alice", "registered": 1700000000 } } }
+{ "data": { "user": { "id": 1, "email": "user@example.com", "username": "Alice", "registered": "2026-01-01T00:00:00Z" } } }
 ```
 
 **Errors:** `UNAUTHENTICATED` (401)
@@ -322,7 +322,17 @@ Save global configuration for a tool. Replaces all settings. Password fields wit
 
 **Response `200`:**
 ```json
-{ "data": { "message": "Global tool settings saved." } }
+{
+  "data": {
+    "tool_class": "Spora\\Tools\\Builtin\\SendEmailTool",
+    "settings": {
+      "smtp_host": "smtp.example.com",
+      "smtp_port": "587",
+      "from_address": "assistant@example.com",
+      "password": "***"
+    }
+  }
+}
 ```
 
 **Security notes:**
@@ -416,7 +426,15 @@ Save agent-level credential overrides for a tool. Only `scope: "agent"` fields a
 
 **Response `200`:**
 ```json
-{ "data": { "message": "Agent tool override saved." } }
+{
+  "data": {
+    "tool_class": "Spora\\Tools\\Builtin\\SearchWebTool",
+    "has_override": true,
+    "settings": {
+      "api_key": "***"
+    }
+  }
+}
 ```
 
 **Notes:**
@@ -466,7 +484,7 @@ List tasks for the current user's agent, newest first.
         "status": "COMPLETED",
         "user_prompt": "Summarize the latest AI news.",
         "final_response": "Here are the top AI stories this week…",
-        "run_count": 3,
+        "step_count": 3,
         "max_steps": 10,
         "failure_reason": null,
         "created_at": "2026-03-28T09:00:00Z",
@@ -510,7 +528,7 @@ Create and start a new task.
       "status": "RUNNING",
       "user_prompt": "Write a blog post about PHP 8.4 and send it by email.",
       "final_response": null,
-      "run_count": 0,
+      "step_count": 0,
       "max_steps": 10,
       "failure_reason": null,
       "created_at": "2026-03-28T10:00:00Z",
@@ -543,7 +561,7 @@ Get full task detail: task record, message history, and pending tool call (if an
       "status": "PENDING_APPROVAL",
       "user_prompt": "Write a blog post and send it by email.",
       "final_response": null,
-      "run_count": 2,
+      "step_count": 2,
       "max_steps": 10,
       "failure_reason": null,
       "created_at": "2026-03-28T10:00:00Z",
@@ -591,6 +609,7 @@ Get full task detail: task record, message history, and pending tool call (if an
 **Notes:**
 - `pending_tool_call` is present only when `task.status === "PENDING_APPROVAL"`, otherwise `null`.
 - `history` excludes `tool_call_payload` (internal Orchestrator field not relevant to the UI).
+- `history[].tool_call_id` and `history[].tool_name` are only populated for `role: "tool"` messages; they are `null` for `role: "user"` and `role: "assistant"` messages.
 - `human_description` is the output of `OutputToolInterface::describeAction($proposedArguments)`.
 
 **Errors:** `NOT_FOUND` (404) — task does not exist or belongs to another user
