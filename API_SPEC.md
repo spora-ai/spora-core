@@ -657,7 +657,7 @@ Get full task detail: task record, message history, and pending tool call (if an
 - `pending_tool_call` is present only when `task.status === "PENDING_APPROVAL"`, otherwise `null`.
 - `history` excludes `tool_call_payload` (internal Orchestrator field not relevant to the UI).
 - `history[].tool_call_id` and `history[].tool_name` are only populated for `role: "tool"` messages; they are `null` for `role: "user"` and `role: "assistant"` messages.
-- `human_description` is the output of `OutputToolInterface::describeAction($proposedArguments)`.
+- `human_description` is stored in `tool_calls.human_description` at row creation time (not computed on read), so it remains accurate even if the plugin is later updated or removed.
 
 **Errors:** `NOT_FOUND` (404) — task does not exist or belongs to another user
 
