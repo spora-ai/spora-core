@@ -516,7 +516,7 @@ List tasks for the current user's agent, newest first.
 
 | Param | Type | Default | Notes |
 |---|---|---|---|
-| `status` | string | (all) | `PENDING`, `RUNNING`, `PENDING_APPROVAL`, `COMPLETED`, `FAILED`, `REJECTED` |
+| `status` | string | (all) | `PENDING`, `RUNNING`, `PENDING_APPROVAL`, `COMPLETED`, `FAILED`, `REJECTED` — Note: `REJECTED` is a terminal state set when the user hard-cancels a task (not yet exposed in V1 — the `/reject` endpoint re-enters the loop instead) |
 | `page` | integer | `1` | |
 | `per_page` | integer | `20` | Max: `100` |
 

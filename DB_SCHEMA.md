@@ -23,7 +23,7 @@
 | `verified` | `TINYINT(1)` | No | `0` | Email verified flag |
 | `resettable` | `TINYINT(1)` | No | `1` | Password reset allowed |
 | `roles_mask` | `INT UNSIGNED` | No | `0` | Role bitmask |
-| `registered` | `INT UNSIGNED` | No | — | Unix timestamp of registration |
+| `registered` | `INT UNSIGNED` | No | — | Unix timestamp of registration. delight-im/auth manages this as a Unix int. The API layer converts to ISO 8601 (`DateTime::createFromTimestamp`) when returning it in responses. |
 | `last_login` | `INT UNSIGNED` | Yes | NULL | Unix timestamp of last login |
 | `force_logout` | `MEDIUMINT UNSIGNED` | No | `0` | Forced-logout counter |
 | `created_at` | `TIMESTAMP` | Yes | NULL | Eloquent standard |
@@ -183,12 +183,11 @@ protected $casts = [
 **Status Transition Rules (enforced in Orchestrator, not DB):**
 ```
 PENDING            → RUNNING
-RUNNING            → PENDING_APPROVAL   (OutputTool intercepted)
+RUNNING            → PENDING_APPROVAL   (OutputTool intercepted, approval required)
 RUNNING            → COMPLETED          (LLM returned text, no tool call)
 RUNNING            → FAILED             (max_steps exceeded or provider error)
-PENDING_APPROVAL   → RUNNING            (human approved → resume dispatched)
-PENDING_APPROVAL   → REJECTED           (human rejected)
-REJECTED           → RUNNING            (user may restart)
+PENDING_APPROVAL   → RUNNING            (human approved OR rejected a tool call → agent resumes loop)
+PENDING_APPROVAL   → REJECTED           (user hard-cancels the task entirely — no loop resume)
 ```
 
 ---

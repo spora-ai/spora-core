@@ -2,12 +2,44 @@
 
 This document serves as the north star for Spora's source code architecture and operational philosophy. Any new features, tools, or UI components should map perfectly to this model.
 
-## 1. The "Digital Employee" MVP
-Spora is "The WordPress of AI Agents," built on the concept of **"My Assistant"**—a single, highly autonomous AI assistant configured uniquely for the user. 
+## 1. Configuration Philosophy
+
+Spora supports two configuration modes, designed for different deployment contexts:
+
+- **File-based (shared hosting default):** `config.php` for application settings + `storage/secret.key` for the encryption key. Simple to set up via FTP with no shell access required.
+- **Environment variable (Docker / VPS / CI):** All settings via `SPORA_*` env vars or a `.env` file in the project root. `SPORA_SECRET_KEY` (base64 32 bytes) replaces the key file entirely. `config.php` is optional when all required vars are present.
+
+Priority: OS env vars > `.env` file > `config.php`. The Kernel reads all three on every boot.
+
+Passwords (DB password, tool credentials) must always come from env vars — they are never written to `config.php`.
+
+**Why the encryption key is not in `config.php`:**
+The key is kept out of `config.php` for two reasons:
+
+1. **It's binary.** `sodium_crypto_secretbox_keygen()` produces 32 raw bytes, not a printable string. Embedding binary in a PHP file requires encoding it first — which is exactly what the env var path does (`SPORA_SECRET_KEY` is base64-encoded). Storing it as a dedicated file avoids that round-trip.
+
+2. **Key and ciphertext must never travel together.** The encrypted tool credentials live in the database. If the key lived in the same directory, a single backup or accidental commit would hand an attacker both. The key must be stored separately from the data it protects.
+
+**Practical implications for the key file:**
+
+`storage/secret.key` and `storage/database.sqlite` are in the same directory — which defeats the separation principle the moment someone takes a full project backup. Therefore install.php auto-detects the best available location outside the project:
+
+1. `~/.spora/secret.key` — the cPanel home directory is the account root; `public_html/` is a subdirectory, so `~/.spora/` is outside the web root and never captured by a project-level backup. This is the default target on shared hosting.
+2. `dirname(project)/.spora/secret.key` — fallback for VPS layouts where `$HOME` is not meaningful.
+3. `storage/secret.key` — last resort if neither location is writable. Install.php prints a prominent warning and the user should migrate the key when possible.
+
+The resolved path is stored in `config.php` as `key_path`. The path itself is not secret — only the file it points to is. For Docker/CI, `SPORA_SECRET_KEY` (base64 env var) bypasses the file entirely.
+
+This is the same principle behind SSH private keys living in `~/.ssh/` rather than in the repository they authenticate.
+
+---
+
+## 2. The "Digital Employee" MVP
+Spora is "The WordPress of AI Agents," built on the concept of **"My Assistant"**—a single, highly autonomous AI assistant configured uniquely for the user.
 - **The Backpack:** Spora is equipped via a UI dashboard where users define its Tools, API connections, and settings.
 - **The Engine:** While the UI is simplified to "My Assistant," the underlying database uses an `agent_id` structure. This ensures the future evolution into a multi-agent orchestration tool requires absolutely zero database structural refactoring.
 
-## 2. Tool Taxonomy (Input/Output Isolation)
+## 3. Tool Taxonomy (Input/Output Isolation)
 Spora categorizes tools strictly into two interfaces to resolve the core fear of autonomous AI: "Is it going to break something?"
 
 ### A. Input Tools (The Senses & Imagination)
@@ -24,14 +56,14 @@ These implement Spora's `OutputToolInterface`.
 - **Default Behavior:** Human-in-the-loop — calling an Output Tool suspends the Agent pending user approval.
 - **Auto-approve:** Each Output Tool declares a class-level default via `#[OutputTool(requiresApproval: true)]`. The agent owner can override this per-tool via `agent_tools.auto_approve`. When auto-approved, the Orchestrator executes the tool immediately without pausing.
 
-## 3. The Orchestrator Loop & State Machine
+## 4. The Orchestrator Loop & State Machine
 Spora requires a *custom-built* Agent Orchestrator. While PHP libraries (like Prism or LLM-Chain) exist, they use synchronous `while()` loops that make it nearly impossible to pause execution across HTTP requests. Spora's loop relies on the SQLite database and `symfony/messenger` queue.
 
 **The Loop Structure (`max_steps` limited):**
-A single Agent Task has a `run_count`. To prevent infinite loops (and massive API bills), the Orchestrator enforces a strict limit (e.g., 10 iterations). 
+A single Agent Task has a `step_count`. To prevent infinite loops (and massive API bills), the Orchestrator enforces a strict limit (e.g., 10 iterations). 
 
 1. **Think:** Spora sends the System Prompt (Recipe), History, and Backpack Tools to the LLM.
-2. **Act (Input Tool):** If the LLM decides to use an `InputTool` (e.g., SearchWeb), the Orchestrator executes it instantly, appends the result to the Task history, increments `run_count`, and loops back to Step 1.
+2. **Act (Input Tool):** If the LLM decides to use an `InputTool` (e.g., SearchWeb), the Orchestrator executes it instantly, appends the result to the Task history, increments `step_count`, and loops back to Step 1.
 3. **Intercept (Output Tool):** If the LLM decides to use an `OutputTool` (e.g., SendEmail), the Orchestrator intercepts the call and checks the approval requirement:
    - **Resolve approval:** Check `agent_tools.auto_approve` for this tool+agent. If `NULL`, fall back to the tool's `#[OutputTool(requiresApproval:)]` class default.
    - **If approval required:** Spora serializes the current state (memory + exactly what arguments the Agent passed to the tool) into the SQLite database as a `PENDING_APPROVAL` status. *The PHP script gracefully stops entirely.* This is crucial for shared hosting.
@@ -42,7 +74,7 @@ A single Agent Task has a `run_count`. To prevent infinite loops (and massive AP
 
 ---
 
-## 4. Plugin System
+## 5. Plugin System
 
 Plugins extend Spora by dropping a folder into `plugins/`. The `Kernel` scans this directory at boot and auto-discovers any class implementing `PluginInterface`. No manual registration is needed — the same "drop and go" philosophy as WordPress plugins.
 

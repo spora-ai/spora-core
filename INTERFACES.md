@@ -406,7 +406,7 @@ interface LLMDriverInterface
      */
     public function complete(LLMRequest $request): LLMResponse;
 
-    /** e.g. "openai" or "anthropic" */
+    /** e.g. "openai_compatible" or "anthropic" */
     public function getProviderName(): string;
 
     /** e.g. "gpt-4o" or "claude-3-5-sonnet-20241022" */
@@ -420,7 +420,7 @@ interface LLMDriverInterface
 
 All value objects are `final readonly` classes (PHP 8.1+). Never persisted directly — serialization to/from DB is handled by Eloquent models and service classes.
 
-### 6.1 `LLMRequest`
+### 7.1 `LLMRequest`
 
 ```php
 <?php
@@ -451,7 +451,7 @@ final readonly class LLMRequest
 }
 ```
 
-### 6.2 `LLMResponse`
+### 7.2 `LLMResponse`
 
 ```php
 <?php
@@ -479,7 +479,7 @@ final readonly class LLMResponse
 }
 ```
 
-### 6.3 `ToolCall`
+### 7.3 `ToolCall`
 
 ```php
 <?php
@@ -514,7 +514,7 @@ final readonly class ToolCall
 }
 ```
 
-### 6.4 `ToolResult`
+### 7.4 `ToolResult`
 
 ```php
 <?php
@@ -560,7 +560,7 @@ final readonly class ToolResult
 }
 ```
 
-### 6.5 `AgentState`
+### 7.5 `AgentState`
 
 ```php
 <?php
@@ -592,7 +592,7 @@ final readonly class AgentState
          */
         public array   $messageSnapshot,
 
-        public int     $runCount,
+        public int     $stepCount,
         public int     $maxSteps,
 
         /** ISO 8601 UTC timestamp. */
@@ -611,7 +611,7 @@ final readonly class AgentState
                 arguments:      $data['pending_tool_call']['arguments'],
             ),
             messageSnapshot: $data['message_snapshot'],
-            runCount:        $data['run_count'],
+            stepCount:       $data['step_count'],
             maxSteps:        $data['max_steps'],
             pausedAt:        $data['paused_at'],
         );
@@ -628,7 +628,7 @@ final readonly class AgentState
                 'arguments'        => $this->pendingToolCall->arguments,
             ],
             'message_snapshot'  => $this->messageSnapshot,
-            'run_count'         => $this->runCount,
+            'step_count'        => $this->stepCount,
             'max_steps'         => $this->maxSteps,
             'paused_at'         => $this->pausedAt,
         ], JSON_THROW_ON_ERROR);
@@ -640,7 +640,7 @@ final readonly class AgentState
 
 ## 8. Security Contracts
 
-### 7.1 `EncryptedValue`
+### 8.1 `EncryptedValue`
 
 ```php
 <?php
@@ -675,7 +675,7 @@ final class EncryptedValue
 }
 ```
 
-### 7.2 `SecurityManagerInterface`
+### 8.2 `SecurityManagerInterface`
 
 ```php
 <?php
@@ -723,7 +723,7 @@ interface SecurityManagerInterface
 }
 ```
 
-### 7.3 `SecurityManager` — Concrete Class Outline
+### 8.3 `SecurityManager` — Concrete Class Outline
 
 ```php
 <?php
@@ -742,12 +742,13 @@ final class SecurityManager implements SecurityManagerInterface
     private readonly string $masterKey;
 
     /**
-     * @param string $keyPath  Absolute path to storage/secret.key.
-     *                         Provided by the DI factory from config['base_path'].
-     * @throws \RuntimeException  If file missing, unreadable, or not exactly
-     *                            SODIUM_CRYPTO_SECRETBOX_KEYBYTES (32) bytes.
+     * @param string $keyOrPath  Either:
+     *                           - A raw 32-byte key string (from SPORA_SECRET_KEY env var, via DI factory).
+     *                           - An absolute file path to storage/secret.key (contains '/', length > 32).
+     *                           The DI factory resolves which form to pass (see 8.6 runtime enforcement).
+     * @throws \RuntimeException  If key is invalid, or file is missing/unreadable/wrong size.
      */
-    public function __construct(string $keyPath)
+    public function __construct(string $keyOrPath)
     {
         if (!file_exists($keyPath) || !is_readable($keyPath)) {
             throw new \RuntimeException(
@@ -782,7 +783,7 @@ final class SecurityManager implements SecurityManagerInterface
 
 **Runtime failure:** `SecurityManager` throws at DI container build time. The `Kernel` catches this at the outermost layer and returns `HTTP 500` with error code `KEY_FILE_MISSING`. The file path must not appear in the HTTP response — only in the server error log.
 
-### 7.4 `DecryptionFailedException`
+### 8.4 `DecryptionFailedException`
 
 ```php
 <?php
@@ -797,7 +798,7 @@ namespace Spora\Core\Exceptions;
 final class DecryptionFailedException extends \RuntimeException {}
 ```
 
-### 7.5 `ToolConfigService`
+### 8.5 `ToolConfigService`
 
 The **only** class permitted to read or write `tool_configurations.settings` and `agent_tool_overrides.settings`.
 
@@ -922,43 +923,192 @@ final class ToolConfigService
 }
 ```
 
-### 7.6 Install Bootstrap — `install.php` Security Flow
+### 8.6 Install Bootstrap — `install.php` Flow
 
 ```
-1. Verify storage/ directory exists → create with chmod 0750 if not.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — Pre-flight checks  (FATAL if any fail)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1a. PHP version >= 8.1.
+1b. Required extensions present: sodium, pdo, json, mbstring.
+    pdo_sqlite required only when DB driver = sqlite.
+    pdo_mysql  required only when DB driver = mysql.
+1c. sodium_crypto_secretbox_KEYBYTES defined (libsodium usable).
 
-2. Verify storage/.htaccess contains "Deny from all":
-   → Create if missing.
-   → FATAL error if file exists but does not deny access.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 2 — Environment / config resolution
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Priority order (highest wins):
+  1. Actual OS / server environment variables (set_env in cPanel, Docker env, etc.)
+  2. .env file in the project root (parsed by install.php and the Kernel at boot)
+  3. config.php (generated/updated by install.php)
 
-3. Check storage/secret.key:
-   IF exists:
-     → Validate: must be exactly SODIUM_CRYPTO_SECRETBOX_KEYBYTES (32) bytes.
-     → sodium_memzero() the loaded bytes immediately after validation.
-     → Log "Key exists and is valid — skipping generation."
-     → NEVER regenerate an existing key (invalidates all encrypted settings).
-   IF missing:
-     → $key = sodium_crypto_secretbox_keygen()
-     → file_put_contents($keyPath, $key, LOCK_EX)
-     → chmod($keyPath, 0600)  // owner read/write only
-     → sodium_memzero($key)   // wipe from PHP memory immediately after write
-     → Log "Key generated."
+Supported environment variables:
 
-4. Ensure "storage/secret.key" is in .gitignore → append if missing.
+  SPORA_SECRET_KEY      base64-encoded 32-byte key. Recommended for production — key never
+                        touches the project filesystem. Takes priority over SPORA_KEY_PATH.
+  SPORA_KEY_PATH        Override the key file path resolved by install.php. Useful for Docker/CI
+                        or when manually relocating the key after initial setup.
+  SPORA_DB_DRIVER       "sqlite" (default) | "mysql"
+  SPORA_DB_PATH         Absolute path for SQLite file (default: {base_path}/storage/database.sqlite)
+  SPORA_DB_HOST         MySQL host
+  SPORA_DB_PORT         MySQL port (default: 3306)
+  SPORA_DB_NAME         MySQL database name
+  SPORA_DB_USER         MySQL username
+  SPORA_DB_PASS         MySQL password
+  SPORA_ALLOW_REGISTRATION  "true" | "false" (default: "true")
 
-5. Print summary:
-   - Key status (exists/generated, 32 bytes)
-   - Web protection status (.htaccess: Deny from all)
-   - .gitignore status
+If all required config is supplied via env vars, config.php is not needed and install.php
+skips writing it. The Kernel reads env vars on every boot via a lightweight loader
+(no third-party library required — getenv() / $_ENV suffice; .env file parsed manually).
 
-6. Print warning:
-   "IMPORTANT: Back up storage/secret.key to a location SEPARATE from this server.
-    If this file is lost, all encrypted tool credentials are permanently unrecoverable."
+Ensure ".env" is in .gitignore → append if missing.
 
-Runtime enforcement (SecurityManager constructor, every request):
-   IF key file missing or unreadable → throw \RuntimeException → HTTP 500 KEY_FILE_MISSING
-   There is no fallback. Fail loudly, never silently.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 3 — Secret key setup
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IF SPORA_SECRET_KEY env var is set:
+  → base64_decode() → validate exactly SODIUM_CRYPTO_SECRETBOX_KEYBYTES (32) bytes.
+  → FATAL if invalid: "SPORA_SECRET_KEY must be base64-encoded 32 bytes."
+  → Log "Using secret key from SPORA_SECRET_KEY — no key file needed."
+  → Write 'key_path' => null into config.php (runtime will read from env).
+  → Skip all file steps.
+
+ELSE (file-based key):
+  Resolve the key file path using this candidate list (first writable wins):
+
+  Candidate 1 — Home directory hidden folder (ideal on cPanel shared hosting):
+    getenv('HOME') . '/.spora/secret.key'
+    e.g. /home/alice/.spora/secret.key
+    Rationale: $HOME is the cPanel account root. public_html/ is a subdirectory of it,
+    so ~/.spora/ is outside the web root and excluded from any project-level backup.
+
+  Candidate 2 — Parent of the project root:
+    dirname(BASE_PATH) . '/.spora/secret.key'
+    e.g. if project is at /var/www/spora/, key goes to /var/www/.spora/secret.key
+    Rationale: covers VPS layouts where HOME is not meaningful.
+
+  Candidate 3 — storage/secret.key (fallback, development only):
+    BASE_PATH . '/storage/secret.key'
+
+  For each candidate (1 and 2 only — not 3):
+    → Try to create the parent directory (mkdir, chmod 0700).
+    → Try to write a test file. If it fails, move to next candidate.
+
+  Once a path is resolved:
+    IF key file exists at that path:
+      → Validate: must be exactly 32 bytes. FATAL if not.
+      → sodium_memzero() immediately after validation.
+      → Log "Key file exists and is valid — skipping generation."
+      → NEVER regenerate an existing key (invalidates all encrypted settings).
+    IF missing:
+      → $key = sodium_crypto_secretbox_keygen()
+      → file_put_contents($resolvedPath, $key, LOCK_EX)
+      → chmod($resolvedPath, 0600)   // owner read/write only
+      → sodium_memzero($key)         // wipe from PHP memory immediately
+      → Log "Key generated at: <resolvedPath>"
+
+  Store the resolved path in config.php as 'key_path' => '<resolvedPath>'.
+  Ensure storage/secret.key is in .gitignore → append if missing (covers fallback case).
+
+  IF resolved path is Candidate 3 (storage/secret.key):
+    Print warning:
+      "WARNING: Could not write the key file outside the project directory.
+       The key has been placed at storage/secret.key alongside your database.
+       A single backup captures both — move the key outside the project when possible,
+       or set SPORA_SECRET_KEY as an environment variable.
+       IMPORTANT: Back up your key separately. If lost, all encrypted credentials are
+       permanently unrecoverable."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 4 — Database setup
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Resolve driver from env / config (default: sqlite).
+
+IF driver = sqlite:
+  → Verify parent directory of DB path is writable. FATAL if not.
+  → Create the SQLite file if it does not exist (touch + chmod 0640).
+
+IF driver = mysql:
+  → Collect host, port, db name, user, password (from env vars or interactive prompt).
+  → Attempt PDO connection: new PDO("mysql:host=…;dbname=…;charset=utf8mb4", …)
+    FATAL if connection fails — print the PDO exception message.
+  → Verify utf8mb4 charset support: SHOW VARIABLES LIKE 'character_set_server'.
+    WARNING (not fatal) if not utf8mb4 — advise setting character-set-server=utf8mb4.
+  → Log "MySQL connection OK."
+
+Run Eloquent migrations via Schema Builder (idempotent — Schema::hasTable() guards).
+Log each table: "Created table X" or "Table X already exists — skipped."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 5 — Storage directory security
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5a. Verify storage/ exists → create with chmod 0750 if not.
+5b. Verify storage/.htaccess contains "Deny from all":
+    → Create if missing.
+    → FATAL if file exists but does not deny access.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 6 — Plugins directory check  (WARNING only, non-fatal)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6a. Verify plugins/ directory exists → create if not.
+6b. Check plugins/ is writable by the web server user.
+    → If writable:   "OK — plugins can be installed."
+    → If not writable: WARNING — "plugins/ is not writable. You can still install plugins
+      manually via FTP/SFTP, but the UI plugin installer will not work."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 7 — Config persistence
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IF all config was supplied via env vars → skip writing config.php.
+ELSE → write / update config.php with resolved values (db driver, path/host/port/name/user,
+       allow_registration). Passwords are NOT written to config.php — they must come from env.
+Ensure config.php is NOT publicly accessible (it lives in project root, protected by root
+.htaccess or outside the web root).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 8 — Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Print table:
+  PHP version         ✓ 8.x.x
+  Extensions          ✓ sodium, pdo, pdo_sqlite / pdo_mysql, json, mbstring
+  Secret key          ✓ env var (SPORA_SECRET_KEY) | ✓ file @ <resolvedPath> (generated / existing) | ⚠ fallback: storage/ (dev only)
+  Database            ✓ sqlite @ path | ✓ mysql @ host (migrations run)
+  storage/ security   ✓ .htaccess: Deny from all
+  plugins/ writable   ✓ yes | ⚠ no (manual install only)
+  .gitignore          ✓ secret.key, .env protected
 ```
+
+**Runtime enforcement (SecurityManager DI factory, every request):**
+
+install.php does the hard work once. At runtime the factory simply reads what install.php decided:
+
+```php
+// Resolution order: SPORA_SECRET_KEY (env) → SPORA_KEY_PATH (env override) → config['key_path']
+\Spora\Core\SecurityManagerInterface::class => static function (\Psr\Container\ContainerInterface $c): SecurityManager {
+    // 1. Raw key bytes from env var (Docker / CI / cPanel env var — no file needed)
+    $envKey = getenv('SPORA_SECRET_KEY');
+    if ($envKey !== false) {
+        $key = base64_decode($envKey, strict: true);
+        if ($key === false || strlen($key) !== SODIUM_CRYPTO_SECRETBOX_KEYBYTES) {
+            throw new \RuntimeException('SPORA_SECRET_KEY is not valid base64 or not 32 bytes.');
+        }
+        return new \Spora\Core\SecurityManager($key);  // accepts raw bytes directly
+    }
+    // 2. Path override via env (e.g. after manually relocating the key file)
+    $keyPath = getenv('SPORA_KEY_PATH') ?: null;
+    // 3. Path resolved by install.php and stored in config.php
+    if ($keyPath === null) {
+        $config  = $c->get('config');
+        $keyPath = $config['key_path']
+            ?? throw new \RuntimeException('key_path not set in config.php. Run install.php.');
+    }
+    return new \Spora\Core\SecurityManager($keyPath);
+},
+```
+
+`SecurityManager::__construct()` accepts either a raw 32-byte string (env path) or an absolute file path string (file paths). File-path variant reads, validates length, and fails loudly if missing or corrupt.
+If no source yields a valid key → `\RuntimeException` → `HTTP 500 KEY_FILE_MISSING`. No fallback. Fail loudly, never silently.
 
 ---
 
