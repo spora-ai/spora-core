@@ -31,6 +31,28 @@ final class Tool
 }
 
 /**
+ * Applied at class level on OutputToolInterface implementors.
+ * Declares the class-level approval default.
+ *
+ * The Orchestrator checks this after intercepting an OutputTool call:
+ *   1. Read agent_tools.auto_approve for this tool+agent (the per-agent override).
+ *   2. If NULL (not explicitly set), fall back to this attribute's $requiresApproval.
+ *   3. If true → pause, serialize AgentState, set PENDING_APPROVAL.
+ *      If false → execute immediately without human review.
+ *
+ * Plugin authors set requiresApproval: false for low-risk output tools (e.g. a
+ * self-notification tool where the agent owner is always the recipient).
+ * The agent owner can still override this per-agent via the UI.
+ */
+#[Attribute(Attribute::TARGET_CLASS)]
+final class OutputTool
+{
+    public function __construct(
+        public readonly bool $requiresApproval = true,
+    ) {}
+}
+
+/**
  * Applied zero-or-more times at class level (repeatable).
  * Each instance describes one parameter the tool accepts.
  * The Orchestrator collects these and builds the JSON Schema `parameters` block
@@ -147,7 +169,11 @@ final class SearchWebTool implements InputToolInterface
 
 ## 3. `OutputToolInterface`
 
-Implemented by all write/real-world-action tools. The Orchestrator MUST NOT call `execute()` directly — it intercepts the call, serializes state as `PENDING_APPROVAL`, and halts. `execute()` is called exclusively by `ApprovalResumeHandler` after human approval.
+Implemented by all write/real-world-action tools. The Orchestrator MUST NOT call `execute()` directly — it intercepts the call, resolves the approval requirement, then either:
+- **Approval required** (`auto_approve` resolves to `false`): serializes `AgentState` as `PENDING_APPROVAL` and halts. `execute()` is called exclusively by `ApprovalResumeHandler` after human approval.
+- **Auto-approved** (`auto_approve` resolves to `true`): calls `execute()` immediately, appends the result to history, and continues the loop.
+
+Approval resolution order: `agent_tools.auto_approve` (per-agent) → `#[OutputTool(requiresApproval:)]` class default.
 
 ```php
 <?php
@@ -195,6 +221,12 @@ interface OutputToolInterface
 
 The contract for the agent loop. The concrete `Orchestrator` is a singleton registered in PHP-DI.
 
+The Orchestrator drives a Task through its full lifecycle using four focused methods:
+- `start()` — creates the Task and fires the first queue message. Returns immediately; no LLM call happens here.
+- `tick()` — the stateless loop body, called once per queue message. Loads history, calls the LLM, and handles the response: runs an InputTool and re-dispatches itself, pauses for OutputTool approval, or marks the task complete/failed. Being stateless and short-lived is what makes Spora viable on shared hosting where long-running PHP processes are not available.
+- `resume()` — re-enters the loop after a human approves a pending OutputTool call, executing the tool with confirmed (or edited) arguments before re-dispatching `tick()`.
+- `reject()` — injects the rejection reason into history as a message the LLM can reason about, then re-dispatches `tick()` so the agent can choose an alternative action.
+
 ```php
 <?php
 
@@ -205,62 +237,40 @@ use Spora\Models\Task;
 interface OrchestratorInterface
 {
     /**
-     * Start a brand-new task for an agent.
-     * Creates the Task record (status: RUNNING), appends the user message to task_history,
-     * dispatches the first Symfony Messenger message, and returns immediately.
-     * On shared hosting (no queue worker), the Messenger transport is synchronous.
-     *
      * @param  int    $agentId
      * @param  string $userPrompt  The user's initial instruction.
      * @param  int    $maxSteps    Hard iteration cap. Copied to Task at creation.
-     * @return Task                The newly created Task.
+     * @return Task                The newly created Task (status: RUNNING).
      */
     public function start(int $agentId, string $userPrompt, int $maxSteps = 10): Task;
 
     /**
-     * Run one iteration of the orchestrator loop for an existing Task.
-     * Called by the Symfony Messenger handler on each queue message.
+     * One iteration of the loop. Called by the Symfony Messenger handler.
      *
-     * Process:
-     *   1. Load Task + reconstruct message history from task_history.
-     *   2. Load effective tool settings for all enabled tools via
-     *      ToolConfigService::getEffectiveSettings($agent, $toolClass) for each tool —
-     *      this resolves global config + any agent-level overrides.
-     *   3. Build LLMRequest (system prompt from Recipe, history, tool schemas).
-     *   4. Call LLMDriverInterface::complete().
-     *   5a. If LLM returns a tool call:
-     *       - InputTool  → execute(), append tool result to history, increment run_count, re-dispatch.
-     *       - OutputTool → create tool_calls row (PENDING), serialize AgentState to tasks.pending_state,
-     *                      set task status PENDING_APPROVAL, halt (do not re-dispatch).
-     *   5b. If LLM returns text (no tool call) → append to history, set status COMPLETED.
-     *   5c. If run_count >= max_steps → set status FAILED, failure_reason = "max_steps_exceeded".
-     *
-     * @param  int $taskId
-     * @return void
+     * 1. Load Task + reconstruct message history from task_history.
+     * 2. Load effective settings for all enabled tools via ToolConfigService::getEffectiveSettings().
+     * 3. Build LLMRequest (Recipe system prompt + history + tool schemas).
+     * 4. Call LLMDriverInterface::complete().
+     * 5a. If LLM returns a tool call:
+     *     - InputTool       → execute(), append result, increment step_count, re-dispatch.
+     *     - OutputTool      → resolve approval (agent_tools.auto_approve ?? #[OutputTool(requiresApproval:)]):
+     *         auto-approved     → execute(), append result, increment step_count, re-dispatch.
+     *         requires approval → create tool_calls row (PENDING), serialize AgentState to tasks.pending_state,
+     *                             set status PENDING_APPROVAL, halt.
+     * 5b. LLM returns text → append to history, set status COMPLETED.
+     * 5c. step_count >= max_steps → set status FAILED, failure_reason = "max_steps_exceeded".
      */
     public function tick(int $taskId): void;
 
     /**
-     * Resume a paused task after human approval of a pending OutputTool call.
-     * Deserializes AgentState from tasks.pending_state, executes the tool with
-     * approved arguments, appends the result to history, increments run_count,
-     * clears pending_state, and re-dispatches tick().
-     *
      * @param  int                  $taskId
      * @param  array<string, mixed> $approvedArguments  Arguments confirmed (or edited) by the human.
-     * @return void
      */
     public function resume(int $taskId, array $approvedArguments): void;
 
     /**
-     * Reject a pending OutputTool call.
-     * Appends a system message with the rejection reason to history so the LLM
-     * can choose an alternative action, clears pending_state, sets task status
-     * back to RUNNING, and re-dispatches tick().
-     *
      * @param  int    $taskId
-     * @param  string $reason  Human-provided note surfaced to the LLM.
-     * @return void
+     * @param  string $reason  Surfaced to the LLM so it can choose an alternative action.
      */
     public function reject(int $taskId, string $reason): void;
 }
@@ -268,9 +278,114 @@ interface OrchestratorInterface
 
 ---
 
-## 5. `LLMDriverInterface`
+## 5. `PluginInterface`
 
-Adapter contract for LLM providers. `OpenAIDriver` and `AnthropicDriver` both implement this.
+The entry point for any Spora plugin. Drop a folder into `plugins/` with a class implementing this interface — the Kernel discovers and boots it automatically on first request.
+
+**Discovery:** At boot, `Kernel` scans each subdirectory of `plugins/` for a PHP file matching the directory name (e.g. `plugins/MyPlugin/MyPlugin.php`). If the class implements `PluginInterface`, it is instantiated and booted. No manual registration required — this is the "WordPress plugin" model.
+
+**Boot sequence per plugin:**
+1. If `plugins/MyPlugin/vendor/autoload.php` exists → `require_once` it automatically (third-party dependencies)
+2. Call `autoload()` → register returned PSR-4 mappings for the plugin's own classes
+3. Call `tools()`, `drivers()`, `recipePaths()` → register contributions
+4. Call `register()` → apply arbitrary DI bindings
+
+**File/library loading:**
+- **Plugin's own classes:** declared via `autoload()` as PSR-4 namespace→path pairs. The Kernel registers these with the active Composer `ClassLoader` before any other plugin method is called.
+- **Third-party dependencies:** plugin author runs `composer install` inside their plugin folder. The resulting `vendor/autoload.php` is required automatically by the Kernel (step 1 above). Plugins are fully self-contained — no assumption about the host environment.
+
+**Dependency conflicts:**
+PHP's autoloader is first-loaded-wins. If two plugins bundle the same package at different versions, or a plugin conflicts with a Spora core dependency, the first-registered autoloader silently wins and the other plugin may fail at runtime in hard-to-diagnose ways.
+
+Mitigations:
+- **Use `php-scoper`** (strongly recommended for plugins with third-party deps): prefixes all vendor namespaces so `GuzzleHttp\Client` becomes `MyPlugin\Deps\GuzzleHttp\Client`. Fully isolated, zero conflicts regardless of load order. This is the standard practice for WordPress plugins.
+- **Prefer Spora core packages**: Spora publishes a list of bundled packages (see `composer.json`). Plugins that rely on these instead of bundling their own avoid the problem entirely.
+- **Kernel conflict detection**: at boot, the Kernel checks PSR-4 namespace prefixes across all plugin `autoload()` declarations and core, and logs a `WARNING` for any collision. This does not resolve the conflict but surfaces it immediately rather than leaving a silent runtime trap.
+
+**What plugins can contribute:**
+- **Tools** — any `InputToolInterface` or `OutputToolInterface` implementors, registered via `tools()`
+- **LLM Drivers** — new provider drivers, registered via `drivers()`
+- **Recipes** — additional recipe files, registered via `recipePaths()`
+- **Anything else** — arbitrary DI bindings, middleware, event listeners via `register()`
+
+```php
+<?php
+
+namespace Spora\Plugins;
+
+use DI\ContainerBuilder;
+
+interface PluginInterface
+{
+    /**
+     * Human-readable plugin name, shown in the UI and logs.
+     */
+    public function getName(): string;
+
+    /**
+     * PSR-4 autoload mappings for the plugin's own classes.
+     * Registered by the Kernel with the active Composer ClassLoader before
+     * any other plugin method is called.
+     *
+     * Example: ['MyVendor\\MyPlugin\\' => __DIR__ . '/src']
+     *
+     * Third-party dependencies are NOT declared here — ship a vendor/ directory
+     * inside the plugin folder instead (run `composer install` in the plugin dir).
+     * The Kernel auto-requires plugins/MyPlugin/vendor/autoload.php if present.
+     *
+     * @return array<string, string> namespace prefix => absolute path
+     */
+    public function autoload(): array;
+
+    /**
+     * Tool classes this plugin contributes to the Tool Registry.
+     * Each class must implement InputToolInterface or OutputToolInterface
+     * and carry the required #[Tool], #[ToolParameter], #[ToolSetting] attributes.
+     *
+     * @return array<class-string<\Spora\Tools\InputToolInterface|\Spora\Tools\OutputToolInterface>>
+     */
+    public function tools(): array;
+
+    /**
+     * LLM drivers this plugin contributes.
+     * Keys are the llm_provider string stored in agents.llm_provider.
+     * Values are the driver class (must implement LLMDriverInterface).
+     *
+     * Example: ['perplexity' => PerplexityDriver::class]
+     *
+     * @return array<string, class-string<\Spora\Drivers\LLMDriverInterface>>
+     */
+    public function drivers(): array;
+
+    /**
+     * Absolute paths to directories or individual files containing recipe definitions.
+     * Spora merges these with the built-in /recipes/ directory.
+     *
+     * @return string[]
+     */
+    public function recipePaths(): array;
+
+    /**
+     * Register arbitrary DI bindings, middleware, or services.
+     * Called after autoload(), tools(), drivers(), and recipePaths() have been processed.
+     * Use for anything not covered by the declarative methods above.
+     */
+    public function register(ContainerBuilder $builder): void;
+}
+```
+
+---
+
+## 6. `LLMDriverInterface`
+
+Adapter contract for LLM providers. Concrete implementations:
+
+| Driver | `llm_provider` value | Notes |
+|---|---|---|
+| `OpenAICompatibleDriver` | `"openai_compatible"` | Default base URL `https://api.openai.com/v1`. Covers OpenAI, Groq, Ollama, Together AI, LM Studio, and any OpenAI-compatible endpoint via `llm_base_url`. |
+| `AnthropicDriver` | `"anthropic"` | Anthropic Messages API. |
+| `GeminiDriver` | `"gemini"` | Google Gemini API. |
+| `MistralDriver` | `"mistral"` | Mistral AI API. |
 
 ```php
 <?php
@@ -301,7 +416,7 @@ interface LLMDriverInterface
 
 ---
 
-## 6. Value Objects / DTOs
+## 7. Value Objects / DTOs
 
 All value objects are `final readonly` classes (PHP 8.1+). Never persisted directly — serialization to/from DB is handled by Eloquent models and service classes.
 
@@ -425,6 +540,19 @@ final readonly class ToolResult
         /**
          * Optional structured data stored in tool_calls.result_data for UI/audit.
          * Never sent to the LLM directly.
+         *
+         * Intentionally LLM-excluded: $data is the full, raw, verbose payload
+         * (e.g. all search result objects, full HTTP response body, metadata).
+         * $content is the tool author's curated summary — context-window-efficient
+         * and shaped for LLM reasoning. If structured data is useful to the LLM,
+         * the tool author should serialize the relevant parts into $content (JSON
+         * strings are fine — that is the standard convention for tool results).
+         *
+         * Convention for HTTP-backed tools: store HTTP context here rather than
+         * on ToolResult directly, e.g.:
+         *   ['http_status' => 429, 'retry_after' => 60]
+         * This keeps ToolResult generic for non-HTTP tools.
+         *
          * @var array<string, mixed>|null
          */
         public ?array  $data = null,
@@ -510,7 +638,7 @@ final readonly class AgentState
 
 ---
 
-## 7. Security Contracts
+## 8. Security Contracts
 
 ### 7.1 `EncryptedValue`
 
@@ -834,7 +962,7 @@ Runtime enforcement (SecurityManager constructor, every request):
 
 ---
 
-## 8. Namespace Summary
+## 9. Namespace Summary
 
 | Namespace | Purpose |
 |---|---|
@@ -844,7 +972,8 @@ Runtime enforcement (SecurityManager constructor, every request):
 | `Spora\Tools\Builtin` | Bundled tools: `SearchWebTool`, `SendEmailTool`, etc. |
 | `Spora\Agents` | `OrchestratorInterface`, concrete `Orchestrator` |
 | `Spora\Agents\ValueObjects` | `AgentState` |
-| `Spora\Drivers` | `LLMDriverInterface`, `OpenAIDriver`, `AnthropicDriver` |
+| `Spora\Plugins` | `PluginInterface` |
+| `Spora\Drivers` | `LLMDriverInterface`, `OpenAICompatibleDriver`, `AnthropicDriver`, `GeminiDriver`, `MistralDriver` |
 | `Spora\Drivers\ValueObjects` | `LLMRequest`, `LLMResponse`, `ToolCall` |
 | `Spora\Drivers\Exceptions` | `LLMProviderException`, `LLMRateLimitException` |
 | `Spora\Models` | Eloquent: `User`, `Agent`, `Task`, `ToolCall`, `TaskHistory`, `ToolConfiguration`, `AgentTool`, `AgentToolOverride` |

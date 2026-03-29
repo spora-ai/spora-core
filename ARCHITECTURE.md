@@ -21,7 +21,8 @@ These implement Spora's `InputToolInterface`.
 ### B. Output Tools (The Hands)
 These implement Spora's `OutputToolInterface`.
 - **Rule:** Write actions or actions that affect the real world (e.g., Sending an Email, Posting a Tweet, Creating a Calendar Event).
-- **Behavior:** Extremely structured, mandatory Human-in-the-loop behavior. Calling an Output Tool instantly suspends the Agent's operation.
+- **Default Behavior:** Human-in-the-loop — calling an Output Tool suspends the Agent pending user approval.
+- **Auto-approve:** Each Output Tool declares a class-level default via `#[OutputTool(requiresApproval: true)]`. The agent owner can override this per-tool via `agent_tools.auto_approve`. When auto-approved, the Orchestrator executes the tool immediately without pausing.
 
 ## 3. The Orchestrator Loop & State Machine
 Spora requires a *custom-built* Agent Orchestrator. While PHP libraries (like Prism or LLM-Chain) exist, they use synchronous `while()` loops that make it nearly impossible to pause execution across HTTP requests. Spora's loop relies on the SQLite database and `symfony/messenger` queue.
@@ -31,10 +32,39 @@ A single Agent Task has a `run_count`. To prevent infinite loops (and massive AP
 
 1. **Think:** Spora sends the System Prompt (Recipe), History, and Backpack Tools to the LLM.
 2. **Act (Input Tool):** If the LLM decides to use an `InputTool` (e.g., SearchWeb), the Orchestrator executes it instantly, appends the result to the Task history, increments `run_count`, and loops back to Step 1.
-3. **Pause (Output Tool):** If the LLM decides to use an `OutputTool` (e.g., SendEmail):
-   - The Orchestrator intercepts the call.
-   - Spora serializes the current state (memory + exactly what arguments the Agent passed to the tool) into the SQLite database as a `PENDING_APPROVAL` status.
-   - *The PHP script gracefully stops entirely.* This is crucial for shared hosting.
-4. **The Notification & Review:** Spora notifies the User via the Dashboard UI (and eventual push notifications/emails) that an action requires review. The user approves, edits, or rejects the drafted action.
+3. **Intercept (Output Tool):** If the LLM decides to use an `OutputTool` (e.g., SendEmail), the Orchestrator intercepts the call and checks the approval requirement:
+   - **Resolve approval:** Check `agent_tools.auto_approve` for this tool+agent. If `NULL`, fall back to the tool's `#[OutputTool(requiresApproval:)]` class default.
+   - **If approval required:** Spora serializes the current state (memory + exactly what arguments the Agent passed to the tool) into the SQLite database as a `PENDING_APPROVAL` status. *The PHP script gracefully stops entirely.* This is crucial for shared hosting.
+   - **If auto-approved:** Execute the tool immediately, append the result to history, increment `step_count`, and loop back to Step 1.
+4. **The Notification & Review:** (Approval-required path only.) Spora notifies the User via the Dashboard UI (and eventual push notifications/emails) that an action requires review. The user approves, edits, or rejects the drafted action.
 5. **Resume (Queue Dispatch):** If approved via the UI, an API call is made. Spora executes the tool, logs it, and dispatches a *new* Message onto the queue to "wake" the agent back up (Step 1) so it can finish its workflow.
 6. **Complete:** If the LLM returns standard text instead of a tool call, the Orchestrator marks the Task as `COMPLETED`.
+
+---
+
+## 4. Plugin System
+
+Plugins extend Spora by dropping a folder into `plugins/`. The `Kernel` scans this directory at boot and auto-discovers any class implementing `PluginInterface`. No manual registration is needed — the same "drop and go" philosophy as WordPress plugins.
+
+Plugins can contribute:
+- **Input/Output Tools** — declared via `tools()`, auto-registered into the Tool Registry
+- **LLM Drivers** — declared via `drivers()` as a `['provider_name' => DriverClass::class]` map, made available in agent config
+- **Recipes** — declared via `recipePaths()`, merged with the built-in `/recipes/` directory
+- **Arbitrary DI bindings** — via `register(ContainerBuilder $builder)` for anything else (middleware, services, event listeners)
+
+**Class loading:** Plugins are fully self-contained. The Kernel auto-requires `plugins/MyPlugin/vendor/autoload.php` if present (for third-party deps the plugin author bundled via `composer install`), then registers the plugin's own PSR-4 mappings declared in `autoload()`. No assumption is made about the host environment — this is essential for shared hosting compatibility.
+
+**Dependency conflicts:** PHP's autoloader is first-loaded-wins. Plugins bundling the same package at different versions, or conflicting with Spora core deps, will silently use whichever loaded first. The Kernel detects PSR-4 namespace collisions at boot and logs a `WARNING`. Plugin authors are strongly encouraged to use `php-scoper` to prefix their vendor namespaces (e.g. `GuzzleHttp\Client` → `MyPlugin\Deps\GuzzleHttp\Client`), achieving full isolation regardless of load order. Plugins should also prefer packages already provided by Spora core over bundling their own copies.
+
+PHP-DI is the mechanism that makes contributions composable: the Kernel builds the container from core definitions first, then each plugin's `register()` call can add or override bindings before the container is compiled.
+
+---
+
+## Future Release Ideas
+
+### Tool Configuration Inheritance
+PHP attribute inheritance already gives derived tools their parent's `#[ToolSetting]` schema for free (via `ReflectionClass`). However, stored configuration data is not shared — a plugin subclassing `SearchWebTool` would still require the user to re-enter credentials.
+
+A future release could introduce an `#[InheritsConfigFrom(ParentTool::class)]` attribute. The `ToolConfigService` would resolve config reads by walking up the inheritance chain, falling back to the parent's `tool_configurations` row if no override exists for the child. This would let plugin authors ship specialised variants of built-in tools without requiring duplicate credential entry.
+
+**Why deferred:** Adds complexity to the registry, override resolution logic, and UI (which tool "owns" the config?). The single-agent v1 use case does not justify it.

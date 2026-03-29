@@ -110,20 +110,23 @@ Return the current user's agent. In V1 always a single agent ("My Assistant").
       "name": "My Assistant",
       "description": "A general-purpose assistant.",
       "recipe_id": "general_assistant",
-      "llm_provider": "openai",
+      "llm_provider": "openai_compatible",
       "llm_model": "gpt-4o",
+      "llm_base_url": null,
       "max_steps": 10,
       "is_active": true,
       "tools": [
         {
           "tool_class": "Spora\\Tools\\Builtin\\SearchWebTool",
           "tool_name": "search_web",
-          "has_override": false
+          "has_override": false,
+          "auto_approve": null
         },
         {
           "tool_class": "Spora\\Tools\\Builtin\\SendEmailTool",
           "tool_name": "send_email",
-          "has_override": true
+          "has_override": true,
+          "auto_approve": false
         }
       ],
       "created_at": "2026-01-01T00:00:00Z",
@@ -135,6 +138,7 @@ Return the current user's agent. In V1 always a single agent ("My Assistant").
 
 **Notes:**
 - `tools` lists all enabled tools from `agent_tools` junction table with a flag indicating whether an `agent_tool_overrides` row exists for that tool.
+- `auto_approve`: `null` = use the tool's class-level `#[OutputTool(requiresApproval:)]` default; `true`/`false` = explicit per-agent override. Always `null` for InputTools (approval is never applicable).
 - Credential values are never included here. Use `GET /api/v1/tools/{toolClass}/settings` and `GET /api/v1/agent/tools/{toolClass}/override`.
 
 ---
@@ -153,6 +157,7 @@ Update agent identity and LLM configuration. Tool enablement is managed separate
   "recipe_id": "general_assistant",
   "llm_provider": "anthropic",
   "llm_model": "claude-3-5-sonnet-20241022",
+  "llm_base_url": null,
   "max_steps": 15,
   "is_active": true
 }
@@ -163,7 +168,11 @@ Update agent identity and LLM configuration. Tool enablement is managed separate
 { "data": { "agent": { /* same shape as GET /api/v1/agent */ } } }
 ```
 
-**Errors:** `VALIDATION_ERROR` (422) — invalid `llm_provider`, unknown `recipe_id`, `max_steps` out of range [1, 50]
+**Field notes:**
+- `llm_provider`: `"openai_compatible"`, `"anthropic"`, `"gemini"`, `"mistral"`
+- `llm_base_url`: only used when `llm_provider = "openai_compatible"`. `null` defaults to `https://api.openai.com/v1`. Set to e.g. `https://api.groq.com/openai/v1` for Groq or `http://localhost:11434/v1` for Ollama.
+
+**Errors:** `VALIDATION_ERROR` (422) — invalid `llm_provider`, `llm_base_url` not a valid URL, unknown `recipe_id`, `max_steps` out of range [1, 50]
 
 ---
 
@@ -353,7 +362,14 @@ Enable a tool for the current agent. Creates a row in `agent_tools`.
 
 **Auth Required:** Yes
 
-**Request:** No body required.
+**Request (body optional):**
+```json
+{ "auto_approve": false }
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `auto_approve` | boolean\|null | No | Per-agent approval override. Omit (or `null`) to use the tool's class-level default. |
 
 **Response `201`:**
 ```json
@@ -361,12 +377,43 @@ Enable a tool for the current agent. Creates a row in `agent_tools`.
   "data": {
     "message": "Tool enabled for agent.",
     "tool_class": "Spora\\Tools\\Builtin\\SearchWebTool",
-    "tool_name": "search_web"
+    "tool_name": "search_web",
+    "auto_approve": null
   }
 }
 ```
 
 **Errors:** `NOT_FOUND` (404) — tool not registered, `CONFLICT` (409) — tool already enabled, `TOOL_NOT_CONFIGURED` (422) — tool has no global configuration and no agent override (must configure before enabling)
+
+---
+
+### `PATCH /api/v1/agent/tools/{toolClass}`
+
+Update per-agent settings for an enabled tool. Currently only `auto_approve` is patchable.
+
+**Auth Required:** Yes
+
+**Request:**
+```json
+{ "auto_approve": true }
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `auto_approve` | boolean\|null | Yes | `true`/`false` to override; `null` to reset to class default |
+
+**Response `200`:**
+```json
+{
+  "data": {
+    "tool_class": "Spora\\Tools\\Builtin\\SendEmailTool",
+    "tool_name": "send_email",
+    "auto_approve": true
+  }
+}
+```
+
+**Errors:** `NOT_FOUND` (404) — tool not enabled for this agent, `VALIDATION_ERROR` (422)
 
 ---
 
@@ -728,6 +775,7 @@ List available recipe files from the `/recipes/` directory.
 | `GET` | `/api/v1/tools/{toolClass}/settings` | Yes | Get global tool settings (passwords masked) |
 | `PUT` | `/api/v1/tools/{toolClass}/settings` | Yes | Save global tool settings |
 | `POST` | `/api/v1/agent/tools/{toolClass}/enable` | Yes | Enable a tool for the agent |
+| `PATCH` | `/api/v1/agent/tools/{toolClass}` | Yes | Update per-agent tool settings (e.g. auto_approve) |
 | `DELETE` | `/api/v1/agent/tools/{toolClass}/enable` | Yes | Disable a tool for the agent |
 | `GET` | `/api/v1/agent/tools/{toolClass}/override` | Yes | Get agent credential override (masked) |
 | `PUT` | `/api/v1/agent/tools/{toolClass}/override` | Yes | Save agent credential override |

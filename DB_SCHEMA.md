@@ -47,8 +47,9 @@
 | `name` | `VARCHAR(100)` | No | `'My Assistant'` | Display name |
 | `description` | `TEXT` | Yes | NULL | Human-written description of the agent's purpose |
 | `recipe_id` | `VARCHAR(100)` | Yes | NULL | Filename stem of active recipe in `/recipes/`, e.g. `"general_assistant"` |
-| `llm_provider` | `VARCHAR(50)` | No | `'openai'` | `"openai"` or `"anthropic"` |
+| `llm_provider` | `VARCHAR(50)` | No | `'openai_compatible'` | `"openai_compatible"`, `"anthropic"`, `"gemini"`, `"mistral"` |
 | `llm_model` | `VARCHAR(100)` | No | `'gpt-4o'` | Provider model ID, e.g. `"gpt-4o"`, `"claude-3-5-sonnet-20241022"` |
+| `llm_base_url` | `VARCHAR(255)` | Yes | NULL | Base URL override for `openai_compatible` driver (e.g. `https://api.groq.com/openai/v1`). NULL = use driver default (`https://api.openai.com/v1`). Ignored by other drivers. |
 | `max_steps` | `TINYINT UNSIGNED` | No | `10` | Hard orchestrator iteration cap [1–50] |
 | `is_active` | `TINYINT(1)` | No | `1` | Soft-disable without deletion |
 | `created_at` | `TIMESTAMP` | Yes | NULL | Eloquent standard |
@@ -125,16 +126,25 @@ protected $casts = [
 | `agent_id` | `BIGINT UNSIGNED` | No | — | FK → `agents.id` |
 | `tool_class` | `VARCHAR(200)` | No | — | The enabled tool's FQCN |
 | `tool_name` | `VARCHAR(100)` | No | — | Denormalized `#[Tool(name:)]` value for query convenience |
+| `auto_approve` | `TINYINT(1)` | Yes | NULL | Per-agent approval override. NULL = use `#[OutputTool(requiresApproval:)]` class default. Only meaningful for OutputTools; ignored for InputTools. |
 | `created_at` | `TIMESTAMP` | Yes | NULL | Eloquent standard (when the tool was enabled for this agent) |
+| `updated_at` | `TIMESTAMP` | Yes | NULL | Set when `auto_approve` is changed after initial enable |
 
 **Indexes:** `PRIMARY KEY (id)`, `UNIQUE KEY uq_agent_tools (agent_id, tool_class)`, `INDEX idx_agent_tools_tool_name (tool_name)`
 
 **Foreign Keys:** `FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE`
 
+**Eloquent Casts:**
+```php
+protected $casts = [
+    'auto_approve' => 'boolean',
+];
+```
+
 **Notes:**
-- No `updated_at` — rows are created (enable) or deleted (disable), never updated.
 - To enable a tool: insert a row. To disable: delete the row.
 - `tool_name` is denormalized to avoid a Reflection call on every query listing enabled tools.
+- `auto_approve = NULL` means "defer to class default" — the Orchestrator falls back to the `#[OutputTool]` attribute. `true`/`false` explicitly override it for this agent.
 
 ---
 
@@ -151,7 +161,7 @@ protected $casts = [
 | `status` | `VARCHAR(30)` | No | `'PENDING'` | `PENDING`, `RUNNING`, `PENDING_APPROVAL`, `COMPLETED`, `FAILED`, `REJECTED` |
 | `user_prompt` | `TEXT` | No | — | The original user instruction |
 | `final_response` | `TEXT` | Yes | NULL | LLM's terminal text output when status becomes `COMPLETED` |
-| `run_count` | `SMALLINT UNSIGNED` | No | `0` | Number of orchestrator iterations consumed |
+| `step_count` | `SMALLINT UNSIGNED` | No | `0` | Number of orchestrator iterations consumed |
 | `max_steps` | `TINYINT UNSIGNED` | No | `10` | Copied from `agents.max_steps` at creation time — in-flight tasks are unaffected by agent config changes |
 | `pending_state` | `TEXT` | Yes | NULL | JSON-encoded `AgentState`. Only populated when `status = PENDING_APPROVAL`. Cleared on resume or reject. |
 | `failure_reason` | `TEXT` | Yes | NULL | Failure description, e.g. `"max_steps_exceeded"` or a provider error message. TEXT to accommodate long messages. |
@@ -165,7 +175,7 @@ protected $casts = [
 **Eloquent Casts:**
 ```php
 protected $casts = [
-    'run_count' => 'integer',
+    'step_count' => 'integer',
     'max_steps' => 'integer',
 ];
 ```
