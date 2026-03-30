@@ -1,0 +1,138 @@
+<?php
+
+declare(strict_types=1);
+
+use Psr\Container\ContainerInterface;
+use Spora\Auth\AuthService;
+use Spora\Core\Database;
+use Spora\Core\SecurityManager;
+use Spora\Core\SecurityManagerInterface;
+
+/**
+ * PHP-DI definitions array.
+ * Wire up core services and resolve the SecurityManager from three possible key sources.
+ */
+return [
+    'config' => static function (): array {
+        // Layer 1 — built-in defaults (always present)
+        $defaults = [
+            'db_driver'          => 'sqlite',
+            'db_path'            => BASE_PATH . '/storage/database.sqlite',
+            'db_host'            => null,
+            'db_port'            => null,
+            'db_name'            => null,
+            'db_user'            => null,
+            'db_password'        => null,  // shared hosting: set in config.php; Docker/CI: SPORA_DB_PASSWORD
+            'key_path'           => null,
+            'allow_registration' => true,
+            'app_env'            => 'production',
+        ];
+
+        // Layer 2 — config.php (installer-generated, gitignored, optional)
+        // Shared hosting users set all values here, including db_password.
+        $configPath = BASE_PATH . '/config.php';
+        $fileConfig = file_exists($configPath) ? require $configPath : [];
+
+        // Layer 3 — SPORA_* env vars (highest priority; Docker / VPS / CI)
+        // Priority: OS env > .env file > config.php (dotenv has already run by this point)
+        $env = static fn(string $k): ?string => $_ENV[$k] ?? (getenv($k) ?: null);
+
+        $envOverrides = [];
+        if (($v = $env('SPORA_DB_DRIVER'))           !== null) {
+            $envOverrides['db_driver']          = $v;
+        }
+        if (($v = $env('SPORA_DB_HOST'))             !== null) {
+            $envOverrides['db_host']             = $v;
+        }
+        if (($v = $env('SPORA_DB_PORT'))             !== null) {
+            $envOverrides['db_port']             = (int) $v;
+        }
+        if (($v = $env('SPORA_DB_NAME'))             !== null) {
+            $envOverrides['db_name']             = $v;
+        }
+        if (($v = $env('SPORA_DB_USER'))             !== null) {
+            $envOverrides['db_user']             = $v;
+        }
+        if (($v = $env('SPORA_DB_PASSWORD'))         !== null) {
+            $envOverrides['db_password']         = $v;
+        }
+        if (($v = $env('SPORA_APP_ENV'))             !== null) {
+            $envOverrides['app_env']             = $v;
+        }
+        if (($v = $env('SPORA_ALLOW_REGISTRATION'))  !== null) {
+            $envOverrides['allow_registration']  = filter_var($v, FILTER_VALIDATE_BOOLEAN);
+        }
+
+        return array_merge($defaults, $fileConfig, $envOverrides);
+    },
+
+    SecurityManagerInterface::class => static function (ContainerInterface $c): SecurityManager {
+        // Resolution priority:
+        // 1. SPORA_SECRET_KEY env var (base64-encoded 32-byte key)
+        // 2. SPORA_KEY_PATH env var (path to key file)
+        // 3. config['key_path'] (set by install.php)
+
+        $envKey     = $_ENV['SPORA_SECRET_KEY'] ?? getenv('SPORA_SECRET_KEY') ?: null;
+        $envKeyPath = $_ENV['SPORA_KEY_PATH']    ?? getenv('SPORA_KEY_PATH') ?: null;
+
+        if ($envKey !== null) {
+            $rawKey = base64_decode($envKey, strict: true);
+            if ($rawKey === false) {
+                throw new RuntimeException(
+                    'SPORA_SECRET_KEY is not valid base64. Regenerate with: base64_encode(random_bytes(32))',
+                );
+            }
+            return new SecurityManager($rawKey);
+        }
+
+        if ($envKeyPath !== null) {
+            return new SecurityManager($envKeyPath);
+        }
+
+        $config  = $c->get('config');
+        $keyPath = $config['key_path'] ?? null;
+
+        if ($keyPath !== null) {
+            return new SecurityManager((string) $keyPath);
+        }
+
+        throw new RuntimeException(
+            'No secret key configured. Set SPORA_SECRET_KEY (base64 32 bytes), ' .
+            'SPORA_KEY_PATH, or run install.php to generate storage/secret.key.',
+        );
+    },
+
+    Database::class => static function (ContainerInterface $c): Database {
+        return new Database($c->get('config'));
+    },
+
+    Delight\Auth\Auth::class => static function (ContainerInterface $c): Delight\Auth\Auth {
+        // Ensure the Eloquent capsule is booted and migrations have run before we touch PDO.
+        $c->get(Database::class)->boot();
+
+        $pdo = Illuminate\Database\Capsule\Manager::connection()->getPdo();
+
+        // Disable throttling in test/development environments to prevent rate-limit errors.
+        $config      = $c->get('config');
+        $throttling  = ($config['app_env'] ?? 'production') !== 'testing';
+
+        return new Delight\Auth\Auth($pdo, null, null, $throttling);
+    },
+
+    AuthService::class => static function (ContainerInterface $c): AuthService {
+        return new AuthService($c->get(Delight\Auth\Auth::class));
+    },
+
+    Spora\Http\AuthController::class => static function (ContainerInterface $c): Spora\Http\AuthController {
+        return new Spora\Http\AuthController(
+            $c->get(AuthService::class),
+            $c->get('config'),
+        );
+    },
+
+    Spora\Services\ToolConfigService::class => static function (ContainerInterface $c): Spora\Services\ToolConfigService {
+        return new Spora\Services\ToolConfigService(
+            $c->get(SecurityManagerInterface::class),
+        );
+    },
+];

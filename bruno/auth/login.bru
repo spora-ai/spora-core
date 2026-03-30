@@ -1,0 +1,23 @@
+meta {
+  name: Login
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/auth/login
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "email": "user@example.com",
+    "password": "s3cur3p@ss",
+    "remember_me": false
+  }
+}

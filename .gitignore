@@ -1,0 +1,54 @@
+###############################################################################
+# Spora .gitignore
+###############################################################################
+
+# ── Secrets & user-generated config ─────────────────────────────────────────
+# config.php is created by install.php and may contain the DB password.
+# It must never be committed. Use config.php.example as the reference template.
+config.php
+
+# Dotenv (used by Docker / VPS users instead of config.php)
+.env
+.env.*
+!.env.example
+
+# ── Encryption key ───────────────────────────────────────────────────────────
+# The key is deliberately stored outside the project by install.php.
+# If it ends up inside storage/ as a last resort, make sure it stays out of git.
+storage/secret.key
+
+# ── Database ─────────────────────────────────────────────────────────────────
+storage/database.sqlite
+storage/database.sqlite-shm
+storage/database.sqlite-wal
+
+# Keep the empty storage/ directory in the repo
+!storage/.gitkeep
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+storage/*.log
+*.log
+
+# ── Composer ─────────────────────────────────────────────────────────────────
+/vendor/
+
+# ── Frontend (Vue / Vite) ────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ── PHP tooling ──────────────────────────────────────────────────────────────
+.php-cs-fixer.cache
+
+# ── OS artefacts ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Editor / IDE ─────────────────────────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+
+# ── Misc artefacts ───────────────────────────────────────────────────────────
+# Leftover SQLite in-memory filename that can appear at the project root
+:memory:

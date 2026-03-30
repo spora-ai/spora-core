@@ -1,0 +1,15 @@
+meta {
+  name: Delete Agent Tool Override
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{baseUrl}}/agent/tools/Spora%5CTools%5CBuiltin%5CSearchWebTool/override
+  body: none
+  auth: none
+}
+
+headers {
+  X-XSRF-TOKEN: {{xsrfToken}}
+}

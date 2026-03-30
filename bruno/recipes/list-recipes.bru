@@ -1,0 +1,15 @@
+meta {
+  name: List Recipes
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/recipes
+  body: none
+  auth: none
+}
+
+headers {
+  X-XSRF-TOKEN: {{xsrfToken}}
+}

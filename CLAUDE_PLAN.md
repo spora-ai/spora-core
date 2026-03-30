@@ -51,28 +51,186 @@ Please enforce this exact structure. The base PHP namespace is `Spora\` mapping 
 └── config.php         # Zero-config environment arrays
 ```
 
-## 4. Phase 1 Execution Roadmap (Your Tasks)
-**TDD REQUIREMENT:** We demand high code quality. For every Task, you MUST write the corresponding `Pest` test before or immediately after implementation. Ensure comprehensive unit coverage for the foundational Kernel and Database connections.
+## 4. Phase 1 — Foundation ✅ COMPLETE
 
-- [ ] **Task 1: Project Initialization**
-  - Run `composer init` and configure basic `composer.json` (PHP 8.1+, autoload `Spora\\` to `app/`).
-  - Require the backend dependencies listed above.
-  - Setup the basic folder structure. Add `./vendor/bin/pest --init`.
+All tasks verified. 32 Pest tests passing, 0 failures.
 
-- [ ] **Task 2: Core Micro-Kernel**
-  - Create `config.php` (returning an array pointing DB to `storage/database.sqlite` by default, but supporting MySQL/MariaDB keys).
-  - Create `app/Core/Kernel.php` (initializes PHP-DI and handles Request/Response loop).
-  - Create `app/Core/Router.php` (wrapping `fast-route` with `php-di` container invocation).
-  - Create `public/index.php` and the root `.htaccess`.
+- [x] **Task 1: Project Initialization**
+  - `composer.json` configured with PHP 8.2+, all dependencies at latest stable.
+  - `pestphp/pest ^3.8` (PHPUnit 11), `php-cs-fixer` configured in `.php-cs-fixer.php`.
+  - Full folder structure in place.
 
-- [ ] **Task 3: Security & Database Scaffold**
-  - Create `app/Core/SecurityManager.php` using native `libsodium` to generate/read a master `storage/secret.key`.
-  - Create `app/Core/Database.php` using `illuminate/database` Capsule to establish an SQLite connection (or MariaDB if configured) and create the `.sqlite` file automatically if it does not exist.
-  - *Verify:* Run Pest tests for the Kernel, SecurityManager, and Database connection.
+- [x] **Task 2: Core Micro-Kernel**
+  - `config.php`, `Kernel.php`, `Router.php`, `public/index.php` all implemented.
+  - `app/Core/routes.php` maps all 21 API routes per `API_SPEC.md` (`/api/v1/` prefix).
+  - PHP-DI container wired in `app/Core/container.php`.
 
-- [ ] **Task 4: Frontend Scaffold**
-  - Run the Vite + Vue 3 initialization inside the `frontend/` directory.
-  - Install Tailwind CSS and initialize `shadcn-vue`.
-  - Configure `vite.config.ts` to output its build artifacts into `../public/dist` and set up API proxying to `localhost:8000` (or your PHP dev server port).
+- [x] **Task 3: Security & Database Scaffold**
+  - `SecurityManager` uses libsodium secretbox; key detection by byte-length (not `/` check).
+  - `Database.php` runs all 8 migrations idempotently via `Schema::hasTable()` guards.
+  - All models correct: `auto_approve` raw 0/1/null, `pending_state` MEDIUMTEXT, `task_history` append-only.
+  - `AgentState` value object: JSON serialize/deserialize roundtrip tested.
 
-**Context is ready. Begin Task 1!**
+- [ ] **Task 4: Frontend Scaffold** *(deferred — implement PHP layers first)*
+  - Vue 3 + Vite + Tailwind + shadcn-vue inside `frontend/`.
+  - `vite.config.ts` output to `../public/dist`, proxy API to PHP dev server.
+
+---
+
+## 5. Phase 2 — Application Layer (Next Steps)
+
+**TDD REQUIREMENT:** Write tests alongside each implementation. Each layer below is a dependency of the next — implement in order.
+
+---
+
+### Layer 1 — Auth *(blocks all authenticated endpoints)*
+
+**Goal:** A working `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`.
+
+- [ ] **`AuthService`** (`app/Auth/AuthService.php`)
+  - Wrap `delight-im/auth` (`\Delight\Auth\Auth`).
+  - Inject `\Delight\Auth\Auth` via PHP-DI (wire in `container.php`).
+  - Expose: `register(email, password): int`, `login(email, password): void`, `logout(): void`, `currentUserId(): ?int`.
+  - Throw typed exceptions for duplicate email, wrong password, unverified account.
+
+- [ ] **`AuthController`** (`app/Http/AuthController.php`)
+  - Wire `AuthService` via constructor injection.
+  - `register`: validate JSON body → call service → return `201` with `{ user: { id, email } }`.
+  - `login`: validate → service → return `200` with `{ user: { id, email } }` (session cookie set by delight-im/auth).
+  - `logout`: call service → return `204`.
+  - `me`: call `currentUserId()` → load `User` model → return `200` with user data, or `401` if not logged in.
+
+- [ ] **Auth middleware / guard helper**
+  - A `requireAuth(Request): int` helper (or middleware) that calls `currentUserId()` and returns `401 UNAUTHENTICATED` if null.
+  - Used by every protected controller method.
+
+- [ ] **Tests** (`tests/Unit/AuthTest.php`)
+  - Register happy path → 201, user row created.
+  - Register duplicate email → 409 CONFLICT.
+  - Login happy path → 200.
+  - Login wrong password → 401 INVALID_CREDENTIALS.
+  - `me` when logged in → 200 with user data.
+  - `me` when not logged in → 401 UNAUTHENTICATED.
+  - Logout → 204.
+
+---
+
+### Layer 2 — ToolConfigService *(blocks agent/tool endpoints)*
+
+**Goal:** The only class permitted to read/write `tool_configurations.settings` and `agent_tool_overrides.settings`.
+
+- [ ] **`ToolConfigService`** (`app/Services/ToolConfigService.php`)
+  - Inject `SecurityManagerInterface`.
+  - `getGlobalSettings(string $toolClass): array` — load `ToolConfiguration` row, decrypt password fields, return plain array.
+  - `putGlobalSettings(string $toolClass, array $settings): void` — encrypt password fields via `SecurityManager`, store JSON.
+  - `getEffectiveSettings(string $toolClass, int $agentId): array` — merge global + `AgentToolOverride` (override wins).
+  - `maskForApi(array $settings, string $toolClass): array` — replace decrypted password values with `"***"`.
+  - Password field detection: inspect `#[ToolSetting(type: 'password')]` via `ReflectionClass`.
+  - On `DecryptionFailedException`: log + return `null` for that field (never crash).
+
+- [ ] **Tests** (`tests/Unit/ToolConfigServiceTest.php`)
+  - Password field is encrypted on write, decrypted on read.
+  - Non-password field stored and returned as plain string.
+  - `maskForApi` replaces password value with `"***"`, leaves others unchanged.
+  - `getEffectiveSettings` override wins over global.
+  - `DecryptionFailedException` is caught; field returns null.
+
+---
+
+### Layer 3 — Agent + Tool endpoints *(depends on Layer 1 + 2)*
+
+- [ ] **`AgentController`** — implement all 8 methods:
+  - `show` → load `Agent` for `currentUserId()`.
+  - `update` → PATCH agent fields (`name`, `description`, `llm_provider`, `llm_model`, `max_steps`).
+  - `enableTool` → upsert `AgentTool` row (`POST /agent/tools/{toolClass}/enable`).
+  - `patchTool` → update `auto_approve` on existing `AgentTool` row.
+  - `disableTool` → delete `AgentTool` row.
+  - `getOverride` → return masked settings via `ToolConfigService::getEffectiveSettings`.
+  - `putOverride` → write `AgentToolOverride` via `ToolConfigService::putGlobalSettings`.
+  - `deleteOverride` → delete `AgentToolOverride` row.
+
+- [ ] **`ToolController`** — implement 3 methods:
+  - `index` → list all registered tool classes with their `#[ToolSetting]` schema.
+  - `getSettings` → return masked global settings for one tool.
+  - `putSettings` → write global settings via `ToolConfigService`.
+
+- [ ] **Tests** (`tests/Unit/AgentControllerTest.php`, `ToolControllerTest.php`)
+  - Unauthenticated request → 401.
+  - Enable/disable/patch tool round-trip.
+  - Override set → effective settings reflect override.
+
+---
+
+### Layer 4 — Orchestrator *(the core value prop)*
+
+- [ ] **`Orchestrator`** (`app/Agents/Orchestrator.php`) — implement the state machine:
+  - `start(agentId, userPrompt, maxSteps)`: create `Task` (status `RUNNING`), dispatch first `TickMessage`.
+  - `tick(taskId)`: load Task + history → call `LLMDriverInterface::complete()` → branch:
+    - Text response → mark `COMPLETED`, store `final_response`.
+    - `InputTool` call → resolve + execute tool, append to `task_history`, increment `step_count`, re-dispatch `TickMessage`.
+    - `OutputTool` call → resolve `auto_approve` (check `AgentTool` row, fall back to class attribute default):
+      - Auto-approved → execute, append, re-dispatch.
+      - Requires approval → serialize `AgentState` to `tasks.pending_state`, set status `PENDING_APPROVAL`, stop.
+    - `step_count >= max_steps` → mark `FAILED` with reason.
+  - `resume(taskId, approvedArguments)`: deserialize `AgentState`, execute tool, append, re-dispatch `TickMessage`.
+  - `reject(taskId, reason)`: inject rejection message into history, re-dispatch `TickMessage`.
+
+- [ ] **Symfony Messenger wiring** (`container.php`)
+  - Register `TickMessage` + `TickHandler` with the Messenger bus.
+  - Default transport: synchronous (in-process) for SQLite/shared hosting.
+  - Optional: async transport (Redis/database) configurable via `config.php`.
+
+- [ ] **`TaskController`** — implement all 5 methods:
+  - `store` → validate prompt → call `Orchestrator::start()` → return Task resource.
+  - `index` → list tasks for current user.
+  - `show` → return Task with `tool_calls` and `task_history`.
+  - `approve` → call `Orchestrator::resume()`.
+  - `reject` → call `Orchestrator::reject()`.
+
+- [ ] **Tests** (`tests/Unit/OrchestratorTest.php`)
+  - InputTool path: step_count increments, Task stays RUNNING.
+  - OutputTool (requires approval): Task becomes PENDING_APPROVAL, AgentState persisted.
+  - OutputTool (auto-approved): executes immediately, Task stays RUNNING.
+  - Resume: AgentState restored, tool executed, Tick re-dispatched.
+  - Reject: rejection injected into history.
+  - max_steps: Task marked FAILED when limit hit.
+
+---
+
+### Layer 5 — Recipes + Plugins *(final layer)*
+
+- [ ] **Recipe scanner** — load `.yaml`/`.json` from `recipes/` + plugin `recipePaths()`.
+- [ ] **`PluginLoader`** — scan `plugins/`, auto-discover `PluginInterface`, boot each.
+- [ ] **`RecipeController::index`** — list available recipes.
+- [ ] **Tests** — scanner finds files, plugin loader discovers and boots correctly.
+
+---
+
+### Task 4 (deferred) — Frontend Scaffold
+
+- [ ] Vue 3 + Vite + Tailwind + shadcn-vue inside `frontend/`.
+- [ ] `vite.config.ts`: build to `../public/dist`, proxy `/api/` to PHP dev server.
+- [ ] Auth pages: login, register.
+- [ ] Dashboard: task list, task detail with approve/reject actions.
+- [ ] Settings: agent config, tool enable/disable, tool settings form (driven by `#[ToolSetting]` schema).
+
+**Start with Layer 1. No endpoint can be integration-tested without an authenticated session.**
+
+## 6. Appendix: Web Search API Research
+
+For the `SearchWebTool`, Spora requires APIs optimized for LLMs (providing clean, parsed content rather than raw HTML links).
+
+### 1. Built Specifically for AI Agents (Highly Recommended)
+*   **Tavily (tavily.com)**: Designed from the ground up for AI agents. Visits sites, extracts relevant content, strips noise, and returns clean JSON context.
+    *   *Best for*: Agents doing deep research.
+*   **Exa (exa.ai, formerly Metaphor)**: Uses "neural search" (meaning-based rather than keyword matching). Returns clean, parsed HTML/text for the LLM.
+
+### 2. Independent & Cost-Effective
+*   **Brave Search API**: Excellent built-in privacy, massive independent index. Very fast, returns clean data, and has a generous free tier.
+    *   *Best for*: Passing concise search snippets to the LLM to decide on further actions.
+
+### 3. Enterprise Heavyweights
+*   **Bing Web Search API**: The backbone of most major AI search features today. Reliable and comprehensive, but can be pricey at scale.
+*   **SerpApi / Serper.dev**: Scraping APIs that return literal Google Search outputs, structured for AI workflows.
+
+**Recommendation for Spora V1**: Default to **Tavily** for an all-in-one research tool, or **Brave Search** if relying on a secondary `ReadUrlTool` to dive deeper into extracted links. Long term: Support all major APIs.

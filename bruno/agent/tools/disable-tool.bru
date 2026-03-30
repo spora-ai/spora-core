@@ -1,0 +1,15 @@
+meta {
+  name: Disable Tool for Agent
+  type: http
+  seq: 3
+}
+
+delete {
+  url: {{baseUrl}}/agent/tools/Spora%5CTools%5CBuiltin%5CSearchWebTool/enable
+  body: none
+  auth: none
+}
+
+headers {
+  X-XSRF-TOKEN: {{xsrfToken}}
+}

@@ -1,0 +1,19 @@
+Options -Indexes
+
+# Deny direct access to sensitive directories
+<FilesMatch "\.(env|key|sqlite|log)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Allow direct access to existing files and directories
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+
+    # Route everything else through the front controller
+    RewriteRule ^(.*)$ public/index.php [QSA,L]
+</IfModule>

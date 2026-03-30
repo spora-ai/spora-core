@@ -1,0 +1,22 @@
+meta {
+  name: Enable Tool for Agent
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/agent/tools/Spora%5CTools%5CBuiltin%5CSearchWebTool/enable
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  X-XSRF-TOKEN: {{xsrfToken}}
+}
+
+body:json {
+  {
+    "auto_approve": null
+  }
+}
