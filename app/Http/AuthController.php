@@ -63,8 +63,6 @@ final class AuthController
             return $this->error('INVALID_CREDENTIALS', 'The email address or password is incorrect.', Response::HTTP_UNAUTHORIZED);
         } catch (AccountUnverifiedException) {
             return $this->error('ACCOUNT_UNVERIFIED', 'Please verify your email address before logging in.', Response::HTTP_FORBIDDEN);
-        } catch (AccountSuspendedException) {
-            return $this->error('ACCOUNT_SUSPENDED', 'This account has been suspended.', Response::HTTP_FORBIDDEN);
         }
 
         $userId = $this->authService->currentUserId();
@@ -73,8 +71,8 @@ final class AuthController
         return new JsonResponse(
             ['data' => ['user' => [
                 'id'       => $userId,
-                'email'    => $user?->email ?? (string) $body['email'],
-                'username' => $user?->username,
+                'email'    => $user !== null ? $user->email : (string) $body['email'],
+                'username' => $user !== null ? $user->username : null,
             ]]],
             Response::HTTP_OK,
         );
@@ -120,7 +118,7 @@ final class AuthController
     private function decodeJson(Request $request): array
     {
         $content = $request->getContent();
-        $decoded = $content !== '' && $content !== false ? json_decode($content, true) : null;
+        $decoded = $content !== '' ? json_decode($content, true) : null;
 
         return is_array($decoded) ? $decoded : [];
     }

@@ -107,9 +107,6 @@ return [
     },
 
     Delight\Auth\Auth::class => static function (ContainerInterface $c): Delight\Auth\Auth {
-        // Ensure the Eloquent capsule is booted and migrations have run before we touch PDO.
-        $c->get(Database::class)->boot();
-
         $pdo = Illuminate\Database\Capsule\Manager::connection()->getPdo();
 
         // Disable throttling in test/development environments to prevent rate-limit errors.

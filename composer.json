@@ -15,7 +15,8 @@
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.94",
-        "pestphp/pest": "^3.8"
+        "pestphp/pest": "^3.8",
+        "phpstan/phpstan": "^2.1"
     },
     "autoload": {
         "psr-4": {
@@ -28,7 +29,8 @@
         }
     },
     "scripts": {
-        "test": "./vendor/bin/pest"
+        "test": "./vendor/bin/pest",
+        "analyse": "./vendor/bin/phpstan analyse --memory-limit=2G"
     },
     "config": {
         "optimize-autoloader": true,

@@ -9,9 +9,7 @@ use Delight\Auth\EmailNotVerifiedException;
 use Delight\Auth\InvalidEmailException;
 use Delight\Auth\InvalidPasswordException;
 use Delight\Auth\UserAlreadyExistsException;
-use Delight\Auth\UserSuspendedException;
 use InvalidArgumentException;
-use Spora\Auth\Exceptions\AccountSuspendedException;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
@@ -52,7 +50,6 @@ final class AuthService
      *
      * @throws InvalidCredentialsException  if the email or password is incorrect
      * @throws AccountUnverifiedException   if the account requires email verification
-     * @throws AccountSuspendedException    if the account has been suspended
      */
     public function login(string $email, string $password, bool $rememberMe = false): void
     {
@@ -64,8 +61,6 @@ final class AuthService
             throw new InvalidCredentialsException('The email address or password is incorrect.');
         } catch (EmailNotVerifiedException) {
             throw new AccountUnverifiedException('Please verify your email address before logging in.');
-        } catch (UserSuspendedException) {
-            throw new AccountSuspendedException('This account has been suspended.');
         }
     }
 
@@ -82,9 +77,11 @@ final class AuthService
      */
     public function currentUserId(): ?int
     {
-        $id = $this->auth->getUserId();
+        if (!$this->auth->isLoggedIn()) {
+            return null;
+        }
 
-        return $id !== null ? (int) $id : null;
+        return (int) $this->auth->getUserId();
     }
 
     /**
@@ -92,6 +89,10 @@ final class AuthService
      */
     public function currentUserEmail(): ?string
     {
+        if (!$this->auth->isLoggedIn()) {
+            return null;
+        }
+
         return $this->auth->getEmail();
     }
 }

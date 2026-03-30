@@ -29,6 +29,7 @@ final class Kernel
     public function handle(Request $request): Response
     {
         try {
+            $this->container->get(Database::class)->boot();
             $router = $this->buildRouter();
             return $router->dispatch($request);
         } catch (Throwable $e) {

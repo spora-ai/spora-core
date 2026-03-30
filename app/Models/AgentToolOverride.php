@@ -8,10 +8,15 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use LogicException;
 
+/**
+ * @method static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
+ */
 class AgentToolOverride extends Model
 {
+    /** @var string */
     protected $table = 'agent_tool_overrides';
 
+    /** @var list<string> */
     protected $fillable = [
         'agent_id',
         'tool_class',

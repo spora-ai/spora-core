@@ -32,9 +32,10 @@ final class Router
         $routeInfo = $this->dispatcher->dispatch($method, $path);
 
         return match ($routeInfo[0]) {
-            Dispatcher::NOT_FOUND    => $this->notFound(),
+            Dispatcher::NOT_FOUND          => $this->notFound(),
             Dispatcher::METHOD_NOT_ALLOWED => $this->methodNotAllowed($routeInfo[1]),
-            Dispatcher::FOUND        => $this->handleFound($request, $routeInfo[1], $routeInfo[2]),
+            Dispatcher::FOUND              => $this->handleFound($request, $routeInfo[1], $routeInfo[2]),
+            default                        => $this->notFound(),
         };
     }
 

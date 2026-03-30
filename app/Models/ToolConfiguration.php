@@ -7,10 +7,15 @@ namespace Spora\Models;
 use Illuminate\Database\Eloquent\Model;
 use LogicException;
 
+/**
+ * @method static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
+ */
 class ToolConfiguration extends Model
 {
+    /** @var string */
     protected $table = 'tool_configurations';
 
+    /** @var list<string> */
     protected $fillable = [
         'tool_class',
         'tool_name',

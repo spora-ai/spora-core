@@ -1,0 +1,15 @@
+
+
+parameters:
+    paths:
+        - app
+        - public
+        - tests
+        - config.php
+    level: 5
+    excludePaths:
+        - vendor
+    bootstrapFiles:
+        - phpstan-bootstrap.php
+    
+

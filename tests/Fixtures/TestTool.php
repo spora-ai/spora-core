@@ -21,6 +21,10 @@ final class TestTool implements InputToolInterface
 
     public function getParametersSchema(): array
     {
-        return [];
+        return [
+            'type'       => 'object',
+            'properties' => [],
+            'required'   => [],
+        ];
     }
 }
