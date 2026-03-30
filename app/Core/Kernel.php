@@ -11,6 +11,7 @@ use FastRoute\RouteCollector;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Spora\Http\Exceptions\UnauthenticatedException;
 use Throwable;
 
 final class Kernel
@@ -78,6 +79,13 @@ final class Kernel
 
     private function handleException(Throwable $e): Response
     {
+        if ($e instanceof UnauthenticatedException) {
+            return new JsonResponse(
+                ['error' => ['code' => 'UNAUTHENTICATED', 'message' => 'Authentication required.']],
+                Response::HTTP_UNAUTHORIZED,
+            );
+        }
+
         $config  = $this->container->has('config') ? $this->container->get('config') : [];
         $appEnv  = $config['app_env'] ?? 'production';
         $isDebug = $appEnv === 'development' || $appEnv === 'local';

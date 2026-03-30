@@ -31,3 +31,65 @@ set_error_handler(static function (int $errno, string $errstr, string $errfile):
 
     return false;
 }, E_DEPRECATED);
+
+// ---------------------------------------------------------------------------
+// Shared test helpers (available to all test files)
+// ---------------------------------------------------------------------------
+
+/**
+ * Boot a fresh in-memory SQLite database and return a ready-to-use AuthService.
+ * Throttling is disabled so tests never hit rate limits.
+ */
+function bootAuthLayer(): Spora\Auth\AuthService
+{
+    Spora\Core\Database::resetBootState();
+
+    $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db->boot();
+
+    $pdo  = Illuminate\Database\Capsule\Manager::connection()->getPdo();
+    $auth = new Delight\Auth\Auth($pdo, null, null, false /* throttling off */);
+
+    return new Spora\Auth\AuthService($auth);
+}
+
+/**
+ * Create a JSON Request with an optional body array.
+ */
+function jsonRequest(string $method, string $uri, array $body = []): Symfony\Component\HttpFoundation\Request
+{
+    $content = $body !== [] ? json_encode($body) : '';
+
+    return Symfony\Component\HttpFoundation\Request::create(
+        $uri,
+        strtoupper($method),
+        [],
+        [],
+        [],
+        ['CONTENT_TYPE' => 'application/json'],
+        $content,
+    );
+}
+
+/**
+ * Simulate a logged-in session by populating the PHP session superglobal
+ * the same way delight-im/auth does internally.
+ */
+function simulateLoggedInSession(int $userId, string $email): void
+{
+    if (!isset($_SESSION)) {
+        $_SESSION = [];
+    }
+    $_SESSION[Delight\Auth\Auth::SESSION_FIELD_LOGGED_IN] = true;
+    $_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID]   = $userId;
+    $_SESSION[Delight\Auth\Auth::SESSION_FIELD_EMAIL]     = $email;
+    $_SESSION[Delight\Auth\Auth::SESSION_FIELD_USERNAME]  = null;
+}
+
+/**
+ * Clear the session, simulating a not-logged-in state.
+ */
+function clearSession(): void
+{
+    $_SESSION = [];
+}

@@ -3,31 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use Spora\Auth\AuthService;
-use Spora\Core\Database;
 use Spora\Http\AuthController;
-use Symfony\Component\HttpFoundation\Request;
-
-// ---------------------------------------------------------------------------
-// Bootstrap helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Boot a fresh in-memory SQLite database and return a ready-to-use AuthService.
- * Throttling is disabled so tests never hit rate limits.
- */
-function bootAuthLayer(): AuthService
-{
-    Database::resetBootState();
-
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-    $db->boot();
-
-    $pdo  = Capsule::connection()->getPdo();
-    $auth = new Delight\Auth\Auth($pdo, null, null, false /* throttling off */);
-
-    return new AuthService($auth);
-}
 
 /**
  * Build an AuthController backed by a fresh database.
@@ -35,53 +11,11 @@ function bootAuthLayer(): AuthService
  */
 function makeAuthController(array $configOverrides = []): array
 {
-    $service = bootAuthLayer();
-    $config  = array_merge(['allow_registration' => true, 'app_env' => 'testing'], $configOverrides);
+    $service    = bootAuthLayer();
+    $config     = array_merge(['allow_registration' => true, 'app_env' => 'testing'], $configOverrides);
     $controller = new AuthController($service, $config);
 
     return [$controller, $service];
-}
-
-/**
- * Create a JSON POST/GET Request with an optional body array.
- */
-function jsonRequest(string $method, string $uri, array $body = []): Request
-{
-    $content = $body !== [] ? json_encode($body) : '';
-
-    return Request::create(
-        $uri,
-        strtoupper($method),
-        [],       // parameters
-        [],       // cookies
-        [],       // files
-        ['CONTENT_TYPE' => 'application/json'],
-        $content,
-    );
-}
-
-/**
- * Simulate a logged-in session by populating the PHP session superglobal
- * the same way delight-im/auth does internally.
- */
-function simulateLoggedInSession(int $userId, string $email): void
-{
-    if (!isset($_SESSION)) {
-        $_SESSION = [];
-    }
-    // These are the session field names used by delight-im/auth (constants on Auth class).
-    $_SESSION[Delight\Auth\Auth::SESSION_FIELD_LOGGED_IN]  = true;
-    $_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID]    = $userId;
-    $_SESSION[Delight\Auth\Auth::SESSION_FIELD_EMAIL]      = $email;
-    $_SESSION[Delight\Auth\Auth::SESSION_FIELD_USERNAME]   = null;
-}
-
-/**
- * Clear the session, simulating a not-logged-in state.
- */
-function clearSession(): void
-{
-    $_SESSION = [];
 }
 
 // ---------------------------------------------------------------------------

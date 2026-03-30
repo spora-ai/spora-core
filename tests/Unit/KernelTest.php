@@ -149,3 +149,41 @@ test('500 response has Content-Type application/json', function (): void {
 
     expect($response->headers->get('Content-Type'))->toContain('application/json');
 });
+
+// ---------------------------------------------------------------------------
+// 401 Unauthenticated (UnauthenticatedException → Kernel → 401)
+// ---------------------------------------------------------------------------
+
+test('UnauthenticatedException from a protected route returns 401 UNAUTHENTICATED', function (): void {
+    clearSession();
+
+    // Provide a temporary key so SecurityManager (needed by AgentController) resolves.
+    $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
+
+    try {
+        $kernel   = new Kernel();
+        $response = $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+    } finally {
+        unset($_ENV['SPORA_SECRET_KEY']);
+    }
+
+    expect($response->getStatusCode())->toBe(401);
+
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('UNAUTHENTICATED');
+    expect($body['error']['message'])->toBe('Authentication required.');
+});
+
+test('401 response has Content-Type application/json', function (): void {
+    clearSession();
+    $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
+
+    try {
+        $kernel   = new Kernel();
+        $response = $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+    } finally {
+        unset($_ENV['SPORA_SECRET_KEY']);
+    }
+
+    expect($response->headers->get('Content-Type'))->toContain('application/json');
+});

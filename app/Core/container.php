@@ -132,4 +132,22 @@ return [
             $c->get(SecurityManagerInterface::class),
         );
     },
+
+    // Registered tool classes. Add to this list to make tools discoverable via GET /api/v1/tools.
+    'tool_classes' => [],
+
+    Spora\Http\AgentController::class => static function (ContainerInterface $c): Spora\Http\AgentController {
+        return new Spora\Http\AgentController(
+            $c->get(AuthService::class),
+            $c->get(Spora\Services\ToolConfigService::class),
+        );
+    },
+
+    Spora\Http\ToolController::class => static function (ContainerInterface $c): Spora\Http\ToolController {
+        return new Spora\Http\ToolController(
+            $c->get(AuthService::class),
+            $c->get(Spora\Services\ToolConfigService::class),
+            $c->get('tool_classes'),
+        );
+    },
 ];
