@@ -1,248 +1,118 @@
-# Spora Handover & Execution Plan 
+# Spora — Execution Plan
 
-**Welcome, Claude!** 
-You are tasked with building the foundation of **Spora**, the "WordPress of AI Agents." Spora is a highly portable, zero-configuration agent orchestration tool built in modern PHP 8.1+ and designed to run on any standard web host (cPanel/FTP).
+**What is Spora?** The "WordPress of AI Agents" — a portable, zero-config agent orchestration tool in PHP 8.2+. Runs on any shared host (cPanel/FTP). Single "My Assistant" UX in V1, multi-agent DB structure for future scale.
 
-## 1. Project Context & Paradigms
-- **The "Digital Employee"**: Spora operates as a single "My Assistant" for the user. While the DB structure should use `agent_id` for future scale, V1 is a single-agent UX.
-- **Zero-Config Database**: Spora uses SQLite by default to remove "Create Database" friction. **However, it fully supports standard MySQL/MariaDB.** The configuration (`config.php` or `.env`) must gracefully fallback to MySQL if credentials are provided.
-- **The State Machine (Human-in-the-Loop)**: The most critical architectural feature. Refer to `ARCHITECTURE.md` in this directory. 
-  - `InputToolInterface` = Safe, read-only tools. Agent runs instantly.
-  - `OutputToolInterface` = Unsafe, write tools. Agent execution strictly pauses, saves state to DB as `PENDING_APPROVAL`, and waits for the Human to approve via the UI before resuming via a Queue message.
-- **Plugin & Tools Ecosystem**: Tools are standard PHP classes that use **PHP 8 Attributes** to define metadata (Name, Description, Settings) for the LLM and the UI. "Recipes" (agentic workflows) are defined via JSON/YAML files. Keep this Attribute-first design in mind when scaffolding the Core.
+**Reference docs:** `docs/architecture.md` · `docs/api.md` · `docs/schema.md` · `docs/interfaces.md`
 
-## 2. Technical Stack
-**Backend (PHP 8.1+)**
-- `symfony/http-foundation` (Request/Response & JSON REST support)
-- `symfony/messenger` (Custom Orchestrator Loop & Queue. Supports daemon workers OR synchronous web-request execution).
-- `nikic/fast-route` (Attribute-based Routing using `php-di`).
-- `php-di/php-di` (Dependency Injection Container for the micro-kernel).
-- `illuminate/database` (Laravel Eloquent ORM - perfect zero-config DB abstraction for SQLite and MySQL/MariaDB).
-- `delight-im/auth` (Standalone, headless User Authentication logic).
-- `pestphp/pest` (Testing).
-
-**Frontend (Vue 3)**
-- Vue 3 (Composition API)
-- Vite (Used *locally only* to output to `../public/dist`. Prod host needs no Node.js. Dev mode should use API proxying to the PHP backend).
-- Tailwind CSS
-- `shadcn-vue` (Premium UI component library)
-
-## 3. Directory Structure
-Please enforce this exact structure. The base PHP namespace is `Spora\` mapping to the `app/` directory.
-
-```text
-/
-├── .htaccess          # Forwards all HTTP traffic to public/index.php
-├── app/
-│   ├── Core/          # Kernel, DI Container, Router
-│   ├── Auth/          # delight-im/auth wrapper
-│   ├── Agents/        # Agent Orchestrator and Custom Loop
-│   ├── Tools/         # InputToolInterface, OutputToolInterface & Annotations/Attributes
-│   ├── Drivers/       # OpenAI / Anthropic Integrations
-│   ├── Http/          # REST API Controllers (JSON headers)
-│   └── Models/        # Eloquent Models (User, Agent, Task, ToolCall)
-├── frontend/          # Vue + shadcn-vue source code
-├── plugins/           # Custom user-added Tools
-├── recipes/           # Agentic Workflows (JSON/YAML)
-├── storage/           # SQLite DB (.sqlite), Logs, and App Secrets
-├── public/
-│   ├── dist/          # COMPILED Vue Assets (JS/CSS)
-│   └── index.php      # Main PHP Entry Point
-└── config.php         # Zero-config environment arrays
-```
-
-## 4. Phase 1 — Foundation ✅ COMPLETE
-
-All tasks verified. 32 Pest tests passing, 0 failures.
-
-- [x] **Task 1: Project Initialization**
-  - `composer.json` configured with PHP 8.2+, all dependencies at latest stable.
-  - `pestphp/pest ^3.8` (PHPUnit 11), `php-cs-fixer` configured in `.php-cs-fixer.php`.
-  - Full folder structure in place.
-
-- [x] **Task 2: Core Micro-Kernel**
-  - `config.php`, `Kernel.php`, `Router.php`, `public/index.php` all implemented.
-  - `app/Core/routes.php` maps all 21 API routes per `API_SPEC.md` (`/api/v1/` prefix).
-  - PHP-DI container wired in `app/Core/container.php`.
-
-- [x] **Task 3: Security & Database Scaffold**
-  - `SecurityManager` uses libsodium secretbox; key detection by byte-length (not `/` check).
-  - `Database.php` runs all 8 migrations idempotently via `Schema::hasTable()` guards.
-  - All models correct: `auto_approve` raw 0/1/null, `pending_state` MEDIUMTEXT, `task_history` append-only.
-  - `AgentState` value object: JSON serialize/deserialize roundtrip tested.
-
-- [ ] **Task 4: Frontend Scaffold** *(see Phase 3 below)*
+**Stack:** `symfony/http-foundation`, `symfony/messenger`, `nikic/fast-route`, `php-di/php-di`, `illuminate/database` (Eloquent), `delight-im/auth`, `pestphp/pest`, Vue 3 + Vite + Tailwind + shadcn-vue (frontend).
 
 ---
 
-## 5. Phase 2 — Application Layer ✅ COMPLETE
+## Completed ✅
 
-### Layer 1 — Auth ✅ COMPLETE
+| Phase | What was built | Tests |
+|---|---|---|
+| Foundation | Kernel, Router, DI container, SecurityManager (libsodium), Database scaffold (8 tables), config/env priority chain | 32 |
+| Auth (Layer 1) | `AuthService`, `AuthController`, session guard | +12 |
+| ToolConfigService (Layer 2) | Encrypt/decrypt password fields, global + per-agent settings | +9 |
+| Agent + Tool endpoints (Layer 3) | `AgentController` (8 methods), `ToolController` (3 methods) | +24 |
+| Orchestrator (Layer 4) | Full state machine (`start/tick/resume/reject`), `OrchestratorProxy`, Messenger wiring, `TaskController` | +24 |
+| Recipes + Plugins (Layer 5) | `RecipeScanner`, `PluginLoader` (token-based FQCN extraction), `RecipeController` | +24 |
 
-- [x] `AuthService`, `AuthController`, auth middleware
-- [x] Tests (`tests/Unit/AuthTest.php`) — 12 tests passing
-
-### Layer 2 — ToolConfigService ✅ COMPLETE
-
-- [x] `ToolConfigService` with encrypt/decrypt, `getGlobalSettings`, `putGlobalSettings`
-- [x] Tests (`tests/Unit/ToolConfigServiceTest.php`) — 9 tests passing
-
-### Layer 3 — Agent + Tool endpoints ✅ COMPLETE
-
-- [x] `AgentController` — all 8 methods implemented
-- [x] `ToolController` — all 3 methods implemented
-- [x] Tests — 24 tests passing
-
-### Layer 4 — Orchestrator ✅ COMPLETE
-
-- [x] Full state machine: `start()`, `tick()`, all branches (text, InputTool, OutputTool auto/manual approval)
-- [x] Symfony Messenger wiring, `TickMessage`, `TickHandler`
-- [x] `TaskController` — all 5 methods implemented
-- [x] `OrchestratorProxy` — breaks circular DI, lazy delegate pattern
-- [x] Tests — 24 tests passing
-
-### Layer 5 — Recipes + Plugins ✅ COMPLETE
-
-- [x] `RecipeScanner` — scans `recipes/` + plugin `recipePaths()` for `.json`/`.yaml`/`.yml` files
-- [x] `PluginLoader` — discovers `plugins/*/Plugin.php` via token parsing, boots each, registers autoload
-- [x] `RecipeController::index` — auth-gated, returns merged recipe list
-- [x] Tests — `RecipeScannerTest`, `PluginLoaderTest`, `RecipeControllerTest` — all passing
-- [x] `symfony/yaml ^8.0` added as dependency
-- [x] Coverage at 89.7%, PHPStan level 5 clean
-
-**Total: 147 tests, 0 failures.**
+**Total: 147 tests, 0 failures. PHPStan level 5 clean. Coverage ~90%.**
 
 ---
 
-## 6. Phase 3 — Infrastructure Hardening + Drivers
+## Phase 3 — Infrastructure + Drivers
 
-Implement in order. Each layer below is a dependency of the next.
+### Layer 6 — WordPress-Style Schema Installer ← NEXT
 
----
-
-### Layer 6 — WordPress-Style Schema Installer *(next up)*
-
-**Goal:** Replace the flat `hasTable()` guard approach with a versioned, component-aware schema installer that supports safe upgrades for both Core and Plugins — no manual SQL, no downtime.
+**Goal:** Replace `hasTable()` guards with a versioned, component-aware schema installer. Supports safe upgrades for Core and Plugins with no manual SQL.
 
 **Design:**
-
-- `schema_versions` table — one row per component (`core`, or plugin name e.g. `my_plugin`):
-  ```
-  component   VARCHAR(100) PK
-  version     UNSIGNED INT NOT NULL
-  updated_at  TIMESTAMP
-  ```
-- `DatabaseSchemaInstaller` is the single entry point. The Kernel calls it on every request (fast no-op if versions match, like WordPress).
-- Each **component** (Core or Plugin) provides:
-  - `schemaVersion(): int` — the current required integer version (increment on any schema change)
-  - `schemaTables(): array<string, callable(Blueprint): void>` — full desired table definitions, keyed by table name
-  - `schemaUpgrades(): array<int, callable(Schema): void>` — version-keyed upgrade callbacks (e.g. `[2 => fn($s) => $s->table('agents', fn($t) => $t->string('new_col'))]`)
+- `schema_versions` table — one row per component (`core`, or plugin name), columns: `component PK`, `version UINT`, `updated_at`.
+- Kernel calls `DatabaseSchemaInstaller::install()` on every boot — fast no-op if versions match.
+- Each component provides a `SchemaDefinition`: `schemaVersion(): int`, `schemaTables(): array<table, Blueprint callable>`, `schemaUpgrades(): array<int, Schema callable>`.
 
 **Installer logic per component (idempotent):**
-1. Read `schema_versions` row for component (0 if missing).
-2. Compare to `schemaVersion()`. If equal → skip.
-3. For each table in `schemaTables()`:
-   - If table missing → **create** it.
-   - If table exists → **compare columns**: for each column in definition not present in actual schema → **add** it. (No column removal — safe for production data.)
-4. Run all `schemaUpgrades()` callbacks for versions `> current AND <= target` in order.
-5. Upsert `schema_versions` row with new version.
+1. Read stored version (0 if missing).
+2. If equal to `schemaVersion()` → skip.
+3. For each table: missing → create. Exists → add any missing columns (never remove).
+4. Run upgrade callbacks for versions `> current AND <= target` in order.
+5. Upsert `schema_versions` row.
 
-**Plugin integration:**
-- `PluginInterface` gains two new optional methods with default implementations: `schemaVersion(): int` (returns 0) and `schemaDefinition(): ?SchemaDefinition` (returns null).
-- `PluginLoader` exposes `pluginSchemaDefinitions(): array` — `PluginLoader` is injected into `DatabaseSchemaInstaller`.
-- On boot, `DatabaseSchemaInstaller::install()` processes Core first, then each plugin.
+**Plugin integration:** `PluginInterface` gets `schemaVersion(): int` (default 0) and `schemaDefinition(): ?SchemaDefinition` (default null) — backward-compatible no-ops. `PluginLoader` exposes `pluginSchemaDefinitions()` and is injected into `DatabaseSchemaInstaller`.
 
-**Files to create/modify:**
+**Files:**
 - `app/Core/DatabaseSchemaInstaller.php` — full rewrite
-- `app/Core/SchemaDefinition.php` — value object wrapping version + tables + upgrades
-- `app/Plugins/PluginInterface.php` — add `schemaVersion()` and `schemaDefinition()` with default implementations
-- `app/Core/Database.php` — call `DatabaseSchemaInstaller::install()` after connection setup
-- `app/Core/container.php` — wire `DatabaseSchemaInstaller` with `PluginLoader` injection
-- **Tests:** `tests/Unit/DatabaseSchemaInstallerTest.php` — fresh DB install, upgrade path (add column), plugin schema registration, idempotency
+- `app/Core/SchemaDefinition.php` — value object (version + tables + upgrades)
+- `app/Plugins/PluginInterface.php` — add two default methods
+- `app/Core/Database.php` — call installer after connection setup
+- `app/Core/container.php` — wire `DatabaseSchemaInstaller` with `PluginLoader`
+- `tests/Unit/DatabaseSchemaInstallerTest.php` — fresh install, upgrade path, plugin schema, idempotency
 
 ---
 
 ### Layer 7 — LLM Drivers
 
-**Goal:** Implement `LLMDriverInterface` for the two most important providers. The Orchestrator already calls `LLMDriverInterface::complete()` — wiring these unlocks end-to-end task execution.
+**Goal:** Implement `LLMDriverInterface` for OpenAI-compatible and Anthropic endpoints. Unlocks end-to-end task execution.
 
-**Interface contract** (already defined, do not change):
-```php
-interface LLMDriverInterface {
-    public function complete(array $messages, array $tools): LLMResponse;
-}
-// LLMResponse: { content: ?string, toolCalls: ToolCallRequest[] }
-// ToolCallRequest: { id: string, name: string, arguments: array }
-```
+**Driver A — `OpenAICompatibleDriver`** (`app/Drivers/OpenAICompatibleDriver.php`)
+- Provider name: `openai_compatible` (matches `agents.llm_provider` default)
+- `POST {base_url}/chat/completions` — standard OpenAI chat completions format
+- `base_url` defaults to `https://api.openai.com/v1`; override for Ollama, Groq, LM Studio, Azure, etc.
+- Reads `api_key`, `model` from `ToolConfigService` or Agent row fallback
+- Parses `finish_reason: tool_calls` vs text
 
-#### Driver A — `OpenAICompatibleDriver` *(highest priority)*
+**Driver B — `AnthropicDriver`** (`app/Drivers/AnthropicDriver.php`)
+- Provider name: `anthropic`
+- `POST https://api.anthropic.com/v1/messages`, header `anthropic-version: 2023-06-01`
+- Anthropic request format: `system` separate, `tools` array uses Anthropic schema
+- Parses `stop_reason: tool_use` (extract `tool_use` blocks) vs `stop_reason: end_turn` (extract `text` blocks)
 
-- **File:** `app/Drivers/OpenAICompatibleDriver.php`
-- **Provider name:** `openai_compatible` (matches `agents.llm_provider` default)
-- Reads `base_url`, `api_key`, `model` from `ToolConfigService` (global settings for tool class `OpenAICompatibleDriver::class`) **OR** from `Agent` row fields as fallback.
-- Calls `POST {base_url}/chat/completions` via `symfony/http-client` (add to `composer.json`).
-- Request format: standard OpenAI chat completions with `tools` array.
-- Response parsing: handle `finish_reason: tool_calls` vs text.
-- Works out of the box for: OpenAI API, Azure OpenAI (with base_url override), Ollama, LM Studio, any OpenAI-compatible endpoint.
-
-#### Driver B — `AnthropicDriver`
-
-- **File:** `app/Drivers/AnthropicDriver.php`
-- **Provider name:** `anthropic`
-- Calls `POST https://api.anthropic.com/v1/messages` with `anthropic-version: 2023-06-01` header.
-- Request format: Anthropic Messages API — `system` prompt separate, `tools` array uses Anthropic schema.
-- Response parsing: `stop_reason: tool_use` → extract `tool_use` content blocks; `stop_reason: end_turn` → extract `text` blocks.
-- Reads `api_key` and `model` from `ToolConfigService`.
-
-**Shared infrastructure:**
-- `app/Drivers/DriverFactory.php` — resolves provider name → driver class. Registered drivers from `PluginLoader::drivers()` are merged in. Replaces the current unbound `LLMDriverInterface` binding in `container.php`.
-- `app/Drivers/LLMResponse.php` + `app/Drivers/ToolCallRequest.php` — value objects (if not already defined).
-
-**Files to create/modify:**
-- `app/Drivers/OpenAICompatibleDriver.php`
-- `app/Drivers/AnthropicDriver.php`
-- `app/Drivers/DriverFactory.php`
-- `app/Core/container.php` — bind `LLMDriverInterface` via `DriverFactory`, using `Agent` row to pick provider
+**Shared:**
+- `app/Drivers/DriverFactory.php` — resolves `agent.llm_provider` → driver instance; merges plugin-registered drivers
+- Bind `LLMDriverInterface` via `DriverFactory` in `container.php` (resolves per-request from Agent row)
 - `composer.json` — add `symfony/http-client ^7.0`
-- **Tests:** `tests/Unit/OpenAICompatibleDriverTest.php`, `tests/Unit/AnthropicDriverTest.php` — use mock HTTP responses (no real API calls); test tool call parsing, text response parsing, error handling.
+- `tests/Unit/OpenAICompatibleDriverTest.php`, `tests/Unit/AnthropicDriverTest.php` — mock HTTP responses; test tool call parsing, text response parsing, error handling, rate limit exception
 
 ---
 
-## 7. Phase 4 — Frontend
+## Phase 4 — Frontend
 
-**Task 4: Frontend Scaffold**
+**Stack:** Vue 3 + Vite + TypeScript + Tailwind CSS + shadcn-vue in `frontend/`.
 
-- [ ] `frontend/` — Vue 3 + Vite + TypeScript + Tailwind CSS + shadcn-vue
-- [ ] `vite.config.ts` — build output to `../public/dist`, dev proxy `/api/` → PHP server (`localhost:8080` or configurable)
-- [ ] Global API client (`frontend/src/api/client.ts`) — thin fetch wrapper, reads base URL from `import.meta.env.VITE_API_URL`, attaches session cookie automatically
-- [ ] Auth store (Pinia) — `useAuthStore`: `login()`, `logout()`, `me()`, persists user state
-- [ ] Pages: Login, Register (redirect to dashboard on success)
-- [ ] Dashboard: task list (`GET /api/v1/tasks`), task detail modal with approve/reject buttons for `PENDING_APPROVAL` tasks
-- [ ] Agent Settings page: agent name/description/model form (`PATCH /api/v1/agent`), tool enable/disable toggle, per-tool settings form driven by `#[ToolSetting]` attribute schema
-- [ ] Recipe picker: list from `GET /api/v1/recipes`, select sets `agent.recipe_id`
-- [ ] Composer (start task): textarea + submit → `POST /api/v1/tasks`
+**Build:** `vite.config.ts` outputs to `../public/dist`. Dev proxy `/api/` → PHP server. `public/index.php` serves `dist/index.html` as SPA fallback for non-API routes.
 
-**Build integration:**
-- `public/index.php` serves `public/dist/index.html` for non-API routes (SPA fallback)
-- `composer.json` scripts: `"frontend:dev": "cd frontend && npm run dev"`, `"frontend:build": "cd frontend && npm run build"`
+**Scope:**
+- Global API client (`frontend/src/api/client.ts`) — fetch wrapper, session cookie, `VITE_API_URL`
+- Pinia auth store — `login()`, `logout()`, `me()`, persisted user state
+- Pages: Login, Register
+- Dashboard: task list, task detail with approve/reject for `PENDING_APPROVAL` tasks
+- Agent Settings: name/description/model form, tool enable/disable, per-tool settings form (driven by `#[ToolSetting]` schema from `GET /api/v1/tools`)
+- Recipe picker: list from `GET /api/v1/recipes`, selection sets `agent.recipe_id`
+- Composer: textarea + submit → `POST /api/v1/tasks`
+
+**`composer.json` scripts:** `"frontend:dev": "cd frontend && npm run dev"`, `"frontend:build": "cd frontend && npm run build"`
 
 ---
 
-## 8. Appendix: Web Search API Research
+## Backlog (Future)
 
-For the `SearchWebTool`, Spora requires APIs optimized for LLMs (providing clean, parsed content rather than raw HTML links).
+### MCP Server Integration
+Connect to Model Context Protocol servers as a source of tools. Question to resolve: is an MCP connection a special "driver", a meta-tool, or a plugin type? Likely a plugin-level contribution that registers a batch of tools at boot, with the MCP transport (stdio/HTTP/SSE) managed inside the plugin.
 
-### 1. Built Specifically for AI Agents (Highly Recommended)
-*   **Tavily (tavily.com)**: Designed from the ground up for AI agents. Visits sites, extracts relevant content, strips noise, and returns clean JSON context.
-    *   *Best for*: Agents doing deep research.
-*   **Exa (exa.ai, formerly Metaphor)**: Uses "neural search" (meaning-based rather than keyword matching). Returns clean, parsed HTML/text for the LLM.
+### User Management
+Multi-user: user list, role management (admin/user), per-user agent isolation. Requires `roles_mask` (already in schema) and a UI section.
 
-### 2. Independent & Cost-Effective
-*   **Brave Search API**: Excellent built-in privacy, massive independent index. Very fast, returns clean data, and has a generous free tier.
-    *   *Best for*: Passing concise search snippets to the LLM to decide on further actions.
+### Installer (`install.php`)
+WordPress-style web installer: DB connection form, generate `config.php`, place encryption key at `~/.spora/secret.key`, create first admin user, verify file permissions.
 
-### 3. Enterprise Heavyweights
-*   **Bing Web Search API**: The backbone of most major AI search features today. Reliable and comprehensive, but can be pricey at scale.
-*   **SerpApi / Serper.dev**: Scraping APIs that return literal Google Search outputs, structured for AI workflows.
+### Build & Distribution Scripts
+- **Shared hosting:** single ZIP (no `vendor/` excluded, `composer install --no-dev` pre-run, htaccess included)
+- **Docker:** `Dockerfile` + `docker-compose.yml` (PHP-FPM + nginx + optional MySQL)
+- **One-click deploy:** Cloudron, Coolify, Railway manifests
+- Frontend build baked into release artifact (`public/dist/` committed or built in CI)
 
-**Recommendation for Spora V1**: Default to **Tavily** for an all-in-one research tool, or **Brave Search** if relying on a secondary `ReadUrlTool` to dive deeper into extracted links. Long term: Support all major APIs.
+### Plugin Marketplace
+Discovery, install, and update flow for community plugins (similar to wp-plugin directory). Requires signature verification.
