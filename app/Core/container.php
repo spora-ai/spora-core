@@ -39,7 +39,7 @@ return [
 
         // Layer 2 — config.php (installer-generated, gitignored, optional)
         // Shared hosting users set all values here, including db_password.
-        $configPath = BASE_PATH . '/config.php';
+        $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: BASE_PATH . '/config.php');
         $fileConfig = file_exists($configPath) ? require $configPath : [];
 
         // Layer 3 — SPORA_* env vars (highest priority; Docker / VPS / CI)
