@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 use Spora\Plugins\PluginLoader;
 
-const FIXTURE_PLUGINS = BASE_PATH . '/tests/Fixtures/plugins';
+const FIXTURE_PLUGINS           = BASE_PATH . '/tests/Fixtures/plugins';
+const FIXTURE_MANIFEST_PLUGINS  = BASE_PATH . '/tests/Fixtures/plugins_with_manifest';
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -53,4 +54,31 @@ test('toolClasses() returns empty array when plugin contributes no tools', funct
     $loader->boot();
 
     expect($loader->toolClasses())->toBe([]);
+});
+
+// ---------------------------------------------------------------------------
+// Fix #3 — plugin.json manifest support
+// ---------------------------------------------------------------------------
+
+test('plugin.json manifest is used instead of token parsing when present', function (): void {
+    $loader = new PluginLoader(FIXTURE_MANIFEST_PLUGINS);
+    $loader->boot();
+
+    expect($loader->getPlugins())->toHaveCount(1);
+    expect($loader->getPlugins()[0]->getName())->toBe('Manifest Plugin');
+});
+
+test('manifest plugin exposes its drivers correctly', function (): void {
+    $loader = new PluginLoader(FIXTURE_MANIFEST_PLUGINS);
+    $loader->boot();
+
+    expect($loader->drivers())->toHaveKey('manifest_driver');
+});
+
+test('manifest boot() is idempotent', function (): void {
+    $loader = new PluginLoader(FIXTURE_MANIFEST_PLUGINS);
+    $loader->boot();
+    $loader->boot();
+
+    expect($loader->getPlugins())->toHaveCount(1);
 });

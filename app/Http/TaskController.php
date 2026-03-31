@@ -112,10 +112,20 @@ final class TaskController
             );
         }
 
-        $body              = $this->decodeJson($request);
-        $approvedArguments = (array) ($body['arguments'] ?? []);
+        $body = $this->decodeJson($request);
 
-        $this->orchestrator->resume($task->id, $approvedArguments);
+        // Accept either a modern batch payload  { "approvals": [{ "provider_call_id": "...", "arguments": {...} }] }
+        // or the legacy single-tool format       { "arguments": {...} }  (auto-wrapped for backward compatibility).
+        if (isset($body['approvals']) && is_array($body['approvals'])) {
+            $approvedBatch = $body['approvals'];
+        } else {
+            $approvedBatch = [[
+                'provider_call_id' => (string) ($body['provider_call_id'] ?? ''),
+                'arguments'        => (array) ($body['arguments'] ?? []),
+            ]];
+        }
+
+        $this->orchestrator->resume($task->id, $approvedBatch);
 
         return new JsonResponse(['data' => ['task' => $this->taskResource($task->fresh())]]);
     }

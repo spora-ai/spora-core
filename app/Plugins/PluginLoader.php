@@ -44,7 +44,8 @@ final class PluginLoader
         $classLoader = $this->findClassLoader();
 
         foreach (glob($this->pluginsDirectory . '/*/Plugin.php') ?: [] as $file) {
-            $this->loadPluginFile($file, $classLoader);
+            $pluginDir = dirname($file);
+            $this->loadPlugin($pluginDir, $file, $classLoader);
         }
     }
 
@@ -108,6 +109,81 @@ final class PluginLoader
         return $this->plugins;
     }
 
+    /**
+     * Load a plugin from its directory.
+     *
+     * Resolution order:
+     *   1. `plugin.json` manifest — reads the FQCN from `"class"` and registers any
+     *      `"autoload"."psr-4"` mappings declared there. Fast: `json_decode` beats
+     *      PHP tokenisation every time.
+     *   2. PHP token parsing of `Plugin.php` — legacy fallback for plugins that do
+     *      not ship a manifest.
+     */
+    private function loadPlugin(string $pluginDir, string $pluginFile, ?\Composer\Autoload\ClassLoader $classLoader): void
+    {
+        $manifestFile = $pluginDir . '/plugin.json';
+
+        if (is_file($manifestFile)) {
+            $this->loadPluginFromManifest($manifestFile, $pluginFile, $classLoader);
+        } else {
+            $this->loadPluginFile($pluginFile, $classLoader);
+        }
+    }
+
+    private function loadPluginFromManifest(string $manifestFile, string $pluginFile, ?\Composer\Autoload\ClassLoader $classLoader): void
+    {
+        $raw = file_get_contents($manifestFile);
+
+        if ($raw === false) {
+            return;
+        }
+
+        $manifest = json_decode($raw, true);
+
+        if (!is_array($manifest) || !isset($manifest['class']) || !is_string($manifest['class'])) {
+            return;
+        }
+
+        $fqcn = $manifest['class'];
+
+        // Register PSR-4 autoload mappings declared in the manifest before require_once.
+        if ($classLoader !== null && isset($manifest['autoload']['psr-4']) && is_array($manifest['autoload']['psr-4'])) {
+            $pluginDir = dirname($manifestFile);
+            foreach ($manifest['autoload']['psr-4'] as $namespace => $relativePath) {
+                $classLoader->addPsr4((string) $namespace, $pluginDir . '/' . ltrim((string) $relativePath, '/'));
+            }
+        }
+
+        require_once $pluginFile;
+
+        $this->instantiatePlugin($fqcn, $classLoader);
+    }
+
+    private function instantiatePlugin(string $fqcn, ?\Composer\Autoload\ClassLoader $classLoader): void
+    {
+        if (!class_exists($fqcn, false) || !is_a($fqcn, PluginInterface::class, true)) {
+            return;
+        }
+
+        // Skip if already loaded.
+        foreach ($this->plugins as $existing) {
+            if (get_class($existing) === $fqcn) {
+                return;
+            }
+        }
+
+        /** @var PluginInterface $plugin */
+        $plugin = new $fqcn();
+
+        if ($classLoader !== null) {
+            foreach ($plugin->autoload() as $namespace => $path) {
+                $classLoader->addPsr4($namespace, $path);
+            }
+        }
+
+        $this->plugins[] = $plugin;
+    }
+
     private function loadPluginFile(string $file, ?\Composer\Autoload\ClassLoader $classLoader): void
     {
         $fqcn = $this->extractFqcn($file);
@@ -118,28 +194,7 @@ final class PluginLoader
 
         require_once $file;
 
-        if (!class_exists($fqcn, false) || !is_a($fqcn, PluginInterface::class, true)) {
-            return;
-        }
-
-        // Skip if already loaded (guards against repeated boot() across instances in tests).
-        foreach ($this->plugins as $existing) {
-            if (get_class($existing) === $fqcn) {
-                return;
-            }
-        }
-
-        /** @var PluginInterface $plugin */
-        $plugin = new $fqcn();
-
-        // Register the plugin's PSR-4 autoload mappings.
-        if ($classLoader !== null) {
-            foreach ($plugin->autoload() as $namespace => $path) {
-                $classLoader->addPsr4($namespace, $path);
-            }
-        }
-
-        $this->plugins[] = $plugin;
+        $this->instantiatePlugin($fqcn, $classLoader);
     }
 
     /**

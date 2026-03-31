@@ -1,0 +1,7 @@
+{
+    "name": "Manifest Plugin",
+    "class": "Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin",
+    "autoload": {
+        "psr-4": {}
+    }
+}

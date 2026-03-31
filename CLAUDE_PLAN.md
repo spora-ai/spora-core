@@ -25,31 +25,33 @@
 
 ## Phase 3 — Infrastructure + Drivers
 
-### Layer 6 — WordPress-Style Schema Installer ← NEXT
+### Layer 6 — Schema Installer via Laravel Migrator ← NEXT
 
-**Goal:** Replace `hasTable()` guards with a versioned, component-aware schema installer. Supports safe upgrades for Core and Plugins with no manual SQL.
+**Goal:** Replace `hasTable()` guards with a versioned, component-aware schema installer. Uses Laravel's battle-tested `Illuminate\Database\Migrations\Migrator` under the hood — no manual diffing.
+
+**Why not naive column diffing?** The original plan of "compare columns: add missing ones, never remove" is brittle: it cannot handle type changes, index modifications, column renames, or foreign keys. `illuminate/database` already ships a production-grade `Migrator` — use it.
 
 **Design:**
 - `schema_versions` table — one row per component (`core`, or plugin name), columns: `component PK`, `version UINT`, `updated_at`.
-- Kernel calls `DatabaseSchemaInstaller::install()` on every boot — fast no-op if versions match.
-- Each component provides a `SchemaDefinition`: `schemaVersion(): int`, `schemaTables(): array<table, Blueprint callable>`, `schemaUpgrades(): array<int, Schema callable>`.
+- Kernel calls `DatabaseSchemaInstaller::install()` on every boot — fast no-op if version stamp matches.
+- Each component provides a directory of standard Laravel `Migration` classes (one file per version step).
+- When an upgrade is needed, `DatabaseSchemaInstaller` programmatically invokes `Migrator::run($migrationsPath)` on the component's migrations directory.
+- Version stamp in `schema_versions` is updated after a successful run.
 
 **Installer logic per component (idempotent):**
 1. Read stored version (0 if missing).
-2. If equal to `schemaVersion()` → skip.
-3. For each table: missing → create. Exists → add any missing columns (never remove).
-4. Run upgrade callbacks for versions `> current AND <= target` in order.
-5. Upsert `schema_versions` row.
+2. If equal to `schemaVersion()` → skip (fast path on every HTTP request).
+3. Otherwise, call `$migrator->run($component->migrationsPath())` — Laravel handles state via the standard `migrations` table, so re-running is safe.
+4. Upsert `schema_versions` row.
 
-**Plugin integration:** `PluginInterface` gets `schemaVersion(): int` (default 0) and `schemaDefinition(): ?SchemaDefinition` (default null) — backward-compatible no-ops. `PluginLoader` exposes `pluginSchemaDefinitions()` and is injected into `DatabaseSchemaInstaller`.
+**Plugin integration:** `PluginInterface` gets `schemaVersion(): int` (default 0) and `migrationsPath(): ?string` (default null) — backward-compatible no-ops. Plugins drop standard Laravel `Migration` class files in their `migrations/` folder; `PluginLoader` exposes `pluginMigrationPaths()` and is injected into `DatabaseSchemaInstaller`.
 
 **Files:**
-- `app/Core/DatabaseSchemaInstaller.php` — full rewrite
-- `app/Core/SchemaDefinition.php` — value object (version + tables + upgrades)
-- `app/Plugins/PluginInterface.php` — add two default methods
+- `app/Core/DatabaseSchemaInstaller.php` — full rewrite using `Illuminate\Database\Migrations\Migrator`
+- `app/Plugins/PluginInterface.php` — add `schemaVersion()` + `migrationsPath()` default methods
 - `app/Core/Database.php` — call installer after connection setup
 - `app/Core/container.php` — wire `DatabaseSchemaInstaller` with `PluginLoader`
-- `tests/Unit/DatabaseSchemaInstallerTest.php` — fresh install, upgrade path, plugin schema, idempotency
+- `tests/Unit/DatabaseSchemaInstallerTest.php` — fresh install, upgrade path, plugin migration, idempotency
 
 ---
 

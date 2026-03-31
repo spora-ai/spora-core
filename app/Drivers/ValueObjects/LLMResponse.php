@@ -7,23 +7,22 @@ namespace Spora\Drivers\ValueObjects;
 final readonly class LLMResponse
 {
     /**
-     * Exactly one of $content or $toolCall is non-null per response.
+     * @param  ?string       $content     Non-null when the LLM returns text (task complete or no tool needed).
+     * @param  list<ToolCall> $toolCalls  Non-empty when the LLM requests one or more tool invocations.
+     *                                   Modern LLMs fire parallel tool calls in a single response.
      */
     public function __construct(
-        /** Non-null when LLM returns text (task complete or no tool needed). */
-        public ?string   $content,
-
-        /** Non-null when LLM requests a tool invocation. */
-        public ?ToolCall $toolCall,
-        public int    $inputTokens,
-        public int    $outputTokens,
+        public ?string $content,
+        public array   $toolCalls,
+        public int     $inputTokens,
+        public int     $outputTokens,
 
         /** Provider-issued completion ID for logging/debugging. */
-        public string $completionId,
+        public string  $completionId,
     ) {}
 
     public function hasToolCalls(): bool
     {
-        return $this->toolCall !== null;
+        return $this->toolCalls !== [];
     }
 }

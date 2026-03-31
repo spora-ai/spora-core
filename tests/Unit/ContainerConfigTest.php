@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use DI\ContainerBuilder;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -80,7 +79,7 @@ test('config closure resolves basic defaults', function (): void {
 
     // Note: depending on the user's real config.php, this might differ slightly,
     // but db_path usually defaults to sqlite.
-    expect($config['db_driver'])->toBeIn(['sqlite', 'mysql', 'pgsql']); 
+    expect($config['db_driver'])->toBeIn(['sqlite', 'mysql', 'pgsql']);
 });
 
 test('environmental variables override default config', function (): void {

@@ -7,19 +7,21 @@ namespace Spora\Agents\ValueObjects;
 use Spora\Drivers\ValueObjects\ToolCall;
 
 /**
- * Snapshot of Orchestrator state at the moment an OutputTool call is intercepted.
+ * Snapshot of Orchestrator state at the moment one or more OutputTool calls are intercepted.
  * Stored as JSON in tasks.pending_state. Reconstructed to resume after human approval.
  */
 final readonly class AgentState
 {
     public function __construct(
-        public int      $taskId,
-        public int      $agentId,
+        public int   $taskId,
+        public int   $agentId,
 
         /**
-         * The exact tool call that triggered the pause.
+         * All tool calls that triggered the pause (parallel tool calls may produce a batch).
+         *
+         * @var list<ToolCall>
          */
-        public ToolCall $pendingToolCall,
+        public array $pendingToolCalls,
 
         /**
          * Conversation history frozen at pause time.
@@ -27,26 +29,31 @@ final readonly class AgentState
          *
          * @var list<array{role: string, content: string|null, tool_calls?: array, tool_call_id?: string, name?: string}>
          */
-        public array    $messageSnapshot,
-        public int      $stepCount,
-        public int      $maxSteps,
+        public array  $messageSnapshot,
+        public int    $stepCount,
+        public int    $maxSteps,
 
         /** ISO 8601 UTC timestamp. */
-        public string   $pausedAt,
+        public string $pausedAt,
     ) {}
 
     public static function fromJson(string $json): static
     {
         $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
 
+        $pendingToolCalls = array_map(
+            static fn(array $tc) => new ToolCall(
+                providerCallId: $tc['provider_call_id'],
+                toolName: $tc['tool_name'],
+                arguments: $tc['arguments'],
+            ),
+            $data['pending_tool_calls'],
+        );
+
         return new static(
             taskId: $data['task_id'],
             agentId: $data['agent_id'],
-            pendingToolCall: new ToolCall(
-                providerCallId: $data['pending_tool_call']['provider_call_id'],
-                toolName: $data['pending_tool_call']['tool_name'],
-                arguments: $data['pending_tool_call']['arguments'],
-            ),
+            pendingToolCalls: $pendingToolCalls,
             messageSnapshot: $data['message_snapshot'] ?? [],
             stepCount: $data['step_count'],
             maxSteps: $data['max_steps'],
@@ -59,11 +66,14 @@ final readonly class AgentState
         return json_encode([
             'task_id'           => $this->taskId,
             'agent_id'          => $this->agentId,
-            'pending_tool_call' => [
-                'provider_call_id' => $this->pendingToolCall->providerCallId,
-                'tool_name'        => $this->pendingToolCall->toolName,
-                'arguments'        => $this->pendingToolCall->arguments,
-            ],
+            'pending_tool_calls' => array_map(
+                static fn(ToolCall $tc) => [
+                    'provider_call_id' => $tc->providerCallId,
+                    'tool_name'        => $tc->toolName,
+                    'arguments'        => $tc->arguments,
+                ],
+                $this->pendingToolCalls,
+            ),
             'message_snapshot'  => $this->messageSnapshot,
             'step_count'        => $this->stepCount,
             'max_steps'         => $this->maxSteps,

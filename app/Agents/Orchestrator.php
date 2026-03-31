@@ -20,7 +20,9 @@ use Spora\Tools\Attributes\OutputTool;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\InputToolInterface;
 use Spora\Tools\OutputToolInterface;
+use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Component\Messenger\MessageBusInterface;
+use Throwable;
 
 final class Orchestrator implements OrchestratorInterface
 {
@@ -83,26 +85,29 @@ final class Orchestrator implements OrchestratorInterface
         $response = $this->llmDriver->complete($request);
 
         if ($response->hasToolCalls()) {
-            $toolCall = $response->toolCall;
-
-            // Record the assistant's tool-call turn in history.
+            // Append ONE assistant history row carrying ALL tool calls as a JSON array.
+            // This matches the OpenAI/Anthropic wire format so buildMessages() reconstructs
+            // the conversation correctly for parallel tool call providers.
             $this->appendHistory(
                 taskId: $task->id,
                 role: 'assistant',
                 content: null,
-                toolCallPayload: json_encode([
-                    'id'       => $toolCall->providerCallId,
-                    'type'     => 'function',
-                    'function' => [
-                        'name'      => $toolCall->toolName,
-                        'arguments' => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
-                    ],
-                ], JSON_THROW_ON_ERROR),
+                toolCallPayload: json_encode(
+                    array_map(static fn(DriverToolCall $tc) => [
+                        'id'       => $tc->providerCallId,
+                        'type'     => 'function',
+                        'function' => [
+                            'name'      => $tc->toolName,
+                            'arguments' => json_encode($tc->arguments, JSON_THROW_ON_ERROR),
+                        ],
+                    ], $response->toolCalls),
+                    JSON_THROW_ON_ERROR,
+                ),
                 inputTokens: $response->inputTokens,
                 outputTokens: $response->outputTokens,
             );
 
-            $this->handleToolCall($task, $agent, $toolCall);
+            $this->handleToolCalls($task, $agent, $response->toolCalls);
         } else {
             // Pure text response — task is complete.
             $this->appendHistory(
@@ -119,7 +124,12 @@ final class Orchestrator implements OrchestratorInterface
         }
     }
 
-    public function resume(int $taskId, array $approvedArguments): void
+    /**
+     * Execute the batch of tool calls that were paused for human approval.
+     *
+     * {@inheritDoc}
+     */
+    public function resume(int $taskId, array $approvedBatch): void
     {
         $task = Task::findOrFail($taskId);
 
@@ -134,39 +144,45 @@ final class Orchestrator implements OrchestratorInterface
         $task->pending_state = null;
         $task->save();
 
-        // Use approved (possibly human-edited) arguments.
-        $toolCallWithApprovedArgs = new DriverToolCall(
-            providerCallId: $state->pendingToolCall->providerCallId,
-            toolName: $state->pendingToolCall->toolName,
-            arguments: $approvedArguments,
-        );
+        // Build a map from providerCallId → approved arguments for O(1) lookup.
+        $approvedMap = [];
+        foreach ($approvedBatch as $item) {
+            $approvedMap[$item['provider_call_id']] = $item['arguments'];
+        }
 
-        $toolInstance = $this->resolveToolByName($state->pendingToolCall->toolName);
+        foreach ($state->pendingToolCalls as $pendingToolCall) {
+            $approvedArgs = $approvedMap[$pendingToolCall->providerCallId] ?? $pendingToolCall->arguments;
 
-        /** @var OutputToolInterface $toolInstance */
-        $result = $toolInstance->execute($approvedArguments);
+            $toolInstance = $this->resolveToolByName($pendingToolCall->toolName);
 
-        // Update the pending ToolCall record to APPROVED + executed.
-        ToolCallModel::where('task_id', $taskId)
-            ->where('provider_call_id', $state->pendingToolCall->providerCallId)
-            ->update([
-                'status'            => 'APPROVED',
-                'approved_arguments' => json_encode($approvedArguments, JSON_THROW_ON_ERROR),
-                'result_content'    => $result->content,
-                'result_data'       => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                'executed_at'       => date('Y-m-d H:i:s'),
-            ]);
+            // Fix #4: Validate the human-edited arguments before trusting them.
+            SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema());
 
-        // Append the tool result into history so the LLM sees it on next tick.
-        $this->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: $result->content,
-            toolCallId: $state->pendingToolCall->providerCallId,
-            toolName: $state->pendingToolCall->toolName,
-        );
+            // Fix #5: Safe execution — community plugins may throw.
+            $result = $this->safeExecute($toolInstance, $approvedArgs);
 
-        $task->step_count++;
+            ToolCallModel::where('task_id', $taskId)
+                ->where('provider_call_id', $pendingToolCall->providerCallId)
+                ->update([
+                    'status'             => 'APPROVED',
+                    'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
+                    'result_content'     => $result->content,
+                    'result_data'        => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
+                    'executed_at'        => date('Y-m-d H:i:s'),
+                ]);
+
+            // Append the tool result into history so the LLM sees it on the next tick.
+            $this->appendHistory(
+                taskId: $task->id,
+                role: 'tool',
+                content: $result->content,
+                toolCallId: $pendingToolCall->providerCallId,
+                toolName: $pendingToolCall->toolName,
+            );
+
+            $task->step_count++;
+        }
+
         $task->save();
 
         if ($task->step_count >= $state->maxSteps) {
@@ -189,20 +205,27 @@ final class Orchestrator implements OrchestratorInterface
 
         $state = AgentState::fromJson($task->pending_state);
 
-        // Update the ToolCall record to REJECTED.
+        // Reject every pending tool call in the batch.
+        $providerCallIds = array_map(
+            static fn(DriverToolCall $tc) => $tc->providerCallId,
+            $state->pendingToolCalls,
+        );
+
         ToolCallModel::where('task_id', $taskId)
-            ->where('provider_call_id', $state->pendingToolCall->providerCallId)
+            ->whereIn('provider_call_id', $providerCallIds)
             ->update(['status' => 'REJECTED']);
 
-        // Inject a synthetic tool result carrying the rejection reason so the LLM can
-        // choose an alternative path.
-        $this->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: "Action rejected by user: {$reason}",
-            toolCallId: $state->pendingToolCall->providerCallId,
-            toolName: $state->pendingToolCall->toolName,
-        );
+        // Inject one synthetic tool-result row per rejected call so the LLM
+        // can reason about the refusal for each individual action.
+        foreach ($state->pendingToolCalls as $pendingToolCall) {
+            $this->appendHistory(
+                taskId: $task->id,
+                role: 'tool',
+                content: "Action rejected by user: {$reason}",
+                toolCallId: $pendingToolCall->providerCallId,
+                toolName: $pendingToolCall->toolName,
+            );
+        }
 
         $task->status        = 'RUNNING';
         $task->pending_state = null;
@@ -215,52 +238,68 @@ final class Orchestrator implements OrchestratorInterface
     // Private helpers
     // -------------------------------------------------------------------------
 
-    private function handleToolCall(Task $task, Agent $agent, DriverToolCall $toolCall): void
+    /**
+     * Process a batch of tool calls from a single LLM response turn.
+     *
+     * Immediately executes InputTools and auto-approved OutputTools.
+     * Collects any OutputTools that need approval into a batch; if any exist,
+     * the task is paused and the full batch is serialised into pending_state.
+     *
+     * @param  list<DriverToolCall>  $toolCalls
+     */
+    private function handleToolCalls(Task $task, Agent $agent, array $toolCalls): void
     {
-        $toolInstance = $this->resolveToolByName($toolCall->toolName);
-        $toolClass    = get_class($toolInstance);
-        $toolType     = $toolInstance instanceof OutputToolInterface ? 'output' : 'input';
+        /** @var list<DriverToolCall> $pendingApproval */
+        $pendingApproval = [];
 
-        // $requiresApproval=true means pause for human; false means run immediately.
-        $requiresApproval = $this->resolveRequiresApproval($toolInstance, $toolClass, $agent->id);
+        foreach ($toolCalls as $toolCall) {
+            $toolInstance     = $this->resolveToolByName($toolCall->toolName);
+            $toolClass        = get_class($toolInstance);
+            $toolType         = $toolInstance instanceof OutputToolInterface ? 'output' : 'input';
+            $requiresApproval = $this->resolveRequiresApproval($toolInstance, $toolClass, $agent->id);
 
-        // Persist the ToolCall record.
-        $toolCallRecord = ToolCallModel::create([
-            'task_id'            => $task->id,
-            'agent_id'           => $agent->id,
-            'provider_call_id'   => $toolCall->providerCallId,
-            'tool_name'          => $toolCall->toolName,
-            'tool_class'         => $toolClass,
-            'tool_type'          => $toolType,
-            'status'             => 'PENDING_APPROVAL',
-            'proposed_arguments' => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
-            'human_description'  => $toolInstance instanceof OutputToolInterface
-                ? $toolInstance->describeAction($toolCall->arguments)
-                : null,
-        ]);
-
-        if ($toolInstance instanceof InputToolInterface || !$requiresApproval) {
-            // Execute immediately.
-            $result = $toolInstance->execute($toolCall->arguments);
-
-            $toolCallRecord->update([
-                'status'         => 'APPROVED',
-                'result_content' => $result->content,
-                'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                'executed_at'    => date('Y-m-d H:i:s'),
+            // Persist the ToolCall record so the UI can surface it immediately.
+            $toolCallRecord = ToolCallModel::create([
+                'task_id'            => $task->id,
+                'agent_id'           => $agent->id,
+                'provider_call_id'   => $toolCall->providerCallId,
+                'tool_name'          => $toolCall->toolName,
+                'tool_class'         => $toolClass,
+                'tool_type'          => $toolType,
+                'status'             => 'PENDING_APPROVAL',
+                'proposed_arguments' => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
+                'human_description'  => $toolInstance instanceof OutputToolInterface
+                    ? $toolInstance->describeAction($toolCall->arguments)
+                    : null,
             ]);
 
-            // Append tool result to history.
-            $this->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: $result->content,
-                toolCallId: $toolCall->providerCallId,
-                toolName: $toolCall->toolName,
-            );
+            if ($toolInstance instanceof InputToolInterface || !$requiresApproval) {
+                // Fix #5: Safe execution — community plugins may throw.
+                $result = $this->safeExecute($toolInstance, $toolCall->arguments);
 
-            $task->step_count++;
+                $toolCallRecord->update([
+                    'status'         => 'APPROVED',
+                    'result_content' => $result->content,
+                    'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
+                    'executed_at'    => date('Y-m-d H:i:s'),
+                ]);
 
+                $this->appendHistory(
+                    taskId: $task->id,
+                    role: 'tool',
+                    content: $result->content,
+                    toolCallId: $toolCall->providerCallId,
+                    toolName: $toolCall->toolName,
+                );
+
+                $task->step_count++;
+            } else {
+                $pendingApproval[] = $toolCall;
+            }
+        }
+
+        if ($pendingApproval === []) {
+            // All tools in this batch were executed immediately — continue the loop.
             if ($task->step_count >= $task->max_steps) {
                 $task->status         = 'FAILED';
                 $task->failure_reason = 'Max steps reached.';
@@ -270,13 +309,13 @@ final class Orchestrator implements OrchestratorInterface
 
             $task->save();
             $this->bus->dispatch(new TickMessage($task->id));
-
         } else {
-            // Pause and wait for human approval.
+            // At least one OutputTool needs approval — pause the task.
+            // step_count was already incremented for any immediately-executed tools.
             $state = new AgentState(
                 taskId: $task->id,
                 agentId: $agent->id,
-                pendingToolCall: $toolCall,
+                pendingToolCalls: $pendingApproval,
                 messageSnapshot: $this->buildMessages($task->id),
                 stepCount: $task->step_count,
                 maxSteps: $task->max_steps,
@@ -286,6 +325,24 @@ final class Orchestrator implements OrchestratorInterface
             $task->status        = 'PENDING_APPROVAL';
             $task->pending_state = $state->toJson();
             $task->save();
+        }
+    }
+
+    /**
+     * Execute a tool, catching any Throwable thrown by community plugin bugs.
+     * The error is encoded into a ToolResult so the Orchestrator loop survives
+     * and the LLM sees the failure on the next tick.
+     */
+    private function safeExecute(InputToolInterface|OutputToolInterface $toolInstance, array $arguments): ToolResult
+    {
+        try {
+            return $toolInstance->execute($arguments);
+        } catch (Throwable $e) {
+            return new ToolResult(
+                success: false,
+                content: 'System Error: The tool encountered a fatal exception: ' . $e->getMessage(),
+                data: ['exception_class' => get_class($e), 'trace' => $e->getTraceAsString()],
+            );
         }
     }
 
@@ -325,6 +382,10 @@ final class Orchestrator implements OrchestratorInterface
     /**
      * Build the OpenAI-compatible message array from task_history rows.
      *
+     * The tool_call_payload column stores a JSON-encoded array of tool call objects
+     * (even when only one tool was called) so that parallel tool call turns round-trip
+     * correctly through the conversation history.
+     *
      * @return list<array{role: string, content: string|null, tool_calls?: array, tool_call_id?: string, name?: string}>
      */
     private function buildMessages(int $taskId): array
@@ -344,11 +405,12 @@ final class Orchestrator implements OrchestratorInterface
                     'content'      => $row->content,
                 ];
             } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
-                $toolCallData = json_decode($row->tool_call_payload, true);
+                // tool_call_payload is a JSON array of tool call objects.
+                $toolCallsData = json_decode($row->tool_call_payload, true);
                 $messages[] = [
                     'role'       => 'assistant',
                     'content'    => null,
-                    'tool_calls' => [$toolCallData],
+                    'tool_calls' => $toolCallsData,
                 ];
             } else {
                 $messages[] = [

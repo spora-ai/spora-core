@@ -22,10 +22,15 @@ interface OrchestratorInterface
     public function tick(int $taskId): void;
 
     /**
-     * @param  int                  $taskId
-     * @param  array<string, mixed> $approvedArguments  Arguments confirmed (or edited) by the human.
+     * Execute the batch of tool calls that were paused for human approval.
+     *
+     * @param  int   $taskId
+     * @param  list<array{provider_call_id: string, arguments: array<string, mixed>}>  $approvedBatch
+     *               One entry per pending tool call. Each entry carries the provider_call_id
+     *               (to correlate with pending_state) and the arguments confirmed (or edited) by the human.
+     *               Arguments are validated against the tool's JSON Schema before execution.
      */
-    public function resume(int $taskId, array $approvedArguments): void;
+    public function resume(int $taskId, array $approvedBatch): void;
 
     /**
      * @param  int    $taskId
