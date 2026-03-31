@@ -3,10 +3,19 @@
 declare(strict_types=1);
 
 use Psr\Container\ContainerInterface;
+use Spora\Agents\Messages\TickMessage;
+use Spora\Agents\Orchestrator;
+use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\OrchestratorProxy;
 use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\SecurityManager;
 use Spora\Core\SecurityManagerInterface;
+use Spora\Plugins\PluginLoader;
+use Spora\Recipes\RecipeScanner;
+use Symfony\Component\Messenger\Handler\HandlersLocator;
+use Symfony\Component\Messenger\MessageBus;
+use Symfony\Component\Messenger\Middleware\HandleMessageMiddleware;
 
 /**
  * PHP-DI definitions array.
@@ -148,6 +157,67 @@ return [
             $c->get(AuthService::class),
             $c->get(Spora\Services\ToolConfigService::class),
             $c->get('tool_classes'),
+        );
+    },
+
+    // Registered tool instances for the Orchestrator. Keys are ignored — order matters for priority.
+    'tool_instances' => [],
+
+    OrchestratorInterface::class => static function (ContainerInterface $c): Orchestrator {
+        // Break the bootstrap circular dependency (Orchestrator → bus → handler → Orchestrator)
+        // using a typed proxy. The proxy is wired into the bus handler first; the real
+        // Orchestrator is constructed with the bus, then injected into the proxy.
+        $proxy = new OrchestratorProxy();
+
+        $bus = new MessageBus([
+            new HandleMessageMiddleware(new HandlersLocator([
+                TickMessage::class => [
+                    static function (TickMessage $msg) use ($proxy): void {
+                        $proxy->tick($msg->taskId);
+                    },
+                ],
+            ])),
+        ]);
+
+        $orchestrator = new Orchestrator(
+            llmDriver: $c->get(Spora\Drivers\LLMDriverInterface::class),
+            bus: $bus,
+            toolInstances: $c->get('tool_instances'),
+        );
+
+        $proxy->setInner($orchestrator);
+
+        return $orchestrator;
+    },
+
+    Spora\Http\TaskController::class => static function (ContainerInterface $c): Spora\Http\TaskController {
+        return new Spora\Http\TaskController(
+            $c->get(AuthService::class),
+            $c->get(OrchestratorInterface::class),
+        );
+    },
+
+    PluginLoader::class => static function (): PluginLoader {
+        $loader = new PluginLoader(BASE_PATH . '/plugins');
+        $loader->boot();
+        return $loader;
+    },
+
+    RecipeScanner::class => static function (ContainerInterface $c): RecipeScanner {
+        $pluginLoader = $c->get(PluginLoader::class);
+
+        $directories = array_merge(
+            [BASE_PATH . '/recipes'],
+            $pluginLoader->recipePaths(),
+        );
+
+        return new RecipeScanner($directories);
+    },
+
+    Spora\Http\RecipeController::class => static function (ContainerInterface $c): Spora\Http\RecipeController {
+        return new Spora\Http\RecipeController(
+            $c->get(AuthService::class),
+            $c->get(RecipeScanner::class),
         );
     },
 ];

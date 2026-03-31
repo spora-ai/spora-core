@@ -202,7 +202,7 @@ final class AgentController
             'llm_base_url' => $agent->llm_base_url,
             'max_steps'    => (int) $agent->max_steps,
             'is_active'    => (bool) $agent->is_active,
-            'tools'        => $tools->map(fn (AgentTool $t) => $this->toolResource($t))->values()->toArray(),
+            'tools'        => $tools->map(fn(AgentTool $t) => $this->toolResource($t))->values()->toArray(),
         ];
     }
 

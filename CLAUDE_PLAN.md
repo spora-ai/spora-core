@@ -83,87 +83,55 @@ All tasks verified. 32 Pest tests passing, 0 failures.
 
 ---
 
-### Layer 1 — Auth *(blocks all authenticated endpoints)*
+### Layer 1 — Auth ✅ COMPLETE
 
 **Goal:** A working `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`.
 
-- [ ] **`AuthService`** (`app/Auth/AuthService.php`)
+- [x] **`AuthService`** (`app/Auth/AuthService.php`)
   - Wrap `delight-im/auth` (`\Delight\Auth\Auth`).
   - Inject `\Delight\Auth\Auth` via PHP-DI (wire in `container.php`).
   - Expose: `register(email, password): int`, `login(email, password): void`, `logout(): void`, `currentUserId(): ?int`.
   - Throw typed exceptions for duplicate email, wrong password, unverified account.
 
-- [ ] **`AuthController`** (`app/Http/AuthController.php`)
-  - Wire `AuthService` via constructor injection.
-  - `register`: validate JSON body → call service → return `201` with `{ user: { id, email } }`.
-  - `login`: validate → service → return `200` with `{ user: { id, email } }` (session cookie set by delight-im/auth).
-  - `logout`: call service → return `204`.
-  - `me`: call `currentUserId()` → load `User` model → return `200` with user data, or `401` if not logged in.
-
-- [ ] **Auth middleware / guard helper**
-  - A `requireAuth(Request): int` helper (or middleware) that calls `currentUserId()` and returns `401 UNAUTHENTICATED` if null.
-  - Used by every protected controller method.
-
-- [ ] **Tests** (`tests/Unit/AuthTest.php`)
-  - Register happy path → 201, user row created.
-  - Register duplicate email → 409 CONFLICT.
-  - Login happy path → 200.
-  - Login wrong password → 401 INVALID_CREDENTIALS.
-  - `me` when logged in → 200 with user data.
-  - `me` when not logged in → 401 UNAUTHENTICATED.
-  - Logout → 204.
+- [x] **`AuthController`** (`app/Http/AuthController.php`)
+- [x] **Auth middleware / guard helper**
+- [x] **Tests** (`tests/Unit/AuthTest.php`) — 12 tests passing
 
 ---
 
-### Layer 2 — ToolConfigService *(blocks agent/tool endpoints)*
+### Layer 2 — ToolConfigService ✅ COMPLETE
 
 **Goal:** The only class permitted to read/write `tool_configurations.settings` and `agent_tool_overrides.settings`.
 
-- [ ] **`ToolConfigService`** (`app/Services/ToolConfigService.php`)
+- [x] **`ToolConfigService`** (`app/Services/ToolConfigService.php`)
   - Inject `SecurityManagerInterface`.
   - `getGlobalSettings(string $toolClass): array` — load `ToolConfiguration` row, decrypt password fields, return plain array.
   - `putGlobalSettings(string $toolClass, array $settings): void` — encrypt password fields via `SecurityManager`, store JSON.
-  - `getEffectiveSettings(string $toolClass, int $agentId): array` — merge global + `AgentToolOverride` (override wins).
-  - `maskForApi(array $settings, string $toolClass): array` — replace decrypted password values with `"***"`.
-  - Password field detection: inspect `#[ToolSetting(type: 'password')]` via `ReflectionClass`.
-  - On `DecryptionFailedException`: log + return `null` for that field (never crash).
+  - [x] All methods implemented and tested
 
-- [ ] **Tests** (`tests/Unit/ToolConfigServiceTest.php`)
-  - Password field is encrypted on write, decrypted on read.
-  - Non-password field stored and returned as plain string.
-  - `maskForApi` replaces password value with `"***"`, leaves others unchanged.
-  - `getEffectiveSettings` override wins over global.
-  - `DecryptionFailedException` is caught; field returns null.
+- [x] **Tests** (`tests/Unit/ToolConfigServiceTest.php`) — 9 tests passing
 
 ---
 
-### Layer 3 — Agent + Tool endpoints *(depends on Layer 1 + 2)*
+### Layer 3 — Agent + Tool endpoints ✅ COMPLETE
 
-- [ ] **`AgentController`** — implement all 8 methods:
+- [x] **`AgentController`** — implement all 8 methods:
   - `show` → load `Agent` for `currentUserId()`.
   - `update` → PATCH agent fields (`name`, `description`, `llm_provider`, `llm_model`, `max_steps`).
   - `enableTool` → upsert `AgentTool` row (`POST /agent/tools/{toolClass}/enable`).
   - `patchTool` → update `auto_approve` on existing `AgentTool` row.
   - `disableTool` → delete `AgentTool` row.
-  - `getOverride` → return masked settings via `ToolConfigService::getEffectiveSettings`.
-  - `putOverride` → write `AgentToolOverride` via `ToolConfigService::putGlobalSettings`.
-  - `deleteOverride` → delete `AgentToolOverride` row.
+  - [x] All 8 methods implemented
 
-- [ ] **`ToolController`** — implement 3 methods:
-  - `index` → list all registered tool classes with their `#[ToolSetting]` schema.
-  - `getSettings` → return masked global settings for one tool.
-  - `putSettings` → write global settings via `ToolConfigService`.
+- [x] **`ToolController`** — all 3 methods implemented
 
-- [ ] **Tests** (`tests/Unit/AgentControllerTest.php`, `ToolControllerTest.php`)
-  - Unauthenticated request → 401.
-  - Enable/disable/patch tool round-trip.
-  - Override set → effective settings reflect override.
+- [x] **Tests** (`tests/Unit/AgentControllerTest.php`, `ToolControllerTest.php`) — 24 tests passing
 
 ---
 
-### Layer 4 — Orchestrator *(the core value prop)*
+### Layer 4 — Orchestrator ✅ COMPLETE
 
-- [ ] **`Orchestrator`** (`app/Agents/Orchestrator.php`) — implement the state machine:
+- [x] **`Orchestrator`** (`app/Agents/Orchestrator.php`) — full state machine implemented:
   - `start(agentId, userPrompt, maxSteps)`: create `Task` (status `RUNNING`), dispatch first `TickMessage`.
   - `tick(taskId)`: load Task + history → call `LLMDriverInterface::complete()` → branch:
     - Text response → mark `COMPLETED`, store `final_response`.
@@ -171,29 +139,15 @@ All tasks verified. 32 Pest tests passing, 0 failures.
     - `OutputTool` call → resolve `auto_approve` (check `AgentTool` row, fall back to class attribute default):
       - Auto-approved → execute, append, re-dispatch.
       - Requires approval → serialize `AgentState` to `tasks.pending_state`, set status `PENDING_APPROVAL`, stop.
-    - `step_count >= max_steps` → mark `FAILED` with reason.
-  - `resume(taskId, approvedArguments)`: deserialize `AgentState`, execute tool, append, re-dispatch `TickMessage`.
-  - `reject(taskId, reason)`: inject rejection message into history, re-dispatch `TickMessage`.
+    - [x] All state machine paths implemented and tested
 
-- [ ] **Symfony Messenger wiring** (`container.php`)
-  - Register `TickMessage` + `TickHandler` with the Messenger bus.
-  - Default transport: synchronous (in-process) for SQLite/shared hosting.
-  - Optional: async transport (Redis/database) configurable via `config.php`.
+- [x] **Symfony Messenger wiring** (`container.php`) — synchronous in-process bus
+- [x] **`TickMessage`** + **`TickHandler`** (`app/Agents/Messages/`, `app/Agents/Handlers/`)
 
-- [ ] **`TaskController`** — implement all 5 methods:
-  - `store` → validate prompt → call `Orchestrator::start()` → return Task resource.
-  - `index` → list tasks for current user.
-  - `show` → return Task with `tool_calls` and `task_history`.
-  - `approve` → call `Orchestrator::resume()`.
-  - `reject` → call `Orchestrator::reject()`.
+- [x] **`TaskController`** — all 5 methods implemented
 
-- [ ] **Tests** (`tests/Unit/OrchestratorTest.php`)
-  - InputTool path: step_count increments, Task stays RUNNING.
-  - OutputTool (requires approval): Task becomes PENDING_APPROVAL, AgentState persisted.
-  - OutputTool (auto-approved): executes immediately, Task stays RUNNING.
-  - Resume: AgentState restored, tool executed, Tick re-dispatched.
-  - Reject: rejection injected into history.
-  - max_steps: Task marked FAILED when limit hit.
+- [x] **Tests** (`tests/Unit/OrchestratorTest.php`, `TaskControllerTest.php`) — 24 tests passing
+  - InputTool, OutputTool (approval + auto-approve + row override), max_steps, resume, reject all covered
 
 ---
 

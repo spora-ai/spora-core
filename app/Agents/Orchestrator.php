@@ -4,36 +4,447 @@ declare(strict_types=1);
 
 namespace Spora\Agents;
 
+use ReflectionClass;
 use RuntimeException;
+use Spora\Agents\Messages\TickMessage;
+use Spora\Agents\ValueObjects\AgentState;
+use Spora\Drivers\LLMDriverInterface;
+use Spora\Drivers\ValueObjects\LLMRequest;
+use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
+use Spora\Models\Agent;
+use Spora\Models\AgentTool;
 use Spora\Models\Task;
+use Spora\Models\TaskHistory;
+use Spora\Models\ToolCall as ToolCallModel;
+use Spora\Tools\Attributes\OutputTool;
+use Spora\Tools\Attributes\Tool;
+use Spora\Tools\InputToolInterface;
+use Spora\Tools\OutputToolInterface;
+use Symfony\Component\Messenger\MessageBusInterface;
 
-/**
- * TODO: Implement the full Orchestrator loop.
- * Drives Tasks through their lifecycle using the Symfony Messenger queue.
- */
 final class Orchestrator implements OrchestratorInterface
 {
+    /**
+     * @param  list<object>  $toolInstances  Instances of InputToolInterface|OutputToolInterface.
+     */
+    public function __construct(
+        private readonly LLMDriverInterface   $llmDriver,
+        private readonly MessageBusInterface  $bus,
+        private readonly array                $toolInstances = [],
+    ) {}
+
+    // -------------------------------------------------------------------------
+    // Public API
+    // -------------------------------------------------------------------------
+
     public function start(int $agentId, string $userPrompt, int $maxSteps = 10): Task
     {
-        // TODO: Create Task record, dispatch first tick message
-        throw new RuntimeException('Not implemented');
+        $agent = Agent::findOrFail($agentId);
+
+        $task = Task::create([
+            'agent_id'    => $agentId,
+            'user_id'     => $agent->user_id,
+            'status'      => 'RUNNING',
+            'user_prompt' => $userPrompt,
+            'step_count'  => 0,
+            'max_steps'   => $maxSteps,
+        ]);
+
+        // Seed the conversation with the user's prompt as the first history row.
+        $this->appendHistory($task->id, 'user', $userPrompt);
+
+        $this->bus->dispatch(new TickMessage($task->id));
+
+        return $task->fresh();
     }
 
     public function tick(int $taskId): void
     {
-        // TODO: Load Task, call LLM, handle InputTool/OutputTool/completion
-        throw new RuntimeException('Not implemented');
+        $task = Task::findOrFail($taskId);
+
+        if ($task->status !== 'RUNNING') {
+            return;
+        }
+
+        $agent = Agent::findOrFail($task->agent_id);
+
+        // Build conversation messages from task_history.
+        $messages = $this->buildMessages($task->id);
+
+        // Build LLM tool definitions from registered tool instances.
+        $toolDefs = $this->buildToolDefinitions();
+
+        $request = new LLMRequest(
+            systemPrompt: 'You are a helpful AI assistant.',
+            messages: $messages,
+            tools: $toolDefs,
+        );
+
+        $response = $this->llmDriver->complete($request);
+
+        if ($response->hasToolCalls()) {
+            $toolCall = $response->toolCall;
+
+            // Record the assistant's tool-call turn in history.
+            $this->appendHistory(
+                taskId: $task->id,
+                role: 'assistant',
+                content: null,
+                toolCallPayload: json_encode([
+                    'id'       => $toolCall->providerCallId,
+                    'type'     => 'function',
+                    'function' => [
+                        'name'      => $toolCall->toolName,
+                        'arguments' => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
+                    ],
+                ], JSON_THROW_ON_ERROR),
+                inputTokens: $response->inputTokens,
+                outputTokens: $response->outputTokens,
+            );
+
+            $this->handleToolCall($task, $agent, $toolCall);
+        } else {
+            // Pure text response — task is complete.
+            $this->appendHistory(
+                taskId: $task->id,
+                role: 'assistant',
+                content: $response->content,
+                inputTokens: $response->inputTokens,
+                outputTokens: $response->outputTokens,
+            );
+
+            $task->status         = 'COMPLETED';
+            $task->final_response = $response->content;
+            $task->save();
+        }
     }
 
     public function resume(int $taskId, array $approvedArguments): void
     {
-        // TODO: Execute approved OutputTool call, re-dispatch tick
-        throw new RuntimeException('Not implemented');
+        $task = Task::findOrFail($taskId);
+
+        if ($task->status !== 'PENDING_APPROVAL' || $task->pending_state === null) {
+            throw new RuntimeException("Task {$taskId} is not awaiting approval.");
+        }
+
+        $state = AgentState::fromJson($task->pending_state);
+
+        // Clear pending state and restore RUNNING status before executing.
+        $task->status        = 'RUNNING';
+        $task->pending_state = null;
+        $task->save();
+
+        // Use approved (possibly human-edited) arguments.
+        $toolCallWithApprovedArgs = new DriverToolCall(
+            providerCallId: $state->pendingToolCall->providerCallId,
+            toolName: $state->pendingToolCall->toolName,
+            arguments: $approvedArguments,
+        );
+
+        $toolInstance = $this->resolveToolByName($state->pendingToolCall->toolName);
+
+        /** @var OutputToolInterface $toolInstance */
+        $result = $toolInstance->execute($approvedArguments);
+
+        // Update the pending ToolCall record to APPROVED + executed.
+        ToolCallModel::where('task_id', $taskId)
+            ->where('provider_call_id', $state->pendingToolCall->providerCallId)
+            ->update([
+                'status'            => 'APPROVED',
+                'approved_arguments' => json_encode($approvedArguments, JSON_THROW_ON_ERROR),
+                'result_content'    => $result->content,
+                'result_data'       => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
+                'executed_at'       => date('Y-m-d H:i:s'),
+            ]);
+
+        // Append the tool result into history so the LLM sees it on next tick.
+        $this->appendHistory(
+            taskId: $task->id,
+            role: 'tool',
+            content: $result->content,
+            toolCallId: $state->pendingToolCall->providerCallId,
+            toolName: $state->pendingToolCall->toolName,
+        );
+
+        $task->step_count++;
+        $task->save();
+
+        if ($task->step_count >= $state->maxSteps) {
+            $task->status         = 'FAILED';
+            $task->failure_reason = 'Max steps reached after resume.';
+            $task->save();
+            return;
+        }
+
+        $this->bus->dispatch(new TickMessage($task->id));
     }
 
     public function reject(int $taskId, string $reason): void
     {
-        // TODO: Inject rejection message into history, re-dispatch tick
-        throw new RuntimeException('Not implemented');
+        $task = Task::findOrFail($taskId);
+
+        if ($task->status !== 'PENDING_APPROVAL' || $task->pending_state === null) {
+            throw new RuntimeException("Task {$taskId} is not awaiting approval.");
+        }
+
+        $state = AgentState::fromJson($task->pending_state);
+
+        // Update the ToolCall record to REJECTED.
+        ToolCallModel::where('task_id', $taskId)
+            ->where('provider_call_id', $state->pendingToolCall->providerCallId)
+            ->update(['status' => 'REJECTED']);
+
+        // Inject a synthetic tool result carrying the rejection reason so the LLM can
+        // choose an alternative path.
+        $this->appendHistory(
+            taskId: $task->id,
+            role: 'tool',
+            content: "Action rejected by user: {$reason}",
+            toolCallId: $state->pendingToolCall->providerCallId,
+            toolName: $state->pendingToolCall->toolName,
+        );
+
+        $task->status        = 'RUNNING';
+        $task->pending_state = null;
+        $task->save();
+
+        $this->bus->dispatch(new TickMessage($task->id));
+    }
+
+    // -------------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------------
+
+    private function handleToolCall(Task $task, Agent $agent, DriverToolCall $toolCall): void
+    {
+        $toolInstance = $this->resolveToolByName($toolCall->toolName);
+        $toolClass    = get_class($toolInstance);
+        $toolType     = $toolInstance instanceof OutputToolInterface ? 'output' : 'input';
+
+        // $requiresApproval=true means pause for human; false means run immediately.
+        $requiresApproval = $this->resolveRequiresApproval($toolInstance, $toolClass, $agent->id);
+
+        // Persist the ToolCall record.
+        $toolCallRecord = ToolCallModel::create([
+            'task_id'            => $task->id,
+            'agent_id'           => $agent->id,
+            'provider_call_id'   => $toolCall->providerCallId,
+            'tool_name'          => $toolCall->toolName,
+            'tool_class'         => $toolClass,
+            'tool_type'          => $toolType,
+            'status'             => 'PENDING_APPROVAL',
+            'proposed_arguments' => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
+            'human_description'  => $toolInstance instanceof OutputToolInterface
+                ? $toolInstance->describeAction($toolCall->arguments)
+                : null,
+        ]);
+
+        if ($toolInstance instanceof InputToolInterface || !$requiresApproval) {
+            // Execute immediately.
+            $result = $toolInstance->execute($toolCall->arguments);
+
+            $toolCallRecord->update([
+                'status'         => 'APPROVED',
+                'result_content' => $result->content,
+                'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
+                'executed_at'    => date('Y-m-d H:i:s'),
+            ]);
+
+            // Append tool result to history.
+            $this->appendHistory(
+                taskId: $task->id,
+                role: 'tool',
+                content: $result->content,
+                toolCallId: $toolCall->providerCallId,
+                toolName: $toolCall->toolName,
+            );
+
+            $task->step_count++;
+
+            if ($task->step_count >= $task->max_steps) {
+                $task->status         = 'FAILED';
+                $task->failure_reason = 'Max steps reached.';
+                $task->save();
+                return;
+            }
+
+            $task->save();
+            $this->bus->dispatch(new TickMessage($task->id));
+
+        } else {
+            // Pause and wait for human approval.
+            $state = new AgentState(
+                taskId: $task->id,
+                agentId: $agent->id,
+                pendingToolCall: $toolCall,
+                messageSnapshot: $this->buildMessages($task->id),
+                stepCount: $task->step_count,
+                maxSteps: $task->max_steps,
+                pausedAt: date('Y-m-d\TH:i:s\Z'),
+            );
+
+            $task->status        = 'PENDING_APPROVAL';
+            $task->pending_state = $state->toJson();
+            $task->save();
+        }
+    }
+
+    /**
+     * Resolve whether the tool requires human approval before execution.
+     *   1. AgentTool row override (null means "not set").
+     *   2. Class-level #[OutputTool(requiresApproval:)] attribute (default: true).
+     *   Returns true → pause for approval, false → execute immediately.
+     */
+    private function resolveRequiresApproval(object $toolInstance, string $toolClass, int $agentId): bool
+    {
+        if (!$toolInstance instanceof OutputToolInterface) {
+            return false;
+        }
+
+        /** @var AgentTool|null $row */
+        $row = AgentTool::where('agent_id', $agentId)->where('tool_class', $toolClass)->first();
+
+        if ($row !== null) {
+            $raw = $row->getRawOriginal('auto_approve');
+            if ($raw !== null) {
+                return !((bool) $raw); // auto_approve=1 → no approval needed → false
+            }
+        }
+
+        // Fall back to class attribute.
+        $ref   = new ReflectionClass($toolClass);
+        $attrs = $ref->getAttributes(OutputTool::class);
+        if ($attrs !== []) {
+            $attr = $attrs[0]->newInstance();
+            return $attr->requiresApproval;
+        }
+
+        return true; // safe default: require approval
+    }
+
+    /**
+     * Build the OpenAI-compatible message array from task_history rows.
+     *
+     * @return list<array{role: string, content: string|null, tool_calls?: array, tool_call_id?: string, name?: string}>
+     */
+    private function buildMessages(int $taskId): array
+    {
+        $rows = TaskHistory::where('task_id', $taskId)
+            ->orderBy('sequence')
+            ->get();
+
+        $messages = [];
+
+        foreach ($rows as $row) {
+            if ($row->role === 'tool') {
+                $messages[] = [
+                    'role'         => 'tool',
+                    'tool_call_id' => $row->tool_call_id,
+                    'name'         => $row->tool_name,
+                    'content'      => $row->content,
+                ];
+            } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
+                $toolCallData = json_decode($row->tool_call_payload, true);
+                $messages[] = [
+                    'role'       => 'assistant',
+                    'content'    => null,
+                    'tool_calls' => [$toolCallData],
+                ];
+            } else {
+                $messages[] = [
+                    'role'    => $row->role,
+                    'content' => $row->content,
+                ];
+            }
+        }
+
+        return $messages;
+    }
+
+    /**
+     * Build the tool definitions array for the LLM request from registered tool instances.
+     *
+     * @return list<array{type: "function", function: array{name: string, description: string, parameters: array}}>
+     */
+    private function buildToolDefinitions(): array
+    {
+        $defs = [];
+
+        foreach ($this->toolInstances as $instance) {
+            $ref   = new ReflectionClass($instance);
+            $attrs = $ref->getAttributes(Tool::class);
+
+            if ($attrs === []) {
+                continue;
+            }
+
+            /** @var Tool $toolAttr */
+            $toolAttr = $attrs[0]->newInstance();
+
+            $defs[] = [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => $toolAttr->name,
+                    'description' => $toolAttr->description,
+                    'parameters'  => $instance->getParametersSchema(),
+                ],
+            ];
+        }
+
+        return $defs;
+    }
+
+    /**
+     * Find the tool instance matching the given tool name (from #[Tool(name:)] attribute).
+     *
+     * @throws RuntimeException  When no matching tool is registered.
+     */
+    private function resolveToolByName(string $toolName): InputToolInterface|OutputToolInterface
+    {
+        foreach ($this->toolInstances as $instance) {
+            $ref   = new ReflectionClass($instance);
+            $attrs = $ref->getAttributes(Tool::class);
+
+            if ($attrs === []) {
+                continue;
+            }
+
+            /** @var Tool $toolAttr */
+            $toolAttr = $attrs[0]->newInstance();
+
+            if ($toolAttr->name === $toolName) {
+                return $instance;
+            }
+        }
+
+        throw new RuntimeException("No tool registered with name '{$toolName}'.");
+    }
+
+    /**
+     * Append one message to task_history with auto-incrementing sequence.
+     */
+    private function appendHistory(
+        int     $taskId,
+        string  $role,
+        ?string $content,
+        ?string $toolCallId      = null,
+        ?string $toolName        = null,
+        ?string $toolCallPayload = null,
+        int     $inputTokens     = 0,
+        int     $outputTokens    = 0,
+    ): void {
+        $nextSeq = TaskHistory::where('task_id', $taskId)->max('sequence') ?? -1;
+
+        TaskHistory::create([
+            'task_id'           => $taskId,
+            'sequence'          => $nextSeq + 1,
+            'role'              => $role,
+            'content'           => $content,
+            'tool_call_id'      => $toolCallId,
+            'tool_name'         => $toolName,
+            'tool_call_payload' => $toolCallPayload,
+            'input_tokens'      => $inputTokens,
+            'output_tokens'     => $outputTokens,
+        ]);
     }
 }

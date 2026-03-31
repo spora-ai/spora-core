@@ -37,7 +37,7 @@ test('unauthenticated request throws UnauthenticatedException', function (): voi
     clearSession();
     [$controller] = makeToolController([TestTool::class]);
 
-    expect(fn () => $controller->index(jsonRequest('GET', '/api/v1/tools')))
+    expect(fn() => $controller->index(jsonRequest('GET', '/api/v1/tools')))
         ->toThrow(UnauthenticatedException::class);
 });
 

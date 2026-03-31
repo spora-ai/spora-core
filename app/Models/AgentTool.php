@@ -7,6 +7,13 @@ namespace Spora\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property int $id
+ * @property int $agent_id
+ * @property string $tool_class
+ * @property string $tool_name
+ * @property bool|null $auto_approve
+ */
 class AgentTool extends Model
 {
     protected $table = 'agent_tools';

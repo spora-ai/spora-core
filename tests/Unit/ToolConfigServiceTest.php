@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Core\Database;
 use Spora\Core\SecurityManager;
+use Spora\Models\Agent;
 use Spora\Services\ToolConfigService;
 use Tests\Fixtures\TestTool;
 
@@ -20,16 +21,34 @@ use Tests\Fixtures\TestTool;
  */
 function makeToolConfigService(): array
 {
-    Database::resetBootState();
-
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-    $db->boot();
+    $authService = bootAuthLayer(); // boots DB + schema via Database::boot()
 
     $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new SecurityManager($key);
     $service  = new ToolConfigService($security);
 
-    return [$service, $security];
+    return [$service, $security, $authService];
+}
+
+/**
+ * Create a user+agent and return the agent ID.
+ * Uses a unique email per call to avoid conflicts across tests.
+ */
+function makeAgent(mixed $authService, string $suffix = ''): int
+{
+    static $seq = 0;
+    $seq++;
+    $email  = "toolconfig{$seq}{$suffix}@example.com";
+    $userId = $authService->register($email, 'Password1!');
+
+    return Agent::create([
+        'user_id'      => $userId,
+        'name'         => 'Test Agent',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ])->id;
 }
 
 // ---------------------------------------------------------------------------
@@ -133,9 +152,9 @@ test('getEffectiveSettings without agent override returns global settings', func
 });
 
 test('getEffectiveSettings with override: agent-scoped key from override wins over global', function (): void {
-    [$service] = makeToolConfigService();
+    [$service, , $authService] = makeToolConfigService();
     $toolClass = TestTool::class;
-    $agentId   = 42;
+    $agentId   = makeAgent($authService);
 
     $service->putGlobalSettings($toolClass, [
         'api_key'     => 'global-key',
@@ -149,12 +168,12 @@ test('getEffectiveSettings with override: agent-scoped key from override wins ov
     $effective = $service->getEffectiveSettings($toolClass, $agentId);
 
     expect($effective['api_key'])->toBe('agent-specific-key');
-});
+})->afterEach(fn() => Database::resetBootState());
 
 test('getEffectiveSettings with override: global-scoped key is not overridden by agent override', function (): void {
-    [$service] = makeToolConfigService();
+    [$service, , $authService] = makeToolConfigService();
     $toolClass = TestTool::class;
-    $agentId   = 43;
+    $agentId   = makeAgent($authService);
 
     $service->putGlobalSettings($toolClass, [
         'api_key'     => 'global-key',
@@ -171,7 +190,7 @@ test('getEffectiveSettings with override: global-scoped key is not overridden by
 
     // The global value must be preserved
     expect($effective['max_results'])->toBe('20');
-});
+})->afterEach(fn() => Database::resetBootState());
 
 // ---------------------------------------------------------------------------
 // DecryptionFailedException resilience

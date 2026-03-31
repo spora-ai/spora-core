@@ -7,7 +7,6 @@ namespace Spora\Http;
 use DateTime;
 use InvalidArgumentException;
 use Spora\Auth\AuthService;
-use Spora\Auth\Exceptions\AccountSuspendedException;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;

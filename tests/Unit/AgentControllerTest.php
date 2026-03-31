@@ -48,7 +48,7 @@ test('unauthenticated request throws UnauthenticatedException', function (): voi
     clearSession();
     [$controller] = makeAgentController();
 
-    expect(fn () => $controller->show(jsonRequest('GET', '/api/v1/agent')))
+    expect(fn() => $controller->show(jsonRequest('GET', '/api/v1/agent')))
         ->toThrow(UnauthenticatedException::class);
 });
 
@@ -91,7 +91,7 @@ test('update patches allowed agent fields', function (): void {
     registerUser($authService);
 
     $response = $controller->update(
-        jsonRequest('PATCH', '/api/v1/agent', ['name' => 'My Bot', 'llm_model' => 'gpt-4o-mini'])
+        jsonRequest('PATCH', '/api/v1/agent', ['name' => 'My Bot', 'llm_model' => 'gpt-4o-mini']),
     );
 
     expect($response->getStatusCode())->toBe(200);
@@ -106,7 +106,7 @@ test('update ignores unknown fields', function (): void {
     registerUser($authService);
 
     $response = $controller->update(
-        jsonRequest('PATCH', '/api/v1/agent', ['user_id' => 999, 'name' => 'Safe Name'])
+        jsonRequest('PATCH', '/api/v1/agent', ['user_id' => 999, 'name' => 'Safe Name']),
     );
 
     expect($response->getStatusCode())->toBe(200);

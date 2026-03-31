@@ -4,42 +4,208 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use Spora\Agents\OrchestratorInterface;
+use Spora\Auth\AuthService;
+use Spora\Http\Middleware\AuthGuard;
+use Spora\Models\Agent;
+use Spora\Models\Task;
+use Spora\Models\TaskHistory;
+use Spora\Models\ToolCall;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-/**
- * TODO: Implement task lifecycle endpoints (create, approve, reject).
- */
 final class TaskController
 {
-    public function index(Request $request, array $vars = []): JsonResponse
+    public function __construct(
+        private readonly AuthService           $authService,
+        private readonly OrchestratorInterface $orchestrator,
+    ) {}
+
+    /**
+     * GET /api/v1/tasks
+     */
+    public function index(Request $request): JsonResponse
     {
-        // TODO: List tasks for the authenticated user
-        return new JsonResponse(['error' => ['code' => 'NOT_IMPLEMENTED', 'message' => 'Not implemented.']], Response::HTTP_NOT_IMPLEMENTED);
+        $userId = AuthGuard::requireAuth($this->authService);
+
+        $tasks = Task::where('user_id', $userId)
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn(Task $t) => $this->taskResource($t));
+
+        return new JsonResponse(['data' => ['tasks' => $tasks->all()]]);
     }
 
-    public function store(Request $request, array $vars = []): JsonResponse
+    /**
+     * POST /api/v1/tasks
+     */
+    public function store(Request $request): JsonResponse
     {
-        // TODO: Create and dispatch a new task
-        return new JsonResponse(['error' => ['code' => 'NOT_IMPLEMENTED', 'message' => 'Not implemented.']], Response::HTTP_NOT_IMPLEMENTED);
+        $userId = AuthGuard::requireAuth($this->authService);
+
+        $body   = $this->decodeJson($request);
+        $prompt = trim((string) ($body['prompt'] ?? ''));
+
+        if ($prompt === '') {
+            return new JsonResponse(
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'prompt is required.']],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
+
+        $agent = Agent::where('user_id', $userId)->first();
+
+        if ($agent === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => 'No agent found for this user.']],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+
+        $maxSteps = isset($body['max_steps']) ? (int) $body['max_steps'] : $agent->max_steps;
+        $task     = $this->orchestrator->start($agent->id, $prompt, $maxSteps);
+
+        return new JsonResponse(
+            ['data' => ['task' => $this->taskResource($task)]],
+            Response::HTTP_CREATED,
+        );
     }
 
-    public function show(Request $request, array $vars = []): JsonResponse
+    /**
+     * GET /api/v1/tasks/{taskId}
+     */
+    public function show(Request $request): JsonResponse
     {
-        // TODO: Return a single task with tool calls and history
-        return new JsonResponse(['error' => ['code' => 'NOT_IMPLEMENTED', 'message' => 'Not implemented.']], Response::HTTP_NOT_IMPLEMENTED);
+        $userId = AuthGuard::requireAuth($this->authService);
+        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
+
+        if ($task === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+
+        return new JsonResponse(['data' => ['task' => $this->taskDetailResource($task)]]);
     }
 
-    public function approve(Request $request, array $vars = []): JsonResponse
+    /**
+     * POST /api/v1/tasks/{taskId}/approve
+     */
+    public function approve(Request $request): JsonResponse
     {
-        // TODO: Approve a pending OutputTool call and resume the Orchestrator
-        return new JsonResponse(['error' => ['code' => 'NOT_IMPLEMENTED', 'message' => 'Not implemented.']], Response::HTTP_NOT_IMPLEMENTED);
+        $userId = AuthGuard::requireAuth($this->authService);
+        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
+
+        if ($task === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+
+        if ($task->status !== 'PENDING_APPROVAL') {
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_STATE', 'message' => 'Task is not pending approval.']],
+                Response::HTTP_CONFLICT,
+            );
+        }
+
+        $body              = $this->decodeJson($request);
+        $approvedArguments = (array) ($body['arguments'] ?? []);
+
+        $this->orchestrator->resume($task->id, $approvedArguments);
+
+        return new JsonResponse(['data' => ['task' => $this->taskResource($task->fresh())]]);
     }
 
-    public function reject(Request $request, array $vars = []): JsonResponse
+    /**
+     * POST /api/v1/tasks/{taskId}/reject
+     */
+    public function reject(Request $request): JsonResponse
     {
-        // TODO: Reject a pending OutputTool call
-        return new JsonResponse(['error' => ['code' => 'NOT_IMPLEMENTED', 'message' => 'Not implemented.']], Response::HTTP_NOT_IMPLEMENTED);
+        $userId = AuthGuard::requireAuth($this->authService);
+        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
+
+        if ($task === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+
+        if ($task->status !== 'PENDING_APPROVAL') {
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_STATE', 'message' => 'Task is not pending approval.']],
+                Response::HTTP_CONFLICT,
+            );
+        }
+
+        $body   = $this->decodeJson($request);
+        $reason = trim((string) ($body['reason'] ?? 'No reason provided.'));
+
+        $this->orchestrator->reject($task->id, $reason);
+
+        return new JsonResponse(['data' => ['task' => $this->taskResource($task->fresh())]]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    private function findTask(int $id, int $userId): ?Task
+    {
+        return Task::where('id', $id)->where('user_id', $userId)->first();
+    }
+
+    private function taskResource(Task $task): array
+    {
+        return [
+            'id'             => $task->id,
+            'status'         => $task->status,
+            'user_prompt'    => $task->user_prompt,
+            'final_response' => $task->final_response,
+            'step_count'     => $task->step_count,
+            'max_steps'      => $task->max_steps,
+            'created_at'     => $task->created_at?->toIso8601String(),
+            'updated_at'     => $task->updated_at?->toIso8601String(),
+        ];
+    }
+
+    private function taskDetailResource(Task $task): array
+    {
+        $resource               = $this->taskResource($task);
+        $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => [
+            'id'                 => $tc->id,
+            'tool_name'          => $tc->tool_name,
+            'tool_type'          => $tc->tool_type,
+            'status'             => $tc->status,
+            'proposed_arguments' => $tc->proposed_arguments,
+            'approved_arguments' => $tc->approved_arguments,
+            'human_description'  => $tc->human_description,
+            'result_content'     => $tc->result_content,
+            'executed_at'        => $tc->executed_at?->toIso8601String(),
+        ])->all();
+
+        $resource['history'] = $task->taskHistory->map(fn(TaskHistory $h) => [
+            'sequence'    => $h->sequence,
+            'role'        => $h->role,
+            'content'     => $h->content,
+            'tool_call_id' => $h->tool_call_id,
+            'tool_name'   => $h->tool_name,
+        ])->all();
+
+        return $resource;
+    }
+
+    private function decodeJson(Request $request): array
+    {
+        $content = $request->getContent();
+        if ($content === '') {
+            return [];
+        }
+
+        return json_decode($content, true) ?? [];
     }
 }

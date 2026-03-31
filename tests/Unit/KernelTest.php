@@ -119,8 +119,9 @@ test('dispatched stub controller returns JSON with error envelope', function ():
 
 test('uncaught controller exception returns 500 JSON', function (): void {
     $kernel = new Kernel();
-    // RecipeController::index() throws RuntimeException — perfect 500 fixture
-    $request  = Request::create('/api/v1/recipes', 'GET');
+    // GET /api/v1/tasks triggers DI resolution of OrchestratorInterface,
+    // which requires LLMDriverInterface — an intentionally unbound interface — producing a 500.
+    $request  = Request::create('/api/v1/tasks', 'GET');
     $response = $kernel->handle($request);
 
     expect($response->getStatusCode())->toBe(500);
@@ -134,7 +135,7 @@ test('uncaught controller exception returns 500 JSON', function (): void {
 
 test('500 response in production mode does not expose exception details', function (): void {
     $kernel   = new Kernel();
-    $request  = Request::create('/api/v1/recipes', 'GET');
+    $request  = Request::create('/api/v1/tasks', 'GET');
     $response = $kernel->handle($request);
 
     $body = json_decode($response->getContent(), true);
@@ -145,7 +146,7 @@ test('500 response in production mode does not expose exception details', functi
 
 test('500 response has Content-Type application/json', function (): void {
     $kernel   = new Kernel();
-    $response = $kernel->handle(Request::create('/api/v1/recipes', 'GET'));
+    $response = $kernel->handle(Request::create('/api/v1/tasks', 'GET'));
 
     expect($response->headers->get('Content-Type'))->toContain('application/json');
 });
@@ -186,4 +187,32 @@ test('401 response has Content-Type application/json', function (): void {
     }
 
     expect($response->headers->get('Content-Type'))->toContain('application/json');
+});
+
+// ---------------------------------------------------------------------------
+// 500 debug mode — exposes exception details when app_env=development
+// ---------------------------------------------------------------------------
+
+test('500 response in development mode includes a debug block with exception details', function (): void {
+    $_ENV['SPORA_APP_ENV']    = 'development';
+    $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
+
+    try {
+        $kernel   = new Kernel();
+        // GET /api/v1/tasks triggers DI resolution of OrchestratorInterface → LLMDriverInterface (unbound) → 500
+        $response = $kernel->handle(Request::create('/api/v1/tasks', 'GET'));
+    } finally {
+        unset($_ENV['SPORA_APP_ENV'], $_ENV['SPORA_SECRET_KEY']);
+    }
+
+    expect($response->getStatusCode())->toBe(500);
+
+    $body = json_decode($response->getContent(), true);
+
+    expect($body)->toHaveKey('debug');
+    expect($body['debug'])->toHaveKey('exception');
+    expect($body['debug'])->toHaveKey('message');
+    expect($body['debug'])->toHaveKey('file');
+    expect($body['debug'])->toHaveKey('line');
+    expect($body['debug']['exception'])->toBeString()->not()->toBeEmpty();
 });

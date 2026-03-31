@@ -1,0 +1,264 @@
+<?php
+
+declare(strict_types=1);
+
+use Spora\Agents\OrchestratorInterface;
+use Spora\Http\Exceptions\UnauthenticatedException;
+use Spora\Http\TaskController;
+use Spora\Models\Agent;
+use Spora\Models\Task;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeTaskController(?OrchestratorInterface $orch = null): array
+{
+    $authService = bootAuthLayer();
+    $orch      ??= Mockery::mock(OrchestratorInterface::class);
+    $controller  = new TaskController($authService, $orch);
+
+    return [$controller, $authService, $orch];
+}
+
+function seedUserAndAgent(mixed $authService): array
+{
+    $userId = $authService->register('task@example.com', 'Password1!');
+    simulateLoggedInSession($userId, 'task@example.com');
+
+    $agent = Agent::create([
+        'user_id'      => $userId,
+        'name'         => 'Agent',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ]);
+
+    return [$userId, $agent];
+}
+
+// ---------------------------------------------------------------------------
+// Unauthenticated requests
+// ---------------------------------------------------------------------------
+
+it('unauthenticated index throws UnauthenticatedException', function (): void {
+    [$controller] = makeTaskController();
+    clearSession();
+
+    expect(fn() => $controller->index(jsonRequest('GET', '/api/v1/tasks')))
+        ->toThrow(UnauthenticatedException::class);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('unauthenticated store throws UnauthenticatedException', function (): void {
+    [$controller] = makeTaskController();
+    clearSession();
+
+    expect(fn() => $controller->store(jsonRequest('POST', '/api/v1/tasks', ['prompt' => 'hi'])))
+        ->toThrow(UnauthenticatedException::class);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// store()
+// ---------------------------------------------------------------------------
+
+it('store returns 422 when prompt is missing', function (): void {
+    [$controller, $authService] = makeTaskController();
+    seedUserAndAgent($authService);
+
+    $resp = $controller->store(jsonRequest('POST', '/api/v1/tasks', []));
+    expect($resp->getStatusCode())->toBe(422);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('store creates task via orchestrator and returns 201', function (): void {
+    $mockTask = new Task([
+        'id'          => 1,
+        'agent_id'    => 1,
+        'user_id'     => 1,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'Hello',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+    $mockTask->id = 1;
+
+    $orch = Mockery::mock(OrchestratorInterface::class);
+    $orch->expects('start')->once()->andReturn($mockTask);
+
+    [$controller, $authService] = makeTaskController($orch);
+    seedUserAndAgent($authService);
+
+    $resp = $controller->store(jsonRequest('POST', '/api/v1/tasks', ['prompt' => 'Hello']));
+    expect($resp->getStatusCode())->toBe(201);
+
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['task']['status'])->toBe('RUNNING');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('store returns 404 when user has no agent', function (): void {
+    [$controller, $authService] = makeTaskController();
+    $userId = $authService->register('noagent@example.com', 'Password1!');
+    simulateLoggedInSession($userId, 'noagent@example.com');
+
+    $resp = $controller->store(jsonRequest('POST', '/api/v1/tasks', ['prompt' => 'hello']));
+    expect($resp->getStatusCode())->toBe(404);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// index()
+// ---------------------------------------------------------------------------
+
+it('index returns list of tasks for the authenticated user', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'Test',
+        'step_count'  => 1,
+        'max_steps'   => 10,
+    ]);
+
+    $resp = $controller->index(jsonRequest('GET', '/api/v1/tasks'));
+    expect($resp->getStatusCode())->toBe(200);
+
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['tasks'])->toHaveCount(1)
+        ->and($body['data']['tasks'][0]['status'])->toBe('COMPLETED');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// show()
+// ---------------------------------------------------------------------------
+
+it('show returns 404 for unknown task', function (): void {
+    [$controller, $authService] = makeTaskController();
+    seedUserAndAgent($authService);
+
+    $req = jsonRequest('GET', '/api/v1/tasks/999');
+    $req->attributes->set('taskId', 999);
+
+    $resp = $controller->show($req);
+    expect($resp->getStatusCode())->toBe(404);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('show returns task detail with history and tool_calls', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'Detail test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('GET', "/api/v1/tasks/{$task->id}");
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->show($req);
+    expect($resp->getStatusCode())->toBe(200);
+
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['task'])->toHaveKey('history')
+        ->and($body['data']['task'])->toHaveKey('tool_calls');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// approve()
+// ---------------------------------------------------------------------------
+
+it('approve returns 409 when task is not PENDING_APPROVAL', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'x',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve");
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->approve($req);
+    expect($resp->getStatusCode())->toBe(409);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('approve calls orchestrator resume and returns updated task', function (): void {
+    [$userId, $agent] = [null, null];
+    $orch = Mockery::mock(OrchestratorInterface::class);
+    $orch->expects('resume')->once();
+
+    [$controller, $authService] = makeTaskController($orch);
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'PENDING_APPROVAL',
+        'user_prompt' => 'approve test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve", ['arguments' => ['key' => 'value']]);
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->approve($req);
+    expect($resp->getStatusCode())->toBe(200);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// reject()
+// ---------------------------------------------------------------------------
+
+it('reject returns 409 when task is not PENDING_APPROVAL', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'x',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/reject", ['reason' => 'No']);
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->reject($req);
+    expect($resp->getStatusCode())->toBe(409);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('reject calls orchestrator reject and returns 200', function (): void {
+    $orch = Mockery::mock(OrchestratorInterface::class);
+    $orch->expects('reject')->once();
+
+    [$controller, $authService] = makeTaskController($orch);
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'PENDING_APPROVAL',
+        'user_prompt' => 'reject test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/reject", ['reason' => 'Too risky']);
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->reject($req);
+    expect($resp->getStatusCode())->toBe(200);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());

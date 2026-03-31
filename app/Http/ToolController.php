@@ -28,7 +28,7 @@ final class ToolController
     {
         AuthGuard::requireAuth($this->authService);
 
-        $tools = array_map(fn (string $class) => $this->toolSchemaResource($class), $this->toolClasses);
+        $tools = array_map(fn(string $class) => $this->toolSchemaResource($class), $this->toolClasses);
 
         return new JsonResponse(['data' => ['tools' => array_values($tools)]]);
     }

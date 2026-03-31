@@ -93,3 +93,49 @@ test('EncryptedValue cannot be cast to string', function (): void {
 
     expect(fn() => (string) $enc)->toThrow(LogicException::class);
 });
+
+// ---------------------------------------------------------------------------
+// decrypt() — error branches
+// ---------------------------------------------------------------------------
+
+test('decrypt() throws DecryptionFailedException for invalid base64 input', function (): void {
+    $sm  = makeSecurityManager();
+    $bad = new EncryptedValue('!!!not-valid-base64===');
+
+    expect(fn() => $sm->decrypt($bad))->toThrow(
+        DecryptionFailedException::class,
+        'Failed to base64-decode',
+    );
+});
+
+test('decrypt() throws DecryptionFailedException when decoded bytes are too short', function (): void {
+    $sm = makeSecurityManager();
+    // base64 of only a few bytes — valid base64 but too short to hold nonce + MAC
+    $bad = new EncryptedValue(base64_encode('short'));
+
+    expect(fn() => $sm->decrypt($bad))->toThrow(
+        DecryptionFailedException::class,
+        'too short',
+    );
+});
+
+// ---------------------------------------------------------------------------
+// loadFromFile() — error branches
+// ---------------------------------------------------------------------------
+
+test('constructing with a non-existent file path throws RuntimeException', function (): void {
+    expect(fn() => new SecurityManager('/tmp/spora_does_not_exist_' . uniqid() . '.key'))
+        ->toThrow(RuntimeException::class, 'not found or not readable');
+});
+
+test('constructing with a file containing wrong-length key throws RuntimeException', function (): void {
+    $tmpFile = tempnam(sys_get_temp_dir(), 'spora_key_bad_');
+    file_put_contents($tmpFile, 'tooshort');
+
+    try {
+        expect(fn() => new SecurityManager($tmpFile))
+            ->toThrow(RuntimeException::class, 'corrupt');
+    } finally {
+        unlink($tmpFile);
+    }
+});

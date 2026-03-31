@@ -1,0 +1,34 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+define('BASE_PATH', dirname(__DIR__));
+
+if (file_exists(BASE_PATH . '/vendor/autoload.php')) {
+    require BASE_PATH . '/vendor/autoload.php';
+} else {
+    echo "Dependencies missing. Run `composer install`.\n";
+    exit(1);
+}
+
+use Spora\Core\Kernel;
+use Symfony\Component\Console\Application;
+use DI\Container;
+
+// 1. Boot Kernel without triggering Web Request Loop or Database Schema checks.
+// We just need the DI container config.
+try {
+    $kernel = new Kernel();
+    $container = $kernel->getContainer();
+} catch (\Throwable $e) {
+    echo sprintf("[Fatal] Failed to boot Spora kernel: %s\n", $e->getMessage());
+    exit(1);
+}
+
+$application = new Application('Spora CLI', '1.0.0');
+
+// Register Commands Manually or Autowire them from container
+$application->addCommand($container->get(\Spora\Console\Commands\InstallCommand::class));
+
+$application->run();

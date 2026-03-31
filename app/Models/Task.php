@@ -7,11 +7,28 @@ namespace Spora\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 
+/**
+ * @property int         $id
+ * @property int         $agent_id
+ * @property int         $user_id
+ * @property string      $status
+ * @property string      $user_prompt
+ * @property string|null $final_response
+ * @property int         $step_count
+ * @property int         $max_steps
+ * @property string|null $pending_state
+ * @property string|null $failure_reason
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
+ */
 class Task extends Model
 {
+    /** @var string */
     protected $table = 'tasks';
 
+    /** @var list<string> */
     protected $fillable = [
         'agent_id',
         'user_id',
@@ -24,6 +41,7 @@ class Task extends Model
         'failure_reason',
     ];
 
+    /** @var array<string, string> */
     protected $casts = [
         'step_count' => 'integer',
         'max_steps'  => 'integer',
@@ -39,11 +57,13 @@ class Task extends Model
         return $this->belongsTo(User::class);
     }
 
+    /** @return HasMany<TaskHistory, $this> */
     public function taskHistory(): HasMany
     {
         return $this->hasMany(TaskHistory::class);
     }
 
+    /** @return HasMany<ToolCall, $this> */
     public function toolCalls(): HasMany
     {
         return $this->hasMany(ToolCall::class);

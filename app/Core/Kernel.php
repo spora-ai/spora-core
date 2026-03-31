@@ -8,10 +8,10 @@ use DI\Container;
 use DI\ContainerBuilder;
 use Dotenv\Dotenv;
 use FastRoute\RouteCollector;
+use Spora\Http\Exceptions\UnauthenticatedException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Spora\Http\Exceptions\UnauthenticatedException;
 use Throwable;
 
 final class Kernel

@@ -9,7 +9,7 @@ test('requireAuth throws UnauthenticatedException when not logged in', function 
     clearSession();
     $authService = bootAuthLayer();
 
-    expect(fn () => AuthGuard::requireAuth($authService))
+    expect(fn() => AuthGuard::requireAuth($authService))
         ->toThrow(UnauthenticatedException::class, 'Authentication required.');
 });
 

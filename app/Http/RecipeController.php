@@ -4,18 +4,26 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use RuntimeException;
+use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\UnauthenticatedException;
+use Spora\Recipes\RecipeScanner;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-/**
- * Handles recipe listing.
- * TODO: implement when recipe file scanning is built.
- */
 final class RecipeController
 {
-    public function index(Request $request, array $vars = []): Response
+    public function __construct(
+        private readonly AuthService   $auth,
+        private readonly RecipeScanner $scanner,
+    ) {}
+
+    public function index(Request $_request, array $_vars = []): Response
     {
-        throw new RuntimeException('RecipeController::index() not implemented.');
+        if ($this->auth->currentUserId() === null) {
+            throw new UnauthenticatedException();
+        }
+
+        return new JsonResponse(['data' => ['recipes' => $this->scanner->scan()]]);
     }
 }

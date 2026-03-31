@@ -8,6 +8,18 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property int $id
+ * @property int $user_id
+ * @property string $name
+ * @property string|null $description
+ * @property string|null $recipe_id
+ * @property string|null $llm_provider
+ * @property string|null $llm_model
+ * @property string|null $llm_base_url
+ * @property int|null $max_steps
+ * @property bool $is_active
+ */
 class Agent extends Model
 {
     protected $table = 'agents';
