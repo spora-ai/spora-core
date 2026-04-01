@@ -28,15 +28,15 @@ test('boot() is idempotent — calling twice does not double-load plugins', func
 });
 
 // ---------------------------------------------------------------------------
-// plugin.json — conventional Plugin.php file
+// plugin.json — slug is the key in getPlugins()
 // ---------------------------------------------------------------------------
 
-test('manifest with no "file" key loads class from Plugin.php', function (): void {
+test('plugin is keyed by its manifest slug in getPlugins()', function (): void {
     $loader = new PluginLoader(FIXTURE_MANIFEST_PLUGINS);
     $loader->boot();
 
-    expect($loader->getPlugins())->toHaveCount(1);
-    expect($loader->getPlugins()[0]->getName())->toBe('Manifest Plugin');
+    expect($loader->getPlugins())->toHaveKey('manifest-plugin');
+    expect($loader->getPlugins()['manifest-plugin']->getName())->toBe('Manifest Plugin');
 });
 
 test('drivers() returns driver map from loaded plugin', function (): void {
@@ -58,37 +58,55 @@ test('toolClasses() returns empty array when plugin contributes no tools', funct
 // ---------------------------------------------------------------------------
 
 test('"file" key loads the plugin from the specified path instead of Plugin.php', function (): void {
-    // The fixture has plugin.json pointing to src/NamedPlugin.php — no Plugin.php exists.
-    // If the loader ignored "file" and fell back to Plugin.php, it would load zero plugins.
     $loader = new PluginLoader(FIXTURE_CUSTOM_FILE_PLUGINS);
     $loader->boot();
 
     expect($loader->getPlugins())->toHaveCount(1);
-    expect($loader->getPlugins()[0]->getName())->toBe('Named Plugin');
+    expect($loader->getPlugins()['named-plugin']->getName())->toBe('Named Plugin');
     expect($loader->drivers())->toHaveKey('named_driver');
 });
 
 // ---------------------------------------------------------------------------
-// Invalid / broken manifests — silent skip, no exception
+// Slug validation — structural manifest errors throw, runtime class errors are silent
 // ---------------------------------------------------------------------------
 
-test('manifest missing "class" key is silently skipped', function (): void {
+test('manifest missing "slug" throws RuntimeException', function (): void {
     $loader = new PluginLoader(FIXTURE_INVALID_MANIFESTS . '/MissingClassKey');
+
+    expect(fn() => $loader->boot())->toThrow(RuntimeException::class, "'slug'");
+});
+
+test('manifest with invalid slug format throws RuntimeException', function (): void {
+    $loader = new PluginLoader(FIXTURE_INVALID_MANIFESTS . '/InvalidSlug');
+
+    expect(fn() => $loader->boot())->toThrow(RuntimeException::class, 'INVALID SLUG!');
+});
+
+test('manifest whose declared class cannot be resolved is silently skipped', function (): void {
+    // The manifest is structurally valid (has slug + class) but the PHP class simply
+    // doesn't exist at runtime — this is a recoverable situation (e.g. bad autoload path).
+    $loader = new PluginLoader(FIXTURE_INVALID_MANIFESTS . '/BadClass');
     $loader->boot();
 
     expect($loader->getPlugins())->toHaveCount(0);
 });
 
-test('manifest whose "class" does not exist after require is silently skipped', function (): void {
-    $loader = new PluginLoader(FIXTURE_INVALID_MANIFESTS . '/NonExistentClass');
+// ---------------------------------------------------------------------------
+// Plugin migration paths use slug as key
+// ---------------------------------------------------------------------------
+
+test('pluginMigrationPaths() is empty for plugins with schemaVersion 0', function (): void {
+    $loader = new PluginLoader(FIXTURE_MANIFEST_PLUGINS);
     $loader->boot();
 
-    expect($loader->getPlugins())->toHaveCount(0);
+    expect($loader->pluginMigrationPaths())->toBe([]);
 });
 
-test('directory of only invalid manifests loads zero plugins without throwing', function (): void {
-    $loader = new PluginLoader(FIXTURE_INVALID_MANIFESTS);
+test('pluginMigrationPaths() uses slug as key', function (): void {
+    $loader = new PluginLoader(BASE_PATH . '/tests/Fixtures/plugins_with_migrations');
     $loader->boot();
 
-    expect($loader->getPlugins())->toHaveCount(0);
+    $paths = $loader->pluginMigrationPaths();
+    expect($paths)->toHaveKey('migrating-plugin');
+    expect($paths['migrating-plugin']['version'])->toBe(1);
 });

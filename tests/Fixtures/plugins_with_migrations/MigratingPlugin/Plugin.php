@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace Tests\Fixtures\Plugins\NamedPlugin;
+namespace Tests\Fixtures\Plugins\MigratingPlugin;
 
 use DI\ContainerBuilder;
 use Spora\Plugins\PluginInterface;
 
-final class NamedPlugin implements PluginInterface
+final class Plugin implements PluginInterface
 {
     public function getName(): string
     {
-        return 'Named Plugin';
+        return 'Migrating Plugin';
     }
 
     public function autoload(): array
@@ -26,7 +26,7 @@ final class NamedPlugin implements PluginInterface
 
     public function drivers(): array
     {
-        return ['named_driver' => self::class];
+        return [];
     }
 
     public function recipePaths(): array
@@ -36,12 +36,12 @@ final class NamedPlugin implements PluginInterface
 
     public function schemaVersion(): int
     {
-        return 0;
+        return 1;
     }
 
     public function migrationsPath(): ?string
     {
-        return null;
+        return __DIR__ . '/migrations';
     }
 
     public function register(ContainerBuilder $builder): void {}

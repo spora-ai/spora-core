@@ -1,3 +1,4 @@
 {
+    "slug": "nonexistent-class",
     "class": "Tests\\Fixtures\\Plugins\\DoesNotExist\\Plugin"
 }

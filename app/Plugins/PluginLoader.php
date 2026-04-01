@@ -14,7 +14,11 @@ namespace Spora\Plugins;
  */
 final class PluginLoader
 {
-    /** @var PluginInterface[] */
+    /**
+     * Loaded plugins, keyed by their manifest slug.
+     *
+     * @var array<string, PluginInterface>
+     */
     private array $plugins = [];
 
     private bool $booted = false;
@@ -100,24 +104,82 @@ final class PluginLoader
         return $paths;
     }
 
-    /** @return PluginInterface[] */
+    /**
+     * All loaded plugins, indexed by their manifest slug.
+     *
+     * @return array<string, PluginInterface>
+     */
     public function getPlugins(): array
     {
         return $this->plugins;
     }
 
+    /**
+     * All plugin migration paths and their declared schema versions, for use by DatabaseSchemaInstaller.
+     * Keyed by plugin slug — the slug is the component name written to schema_versions
+     * and the required prefix for migration filenames.
+     *
+     * @return array<string, array{path: string, version: int}>
+     */
+    public function pluginMigrationPaths(): array
+    {
+        $result = [];
+
+        foreach ($this->plugins as $slug => $plugin) {
+            if ($plugin->schemaVersion() > 0 && $plugin->migrationsPath() !== null) {
+                $result[$slug] = [
+                    'path'    => $plugin->migrationsPath(),
+                    'version' => $plugin->schemaVersion(),
+                ];
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * @throws \RuntimeException  When the manifest JSON is invalid or violates the schema contract.
+     *                            Not thrown when the declared class simply cannot be resolved at
+     *                            runtime (e.g. PSR-4 not yet registered) — that failure is silent.
+     */
     private function loadPluginFromManifest(string $manifestFile, ?\Composer\Autoload\ClassLoader $classLoader): void
     {
         $raw = file_get_contents($manifestFile);
 
         if ($raw === false) {
-            return;
+            return; // unreadable file — filesystem issue, not a manifest error
         }
 
         $manifest = json_decode($raw, true);
 
-        if (!is_array($manifest) || !isset($manifest['class']) || !is_string($manifest['class'])) {
-            return;
+        if (!is_array($manifest)) {
+            throw new \RuntimeException(
+                "Plugin manifest '{$manifestFile}' contains invalid JSON.",
+            );
+        }
+
+        if (!isset($manifest['slug']) || !is_string($manifest['slug'])) {
+            throw new \RuntimeException(
+                "Plugin manifest '{$manifestFile}' is missing the required 'slug' field. " .
+                "See plugin.schema.json for the full manifest contract.",
+            );
+        }
+
+        $slug = $manifest['slug'];
+
+        if (!preg_match('/^[a-z0-9][a-z0-9_-]*$/', $slug)) {
+            throw new \RuntimeException(
+                "Plugin manifest '{$manifestFile}' has an invalid slug '{$slug}'. " .
+                "Slugs must be lowercase alphanumeric and may contain hyphens or underscores " .
+                "(e.g. 'my-plugin').",
+            );
+        }
+
+        if (!isset($manifest['class']) || !is_string($manifest['class'])) {
+            throw new \RuntimeException(
+                "Plugin manifest '{$manifestFile}' (slug: '{$slug}') is missing the required 'class' field. " .
+                "See plugin.schema.json for the full manifest contract.",
+            );
         }
 
         $fqcn      = $manifest['class'];
@@ -127,6 +189,16 @@ final class PluginLoader
         if ($classLoader !== null && isset($manifest['autoload']['psr-4']) && is_array($manifest['autoload']['psr-4'])) {
             foreach ($manifest['autoload']['psr-4'] as $namespace => $relativePath) {
                 $classLoader->addPsr4((string) $namespace, $pluginDir . '/' . ltrim((string) $relativePath, '/'));
+            }
+        }
+
+        // Require bootstrap files (e.g. vendor/autoload.php for plugins with their own Composer deps).
+        if (isset($manifest['autoload']['files']) && is_array($manifest['autoload']['files'])) {
+            foreach ($manifest['autoload']['files'] as $relFile) {
+                $abs = $pluginDir . '/' . ltrim((string) $relFile, '/');
+                if (is_file($abs)) {
+                    require_once $abs;
+                }
             }
         }
 
@@ -140,16 +212,20 @@ final class PluginLoader
             require_once $fileToRequire;
         }
 
-        $this->instantiatePlugin($fqcn, $classLoader);
+        $this->instantiatePlugin($slug, $fqcn, $classLoader);
     }
 
-    private function instantiatePlugin(string $fqcn, ?\Composer\Autoload\ClassLoader $classLoader): void
+    private function instantiatePlugin(string $slug, string $fqcn, ?\Composer\Autoload\ClassLoader $classLoader): void
     {
         if (!class_exists($fqcn, false) || !is_a($fqcn, PluginInterface::class, true)) {
             return;
         }
 
-        // Skip if already loaded.
+        // Skip if slug or class is already loaded.
+        if (isset($this->plugins[$slug])) {
+            return;
+        }
+
         foreach ($this->plugins as $existing) {
             if (get_class($existing) === $fqcn) {
                 return;
@@ -165,7 +241,7 @@ final class PluginLoader
             }
         }
 
-        $this->plugins[] = $plugin;
+        $this->plugins[$slug] = $plugin;
     }
 
     private function findClassLoader(): ?\Composer\Autoload\ClassLoader

@@ -1,0 +1,4 @@
+{
+    "slug": "migrating-plugin",
+    "class": "Tests\\Fixtures\\Plugins\\MigratingPlugin\\Plugin"
+}

@@ -1,0 +1,54 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://spora.dev/plugin.schema.json",
+    "title": "Spora Plugin Manifest",
+    "description": "Schema for plugin.json — the manifest every Spora plugin must ship.",
+    "type": "object",
+    "required": ["slug", "class"],
+    "additionalProperties": false,
+    "properties": {
+        "slug": {
+            "type": "string",
+            "description": "Unique machine-readable identifier for this plugin. Used as the component key in schema_versions and as the required prefix for migration filenames. Must be stable across releases.",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "examples": ["my-plugin", "acme_search"]
+        },
+        "class": {
+            "type": "string",
+            "description": "Fully-qualified class name of the plugin entry point. Must implement Spora\\Plugins\\PluginInterface.",
+            "examples": ["Acme\\MyPlugin\\Plugin"]
+        },
+        "file": {
+            "type": "string",
+            "description": "Relative path (from the plugin directory) to the PHP file that declares the entry-point class. Defaults to Plugin.php when omitted.",
+            "examples": ["src/Plugin.php", "EntryPoint.php"]
+        },
+        "autoload": {
+            "type": "object",
+            "description": "PSR-4 autoload mappings registered with the Composer classloader before the plugin is instantiated.",
+            "additionalProperties": false,
+            "properties": {
+                "psr-4": {
+                    "type": "object",
+                    "description": "Map of namespace prefix to relative path. Multiple entries are supported.",
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "examples": [
+                        { "Acme\\MyPlugin\\": "src/", "Acme\\Shared\\": "lib/" }
+                    ]
+                },
+                "files": {
+                    "type": "array",
+                    "description": "PHP files to require_once before the plugin is instantiated, relative to the plugin directory. Use [\"vendor/autoload.php\"] to load the plugin's own Composer dependency tree.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "examples": [
+                        ["vendor/autoload.php"]
+                    ]
+                }
+            }
+        }
+    }
+}

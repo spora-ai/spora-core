@@ -34,5 +34,15 @@ final class Plugin implements PluginInterface
         return [];
     }
 
+    public function schemaVersion(): int
+    {
+        return 0;
+    }
+
+    public function migrationsPath(): ?string
+    {
+        return null;
+    }
+
     public function register(ContainerBuilder $builder): void {}
 }

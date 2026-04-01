@@ -1,0 +1,180 @@
+# Spora Plugin System
+
+Plugins extend Spora with additional LLM drivers, tools, and recipes. Each plugin is a
+self-contained directory deployed alongside the core application.
+
+---
+
+## Directory layout
+
+```
+plugins/
+└── my-plugin/
+    ├── plugin.json        ← required manifest
+    ├── Plugin.php         ← entry-point class (default location)
+    ├── src/               ← plugin source code
+    └── vendor/            ← optional: plugin's own Composer dependencies
+```
+
+Plugins live in the directory configured as the plugin path (default: `plugins/` at the
+repo root). Each plugin must occupy its own subdirectory and ship a `plugin.json` manifest.
+
+---
+
+## plugin.json manifest
+
+The full JSON Schema is in [`plugin.schema.json`](../plugin.schema.json) at the repo root.
+
+### Required fields
+
+| Field   | Type   | Description |
+|---------|--------|-------------|
+| `slug`  | string | Unique machine-readable identifier. Lowercase alphanumeric, hyphens, and underscores only (`^[a-z0-9][a-z0-9_-]*$`). Must be stable across releases — it is used as the component key in `schema_versions` and as the required prefix for migration filenames. |
+| `class` | string | Fully-qualified class name of the plugin entry point. Must implement `Spora\Plugins\PluginInterface`. |
+
+### Optional fields
+
+| Field           | Type   | Description |
+|-----------------|--------|-------------|
+| `file`          | string | Relative path (from the plugin directory) to the PHP file that declares the entry-point class. Defaults to `Plugin.php` when omitted. |
+| `autoload.psr-4`  | object | PSR-4 namespace → relative path mappings registered with the Composer classloader before the plugin is instantiated. Multiple entries are supported. |
+| `autoload.files`  | array  | PHP files to `require_once` before the plugin is instantiated, relative to the plugin directory. Use `["vendor/autoload.php"]` to load the plugin's own Composer dependency tree. Processed after `psr-4` mappings. |
+
+### Minimal example
+
+```json
+{
+    "slug": "my-plugin",
+    "class": "Acme\\MyPlugin\\Plugin"
+}
+```
+
+### Full example
+
+```json
+{
+    "slug": "acme-search",
+    "class": "Acme\\Search\\Plugin",
+    "file": "src/Plugin.php",
+    "autoload": {
+        "psr-4": {
+            "Acme\\Search\\": "src/",
+            "Acme\\Shared\\": "lib/"
+        },
+        "files": [
+            "vendor/autoload.php"
+        ]
+    }
+}
+```
+
+---
+
+## Entry-point class
+
+The class named in `class` must implement `Spora\Plugins\PluginInterface`:
+
+```php
+namespace Acme\MyPlugin;
+
+use Spora\Plugins\PluginInterface;
+
+final class Plugin implements PluginInterface
+{
+    public function getName(): string  { return 'My Plugin'; }
+
+    /** @return list<class-string> */
+    public function tools(): array     { return []; }
+
+    /** @return array<string, class-string> */
+    public function drivers(): array   { return []; }
+
+    /** @return string[] */
+    public function recipePaths(): array { return []; }
+
+    /** @return array<string, string> */
+    public function autoload(): array  { return []; }
+
+    public function schemaVersion(): int    { return 0; }
+    public function migrationsPath(): ?string { return null; }
+}
+```
+
+---
+
+## Database migrations
+
+Plugins that need their own tables declare a schema version and a migrations path:
+
+```php
+public function schemaVersion(): int     { return 1; }
+public function migrationsPath(): ?string { return __DIR__ . '/../database/migrations'; }
+```
+
+Migration files follow the same anonymous-class pattern as core migrations and **must be
+prefixed with the plugin slug**:
+
+```
+database/migrations/
+└── acme-search_000001_create_search_index_table.php
+```
+
+```php
+use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+
+return new class extends Migration {
+    public function up(): void {
+        Capsule::schema()->create('search_index', static function (Blueprint $table): void {
+            $table->id();
+            $table->string('keyword')->index();
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void {
+        Capsule::schema()->dropIfExists('search_index');
+    }
+};
+```
+
+The slug prefix is enforced at install time — `DatabaseSchemaInstaller` throws a
+`RuntimeException` if any migration file in the plugin's path lacks the `{slug}_` prefix.
+
+---
+
+## Shipping third-party dependencies
+
+For plugins that depend on external Composer packages, run `composer install --no-dev`
+inside the plugin directory before deployment and declare the vendor autoloader in the
+manifest:
+
+```json
+{
+    "slug": "acme-search",
+    "class": "Acme\\Search\\Plugin",
+    "autoload": {
+        "files": ["vendor/autoload.php"]
+    }
+}
+```
+
+Spora will `require_once` the file before instantiating the plugin. The plugin's vendor
+tree is completely isolated from the host application's vendor tree.
+
+---
+
+## Manifest validation
+
+`PluginLoader` enforces structural correctness at boot time and throws a `RuntimeException`
+for any of the following:
+
+- Invalid JSON in `plugin.json`
+- Missing or non-string `slug` field
+- `slug` value that does not match `^[a-z0-9][a-z0-9_-]*$`
+- Missing or non-string `class` field
+
+A manifest that is structurally valid but whose declared class cannot be resolved at
+runtime (e.g. a bad autoload path) is silently skipped — this is treated as a recoverable
+deployment error rather than a fatal one.

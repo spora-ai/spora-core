@@ -112,7 +112,7 @@ return [
     },
 
     Database::class => static function (ContainerInterface $c): Database {
-        return new Database($c->get('config'));
+        return new Database($c->get('config'), $c->get(PluginLoader::class));
     },
 
     Delight\Auth\Auth::class => static function (ContainerInterface $c): Delight\Auth\Auth {

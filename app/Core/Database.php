@@ -5,12 +5,19 @@ declare(strict_types=1);
 namespace Spora\Core;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Plugins\PluginLoader;
 
 final class Database
 {
     private static bool $booted = false;
 
-    public function __construct(private readonly array $config) {}
+    /** Stored so DatabaseSchemaInstaller can access getDatabaseManager() after boot. */
+    private static ?Capsule $capsule = null;
+
+    public function __construct(
+        private readonly array $config,
+        private readonly ?PluginLoader $pluginLoader = null,
+    ) {}
 
     public function bootDatabaseConnectionOnly(): void
     {
@@ -33,7 +40,6 @@ final class Database
                 'prefix'    => '',
             ]);
         } else {
-            // SQLite default
             $dbPath = $this->config['db_path'] ?? (__DIR__ . '/../../storage/database.sqlite');
 
             $dir = dirname((string) $dbPath);
@@ -55,35 +61,38 @@ final class Database
         $capsule->setAsGlobal();
         $capsule->bootEloquent();
 
-        self::$booted = true;
+        self::$capsule = $capsule;
+        self::$booted  = true;
     }
 
     public function boot(): void
     {
         $this->bootDatabaseConnectionOnly();
 
-        $dbPath = (string) ($this->config['db_path'] ?? (__DIR__ . '/../../storage/database.sqlite'));
+        // For :memory: SQLite (tests) there is no persistent filesystem, so the stamp
+        // cache is disabled and the installer always runs the full DB check.
+        // For all other drivers the stamp file gives an O(1) hot path on every HTTP request.
+        $dbPath    = $this->config['db_path'] ?? null;
+        $stampPath = ($dbPath === ':memory:')
+            ? null
+            : BASE_PATH . '/storage/.schema_stamp';
 
-        // In-memory SQLite has no persistence — always run migrations immediately.
-        if ($dbPath === ':memory:') {
-            (new DatabaseSchemaInstaller())->install();
-            return;
+        (new DatabaseSchemaInstaller($this->pluginLoader, $stampPath))->install();
+    }
+
+    /** Returns the active Capsule instance (available after bootDatabaseConnectionOnly). */
+    public static function getCapsule(): Capsule
+    {
+        if (self::$capsule === null) {
+            throw new \RuntimeException('Database not booted yet.');
         }
-
-        // For file-based databases: a version file prevents re-running migrations
-        // on every PHP request (shared hosting zero-config optimisation).
-        // MySQL users invoke `bin/spora spora:install` explicitly instead.
-        $versionFile = dirname($dbPath) . '/.db_version';
-
-        if (!file_exists($versionFile) || (int) file_get_contents($versionFile) < DatabaseSchemaInstaller::CODE_VERSION) {
-            (new DatabaseSchemaInstaller())->install();
-            file_put_contents($versionFile, (string) DatabaseSchemaInstaller::CODE_VERSION);
-        }
+        return self::$capsule;
     }
 
     /** Reset the static boot flag (for testing only). */
     public static function resetBootState(): void
     {
-        self::$booted = false;
+        self::$booted  = false;
+        self::$capsule = null;
     }
 }

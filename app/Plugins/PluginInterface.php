@@ -41,6 +41,19 @@ interface PluginInterface
     public function recipePaths(): array;
 
     /**
+     * Schema version for this plugin's database migrations.
+     * Return 0 (default) if the plugin has no database schema.
+     * Increment whenever new migration files are added.
+     */
+    public function schemaVersion(): int;
+
+    /**
+     * Absolute path to the directory containing this plugin's Laravel Migration files.
+     * Return null (default) if the plugin has no database schema.
+     */
+    public function migrationsPath(): ?string;
+
+    /**
      * Register arbitrary DI bindings, middleware, or services.
      */
     public function register(ContainerBuilder $builder): void;
