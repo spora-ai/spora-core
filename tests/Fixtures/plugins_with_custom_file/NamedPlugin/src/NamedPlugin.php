@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace Tests\Fixtures\Plugins\TestPlugin;
+namespace Tests\Fixtures\Plugins\NamedPlugin;
 
 use DI\ContainerBuilder;
 use Spora\Plugins\PluginInterface;
 
-final class Plugin implements PluginInterface
+final class NamedPlugin implements PluginInterface
 {
     public function getName(): string
     {
-        return 'Test Plugin';
+        return 'Named Plugin';
     }
 
     public function autoload(): array
@@ -26,12 +26,12 @@ final class Plugin implements PluginInterface
 
     public function drivers(): array
     {
-        return ['test_driver' => self::class];
+        return ['named_driver' => self::class];
     }
 
     public function recipePaths(): array
     {
-        return [dirname(__DIR__) . '/plugin_recipes'];
+        return [];
     }
 
     public function register(ContainerBuilder $builder): void {}

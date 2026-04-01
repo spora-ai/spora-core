@@ -68,6 +68,18 @@ final class Orchestrator implements OrchestratorInterface
             return;
         }
 
+        // Each tick() represents one full Agent lifecycle turn (Think → Act).
+        // Increment exactly once here so N parallel tools in a single turn count as 1 step.
+        if ($task->step_count >= $task->max_steps) {
+            $task->status         = 'FAILED';
+            $task->failure_reason = 'Max steps reached.';
+            $task->save();
+            return;
+        }
+
+        $task->step_count++;
+        $task->save();
+
         $agent = Agent::findOrFail($task->agent_id);
 
         // Build conversation messages from task_history.
@@ -179,18 +191,9 @@ final class Orchestrator implements OrchestratorInterface
                 toolCallId: $pendingToolCall->providerCallId,
                 toolName: $pendingToolCall->toolName,
             );
-
-            $task->step_count++;
         }
 
         $task->save();
-
-        if ($task->step_count >= $state->maxSteps) {
-            $task->status         = 'FAILED';
-            $task->failure_reason = 'Max steps reached after resume.';
-            $task->save();
-            return;
-        }
 
         $this->bus->dispatch(new TickMessage($task->id));
     }
@@ -291,8 +294,6 @@ final class Orchestrator implements OrchestratorInterface
                     toolCallId: $toolCall->providerCallId,
                     toolName: $toolCall->toolName,
                 );
-
-                $task->step_count++;
             } else {
                 $pendingApproval[] = $toolCall;
             }
@@ -300,13 +301,6 @@ final class Orchestrator implements OrchestratorInterface
 
         if ($pendingApproval === []) {
             // All tools in this batch were executed immediately — continue the loop.
-            if ($task->step_count >= $task->max_steps) {
-                $task->status         = 'FAILED';
-                $task->failure_reason = 'Max steps reached.';
-                $task->save();
-                return;
-            }
-
             $task->save();
             $this->bus->dispatch(new TickMessage($task->id));
         } else {

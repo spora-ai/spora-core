@@ -165,7 +165,7 @@ it('tick is a no-op when task is not RUNNING', function (): void {
 // tick() — single InputTool path
 // ---------------------------------------------------------------------------
 
-it('InputTool path increments step_count and task stays RUNNING until LLM finishes', function (): void {
+it('InputTool path increments step_count once per LLM turn', function (): void {
     [$agentId] = seedAgent();
 
     $callCount = 0;
@@ -183,8 +183,9 @@ it('InputTool path increments step_count and task stays RUNNING until LLM finish
 
     $task->refresh();
 
+    // 2 LLM turns: one for the tool call, one for the final text response.
     expect($task->status)->toBe('COMPLETED')
-        ->and($task->step_count)->toBe(1)
+        ->and($task->step_count)->toBe(2)
         ->and($task->final_response)->toBe('Done via input tool.');
 
     $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
@@ -224,6 +225,35 @@ it('two parallel InputTools are both executed and step_count is 2', function ():
     $toolCallRecords = ToolCallModel::where('task_id', $task->id)->get();
     expect($toolCallRecords)->toHaveCount(2);
     expect($toolCallRecords->every(fn($r) => $r->status === 'APPROVED'))->toBeTrue();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('N parallel InputTools in one LLM turn increment step_count by 1, not N', function (): void {
+    [$agentId] = seedAgent();
+
+    $callCount = 0;
+    $mock      = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+        $callCount++;
+        if ($callCount === 1) {
+            // LLM fires 10 tools simultaneously — must still count as a single step.
+            return new LLMResponse(null, array_map(
+                static fn(int $i) => new DriverToolCall("call_{$i}", 'stub_input', []),
+                range(1, 10),
+            ), 100, 50, 'cmp_1');
+        }
+        return new LLMResponse('All done.', [], 10, 5, 'cmp_2');
+    });
+
+    $orch = makeOrchestrator($mock, [new StubInputTool()]);
+    // With the old bug: 10 tools × step_count++ would hit max_steps=10 immediately and FAIL.
+    $task = $orch->start($agentId, 'Parallel overload', maxSteps: 10);
+
+    $task->refresh();
+    // 2 LLM turns (not 10): tick 1 runs all 10 tools, tick 2 gets the final response.
+    expect($task->status)->toBe('COMPLETED')
+        ->and($task->step_count)->toBe(2);
+
+    expect(ToolCallModel::where('task_id', $task->id)->count())->toBe(10);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('parallel batch with one auto-execute and one requiring approval pauses with correct pending batch', function (): void {
@@ -341,8 +371,9 @@ it('OutputTool with requiresApproval=false executes immediately', function (): v
     $task = $orch->start($agentId, 'Auto approve', maxSteps: 10);
 
     $task->refresh();
+    // 2 LLM turns: one for the tool, one for the final text.
     expect($task->status)->toBe('COMPLETED')
-        ->and($task->step_count)->toBe(1);
+        ->and($task->step_count)->toBe(2);
 
     $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
     expect($toolCallRecord->status)->toBe('APPROVED')
@@ -377,8 +408,9 @@ it('AgentTool row auto_approve=1 overrides class-level requiresApproval=true', f
     $task = $orch->start($agentId, 'Override auto approve', maxSteps: 10);
 
     $task->refresh();
+    // 2 LLM turns: one for the tool, one for the final text.
     expect($task->status)->toBe('COMPLETED')
-        ->and($task->step_count)->toBe(1);
+        ->and($task->step_count)->toBe(2);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -461,8 +493,9 @@ it('resume executes the approved OutputTool, appends history, and re-dispatches 
     $orch->resume($task->id, [['provider_call_id' => 'call_r', 'arguments' => ['x' => 99]]]);
 
     $task->refresh();
+    // 2 LLM turns: tick 1 (tool call paused) + tick 2 (after resume).
     expect($task->status)->toBe('COMPLETED')
-        ->and($task->step_count)->toBe(1)
+        ->and($task->step_count)->toBe(2)
         ->and($task->final_response)->toBe('Resumed.');
 
     $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();

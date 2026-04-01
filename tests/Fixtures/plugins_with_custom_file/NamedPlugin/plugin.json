@@ -1,0 +1,5 @@
+{
+    "name": "Named Plugin",
+    "class": "Tests\\Fixtures\\Plugins\\NamedPlugin\\NamedPlugin",
+    "file": "src/NamedPlugin.php"
+}
