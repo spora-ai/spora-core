@@ -21,7 +21,7 @@ use Spora\Tools\Attributes\ToolSetting;
  * The Eloquent models have a guard accessor that throws LogicException on direct
  * `settings` access — all reads/writes must funnel through this service.
  */
-final class ToolConfigService
+class ToolConfigService
 {
     public function __construct(
         private readonly SecurityManagerInterface $security,

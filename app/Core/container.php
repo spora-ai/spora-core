@@ -35,8 +35,6 @@ return [
             'key_path'            => null,
             'allow_registration'  => true,
             'app_env'             => 'production',
-            'openai_api_key'      => null,  // SPORA_OPENAI_API_KEY env var or config.php
-            'anthropic_api_key'   => null,  // SPORA_ANTHROPIC_API_KEY env var or config.php
         ];
 
         // Layer 2 — config.php (installer-generated, gitignored, optional)
@@ -73,13 +71,6 @@ return [
         if (($v = $env('SPORA_ALLOW_REGISTRATION'))  !== null) {
             $envOverrides['allow_registration']  = filter_var($v, FILTER_VALIDATE_BOOLEAN);
         }
-        if (($v = $env('SPORA_OPENAI_API_KEY'))      !== null) {
-            $envOverrides['openai_api_key']      = $v;
-        }
-        if (($v = $env('SPORA_ANTHROPIC_API_KEY'))   !== null) {
-            $envOverrides['anthropic_api_key']   = $v;
-        }
-
         return array_merge($defaults, $fileConfig, $envOverrides);
     },
 
@@ -151,11 +142,13 @@ return [
     },
 
     Spora\Drivers\DriverFactory::class => static function (ContainerInterface $c): Spora\Drivers\DriverFactory {
-        return new Spora\Drivers\DriverFactory($c->get('config'));
+        return new Spora\Drivers\DriverFactory($c->get(Spora\Services\ToolConfigService::class));
     },
 
     // Registered tool classes. Add to this list to make tools discoverable via GET /api/v1/tools.
-    'tool_classes' => [],
+    'tool_classes' => [
+        Spora\Drivers\LLMConfiguration::class,
+    ],
 
     Spora\Http\AgentController::class => static function (ContainerInterface $c): Spora\Http\AgentController {
         return new Spora\Http\AgentController(

@@ -7,17 +7,18 @@ namespace Spora\Drivers;
 use Spora\Models\Agent;
 use Symfony\Component\HttpClient\HttpClient;
 
+use Spora\Services\ToolConfigService;
+
 /**
  * Resolves the correct LLM driver for a given Agent.
  *
  * Provider and model are read from the Agent row (set by the user in Agent Settings).
- * API keys are read from the application config, which maps to SPORA_OPENAI_API_KEY /
- * SPORA_ANTHROPIC_API_KEY environment variables (or config.php for shared hosting).
+ * API keys are securely read from the database via ToolConfigService using LLMConfiguration.
  */
 class DriverFactory
 {
     public function __construct(
-        private readonly array $config,
+        private readonly ToolConfigService $toolConfigService,
     ) {}
 
     public function makeFromAgent(Agent $agent): LLMDriverInterface
@@ -27,9 +28,10 @@ class DriverFactory
         $baseUrl  = $agent->llm_base_url ?? 'https://api.openai.com/v1';
 
         $httpClient = HttpClient::create();
+        $settings   = $this->toolConfigService->getEffectiveSettings(LLMConfiguration::class, (int) $agent->id);
 
         if ($provider === 'anthropic') {
-            $apiKey = (string) ($this->config['anthropic_api_key'] ?? '');
+            $apiKey = (string) ($settings['anthropic_api_key'] ?? '');
 
             return new AnthropicDriver(
                 apiKey:     $apiKey,
@@ -39,7 +41,7 @@ class DriverFactory
         }
 
         // Default: openai_compatible (also covers Ollama, Groq, LM Studio, Azure, etc.)
-        $apiKey = (string) ($this->config['openai_api_key'] ?? '');
+        $apiKey = (string) ($settings['openai_api_key'] ?? '');
 
         return new OpenAICompatibleDriver(
             apiKey:     $apiKey,
