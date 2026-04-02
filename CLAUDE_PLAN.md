@@ -140,13 +140,11 @@ WordPress-style web installer: DB connection form, generate `config.php`, place 
 
 ### Build & Distribution Scripts
 - **Shared hosting:** single ZIP (no `vendor/` excluded, `composer install --no-dev` pre-run, htaccess included)
-- **Docker (standard):** `Dockerfile` + `docker-compose.yml` (PHP-FPM + nginx + optional MySQL)
-- **Docker (FrankenPHP):** Publish a `Dockerfile.frankenphp` image based on
-  [`dunglas/frankenphp`](https://hub.docker.com/r/dunglas/frankenphp) as a
-  named release artifact (e.g. `ghcr.io/fabeat/spora:latest-frankenphp`).
-  FrankenPHP ships with a **built-in Mercure hub**, so a single container
-  provides PHP + Mercure with no extra services — the recommended image for
-  any VPS or Docker-capable shared host that wants real-time SSE updates.
+- **Docker (FrankenPHP):** `Dockerfile` + `docker-compose.yml` based on
+  [`dunglas/frankenphp`](https://hub.docker.com/r/dunglas/frankenphp), published
+  as a release artifact (e.g. `ghcr.io/fabeat/spora:latest`). FrankenPHP ships
+  with a **built-in Mercure hub**, so a single container provides PHP + Mercure
+  with no extra services — compatible with any VPS or Docker-capable host.
 - **One-click deploy:** Cloudron, Coolify, Railway manifests
 - Frontend build baked into release artifact (`public/dist/` committed or built in CI)
 
