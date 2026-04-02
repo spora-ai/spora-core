@@ -88,9 +88,9 @@
 **Real-Time Architecture (UI Updates vs System Notifications):**
 Spora distinguishes between live UI updates (when the tab is open) and asynchronous notifications (when the user is away).
 
-1. **Dashboard Updates (Polling/WebSockets):**
-   - **Base (Shared Hosting Safe):** The frontend will use standard REST Long-Polling against `GET /api/v1/tasks/{id}?since_sequence=X` every 2s. This guarantees functionality on cheap cPanel hosts where persistent WebSocket daemons are banned.
-   - **Optional Enhancement (VPS/Managed):** Spora will support optional server-side WebSockets (via Ratchet or Laravel Reverb equivalents) for users who have Docker/VPS terminal access to run a persistent `php spora:serve` daemon. External services like Pusher are supported but strictly optional.
+1. **Dashboard Updates (Polling vs Mercure/SSE):**
+   - **Base (Shared Hosting Safe):** The frontend will use standard REST Long-Polling against `GET /api/v1/tasks/{id}?since_sequence=X` every 2s. This guarantees functionality on cheap cPanel hosts where persistent background daemons are banned, without tying up all PHP-FPM workers.
+   - **Optional Enhancement (Mercure / Server-Sent Events):** Because Orchestrator states are entirely one-way (Server → Client), Server-Sent Events (SSE) via **Mercure** are vastly superior to WebSockets. Users with VPS access can run the Mercure Hub binary. Spora will push updates to the Hub using `symfony/mercure`. The Vue app will connect natively via `new EventSource()` (no heavy JS libraries required).
 
 2. **Web Push & Notification Gateways:**
    - When a task transitions to `PENDING_APPROVAL` or an agent replies, Spora needs to alert the user even if their browser is closed.
