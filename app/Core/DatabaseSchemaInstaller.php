@@ -104,7 +104,7 @@ final class DatabaseSchemaInstaller
 
     private function isStampCurrent(string $hash): bool
     {
-        return is_file($this->stampPath) // @phpstan-ignore-line (stampPath checked by caller)
+        return is_file($this->stampPath)
             && file_get_contents($this->stampPath) === $hash;
     }
 

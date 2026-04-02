@@ -25,16 +25,18 @@ return [
     'config' => static function (): array {
         // Layer 1 — built-in defaults (always present)
         $defaults = [
-            'db_driver'          => 'sqlite',
-            'db_path'            => BASE_PATH . '/storage/database.sqlite',
-            'db_host'            => null,
-            'db_port'            => null,
-            'db_name'            => null,
-            'db_user'            => null,
-            'db_password'        => null,  // shared hosting: set in config.php; Docker/CI: SPORA_DB_PASSWORD
-            'key_path'           => null,
-            'allow_registration' => true,
-            'app_env'            => 'production',
+            'db_driver'           => 'sqlite',
+            'db_path'             => BASE_PATH . '/storage/database.sqlite',
+            'db_host'             => null,
+            'db_port'             => null,
+            'db_name'             => null,
+            'db_user'             => null,
+            'db_password'         => null,  // shared hosting: set in config.php; Docker/CI: SPORA_DB_PASSWORD
+            'key_path'            => null,
+            'allow_registration'  => true,
+            'app_env'             => 'production',
+            'openai_api_key'      => null,  // SPORA_OPENAI_API_KEY env var or config.php
+            'anthropic_api_key'   => null,  // SPORA_ANTHROPIC_API_KEY env var or config.php
         ];
 
         // Layer 2 — config.php (installer-generated, gitignored, optional)
@@ -70,6 +72,12 @@ return [
         }
         if (($v = $env('SPORA_ALLOW_REGISTRATION'))  !== null) {
             $envOverrides['allow_registration']  = filter_var($v, FILTER_VALIDATE_BOOLEAN);
+        }
+        if (($v = $env('SPORA_OPENAI_API_KEY'))      !== null) {
+            $envOverrides['openai_api_key']      = $v;
+        }
+        if (($v = $env('SPORA_ANTHROPIC_API_KEY'))   !== null) {
+            $envOverrides['anthropic_api_key']   = $v;
         }
 
         return array_merge($defaults, $fileConfig, $envOverrides);
@@ -142,6 +150,10 @@ return [
         );
     },
 
+    Spora\Drivers\DriverFactory::class => static function (ContainerInterface $c): Spora\Drivers\DriverFactory {
+        return new Spora\Drivers\DriverFactory($c->get('config'));
+    },
+
     // Registered tool classes. Add to this list to make tools discoverable via GET /api/v1/tools.
     'tool_classes' => [],
 
@@ -180,7 +192,7 @@ return [
         ]);
 
         $orchestrator = new Orchestrator(
-            llmDriver: $c->get(Spora\Drivers\LLMDriverInterface::class),
+            driverFactory: $c->get(Spora\Drivers\DriverFactory::class),
             bus: $bus,
             toolInstances: $c->get('tool_instances'),
         );

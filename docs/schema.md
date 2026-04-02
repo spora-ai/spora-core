@@ -35,3 +35,15 @@
 **Both `tool_name` and `tool_class` stored in `tool_calls`** — `tool_name` is what the LLM uses; `tool_class` is what PHP uses to instantiate. Both needed for unambiguous resolution and audit.
 
 **Migration order:** `users` → `agents` → `tool_configurations` → `agent_tools` → `agent_tool_overrides` → `tasks` → `tool_calls` → `task_history`
+
+---
+
+## Database Schema Installer
+
+All database tables are created and upgraded automatically by `Spora\Core\DatabaseSchemaInstaller` during application boot. This mechanism wraps Laravel's `Migrator` but is optimized for Spora's zero-config, plugin-heavy environment:
+
+- **O(1) Hot Path Cache:** `install()` is called on every application boot. To prevent executing multiple database queries per request, it computes a composite version hash (`core_v1|plugin-a_v2|plugin-b_v1`) and compares it to a local filesystem stamp (`storage/.schema_stamp`). If the hash matches, the installer returns immediately (0 DB queries).
+- **Component isolation:** Each plugin (and the Core itself) has a tracked version in the `schema_versions` table.
+- **Migration file format:** Migrations should use numbered formats without dates (e.g. `000001_create_table.php`), an anonymous class pattern (`return new class extends Migration {}`), and directly use `Capsule::schema()` instead of the Laravel `Schema` facade. 
+- **Plugin Migration Constraints:** Plugin migration files **must** be globally prefixed with the plugin's slug (`{slug}_000001_name.php`) to avoid file collision in the shared `migrations` tracking table. `RuntimeException` is thrown if this is violated.
+- **Boot Lifecycle:** `Database::getCapsule()` exposes the static Eloquent capsule after `bootDatabaseConnectionOnly()` to allow the Installer to retrieve the `DatabaseManager` before the rest of the application loads.

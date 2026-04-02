@@ -8,7 +8,7 @@ use ReflectionClass;
 use RuntimeException;
 use Spora\Agents\Messages\TickMessage;
 use Spora\Agents\ValueObjects\AgentState;
-use Spora\Drivers\LLMDriverInterface;
+use Spora\Drivers\DriverFactory;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
@@ -30,7 +30,7 @@ final class Orchestrator implements OrchestratorInterface
      * @param  list<object>  $toolInstances  Instances of InputToolInterface|OutputToolInterface.
      */
     public function __construct(
-        private readonly LLMDriverInterface   $llmDriver,
+        private readonly DriverFactory        $driverFactory,
         private readonly MessageBusInterface  $bus,
         private readonly array                $toolInstances = [],
     ) {}
@@ -94,7 +94,7 @@ final class Orchestrator implements OrchestratorInterface
             tools: $toolDefs,
         );
 
-        $response = $this->llmDriver->complete($request);
+        $response = $this->driverFactory->makeFromAgent($agent)->complete($request);
 
         if ($response->hasToolCalls()) {
             // Append ONE assistant history row carrying ALL tool calls as a JSON array.

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Agents\Messages\TickMessage;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\ValueObjects\AgentState;
+use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
@@ -30,7 +31,7 @@ use Tests\Fixtures\ThrowingTool;
  * Build a synchronous Messenger bus + Orchestrator pair.
  */
 function makeOrchestrator(
-    LLMDriverInterface $llmDriver,
+    DriverFactory $driverFactory,
     array $toolInstances = [],
 ): Orchestrator {
     $orchestratorRef = null;
@@ -46,7 +47,7 @@ function makeOrchestrator(
     ]);
 
     $orchestratorRef = new Orchestrator(
-        llmDriver: $llmDriver,
+        driverFactory: $driverFactory,
         bus: $bus,
         toolInstances: $toolInstances,
     );
@@ -65,6 +66,17 @@ function mockLlm(LLMResponse $response): LLMDriverInterface
     $mock->allows('getModelName')->andReturn('mock-model');
 
     return $mock;
+}
+
+/**
+ * Wrap a mock LLMDriverInterface in a DriverFactory stub that always returns it.
+ */
+function mockDriverFactory(LLMDriverInterface $driver): DriverFactory
+{
+    $factory = Mockery::mock(DriverFactory::class);
+    $factory->allows('makeFromAgent')->andReturn($driver);
+
+    return $factory;
 }
 
 /**
@@ -102,7 +114,7 @@ it('start creates a RUNNING Task and seeds user history row', function (): void 
         completionId: 'cmp_1',
     ));
 
-    $orch = makeOrchestrator($llm);
+    $orch = makeOrchestrator(mockDriverFactory($llm));
     $task = $orch->start($agentId, 'Hello!', maxSteps: 5);
 
     expect($task->status)->toBe('COMPLETED')      // tick ran synchronously
@@ -122,7 +134,7 @@ it('tick marks task COMPLETED when LLM returns text', function (): void {
     [$agentId] = seedAgent();
 
     $llm  = mockLlm(new LLMResponse('All done!', [], 10, 5, 'cmp_1'));
-    $orch = makeOrchestrator($llm);
+    $orch = makeOrchestrator(mockDriverFactory($llm));
 
     $task = Task::create([
         'agent_id'    => $agentId,
@@ -147,7 +159,7 @@ it('tick is a no-op when task is not RUNNING', function (): void {
     $mock = Mockery::mock(LLMDriverInterface::class);
     $mock->allows('complete')->never();
 
-    $orch = makeOrchestrator($mock);
+    $orch = makeOrchestrator(mockDriverFactory($mock));
 
     $task = Task::create([
         'agent_id'    => $agentId,
@@ -178,7 +190,7 @@ it('InputTool path increments step_count once per LLM turn', function (): void {
         return new LLMResponse('Done via input tool.', [], 10, 5, 'cmp_2');
     });
 
-    $orch = makeOrchestrator($mock, [new StubInputTool()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new StubInputTool()]);
     $task = $orch->start($agentId, 'Run input tool', maxSteps: 10);
 
     $task->refresh();
@@ -215,7 +227,7 @@ it('two parallel InputTools are both executed and step_count is 2', function ():
         return new LLMResponse('Both done.', [], 10, 5, 'cmp_2');
     });
 
-    $orch = makeOrchestrator($mock, [new StubInputTool()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new StubInputTool()]);
     $task = $orch->start($agentId, 'Parallel inputs', maxSteps: 10);
 
     $task->refresh();
@@ -244,7 +256,7 @@ it('N parallel InputTools in one LLM turn increment step_count by 1, not N', fun
         return new LLMResponse('All done.', [], 10, 5, 'cmp_2');
     });
 
-    $orch = makeOrchestrator($mock, [new StubInputTool()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new StubInputTool()]);
     // With the old bug: 10 tools × step_count++ would hit max_steps=10 immediately and FAIL.
     $task = $orch->start($agentId, 'Parallel overload', maxSteps: 10);
 
@@ -267,7 +279,7 @@ it('parallel batch with one auto-execute and one requiring approval pauses with 
         ], 10, 5, 'cmp_1'),
     );
 
-    $orch = makeOrchestrator($mock, [new StubInputTool(), new StubOutputTool()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new StubInputTool(), new StubOutputTool()]);
     $task = $orch->start($agentId, 'Mixed parallel', maxSteps: 10);
 
     $task->refresh();
@@ -305,7 +317,7 @@ it('single assistant history row carries both tool calls when LLM fires two in p
             : new LLMResponse('done', [], 5, 3, 'cmp_2');
     });
 
-    $orch = makeOrchestrator($mock, [new StubInputTool()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new StubInputTool()]);
     $task = $orch->start($agentId, 'Parallel', maxSteps: 10);
 
     $assistantRow = TaskHistory::where('task_id', $task->id)
@@ -334,7 +346,7 @@ it('OutputTool requiring approval pauses task as PENDING_APPROVAL and serializes
         new LLMResponse(null, [new DriverToolCall('call_out', 'stub_output', ['key' => 'val'])], 10, 5, 'cmp_1'),
     );
 
-    $orch = makeOrchestrator($mock, [new StubOutputTool()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new StubOutputTool()]);
     $task = $orch->start($agentId, 'Run output tool', maxSteps: 10);
 
     $task->refresh();
@@ -367,7 +379,7 @@ it('OutputTool with requiresApproval=false executes immediately', function (): v
             : new LLMResponse('Auto done.', [], 5, 3, 'cmp_2');
     });
 
-    $orch = makeOrchestrator($mock, [new StubAutoApproveOutputTool()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new StubAutoApproveOutputTool()]);
     $task = $orch->start($agentId, 'Auto approve', maxSteps: 10);
 
     $task->refresh();
@@ -404,7 +416,7 @@ it('AgentTool row auto_approve=1 overrides class-level requiresApproval=true', f
             : new LLMResponse('Override done.', [], 5, 3, 'cmp_2');
     });
 
-    $orch = makeOrchestrator($mock, [new StubOutputTool()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new StubOutputTool()]);
     $task = $orch->start($agentId, 'Override auto approve', maxSteps: 10);
 
     $task->refresh();
@@ -428,7 +440,7 @@ it('task is marked FAILED when step_count reaches max_steps', function (): void 
         return new LLMResponse(null, [new DriverToolCall("call_{$callNum}", 'stub_input', [])], 5, 3, "cmp_{$callNum}");
     });
 
-    $orch = makeOrchestrator($mock, [new StubInputTool()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new StubInputTool()]);
     $task = $orch->start($agentId, 'Infinite loop', maxSteps: 3);
 
     $task->refresh();
@@ -454,7 +466,7 @@ it('tool exception is caught, encoded as an error ToolResult, and the loop survi
             : new LLMResponse('Recovered after plugin error.', [], 5, 3, 'cmp_2');
     });
 
-    $orch = makeOrchestrator($mock, [new ThrowingTool()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new ThrowingTool()]);
     $task = $orch->start($agentId, 'Use failing tool', maxSteps: 10);
 
     $task->refresh();
@@ -483,7 +495,7 @@ it('resume executes the approved OutputTool, appends history, and re-dispatches 
             : new LLMResponse('Resumed.', [], 5, 3, 'cmp_2');
     });
 
-    $orch = makeOrchestrator($mock, [new StubOutputTool()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new StubOutputTool()]);
     $task = $orch->start($agentId, 'Resume test', maxSteps: 10);
 
     $task->refresh();
@@ -516,7 +528,7 @@ it('resume throws when task is not PENDING_APPROVAL', function (): void {
     ]);
 
     $mock = Mockery::mock(LLMDriverInterface::class);
-    $orch = makeOrchestrator($mock);
+    $orch = makeOrchestrator(mockDriverFactory($mock));
 
     expect(fn() => $orch->resume($task->id, []))->toThrow(RuntimeException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
@@ -533,7 +545,7 @@ it('resume throws InvalidArgumentException when approved arguments fail schema v
         new LLMResponse(null, [new DriverToolCall('call_schema', 'stub_output_with_schema', ['recipient' => 'a@b.com'])], 5, 3, 'cmp_1'),
     );
 
-    $orch = makeOrchestrator($mock, [new StubOutputToolWithSchema()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new StubOutputToolWithSchema()]);
     $task = $orch->start($agentId, 'Schema validation test', maxSteps: 10);
 
     $task->refresh();
@@ -561,7 +573,7 @@ it('reject injects rejection into history and re-dispatches tick', function (): 
             : new LLMResponse('Ok, rejected.', [], 5, 3, 'cmp_2');
     });
 
-    $orch = makeOrchestrator($mock, [new StubOutputTool()]);
+    $orch = makeOrchestrator(mockDriverFactory($mock), [new StubOutputTool()]);
     $task = $orch->start($agentId, 'Reject test', maxSteps: 10);
 
     $task->refresh();
@@ -594,7 +606,7 @@ it('reject throws when task is not PENDING_APPROVAL', function (): void {
     ]);
 
     $mock = Mockery::mock(LLMDriverInterface::class);
-    $orch = makeOrchestrator($mock);
+    $orch = makeOrchestrator(mockDriverFactory($mock));
 
     expect(fn() => $orch->reject($task->id, 'reason'))->toThrow(RuntimeException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
