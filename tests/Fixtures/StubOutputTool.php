@@ -17,7 +17,7 @@ final class StubOutputTool implements OutputToolInterface
         private readonly string $resultContent = 'output_result',
     ) {}
 
-    public function execute(array $arguments): ToolResult
+    public function execute(array $arguments, int $agentId): ToolResult
     {
         return new ToolResult(true, $this->resultContent);
     }

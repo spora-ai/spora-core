@@ -10,6 +10,7 @@ use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Psr\Log\LoggerInterface;
 
 final class OpenAICompatibleDriver implements LLMDriverInterface
 {
@@ -18,6 +19,7 @@ final class OpenAICompatibleDriver implements LLMDriverInterface
         private readonly string              $model,
         private readonly string              $baseUrl,
         private readonly HttpClientInterface $httpClient,
+        private readonly ?LoggerInterface    $logger = null,
     ) {}
 
     public function getProviderName(): string
@@ -49,7 +51,10 @@ final class OpenAICompatibleDriver implements LLMDriverInterface
             $body['tool_choice'] = 'auto';
         }
 
-        $response = $this->httpClient->request('POST', rtrim($this->baseUrl, '/') . '/chat/completions', [
+        $url = rtrim($this->baseUrl, '/') . '/chat/completions';
+        $this->logger?->debug('LLM Request (OpenAI)', ['url' => $url, 'payload' => $body]);
+
+        $response = $this->httpClient->request('POST', $url, [
             'headers' => [
                 'Authorization' => 'Bearer ' . $this->apiKey,
                 'Content-Type'  => 'application/json',
@@ -70,6 +75,7 @@ final class OpenAICompatibleDriver implements LLMDriverInterface
 
         /** @var array<string, mixed> $data */
         $data = $response->toArray();
+        $this->logger?->debug('LLM Response (OpenAI)', ['status' => $statusCode, 'data' => $data]);
 
         $completionId  = (string) ($data['id'] ?? '');
         $inputTokens   = (int) ($data['usage']['prompt_tokens'] ?? 0);

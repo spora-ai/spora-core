@@ -85,8 +85,11 @@ final class Orchestrator implements OrchestratorInterface
         // Build conversation messages from task_history.
         $messages = $this->buildMessages($task->id);
 
+        // Fetch enabled tool classes for this agent
+        $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->toArray();
+
         // Build LLM tool definitions from registered tool instances.
-        $toolDefs = $this->buildToolDefinitions();
+        $toolDefs = $this->buildToolDefinitions($enabledClasses);
 
         $request = new LLMRequest(
             systemPrompt: 'You are a helpful AI assistant.',
@@ -119,7 +122,7 @@ final class Orchestrator implements OrchestratorInterface
                 outputTokens: $response->outputTokens,
             );
 
-            $this->handleToolCalls($task, $agent, $response->toolCalls);
+            $this->handleToolCalls($task, $agent, $response->toolCalls, $enabledClasses);
         } else {
             // Pure text response — task is complete.
             $this->appendHistory(
@@ -171,7 +174,7 @@ final class Orchestrator implements OrchestratorInterface
             SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema());
 
             // Fix #5: Safe execution — community plugins may throw.
-            $result = $this->safeExecute($toolInstance, $approvedArgs);
+            $result = $this->safeExecute($toolInstance, $approvedArgs, $state->agentId);
 
             ToolCallModel::where('task_id', $taskId)
                 ->where('provider_call_id', $pendingToolCall->providerCallId)
@@ -249,53 +252,70 @@ final class Orchestrator implements OrchestratorInterface
      * the task is paused and the full batch is serialised into pending_state.
      *
      * @param  list<DriverToolCall>  $toolCalls
+     * @param  list<string>          $enabledClasses
      */
-    private function handleToolCalls(Task $task, Agent $agent, array $toolCalls): void
+    private function handleToolCalls(Task $task, Agent $agent, array $toolCalls, array $enabledClasses): void
     {
         /** @var list<DriverToolCall> $pendingApproval */
         $pendingApproval = [];
 
         foreach ($toolCalls as $toolCall) {
-            $toolInstance     = $this->resolveToolByName($toolCall->toolName);
-            $toolClass        = get_class($toolInstance);
-            $toolType         = $toolInstance instanceof OutputToolInterface ? 'output' : 'input';
-            $requiresApproval = $this->resolveRequiresApproval($toolInstance, $toolClass, $agent->id);
+            try {
+                $toolInstance = $this->resolveToolByName($toolCall->toolName);
+                $toolClass    = get_class($toolInstance);
 
-            // Persist the ToolCall record so the UI can surface it immediately.
-            $toolCallRecord = ToolCallModel::create([
-                'task_id'            => $task->id,
-                'agent_id'           => $agent->id,
-                'provider_call_id'   => $toolCall->providerCallId,
-                'tool_name'          => $toolCall->toolName,
-                'tool_class'         => $toolClass,
-                'tool_type'          => $toolType,
-                'status'             => 'PENDING_APPROVAL',
-                'proposed_arguments' => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
-                'human_description'  => $toolInstance instanceof OutputToolInterface
-                    ? $toolInstance->describeAction($toolCall->arguments)
-                    : null,
-            ]);
+                if (!in_array($toolClass, $enabledClasses, true)) {
+                    throw new RuntimeException("The LLM attempted to call tool '{$toolCall->toolName}' which is not enabled for this agent.");
+                }
 
-            if ($toolInstance instanceof InputToolInterface || !$requiresApproval) {
-                // Fix #5: Safe execution — community plugins may throw.
-                $result = $this->safeExecute($toolInstance, $toolCall->arguments);
+                $toolType         = $toolInstance instanceof OutputToolInterface ? 'output' : 'input';
+                $requiresApproval = $this->resolveRequiresApproval($toolInstance, $toolClass, $agent->id);
 
-                $toolCallRecord->update([
-                    'status'         => 'APPROVED',
-                    'result_content' => $result->content,
-                    'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                    'executed_at'    => date('Y-m-d H:i:s'),
+                // Persist the ToolCall record so the UI can surface it immediately.
+                $toolCallRecord = ToolCallModel::create([
+                    'task_id'            => $task->id,
+                    'agent_id'           => $agent->id,
+                    'provider_call_id'   => $toolCall->providerCallId,
+                    'tool_name'          => $toolCall->toolName,
+                    'tool_class'         => $toolClass,
+                    'tool_type'          => $toolType,
+                    'status'             => 'PENDING_APPROVAL',
+                    'proposed_arguments' => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
+                    'human_description'  => $toolInstance instanceof OutputToolInterface
+                        ? $toolInstance->describeAction($toolCall->arguments)
+                        : null,
                 ]);
 
+                if ($toolInstance instanceof InputToolInterface || !$requiresApproval) {
+                    // Fix #5: Safe execution — community plugins may throw.
+                    $result = $this->safeExecute($toolInstance, $toolCall->arguments, $agent->id);
+
+                    $toolCallRecord->update([
+                        'status'         => 'APPROVED',
+                        'result_content' => $result->content,
+                        'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
+                        'executed_at'    => date('Y-m-d H:i:s'),
+                    ]);
+
+                    $this->appendHistory(
+                        taskId: $task->id,
+                        role: 'tool',
+                        content: $result->content,
+                        toolCallId: $toolCall->providerCallId,
+                        toolName: $toolCall->toolName,
+                    );
+                } else {
+                    $pendingApproval[] = $toolCall;
+                }
+            } catch (Throwable $e) {
+                // If resolving the tool fails (hallucinated) or validating it fails, log the error to the LLM directly
                 $this->appendHistory(
                     taskId: $task->id,
                     role: 'tool',
-                    content: $result->content,
+                    content: 'System Error: ' . $e->getMessage(),
                     toolCallId: $toolCall->providerCallId,
                     toolName: $toolCall->toolName,
                 );
-            } else {
-                $pendingApproval[] = $toolCall;
             }
         }
 
@@ -327,10 +347,10 @@ final class Orchestrator implements OrchestratorInterface
      * The error is encoded into a ToolResult so the Orchestrator loop survives
      * and the LLM sees the failure on the next tick.
      */
-    private function safeExecute(InputToolInterface|OutputToolInterface $toolInstance, array $arguments): ToolResult
+    private function safeExecute(InputToolInterface|OutputToolInterface $toolInstance, array $arguments, int $agentId): ToolResult
     {
         try {
-            return $toolInstance->execute($arguments);
+            return $toolInstance->execute($arguments, $agentId);
         } catch (Throwable $e) {
             return new ToolResult(
                 success: false,
@@ -420,13 +440,18 @@ final class Orchestrator implements OrchestratorInterface
     /**
      * Build the tool definitions array for the LLM request from registered tool instances.
      *
+     * @param  list<string> $enabledClasses
      * @return list<array{type: "function", function: array{name: string, description: string, parameters: array}}>
      */
-    private function buildToolDefinitions(): array
+    private function buildToolDefinitions(array $enabledClasses): array
     {
         $defs = [];
 
         foreach ($this->toolInstances as $instance) {
+            if (!in_array(get_class($instance), $enabledClasses, true)) {
+                continue;
+            }
+
             $ref   = new ReflectionClass($instance);
             $attrs = $ref->getAttributes(Tool::class);
 

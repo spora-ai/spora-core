@@ -13,7 +13,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[OutputTool(requiresApproval: false)]
 final class StubAutoApproveOutputTool implements OutputToolInterface
 {
-    public function execute(array $arguments): ToolResult
+    public function execute(array $arguments, int $agentId): ToolResult
     {
         return new ToolResult(true, 'auto_output_result');
     }

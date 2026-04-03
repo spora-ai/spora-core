@@ -16,7 +16,7 @@ interface InputToolInterface
      *
      * @param  array<string, mixed> $arguments  Key-value pairs matching #[ToolParameter] names.
      */
-    public function execute(array $arguments): ToolResult;
+    public function execute(array $arguments, int $agentId): ToolResult;
 
     /**
      * Return the JSON Schema "parameters" object for the LLM function-calling payload.

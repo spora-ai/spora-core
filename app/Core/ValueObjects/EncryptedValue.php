@@ -25,7 +25,7 @@ final class EncryptedValue
         return $this->encoded;
     }
 
-    public function __toString(): never
+    public function __toString(): string
     {
         throw new LogicException(
             'EncryptedValue cannot be cast to string. Call SecurityManager::decrypt() first.',

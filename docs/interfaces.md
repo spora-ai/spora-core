@@ -21,7 +21,7 @@ All interfaces live in `app/`. The authoritative source is the source code — t
 
 Read-only / generative tools. Executed instantly by the Orchestrator without pausing.
 
-- `execute(array $arguments): ToolResult` — MUST NOT throw; encode errors in `ToolResult`.
+- `execute(array $arguments, int $agentId): ToolResult` — MUST NOT throw; encode errors in `ToolResult`.
 - `getParametersSchema(): array` — returns the JSON Schema `parameters` block.
 
 ---
@@ -30,7 +30,7 @@ Read-only / generative tools. Executed instantly by the Orchestrator without pau
 
 Write / real-world-action tools. The Orchestrator MUST NOT call `execute()` directly — it pauses the loop and lets `ApprovalResumeHandler` call `execute()` after human approval (or auto-approves immediately).
 
-- `execute(array $arguments): ToolResult` — called only after approval.
+- `execute(array $arguments, int $agentId): ToolResult` — called only after approval.
 - `describeAction(array $arguments): string` — human-readable description for the approval UI.
 - `getParametersSchema(): array`
 

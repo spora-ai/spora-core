@@ -13,7 +13,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[OutputTool(requiresApproval: true)]
 final class StubOutputToolWithSchema implements OutputToolInterface
 {
-    public function execute(array $arguments): ToolResult
+    public function execute(array $arguments, int $agentId): ToolResult
     {
         return new ToolResult(true, 'output_with_schema_result');
     }

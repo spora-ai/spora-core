@@ -16,7 +16,7 @@ interface OutputToolInterface
      *
      * @param  array<string, mixed> $arguments  Arguments confirmed (or edited) by the human.
      */
-    public function execute(array $arguments): ToolResult;
+    public function execute(array $arguments, int $agentId): ToolResult;
 
     /**
      * Return a human-readable, markdown-safe description of what this tool WILL DO.

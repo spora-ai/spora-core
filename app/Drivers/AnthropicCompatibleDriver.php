@@ -10,16 +10,18 @@ use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Psr\Log\LoggerInterface;
 
-final class AnthropicDriver implements LLMDriverInterface
+class AnthropicCompatibleDriver implements LLMDriverInterface
 {
-    private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
 
     public function __construct(
         private readonly string              $apiKey,
         private readonly string              $model,
+        private readonly string              $baseUrl,
         private readonly HttpClientInterface $httpClient,
+        private readonly ?LoggerInterface    $logger = null,
     ) {}
 
     public function getProviderName(): string
@@ -48,7 +50,10 @@ final class AnthropicDriver implements LLMDriverInterface
             $body['tools'] = $tools;
         }
 
-        $response = $this->httpClient->request('POST', self::API_URL, [
+        $url = rtrim($this->baseUrl, '/');
+        $this->logger?->debug('LLM Request (Anthropic)', ['url' => $url, 'payload' => $body]);
+
+        $response = $this->httpClient->request('POST', $url, [
             'headers' => [
                 'x-api-key'         => $this->apiKey,
                 'anthropic-version' => self::API_VERSION,
@@ -70,6 +75,7 @@ final class AnthropicDriver implements LLMDriverInterface
 
         /** @var array<string, mixed> $data */
         $data = $response->toArray();
+        $this->logger?->debug('LLM Response (Anthropic)', ['status' => $statusCode, 'data' => $data]);
 
         $completionId = (string) ($data['id'] ?? '');
         $inputTokens  = (int) ($data['usage']['input_tokens'] ?? 0);

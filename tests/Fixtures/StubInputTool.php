@@ -17,7 +17,7 @@ final class StubInputTool implements InputToolInterface
         private readonly string $resultContent = 'input_result',
     ) {}
 
-    public function execute(array $arguments): ToolResult
+    public function execute(array $arguments, int $agentId): ToolResult
     {
         return new ToolResult(true, $this->resultContent);
     }

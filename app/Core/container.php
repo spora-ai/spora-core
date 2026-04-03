@@ -35,6 +35,8 @@ return [
             'key_path'            => null,
             'allow_registration'  => true,
             'app_env'             => 'production',
+            'log_level'           => 'WARNING',
+            'log_path'            => BASE_PATH . '/storage/spora.log',
         ];
 
         // Layer 2 — config.php (installer-generated, gitignored, optional)
@@ -70,6 +72,12 @@ return [
         }
         if (($v = $env('SPORA_ALLOW_REGISTRATION'))  !== null) {
             $envOverrides['allow_registration']  = filter_var($v, FILTER_VALIDATE_BOOLEAN);
+        }
+        if (($v = $env('SPORA_LOG_LEVEL')) !== null) {
+            $envOverrides['log_level'] = $v;
+        }
+        if (($v = $env('SPORA_LOG_PATH')) !== null) {
+            $envOverrides['log_path'] = $v;
         }
         return array_merge($defaults, $fileConfig, $envOverrides);
     },
@@ -114,6 +122,19 @@ return [
         return new Database($c->get('config'), $c->get(PluginLoader::class));
     },
 
+    Psr\Log\LoggerInterface::class => static function (ContainerInterface $c): Psr\Log\LoggerInterface {
+        $config = $c->get('config');
+        $levelStr = strtoupper($config['log_level'] ?? 'WARNING');
+        $level = constant(Monolog\Level::class . '::' . $levelStr);
+
+        $logger = new Monolog\Logger('spora');
+        $handler = new Monolog\Handler\StreamHandler($config['log_path'] ?? (BASE_PATH . '/storage/spora.log'), $level);
+        // Explicitly set permissions for shared hosting (e.g., 0664) - though StreamHandler respects umask natively.
+        $logger->pushHandler($handler);
+
+        return $logger;
+    },
+
     Delight\Auth\Auth::class => static function (ContainerInterface $c): Delight\Auth\Auth {
         $pdo = Illuminate\Database\Capsule\Manager::connection()->getPdo();
 
@@ -142,12 +163,18 @@ return [
     },
 
     Spora\Drivers\DriverFactory::class => static function (ContainerInterface $c): Spora\Drivers\DriverFactory {
-        return new Spora\Drivers\DriverFactory($c->get(Spora\Services\ToolConfigService::class));
+        return new Spora\Drivers\DriverFactory(
+            $c->get(Spora\Services\ToolConfigService::class),
+            $c->get(Psr\Log\LoggerInterface::class)
+        );
     },
 
     // Registered tool classes. Add to this list to make tools discoverable via GET /api/v1/tools.
     'tool_classes' => [
         Spora\Drivers\LLMConfiguration::class,
+        Spora\Tools\CurrentTimeTool::class,
+        Spora\Tools\CalculatorTool::class,
+        Spora\Tools\ScratchpadTool::class,
     ],
 
     Spora\Http\AgentController::class => static function (ContainerInterface $c): Spora\Http\AgentController {

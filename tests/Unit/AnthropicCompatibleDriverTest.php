@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Spora\Drivers\AnthropicDriver;
+use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\ValueObjects\LLMRequest;
@@ -13,11 +13,12 @@ use Symfony\Component\HttpClient\Response\MockResponse;
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeAnthropicDriver(MockHttpClient $client): AnthropicDriver
+function makeAnthropicDriver(MockHttpClient $client): AnthropicCompatibleDriver
 {
-    return new AnthropicDriver(
+    return new AnthropicCompatibleDriver(
         apiKey:     'test-anthropic-key',
         model:      'claude-3-5-sonnet-20241022',
+        baseUrl:    'https://api.anthropic.com/v1/messages',
         httpClient: $client,
     );
 }

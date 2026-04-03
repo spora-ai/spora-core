@@ -2,7 +2,7 @@
 
 **What is Spora?** The "WordPress of AI Agents" — a portable, zero-config agent orchestration tool in PHP 8.2+. Runs on any shared host (cPanel/FTP). Single "My Assistant" UX in V1, multi-agent DB structure for future scale.
 
-**Reference docs:** `docs/architecture.md` · `docs/api.md` · `docs/schema.md` · `docs/interfaces.md` · `docs/plugins.md`
+**Reference docs:** `docs/architecture.md` · `docs/api.md` · `docs/schema.md` · `docs/interfaces.md` · `docs/plugins.md` · `docs/drivers.md`
 
 **Stack:** `symfony/http-foundation`, `symfony/messenger`, `nikic/fast-route`, `php-di/php-di`, `illuminate/database` (Eloquent), `delight-im/auth`, `pestphp/pest`, Vue 3 + Vite + Tailwind + shadcn-vue (frontend).
 
@@ -19,37 +19,13 @@
 | Orchestrator (Layer 4) | Full state machine (`start/tick/resume/reject`), `OrchestratorProxy`, Messenger wiring, `TaskController` | +24 |
 | Recipes + Plugins (Layer 5) | `RecipeScanner`, `PluginLoader` (Strict `plugin.json` manifest enforcement, PSR-4 mapping, nested deps, plugin auto-discovery). See `docs/plugins.md` | +24 |
 | Schema Installer (Layer 6) | `DatabaseSchemaInstaller` (`schema_versions` wrapping Laravel Migrator). Features O(1) filesystem stamp cache for hot-path skipping + plugin migration support natively. See `docs/schema.md` | +17 |
+| LLM Drivers (Layer 7) | `OpenAICompatibleDriver`, `AnthropicDriver`, `DriverFactory` (plugin-extensible provider registry). `symfony/http-client` transport. See `docs/drivers.md` | +? |
 
 **Total: 186 tests, 0 failures. PHPStan level 5 clean.**
 
 ---
 
 ## Phase 3 — Core Infrastructure (Active)
-
-### Layer 7 — LLM Drivers (Completed)
-
-**Goal:** Implement `LLMDriverInterface` for OpenAI-compatible and Anthropic endpoints. Unlocks end-to-end task execution.
-
-**Driver A — `OpenAICompatibleDriver`** (`app/Drivers/OpenAICompatibleDriver.php`)
-- Provider name: `openai_compatible` (matches `agents.llm_provider` default)
-- `POST {base_url}/chat/completions` — standard OpenAI chat completions format
-- `base_url` defaults to `https://api.openai.com/v1`; override for Ollama, Groq, LM Studio, Azure, etc.
-- Reads `api_key`, `model` from `ToolConfigService` or Agent row fallback
-- Parses `finish_reason: tool_calls` vs text
-
-**Driver B — `AnthropicDriver`** (`app/Drivers/AnthropicDriver.php`)
-- Provider name: `anthropic`
-- `POST https://api.anthropic.com/v1/messages`, header `anthropic-version: 2023-06-01`
-- Anthropic request format: `system` separate, `tools` array uses Anthropic schema
-- Parses `stop_reason: tool_use` (extract `tool_use` blocks) vs `stop_reason: end_turn` (extract `text` blocks)
-
-**Shared:**
-- `app/Drivers/DriverFactory.php` — resolves `agent.llm_provider` → driver instance; merges plugin-registered drivers
-- Bind `LLMDriverInterface` via `DriverFactory` in `container.php` (resolves per-request from Agent row)
-- `composer.json` — add `symfony/http-client ^7.0`
-- `tests/Unit/OpenAICompatibleDriverTest.php`, `tests/Unit/AnthropicDriverTest.php` — mock HTTP responses; test tool call parsing, text response parsing, error handling, rate limit exception
-
----
 
 ### Layer 8 — Core Base Toolset ← NEXT
 
@@ -60,13 +36,12 @@
 - **Calculator** (`Input`): LLMs hallucinate math. A simple PHP-backed expression evaluator ensures flawless arithmetic for budgets and scheduling.
 
 *Configurable Core Tools:*
-- **Web Search** (`Input`): Tavily, Exa, or Brave Search to search the web and return JSON snippets.
-- **Read URL** (`Input`): The critical companion to Web Search. The agent takes a URL, scrapes it, strips the HTML, and returns clean Markdown.
-- **News** (`Input`): Fetch latest headlines based on keywords or categories.
-- **Weather** (`Input`): Use a free API (like Open-Meteo) to fetch local forecasts based on coordinates/city.
-- **E-Mail Access** (`Input` / `Output`): IMAP reader to retrieve unread mail; SMTP writer (`requiresApproval: true`) to draft outgoing emails.
+- **Web Search** (`Input`): Separate providers via tool classes (e.g. `TavilySearchTool`, `SerperSearchTool`) tagged mathematically with `#[Tool(category: 'search')]` to prevent LLM collision. Native API capabilities (like Minimax search) will be handled as simple toggle flags inside the Agent's `LLMConfiguration` settings, NOT as standalone Agent tools.
+- **Read URL** (`Input`): Scrape a URL for Markdown extraction.
+- **News** (`Input`): Distinct from web search. Fetch latest headlines based on keywords or categories.
+- **E-Mail Access** (`Input` / `Output`): IMAP reader/SMTP writer baseline with a future OAuth layer plugin expansion for Google/Outlook.
 - **Calendar Access** (`Input` / `Output`): CalDAV or Google/Outlook API bridge.
-- **Internal Scratchpad / Notes** (`Input` / `Output`): A simple text/SQLite-based key-value store or markdown file writer where the agent can save long-term memories or format final reports for the user to read natively in the app.
+- **Internal Scratchpad / Notes** (`Input` / `Output`): A simple text/SQLite-based key-value store or markdown file writer.
 
 ---
 
@@ -111,6 +86,11 @@ Spora distinguishes between live UI updates (when the tab is open) and asynchron
 ---
 
 ## Backlog
+
+### API Logging & Observability
+System-wide config definition for API interactions via PSR-3 (`Monolog`).
+- Setup a `LoggerInterface` bound in the container, reading `log_level` and `log_path` from settings.
+- Implement Guzzle HTTP Middleware in driver transports to log external API calls, LLM requests, and HTTP traffic implicitly without custom code spanning the tools.
 
 ### Agent Execution Triggers
 Expand how an Agent Task can be started beyond a manual UI click:

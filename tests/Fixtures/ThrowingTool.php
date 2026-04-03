@@ -14,7 +14,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[InputTool]
 final class ThrowingTool implements InputToolInterface
 {
-    public function execute(array $arguments): ToolResult
+    public function execute(array $arguments, int $agentId): ToolResult
     {
         throw new RuntimeException('Community plugin exploded!');
     }
