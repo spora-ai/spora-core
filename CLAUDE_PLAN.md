@@ -90,7 +90,7 @@ Spora distinguishes between live UI updates (when the tab is open) and asynchron
 
 1. **Dashboard Updates (Polling vs Mercure/SSE):**
    - **Base (Shared Hosting Safe):** The frontend will use standard REST Long-Polling against `GET /api/v1/tasks/{id}?since_sequence=X` every 2s. This guarantees functionality on cheap cPanel hosts where persistent background daemons are banned, without tying up all PHP-FPM workers.
-   - **Optional Enhancement (Mercure / Server-Sent Events):** Because Orchestrator states are entirely one-way (Server → Client), Server-Sent Events (SSE) via **Mercure** are vastly superior to WebSockets. Users with VPS access can run the Mercure Hub binary. Spora will push updates to the Hub using `symfony/mercure`. The Vue app will connect natively via `new EventSource()` (no heavy JS libraries required).
+   - **Optional Enhancement (Mercure / Server-Sent Events):** Because Orchestrator states are entirely one-way (Server → Client), Server-Sent Events (SSE) via **Mercure** are vastly superior to WebSockets. Users with VPS access can run the Mercure Hub binary. Spora will push updates to the Hub using `symfony/mercure`. The Vue app will connect natively via `new EventSource()` (no heavy JS libraries required). The **FrankenPHP-based Docker image** (see Build & Distribution Scripts) bundles the Mercure hub natively, giving any Docker/VPS user both PHP and Mercure in a single container with zero extra setup.
 
 2. **Web Push & Notification Gateways:**
    - When a task transitions to `PENDING_APPROVAL` or an agent replies, Spora needs to alert the user even if their browser is closed.
@@ -140,7 +140,11 @@ WordPress-style web installer: DB connection form, generate `config.php`, place 
 
 ### Build & Distribution Scripts
 - **Shared hosting:** single ZIP (no `vendor/` excluded, `composer install --no-dev` pre-run, htaccess included)
-- **Docker:** `Dockerfile` + `docker-compose.yml` (PHP-FPM + nginx + optional MySQL)
+- **Docker (FrankenPHP):** `Dockerfile` + `docker-compose.yml` based on
+  [`dunglas/frankenphp`](https://hub.docker.com/r/dunglas/frankenphp), published
+  as a release artifact (e.g. `ghcr.io/fabeat/spora:latest`). FrankenPHP ships
+  with a **built-in Mercure hub**, so a single container provides PHP + Mercure
+  with no extra services — compatible with any VPS or Docker-capable host.
 - **One-click deploy:** Cloudron, Coolify, Railway manifests
 - Frontend build baked into release artifact (`public/dist/` committed or built in CI)
 
