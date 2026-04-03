@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Plugins;
 
+use RuntimeException;
+
 /**
  * Discovers and boots PluginInterface implementations from the plugins/ directory.
  *
@@ -138,7 +140,7 @@ final class PluginLoader
     }
 
     /**
-     * @throws \RuntimeException  When the manifest JSON is invalid or violates the schema contract.
+     * @throws RuntimeException  When the manifest JSON is invalid or violates the schema contract.
      *                            Not thrown when the declared class simply cannot be resolved at
      *                            runtime (e.g. PSR-4 not yet registered) — that failure is silent.
      */
@@ -153,13 +155,13 @@ final class PluginLoader
         $manifest = json_decode($raw, true);
 
         if (!is_array($manifest)) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 "Plugin manifest '{$manifestFile}' contains invalid JSON.",
             );
         }
 
         if (!isset($manifest['slug']) || !is_string($manifest['slug'])) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 "Plugin manifest '{$manifestFile}' is missing the required 'slug' field. " .
                 "See plugin.schema.json for the full manifest contract.",
             );
@@ -168,7 +170,7 @@ final class PluginLoader
         $slug = $manifest['slug'];
 
         if (!preg_match('/^[a-z0-9][a-z0-9_-]*$/', $slug)) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 "Plugin manifest '{$manifestFile}' has an invalid slug '{$slug}'. " .
                 "Slugs must be lowercase alphanumeric and may contain hyphens or underscores " .
                 "(e.g. 'my-plugin').",
@@ -176,7 +178,7 @@ final class PluginLoader
         }
 
         if (!isset($manifest['class']) || !is_string($manifest['class'])) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 "Plugin manifest '{$manifestFile}' (slug: '{$slug}') is missing the required 'class' field. " .
                 "See plugin.schema.json for the full manifest contract.",
             );

@@ -16,7 +16,7 @@ test('it creates AnthropicDriver when agent uses anthropic provider', function (
         ->once()
         ->andReturn(['anthropic_api_key' => 'test-anthropic-key']);
 
-    $factory = new DriverFactory($toolConfigService, new \Psr\Log\NullLogger());
+    $factory = new DriverFactory($toolConfigService, new Psr\Log\NullLogger());
 
     $agent = new Agent();
     $agent->id = 1;
@@ -37,7 +37,7 @@ test('it creates OpenAICompatibleDriver when agent uses openai_compatible provid
         ->once()
         ->andReturn(['openai_api_key' => 'test-openai-key']);
 
-    $factory = new DriverFactory($toolConfigService, new \Psr\Log\NullLogger());
+    $factory = new DriverFactory($toolConfigService, new Psr\Log\NullLogger());
 
     $agent = new Agent();
     $agent->id = 2;
@@ -59,7 +59,7 @@ test('it defaults to openai_compatible when provider is null', function () {
         ->once()
         ->andReturn([]);
 
-    $factory = new DriverFactory($toolConfigService, new \Psr\Log\NullLogger());
+    $factory = new DriverFactory($toolConfigService, new Psr\Log\NullLogger());
 
     $agent = new Agent();
     $agent->id = 3;

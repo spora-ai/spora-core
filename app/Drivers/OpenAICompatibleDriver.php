@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Spora\Drivers;
 
+use Psr\Log\LoggerInterface;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
-use Psr\Log\LoggerInterface;
 
 final class OpenAICompatibleDriver implements LLMDriverInterface
 {
@@ -59,7 +59,8 @@ final class OpenAICompatibleDriver implements LLMDriverInterface
                 'Authorization' => 'Bearer ' . $this->apiKey,
                 'Content-Type'  => 'application/json',
             ],
-            'json' => $body,
+            'json'    => $body,
+            'timeout' => 45, // Fix 2: Prevent hanging indefinitely
         ]);
 
         $statusCode = $response->getStatusCode();
@@ -96,24 +97,24 @@ final class OpenAICompatibleDriver implements LLMDriverInterface
 
                 $toolCalls[] = new ToolCall(
                     providerCallId: (string) ($tc['id'] ?? ''),
-                    toolName:       (string) ($tc['function']['name'] ?? ''),
-                    arguments:      $arguments,
+                    toolName: (string) ($tc['function']['name'] ?? ''),
+                    arguments: $arguments,
                 );
             }
 
             return new LLMResponse(
-                content:      null,
-                toolCalls:    $toolCalls,
-                inputTokens:  $inputTokens,
+                content: null,
+                toolCalls: $toolCalls,
+                inputTokens: $inputTokens,
                 outputTokens: $outputTokens,
                 completionId: $completionId,
             );
         }
 
         return new LLMResponse(
-            content:      (string) ($message['content'] ?? ''),
-            toolCalls:    [],
-            inputTokens:  $inputTokens,
+            content: (string) ($message['content'] ?? ''),
+            toolCalls: [],
+            inputTokens: $inputTokens,
             outputTokens: $outputTokens,
             completionId: $completionId,
         );

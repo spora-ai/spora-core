@@ -17,11 +17,11 @@ use Spora\Models\ToolCall as ToolCallModel;
 use Symfony\Component\Messenger\Handler\HandlersLocator;
 use Symfony\Component\Messenger\MessageBus;
 use Symfony\Component\Messenger\Middleware\HandleMessageMiddleware;
+use Tests\Fixtures\SpyAgentIdInputTool;
 use Tests\Fixtures\StubAutoApproveOutputTool;
 use Tests\Fixtures\StubInputTool;
 use Tests\Fixtures\StubOutputTool;
 use Tests\Fixtures\StubOutputToolWithSchema;
-use Tests\Fixtures\SpyAgentIdInputTool;
 use Tests\Fixtures\ThrowingTool;
 
 // ---------------------------------------------------------------------------
@@ -578,10 +578,14 @@ it('resume throws when task is not PENDING_APPROVAL', function (): void {
 it('resume throws InvalidArgumentException when approved arguments fail schema validation', function (): void {
     [$agentId] = seedAgent();
 
+    $callCount = 0;
     $mock = Mockery::mock(LLMDriverInterface::class);
-    $mock->allows('complete')->once()->andReturn(
-        new LLMResponse(null, [new DriverToolCall('call_schema', 'stub_output_with_schema', ['recipient' => 'a@b.com'])], 5, 3, 'cmp_1'),
-    );
+    $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+        $callCount++;
+        return $callCount === 1
+            ? new LLMResponse(null, [new DriverToolCall('call_schema', 'stub_output_with_schema', ['recipient' => 'a@b.com'])], 5, 3, 'cmp_1')
+            : new LLMResponse('Oh sorry let me fix that.', [], 5, 3, 'cmp_2');
+    });
 
     $tools = [new StubOutputToolWithSchema()];
     enableToolsForAgent($agentId, $tools);
@@ -591,9 +595,12 @@ it('resume throws InvalidArgumentException when approved arguments fail schema v
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
 
-    // Human forgot the required 'recipient' field — schema validation must catch this.
-    expect(fn() => $orch->resume($task->id, [['provider_call_id' => 'call_schema', 'arguments' => []]]))
-        ->toThrow(InvalidArgumentException::class);
+    // Human forgot the required 'recipient' field — schema validation must catch this gracefully now.
+    $orch->resume($task->id, [['provider_call_id' => 'call_schema', 'arguments' => []]]);
+
+    $toolCall = ToolCallModel::where('provider_call_id', 'call_schema')->first();
+    expect($toolCall->status)->toBe('APPROVED')
+        ->and($toolCall->result_content)->toContain('Validation Error');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------

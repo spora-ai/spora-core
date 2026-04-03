@@ -165,7 +165,7 @@ return [
     Spora\Drivers\DriverFactory::class => static function (ContainerInterface $c): Spora\Drivers\DriverFactory {
         return new Spora\Drivers\DriverFactory(
             $c->get(Spora\Services\ToolConfigService::class),
-            $c->get(Psr\Log\LoggerInterface::class)
+            $c->get(Psr\Log\LoggerInterface::class),
         );
     },
 

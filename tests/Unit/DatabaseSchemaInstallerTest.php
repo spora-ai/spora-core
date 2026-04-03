@@ -59,7 +59,7 @@ test('install() creates all core application tables', function (): void {
 
     $schema = Capsule::schema();
     $tables = ['users', 'agents', 'tool_configurations', 'agent_tools', 'agent_tool_overrides',
-               'tasks', 'tool_calls', 'task_history'];
+        'tasks', 'tool_calls', 'task_history'];
 
     foreach ($tables as $table) {
         expect($schema->hasTable($table))->toBeTrue("Expected table '{$table}' to exist");
@@ -72,7 +72,7 @@ test('install() creates all delight-im/auth auxiliary tables', function (): void
 
     $schema = Capsule::schema();
     $tables = ['users_2fa', 'users_audit_log', 'users_confirmations',
-               'users_otps', 'users_remembered', 'users_resets', 'users_throttling'];
+        'users_otps', 'users_remembered', 'users_resets', 'users_throttling'];
 
     foreach ($tables as $table) {
         expect($schema->hasTable($table))->toBeTrue("Expected auth table '{$table}' to exist");

@@ -18,7 +18,7 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'string',
     description: 'The action to perform: "read", "write", or "delete".',
     required: true,
-    enum: ['read', 'write', 'delete']
+    enum: ['read', 'write', 'delete'],
 )]
 #[ToolParameter(
     name: 'key',
@@ -58,7 +58,7 @@ final class ScratchpadTool implements InputToolInterface
                 }
                 AgentMemory::updateOrCreate(
                     ['agent_id' => $agentId, 'key' => $key],
-                    ['value' => $value]
+                    ['value' => $value],
                 );
                 return new ToolResult(true, "Successfully saved memory [{$key}].");
 

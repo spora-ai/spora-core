@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace Spora\Drivers;
 
-use Spora\Models\Agent;
-use Symfony\Component\HttpClient\HttpClient;
-
-use Spora\Services\ToolConfigService;
 use Psr\Log\LoggerInterface;
+use Spora\Models\Agent;
+use Spora\Services\ToolConfigService;
+use Symfony\Component\HttpClient\HttpClient;
 
 /**
  * Resolves the correct LLM driver for a given Agent.
@@ -35,11 +34,11 @@ class DriverFactory
             $baseUrl = $agent->llm_base_url ?? 'https://api.anthropic.com/v1/messages';
 
             return new AnthropicCompatibleDriver(
-                apiKey:     $apiKey,
-                model:      $model,
-                baseUrl:    $baseUrl,
+                apiKey: $apiKey,
+                model: $model,
+                baseUrl: $baseUrl,
                 httpClient: $httpClient,
-                logger:     $this->logger,
+                logger: $this->logger,
             );
         }
 
@@ -48,11 +47,11 @@ class DriverFactory
         $baseUrl = $agent->llm_base_url ?? 'https://api.openai.com/v1';
 
         return new OpenAICompatibleDriver(
-            apiKey:     $apiKey,
-            model:      $model,
-            baseUrl:    $baseUrl,
+            apiKey: $apiKey,
+            model: $model,
+            baseUrl: $baseUrl,
             httpClient: $httpClient,
-            logger:     $this->logger,
+            logger: $this->logger,
         );
     }
 }

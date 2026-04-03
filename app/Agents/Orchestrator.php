@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Agents;
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use ReflectionClass;
 use RuntimeException;
 use Spora\Agents\Messages\TickMessage;
@@ -146,98 +147,124 @@ final class Orchestrator implements OrchestratorInterface
      */
     public function resume(int $taskId, array $approvedBatch): void
     {
-        $task = Task::findOrFail($taskId);
+        Capsule::connection()->transaction(function () use ($taskId, $approvedBatch) {
+            /** @var Task $task */
+            $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
-        if ($task->status !== 'PENDING_APPROVAL' || $task->pending_state === null) {
-            throw new RuntimeException("Task {$taskId} is not awaiting approval.");
-        }
+            if ($task->status !== 'PENDING_APPROVAL' || $task->pending_state === null) {
+                throw new RuntimeException("Task {$taskId} is not awaiting approval.");
+            }
 
-        $state = AgentState::fromJson($task->pending_state);
+            $state = AgentState::fromJson($task->pending_state);
 
-        // Clear pending state and restore RUNNING status before executing.
-        $task->status        = 'RUNNING';
-        $task->pending_state = null;
-        $task->save();
+            // Clear pending state and restore RUNNING status before executing.
+            $task->status        = 'RUNNING';
+            $task->pending_state = null;
+            $task->save();
 
-        // Build a map from providerCallId → approved arguments for O(1) lookup.
-        $approvedMap = [];
-        foreach ($approvedBatch as $item) {
-            $approvedMap[$item['provider_call_id']] = $item['arguments'];
-        }
+            // Build a map from providerCallId → approved arguments for O(1) lookup.
+            $approvedMap = [];
+            foreach ($approvedBatch as $item) {
+                $approvedMap[$item['provider_call_id']] = $item['arguments'];
+            }
 
-        foreach ($state->pendingToolCalls as $pendingToolCall) {
-            $approvedArgs = $approvedMap[$pendingToolCall->providerCallId] ?? $pendingToolCall->arguments;
+            foreach ($state->pendingToolCalls as $pendingToolCall) {
+                $approvedArgs = $approvedMap[$pendingToolCall->providerCallId] ?? $pendingToolCall->arguments;
 
-            $toolInstance = $this->resolveToolByName($pendingToolCall->toolName);
+                $toolInstance = $this->resolveToolByName($pendingToolCall->toolName);
 
-            // Fix #4: Validate the human-edited arguments before trusting them.
-            SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema());
+                // Fix #4: Validate the human-edited arguments before trusting them.
+                try {
+                    SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema());
+                } catch (Throwable $e) {
+                    $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
+                    // Skip execution, immediately inject failure
+                    $this->appendHistory(
+                        taskId: $task->id,
+                        role: 'tool',
+                        content: $result->content,
+                        toolCallId: $pendingToolCall->providerCallId,
+                        toolName: $pendingToolCall->toolName,
+                    );
+                    ToolCallModel::where('task_id', $taskId)
+                        ->where('provider_call_id', $pendingToolCall->providerCallId)
+                        ->update([
+                            'status'         => 'APPROVED',
+                            'result_content' => $result->content,
+                            'executed_at'    => date('Y-m-d H:i:s'),
+                        ]);
+                    continue;
+                }
 
-            // Fix #5: Safe execution — community plugins may throw.
-            $result = $this->safeExecute($toolInstance, $approvedArgs, $state->agentId);
+                // Fix #5: Safe execution — community plugins may throw.
+                $result = $this->safeExecute($toolInstance, $approvedArgs, $state->agentId);
 
-            ToolCallModel::where('task_id', $taskId)
-                ->where('provider_call_id', $pendingToolCall->providerCallId)
-                ->update([
-                    'status'             => 'APPROVED',
-                    'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
-                    'result_content'     => $result->content,
-                    'result_data'        => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                    'executed_at'        => date('Y-m-d H:i:s'),
-                ]);
+                ToolCallModel::where('task_id', $taskId)
+                    ->where('provider_call_id', $pendingToolCall->providerCallId)
+                    ->update([
+                        'status'             => 'APPROVED',
+                        'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
+                        'result_content'     => $result->content,
+                        'result_data'        => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
+                        'executed_at'        => date('Y-m-d H:i:s'),
+                    ]);
 
-            // Append the tool result into history so the LLM sees it on the next tick.
-            $this->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: $result->content,
-                toolCallId: $pendingToolCall->providerCallId,
-                toolName: $pendingToolCall->toolName,
-            );
-        }
+                // Append the tool result into history so the LLM sees it on the next tick.
+                $this->appendHistory(
+                    taskId: $task->id,
+                    role: 'tool',
+                    content: $result->content,
+                    toolCallId: $pendingToolCall->providerCallId,
+                    toolName: $pendingToolCall->toolName,
+                );
+            }
 
-        $task->save();
+            $task->save();
 
-        $this->bus->dispatch(new TickMessage($task->id));
+            $this->bus->dispatch(new TickMessage($task->id));
+        });
     }
 
     public function reject(int $taskId, string $reason): void
     {
-        $task = Task::findOrFail($taskId);
+        Capsule::connection()->transaction(function () use ($taskId, $reason) {
+            /** @var Task $task */
+            $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
-        if ($task->status !== 'PENDING_APPROVAL' || $task->pending_state === null) {
-            throw new RuntimeException("Task {$taskId} is not awaiting approval.");
-        }
+            if ($task->status !== 'PENDING_APPROVAL' || $task->pending_state === null) {
+                throw new RuntimeException("Task {$taskId} is not awaiting approval.");
+            }
 
-        $state = AgentState::fromJson($task->pending_state);
+            $state = AgentState::fromJson($task->pending_state);
 
-        // Reject every pending tool call in the batch.
-        $providerCallIds = array_map(
-            static fn(DriverToolCall $tc) => $tc->providerCallId,
-            $state->pendingToolCalls,
-        );
-
-        ToolCallModel::where('task_id', $taskId)
-            ->whereIn('provider_call_id', $providerCallIds)
-            ->update(['status' => 'REJECTED']);
-
-        // Inject one synthetic tool-result row per rejected call so the LLM
-        // can reason about the refusal for each individual action.
-        foreach ($state->pendingToolCalls as $pendingToolCall) {
-            $this->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: "Action rejected by user: {$reason}",
-                toolCallId: $pendingToolCall->providerCallId,
-                toolName: $pendingToolCall->toolName,
+            // Reject every pending tool call in the batch.
+            $providerCallIds = array_map(
+                static fn(DriverToolCall $tc) => $tc->providerCallId,
+                $state->pendingToolCalls,
             );
-        }
 
-        $task->status        = 'RUNNING';
-        $task->pending_state = null;
-        $task->save();
+            ToolCallModel::where('task_id', $taskId)
+                ->whereIn('provider_call_id', $providerCallIds)
+                ->update(['status' => 'REJECTED']);
 
-        $this->bus->dispatch(new TickMessage($task->id));
+            // Inject one synthetic tool-result row per rejected call so the LLM
+            // can reason about the refusal for each individual action.
+            foreach ($state->pendingToolCalls as $pendingToolCall) {
+                $this->appendHistory(
+                    taskId: $task->id,
+                    role: 'tool',
+                    content: "Action rejected by user: {$reason}",
+                    toolCallId: $pendingToolCall->providerCallId,
+                    toolName: $pendingToolCall->toolName,
+                );
+            }
+
+            $task->status        = 'RUNNING';
+            $task->pending_state = null;
+            $task->save();
+
+            $this->bus->dispatch(new TickMessage($task->id));
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -285,6 +312,25 @@ final class Orchestrator implements OrchestratorInterface
                         ? $toolInstance->describeAction($toolCall->arguments)
                         : null,
                 ]);
+
+                try {
+                    SchemaValidator::validate($toolCall->arguments, $toolInstance->getParametersSchema());
+                } catch (Throwable $e) {
+                    $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
+                    $toolCallRecord->update([
+                        'status'         => 'APPROVED',
+                        'result_content' => $result->content,
+                        'executed_at'    => date('Y-m-d H:i:s'),
+                    ]);
+                    $this->appendHistory(
+                        taskId: $task->id,
+                        role: 'tool',
+                        content: $result->content,
+                        toolCallId: $toolCall->providerCallId,
+                        toolName: $toolCall->toolName,
+                    );
+                    continue; // Skip execution and don't pause for approval
+                }
 
                 if ($toolInstance instanceof InputToolInterface || !$requiresApproval) {
                     // Fix #5: Safe execution — community plugins may throw.

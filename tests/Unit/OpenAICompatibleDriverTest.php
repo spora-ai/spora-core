@@ -16,9 +16,9 @@ use Symfony\Component\HttpClient\Response\MockResponse;
 function makeOpenAIDriver(MockHttpClient $client): OpenAICompatibleDriver
 {
     return new OpenAICompatibleDriver(
-        apiKey:     'test-key',
-        model:      'gpt-4o',
-        baseUrl:    'https://api.openai.com/v1',
+        apiKey: 'test-key',
+        model: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
         httpClient: $client,
     );
 }
@@ -27,8 +27,8 @@ function makeRequest(array $messages = []): LLMRequest
 {
     return new LLMRequest(
         systemPrompt: 'You are helpful.',
-        messages:     $messages,
-        tools:        [],
+        messages: $messages,
+        tools: [],
     );
 }
 
@@ -188,8 +188,8 @@ test('complete prepends the system prompt as the first message', function (): vo
     $driver  = makeOpenAIDriver($client);
     $request = new LLMRequest(
         systemPrompt: 'Be concise.',
-        messages:     [['role' => 'user', 'content' => 'Hello']],
-        tools:        [],
+        messages: [['role' => 'user', 'content' => 'Hello']],
+        tools: [],
     );
 
     $driver->complete($request);

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Tools;
 
+use DateTimeImmutable;
+use DateTimeInterface;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\ValueObjects\ToolResult;
 
@@ -15,8 +17,8 @@ final class CurrentTimeTool implements InputToolInterface
 {
     public function execute(array $arguments, int $agentId): ToolResult
     {
-        $now      = new \DateTimeImmutable();
-        $iso8601  = $now->format(\DateTimeInterface::ATOM);
+        $now      = new DateTimeImmutable();
+        $iso8601  = $now->format(DateTimeInterface::ATOM);
         $timezone = $now->getTimezone()->getName();
         $unix     = $now->getTimestamp();
 

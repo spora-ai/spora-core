@@ -30,7 +30,7 @@ it('deletes memory', function () {
     [$agentId] = seedAgent();
 
     $tool->execute(['action' => 'write', 'key' => 'temp', 'value' => '123'], $agentId);
-    
+
     $deleteResult = $tool->execute(['action' => 'delete', 'key' => 'temp'], $agentId);
     expect($deleteResult->success)->toBeTrue();
 
@@ -41,7 +41,7 @@ it('deletes memory', function () {
 it('returns error on missing key', function () {
     $tool = new ScratchpadTool();
     $result = $tool->execute(['action' => 'read'], 99);
-    
+
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('Key is required');
 });

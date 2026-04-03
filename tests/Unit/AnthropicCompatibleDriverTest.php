@@ -16,9 +16,9 @@ use Symfony\Component\HttpClient\Response\MockResponse;
 function makeAnthropicDriver(MockHttpClient $client): AnthropicCompatibleDriver
 {
     return new AnthropicCompatibleDriver(
-        apiKey:     'test-anthropic-key',
-        model:      'claude-3-5-sonnet-20241022',
-        baseUrl:    'https://api.anthropic.com/v1/messages',
+        apiKey: 'test-anthropic-key',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com/v1/messages',
         httpClient: $client,
     );
 }
@@ -27,8 +27,8 @@ function makeAnthropicRequest(array $messages = [], array $tools = []): LLMReque
 {
     return new LLMRequest(
         systemPrompt: 'You are helpful.',
-        messages:     $messages,
-        tools:        $tools,
+        messages: $messages,
+        tools: $tools,
     );
 }
 

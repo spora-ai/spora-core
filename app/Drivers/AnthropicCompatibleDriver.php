@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Spora\Drivers;
 
+use Psr\Log\LoggerInterface;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
-use Psr\Log\LoggerInterface;
 
 class AnthropicCompatibleDriver implements LLMDriverInterface
 {
@@ -59,7 +59,8 @@ class AnthropicCompatibleDriver implements LLMDriverInterface
                 'anthropic-version' => self::API_VERSION,
                 'Content-Type'      => 'application/json',
             ],
-            'json' => $body,
+            'json'    => $body,
+            'timeout' => 45,
         ]);
 
         $statusCode = $response->getStatusCode();
@@ -93,15 +94,15 @@ class AnthropicCompatibleDriver implements LLMDriverInterface
 
                 $toolCalls[] = new ToolCall(
                     providerCallId: (string) ($block['id'] ?? ''),
-                    toolName:       (string) ($block['name'] ?? ''),
-                    arguments:      (array)  ($block['input'] ?? []),
+                    toolName: (string) ($block['name'] ?? ''),
+                    arguments: (array) ($block['input'] ?? []),
                 );
             }
 
             return new LLMResponse(
-                content:      null,
-                toolCalls:    $toolCalls,
-                inputTokens:  $inputTokens,
+                content: null,
+                toolCalls: $toolCalls,
+                inputTokens: $inputTokens,
                 outputTokens: $outputTokens,
                 completionId: $completionId,
             );
@@ -116,9 +117,9 @@ class AnthropicCompatibleDriver implements LLMDriverInterface
         }
 
         return new LLMResponse(
-            content:      $textContent,
-            toolCalls:    [],
-            inputTokens:  $inputTokens,
+            content: $textContent,
+            toolCalls: [],
+            inputTokens: $inputTokens,
             outputTokens: $outputTokens,
             completionId: $completionId,
         );
