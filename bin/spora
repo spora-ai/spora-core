@@ -14,10 +14,10 @@ if (file_exists(BASE_PATH . '/vendor/autoload.php')) {
 
 use Spora\Core\Kernel;
 use Symfony\Component\Console\Application;
-use DI\Container;
+use Spora\Console\Commands\InstallCommand;
+use Spora\Console\Commands\SeedCommand;
 
-// 1. Boot Kernel without triggering Web Request Loop or Database Schema checks.
-// We just need the DI container config.
+// 1. Boot Kernel to get the DI container. Each command boots its own DB connection.
 try {
     $kernel = new Kernel();
     $container = $kernel->getContainer();
@@ -26,9 +26,10 @@ try {
     exit(1);
 }
 
-$application = new Application('Spora CLI', '1.0.0');
+$application = new Application('Spora CLI', \Spora\Core\Version::current());
 
 // Register Commands Manually or Autowire them from container
-$application->addCommand($container->get(\Spora\Console\Commands\InstallCommand::class));
+$application->addCommand($container->get(InstallCommand::class));
+$application->addCommand($container->get(SeedCommand::class));
 
 $application->run();

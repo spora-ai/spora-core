@@ -168,6 +168,36 @@ it('show returns task detail with history and tool_calls', function (): void {
         ->and($body['data']['task'])->toHaveKey('tool_calls');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
+it('show respects since_sequence to filter task history', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'Sequence test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    Spora\Models\TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'First']);
+    Spora\Models\TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'Second']);
+    Spora\Models\TaskHistory::create(['task_id' => $task->id, 'sequence' => 2, 'role' => 'user', 'content' => 'Third']);
+
+    $req = jsonRequest('GET', "/api/v1/tasks/{$task->id}?since_sequence=1");
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->show($req);
+    expect($resp->getStatusCode())->toBe(200);
+
+    $body = json_decode($resp->getContent(), true);
+    $history = $body['data']['task']['history'];
+    expect($history)->toHaveCount(1)
+        ->and($history[0]['sequence'])->toBe(2)
+        ->and($history[0]['content'])->toBe('Third');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
 // ---------------------------------------------------------------------------
 // approve()
 // ---------------------------------------------------------------------------

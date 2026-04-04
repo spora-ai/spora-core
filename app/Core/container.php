@@ -149,6 +149,10 @@ return [
         return new AuthService($c->get(Delight\Auth\Auth::class));
     },
 
+    Symfony\Contracts\HttpClient\HttpClientInterface::class => static function (): Symfony\Contracts\HttpClient\HttpClientInterface {
+        return Symfony\Component\HttpClient\HttpClient::create();
+    },
+
     Spora\Http\AuthController::class => static function (ContainerInterface $c): Spora\Http\AuthController {
         return new Spora\Http\AuthController(
             $c->get(AuthService::class),
@@ -170,11 +174,20 @@ return [
     },
 
     // Registered tool classes. Add to this list to make tools discoverable via GET /api/v1/tools.
+    // Settings (#[ToolSetting]) live directly on each tool class. See docs/06_tools.md.
     'tool_classes' => [
-        Spora\Drivers\LLMConfiguration::class,
+        Spora\Drivers\LLMConfiguration::class, // Standalone — feeds DriverFactory, not a tool
         Spora\Tools\CurrentTimeTool::class,
         Spora\Tools\CalculatorTool::class,
         Spora\Tools\ScratchpadTool::class,
+        Spora\Tools\TavilySearchTool::class,
+        Spora\Tools\SerperSearchTool::class,
+        Spora\Tools\ReadUrlTool::class,
+        Spora\Tools\NewsApiTool::class,
+        Spora\Tools\GNewsTool::class,
+        Spora\Tools\ReadEmailTool::class,
+        Spora\Tools\SendEmailTool::class,
+        Spora\Tools\CalDavCalendarTool::class,
     ],
 
     Spora\Http\AgentController::class => static function (ContainerInterface $c): Spora\Http\AgentController {
@@ -194,6 +207,15 @@ return [
 
     // Registered tool instances for the Orchestrator. Keys are ignored — order matters for priority.
     'tool_instances' => [],
+
+    Spora\Console\Commands\SeedCommand::class => static function (ContainerInterface $c): Spora\Console\Commands\SeedCommand {
+        return new Spora\Console\Commands\SeedCommand(
+            $c->get(Database::class),
+            // Closure defers AuthService (and Delight\Auth\Auth → PDO) construction until after
+            // bootDatabaseConnectionOnly() has been called inside execute().
+            static fn(): AuthService => $c->get(AuthService::class),
+        );
+    },
 
     OrchestratorInterface::class => static function (ContainerInterface $c): Orchestrator {
         // Break the bootstrap circular dependency (Orchestrator → bus → handler → Orchestrator)
@@ -215,6 +237,7 @@ return [
             driverFactory: $c->get(Spora\Drivers\DriverFactory::class),
             bus: $bus,
             toolInstances: $c->get('tool_instances'),
+            logger: $c->get(Psr\Log\LoggerInterface::class),
         );
 
         $proxy->setInner($orchestrator);

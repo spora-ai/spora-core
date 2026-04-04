@@ -87,7 +87,15 @@ final class TaskController
             );
         }
 
-        return new JsonResponse(['data' => ['task' => $this->taskDetailResource($task)]]);
+        $sinceSequence = null;
+        if ($request->query->has('since_sequence')) {
+            $sinceSequence = (int) $request->query->get('since_sequence');
+            if ($sinceSequence < 0) {
+                $sinceSequence = null;
+            }
+        }
+
+        return new JsonResponse(['data' => ['task' => $this->taskDetailResource($task, $sinceSequence)]]);
     }
 
     /**
@@ -183,7 +191,7 @@ final class TaskController
         ];
     }
 
-    private function taskDetailResource(Task $task): array
+    private function taskDetailResource(Task $task, ?int $sinceSequence = null): array
     {
         $resource               = $this->taskResource($task);
         $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => [
@@ -198,12 +206,17 @@ final class TaskController
             'executed_at'        => $tc->executed_at?->toIso8601String(),
         ])->all();
 
-        $resource['history'] = $task->taskHistory->map(fn(TaskHistory $h) => [
-            'sequence'    => $h->sequence,
-            'role'        => $h->role,
-            'content'     => $h->content,
+        $historyQuery = $task->taskHistory();
+        if ($sinceSequence !== null) {
+            $historyQuery->where('sequence', '>', $sinceSequence);
+        }
+
+        $resource['history'] = $historyQuery->get()->map(fn(TaskHistory $h) => [
+            'sequence'     => $h->sequence,
+            'role'         => $h->role,
+            'content'      => $h->content,
             'tool_call_id' => $h->tool_call_id,
-            'tool_name'   => $h->tool_name,
+            'tool_name'    => $h->tool_name,
         ])->all();
 
         return $resource;

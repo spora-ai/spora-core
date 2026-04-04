@@ -2,7 +2,7 @@
 
 **What is Spora?** The "WordPress of AI Agents" — a portable, zero-config agent orchestration tool in PHP 8.2+. Runs on any shared host (cPanel/FTP). Single "My Assistant" UX in V1, multi-agent DB structure for future scale.
 
-**Reference docs:** `docs/architecture.md` · `docs/api.md` · `docs/schema.md` · `docs/interfaces.md` · `docs/plugins.md` · `docs/drivers.md`
+**Reference docs:** `docs/00_index.md` · `docs/01_architecture.md` · `docs/02_schema.md` · `docs/03_interfaces.md` · `docs/04_api.md` · `docs/05_drivers.md` · `docs/06_tools.md` · `docs/07_plugins.md` · `docs/08_logging.md`
 
 **Stack:** `symfony/http-foundation`, `symfony/messenger`, `nikic/fast-route`, `php-di/php-di`, `illuminate/database` (Eloquent), `delight-im/auth`, `pestphp/pest`, Vue 3 + Vite + Tailwind + shadcn-vue (frontend).
 

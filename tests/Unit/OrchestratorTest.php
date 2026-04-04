@@ -19,6 +19,7 @@ use Symfony\Component\Messenger\MessageBus;
 use Symfony\Component\Messenger\Middleware\HandleMessageMiddleware;
 use Tests\Fixtures\SpyAgentIdInputTool;
 use Tests\Fixtures\StubAutoApproveOutputTool;
+use Tests\Fixtures\StubFailingTool;
 use Tests\Fixtures\StubInputTool;
 use Tests\Fixtures\StubOutputTool;
 use Tests\Fixtures\StubOutputToolWithSchema;
@@ -34,6 +35,7 @@ use Tests\Fixtures\ThrowingTool;
 function makeOrchestrator(
     DriverFactory $driverFactory,
     array $toolInstances = [],
+    ?Psr\Log\LoggerInterface $logger = null,
 ): Orchestrator {
     $orchestratorRef = null;
 
@@ -51,6 +53,7 @@ function makeOrchestrator(
         driverFactory: $driverFactory,
         bus: $bus,
         toolInstances: $toolInstances,
+        logger: $logger,
     );
 
     return $orchestratorRef;
@@ -658,6 +661,107 @@ it('reject throws when task is not PENDING_APPROVAL', function (): void {
     $orch = makeOrchestrator(mockDriverFactory($mock));
 
     expect(fn() => $orch->reject($task->id, 'reason'))->toThrow(RuntimeException::class);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// Dependency Injection / Context Verification
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
+
+it('logs a debug entry with tool name, agent_id, task_id, and arguments on every dispatch', function (): void {
+    [$agentId] = seedAgent();
+
+    $callCount = 0;
+    $mock      = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+        $callCount++;
+        return $callCount === 1
+            ? new LLMResponse(null, [new DriverToolCall('call_log', 'stub_input', ['x' => 42])], 5, 3, 'cmp_1')
+            : new LLMResponse('Done.', [], 5, 3, 'cmp_2');
+    });
+
+    $logger = Mockery::mock(Psr\Log\LoggerInterface::class);
+    $logger->shouldReceive('debug')
+        ->once()
+        ->withArgs(static function (string $msg, array $ctx): bool {
+            return $msg === 'Tool dispatch'
+                && $ctx['tool'] === 'stub_input'
+                && isset($ctx['agent_id'])
+                && isset($ctx['task_id'])
+                && $ctx['arguments'] === ['x' => 42];
+        });
+    $logger->allows('error');  // allow but don't require error calls on the success path
+
+    $tools = [new StubInputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools, $logger);
+    $orch->start($agentId, 'Log dispatch test', maxSteps: 10);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('logs an error when a tool returns a failed ToolResult, without including arguments', function (): void {
+    [$agentId] = seedAgent();
+
+    $callCount = 0;
+    $mock      = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+        $callCount++;
+        return $callCount === 1
+            ? new LLMResponse(null, [new DriverToolCall('call_fail', 'stub_failing', ['secret' => 'password123'])], 5, 3, 'cmp_1')
+            : new LLMResponse('Handled.', [], 5, 3, 'cmp_2');
+    });
+
+    $logger = Mockery::mock(Psr\Log\LoggerInterface::class);
+    $logger->allows('debug');
+    $logger->shouldReceive('error')
+        ->once()
+        ->withArgs(static function (string $msg, array $ctx): bool {
+            return $msg === 'Tool returned failure'
+                && $ctx['tool'] === 'stub_failing'
+                && isset($ctx['agent_id'])
+                && isset($ctx['task_id'])
+                && str_contains((string) $ctx['content'], 'Stub tool failure')
+                // Arguments must NOT be present in error logs (PII protection).
+                && !isset($ctx['arguments']);
+        });
+
+    $tools = [new StubFailingTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools, $logger);
+    $orch->start($agentId, 'Log failure test', maxSteps: 10);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('logs an error with exception_class when a tool throws, without including arguments', function (): void {
+    [$agentId] = seedAgent();
+
+    $callCount = 0;
+    $mock      = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+        $callCount++;
+        return $callCount === 1
+            ? new LLMResponse(null, [new DriverToolCall('call_throw', 'throwing_tool', ['private' => 'data'])], 5, 3, 'cmp_1')
+            : new LLMResponse('Recovered.', [], 5, 3, 'cmp_2');
+    });
+
+    $logger = Mockery::mock(Psr\Log\LoggerInterface::class);
+    $logger->allows('debug');
+    $logger->shouldReceive('error')
+        ->once()
+        ->withArgs(static function (string $msg, array $ctx): bool {
+            return $msg === 'Tool threw exception'
+                && $ctx['tool'] === 'throwing_tool'
+                && isset($ctx['exception_class'])
+                && str_contains((string) $ctx['message'], 'Community plugin exploded!')
+                // Arguments must NOT be present in error logs (PII protection).
+                && !isset($ctx['arguments']);
+        });
+
+    $tools = [new ThrowingTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools, $logger);
+    $orch->start($agentId, 'Log exception test', maxSteps: 10);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------

@@ -30,7 +30,7 @@ class DriverFactory
         $settings   = $this->toolConfigService->getEffectiveSettings(LLMConfiguration::class, (int) $agent->id);
 
         if ($provider === 'anthropic') {
-            $apiKey  = (string) ($settings['anthropic_api_key'] ?? '');
+            $apiKey  = (string) ($settings['core.anthropic.api_key'] ?? '');
             $baseUrl = $agent->llm_base_url ?? 'https://api.anthropic.com/v1/messages';
 
             return new AnthropicCompatibleDriver(
@@ -43,7 +43,7 @@ class DriverFactory
         }
 
         // Default: openai_compatible (also covers Ollama, Groq, LM Studio, Azure, etc.)
-        $apiKey  = (string) ($settings['openai_api_key'] ?? '');
+        $apiKey  = (string) ($settings['core.openai.api_key'] ?? '');
         $baseUrl = $agent->llm_base_url ?? 'https://api.openai.com/v1';
 
         return new OpenAICompatibleDriver(

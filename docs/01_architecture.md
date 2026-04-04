@@ -69,4 +69,4 @@ YAML/JSON files in `recipes/` (+ plugin `recipePaths()`). Provide the system pro
 
 ## Database
 
-SQLite by default (zero config), MySQL/MariaDB supported via `config.php` or env vars. All schema managed by `DatabaseSchemaInstaller` using Eloquent Schema Builder — versioned, component-aware, WordPress-style upgrade model. See `docs/schema.md`.
+SQLite by default (zero config), MySQL/MariaDB supported via `config.php` or env vars. All schema managed by `DatabaseSchemaInstaller` using Eloquent Schema Builder — versioned, component-aware, WordPress-style upgrade model. See `docs/02_schema.md`.

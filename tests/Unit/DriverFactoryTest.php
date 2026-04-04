@@ -14,7 +14,7 @@ test('it creates AnthropicDriver when agent uses anthropic provider', function (
     $toolConfigService->shouldReceive('getEffectiveSettings')
         ->with(LLMConfiguration::class, 1)
         ->once()
-        ->andReturn(['anthropic_api_key' => 'test-anthropic-key']);
+        ->andReturn(['core.anthropic.api_key' => 'test-anthropic-key']);
 
     $factory = new DriverFactory($toolConfigService, new Psr\Log\NullLogger());
 
@@ -35,7 +35,7 @@ test('it creates OpenAICompatibleDriver when agent uses openai_compatible provid
     $toolConfigService->shouldReceive('getEffectiveSettings')
         ->with(LLMConfiguration::class, 2)
         ->once()
-        ->andReturn(['openai_api_key' => 'test-openai-key']);
+        ->andReturn(['core.openai.api_key' => 'test-openai-key']);
 
     $factory = new DriverFactory($toolConfigService, new Psr\Log\NullLogger());
 

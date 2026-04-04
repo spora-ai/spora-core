@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Agents;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Psr\Log\LoggerInterface;
 use ReflectionClass;
 use RuntimeException;
 use Spora\Agents\Messages\TickMessage;
@@ -28,12 +29,15 @@ use Throwable;
 final class Orchestrator implements OrchestratorInterface
 {
     /**
-     * @param  list<object>  $toolInstances  Instances of InputToolInterface|OutputToolInterface.
+     * @param  list<object>       $toolInstances  Instances of InputToolInterface|OutputToolInterface.
+     * @param  ?LoggerInterface   $logger         Optional PSR-3 logger. When null, all log calls
+     *                                            are silently skipped — no behaviour change.
      */
     public function __construct(
-        private readonly DriverFactory        $driverFactory,
-        private readonly MessageBusInterface  $bus,
-        private readonly array                $toolInstances = [],
+        private readonly DriverFactory       $driverFactory,
+        private readonly MessageBusInterface $bus,
+        private readonly array               $toolInstances = [],
+        private readonly ?LoggerInterface    $logger        = null,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -197,7 +201,7 @@ final class Orchestrator implements OrchestratorInterface
                 }
 
                 // Fix #5: Safe execution — community plugins may throw.
-                $result = $this->safeExecute($toolInstance, $approvedArgs, $state->agentId);
+                $result = $this->safeExecute($toolInstance, $approvedArgs, $state->agentId, $taskId);
 
                 ToolCallModel::where('task_id', $taskId)
                     ->where('provider_call_id', $pendingToolCall->providerCallId)
@@ -334,7 +338,7 @@ final class Orchestrator implements OrchestratorInterface
 
                 if ($toolInstance instanceof InputToolInterface || !$requiresApproval) {
                     // Fix #5: Safe execution — community plugins may throw.
-                    $result = $this->safeExecute($toolInstance, $toolCall->arguments, $agent->id);
+                    $result = $this->safeExecute($toolInstance, $toolCall->arguments, $agent->id, $task->id);
 
                     $toolCallRecord->update([
                         'status'         => 'APPROVED',
@@ -392,12 +396,62 @@ final class Orchestrator implements OrchestratorInterface
      * Execute a tool, catching any Throwable thrown by community plugin bugs.
      * The error is encoded into a ToolResult so the Orchestrator loop survives
      * and the LLM sees the failure on the next tick.
+     *
+     * Logging behaviour (controlled by SPORA_LOG_LEVEL):
+     *   DEBUG — every dispatch is logged, including full arguments (may contain PII —
+     *           only enable DEBUG in environments where log storage is trusted and
+     *           data-retention obligations have been considered).
+     *   ERROR — logged on ToolResult failure (success=false) or unhandled exception.
+     *           Arguments are intentionally EXCLUDED from ERROR logs to prevent PII
+     *           (email addresses, search queries, message bodies) from reaching
+     *           aggregators that may have broader access or retention than DEBUG logs.
      */
-    private function safeExecute(InputToolInterface|OutputToolInterface $toolInstance, array $arguments, int $agentId): ToolResult
-    {
+    private function safeExecute(
+        InputToolInterface|OutputToolInterface $toolInstance,
+        array $arguments,
+        int $agentId,
+        int $taskId,
+    ): ToolResult {
+        // Resolve the canonical tool name from the #[Tool] attribute for log context.
+        $ref      = new ReflectionClass($toolInstance);
+        $attrs    = $ref->getAttributes(Tool::class);
+        $toolName = $attrs !== [] ? $attrs[0]->newInstance()->name : get_class($toolInstance);
+
+        // DEBUG: log every invocation before execution.
+        // ⚠ Arguments may contain PII — see method docblock before lowering log level.
+        $this->logger?->debug('Tool dispatch', [
+            'tool'      => $toolName,
+            'agent_id'  => $agentId,
+            'task_id'   => $taskId,
+            'arguments' => $arguments,
+        ]);
+
         try {
-            return $toolInstance->execute($arguments, $agentId);
+            $result = $toolInstance->execute($arguments, $agentId);
+
+            if (!$result->success) {
+                // ERROR: tool reported a logical failure (bad API key, empty result, etc.).
+                // Arguments are NOT included here — see method docblock for PII rationale.
+                $this->logger?->error('Tool returned failure', [
+                    'tool'     => $toolName,
+                    'agent_id' => $agentId,
+                    'task_id'  => $taskId,
+                    'content'  => $result->content,
+                ]);
+            }
+
+            return $result;
         } catch (Throwable $e) {
+            // ERROR: unhandled exception from the tool (likely a plugin bug).
+            // Arguments are NOT included here — see method docblock for PII rationale.
+            $this->logger?->error('Tool threw exception', [
+                'tool'            => $toolName,
+                'agent_id'        => $agentId,
+                'task_id'         => $taskId,
+                'exception_class' => get_class($e),
+                'message'         => $e->getMessage(),
+            ]);
+
             return new ToolResult(
                 success: false,
                 content: 'System Error: The tool encountered a fatal exception: ' . $e->getMessage(),
