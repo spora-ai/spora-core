@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $name
  * @property string|null $description
  * @property string|null $recipe_id
+ * @property string|null $system_prompt
  * @property string|null $llm_provider
  * @property string|null $llm_model
  * @property string|null $llm_base_url
@@ -29,6 +30,7 @@ class Agent extends Model
         'name',
         'description',
         'recipe_id',
+        'system_prompt',
         'llm_provider',
         'llm_model',
         'llm_base_url',

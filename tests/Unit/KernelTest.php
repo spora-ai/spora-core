@@ -117,12 +117,47 @@ test('dispatched stub controller returns JSON with error envelope', function ():
 // Exception handling (500)
 // ---------------------------------------------------------------------------
 
+// Helper: force SecurityManager to throw regardless of whether a .env file is present.
+// Dotenv::createImmutable (used by Kernel::loadDotEnv) will NOT override a variable that is
+// already defined in the environment, so injecting an invalid key before constructing the
+// Kernel is safe — the .env value is skipped and the container always sees our bad value.
+// '!invalid!' contains '!' which is not in the base64 alphabet, so strict base64_decode
+// returns false → RuntimeException in the SecurityManagerInterface factory → 500.
+function withoutSecretKey(callable $fn): mixed
+{
+    $savedKey     = $_ENV['SPORA_SECRET_KEY'] ?? null;
+    $savedKeyPath = $_ENV['SPORA_KEY_PATH'] ?? null;
+
+    $_ENV['SPORA_SECRET_KEY'] = '!invalid!';
+    putenv('SPORA_SECRET_KEY=!invalid!');
+    // Remove key-path so the factory doesn't fall through to a file.
+    unset($_ENV['SPORA_KEY_PATH']);
+    putenv('SPORA_KEY_PATH');
+
+    try {
+        return $fn();
+    } finally {
+        if ($savedKey !== null) {
+            $_ENV['SPORA_SECRET_KEY'] = $savedKey;
+            putenv("SPORA_SECRET_KEY={$savedKey}");
+        } else {
+            unset($_ENV['SPORA_SECRET_KEY']);
+            putenv('SPORA_SECRET_KEY');
+        }
+        if ($savedKeyPath !== null) {
+            $_ENV['SPORA_KEY_PATH'] = $savedKeyPath;
+            putenv("SPORA_KEY_PATH={$savedKeyPath}");
+        }
+    }
+}
+
 test('uncaught controller exception returns 500 JSON', function (): void {
-    $kernel = new Kernel();
     // GET /api/v1/agent resolves AgentController → ToolConfigService → SecurityManagerInterface.
-    // Without SPORA_SECRET_KEY configured, SecurityManager throws → 500.
-    $request  = Request::create('/api/v1/agent', 'GET');
-    $response = $kernel->handle($request);
+    // Without any secret key configured, SecurityManager throws → Kernel catches → 500.
+    $response = withoutSecretKey(static function (): mixed {
+        $kernel = new Kernel();
+        return $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+    });
 
     expect($response->getStatusCode())->toBe(500);
 
@@ -134,19 +169,36 @@ test('uncaught controller exception returns 500 JSON', function (): void {
 });
 
 test('500 response in production mode does not expose exception details', function (): void {
-    $kernel   = new Kernel();
-    $request  = Request::create('/api/v1/agent', 'GET');
-    $response = $kernel->handle($request);
+    // Pin app_env to production regardless of local .env so the debug block assertion is stable.
+    $savedEnv = $_ENV['SPORA_APP_ENV'] ?? null;
+    $_ENV['SPORA_APP_ENV'] = 'production';
+    putenv('SPORA_APP_ENV=production');
+
+    try {
+        $response = withoutSecretKey(static function (): mixed {
+            $kernel = new Kernel();
+            return $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+        });
+    } finally {
+        if ($savedEnv !== null) {
+            $_ENV['SPORA_APP_ENV'] = $savedEnv;
+            putenv("SPORA_APP_ENV={$savedEnv}");
+        } else {
+            unset($_ENV['SPORA_APP_ENV']);
+            putenv('SPORA_APP_ENV');
+        }
+    }
 
     $body = json_decode($response->getContent(), true);
 
-    // config.php has app_env=production — debug block must be absent
     expect($body)->not()->toHaveKey('debug');
 });
 
 test('500 response has Content-Type application/json', function (): void {
-    $kernel   = new Kernel();
-    $response = $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+    $response = withoutSecretKey(static function (): mixed {
+        $kernel = new Kernel();
+        return $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+    });
 
     expect($response->headers->get('Content-Type'))->toContain('application/json');
 });
@@ -197,9 +249,11 @@ test('500 response in development mode includes a debug block with exception det
     $_ENV['SPORA_APP_ENV'] = 'development';
 
     try {
-        $kernel   = new Kernel();
-        // GET /api/v1/agent without SPORA_SECRET_KEY → SecurityManager resolution throws → 500
-        $response = $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+        // Clear secret key so SecurityManager throws → 500, then verify debug block appears.
+        $response = withoutSecretKey(static function (): mixed {
+            $kernel = new Kernel();
+            return $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+        });
     } finally {
         unset($_ENV['SPORA_APP_ENV']);
     }

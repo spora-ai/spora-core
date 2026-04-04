@@ -35,7 +35,7 @@ use Spora\Plugins\PluginLoader;
 final class DatabaseSchemaInstaller
 {
     /** Increment when new core migration files are added. */
-    public const CORE_VERSION = 3;
+    public const CORE_VERSION = 4;
 
     private const CORE_MIGRATIONS_PATH = BASE_PATH . '/database/migrations';
 

@@ -67,6 +67,12 @@ final class Orchestrator implements OrchestratorInterface
 
     public function tick(int $taskId): void
     {
+        // NOTE: tick() assumes single-threaded, synchronous dispatch (Symfony Messenger sync transport).
+        // resume() and reject() use lockForUpdate() transactions because they are triggered by HTTP
+        // requests that can race. tick() is always called from within the same request that called
+        // start()/resume()/reject(), so concurrent execution is impossible today.
+        // If async dispatch is ever added, add a lockForUpdate() transaction here too, and ensure
+        // appendHistory() sequence assignment is covered by the same lock.
         $task = Task::findOrFail($taskId);
 
         if ($task->status !== 'RUNNING') {
@@ -96,8 +102,12 @@ final class Orchestrator implements OrchestratorInterface
         // Build LLM tool definitions from registered tool instances.
         $toolDefs = $this->buildToolDefinitions($enabledClasses);
 
+        $systemPrompt = ($agent->system_prompt !== null && $agent->system_prompt !== '')
+            ? $agent->system_prompt
+            : 'You are a helpful AI assistant.';
+
         $request = new LLMRequest(
-            systemPrompt: 'You are a helpful AI assistant.',
+            systemPrompt: $systemPrompt,
             messages: $messages,
             tools: $toolDefs,
         );

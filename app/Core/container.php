@@ -205,8 +205,19 @@ return [
         );
     },
 
-    // Registered tool instances for the Orchestrator. Keys are ignored — order matters for priority.
-    'tool_instances' => [],
+    // Registered tool instances for the Orchestrator.
+    // Instantiated from tool_classes via PHP-DI autowiring; LLMConfiguration is skipped because
+    // it is a configuration surrogate only (no tool interface) — it feeds DriverFactory directly.
+    'tool_instances' => static function (ContainerInterface $c): array {
+        $instances = [];
+        foreach ($c->get('tool_classes') as $toolClass) {
+            if ($toolClass === \Spora\Drivers\LLMConfiguration::class) {
+                continue;
+            }
+            $instances[] = $c->get($toolClass);
+        }
+        return $instances;
+    },
 
     Spora\Console\Commands\SeedCommand::class => static function (ContainerInterface $c): Spora\Console\Commands\SeedCommand {
         return new Spora\Console\Commands\SeedCommand(
@@ -217,7 +228,7 @@ return [
         );
     },
 
-    OrchestratorInterface::class => static function (ContainerInterface $c): Orchestrator {
+    OrchestratorInterface::class => static function (ContainerInterface $c): OrchestratorInterface {
         // Break the bootstrap circular dependency (Orchestrator → bus → handler → Orchestrator)
         // using a typed proxy. The proxy is wired into the bus handler first; the real
         // Orchestrator is constructed with the bus, then injected into the proxy.
