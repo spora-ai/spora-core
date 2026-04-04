@@ -178,3 +178,11 @@ for any of the following:
 A manifest that is structurally valid but whose declared class cannot be resolved at
 runtime (e.g. a bad autoload path) is silently skipped — this is treated as a recoverable
 deployment error rather than a fatal one.
+
+The following conditions also result in a silent skip rather than a fatal error:
+
+- **Duplicate slug** — a second plugin with the same `slug` as an already-loaded plugin.
+- **Duplicate class** — a second plugin manifest pointing to the same entry-point FQCN as an already-loaded plugin.
+
+In both cases the second plugin is quietly ignored. If a plugin appears to be "not found" at
+runtime, check that its slug and class are unique across all plugins in the plugins directory.

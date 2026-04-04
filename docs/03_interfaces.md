@@ -12,7 +12,7 @@ All interfaces live in `app/`. The authoritative source is the source code — t
 |---|---|---|
 | `#[Tool(name, description)]` | class | LLM-facing name (snake_case) and description. Required on every tool. |
 | `#[OutputTool(requiresApproval: true)]` | class | Class-level approval default for OutputTools. Overridable per-agent via `agent_tools.auto_approve`. |
-| `#[ToolParameter(name, type, description, required, default, enum)]` | class (repeatable) | One entry per LLM-facing parameter. Builds the `parameters` JSON Schema for function calling. |
+| `#[ToolParameter(name, type, description, required, default, enum)]` | class (repeatable) | Documents one LLM-facing parameter for UI/reflection. Does **not** auto-generate the JSON Schema — each tool implements `getParametersSchema()` manually to produce the schema sent to the LLM. |
 | `#[ToolSetting(key, label, type, description, default, required, scope, options)]` | class (repeatable) | UI-configurable setting stored in `tool_configurations` or `agent_tool_overrides`. Never sent to LLM. `scope: "global"` = shared infra, `scope: "agent"` = per-agent override allowed. |
 
 ---
@@ -64,4 +64,4 @@ Write / real-world-action tools. The Orchestrator MUST NOT call `execute()` dire
 - `recipePaths(): list<string>` — absolute paths to recipe directories
 - `register(ContainerBuilder): void` — arbitrary DI bindings
 - `schemaVersion(): int` — DB schema version this plugin requires (default: 0)
-- `schemaDefinition(): ?SchemaDefinition` — table definitions + upgrade callbacks (default: null)
+- `migrationsPath(): ?string` — absolute path to the directory containing this plugin's migration files (default: null)
