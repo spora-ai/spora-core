@@ -17,80 +17,56 @@
 | ToolConfigService (Layer 2) | Encrypt/decrypt password fields, global + per-agent settings | +9 |
 | Agent + Tool endpoints (Layer 3) | `AgentController` (8 methods), `ToolController` (3 methods) | +24 |
 | Orchestrator (Layer 4) | Full state machine (`start/tick/resume/reject`), `OrchestratorProxy`, Messenger wiring, `TaskController` | +24 |
-| Recipes + Plugins (Layer 5) | `RecipeScanner`, `PluginLoader` (Strict `plugin.json` manifest enforcement, PSR-4 mapping, nested deps, plugin auto-discovery). See `docs/plugins.md` | +24 |
-| Schema Installer (Layer 6) | `DatabaseSchemaInstaller` (`schema_versions` wrapping Laravel Migrator). Features O(1) filesystem stamp cache for hot-path skipping + plugin migration support natively. See `docs/schema.md` | +17 |
-| LLM Drivers (Layer 7) | `OpenAICompatibleDriver`, `AnthropicDriver`, `DriverFactory` (plugin-extensible provider registry). `symfony/http-client` transport. See `docs/drivers.md` | +? |
+| Recipes + Plugins (Layer 5) | `RecipeScanner`, `PluginLoader` (strict `plugin.json` manifest enforcement, PSR-4 mapping, nested deps, plugin auto-discovery). See `docs/07_plugins.md` | +24 |
+| Schema Installer (Layer 6) | `DatabaseSchemaInstaller` (`schema_versions` wrapping Laravel Migrator). O(1) filesystem stamp cache, plugin migration support. See `docs/02_schema.md` | +17 |
+| LLM Drivers (Layer 7) | `OpenAICompatibleDriver`, `AnthropicCompatibleDriver`, `DriverFactory` (plugin-extensible provider registry). `symfony/http-client` transport. See `docs/05_drivers.md` | +17 |
+| PSR-3 Logging | `LoggerInterface` (Monolog) bound in DI container from `SPORA_LOG_LEVEL` env var. Injected into LLM drivers and `Orchestrator::safeExecute()`. PII policy: arguments logged at DEBUG only, never at ERROR. See `docs/08_logging.md` | +3 |
+| Core Base Toolset (Layer 8) | Always-active: `CurrentTimeTool`, `CalculatorTool`, `ScratchpadTool` (key-value agent memory, `agent_memory` table). Configurable: `TavilySearchTool`, `SerperSearchTool`, `GNewsTool`, `NewsApiTool`, `ReadUrlTool` (SSRF protection, Markdown conversion, truncation), `ReadEmailTool` (IMAP, explicit `mark_as_read` opt-in), `SendEmailTool` (SMTP, allowlist), `CalDavCalendarTool` (RFC 5545 unfolding). See `docs/06_tools.md` | +35 |
+| API Polling + Seeders (Layer 9) | `TaskController` `?since_sequence=X` for efficient frontend polling. `bin/spora db:seed` (`SeedCommand` + `DatabaseSeeder`): creates admin user, default agent, enables base tools. | +7 |
 
-**Total: 186 tests, 0 failures. PHPStan level 5 clean.**
-
----
-
-## Phase 3 — Core Infrastructure (Active)
-
-### Layer 8 — Core Base Toolset ← NEXT
-
-**Goal:** Before exposing the UI, the agent needs a solid baseline of built-in tools (The "Senses and Hands") to be genuinely useful. These should be built as standard classes implementing `InputToolInterface` or `OutputToolInterface`.
-
-*Always-Active Base Tools (Built-in, non-disableable defaults):*
-- **Current Time / Date** (`Input`): **Crucial.** LLMs don't natively "know" the exact current time. To schedule a calendar event for "tomorrow," the agent must implicitly anchor its temporal awareness.
-- **Calculator** (`Input`): LLMs hallucinate math. A simple PHP-backed expression evaluator ensures flawless arithmetic for budgets and scheduling.
-
-*Configurable Core Tools:*
-- **Web Search** (`Input`): Separate providers via tool classes (e.g. `TavilySearchTool`, `SerperSearchTool`) tagged mathematically with `#[Tool(category: 'search')]` to prevent LLM collision. Native API capabilities (like Minimax search) will be handled as simple toggle flags inside the Agent's `LLMConfiguration` settings, NOT as standalone Agent tools.
-- **Read URL** (`Input`): Scrape a URL for Markdown extraction.
-- **News** (`Input`): Distinct from web search. Fetch latest headlines based on keywords or categories.
-- **E-Mail Access** (`Input` / `Output`): IMAP reader/SMTP writer baseline with a future OAuth layer plugin expansion for Google/Outlook.
-- **Calendar Access** (`Input` / `Output`): CalDAV or Google/Outlook API bridge.
-- **Internal Scratchpad / Notes** (`Input` / `Output`): A simple text/SQLite-based key-value store or markdown file writer.
+**Total: 254 tests, 622 assertions. PHPStan level 5 clean.**
 
 ---
 
-### Layer 9 — API Polling & Seeders ← NEXT
-
-**Goal:** Ensure the backend API correctly supports real-time capable UI fetching, and generate dummy data to accelerate UI scaffolding.
-
-- **API Polling Optimization:** Update `TaskController` to support `?since_sequence=X`. This enables the frontend to safely execute 2-second REST polling for live conversational updates without crushing bandwidth.
-- **Local Development Seeders:** Create a CLI fixture command (e.g. `bin/spora db:seed`) that wipes the DB, creates an Admin, an Agent, and seeds simulated `task_history` conversational logs to simulate complex tool runs for Phase 4.
-
----
-
-## Phase 4 — Frontend
+## Phase 4 — Frontend ← ACTIVE
 
 **Stack:** Vue 3 + Vite + TypeScript + Tailwind CSS + shadcn-vue in `frontend/`.
 
 **Build:** `vite.config.ts` outputs to `../public/dist`. Dev proxy `/api/` → PHP server. `public/index.php` serves `dist/index.html` as SPA fallback for non-API routes.
 
-**Real-Time Architecture (UI Updates vs System Notifications):**
-Spora distinguishes between live UI updates (when the tab is open) and asynchronous notifications (when the user is away).
-
-1. **Dashboard Updates (Polling vs Mercure/SSE):**
-   - **Base (Shared Hosting Safe):** The frontend will use standard REST Long-Polling against `GET /api/v1/tasks/{id}?since_sequence=X` every 2s. This guarantees functionality on cheap cPanel hosts where persistent background daemons are banned, without tying up all PHP-FPM workers.
-   - **Optional Enhancement (Mercure / Server-Sent Events):** Because Orchestrator states are entirely one-way (Server → Client), Server-Sent Events (SSE) via **Mercure** are vastly superior to WebSockets. Users with VPS access can run the Mercure Hub binary. Spora will push updates to the Hub using `symfony/mercure`. The Vue app will connect natively via `new EventSource()` (no heavy JS libraries required). The **FrankenPHP-based Docker image** (see Build & Distribution Scripts) bundles the Mercure hub natively, giving any Docker/VPS user both PHP and Mercure in a single container with zero extra setup.
-
-2. **Web Push & Notification Gateways:**
-   - When a task transitions to `PENDING_APPROVAL` or an agent replies, Spora needs to alert the user even if their browser is closed.
-   - **Native Web Push (VAPID):** Backend signs standard VAPID payloads using `minishlink/web-push` to trigger OS-level Chrome/Safari/Firefox notifications without requiring *any* persistent daemon. Completely compatible with shared hosting.
-   - **Third-Party Gateways:** Pluggable notification channels (E-Mail, Telegram, Slack Webhooks, Pushover, Ntfy.sh) available via the Plugin system.
-
-**Scope:**
-- Global API client (`frontend/src/api/client.ts`) — fetch wrapper, session cookie, `VITE_API_URL`
-- Pinia auth store — `login()`, `logout()`, `me()`, persisted user state
-- Pages: Login, Register
-- Dashboard: task list, task detail with approve/reject for `PENDING_APPROVAL` tasks. **UI Concept:** Task interaction should look like a WhatsApp chat, treating the Agent as a "User" with a profile picture. Tool calls, arguments, and approvals should be rendered inline within the chat flow. In later stages, multi-agent workflows could be displayed seamlessly as a "Group Chat".
-- Agent Settings: Configuration form for name/description/model, tool enable/disable, and per-tool settings (driven by `#[ToolSetting]` schema from `GET /api/v1/tools`).
-- Recipe picker: list from `GET /api/v1/recipes`, selection sets `agent.recipe_id`
-- Composer: textarea + submit → `POST /api/v1/tasks`
-
 **`composer.json` scripts:** `"frontend:dev": "cd frontend && npm run dev"`, `"frontend:build": "cd frontend && npm run build"`
+
+### Step 1 — Scaffold & Auth Pages ← NEXT
+
+- [ ] Init Vite + Vue 3 + TypeScript + Tailwind + shadcn-vue in `frontend/`
+- [ ] Global API client (`frontend/src/api/client.ts`) — fetch wrapper, session cookie, `VITE_API_URL`
+- [ ] Pinia auth store — `login()`, `logout()`, `me()`, persisted user state
+- [ ] Pages: Login, Register (route guards: redirect to dashboard if already authenticated)
+
+### Step 2 — Dashboard & Task Chat
+
+- [ ] Task list view: status badge, last-updated timestamp, link to detail
+- [ ] Task detail — **WhatsApp-style chat UI**: agent messages as "bubbles", tool calls inline with expandable arguments, system messages (task started/completed/failed) as centered pills
+- [ ] Approve / Reject UI for `PENDING_APPROVAL` tasks: show `human_description`, editable arguments form, confirm button
+- [ ] Polling loop: `GET /api/v1/tasks/{id}?since_sequence=X` every 2 s; update only new `task_history` entries
+- [ ] Composer: textarea + submit → `POST /api/v1/tasks`
+
+### Step 3 — Agent Settings
+
+- [ ] Agent config form: name, description, LLM provider/model, `max_steps`
+- [ ] Tool enable/disable toggle (driven by `GET /api/v1/tools`, updates `agent_tools`)
+- [ ] Per-tool settings form rendered from `#[ToolSetting]` schema (`key`, `type`, `label`, `description`)
+- [ ] Recipe picker: list from `GET /api/v1/recipes`, selection sets `agent.recipe_id`
+
+### Real-Time Architecture
+
+1. **Base (Shared Hosting Safe):** REST polling against `GET /api/v1/tasks/{id}?since_sequence=X` every 2 s. Zero persistent daemons; works on cPanel.
+2. **Optional Enhancement:** Mercure / SSE. Server-Sent Events via `symfony/mercure`. The FrankenPHP Docker image bundles Mercure natively — single container, zero extra services.
+3. **Web Push & Notifications:** `minishlink/web-push` (VAPID) for OS-level browser notifications when `PENDING_APPROVAL`. Pluggable gateways (Email, Telegram, Slack, Pushover, Ntfy.sh) via Plugin system.
 
 ---
 
 ## Backlog
-
-### API Logging & Observability
-System-wide config definition for API interactions via PSR-3 (`Monolog`).
-- Setup a `LoggerInterface` bound in the container, reading `log_level` and `log_path` from settings.
-- Implement Guzzle HTTP Middleware in driver transports to log external API calls, LLM requests, and HTTP traffic implicitly without custom code spanning the tools.
 
 ### Agent Execution Triggers
 Expand how an Agent Task can be started beyond a manual UI click:
@@ -106,7 +82,7 @@ Refine the `Orchestrator::reject` flow. Currently, it injects the user's rejecti
 ### Multimodal / Image Inputs (Vision)
 Allowing the agent to "see" by accepting image uploads in the composer.
 - **Storage:** Images are uploaded to a `storage/media/` directory. The `task_history.content` column (already `MEDIUMTEXT`) can store a JSON array representing the standard LLM multimodal structure: `[{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "..."}}]`.
-- **Drivers:** `OpenAICompatibleDriver` and `AnthropicDriver` will dynamically read the local image files and convert them to Base64 data URIs right before pushing the request to the API.
+- **Drivers:** `OpenAICompatibleDriver` and `AnthropicCompatibleDriver` will dynamically read the local image files and convert them to Base64 data URIs right before pushing the request to the API.
 - **Frontend:** The Composer UI requires an attachment/drag-and-drop zone.
 
 ### MCP Server Integration
