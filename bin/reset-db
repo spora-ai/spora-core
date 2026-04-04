@@ -1,0 +1,34 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Wipe and recreate the local SQLite database file.
+ * Also clears the schema stamp so the installer runs fresh migrations on next boot.
+ *
+ * Usage:  php bin/reset-db
+ *         composer reset
+ *
+ * This script is for local development only. It has no effect on MySQL.
+ */
+
+declare(strict_types=1);
+
+define('BASE_PATH', dirname(__DIR__));
+
+$dbPath    = BASE_PATH . '/storage/database.sqlite';
+$stampPath = BASE_PATH . '/storage/.schema_stamp';
+
+if (file_exists($dbPath)) {
+    unlink($dbPath);
+    echo "Deleted {$dbPath}\n";
+}
+
+touch($dbPath);
+echo "Created fresh SQLite database.\n";
+
+if (file_exists($stampPath)) {
+    unlink($stampPath);
+    echo "Cleared schema stamp.\n";
+}
+
+echo "Ready. Run 'composer install:db' to apply migrations.\n";

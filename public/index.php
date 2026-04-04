@@ -4,6 +4,14 @@ declare(strict_types=1);
 
 define('BASE_PATH', dirname(__DIR__));
 
+// Serve the SPA for all non-API routes in production (dist must be built first).
+$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
+if (!str_starts_with($requestPath, '/api/') && file_exists(__DIR__ . '/dist/index.html')) {
+    header('Content-Type: text/html; charset=UTF-8');
+    readfile(__DIR__ . '/dist/index.html');
+    exit;
+}
+
 require_once BASE_PATH . '/vendor/autoload.php';
 
 use Spora\Core\Kernel;

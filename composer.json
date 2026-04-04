@@ -41,10 +41,30 @@
         }
     },
     "scripts": {
+        "setup": [
+            "@php bin/reset-db",
+            "@php bin/spora spora:install",
+            "@php bin/spora db:seed"
+        ],
+        "reset": "@php bin/reset-db",
+        "dev": [
+            "Composer\\Config::disableProcessTimeout",
+            "bin/dev"
+        ],
+        "install:db": "@php bin/spora spora:install",
+        "seed": "@php bin/spora db:seed",
         "test": "./vendor/bin/pest",
         "test:coverage": "./vendor/bin/pest --coverage --coverage-html=coverage",
         "analyse": "./vendor/bin/phpstan analyse --memory-limit=2G",
-        "format": "./vendor/bin/php-cs-fixer fix"
+        "format": "./vendor/bin/php-cs-fixer fix",
+        "frontend:dev": [
+            "Composer\\Config::disableProcessTimeout",
+            "cd frontend && npm run dev"
+        ],
+        "frontend:build": [
+            "Composer\\Config::disableProcessTimeout",
+            "cd frontend && npm run build"
+        ]
     },
     "config": {
         "optimize-autoloader": true,

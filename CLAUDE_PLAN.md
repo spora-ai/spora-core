@@ -36,12 +36,14 @@
 
 **`composer.json` scripts:** `"frontend:dev": "cd frontend && npm run dev"`, `"frontend:build": "cd frontend && npm run build"`
 
-### Step 1 — Scaffold & Auth Pages ← NEXT
+### Step 1 — Scaffold & Auth Pages ✅
 
-- [ ] Init Vite + Vue 3 + TypeScript + Tailwind + shadcn-vue in `frontend/`
-- [ ] Global API client (`frontend/src/api/client.ts`) — fetch wrapper, session cookie, `VITE_API_URL`
-- [ ] Pinia auth store — `login()`, `logout()`, `me()`, persisted user state
-- [ ] Pages: Login, Register (route guards: redirect to dashboard if already authenticated)
+- [x] Init Vite + Vue 3 + TypeScript + Tailwind + shadcn-vue in `frontend/`
+- [x] Global API client (`frontend/src/api/client.ts`) — fetch wrapper, session cookie, `VITE_API_URL`
+- [x] Pinia auth store — `login()`, `logout()`, `me()`, persisted user state
+- [x] Pages: Login, Register (route guards: redirect to dashboard if already authenticated)
+- [x] SPA fallback in `public/index.php` — non-`/api/` routes serve `public/dist/index.html`
+- [x] `composer frontend:dev` / `composer frontend:build` scripts
 
 ### Step 2 — Dashboard & Task Chat
 
