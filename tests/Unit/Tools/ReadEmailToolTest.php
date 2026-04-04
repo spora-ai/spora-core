@@ -30,7 +30,7 @@ it('does not mark emails as read by default', function () {
 
     $tool = new ReadEmailTool($config);
     // Without mark_as_read — should still fail at connection, not at setFlag.
-    $result = $tool->execute([], 1);
+    $result = @$tool->execute([], 1);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('Failed to fetch emails');
 });
@@ -45,7 +45,7 @@ it('attempts to connect to imap but fails gracefully with bad host', function ()
     ]);
 
     $tool = new ReadEmailTool($config);
-    $result = $tool->execute([], 1);
+    $result = @$tool->execute([], 1);
 
     // Webklex PHP IMAP will throw an exception during make/connect.
     expect($result->success)->toBeFalse()

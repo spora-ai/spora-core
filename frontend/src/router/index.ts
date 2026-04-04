@@ -23,6 +23,24 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/agents/:id',
+      name: 'agent',
+      component: () => import('@/pages/AgentPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/agents/:id/settings',
+      name: 'agent-settings',
+      component: () => import('@/pages/AgentSettingsPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/tasks/:id',
+      name: 'task',
+      component: () => import('@/pages/TaskChatPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: '/',
     },

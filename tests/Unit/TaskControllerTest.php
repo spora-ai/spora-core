@@ -86,9 +86,9 @@ it('store creates task via orchestrator and returns 201', function (): void {
     $orch->expects('start')->once()->andReturn($mockTask);
 
     [$controller, $authService] = makeTaskController($orch);
-    seedUserAndAgent($authService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
-    $resp = $controller->store(jsonRequest('POST', '/api/v1/tasks', ['prompt' => 'Hello']));
+    $resp = $controller->store(jsonRequest('POST', '/api/v1/tasks', ['agent_id' => $agent->id, 'prompt' => 'Hello']));
     expect($resp->getStatusCode())->toBe(201);
 
     $body = json_decode($resp->getContent(), true);
@@ -100,7 +100,7 @@ it('store returns 404 when user has no agent', function (): void {
     $userId = $authService->register('noagent@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'noagent@example.com');
 
-    $resp = $controller->store(jsonRequest('POST', '/api/v1/tasks', ['prompt' => 'hello']));
+    $resp = $controller->store(jsonRequest('POST', '/api/v1/tasks', ['agent_id' => 99999, 'prompt' => 'hello']));
     expect($resp->getStatusCode())->toBe(404);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 

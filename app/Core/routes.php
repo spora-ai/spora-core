@@ -21,19 +21,22 @@ return static function (RouteCollector $r): void {
     $r->addRoute('GET', '/api/v1/auth/me', [AuthController::class, 'me']);
     $r->addRoute('POST', '/api/v1/auth/register', [AuthController::class, 'register']);
 
-    // Agent (V1: single agent per user — no ID in path)
-    $r->addRoute('GET', '/api/v1/agent', [AgentController::class, 'show']);
-    $r->addRoute('PATCH', '/api/v1/agent', [AgentController::class, 'update']);
+    // Agents — CRUD
+    $r->addRoute('GET', '/api/v1/agents', [AgentController::class, 'index']);
+    $r->addRoute('POST', '/api/v1/agents', [AgentController::class, 'store']);
+    $r->addRoute('GET', '/api/v1/agents/{id}', [AgentController::class, 'show']);
+    $r->addRoute('PATCH', '/api/v1/agents/{id}', [AgentController::class, 'update']);
+    $r->addRoute('DELETE', '/api/v1/agents/{id}', [AgentController::class, 'destroy']);
 
     // Agent tools — enablement & auto_approve override
-    $r->addRoute('POST', '/api/v1/agent/tools/{toolClass}/enable', [AgentController::class, 'enableTool']);
-    $r->addRoute('PATCH', '/api/v1/agent/tools/{toolClass}', [AgentController::class, 'patchTool']);
-    $r->addRoute('DELETE', '/api/v1/agent/tools/{toolClass}/enable', [AgentController::class, 'disableTool']);
+    $r->addRoute('POST', '/api/v1/agents/{id}/tools/{toolClass}/enable', [AgentController::class, 'enableTool']);
+    $r->addRoute('PATCH', '/api/v1/agents/{id}/tools/{toolClass}', [AgentController::class, 'patchTool']);
+    $r->addRoute('DELETE', '/api/v1/agents/{id}/tools/{toolClass}/enable', [AgentController::class, 'disableTool']);
 
     // Agent tools — per-agent credential overrides
-    $r->addRoute('GET', '/api/v1/agent/tools/{toolClass}/override', [AgentController::class, 'getOverride']);
-    $r->addRoute('PUT', '/api/v1/agent/tools/{toolClass}/override', [AgentController::class, 'putOverride']);
-    $r->addRoute('DELETE', '/api/v1/agent/tools/{toolClass}/override', [AgentController::class, 'deleteOverride']);
+    $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolClass}/override', [AgentController::class, 'getOverride']);
+    $r->addRoute('PUT', '/api/v1/agents/{id}/tools/{toolClass}/override', [AgentController::class, 'putOverride']);
+    $r->addRoute('DELETE', '/api/v1/agents/{id}/tools/{toolClass}/override', [AgentController::class, 'deleteOverride']);
 
     // Tool registry — global settings
     $r->addRoute('GET', '/api/v1/tools', [ToolController::class, 'index']);

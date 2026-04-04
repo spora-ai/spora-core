@@ -25,4 +25,10 @@ export default defineConfig({
       },
     },
   },
+
+  test: {
+    environment: 'happy-dom',
+    globals: true,
+    include: ['tests/**/*.spec.{ts,tsx}'],
+  },
 })

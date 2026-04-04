@@ -24,15 +24,28 @@ final class TaskController
 
     /**
      * GET /api/v1/tasks
+     * Optional ?agent_id=X query param to scope results to a specific agent.
      */
     public function index(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId  = AuthGuard::requireAuth($this->authService);
+        $agentId = $request->query->has('agent_id') ? (int) $request->query->get('agent_id') : null;
 
-        $tasks = Task::where('user_id', $userId)
-            ->orderByDesc('created_at')
-            ->get()
-            ->map(fn(Task $t) => $this->taskResource($t));
+        $query = Task::where('user_id', $userId)->orderByDesc('created_at');
+
+        if ($agentId !== null) {
+            // Verify the agent belongs to this user before filtering
+            $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
+            if ($agent === null) {
+                return new JsonResponse(
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => 'Agent not found.']],
+                    Response::HTTP_NOT_FOUND,
+                );
+            }
+            $query->where('agent_id', $agentId);
+        }
+
+        $tasks = $query->get()->map(fn(Task $t) => $this->taskResource($t));
 
         return new JsonResponse(['data' => ['tasks' => $tasks->all()]]);
     }
@@ -54,11 +67,20 @@ final class TaskController
             );
         }
 
-        $agent = Agent::where('user_id', $userId)->first();
+        $agentId = isset($body['agent_id']) ? (int) $body['agent_id'] : null;
+
+        if ($agentId === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'agent_id is required.']],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
+
+        $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
 
         if ($agent === null) {
             return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => 'No agent found for this user.']],
+                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Agent not found.']],
                 Response::HTTP_NOT_FOUND,
             );
         }
@@ -181,6 +203,7 @@ final class TaskController
     {
         return [
             'id'             => $task->id,
+            'agent_id'       => $task->agent_id,
             'status'         => $task->status,
             'user_prompt'    => $task->user_prompt,
             'final_response' => $task->final_response,

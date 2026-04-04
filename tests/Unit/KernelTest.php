@@ -156,7 +156,7 @@ test('uncaught controller exception returns 500 JSON', function (): void {
     // Without any secret key configured, SecurityManager throws → Kernel catches → 500.
     $response = withoutSecretKey(static function (): mixed {
         $kernel = new Kernel();
-        return $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+        return $kernel->handle(Request::create('/api/v1/agents', 'GET'));
     });
 
     expect($response->getStatusCode())->toBe(500);
@@ -177,7 +177,7 @@ test('500 response in production mode does not expose exception details', functi
     try {
         $response = withoutSecretKey(static function (): mixed {
             $kernel = new Kernel();
-            return $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+            return $kernel->handle(Request::create('/api/v1/agents', 'GET'));
         });
     } finally {
         if ($savedEnv !== null) {
@@ -197,7 +197,7 @@ test('500 response in production mode does not expose exception details', functi
 test('500 response has Content-Type application/json', function (): void {
     $response = withoutSecretKey(static function (): mixed {
         $kernel = new Kernel();
-        return $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+        return $kernel->handle(Request::create('/api/v1/agents', 'GET'));
     });
 
     expect($response->headers->get('Content-Type'))->toContain('application/json');
@@ -215,7 +215,7 @@ test('UnauthenticatedException from a protected route returns 401 UNAUTHENTICATE
 
     try {
         $kernel   = new Kernel();
-        $response = $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+        $response = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
     } finally {
         unset($_ENV['SPORA_SECRET_KEY']);
     }
@@ -233,7 +233,7 @@ test('401 response has Content-Type application/json', function (): void {
 
     try {
         $kernel   = new Kernel();
-        $response = $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+        $response = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
     } finally {
         unset($_ENV['SPORA_SECRET_KEY']);
     }
@@ -252,7 +252,7 @@ test('500 response in development mode includes a debug block with exception det
         // Clear secret key so SecurityManager throws → 500, then verify debug block appears.
         $response = withoutSecretKey(static function (): mixed {
             $kernel = new Kernel();
-            return $kernel->handle(Request::create('/api/v1/agent', 'GET'));
+            return $kernel->handle(Request::create('/api/v1/agents', 'GET'));
         });
     } finally {
         unset($_ENV['SPORA_APP_ENV']);

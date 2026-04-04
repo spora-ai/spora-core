@@ -1,0 +1,214 @@
+import { setActivePinia, createPinia } from 'pinia'
+import { useTaskStore } from '@/stores/tasks'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+
+vi.mock('@/api/client', () => ({
+  api: {
+    get: vi.fn(),
+    post: vi.fn(),
+  },
+}))
+
+import { api } from '@/api/client'
+
+const mockApi = api as ReturnType<typeof vi.fn>
+
+const mockTask = {
+  id: 1,
+  agent_id: 1,
+  status: 'RUNNING',
+  user_prompt: 'Do something',
+  final_response: null,
+  step_count: 1,
+  max_steps: 10,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:01Z',
+}
+
+const mockTaskDetail = {
+  ...mockTask,
+  tool_calls: [],
+  history: [],
+}
+
+describe('useTaskStore', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  describe('fetchTasks', () => {
+    it('fetches and sets tasks list', async () => {
+      const tasks = [mockTask]
+      mockApi.get.mockResolvedValueOnce({ tasks })
+
+      const store = useTaskStore()
+      await store.fetchTasks()
+
+      expect(store.tasks).toEqual(tasks)
+    })
+  })
+
+  describe('createTaskForAgent', () => {
+    it('posts with agent_id and prompt', async () => {
+      mockApi.post.mockResolvedValueOnce({ task: mockTask })
+
+      const store = useTaskStore()
+      const result = await store.createTaskForAgent(1, 'Do something')
+
+      expect(mockApi.post).toHaveBeenCalledWith('/tasks', {
+        agent_id: 1,
+        prompt: 'Do something',
+      })
+      expect(result).toEqual(mockTask)
+    })
+  })
+
+  describe('fetchTaskDetail', () => {
+    it('replaces activeTask on first load', async () => {
+      mockApi.get.mockResolvedValueOnce({ task: mockTaskDetail })
+
+      const store = useTaskStore()
+      await store.fetchTaskDetail(1)
+
+      expect(store.activeTask).toEqual(mockTaskDetail)
+    })
+
+    it('merges incremental history entries (server filters by since_sequence)', async () => {
+      const first: typeof mockTaskDetail = {
+        ...mockTaskDetail,
+        history: [{ sequence: 0, role: 'user' as const, content: 'Hi', tool_call_id: null, tool_name: null }],
+      }
+      // Second response: server returns only entries where sequence > 0 (the new one)
+      const second: typeof mockTaskDetail = {
+        ...mockTaskDetail,
+        history: [
+          { sequence: 1, role: 'assistant' as const, content: 'Hello', tool_call_id: null, tool_name: null },
+        ],
+      }
+
+      mockApi.get
+        .mockResolvedValueOnce({ task: first })
+        .mockResolvedValueOnce({ task: second })
+
+      const store = useTaskStore()
+      await store.fetchTaskDetail(1)
+      await store.fetchTaskDetail(1, 0)
+
+      // Server filters by since_sequence so only new entries are appended
+      expect(store.activeTask!.history.length).toBe(2)
+      expect(store.activeTask!.history[0].sequence).toBe(0)
+      expect(store.activeTask!.history[1].sequence).toBe(1)
+    })
+  })
+
+  describe('approveTask', () => {
+    it('posts approvals and refreshes detail', async () => {
+      mockApi.post.mockResolvedValueOnce(undefined)
+      mockApi.get.mockResolvedValueOnce({ task: { ...mockTaskDetail, status: 'RUNNING' } })
+
+      const store = useTaskStore()
+      store.activeTask = { ...mockTaskDetail, status: 'PENDING_APPROVAL' }
+      await store.approveTask(1, [{ provider_call_id: '1', arguments: {} }])
+
+      expect(mockApi.post).toHaveBeenCalledWith('/tasks/1/approve', {
+        approvals: [{ provider_call_id: '1', arguments: {} }],
+      })
+    })
+  })
+
+  describe('rejectTask', () => {
+    it('posts rejection reason and refreshes detail', async () => {
+      mockApi.post.mockResolvedValueOnce(undefined)
+      mockApi.get.mockResolvedValueOnce({ task: { ...mockTaskDetail, status: 'RUNNING' } })
+
+      const store = useTaskStore()
+      store.activeTask = { ...mockTaskDetail, status: 'PENDING_APPROVAL' }
+      await store.rejectTask(1, 'No thanks')
+
+      expect(mockApi.post).toHaveBeenCalledWith('/tasks/1/reject', {
+        reason: 'No thanks',
+      })
+    })
+  })
+
+  describe('pendingToolCalls', () => {
+    it('returns only PENDING tool calls', () => {
+      const store = useTaskStore()
+      store.activeTask = {
+        ...mockTaskDetail,
+        tool_calls: [
+          { id: 1, tool_name: 'WebSearch', tool_type: 'search', status: 'PENDING', proposed_arguments: {}, approved_arguments: null, human_description: null, result_content: null, executed_at: null },
+          { id: 2, tool_name: 'Calculator', tool_type: 'calc', status: 'EXECUTED', proposed_arguments: {}, approved_arguments: {}, human_description: null, result_content: '42', executed_at: null },
+        ],
+      }
+
+      expect(store.pendingToolCalls.length).toBe(1)
+      expect(store.pendingToolCalls[0].id).toBe(1)
+    })
+  })
+
+  describe('isTerminal', () => {
+    it('returns true for COMPLETED', () => {
+      const store = useTaskStore()
+      store.activeTask = { ...mockTaskDetail, status: 'COMPLETED' }
+      expect(store.isTerminal).toBe(true)
+    })
+
+    it('returns true for FAILED', () => {
+      const store = useTaskStore()
+      store.activeTask = { ...mockTaskDetail, status: 'FAILED' }
+      expect(store.isTerminal).toBe(true)
+    })
+
+    it('returns false for RUNNING', () => {
+      const store = useTaskStore()
+      store.activeTask = { ...mockTaskDetail, status: 'RUNNING' }
+      expect(store.isTerminal).toBe(false)
+    })
+
+    it('returns false when no activeTask', () => {
+      const store = useTaskStore()
+      expect(store.isTerminal).toBe(false)
+    })
+  })
+
+  describe('clearActiveTask', () => {
+    it('resets activeTask and lastSequence', () => {
+      const store = useTaskStore()
+      store.activeTask = mockTaskDetail
+      store.clearActiveTask()
+      expect(store.activeTask).toBe(null)
+    })
+  })
+
+  describe('tasksByAgent', () => {
+    it('groups tasks by agent_id', () => {
+      const store = useTaskStore()
+      store.tasks = [
+        { ...mockTask, id: 1, agent_id: 1 },
+        { ...mockTask, id: 2, agent_id: 2 },
+        { ...mockTask, id: 3, agent_id: 1 },
+      ]
+
+      const grouped = store.tasksByAgent
+      expect(grouped.get(1)?.length).toBe(2)
+      expect(grouped.get(2)?.length).toBe(1)
+    })
+  })
+
+  describe('lastTaskByAgent', () => {
+    it('returns most recent task per agent', () => {
+      const store = useTaskStore()
+      store.tasks = [
+        { ...mockTask, id: 1, agent_id: 1, updated_at: '2026-01-01T00:00:00Z' },
+        { ...mockTask, id: 2, agent_id: 1, updated_at: '2026-01-02T00:00:00Z' },
+        { ...mockTask, id: 3, agent_id: 2, updated_at: '2026-01-01T00:00:00Z' },
+      ]
+
+      const last = store.lastTaskByAgent
+      expect(last.get(1)?.id).toBe(2) // newer
+      expect(last.get(2)?.id).toBe(3)
+    })
+  })
+})

@@ -15,4 +15,10 @@
             <directory>app</directory>
         </include>
     </source>
+
+    <php>
+        <!-- A valid 32-byte key base64-encoded for tests -->
+        <env name="SPORA_SECRET_KEY" value="ZGVhZGJlZWZkZWFkYmVlZmRlYWRiZWVmZGVhZGJlZWY="/>
+        <env name="SPORA_APP_ENV" value="testing"/>
+    </php>
 </phpunit>

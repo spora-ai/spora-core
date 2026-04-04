@@ -24,7 +24,7 @@ require_once BASE_PATH . '/vendor/autoload.php';
 // which PHP 8.4+ deprecates. The maintainer has acknowledged this (GitHub #314)
 // but defers the fix to preserve PHP 7.0 compatibility. The warnings are harmless
 // — nothing breaks at runtime — so we silence them here rather than patching vendor.
-set_error_handler(static function (int $errno, string $errstr, string $errfile): bool {
+set_error_handler(static function (int $errno, string $_errstr, string $errfile): bool {
     if ($errno === E_DEPRECATED && str_contains($errfile, \DIRECTORY_SEPARATOR . 'delight-im' . \DIRECTORY_SEPARATOR)) {
         return true;
     }
@@ -42,11 +42,6 @@ set_error_handler(static function (int $errno, string $errstr, string $errfile):
  */
 function bootAuthLayer(): Spora\Auth\AuthService
 {
-    Spora\Core\Database::resetBootState();
-
-    $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-    $db->boot();
-
     $pdo  = Illuminate\Database\Capsule\Manager::connection()->getPdo();
     $auth = new Delight\Auth\Auth($pdo, null, null, false /* throttling off */);
 
@@ -93,3 +88,18 @@ function clearSession(): void
 {
     $_SESSION = [];
 }
+
+uses()
+    ->beforeEach(function () {
+        Spora\Core\Database::resetBootState();
+        $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+        $db->boot();
+        Illuminate\Database\Capsule\Manager::connection()->beginTransaction();
+    })
+    ->afterEach(function () {
+        if (Illuminate\Database\Capsule\Manager::connection()->transactionLevel() > 0) {
+            Illuminate\Database\Capsule\Manager::connection()->rollBack();
+        }
+        Spora\Core\Database::resetBootState();
+    })
+    ->in(__DIR__);

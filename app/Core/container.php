@@ -124,7 +124,7 @@ return [
 
     Psr\Log\LoggerInterface::class => static function (ContainerInterface $c): Psr\Log\LoggerInterface {
         $config = $c->get('config');
-        $levelStr = strtoupper($config['log_level'] ?? 'WARNING');
+        $levelStr = ucfirst(strtolower($config['log_level'] ?? 'warning'));
         $level = constant(Monolog\Level::class . '::' . $levelStr);
 
         $logger = new Monolog\Logger('spora');

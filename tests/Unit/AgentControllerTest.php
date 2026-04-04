@@ -8,6 +8,7 @@ use Spora\Core\SecurityManager;
 use Spora\Http\AgentController;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Services\ToolConfigService;
+use Symfony\Component\HttpFoundation\Request;
 use Tests\Fixtures\TestTool;
 
 // ---------------------------------------------------------------------------
@@ -40,6 +41,28 @@ function registerUser(AuthService $authService, string $email = 'user@example.co
     return $userId;
 }
 
+/**
+ * Create an agent via the controller's store() and return the agent ID.
+ */
+function createAgent(AgentController $controller, string $name = 'My Assistant'): int
+{
+    $response = $controller->store(jsonRequest('POST', '/api/v1/agents', ['name' => $name]));
+    $body = json_decode($response->getContent(), true);
+
+    return (int) $body['data']['agent']['id'];
+}
+
+/**
+ * Build a JSON request with the agent ID set in route attributes.
+ */
+function agentJsonRequest(string $method, string $path, array $body = [], int $agentId = 1): Request
+{
+    $request = jsonRequest($method, $path, $body);
+    $request->attributes->set('id', $agentId);
+
+    return $request;
+}
+
 // ---------------------------------------------------------------------------
 // Auth guard
 // ---------------------------------------------------------------------------
@@ -48,50 +71,126 @@ test('unauthenticated request throws UnauthenticatedException', function (): voi
     clearSession();
     [$controller] = makeAgentController();
 
-    expect(fn() => $controller->show(jsonRequest('GET', '/api/v1/agent')))
+    expect(fn() => $controller->index(jsonRequest('GET', '/api/v1/agents')))
         ->toThrow(UnauthenticatedException::class);
 });
 
 // ---------------------------------------------------------------------------
-// show
+// index / store
 // ---------------------------------------------------------------------------
 
-test('show auto-creates default agent for new user', function (): void {
+test('index returns empty array when no agents exist', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
 
-    $response = $controller->show(jsonRequest('GET', '/api/v1/agent'));
+    $response = $controller->index(jsonRequest('GET', '/api/v1/agents'));
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
-    expect($body['data']['agent'])->toHaveKey('id');
-    expect($body['data']['agent']['name'])->toBe('My Assistant');
-    expect($body['data']['agent']['tools'])->toBe([]);
+    expect($body['data']['agents'])->toBe([]);
 });
 
-test('show returns existing agent without creating a duplicate', function (): void {
+test('index returns all agents for the current user', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    createAgent($controller, 'Agent A');
+    createAgent($controller, 'Agent B');
+
+    $response = $controller->index(jsonRequest('GET', '/api/v1/agents'));
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['agents'])->toHaveCount(2);
+});
+
+test('store creates a new agent and returns 201', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
 
-    $controller->show(jsonRequest('GET', '/api/v1/agent'));
-    $controller->show(jsonRequest('GET', '/api/v1/agent'));
+    $response = $controller->store(
+        jsonRequest('POST', '/api/v1/agents', ['name' => 'Research Bot']),
+    );
 
-    expect(Capsule::table('agents')->count())->toBe(1);
+    expect($response->getStatusCode())->toBe(201);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['agent']['name'])->toBe('Research Bot');
+    expect($body['data']['agent'])->toHaveKey('id');
+});
+
+test('store requires a name', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+
+    $response = $controller->store(
+        jsonRequest('POST', '/api/v1/agents', ['name' => '']),
+    );
+
+    expect($response->getStatusCode())->toBe(422);
 });
 
 // ---------------------------------------------------------------------------
-// update
+// show / update / destroy
 // ---------------------------------------------------------------------------
+
+test('show returns the agent by id', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller, 'My Bot');
+
+    $response = $controller->show(agentJsonRequest('GET', '/api/v1/agents/' . $agentId, [], $agentId));
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['agent']['name'])->toBe('My Bot');
+});
+
+test('show returns 404 for another user\'s agent', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    // Register and switch to a different user
+    registerUser($authService, 'other@example.com');
+    $response = $controller->show(agentJsonRequest('GET', '/api/v1/agents/' . $agentId, [], $agentId));
+
+    expect($response->getStatusCode())->toBe(404);
+});
+
+test('show includes tools in the agent resource', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    $request = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/enable');
+    $request->attributes->set('id', $agentId);
+    $request->attributes->set('toolClass', TestTool::class);
+    $controller->enableTool($request);
+
+    $response = $controller->show(agentJsonRequest('GET', '/api/v1/agents/' . $agentId, [], $agentId));
+    $body = json_decode($response->getContent(), true);
+
+    expect($body['data']['agent']['tools'])->toHaveCount(1);
+    expect($body['data']['agent']['tools'][0]['tool_class'])->toBe(TestTool::class);
+});
 
 test('update patches allowed agent fields', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
+    $agentId = createAgent($controller);
 
     $response = $controller->update(
-        jsonRequest('PATCH', '/api/v1/agent', ['name' => 'My Bot', 'llm_model' => 'gpt-4o-mini']),
+        agentJsonRequest('PATCH', '/api/v1/agents/' . $agentId, [
+            'name' => 'My Bot',
+            'llm_model' => 'gpt-4o-mini',
+        ], $agentId),
     );
 
     expect($response->getStatusCode())->toBe(200);
@@ -104,9 +203,13 @@ test('update ignores unknown fields', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
+    $agentId = createAgent($controller);
 
     $response = $controller->update(
-        jsonRequest('PATCH', '/api/v1/agent', ['user_id' => 999, 'name' => 'Safe Name']),
+        agentJsonRequest('PATCH', '/api/v1/agents/' . $agentId, [
+            'user_id' => 999,
+            'name' => 'Safe Name',
+        ], $agentId),
     );
 
     expect($response->getStatusCode())->toBe(200);
@@ -117,6 +220,32 @@ test('update ignores unknown fields', function (): void {
     expect((int) $row->user_id)->not()->toBe(999);
 });
 
+test('update returns 404 for non-existent agent', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+
+    $response = $controller->update(
+        agentJsonRequest('PATCH', '/api/v1/agents/99999', ['name' => 'Ghost'], 99999),
+    );
+
+    expect($response->getStatusCode())->toBe(404);
+});
+
+test('destroy removes the agent and returns 204', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    $response = $controller->destroy(
+        agentJsonRequest('DELETE', '/api/v1/agents/' . $agentId, [], $agentId),
+    );
+
+    expect($response->getStatusCode())->toBe(204);
+    expect(Capsule::table('agents')->count())->toBe(0);
+});
+
 // ---------------------------------------------------------------------------
 // enableTool / disableTool
 // ---------------------------------------------------------------------------
@@ -125,8 +254,10 @@ test('enableTool inserts an AgentTool row and returns 201', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
+    $agentId = createAgent($controller);
 
-    $request = jsonRequest('POST', '/api/v1/agent/tools/test/enable');
+    $request = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/enable');
+    $request->attributes->set('id', $agentId);
     $request->attributes->set('toolClass', TestTool::class);
 
     $response = $controller->enableTool($request);
@@ -141,8 +272,10 @@ test('enableTool is idempotent: second call returns 200 without duplicating', fu
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
+    $agentId = createAgent($controller);
 
-    $request = jsonRequest('POST', '/api/v1/agent/tools/test/enable');
+    $request = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/enable');
+    $request->attributes->set('id', $agentId);
     $request->attributes->set('toolClass', TestTool::class);
 
     $controller->enableTool($request);
@@ -152,32 +285,19 @@ test('enableTool is idempotent: second call returns 200 without duplicating', fu
     expect(Capsule::table('agent_tools')->count())->toBe(1);
 });
 
-test('show lists enabled tools on the agent resource', function (): void {
-    clearSession();
-    [$controller, $authService] = makeAgentController();
-    registerUser($authService);
-
-    $request = jsonRequest('POST', '/api/v1/agent/tools/test/enable');
-    $request->attributes->set('toolClass', TestTool::class);
-    $controller->enableTool($request);
-
-    $response = $controller->show(jsonRequest('GET', '/api/v1/agent'));
-    $body     = json_decode($response->getContent(), true);
-
-    expect($body['data']['agent']['tools'])->toHaveCount(1);
-    expect($body['data']['agent']['tools'][0]['tool_class'])->toBe(TestTool::class);
-});
-
 test('disableTool removes the AgentTool row and returns 204', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
+    $agentId = createAgent($controller);
 
-    $enableReq = jsonRequest('POST', '/api/v1/agent/tools/test/enable');
+    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/enable');
+    $enableReq->attributes->set('id', $agentId);
     $enableReq->attributes->set('toolClass', TestTool::class);
     $controller->enableTool($enableReq);
 
-    $disableReq = jsonRequest('DELETE', '/api/v1/agent/tools/test/enable');
+    $disableReq = jsonRequest('DELETE', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/enable');
+    $disableReq->attributes->set('id', $agentId);
     $disableReq->attributes->set('toolClass', TestTool::class);
     $response = $controller->disableTool($disableReq);
 
@@ -194,12 +314,15 @@ test('patchTool sets auto_approve to true', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
+    $agentId = createAgent($controller);
 
-    $enableReq = jsonRequest('POST', '/api/v1/agent/tools/test/enable');
+    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/enable');
+    $enableReq->attributes->set('id', $agentId);
     $enableReq->attributes->set('toolClass', TestTool::class);
     $controller->enableTool($enableReq);
 
-    $patchReq = jsonRequest('PATCH', '/api/v1/agent/tools/test', ['auto_approve' => true]);
+    $patchReq = jsonRequest('PATCH', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class), ['auto_approve' => true]);
+    $patchReq->attributes->set('id', $agentId);
     $patchReq->attributes->set('toolClass', TestTool::class);
     $response = $controller->patchTool($patchReq);
 
@@ -212,16 +335,20 @@ test('patchTool sets auto_approve back to null', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
+    $agentId = createAgent($controller);
 
-    $enableReq = jsonRequest('POST', '/api/v1/agent/tools/test/enable');
+    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/enable');
+    $enableReq->attributes->set('id', $agentId);
     $enableReq->attributes->set('toolClass', TestTool::class);
     $controller->enableTool($enableReq);
 
-    $patchReq = jsonRequest('PATCH', '/api/v1/agent/tools/test', ['auto_approve' => true]);
+    $patchReq = jsonRequest('PATCH', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class), ['auto_approve' => true]);
+    $patchReq->attributes->set('id', $agentId);
     $patchReq->attributes->set('toolClass', TestTool::class);
     $controller->patchTool($patchReq);
 
-    $patchReq2 = jsonRequest('PATCH', '/api/v1/agent/tools/test', ['auto_approve' => null]);
+    $patchReq2 = jsonRequest('PATCH', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class), ['auto_approve' => null]);
+    $patchReq2->attributes->set('id', $agentId);
     $patchReq2->attributes->set('toolClass', TestTool::class);
     $response = $controller->patchTool($patchReq2);
 
@@ -233,10 +360,10 @@ test('patchTool on non-enabled tool returns 404', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
+    $agentId = createAgent($controller);
 
-    $controller->show(jsonRequest('GET', '/api/v1/agent')); // create default agent
-
-    $request = jsonRequest('PATCH', '/api/v1/agent/tools/test', ['auto_approve' => true]);
+    $request = jsonRequest('PATCH', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class), ['auto_approve' => true]);
+    $request->attributes->set('id', $agentId);
     $request->attributes->set('toolClass', TestTool::class);
     $response = $controller->patchTool($request);
 
@@ -251,8 +378,10 @@ test('getOverride returns empty settings when no override set', function (): voi
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
+    $agentId = createAgent($controller);
 
-    $request = jsonRequest('GET', '/api/v1/agent/tools/test/override');
+    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/override');
+    $request->attributes->set('id', $agentId);
     $request->attributes->set('toolClass', TestTool::class);
     $response = $controller->getOverride($request);
 
@@ -265,8 +394,10 @@ test('putOverride saves agent-scoped settings and masks passwords', function ():
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
+    $agentId = createAgent($controller);
 
-    $request = jsonRequest('PUT', '/api/v1/agent/tools/test/override', ['api_key' => 'secret-key']);
+    $request = jsonRequest('PUT', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/override', ['api_key' => 'secret-key']);
+    $request->attributes->set('id', $agentId);
     $request->attributes->set('toolClass', TestTool::class);
     $response = $controller->putOverride($request);
 
@@ -278,16 +409,14 @@ test('putOverride saves agent-scoped settings and masks passwords', function ():
 test('putOverride discards global-scoped keys', function (): void {
     clearSession();
     [$controller, $authService, $toolConfig] = makeAgentController();
-    $userId = registerUser($authService);
+    registerUser($authService);
+    $agentId = createAgent($controller);
 
-    // Create the agent first
-    $controller->show(jsonRequest('GET', '/api/v1/agent'));
-    $agentId = (int) Capsule::table('agents')->where('user_id', $userId)->value('id');
-
-    $request = jsonRequest('PUT', '/api/v1/agent/tools/test/override', [
+    $request = jsonRequest('PUT', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/override', [
         'api_key'     => 'secret',   // scope: agent → stored
         'max_results' => '10',        // scope: global → discarded
     ]);
+    $request->attributes->set('id', $agentId);
     $request->attributes->set('toolClass', TestTool::class);
     $controller->putOverride($request);
 
@@ -300,12 +429,15 @@ test('deleteOverride removes the override and returns 204', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
+    $agentId = createAgent($controller);
 
-    $putReq = jsonRequest('PUT', '/api/v1/agent/tools/test/override', ['api_key' => 'secret-key']);
+    $putReq = jsonRequest('PUT', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/override', ['api_key' => 'secret-key']);
+    $putReq->attributes->set('id', $agentId);
     $putReq->attributes->set('toolClass', TestTool::class);
     $controller->putOverride($putReq);
 
-    $delReq = jsonRequest('DELETE', '/api/v1/agent/tools/test/override');
+    $delReq = jsonRequest('DELETE', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/override');
+    $delReq->attributes->set('id', $agentId);
     $delReq->attributes->set('toolClass', TestTool::class);
     $response = $controller->deleteOverride($delReq);
 
@@ -313,7 +445,8 @@ test('deleteOverride removes the override and returns 204', function (): void {
     expect($response->getContent())->toBe('');
 
     // Override row should be gone
-    $getReq = jsonRequest('GET', '/api/v1/agent/tools/test/override');
+    $getReq = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode(TestTool::class) . '/override');
+    $getReq->attributes->set('id', $agentId);
     $getReq->attributes->set('toolClass', TestTool::class);
     $body = json_decode($controller->getOverride($getReq)->getContent(), true);
     expect($body['data']['settings'])->toBe([]);
