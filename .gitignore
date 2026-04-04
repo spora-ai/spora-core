@@ -22,6 +22,9 @@ storage/database.sqlite
 storage/database.sqlite-shm
 storage/database.sqlite-wal
 
+# Schema installer stamp — regenerated on every migration run, not source
+storage/.schema_stamp
+
 # Keep the empty storage/ directory in the repo
 !storage/.gitkeep
 
