@@ -23,7 +23,7 @@ it('seeds the admin user and agent successfully', function () {
 
     expect($output)->toContain('Created Admin User')
         ->toContain('Created Default Agent')
-        ->toContain('Enabled 4 Base Tools');
+        ->toContain('Enabled 3 Base Tools');
 
     // Assert databases state
     $user = User::where('email', 'admin@spora.local')->first();
@@ -34,7 +34,7 @@ it('seeds the admin user and agent successfully', function () {
         ->and($agent->name)->toBe('Spora Core Agent');
 
     $tools = AgentTool::where('agent_id', $agent->id)->get();
-    expect($tools)->toHaveCount(4);
+    expect($tools)->toHaveCount(3);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('does not duplicate records if seeder is run twice', function () {
@@ -53,10 +53,10 @@ it('does not duplicate records if seeder is run twice', function () {
 
     expect($output)->toContain('Admin user already exists')
         ->toContain('Default Agent already exists')
-        ->toContain('Enabled 4 Base Tools');
+        ->toContain('Enabled 3 Base Tools');
 
     // Assert counts haven't abnormally expanded
     expect(User::where('email', 'admin@spora.local')->count())->toBe(1)
         ->and(Agent::where('name', 'Spora Core Agent')->count())->toBe(1)
-        ->and(AgentTool::count())->toBe(4);
+        ->and(AgentTool::count())->toBe(3);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());

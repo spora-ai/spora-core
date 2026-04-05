@@ -10,9 +10,10 @@ use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
+use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
-final class OpenAICompatibleDriver implements LLMDriverInterface
+final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface
 {
     public function __construct(
         private readonly string              $apiKey,
@@ -21,6 +22,8 @@ final class OpenAICompatibleDriver implements LLMDriverInterface
         private readonly HttpClientInterface $httpClient,
         private readonly ?LoggerInterface    $logger = null,
     ) {}
+
+    // ── LLMDriverInterface ──────────────────────────────────────────────────────
 
     public function getProviderName(): string
     {
@@ -60,7 +63,7 @@ final class OpenAICompatibleDriver implements LLMDriverInterface
                 'Content-Type'  => 'application/json',
             ],
             'json'    => $body,
-            'timeout' => 45, // Fix 2: Prevent hanging indefinitely
+            'timeout' => 45,
         ]);
 
         $statusCode = $response->getStatusCode();
@@ -118,5 +121,74 @@ final class OpenAICompatibleDriver implements LLMDriverInterface
             outputTokens: $outputTokens,
             completionId: $completionId,
         );
+    }
+
+    // ── LLMDriverConfigInterface ────────────────────────────────────────────────
+
+    public static function getName(): string
+    {
+        return 'openai_compatible';
+    }
+
+    public static function getDisplayName(): string
+    {
+        return 'OpenAI Compatible';
+    }
+
+    /** @return list<ToolSetting> */
+    public static function getSettingsSchema(): array
+    {
+        return [
+            new ToolSetting(
+                key: 'api_key',
+                label: 'API Key',
+                type: 'password',
+                description: 'API key for the OpenAI-compatible endpoint.',
+                required: true,
+                scope: 'global',
+            ),
+            new ToolSetting(
+                key: 'base_url',
+                label: 'Base URL',
+                type: 'text',
+                description: 'Base URL of the API endpoint (e.g. https://api.openai.com/v1).',
+                required: false,
+                scope: 'global',
+                default: 'https://api.openai.com/v1',
+            ),
+            new ToolSetting(
+                key: 'model',
+                label: 'Model',
+                type: 'text',
+                description: 'Model identifier (e.g. gpt-4o, gpt-4-turbo, o1-preview).',
+                required: false,
+                scope: 'global',
+                default: 'gpt-4o',
+            ),
+            new ToolSetting(
+                key: 'temperature',
+                label: 'Temperature',
+                type: 'text',
+                description: 'Sampling temperature (0.0–2.0). Lower is more deterministic.',
+                required: false,
+                scope: 'global',
+                default: '0.7',
+            ),
+            new ToolSetting(
+                key: 'max_tokens',
+                label: 'Max Tokens',
+                type: 'text',
+                description: 'Maximum number of tokens to generate.',
+                required: false,
+                scope: 'global',
+                default: '4096',
+            ),
+        ];
+    }
+
+    /** @return list<class-string> */
+    public static function getDefaultTools(): array
+    {
+        return [];
     }
 }

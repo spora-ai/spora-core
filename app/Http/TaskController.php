@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use JsonException;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
@@ -57,7 +58,15 @@ final class TaskController
     {
         $userId = AuthGuard::requireAuth($this->authService);
 
-        $body   = $this->decodeJson($request);
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_JSON', 'message' => 'Request body must be valid JSON.']],
+                Response::HTTP_BAD_REQUEST,
+            );
+        }
+
         $prompt = trim((string) ($body['prompt'] ?? ''));
 
         if ($prompt === '') {
@@ -142,7 +151,14 @@ final class TaskController
             );
         }
 
-        $body = $this->decodeJson($request);
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_JSON', 'message' => 'Request body must be valid JSON.']],
+                Response::HTTP_BAD_REQUEST,
+            );
+        }
 
         // Accept either a modern batch payload  { "approvals": [{ "provider_call_id": "...", "arguments": {...} }] }
         // or the legacy single-tool format       { "arguments": {...} }  (auto-wrapped for backward compatibility).
@@ -182,7 +198,15 @@ final class TaskController
             );
         }
 
-        $body   = $this->decodeJson($request);
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_JSON', 'message' => 'Request body must be valid JSON.']],
+                Response::HTTP_BAD_REQUEST,
+            );
+        }
+
         $reason = trim((string) ($body['reason'] ?? 'No reason provided.'));
 
         $this->orchestrator->reject($task->id, $reason);
@@ -252,6 +276,6 @@ final class TaskController
             return [];
         }
 
-        return json_decode($content, true) ?? [];
+        return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
     }
 }

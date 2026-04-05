@@ -16,6 +16,7 @@ use Webklex\PHPIMAP\ClientManager;
 #[Tool(
     name: 'read_email',
     description: 'Read the latest unread emails from the inbox. Use this to check for new messages, verifications, or replies.',
+    displayName: 'Read Email',
 )]
 #[ToolSetting(key: 'core.imap.host', label: 'IMAP Host', type: 'text', description: 'e.g. imap.example.com', scope: 'agent')]
 #[ToolSetting(key: 'core.imap.port', label: 'IMAP Port', type: 'text', description: 'Usually 993', scope: 'agent')]

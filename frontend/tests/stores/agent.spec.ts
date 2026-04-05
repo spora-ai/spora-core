@@ -164,7 +164,7 @@ describe('useAgentStore', () => {
       const result = await store.getLLMConfig(1)
 
       expect(mockApi.get).toHaveBeenCalledWith(
-        '/agents/1/tools/Spora%5CDrivers%5CLLMConfiguration/override',
+        '/agents/1/tools/llm_configuration/override',
       )
       expect(result).toEqual(config)
     })
@@ -179,7 +179,7 @@ describe('useAgentStore', () => {
       const result = await store.putLLMConfig(1, config)
 
       expect(mockApi.put).toHaveBeenCalledWith(
-        '/agents/1/tools/Spora%5CDrivers%5CLLMConfiguration/override',
+        '/agents/1/tools/llm_configuration/override',
         { settings: config },
       )
       expect(result).toEqual(config)

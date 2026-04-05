@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use JsonException;
 use ReflectionClass;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
@@ -12,6 +13,7 @@ use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 final class ToolController
 {
@@ -37,9 +39,13 @@ final class ToolController
     {
         AuthGuard::requireAuth($this->authService);
 
-        $toolClass = (string) $request->attributes->get('toolClass', '');
-        $settings  = $this->toolConfigService->getGlobalSettings($toolClass);
-        $masked    = $this->toolConfigService->maskForApi($settings, $toolClass);
+        $toolClass = $this->resolveToolClassFromRequest($request);
+        if ($toolClass === null) {
+            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Tool not found.']], 404);
+        }
+
+        $settings = $this->toolConfigService->getGlobalSettings($toolClass);
+        $masked   = $this->toolConfigService->maskForApi($settings, $toolClass);
 
         return new JsonResponse(['data' => ['settings' => $masked]]);
     }
@@ -48,9 +54,21 @@ final class ToolController
     {
         AuthGuard::requireAuth($this->authService);
 
-        $toolClass = (string) $request->attributes->get('toolClass', '');
-        $body      = $this->decodeJson($request);
-        $settings  = isset($body['settings']) && is_array($body['settings']) ? $body['settings'] : $body;
+        $toolClass = $this->resolveToolClassFromRequest($request);
+        if ($toolClass === null) {
+            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Tool not found.']], 404);
+        }
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_JSON', 'message' => 'Request body must be valid JSON.']],
+                Response::HTTP_BAD_REQUEST,
+            );
+        }
+
+        $settings = isset($body['settings']) && is_array($body['settings']) ? $body['settings'] : $body;
 
         $this->toolConfigService->putGlobalSettings($toolClass, $settings);
 
@@ -74,6 +92,7 @@ final class ToolController
 
         $toolAttrs = $reflection->getAttributes(Tool::class);
         $toolName  = $toolAttrs !== [] ? $toolAttrs[0]->newInstance()->name : $reflection->getShortName();
+        $displayName = $toolAttrs !== [] ? $toolAttrs[0]->newInstance()->displayName : null;
 
         $schema = [];
         foreach ($reflection->getAttributes(ToolSetting::class) as $attribute) {
@@ -93,15 +112,29 @@ final class ToolController
         return [
             'tool_class'      => $toolClass,
             'tool_name'       => $toolName,
+            'display_name'    => $displayName,
             'settings_schema' => $schema,
         ];
+    }
+
+    private function resolveToolClassFromRequest(Request $request): ?string
+    {
+        $toolId = (string) $request->attributes->get('toolId', '');
+
+        if ($toolId === '') {
+            return null;
+        }
+
+        return $this->toolConfigService->resolveToolClass($toolId);
     }
 
     private function decodeJson(Request $request): array
     {
         $content = $request->getContent();
-        $decoded = $content !== '' ? json_decode($content, true) : null;
+        if ($content === '') {
+            return [];
+        }
 
-        return is_array($decoded) ? $decoded : [];
+        return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
     }
 }

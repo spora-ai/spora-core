@@ -18,6 +18,7 @@ use Throwable;
 #[Tool(
     name: 'calendar_list_events',
     description: 'Fetch upcoming events from the configured CalDAV calendar within a selected timezone. Always query real-time dates rather than assuming.',
+    displayName: 'Calendar',
 )]
 #[ToolSetting(key: 'core.caldav.url', label: 'CalDAV URL', type: 'text', description: 'URL to the Calendar server (e.g. Nextcloud, Baikal)', scope: 'agent')]
 #[ToolSetting(key: 'core.caldav.username', label: 'Username', type: 'text', description: 'CalDAV username', scope: 'agent')]

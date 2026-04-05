@@ -45,13 +45,16 @@ Write / real-world-action tools. The Orchestrator MUST NOT call `execute()` dire
 
 ---
 
-## `LLMDriverInterface` (`app/Drivers/LLMDriverInterface.php`)
+## `LLMDriverConfigInterface` (`app/Drivers/LLMDriverConfigInterface.php`)
 
-- `complete(LLMRequest $request): LLMResponse`
-- `getProviderName(): string` — e.g. `"openai_compatible"`, `"anthropic"`
-- `getModelName(): string`
+Drivers are resolved per-request by `DriverFactory` based on the agent's `llm_driver_config_id` FK.
 
-`LLMRequest` / `LLMResponse` value objects in `app/Drivers/ValueObjects/`. Exceptions in `app/Drivers/Exceptions/`.
+- `getName(): string` — snake_case identifier, e.g. `"openai_compatible"`, `"anthropic_compatible"`
+- `getDisplayName(): string` — human-readable, e.g. `"OpenAI Compatible"`
+- `getSettingsSchema(): list<ToolSetting>` — `#[ToolSetting]` attributes discovered via `ReflectionClass::getAttributes()`
+- `getDefaultTools(): list<class-string>` — default tool list for this driver
+
+Settings are stored encrypted in `LLMDriverConfiguration.settings` (JSON blob). Each driver declares its own schema via `#[ToolSetting]` attributes on the class — no hardcoded field lists.
 
 ---
 

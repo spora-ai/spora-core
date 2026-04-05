@@ -3,8 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { useThemeStore } from '@/stores/theme'
-import { api } from '@/api/client'
-import { ApiError } from '@/api/client'
+import type { ToolSchema } from '@/composables/useToolSettings'
+import { ApiError, api } from '@/api/client'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,30 +15,27 @@ const agentId = computed(() => Number(route.params.id))
 
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
-interface ToolSchema {
-  tool_class: string
-  tool_name: string
-  settings_schema: {
-    key: string
-    label: string
-    type: string
-    description: string
-    default: unknown
-    required: boolean
-    scope: string
-    options: string[] | null
-  }[]
-}
-
 const toolRegistry = ref<ToolSchema[]>([])
 const loadingTools = ref(false)
 
-// ── LLM Config (from LLMConfiguration override) ────────────────────────────────
+// ── LLM Configs (llm_driver_config_id dropdown) ───────────────────────────────
 
-const llmConfig = ref<Record<string, string>>({})
-const savingLlmConfig = ref(false)
-const llmConfigError = ref<string | null>(null)
-const llmConfigSaved = ref(false)
+interface LLMConfigResource {
+  id: number
+  name: string
+  driver_display_name: string
+  driver_class: string
+  is_default: boolean
+}
+
+const llmConfigs = ref<LLMConfigResource[]>([])
+
+const llmSettingsForm = ref({
+  llm_driver_config_id: null as number | null,
+})
+const savingLlmSettings = ref(false)
+const llmSettingsError = ref<string | null>(null)
+const llmSettingsSaved = ref(false)
 
 // ── Identity form ─────────────────────────────────────────────────────────────
 
@@ -50,17 +47,6 @@ const identityForm = ref({
 const savingIdentity = ref(false)
 const identityError = ref<string | null>(null)
 const identitySaved = ref(false)
-
-// ── LLM settings form (provider, model, base_url on agent) ────────────────────
-
-const llmSettingsForm = ref({
-  llm_provider: 'openai_compatible',
-  llm_model: 'gpt-4o',
-  llm_base_url: '',
-})
-const savingLlmSettings = ref(false)
-const llmSettingsError = ref<string | null>(null)
-const llmSettingsSaved = ref(false)
 
 // ── Tools ─────────────────────────────────────────────────────────────────────
 
@@ -74,7 +60,7 @@ const enabledTools = ref<EnabledTool[]>([])
 const savingTools = ref<Record<string, boolean>>({})
 const toolsError = ref<string | null>(null)
 
-// ── Delete agent ──────────────────────────────────────────────────────────────
+// ── Delete agent ─────────────────────────────────────────────────────────────
 
 const deleting = ref(false)
 const confirmDeleteName = ref('')
@@ -91,32 +77,20 @@ onMounted(async () => {
     system_prompt: agent.system_prompt ?? '',
   }
   llmSettingsForm.value = {
-    llm_provider: agent.llm_provider,
-    llm_model: agent.llm_model,
-    llm_base_url: agent.llm_base_url ?? '',
+    llm_driver_config_id: agent.llm_driver_config_id ?? null,
   }
   enabledTools.value = [...agent.tools]
 
-  // Fetch LLM config override
-  try {
-    llmConfig.value = (await agentStore.getLLMConfig(agentId.value)) as Record<string, string>
-  } catch {
-    llmConfig.value = {}
-  }
-
-  // Fetch tool registry
-  try {
-    loadingTools.value = true
-    const result = await api.get<{ tools: ToolSchema[] }>('/tools')
-    toolRegistry.value = result.tools
-  } catch {
-    toolRegistry.value = []
-  } finally {
-    loadingTools.value = false
-  }
+  // Fetch tool registry and LLM configs in parallel
+  const [toolsResult, configsResult] = await Promise.all([
+    api.get<{ tools: ToolSchema[] }>('/tools'),
+    api.get<{ configs: LLMConfigResource[] }>('/llm-configs'),
+  ])
+  toolRegistry.value = toolsResult.tools
+  llmConfigs.value = configsResult.configs
 })
 
-// ── Identity ──────────────────────────────────────────────────────────────────
+// ── Identity ─────────────────────────────────────────────────────────────────
 
 async function saveIdentity(): Promise<void> {
   identityError.value = null
@@ -137,7 +111,7 @@ async function saveIdentity(): Promise<void> {
   }
 }
 
-// ── LLM Settings (provider, model, base_url) ─────────────────────────────────
+// ── LLM Config (llm_driver_config_id) ───────────────────────────────────────
 
 async function saveLlmSettings(): Promise<void> {
   llmSettingsError.value = null
@@ -145,9 +119,7 @@ async function saveLlmSettings(): Promise<void> {
   savingLlmSettings.value = true
   try {
     await agentStore.updateAgent(agentId.value, {
-      llm_provider: llmSettingsForm.value.llm_provider,
-      llm_model: llmSettingsForm.value.llm_model,
-      llm_base_url: llmSettingsForm.value.llm_base_url || null,
+      llm_driver_config_id: llmSettingsForm.value.llm_driver_config_id,
     })
     llmSettingsSaved.value = true
     setTimeout(() => { llmSettingsSaved.value = false }, 2000)
@@ -158,64 +130,47 @@ async function saveLlmSettings(): Promise<void> {
   }
 }
 
-// ── LLM API Keys ───────────────────────────────────────────────────────────────
-
-async function saveLlmConfig(): Promise<void> {
-  llmConfigError.value = null
-  llmConfigSaved.value = false
-  savingLlmConfig.value = true
-  try {
-    llmConfig.value = await agentStore.putLLMConfig(agentId.value, llmConfig.value as Record<string, string>) as Record<string, string>
-    llmConfigSaved.value = true
-    setTimeout(() => { llmConfigSaved.value = false }, 2000)
-  } catch (e) {
-    llmConfigError.value = e instanceof ApiError ? e.message : 'Failed to save API keys.'
-  } finally {
-    savingLlmConfig.value = false
-  }
-}
-
 // ── Tools ─────────────────────────────────────────────────────────────────────
 
-function isToolEnabled(toolClass: string): boolean {
-  return enabledTools.value.some((t) => t.tool_class === toolClass)
+function isToolEnabled(toolName: string): boolean {
+  return enabledTools.value.some((t) => t.tool_name === toolName)
 }
 
-function isToolAutoApproved(toolClass: string): boolean {
-  const tool = enabledTools.value.find((t) => t.tool_class === toolClass)
+function isToolAutoApproved(toolName: string): boolean {
+  const tool = enabledTools.value.find((t) => t.tool_name === toolName)
   return tool?.auto_approve === true
 }
 
-async function toggleTool(toolClass: string): Promise<void> {
-  savingTools.value[toolClass] = true
+async function toggleTool(toolName: string): Promise<void> {
+  savingTools.value[toolName] = true
   toolsError.value = null
   try {
-    if (isToolEnabled(toolClass)) {
-      await agentStore.disableTool(agentId.value, toolClass)
-      enabledTools.value = enabledTools.value.filter((t) => t.tool_class !== toolClass)
+    if (isToolEnabled(toolName)) {
+      await agentStore.disableTool(agentId.value, toolName)
+      enabledTools.value = enabledTools.value.filter((t) => t.tool_name !== toolName)
     } else {
-      const tool = await agentStore.enableTool(agentId.value, toolClass)
+      const tool = await agentStore.enableTool(agentId.value, toolName)
       enabledTools.value.push(tool)
     }
   } catch (e) {
     toolsError.value = e instanceof ApiError ? e.message : 'Failed to update tool.'
   } finally {
-    savingTools.value[toolClass] = false
+    savingTools.value[toolName] = false
   }
 }
 
-async function toggleAutoApprove(toolClass: string): Promise<void> {
-  const tool = enabledTools.value.find((t) => t.tool_class === toolClass)
+async function toggleAutoApprove(toolName: string): Promise<void> {
+  const tool = enabledTools.value.find((t) => t.tool_name === toolName)
   if (!tool) return
-  savingTools.value[toolClass] = true
+  savingTools.value[toolName] = true
   try {
     const newValue = tool.auto_approve !== true
-    await agentStore.patchTool(agentId.value, toolClass, { auto_approve: newValue })
+    await agentStore.patchTool(agentId.value, toolName, { auto_approve: newValue })
     tool.auto_approve = newValue
   } catch (e) {
     toolsError.value = e instanceof ApiError ? e.message : 'Failed to update auto-approve.'
   } finally {
-    savingTools.value[toolClass] = false
+    savingTools.value[toolName] = false
   }
 }
 
@@ -227,7 +182,7 @@ async function deleteAgent(): Promise<void> {
   try {
     await agentStore.deleteAgent(agentId.value)
     router.push({ name: 'dashboard' })
-  } catch (e) {
+  } catch {
     // handle error
   } finally {
     deleting.value = false
@@ -321,47 +276,25 @@ async function deleteAgent(): Promise<void> {
         </div>
       </section>
 
-      <!-- ── LLM Settings ─────────────────────────────────────────────────── -->
+      <!-- ── LLM Configuration ─────────────────────────────────────────────── -->
       <section class="flex flex-col gap-4">
-        <h2 class="text-base font-semibold">LLM Settings</h2>
+        <h2 class="text-base font-semibold">LLM Configuration</h2>
         <div class="rounded-xl border border-border bg-card p-5 flex flex-col gap-4">
-
-          <!-- Provider -->
           <div class="flex flex-col gap-1.5">
-            <label for="llm-provider" class="text-sm font-medium">Provider</label>
+            <label for="llm-driver-config" class="text-sm font-medium">Configuration</label>
             <select
-              id="llm-provider"
-              v-model="llmSettingsForm.llm_provider"
+              id="llm-driver-config"
+              v-model="llmSettingsForm.llm_driver_config_id"
               class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
             >
-              <option value="openai_compatible">OpenAI Compatible (GPT, Claude via API compatible endpoint)</option>
-              <option value="anthropic">Anthropic (Claude)</option>
+              <option :value="null">— Use global default —</option>
+              <option v-for="config in llmConfigs" :key="config.id" :value="config.id">
+                {{ config.name }} ({{ config.driver_display_name }})
+              </option>
             </select>
-          </div>
-
-          <!-- Model -->
-          <div class="flex flex-col gap-1.5">
-            <label for="llm-model" class="text-sm font-medium">Model</label>
-            <input
-              id="llm-model"
-              v-model="llmSettingsForm.llm_model"
-              type="text"
-              placeholder="e.g. gpt-4o, claude-3-5-sonnet"
-              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
-
-          <!-- Base URL (for openai_compatible) -->
-          <div v-if="llmSettingsForm.llm_provider === 'openai_compatible'" class="flex flex-col gap-1.5">
-            <label for="llm-base-url" class="text-sm font-medium">Base URL <span class="text-muted-foreground font-normal">(optional)</span></label>
-            <input
-              id="llm-base-url"
-              v-model="llmSettingsForm.llm_base_url"
-              type="url"
-              placeholder="https://api.openai.com/v1"
-              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <p class="text-xs text-muted-foreground">Used for OpenAI-compatible endpoints (Ollama, Groq, LM Studio, Azure, etc.)</p>
+            <p class="text-xs text-muted-foreground mt-1">
+              Choose a saved LLM configuration, or leave unset to use your global default.
+            </p>
           </div>
 
           <div class="flex items-center justify-between">
@@ -373,48 +306,7 @@ async function deleteAgent(): Promise<void> {
               :disabled="savingLlmSettings"
               class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
             >
-              {{ savingLlmSettings ? 'Saving…' : 'Save LLM Settings' }}
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- ── API Keys ──────────────────────────────────────────────────────── -->
-      <section class="flex flex-col gap-4">
-        <h2 class="text-base font-semibold">API Keys</h2>
-        <div class="rounded-xl border border-border bg-card p-5 flex flex-col gap-4">
-          <div class="flex flex-col gap-1.5">
-            <label for="openai-key" class="text-sm font-medium">OpenAI API Key</label>
-            <input
-              id="openai-key"
-              v-model="llmConfig['core.openai.api_key']"
-              type="password"
-              placeholder="sk-…"
-              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <p class="text-xs text-muted-foreground">Used when provider is OpenAI Compatible.</p>
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label for="anthropic-key" class="text-sm font-medium">Anthropic API Key</label>
-            <input
-              id="anthropic-key"
-              v-model="llmConfig['core.anthropic.api_key']"
-              type="password"
-              placeholder="sk-ant-…"
-              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <p class="text-xs text-muted-foreground">Used when provider is Anthropic.</p>
-          </div>
-          <div class="flex items-center justify-between">
-            <p v-if="llmConfigError" role="alert" class="text-xs text-destructive">{{ llmConfigError }}</p>
-            <span v-else-if="llmConfigSaved" class="text-xs text-green-600 dark:text-green-400">Saved!</span>
-            <span v-else />
-            <button
-              @click="saveLlmConfig"
-              :disabled="savingLlmConfig"
-              class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-            >
-              {{ savingLlmConfig ? 'Saving…' : 'Save API Keys' }}
+              {{ savingLlmSettings ? 'Saving…' : 'Save LLM Configuration' }}
             </button>
           </div>
         </div>
@@ -430,7 +322,7 @@ async function deleteAgent(): Promise<void> {
             class="px-5 py-4 flex items-start gap-4"
           >
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium">{{ tool.tool_name }}</p>
+              <p class="text-sm font-medium">{{ tool.display_name || tool.tool_name }}</p>
               <p v-if="tool.settings_schema.length > 0" class="text-xs text-muted-foreground mt-0.5">
                 Has credentials to configure
               </p>
@@ -438,33 +330,33 @@ async function deleteAgent(): Promise<void> {
             <div class="flex items-center gap-3 shrink-0">
               <!-- Auto-approve toggle (only if enabled) -->
               <label
-                v-if="isToolEnabled(tool.tool_class)"
+                v-if="isToolEnabled(tool.tool_name)"
                 class="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer"
-                :title="isToolAutoApproved(tool.tool_class) ? 'Auto-approve is on' : 'Auto-approve is off'"
+                :title="isToolAutoApproved(tool.tool_name) ? 'Auto-approve is on' : 'Auto-approve is off'"
               >
                 <span>Auto-approve</span>
                 <button
-                  @click="toggleAutoApprove(tool.tool_class)"
-                  :disabled="savingTools[tool.tool_class]"
+                  @click="toggleAutoApprove(tool.tool_name)"
+                  :disabled="savingTools[tool.tool_name]"
                   class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-                  :class="isToolAutoApproved(tool.tool_class) ? 'bg-primary' : 'bg-muted'"
+                  :class="isToolAutoApproved(tool.tool_name) ? 'bg-primary' : 'bg-muted'"
                 >
                   <span
                     class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
-                    :class="isToolAutoApproved(tool.tool_class) ? 'translate-x-4' : 'translate-x-0.5'"
+                    :class="isToolAutoApproved(tool.tool_name) ? 'translate-x-4' : 'translate-x-0.5'"
                   />
                 </button>
               </label>
               <!-- Enable/Disable toggle -->
               <button
-                @click="toggleTool(tool.tool_class)"
-                :disabled="savingTools[tool.tool_class]"
+                @click="toggleTool(tool.tool_name)"
+                :disabled="savingTools[tool.tool_name]"
                 class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-                :class="isToolEnabled(tool.tool_class) ? 'bg-primary' : 'bg-muted'"
+                :class="isToolEnabled(tool.tool_name) ? 'bg-primary' : 'bg-muted'"
               >
                 <span
                   class="inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform"
-                  :class="isToolEnabled(tool.tool_class) ? 'translate-x-6' : 'translate-x-1'"
+                  :class="isToolEnabled(tool.tool_name) ? 'translate-x-6' : 'translate-x-1'"
                 />
               </button>
             </div>
@@ -480,7 +372,7 @@ async function deleteAgent(): Promise<void> {
         <p v-if="toolsError" role="alert" class="text-xs text-destructive">{{ toolsError }}</p>
       </section>
 
-      <!-- ── Danger Zone ──────────────────────────────────────────────────── -->
+      <!-- ── Danger Zone ─────────────────────────────────────────────────── -->
       <section class="flex flex-col gap-4">
         <h2 class="text-base font-semibold text-destructive">Danger Zone</h2>
         <div class="rounded-xl border border-destructive/30 bg-card p-5 flex flex-col gap-4">

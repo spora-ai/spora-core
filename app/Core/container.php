@@ -163,20 +163,27 @@ return [
     Spora\Services\ToolConfigService::class => static function (ContainerInterface $c): Spora\Services\ToolConfigService {
         return new Spora\Services\ToolConfigService(
             $c->get(SecurityManagerInterface::class),
+            $c->get('tool_classes'),
         );
     },
 
     Spora\Drivers\DriverFactory::class => static function (ContainerInterface $c): Spora\Drivers\DriverFactory {
         return new Spora\Drivers\DriverFactory(
-            $c->get(Spora\Services\ToolConfigService::class),
             $c->get(Psr\Log\LoggerInterface::class),
+            $c->get(Spora\Services\LLMConfigService::class),
         );
     },
+
+    // Registered LLM driver classes (implementing LLMDriverConfigInterface).
+    // Each driver declares its settings schema via #[ToolSetting] attributes.
+    'llm_driver_classes' => [
+        Spora\Drivers\OpenAICompatibleDriver::class,
+        Spora\Drivers\AnthropicCompatibleDriver::class,
+    ],
 
     // Registered tool classes. Add to this list to make tools discoverable via GET /api/v1/tools.
     // Settings (#[ToolSetting]) live directly on each tool class. See docs/06_tools.md.
     'tool_classes' => [
-        Spora\Drivers\LLMConfiguration::class, // Standalone — feeds DriverFactory, not a tool
         Spora\Tools\CurrentTimeTool::class,
         Spora\Tools\CalculatorTool::class,
         Spora\Tools\ScratchpadTool::class,
@@ -189,6 +196,20 @@ return [
         Spora\Tools\SendEmailTool::class,
         Spora\Tools\CalDavCalendarTool::class,
     ],
+
+    Spora\Http\LLMConfigController::class => static function (ContainerInterface $c): Spora\Http\LLMConfigController {
+        return new Spora\Http\LLMConfigController(
+            $c->get(AuthService::class),
+            $c->get(Spora\Services\LLMConfigService::class),
+        );
+    },
+
+    Spora\Services\LLMConfigService::class => static function (ContainerInterface $c): Spora\Services\LLMConfigService {
+        return new Spora\Services\LLMConfigService(
+            $c->get(SecurityManagerInterface::class),
+            $c->get('llm_driver_classes'),
+        );
+    },
 
     Spora\Http\AgentController::class => static function (ContainerInterface $c): Spora\Http\AgentController {
         return new Spora\Http\AgentController(
@@ -206,17 +227,12 @@ return [
     },
 
     // Registered tool instances for the Orchestrator.
-    // Instantiated from tool_classes via PHP-DI autowiring; LLMConfiguration is skipped because
-    // it is a configuration surrogate only (no tool interface) — it feeds DriverFactory directly.
+    // Instantiated from tool_classes via PHP-DI autowiring.
     'tool_instances' => static function (ContainerInterface $c): array {
-        $instances = [];
-        foreach ($c->get('tool_classes') as $toolClass) {
-            if ($toolClass === \Spora\Drivers\LLMConfiguration::class) {
-                continue;
-            }
-            $instances[] = $c->get($toolClass);
-        }
-        return $instances;
+        return array_map(
+            fn(string $toolClass) => $c->get($toolClass),
+            $c->get('tool_classes'),
+        );
     },
 
     Spora\Console\Commands\SeedCommand::class => static function (ContainerInterface $c): Spora\Console\Commands\SeedCommand {

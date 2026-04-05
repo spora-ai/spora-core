@@ -13,9 +13,11 @@ use Attribute;
 final class Tool
 {
     public function __construct(
-        /** snake_case, e.g. "search_web" */
+        /** snake_case, e.g. "tavily_search" — used in URLs */
         public readonly string $name,
         /** Sent to LLM as function description */
         public readonly string $description,
+        /** Human-readable name for UI display, e.g. "Tavily Search". Falls back to name if omitted. */
+        public readonly ?string $displayName = null,
     ) {}
 }

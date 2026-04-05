@@ -15,9 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $description
  * @property string|null $recipe_id
  * @property string|null $system_prompt
- * @property string|null $llm_provider
- * @property string|null $llm_model
- * @property string|null $llm_base_url
+ * @property int|null $llm_driver_config_id
  * @property int|null $max_steps
  * @property bool $is_active
  */
@@ -31,9 +29,7 @@ class Agent extends Model
         'description',
         'recipe_id',
         'system_prompt',
-        'llm_provider',
-        'llm_model',
-        'llm_base_url',
+        'llm_driver_config_id',
         'max_steps',
         'is_active',
     ];
@@ -41,6 +37,7 @@ class Agent extends Model
     protected $casts = [
         'is_active' => 'boolean',
         'max_steps' => 'integer',
+        'llm_driver_config_id' => 'integer',
     ];
 
     public function user(): BelongsTo

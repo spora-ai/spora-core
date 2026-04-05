@@ -18,6 +18,7 @@ use Throwable;
 #[Tool(
     name: 'send_email',
     description: 'Send an email to a recipient. You MUST construct a professional and complete email body. The human will review the email before it is sent.',
+    displayName: 'Send Email',
 )]
 #[ToolSetting(key: 'core.smtp.dsn', label: 'SMTP DSN', type: 'password', description: 'e.g. smtp://user:pass@smtp.example.com:587', scope: 'agent')]
 #[ToolSetting(key: 'core.smtp.from', label: 'From Address', type: 'text', description: 'e.g. agent@spora.local', scope: 'agent')]

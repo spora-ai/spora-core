@@ -16,6 +16,7 @@ use Throwable;
 #[Tool(
     name: 'gnews_search',
     description: 'Fetch the latest news headlines from GNews.io. Use this to find out what is happening in the world right now regarding a specific topic.',
+    displayName: 'GNews Search',
 )]
 #[ToolSetting(
     key: 'core.gnews.api_key',

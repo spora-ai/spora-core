@@ -89,6 +89,18 @@ function clearSession(): void
     $_SESSION = [];
 }
 
+/**
+ * Register a new user and simulate their session.
+ * Returns the user ID.
+ */
+function bootAuth(Spora\Auth\AuthService $authService, string $email = 'test@example.com', string $password = 'Password1!'): int
+{
+    $userId = $authService->register($email, $password);
+    simulateLoggedInSession($userId, $email);
+
+    return $userId;
+}
+
 uses()
     ->beforeEach(function () {
         Spora\Core\Database::resetBootState();

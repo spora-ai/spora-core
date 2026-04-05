@@ -239,9 +239,8 @@ onUnmounted(() => {
               <svg class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
               </svg>
-              <span>{{ agentStore.currentAgent.llm_provider === 'openai_compatible' ? 'OpenAI Compatible' : 'Anthropic' }}</span>
-              <span class="font-medium text-foreground">·</span>
-              <span class="font-medium text-foreground">{{ agentStore.currentAgent.llm_model }}</span>
+              <span v-if="agentStore.currentAgent.llm_driver_config_id">Custom LLM config</span>
+              <span v-else>Global default LLM config</span>
             </div>
 
             <!-- Tools count -->

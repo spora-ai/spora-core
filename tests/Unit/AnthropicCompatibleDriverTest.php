@@ -36,9 +36,9 @@ function makeAnthropicRequest(array $messages = [], array $tools = []): LLMReque
 // Provider / model metadata
 // ---------------------------------------------------------------------------
 
-test('getProviderName returns anthropic', function (): void {
+test('getProviderName returns anthropic_compatible', function (): void {
     $driver = makeAnthropicDriver(new MockHttpClient());
-    expect($driver->getProviderName())->toBe('anthropic');
+    expect($driver->getProviderName())->toBe('anthropic_compatible');
 });
 
 test('getModelName returns the model passed at construction', function (): void {

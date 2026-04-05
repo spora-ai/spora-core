@@ -5,52 +5,71 @@ declare(strict_types=1);
 namespace Spora\Drivers;
 
 use Psr\Log\LoggerInterface;
+use RuntimeException;
 use Spora\Models\Agent;
-use Spora\Services\ToolConfigService;
-use Symfony\Component\HttpClient\HttpClient;
+use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\LLMConfigService;
 
 /**
- * Resolves the correct LLM driver for a given Agent.
+ * Builds the correct LLM driver for a given Agent.
  *
- * Provider and model are read from the Agent row (set by the user in Agent Settings).
- * API keys are securely read from the database via ToolConfigService using LLMConfiguration.
+ * Resolution order:
+ *   1. Agent has llm_driver_config_id → use that config
+ *   2. Otherwise → use the global default LLMDriverConfiguration
+ *   3. If neither exists → fall back to OpenAICompatibleDriver with minimal defaults
  */
 class DriverFactory
 {
     public function __construct(
-        private readonly ToolConfigService $toolConfigService,
-        private readonly LoggerInterface $logger,
+        private readonly LoggerInterface    $logger,
+        private readonly LLMConfigService $llmConfigService,
     ) {}
 
     public function makeFromAgent(Agent $agent): LLMDriverInterface
     {
-        $provider = $agent->llm_provider ?? 'openai_compatible';
-        $model    = $agent->llm_model    ?? 'gpt-4o';
-        $httpClient = HttpClient::create();
-        $settings   = $this->toolConfigService->getEffectiveSettings(LLMConfiguration::class, (int) $agent->id);
+        // Try agent-specific config first
+        $configId = $agent->llm_driver_config_id;
 
-        if ($provider === 'anthropic') {
-            $apiKey  = (string) ($settings['core.anthropic.api_key'] ?? '');
-            $baseUrl = $agent->llm_base_url ?? 'https://api.anthropic.com/v1/messages';
-
-            return new AnthropicCompatibleDriver(
-                apiKey: $apiKey,
-                model: $model,
-                baseUrl: $baseUrl,
-                httpClient: $httpClient,
-                logger: $this->logger,
-            );
+        if ($configId !== null) {
+            $config = LLMDriverConfiguration::find($configId);
+            if ($config !== null) {
+                return $this->makeDriverFromConfig($config);
+            }
         }
 
-        // Default: openai_compatible (also covers Ollama, Groq, LM Studio, Azure, etc.)
-        $apiKey  = (string) ($settings['core.openai.api_key'] ?? '');
-        $baseUrl = $agent->llm_base_url ?? 'https://api.openai.com/v1';
+        // Fall back to global default
+        $defaultConfig = LLMDriverConfiguration::where('is_default', true)->first();
+        if ($defaultConfig !== null) {
+            return $this->makeDriverFromConfig($defaultConfig);
+        }
+
+        // Ultimate fallback: OpenAICompatibleDriver with empty settings
+        $this->logger->warning('No LLMDriverConfiguration found, using fallback OpenAI driver.');
 
         return new OpenAICompatibleDriver(
-            apiKey: $apiKey,
-            model: $model,
-            baseUrl: $baseUrl,
-            httpClient: $httpClient,
+            apiKey: '',
+            model: 'gpt-4o',
+            baseUrl: 'https://api.openai.com/v1',
+            httpClient: \Symfony\Component\HttpClient\HttpClient::create(),
+            logger: $this->logger,
+        );
+    }
+
+    private function makeDriverFromConfig(LLMDriverConfiguration $config): LLMDriverInterface
+    {
+        $driverClass = $config->driver_class;
+
+        if (! class_exists($driverClass)) {
+            throw new RuntimeException("LLM driver class {$driverClass} does not exist.");
+        }
+
+        $settings = $this->llmConfigService->decryptSettings($config->settings);
+
+        return new $driverClass(
+            apiKey: (string) ($settings['api_key'] ?? ''),
+            model: (string) ($settings['model'] ?? ''),
+            baseUrl: (string) ($settings['base_url'] ?? ''),
+            httpClient: \Symfony\Component\HttpClient\HttpClient::create(),
             logger: $this->logger,
         );
     }

@@ -16,6 +16,7 @@ use Throwable;
 #[Tool(
     name: 'newsapi_search',
     description: 'Fetch the latest news headlines from NewsAPI.org. Use this to find out what is happening in the world right now regarding a specific topic.',
+    displayName: 'NewsAPI Search',
 )]
 #[ToolSetting(
     key: 'core.newsapi.api_key',

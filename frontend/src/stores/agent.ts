@@ -26,9 +26,7 @@ export const useAgentStore = defineStore('agent', () => {
     name: string
     description?: string
     system_prompt?: string
-    llm_provider?: string
-    llm_model?: string
-    llm_base_url?: string
+    llm_driver_config_id?: number | null
     max_steps?: number
   }): Promise<Agent> {
     const result = await api.post<{ agent: Agent }>('/agents', data)
@@ -42,9 +40,7 @@ export const useAgentStore = defineStore('agent', () => {
       name: string
       description: string | null
       system_prompt: string | null
-      llm_provider: string
-      llm_model: string
-      llm_base_url: string | null
+      llm_driver_config_id: number | null
       max_steps: number
     }>,
   ): Promise<Agent> {
@@ -70,38 +66,36 @@ export const useAgentStore = defineStore('agent', () => {
 
   // ── Tools ───────────────────────────────────────────────────────────────────
 
-  async function enableTool(agentId: number, toolClass: string): Promise<AgentTool> {
-    const result = await api.post<{ tool: AgentTool }>(`/agents/${agentId}/tools/${encodeURIComponent(toolClass)}/enable`)
+  async function enableTool(agentId: number, toolName: string): Promise<AgentTool> {
+    const result = await api.post<{ tool: AgentTool }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/enable`)
     return result.tool
   }
 
-  async function disableTool(agentId: number, toolClass: string): Promise<void> {
-    await api.delete(`/agents/${agentId}/tools/${encodeURIComponent(toolClass)}/enable`)
+  async function disableTool(agentId: number, toolName: string): Promise<void> {
+    await api.delete(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/enable`)
   }
 
   async function patchTool(
     agentId: number,
-    toolClass: string,
+    toolName: string,
     data: { auto_approve?: boolean | null },
   ): Promise<AgentTool> {
-    const result = await api.patch<{ tool: AgentTool }>(`/agents/${agentId}/tools/${encodeURIComponent(toolClass)}`, data)
+    const result = await api.patch<{ tool: AgentTool }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}`, data)
     return result.tool
   }
 
   // ── LLM Config (setup detection) ────────────────────────────────────────────
 
   async function getLLMConfig(agentId: number): Promise<LLMConfigSettings> {
-    const toolClass = 'Spora\\Drivers\\LLMConfiguration'
     const result = await api.get<{ settings: LLMConfigSettings }>(
-      `/agents/${agentId}/tools/${encodeURIComponent(toolClass)}/override`,
+      `/agents/${agentId}/tools/${encodeURIComponent('llm_configuration')}/override`,
     )
     return result.settings
   }
 
   async function putLLMConfig(agentId: number, settings: LLMConfigSettings): Promise<LLMConfigSettings> {
-    const toolClass = 'Spora\\Drivers\\LLMConfiguration'
     const result = await api.put<{ settings: LLMConfigSettings }>(
-      `/agents/${agentId}/tools/${encodeURIComponent(toolClass)}/override`,
+      `/agents/${agentId}/tools/${encodeURIComponent('llm_configuration')}/override`,
       { settings },
     )
     return result.settings

@@ -12,6 +12,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[Tool(
     name: 'scratchpad',
     description: 'Provides a persistent Key-Value store where you can save long-term memory about the user or draft complex reports. Memories are persisted across all tasks for this agent.',
+    displayName: 'Scratchpad',
 )]
 #[ToolParameter(
     name: 'action',

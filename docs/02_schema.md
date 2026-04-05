@@ -12,7 +12,8 @@
 |---|---|---|
 | `users` | `Spora\Models\User` | Managed by `delight-im/auth`. Spora adds `created_at`/`updated_at`. |
 | `users_2fa`, `users_audit_log`, `users_confirmations`, `users_otps`, `users_remembered`, `users_resets`, `users_throttling` | — | delight-im/auth auxiliary tables. Do not modify. |
-| `agents` | `Spora\Models\Agent` | One agent per user (V1). Stores identity, LLM config (`provider`, `model`, `base_url`), `recipe_id`, `max_steps`. |
+| `llm_driver_configurations` | `Spora\Models\LLMDriverConfiguration` | User-scoped LLM driver configs. One row per user+driver. `settings` is encrypted JSON. `is_default` marks user's fallback. |
+| `agents` | `Spora\Models\Agent` | One agent per user. Stores identity, `llm_driver_config_id` (FK), `recipe_id`, `max_steps`. |
 | `tool_configurations` | `Spora\Models\ToolConfiguration` | Global per-tool settings. One row per tool class. Password fields encrypted via `SecurityManager`. All access via `ToolConfigService` only. |
 | `agent_tools` | `Spora\Models\AgentTool` | Junction: which tools are enabled per agent. `auto_approve` is 3-state: `0`/`1`/`null` — never cast to boolean (null = use class attribute default). |
 | `agent_tool_overrides` | `Spora\Models\AgentToolOverride` | Per-agent credential overrides for `scope: "agent"` settings. Merged on top of global settings by `ToolConfigService`. |
@@ -34,7 +35,7 @@
 
 **Both `tool_name` and `tool_class` stored in `tool_calls`** — `tool_name` is what the LLM uses; `tool_class` is what PHP uses to instantiate. Both needed for unambiguous resolution and audit.
 
-**Migration order:** `users` → `agents` → `tool_configurations` → `agent_tools` → `agent_tool_overrides` → `tasks` → `tool_calls` → `task_history`
+**Migration order:** `users` → `llm_driver_configurations` → `agents` → `tool_configurations` → `agent_tools` → `agent_tool_overrides` → `tasks` → `tool_calls` → `task_history`
 
 ---
 

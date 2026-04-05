@@ -35,6 +35,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('@/pages/GlobalSettingsPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/tasks/:id',
       name: 'task',
       component: () => import('@/pages/TaskChatPage.vue'),

@@ -101,14 +101,22 @@ final class Kernel
             ];
         }
 
-        // Always log to stderr — never expose file paths in production responses
-        error_log(sprintf(
-            '[Spora] %s: %s in %s:%d',
-            get_class($e),
-            $e->getMessage(),
-            $e->getFile(),
-            $e->getLine(),
-        ));
+        // Log to stderr — include file/line only in debug mode to avoid leaking paths in production
+        if ($isDebug) {
+            error_log(sprintf(
+                '[Spora] %s: %s in %s:%d',
+                get_class($e),
+                $e->getMessage(),
+                $e->getFile(),
+                $e->getLine(),
+            ));
+        } else {
+            error_log(sprintf(
+                '[Spora] %s: %s',
+                get_class($e),
+                $e->getMessage(),
+            ));
+        }
 
         return new JsonResponse($body, Response::HTTP_INTERNAL_SERVER_ERROR);
     }

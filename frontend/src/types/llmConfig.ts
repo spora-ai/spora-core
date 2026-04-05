@@ -1,0 +1,33 @@
+/**
+ * Types for LLM Driver Configurations.
+ */
+
+export interface LLMSettingsSchema {
+  key: string
+  label: string
+  type: 'text' | 'password' | 'select' | 'textarea' | 'toggle'
+  description: string
+  default: unknown
+  required: boolean
+  scope: 'global' | 'agent'
+  options: string[] | null
+}
+
+export interface LLMDriverInfo {
+  name: string
+  display_name: string
+  driver_class: string
+  settings_schema: LLMSettingsSchema[]
+}
+
+export interface LLMConfigResource {
+  id: number
+  name: string
+  driver_class: string
+  driver_name: string
+  driver_display_name: string
+  settings: Record<string, string>
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}

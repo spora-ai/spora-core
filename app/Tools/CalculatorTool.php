@@ -13,6 +13,7 @@ use Throwable;
 #[Tool(
     name: 'calculator',
     description: 'Evaluates a mathematical expression safely. Use this to calculate exact results. Supports standard arithmetic operators (+, -, *, /) and parentheses.',
+    displayName: 'Calculator',
 )]
 #[ToolParameter(
     name: 'expression',

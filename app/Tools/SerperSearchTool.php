@@ -16,6 +16,7 @@ use Throwable;
 #[Tool(
     name: 'serper_search',
     description: 'Search the web using Google Search via Serper.dev. Use this for general queries, looking up specific websites, or finding real-time information.',
+    displayName: 'Serper Search',
 )]
 #[ToolSetting(
     key: 'core.serper.api_key',

@@ -6,17 +6,22 @@ namespace Spora\Http;
 
 use DateTime;
 use InvalidArgumentException;
+use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
 use Spora\Models\User;
+use Spora\Services\RateLimiter;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 final class AuthController
 {
+    private const RATE_LIMIT_MAX_ATTEMPTS = 5;
+    private const RATE_LIMIT_WINDOW_SECONDS = 60;
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly array $config = [],
@@ -24,11 +29,21 @@ final class AuthController
 
     public function register(Request $request, array $vars = []): JsonResponse
     {
+        $clientIp = $this->getClientIp($request);
+
+        if ($this->isRateLimited($clientIp)) {
+            return $this->rateLimitedResponse($clientIp);
+        }
+
         if (!($this->config['allow_registration'] ?? true)) {
             return $this->error('REGISTRATION_DISABLED', 'Registration is currently disabled.', Response::HTTP_FORBIDDEN);
         }
 
-        $body = $this->decodeJson($request);
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
 
         if ($this->missingFields($body, ['email', 'password'])) {
             return $this->error('VALIDATION_ERROR', 'The fields "email" and "password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
@@ -36,21 +51,35 @@ final class AuthController
 
         try {
             $userId = $this->authService->register((string) $body['email'], (string) $body['password']);
+            RateLimiter::clear($clientIp);
         } catch (EmailTakenException) {
             return $this->error('EMAIL_TAKEN', 'A user with that email address already exists.', Response::HTTP_CONFLICT);
         } catch (InvalidArgumentException $e) {
             return $this->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        return new JsonResponse(
-            ['data' => ['user' => ['id' => $userId, 'email' => $body['email']]]],
-            Response::HTTP_CREATED,
+        return $this->withRateLimitHeaders(
+            new JsonResponse(
+                ['data' => ['user' => ['id' => $userId, 'email' => $body['email']]]],
+                Response::HTTP_CREATED,
+            ),
+            $clientIp,
         );
     }
 
     public function login(Request $request, array $vars = []): JsonResponse
     {
-        $body = $this->decodeJson($request);
+        $clientIp = $this->getClientIp($request);
+
+        if ($this->isRateLimited($clientIp)) {
+            return $this->rateLimitedResponse($clientIp);
+        }
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
 
         if ($this->missingFields($body, ['email', 'password'])) {
             return $this->error('VALIDATION_ERROR', 'The fields "email" and "password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
@@ -58,6 +87,7 @@ final class AuthController
 
         try {
             $this->authService->login((string) $body['email'], (string) $body['password'], (bool) ($body['remember_me'] ?? false));
+            RateLimiter::clear($clientIp);
         } catch (InvalidCredentialsException) {
             return $this->error('INVALID_CREDENTIALS', 'The email address or password is incorrect.', Response::HTTP_UNAUTHORIZED);
         } catch (AccountUnverifiedException) {
@@ -67,13 +97,16 @@ final class AuthController
         $userId = $this->authService->currentUserId();
         $user   = User::find($userId);
 
-        return new JsonResponse(
-            ['data' => ['user' => [
-                'id'       => $userId,
-                'email'    => $user !== null ? $user->email : (string) $body['email'],
-                'username' => $user !== null ? $user->username : null,
-            ]]],
-            Response::HTTP_OK,
+        return $this->withRateLimitHeaders(
+            new JsonResponse(
+                ['data' => ['user' => [
+                    'id'       => $userId,
+                    'email'    => $user !== null ? $user->email : (string) $body['email'],
+                    'username' => $user !== null ? $user->username : null,
+                ]]],
+                Response::HTTP_OK,
+            ),
+            $clientIp,
         );
     }
 
@@ -114,12 +147,58 @@ final class AuthController
         );
     }
 
+    private function getClientIp(Request $request): string
+    {
+        $serverVar = $request->server->get('HTTP_X_FORWARDED_FOR');
+        if ($serverVar !== null) {
+            $parts = explode(',', $serverVar, 2);
+
+            return trim($parts[0]);
+        }
+
+        return $request->server->get('REMOTE_ADDR', '0.0.0.0');
+    }
+
+    private function isRateLimited(string $clientIp): bool
+    {
+        return RateLimiter::attempt($clientIp, self::RATE_LIMIT_MAX_ATTEMPTS, self::RATE_LIMIT_WINDOW_SECONDS);
+    }
+
+    private function rateLimitedResponse(string $clientIp): JsonResponse
+    {
+        $retryAfter = RateLimiter::retryAfter($clientIp, self::RATE_LIMIT_WINDOW_SECONDS);
+
+        $response = new JsonResponse(
+            ['error' => ['code' => 'TOO_MANY_REQUESTS', 'message' => 'Too many requests. Please try again later.']],
+            Response::HTTP_TOO_MANY_REQUESTS,
+        );
+        $response->headers->set('Retry-After', (string) $retryAfter);
+        $response->headers->set('X-RateLimit-Limit', (string) self::RATE_LIMIT_MAX_ATTEMPTS);
+        $response->headers->set('X-RateLimit-Remaining', '0');
+
+        return $response;
+    }
+
+    private function withRateLimitHeaders(JsonResponse $response, string $clientIp): JsonResponse
+    {
+        $response->headers->set('X-RateLimit-Limit', (string) self::RATE_LIMIT_MAX_ATTEMPTS);
+        $response->headers->set('X-RateLimit-Remaining', (string) RateLimiter::remaining(
+            $clientIp,
+            self::RATE_LIMIT_MAX_ATTEMPTS,
+            self::RATE_LIMIT_WINDOW_SECONDS,
+        ));
+
+        return $response;
+    }
+
     private function decodeJson(Request $request): array
     {
         $content = $request->getContent();
-        $decoded = $content !== '' ? json_decode($content, true) : null;
+        if ($content === '') {
+            return [];
+        }
 
-        return is_array($decoded) ? $decoded : [];
+        return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
     }
 
     private function missingFields(array $body, array $fields): bool

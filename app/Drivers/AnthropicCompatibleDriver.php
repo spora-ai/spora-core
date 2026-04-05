@@ -10,9 +10,10 @@ use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
+use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
-class AnthropicCompatibleDriver implements LLMDriverInterface
+final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface
 {
     private const API_VERSION = '2023-06-01';
 
@@ -26,7 +27,7 @@ class AnthropicCompatibleDriver implements LLMDriverInterface
 
     public function getProviderName(): string
     {
-        return 'anthropic';
+        return 'anthropic_compatible';
     }
 
     public function getModelName(): string
@@ -220,5 +221,65 @@ class AnthropicCompatibleDriver implements LLMDriverInterface
         }
 
         return $converted;
+    }
+
+    // ── LLMDriverConfigInterface ────────────────────────────────────────────────
+
+    public static function getName(): string
+    {
+        return 'anthropic_compatible';
+    }
+
+    public static function getDisplayName(): string
+    {
+        return 'Anthropic Compatible';
+    }
+
+    /** @return list<ToolSetting> */
+    public static function getSettingsSchema(): array
+    {
+        return [
+            new ToolSetting(
+                key: 'api_key',
+                label: 'API Key',
+                type: 'password',
+                description: 'API key for the Anthropic-compatible endpoint.',
+                required: true,
+                scope: 'global',
+            ),
+            new ToolSetting(
+                key: 'base_url',
+                label: 'Base URL',
+                type: 'text',
+                description: 'Base URL of the API endpoint.',
+                required: false,
+                scope: 'global',
+                default: 'https://api.anthropic.com/v1/messages',
+            ),
+            new ToolSetting(
+                key: 'model',
+                label: 'Model',
+                type: 'text',
+                description: 'Model identifier (e.g. claude-3-5-sonnet-20241022, claude-3-opus).',
+                required: false,
+                scope: 'global',
+                default: 'claude-3-5-sonnet-20241022',
+            ),
+            new ToolSetting(
+                key: 'thinking_budget',
+                label: 'Thinking Budget (tokens)',
+                type: 'text',
+                description: 'Maximum tokens for extended thinking (Claude 3.7+).',
+                required: false,
+                scope: 'global',
+                default: null,
+            ),
+        ];
+    }
+
+    /** @return list<class-string> */
+    public static function getDefaultTools(): array
+    {
+        return [];
     }
 }

@@ -12,6 +12,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[Tool(
     name: 'current_time',
     description: 'Returns the exact current date, time, and timezone. Use this whenever you need to know the current date to answer a question or schedule an event.',
+    displayName: 'Current Time',
 )]
 final class CurrentTimeTool implements InputToolInterface
 {

@@ -6,7 +6,6 @@ namespace Spora\Core;
 
 use ReflectionClass;
 use Spora\Auth\AuthService;
-use Spora\Drivers\LLMConfiguration;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\User;
@@ -43,8 +42,6 @@ final class DatabaseSeeder
             $agent = Agent::create([
                 'user_id'      => $userId,
                 'name'         => 'Spora Core Agent',
-                'llm_provider' => 'anthropic',
-                'llm_model'    => 'claude-3-7-sonnet-20250219',
                 'max_steps'    => 10,
                 'is_active'    => true,
             ]);
@@ -55,7 +52,6 @@ final class DatabaseSeeder
 
         // 3. Define the base tools every functional agent needs.
         $toolsToEnable = [
-            LLMConfiguration::class,
             CurrentTimeTool::class,
             CalculatorTool::class,
             ScratchpadTool::class,

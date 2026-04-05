@@ -16,6 +16,7 @@ use Throwable;
 #[Tool(
     name: 'tavily_search',
     description: 'Search the web using Tavily AI (optimized for agents). Use this for fact-checking, recent events, research, or finding current data online. This provides direct concise answers.',
+    displayName: 'Tavily Search',
 )]
 #[ToolSetting(
     key: 'core.tavily.api_key',

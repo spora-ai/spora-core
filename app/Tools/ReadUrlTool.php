@@ -15,6 +15,7 @@ use Throwable;
 #[Tool(
     name: 'read_url',
     description: 'Fetch and read the contents of a URL. Can parse HTML pages into Markdown, and can read XML/RSS feeds. Only http:// and https:// URLs are supported.',
+    displayName: 'Read URL',
 )]
 #[ToolParameter(
     name: 'url',

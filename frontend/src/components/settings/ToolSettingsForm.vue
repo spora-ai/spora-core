@@ -1,0 +1,112 @@
+<script setup lang="ts">
+/**
+ * ToolSettingsForm — renders a complete settings form driven purely by the backend schema.
+ *
+ * Props:
+ *   tool            — ToolSchema with settings_schema[] from GET /tools
+ *   initialSettings — Record<key, value> currently saved on the server
+ *   saving          — whether a save is in-flight
+ *   error           — last save error message
+ *
+ * Emits:
+ *   save(settings: Record<string, string>) — parent calls API and passes back updated serverSettings
+ *   saved() — emitted when save succeeds (for flash message in parent)
+ *
+ * Password handling:
+ *   - initialSettings contains "***" for masked (unchanged) password fields
+ *   - If user clears a password that was "***", the composable sends "" (clear)
+ *   - If user leaves "***" untouched, the field is omitted from the save payload (no-overwrite)
+ */
+import { ref, computed, watch } from 'vue'
+import ToolSettingField from './ToolSettingField.vue'
+import type { ToolSchema } from '@/composables/useToolSettings'
+
+const props = defineProps<{
+  tool: ToolSchema
+  initialSettings: Record<string, string>
+  saving: boolean
+  error: string | null
+}>()
+
+const emit = defineEmits<{
+  save: [settings: Record<string, string>]
+  saved: []
+}>()
+
+// Local form state: key → value
+const form = ref<Record<string, string>>({})
+
+// Sync form when initialSettings prop changes (e.g. after save completes)
+watch(
+  () => props.initialSettings,
+  (settings) => {
+    form.value = { ...settings }
+  },
+  { immediate: true },
+)
+
+// Dirty = form differs from initialSettings
+// For password fields, "***" in initialSettings means "masked / unchanged" — treat as equal to ''
+const isDirty = computed(() => {
+  for (const [key, value] of Object.entries(form.value)) {
+    const initial = props.initialSettings[key]
+    if (initial === '***') {
+      // Password unchanged if user hasn't typed anything new
+      if (value !== '' && value !== '***') return true
+    } else if (value !== initial) {
+      return true
+    }
+  }
+  // Also true if form has a new key initialSettings doesn't have
+  for (const [key, value] of Object.entries(props.initialSettings)) {
+    if (!(key in form.value) && value !== '***') return true
+  }
+  return false
+})
+
+function reset(): void {
+  form.value = { ...props.initialSettings }
+}
+
+async function submit(): Promise<void> {
+  emit('save', { ...form.value })
+}
+</script>
+
+<template>
+  <form @submit.prevent="submit" class="flex flex-col gap-5">
+    <!-- Fields -->
+    <div class="flex flex-col gap-4">
+      <ToolSettingField
+        v-for="field in tool.settings_schema"
+        :key="field.key"
+        :modelValue="form[field.key] ?? ''"
+        :field="field"
+        @update:modelValue="form[field.key] = String($event ?? '')"
+      />
+    </div>
+
+    <!-- Actions -->
+    <div class="flex items-center justify-between gap-4">
+      <p v-if="error" role="alert" class="text-xs text-destructive">{{ error }}</p>
+      <span v-else />
+      <div class="flex gap-2">
+        <button
+          type="button"
+          @click="reset"
+          :disabled="!isDirty || saving"
+          class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50"
+        >
+          Reset
+        </button>
+        <button
+          type="submit"
+          :disabled="!isDirty || saving"
+          class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+        >
+          {{ saving ? 'Saving…' : 'Save' }}
+        </button>
+      </div>
+    </div>
+  </form>
+</template>

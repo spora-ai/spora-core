@@ -23,7 +23,7 @@ function makeToolController(array $toolClasses = []): array
 
     $key        = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security   = new SecurityManager($key);
-    $toolConfig = new ToolConfigService($security);
+    $toolConfig = new ToolConfigService($security, $toolClasses);
     $controller = new ToolController($authService, $toolConfig, $toolClasses);
 
     return [$controller, $authService, $toolConfig];
@@ -105,8 +105,8 @@ test('getSettings returns empty array when no settings saved yet', function (): 
     $userId = $authService->register('user@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'user@example.com');
 
-    $request = jsonRequest('GET', '/api/v1/tools/test/settings');
-    $request->attributes->set('toolClass', TestTool::class);
+    $request = jsonRequest('GET', '/api/v1/tools/test_tool/settings');
+    $request->attributes->set('toolId', 'test_tool');
     $response = $controller->getSettings($request);
 
     expect($response->getStatusCode())->toBe(200);
@@ -120,12 +120,12 @@ test('getSettings returns masked password after putSettings', function (): void 
     $userId = $authService->register('user@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'user@example.com');
 
-    $putRequest = jsonRequest('PUT', '/api/v1/tools/test/settings', ['api_key' => 'my-secret']);
-    $putRequest->attributes->set('toolClass', TestTool::class);
+    $putRequest = jsonRequest('PUT', '/api/v1/tools/test_tool/settings', ['api_key' => 'my-secret']);
+    $putRequest->attributes->set('toolId', 'test_tool');
     $controller->putSettings($putRequest);
 
-    $getRequest = jsonRequest('GET', '/api/v1/tools/test/settings');
-    $getRequest->attributes->set('toolClass', TestTool::class);
+    $getRequest = jsonRequest('GET', '/api/v1/tools/test_tool/settings');
+    $getRequest->attributes->set('toolId', 'test_tool');
     $response = $controller->getSettings($getRequest);
 
     $body = json_decode($response->getContent(), true);
@@ -142,11 +142,11 @@ test('putSettings saves settings and returns masked result', function (): void {
     $userId = $authService->register('user@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'user@example.com');
 
-    $request = jsonRequest('PUT', '/api/v1/tools/test/settings', [
+    $request = jsonRequest('PUT', '/api/v1/tools/test_tool/settings', [
         'api_key'     => 'secret-value',
         'max_results' => '25',
     ]);
-    $request->attributes->set('toolClass', TestTool::class);
+    $request->attributes->set('toolId', 'test_tool');
     $response = $controller->putSettings($request);
 
     expect($response->getStatusCode())->toBe(200);
@@ -168,10 +168,10 @@ test('putSettings accepts settings nested under a settings key', function (): vo
     $userId = $authService->register('user@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'user@example.com');
 
-    $request = jsonRequest('PUT', '/api/v1/tools/test/settings', [
+    $request = jsonRequest('PUT', '/api/v1/tools/test_tool/settings', [
         'settings' => ['max_results' => '5'],
     ]);
-    $request->attributes->set('toolClass', TestTool::class);
+    $request->attributes->set('toolId', 'test_tool');
     $response = $controller->putSettings($request);
 
     expect($response->getStatusCode())->toBe(200);

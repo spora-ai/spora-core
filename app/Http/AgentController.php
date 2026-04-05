@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use JsonException;
 use ReflectionClass;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
+use Spora\Models\AgentToolOverride;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
+use Spora\Tools\InputToolInterface;
+use Spora\Tools\OutputToolInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -44,7 +48,12 @@ final class AgentController
     public function store(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $body   = $this->decodeJson($request);
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
 
         $name = trim((string) ($body['name'] ?? ''));
         if ($name === '') {
@@ -56,9 +65,7 @@ final class AgentController
             'name'          => $name,
             'description'   => trim((string) ($body['description'] ?? '')) ?: null,
             'system_prompt' => trim((string) ($body['system_prompt'] ?? '')) ?: null,
-            'llm_provider'  => $body['llm_provider'] ?? 'openai_compatible',
-            'llm_model'     => $body['llm_model'] ?? 'gpt-4o',
-            'llm_base_url'  => $body['llm_base_url'] ?? null,
+            'llm_driver_config_id' => isset($body['llm_driver_config_id']) ? (int) $body['llm_driver_config_id'] : null,
             'max_steps'     => (int) ($body['max_steps'] ?? 10),
             'is_active'     => 1,
             'created_at'   => date('Y-m-d H:i:s'),
@@ -100,8 +107,13 @@ final class AgentController
             return $this->notFound();
         }
 
-        $body    = $this->decodeJson($request);
-        $allowed = ['name', 'description', 'system_prompt', 'llm_provider', 'llm_model', 'llm_base_url', 'max_steps'];
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+
+        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps'];
         $data    = array_intersect_key($body, array_flip($allowed));
 
         if ($data !== []) {
@@ -138,12 +150,12 @@ final class AgentController
     {
         $userId    = AuthGuard::requireAuth($this->authService);
         $agent     = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
-        $toolClass = (string) $request->attributes->get('toolClass', '');
+        $toolClass = $this->resolveToolClassFromRequest($request);
 
         if ($agent === null) {
             return $this->notFound();
         }
-        if ($toolClass === '') {
+        if ($toolClass === null) {
             return $this->error('VALIDATION_ERROR', 'toolClass is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
@@ -155,14 +167,42 @@ final class AgentController
             return new JsonResponse(['data' => ['tool' => $this->toolResource($existing)]], Response::HTTP_OK);
         }
 
+        // Determine auto_approve default based on tool type:
+        // InputToolInterface → true (read-only, auto-approve by default)
+        // OutputToolInterface → null (defer to class attribute / manual approval)
+        $autoApprove = null;
+        if (class_exists($toolClass)) {
+            $ref = new ReflectionClass($toolClass);
+            $interfaces = $ref->getInterfaceNames();
+            if (in_array(InputToolInterface::class, $interfaces, true)) {
+                $autoApprove = true;
+            }
+        }
+
         Capsule::table('agent_tools')->insert([
             'agent_id'     => $agent->id,
             'tool_class'   => $toolClass,
             'tool_name'    => $this->resolveToolName($toolClass),
-            'auto_approve' => null,
+            'auto_approve' => $autoApprove,
             'created_at'   => date('Y-m-d H:i:s'),
             'updated_at'   => date('Y-m-d H:i:s'),
         ]);
+
+        // Seed schema defaults if there is no global config AND no agent override for this tool.
+        // This gives the agent meaningful defaults immediately on enable.
+        $globalSettings = $this->toolConfigService->getGlobalSettings($toolClass);
+        $hasAgentOverride = AgentToolOverride::where('agent_id', $agent->id)
+            ->where('tool_class', $toolClass)
+            ->exists();
+
+        if (!empty($globalSettings) || $hasAgentOverride) {
+            // Nothing to seed — global config or override already exists
+        } else {
+            $defaults = $this->toolConfigService->getSchemaDefaults($toolClass);
+            if ($defaults !== []) {
+                $this->toolConfigService->putAgentOverride($toolClass, $agent->id, $defaults);
+            }
+        }
 
         $tool = AgentTool::where('agent_id', $agent->id)->where('tool_class', $toolClass)->first();
 
@@ -176,9 +216,9 @@ final class AgentController
     {
         $userId    = AuthGuard::requireAuth($this->authService);
         $agent     = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
-        $toolClass = (string) $request->attributes->get('toolClass', '');
+        $toolClass = $this->resolveToolClassFromRequest($request);
 
-        if ($agent === null) {
+        if ($agent === null || $toolClass === null) {
             return $this->notFound();
         }
 
@@ -190,7 +230,11 @@ final class AgentController
             return $this->error('NOT_FOUND', 'Tool is not enabled for this agent.', Response::HTTP_NOT_FOUND);
         }
 
-        $body = $this->decodeJson($request);
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
 
         if (array_key_exists('auto_approve', $body)) {
             $raw     = $body['auto_approve'];
@@ -212,9 +256,9 @@ final class AgentController
     {
         $userId    = AuthGuard::requireAuth($this->authService);
         $agent     = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
-        $toolClass = (string) $request->attributes->get('toolClass', '');
+        $toolClass = $this->resolveToolClassFromRequest($request);
 
-        if ($agent === null) {
+        if ($agent === null || $toolClass === null) {
             return $this->notFound();
         }
 
@@ -235,9 +279,9 @@ final class AgentController
     {
         $userId    = AuthGuard::requireAuth($this->authService);
         $agent     = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
-        $toolClass = (string) $request->attributes->get('toolClass', '');
+        $toolClass = $this->resolveToolClassFromRequest($request);
 
-        if ($agent === null) {
+        if ($agent === null || $toolClass === null) {
             return $this->notFound();
         }
 
@@ -248,19 +292,36 @@ final class AgentController
     }
 
     /**
-     * PUT /api/v1/agents/{id}/tools/{toolClass}/override
+     * PUT /api/v1/agents/{id}/tools/{toolId}/override
      */
     public function putOverride(Request $request): JsonResponse
     {
         $userId    = AuthGuard::requireAuth($this->authService);
         $agent     = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
-        $toolClass = (string) $request->attributes->get('toolClass', '');
+        $toolClass = $this->resolveToolClassFromRequest($request);
 
-        if ($agent === null) {
+        if ($agent === null || $toolClass === null) {
             return $this->notFound();
         }
 
-        $body     = $this->decodeJson($request);
+        // Verify the tool is explicitly assigned to this agent before allowing an override
+        $assignedTool = AgentTool::where('agent_id', $agent->id)
+            ->where('tool_class', $toolClass)
+            ->first();
+        if ($assignedTool === null) {
+            return $this->error(
+                'FORBIDDEN',
+                'Tool is not assigned to this agent. Enable the tool first.',
+                Response::HTTP_FORBIDDEN,
+            );
+        }
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+
         $settings = isset($body['settings']) && is_array($body['settings']) ? $body['settings'] : $body;
 
         $this->toolConfigService->putAgentOverride($toolClass, $agent->id, $settings);
@@ -272,16 +333,28 @@ final class AgentController
     }
 
     /**
-     * DELETE /api/v1/agents/{id}/tools/{toolClass}/override
+     * DELETE /api/v1/agents/{id}/tools/{toolId}/override
      */
     public function deleteOverride(Request $request): JsonResponse
     {
         $userId    = AuthGuard::requireAuth($this->authService);
         $agent     = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
-        $toolClass = (string) $request->attributes->get('toolClass', '');
+        $toolClass = $this->resolveToolClassFromRequest($request);
 
-        if ($agent === null) {
+        if ($agent === null || $toolClass === null) {
             return $this->notFound();
+        }
+
+        // Verify the tool is explicitly assigned to this agent before deleting an override
+        $assignedTool = AgentTool::where('agent_id', $agent->id)
+            ->where('tool_class', $toolClass)
+            ->first();
+        if ($assignedTool === null) {
+            return $this->error(
+                'FORBIDDEN',
+                'Tool is not assigned to this agent. Enable the tool first.',
+                Response::HTTP_FORBIDDEN,
+            );
         }
 
         $this->toolConfigService->deleteAgentOverride($toolClass, $agent->id);
@@ -311,9 +384,7 @@ final class AgentController
             'description'   => $agent->description,
             'recipe_id'     => $agent->recipe_id,
             'system_prompt' => $agent->system_prompt,
-            'llm_provider'  => $agent->llm_provider,
-            'llm_model'     => $agent->llm_model,
-            'llm_base_url'  => $agent->llm_base_url,
+            'llm_driver_config_id' => $agent->llm_driver_config_id,
             'max_steps'     => (int) $agent->max_steps,
             'is_active'     => (bool) $agent->is_active,
             'tools'         => $tools->map(fn(AgentTool $t) => $this->toolResource($t))->values()->toArray(),
@@ -347,12 +418,29 @@ final class AgentController
         return $reflection->getShortName();
     }
 
+    /**
+     * Resolve the {toolId} route parameter to a fully-qualified PHP class name.
+     * Returns null if the tool identifier is not registered.
+     */
+    private function resolveToolClassFromRequest(Request $request): ?string
+    {
+        $toolId = (string) $request->attributes->get('toolId', '');
+
+        if ($toolId === '') {
+            return null;
+        }
+
+        return $this->toolConfigService->resolveToolClass($toolId);
+    }
+
     private function decodeJson(Request $request): array
     {
         $content = $request->getContent();
-        $decoded = $content !== '' ? json_decode($content, true) : null;
+        if ($content === '') {
+            return [];
+        }
 
-        return is_array($decoded) ? $decoded : [];
+        return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
     }
 
     private function error(string $code, string $message, int $status): JsonResponse

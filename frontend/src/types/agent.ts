@@ -10,9 +10,7 @@ export interface Agent {
   description: string | null
   recipe_id: string | null
   system_prompt: string | null
-  llm_provider: string
-  llm_model: string
-  llm_base_url: string | null
+  llm_driver_config_id: number | null
   max_steps: number
   is_active: boolean
   tools: AgentTool[]

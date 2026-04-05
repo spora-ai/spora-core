@@ -43,6 +43,15 @@ final class Router
     {
         [$controllerClass, $method] = is_array($handler) ? $handler : [$handler, '__invoke'];
 
+        // URL-decode path variables since getPathInfo() does not decode them.
+        // Handles %5C → \ conversion so ReflectionClass sees a valid class name.
+        foreach ($vars as $key => $value) {
+            $decoded = urldecode((string) $value);
+            if ($decoded !== $value) {
+                $vars[$key] = $decoded;
+            }
+        }
+
         $request->attributes->add($vars);
 
         $controller = $this->container->get($controllerClass);

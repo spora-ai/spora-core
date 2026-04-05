@@ -23,8 +23,13 @@ use Spora\Tools\Attributes\ToolSetting;
  */
 class ToolConfigService
 {
+    /** @var array<string, string> tool name (from #[Tool(name:)]) => fully-qualified class name */
+    private ?array $toolNameMap = null;
+
     public function __construct(
         private readonly SecurityManagerInterface $security,
+        /** @var list<string> */
+        private readonly array $toolClasses = [],
     ) {}
 
     // -----------------------------------------------------------------------
@@ -316,5 +321,62 @@ class ToolConfigService
         }
 
         return $reflection->getShortName();
+    }
+
+    /**
+     * Build the tool name → class map from registered tool classes.
+     *
+     * @return array<string, string>
+     */
+    private function buildToolNameMap(): array
+    {
+        if ($this->toolNameMap !== null) {
+            return $this->toolNameMap;
+        }
+
+        $this->toolNameMap = [];
+        foreach ($this->toolClasses as $class) {
+            $reflection = new ReflectionClass($class);
+            $attrs = $reflection->getAttributes(Tool::class);
+            if ($attrs !== []) {
+                /** @var Tool $tool */
+                $tool = $attrs[0]->newInstance();
+                $this->toolNameMap[$tool->name] = $class;
+            }
+        }
+
+        return $this->toolNameMap;
+    }
+
+    /**
+     * Resolve a tool identifier (from #[Tool(name:)]) to its fully-qualified PHP class name.
+     */
+    public function resolveToolClass(string $toolName): ?string
+    {
+        return $this->buildToolNameMap()[$toolName] ?? null;
+    }
+
+    /**
+     * Return schema defaults as key => default_value for all #[ToolSetting] fields.
+     * Used to pre-seed agent overrides when enabling a tool.
+     *
+     * @return array<string, mixed>
+     */
+    public function getSchemaDefaults(string $toolClass): array
+    {
+        if (!class_exists($toolClass)) {
+            return [];
+        }
+
+        $defaults = [];
+        foreach ((new ReflectionClass($toolClass))->getAttributes(ToolSetting::class) as $attr) {
+            /** @var ToolSetting $setting */
+            $setting = $attr->newInstance();
+            if ($setting->default !== null) {
+                $defaults[$setting->key] = $setting->default;
+            }
+        }
+
+        return $defaults;
     }
 }
