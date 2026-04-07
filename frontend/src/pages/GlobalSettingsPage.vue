@@ -12,6 +12,7 @@ import { api } from '@/api/client'
 import { ApiError } from '@/api/client'
 import { useToolSettings } from '@/composables/useToolSettings'
 import ToolSettingsForm from '@/components/settings/ToolSettingsForm.vue'
+import SettingsSidebar from '@/components/settings/SettingsSidebar.vue'
 import GlobalNavbar from '@/components/GlobalNavbar.vue'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
 import type { ToolSchema } from '@/composables/useToolSettings'
@@ -22,8 +23,8 @@ import type { LLMDriverInfo, LLMConfigResource } from '@/types/llmConfig'
 const route = useRoute()
 const router = useRouter()
 
-const selectedSection = ref<'tools' | 'llm'>(
-  (route.query.section as string) === 'llm' ? 'llm' : 'tools',
+const selectedSection = ref<'overview' | 'tools' | 'llm'>(
+  (route.query.section as string) === 'llm' ? 'llm' : (route.query.section as string) === 'tools' ? 'tools' : 'overview',
 )
 
 // ── Shared state (tool settings composable) ────────────────────────────────────
@@ -97,6 +98,7 @@ const formSettings = ref<Record<string, string>>({})
 const serverSettingsLLM = ref<Record<string, string>>({})
 const saveLLMError = ref<string | null>(null)
 const savedLLMFlash = ref(false)
+const formSetAsDefault = ref(false)
 
 const activeDriver = computed<LLMDriverInfo | null>(() => {
   if (llmViewMode.value === 'create') {
@@ -125,16 +127,22 @@ onMounted(async () => {
   }
 
   // Load LLM configs if on that section
-  if (selectedSection.value === 'llm') {
+  if (selectedSection.value === 'llm' || selectedSection.value === 'overview') {
     await Promise.all([llmStore.loadDrivers(), llmStore.loadConfigs()])
   }
 })
 
 // Watch section changes to load LLM data
-async function selectSection(section: 'tools' | 'llm'): Promise<void> {
+async function selectSection(section: 'overview' | 'tools' | 'llm'): Promise<void> {
   selectedSection.value = section
-  router.replace({ query: section === 'llm' ? { section: 'llm' } : {} })
+  router.replace({ query: section === 'llm' ? { section: 'llm' } : section === 'tools' ? { section: 'tools' } : {} })
+  if (section === 'tools') {
+    selectedToolId.value = null
+  }
   if (section === 'llm' && llmStore.drivers.length === 0) {
+    await Promise.all([llmStore.loadDrivers(), llmStore.loadConfigs()])
+  }
+  if (section === 'overview' && llmStore.drivers.length === 0) {
     await Promise.all([llmStore.loadDrivers(), llmStore.loadConfigs()])
   }
 }
@@ -157,6 +165,7 @@ function startCreate(): void {
   formSettings.value = {}
   serverSettingsLLM.value = {}
   saveLLMError.value = null
+  formSetAsDefault.value = llmStore.configs.length === 0
 }
 
 function cancelLLMForm(): void {
@@ -178,6 +187,7 @@ async function submitCreate(): Promise<void> {
       name: formName.value.trim(),
       driver_class: driver.driver_class,
       settings: { ...formSettings.value },
+      is_default: formSetAsDefault.value,
     })
     savedLLMFlash.value = true
     setTimeout(() => { savedLLMFlash.value = false }, 2000)
@@ -267,74 +277,76 @@ function formatDate(iso: string): string {
     <div class="flex-1 flex">
 
       <!-- Left sidebar: settings navigation -->
-      <aside class="w-64 border-r border-border shrink-0 overflow-y-auto hidden md:block">
-        <div class="p-4">
-          <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Settings
-          </h2>
-          <ul class="flex flex-col gap-0.5">
-            <li>
-              <button
-                @click="selectSection('tools')"
-                class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
-                :class="
-                  selectedSection === 'tools'
-                    ? 'bg-primary text-primary-foreground font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                "
-              >
-                Tools
-              </button>
-            </li>
-            <li>
-              <button
-                @click="selectSection('llm')"
-                class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
-                :class="
-                  selectedSection === 'llm'
-                    ? 'bg-primary text-primary-foreground font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                "
-              >
-                LLM Drivers
-              </button>
-            </li>
-          </ul>
-        </div>
-
-        <!-- Tool list (only visible in Tools section) -->
-        <template v-if="selectedSection === 'tools'">
-          <div class="px-4 pb-4">
-            <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-              Configure
-            </h3>
-            <ul class="flex flex-col gap-0.5">
-              <li v-if="loadingTools">
-                <p class="px-3 py-2 text-xs text-muted-foreground">Loading…</p>
-              </li>
-              <li v-else-if="toolsWithSettings().length === 0">
-                <p class="px-3 py-2 text-xs text-muted-foreground">No configurable tools.</p>
-              </li>
-              <li v-for="tool in toolsWithSettings()" :key="tool.tool_name">
-                <button
-                  @click="selectTool(tool.tool_name)"
-                  class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
-                  :class="
-                    selectedToolId === tool.tool_name
-                      ? 'bg-primary text-primary-foreground font-medium'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                  "
-                >
-                  {{ tool.display_name || tool.tool_name }}
-                </button>
-              </li>
-            </ul>
-          </div>
-        </template>
-      </aside>
+      <SettingsSidebar
+        :selectedSection="selectedSection"
+        :allTools="allTools"
+        :loadingTools="loadingTools"
+        :selectedToolId="selectedToolId"
+        :selectedConfigId="selectedConfigId"
+        @update:selectedSection="(s: 'overview' | 'tools' | 'llm') => selectSection(s)"
+        @selectTool="selectTool"
+        @selectConfig="selectConfig"
+        @startCreate="startCreate"
+      />
 
       <!-- Main content -->
       <main class="flex-1 max-w-2xl mx-auto w-full px-4 py-8">
+
+        <!-- ── Overview section ─────────────────────────────────────────── -->
+        <template v-if="selectedSection === 'overview'">
+
+          <!-- Mobile section selector -->
+          <div class="md:hidden mb-6 flex gap-2">
+            <button
+              @click="selectSection('tools')"
+              class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
+            >
+              Tools →
+            </button>
+            <button
+              @click="selectSection('llm')"
+              class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
+            >
+              LLM →
+            </button>
+          </div>
+
+          <div class="mb-6">
+            <h1 class="text-lg font-semibold">Global Settings</h1>
+            <p class="text-sm text-muted-foreground mt-0.5">
+              Manage your tools and LLM provider configurations.
+            </p>
+          </div>
+
+          <!-- Tools overview -->
+          <div class="mb-6">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="text-sm font-semibold">Tools</h2>
+              <button
+                @click="selectSection('tools')"
+                class="text-xs text-primary hover:text-primary/80 font-medium"
+              >
+                View all →
+              </button>
+            </div>
+            <div v-if="loadingTools" class="text-sm text-muted-foreground">Loading…</div>
+            <div v-else-if="toolsWithSettings().length === 0" class="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
+              No configurable tools available.
+            </div>
+            <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                v-for="tool in toolsWithSettings().slice(0, 6)"
+                :key="tool.tool_name"
+                @click="selectedSection = 'tools'; selectTool(tool.tool_name)"
+                class="rounded-xl border border-border bg-card p-4 text-left hover:border-primary/50 hover:bg-muted/50 transition-colors"
+              >
+                <p class="text-sm font-medium">{{ tool.display_name || tool.tool_name }}</p>
+                <p class="text-xs text-muted-foreground mt-0.5">{{ tool.settings_schema.length }} settings</p>
+              </button>
+            </div>
+          </div>
+
+        </template>
 
         <!-- ── Tools section ─────────────────────────────────────────────── -->
         <template v-if="selectedSection === 'tools'">
@@ -342,10 +354,16 @@ function formatDate(iso: string): string {
           <!-- Mobile section selector -->
           <div class="md:hidden mb-6 flex gap-2">
             <button
+              @click="selectSection('overview')"
+              class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
+            >
+              ← Overview
+            </button>
+            <button
               @click="selectSection('llm')"
               class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
             >
-              LLM Drivers →
+              LLM →
             </button>
           </div>
 
@@ -405,8 +423,24 @@ function formatDate(iso: string): string {
             />
           </div>
 
-          <div v-else-if="!loadingTools && !toolsError" class="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
-            Select a tool from the list to configure it.
+          <!-- Tools list view -->
+          <div v-else-if="!loadingTools && !toolsError">
+            <div class="rounded-xl border border-border bg-card divide-y divide-border">
+              <button
+                v-for="tool in toolsWithSettings()"
+                :key="tool.tool_name"
+                @click="selectTool(tool.tool_name)"
+                class="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-muted/50 transition-colors"
+              >
+                <div>
+                  <p class="text-sm font-medium">{{ tool.display_name || tool.tool_name }}</p>
+                  <p class="text-xs text-muted-foreground mt-0.5">{{ tool.settings_schema.length }} settings</p>
+                </div>
+                <svg class="h-4 w-4 text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
           </div>
 
         </template>
@@ -417,79 +451,18 @@ function formatDate(iso: string): string {
           <!-- Mobile section selector -->
           <div class="md:hidden mb-6 flex gap-2">
             <button
+              @click="selectSection('overview')"
+              class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
+            >
+              ← Overview
+            </button>
+            <button
               @click="selectSection('tools')"
               class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
             >
               ← Tools
             </button>
           </div>
-
-          <!-- Left sidebar: config list -->
-          <aside class="w-72 border border-border rounded-xl bg-card mb-6 overflow-hidden">
-            <div class="p-4">
-              <div class="flex items-center justify-between mb-3">
-                <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                  LLM Configs
-                </h2>
-                <button
-                  @click="startCreate"
-                  class="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-                  title="New configuration"
-                >
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-                  </svg>
-                  New
-                </button>
-              </div>
-
-              <ul class="flex flex-col gap-0.5">
-                <li v-if="llmStore.loadingConfigs">
-                  <p class="px-3 py-2 text-xs text-muted-foreground">Loading…</p>
-                </li>
-                <li v-else-if="llmStore.configs.length === 0 && !llmStore.loadingConfigs">
-                  <p class="px-3 py-2 text-xs text-muted-foreground">No configurations yet.</p>
-                </li>
-                <li v-for="config in llmStore.configs" :key="config.id">
-                  <button
-                    @click="selectConfig(config)"
-                    class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
-                    :class="
-                      selectedConfigId === config.id
-                        ? 'bg-primary text-primary-foreground font-medium'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    "
-                  >
-                    <div class="flex items-center gap-1.5">
-                      <span class="truncate">{{ config.name }}</span>
-                      <span
-                        v-if="config.is_default"
-                        class="shrink-0 text-[10px] font-semibold bg-primary/20 text-primary-foreground px-1.5 py-0.5 rounded"
-                      >
-                        default
-                      </span>
-                    </div>
-                    <div class="text-xs mt-0.5 opacity-70 truncate">
-                      {{ config.driver_display_name }}
-                    </div>
-                  </button>
-                </li>
-              </ul>
-            </div>
-
-            <!-- Driver legend -->
-            <div class="p-4 border-t border-border">
-              <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                Available Drivers
-              </h3>
-              <ul class="flex flex-col gap-1">
-                <li v-for="driver in llmStore.drivers" :key="driver.name" class="text-xs text-muted-foreground">
-                  <span class="font-medium text-foreground">{{ driver.display_name }}</span>
-                  <span class="ml-1">({{ driver.name }})</span>
-                </li>
-              </ul>
-            </div>
-          </aside>
 
           <!-- Error -->
           <div
@@ -535,6 +508,21 @@ function formatDate(iso: string): string {
                     {{ driver.display_name }} ({{ driver.name }})
                   </option>
                 </select>
+              </div>
+
+              <!-- Set as default -->
+              <div class="mb-5">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    v-model="formSetAsDefault"
+                    class="rounded border-border text-primary focus:ring-primary"
+                  />
+                  <span class="text-sm font-medium">Set as default</span>
+                </label>
+                <p class="text-xs text-muted-foreground mt-1 ml-6">
+                  The default config is used by all agents that don't have a custom LLM config assigned.
+                </p>
               </div>
 
               <!-- Settings (only visible after driver is selected) -->
@@ -643,8 +631,50 @@ function formatDate(iso: string): string {
             </div>
           </template>
 
+          <!-- ── List view ───────────────────────────────────────────────── -->
+          <template v-else-if="llmViewMode === 'list' && llmStore.configs.length > 0">
+            <div class="mb-6">
+              <h1 class="text-lg font-semibold">LLM Providers</h1>
+              <p class="text-sm text-muted-foreground mt-0.5">
+                Manage your LLM provider configurations.
+              </p>
+            </div>
+            <div class="rounded-xl border border-border bg-card divide-y divide-border">
+              <button
+                v-for="config in llmStore.configs"
+                :key="config.id"
+                @click="selectConfig(config)"
+                class="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-muted/50 transition-colors"
+              >
+                <div>
+                  <div class="flex items-center gap-2">
+                    <p class="text-sm font-medium">{{ config.name }}</p>
+                    <span
+                      v-if="config.is_default"
+                      class="text-xs rounded-full bg-primary/10 text-primary px-1.5 py-0.5 font-medium"
+                    >
+                      Default
+                    </span>
+                  </div>
+                  <p class="text-xs text-muted-foreground mt-0.5">{{ config.driver_display_name }}</p>
+                </div>
+                <svg class="h-4 w-4 text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+            <div class="mt-4 flex justify-end">
+              <button
+                @click="startCreate"
+                class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
+              >
+                + Add New
+              </button>
+            </div>
+          </template>
+
           <!-- ── Empty state ─────────────────────────────────────────────── -->
-          <template v-else>
+          <template v-else-if="llmStore.configs.length === 0">
             <div class="rounded-xl border border-border bg-card p-8 text-center">
               <p class="text-sm text-muted-foreground mb-4">
                 No LLM configuration selected.

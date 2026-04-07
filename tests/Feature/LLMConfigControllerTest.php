@@ -18,24 +18,19 @@ function makeLLMConfigController(): array
     ]);
     $controller = new Spora\Http\LLMConfigController($authService, $llmConfigService);
 
-    return [$controller, $authService, $llmConfigService];
+    return [$controller, $authService, $llmConfigService, $key];
 }
 
-function encryptForTest(string $json): string
+function createTestConfig(string $name, string $driverClass, array $settings, bool $isDefault = false, ?int $userId = null, ?Spora\Services\LLMConfigService $llmConfigService = null): LLMDriverConfiguration
 {
-    $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-    $security = new Spora\Core\SecurityManager($key);
-    return $security->encrypt($json)->toStorageString();
-}
-
-function createTestConfig(string $name, string $driverClass, array $settings, bool $isDefault = false, ?int $userId = null): LLMDriverConfiguration
-{
-    $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-    $security = new Spora\Core\SecurityManager($key);
-    $llmConfigService = new Spora\Services\LLMConfigService($security, [
-        OpenAICompatibleDriver::class,
-        AnthropicCompatibleDriver::class,
-    ]);
+    if ($llmConfigService === null) {
+        $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $security = new Spora\Core\SecurityManager($key);
+        $llmConfigService = new Spora\Services\LLMConfigService($security, [
+            OpenAICompatibleDriver::class,
+            AnthropicCompatibleDriver::class,
+        ]);
+    }
 
     $config = new LLMDriverConfiguration();
     $config->user_id = $userId ?? ($_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID] ?? 1);
@@ -105,7 +100,7 @@ test('store() creates a new config', function (): void {
     $result = json_decode($response->getContent(), true)['data']['config'];
     expect($result['name'])->toBe('Test Config')
         ->and($result['driver_class'])->toBe(OpenAICompatibleDriver::class)
-        ->and($result['settings']['api_key'])->toBe('***')  // masked
+        ->and($result['settings']['api_key'])->toBe('sk-test')  // decrypted from encrypted storage
         ->and($result['is_default'])->toBe(false);
 
     // Cleanup
@@ -145,13 +140,13 @@ test('store() returns 422 for invalid driver_class', function (): void {
 });
 
 test('show() returns a config by id', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
     bootAuth($authService);
 
     $config = createTestConfig('Show Test', OpenAICompatibleDriver::class, [
         'api_key' => 'sk-show-test',
         'model' => 'gpt-4o',
-    ]);
+    ], false, null, $llmConfigService);
 
     $request = new Symfony\Component\HttpFoundation\Request();
     $response = $controller->show($request, $config->id);
@@ -160,7 +155,7 @@ test('show() returns a config by id', function (): void {
 
     $result = json_decode($response->getContent(), true)['data']['config'];
     expect($result['name'])->toBe('Show Test')
-        ->and($result['settings']['api_key'])->toBe('***');
+        ->and($result['settings']['api_key'])->toBe('sk-show-test');
 
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });
@@ -176,13 +171,13 @@ test('show() returns 404 for unknown id', function (): void {
 });
 
 test('update() modifies a config', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
     bootAuth($authService);
 
     $config = createTestConfig('Update Test', OpenAICompatibleDriver::class, [
         'api_key' => 'sk-old',
         'model' => 'gpt-4o',
-    ]);
+    ], false, null, $llmConfigService);
 
     $body = ['name' => 'Updated Name'];
     $request = jsonRequest('PUT', "/api/v1/llm-configs/{$config->id}", $body);
@@ -197,10 +192,10 @@ test('update() modifies a config', function (): void {
 });
 
 test('destroy() deletes a config', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
     bootAuth($authService);
 
-    $config = createTestConfig('Delete Test', OpenAICompatibleDriver::class, ['api_key' => 'sk-del']);
+    $config = createTestConfig('Delete Test', OpenAICompatibleDriver::class, ['api_key' => 'sk-del'], false, null, $llmConfigService);
 
     $request = new Symfony\Component\HttpFoundation\Request();
     $response = $controller->destroy($request, $config->id);
@@ -210,12 +205,12 @@ test('destroy() deletes a config', function (): void {
 });
 
 test('setDefault() sets a config as global default', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
     bootAuth($authService);
 
     // Create two configs
-    $config1 = createTestConfig('Default 1', OpenAICompatibleDriver::class, ['api_key' => 'sk-1'], false);
-    $config2 = createTestConfig('Default 2', OpenAICompatibleDriver::class, ['api_key' => 'sk-2'], false);
+    $config1 = createTestConfig('Default 1', OpenAICompatibleDriver::class, ['api_key' => 'sk-1'], false, null, $llmConfigService);
+    $config2 = createTestConfig('Default 2', OpenAICompatibleDriver::class, ['api_key' => 'sk-2'], false, null, $llmConfigService);
 
     $request = new Symfony\Component\HttpFoundation\Request();
     $response = $controller->setDefault($request, $config2->id);
@@ -232,13 +227,13 @@ test('setDefault() sets a config as global default', function (): void {
 });
 
 test('index() returns all configs', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
     bootAuth($authService);
 
     $config = createTestConfig('Index Test', AnthropicCompatibleDriver::class, [
         'api_key' => 'sk-anthropic',
         'model' => 'claude-3-5-sonnet',
-    ]);
+    ], false, null, $llmConfigService);
 
     $request = new Symfony\Component\HttpFoundation\Request();
     $response = $controller->index($request);
@@ -256,14 +251,14 @@ test('index() returns all configs', function (): void {
 // ---------------------------------------------------------------------------
 
 test('index() only returns configs belonging to the current user', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
     $userA = bootAuth($authService, 'usera@example.com');
 
-    $configA = createTestConfig('UserA Config', OpenAICompatibleDriver::class, ['api_key' => 'sk-usera']);
+    $configA = createTestConfig('UserA Config', OpenAICompatibleDriver::class, ['api_key' => 'sk-usera'], false, null, $llmConfigService);
 
     // Register and log in as a different user
     $userB = bootAuth($authService, 'userb@example.com');
-    createTestConfig('UserB Config', AnthropicCompatibleDriver::class, ['api_key' => 'sk-userb']);
+    createTestConfig('UserB Config', AnthropicCompatibleDriver::class, ['api_key' => 'sk-userb'], false, null, $llmConfigService);
 
     // User B should only see their own config
     $request = new Symfony\Component\HttpFoundation\Request();
@@ -279,10 +274,10 @@ test('index() only returns configs belonging to the current user', function (): 
 });
 
 test('show() returns 404 when fetching another user\'s config', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
     $userA = bootAuth($authService, 'usera@example.com');
 
-    $configA = createTestConfig('UserA Private', OpenAICompatibleDriver::class, ['api_key' => 'sk-private']);
+    $configA = createTestConfig('UserA Private', OpenAICompatibleDriver::class, ['api_key' => 'sk-private'], false, null, $llmConfigService);
 
     // Log in as a different user
     bootAuth($authService, 'userb@example.com');
@@ -296,10 +291,10 @@ test('show() returns 404 when fetching another user\'s config', function (): voi
 });
 
 test('update() returns 404 when updating another user\'s config', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
     $userA = bootAuth($authService, 'usera@example.com');
 
-    $configA = createTestConfig('UserA Update', OpenAICompatibleDriver::class, ['api_key' => 'sk-update']);
+    $configA = createTestConfig('UserA Update', OpenAICompatibleDriver::class, ['api_key' => 'sk-update'], false, null, $llmConfigService);
 
     // Log in as a different user
     bootAuth($authService, 'userb@example.com');
@@ -313,10 +308,10 @@ test('update() returns 404 when updating another user\'s config', function (): v
 });
 
 test('destroy() returns 404 when deleting another user\'s config', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
     $userA = bootAuth($authService, 'usera@example.com');
 
-    $configA = createTestConfig('UserA Delete', OpenAICompatibleDriver::class, ['api_key' => 'sk-delete']);
+    $configA = createTestConfig('UserA Delete', OpenAICompatibleDriver::class, ['api_key' => 'sk-delete'], false, null, $llmConfigService);
 
     // Log in as a different user
     bootAuth($authService, 'userb@example.com');
@@ -332,14 +327,14 @@ test('destroy() returns 404 when deleting another user\'s config', function (): 
 });
 
 test('setDefault() only affects the current user\'s configs', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
     $userA = bootAuth($authService, 'usera@example.com');
 
-    $configA = createTestConfig('UserA Default', OpenAICompatibleDriver::class, ['api_key' => 'sk-usera'], false);
+    $configA = createTestConfig('UserA Default', OpenAICompatibleDriver::class, ['api_key' => 'sk-usera'], false, null, $llmConfigService);
 
     // Log in as a different user and set their own default
     bootAuth($authService, 'userb@example.com');
-    $configB = createTestConfig('UserB Default', AnthropicCompatibleDriver::class, ['api_key' => 'sk-userb'], false);
+    $configB = createTestConfig('UserB Default', AnthropicCompatibleDriver::class, ['api_key' => 'sk-userb'], false, null, $llmConfigService);
 
     $request = new Symfony\Component\HttpFoundation\Request();
     $controller->setDefault($request, $configB->id);

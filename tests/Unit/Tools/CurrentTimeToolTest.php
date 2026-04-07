@@ -19,6 +19,9 @@ it('has an empty parameter schema', function () {
     $schema = $tool->getParametersSchema();
 
     expect($schema['type'])->toBe('object')
-        ->and($schema['properties'])->toBeEmpty()
+        // properties must be a stdClass (empty object {}), not [] (empty sequential array).
+        // The OpenAI API rejects "properties": [] as invalid JSON Schema.
+        ->and($schema['properties'])->toBeInstanceOf(stdClass::class)
+        ->and((array) $schema['properties'])->toBeEmpty()
         ->and($schema['required'])->toBeEmpty();
 });

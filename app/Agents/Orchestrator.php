@@ -572,12 +572,20 @@ final class Orchestrator implements OrchestratorInterface
             /** @var Tool $toolAttr */
             $toolAttr = $attrs[0]->newInstance();
 
+            $schema = $instance->getParametersSchema();
+
+            // Normalize empty "properties" from [] to (object)[] so it encodes as {} in JSON.
+            // The OpenAI API requires properties to be a JSON object, not an empty sequential array.
+            if (isset($schema['properties']) && $schema['properties'] === []) {
+                $schema['properties'] = (object) [];
+            }
+
             $defs[] = [
                 'type'     => 'function',
                 'function' => [
                     'name'        => $toolAttr->name,
                     'description' => $toolAttr->description,
-                    'parameters'  => $instance->getParametersSchema(),
+                    'parameters'  => $schema,
                 ],
             ];
         }

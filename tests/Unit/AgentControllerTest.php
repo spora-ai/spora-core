@@ -5,8 +5,12 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Auth\AuthService;
 use Spora\Core\SecurityManager;
+use Spora\Drivers\AnthropicCompatibleDriver;
+use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Http\AgentController;
 use Spora\Http\Exceptions\UnauthenticatedException;
+use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\HttpFoundation\Request;
 use Tests\Fixtures\TestTool;
@@ -25,9 +29,10 @@ function makeAgentController(): array
     $key        = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security   = new SecurityManager($key);
     $toolConfig = new ToolConfigService($security, [TestTool::class]);
-    $controller = new AgentController($authService, $toolConfig);
+    $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class]);
+    $controller = new AgentController($authService, $toolConfig, $llmConfig);
 
-    return [$controller, $authService, $toolConfig];
+    return [$controller, $authService, $toolConfig, $llmConfig];
 }
 
 /**
@@ -389,6 +394,38 @@ test('getOverride returns empty settings when no override set', function (): voi
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
     expect($body['data']['settings'])->toBe([]);
+});
+
+test('getOverride for llm_configuration falls back to the user default LLMDriverConfiguration', function (): void {
+    clearSession();
+    [$controller, $authService, $toolConfig, $llmConfig] = makeAgentController();
+    $userId = registerUser($authService);
+    $agentId = createAgent($controller);
+
+    // Create a default LLMDriverConfiguration for the same user
+    $config = new LLMDriverConfiguration();
+    $config->user_id = $userId;
+    $config->name = 'Test Default';
+    $config->driver_class = OpenAICompatibleDriver::class;
+    $config->settings = $llmConfig->encryptSettings([
+        'api_key' => 'sk-test-secret',
+        'model' => 'gpt-4o',
+    ]);
+    $config->is_default = true;
+    $config->save();
+
+    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('llm_configuration') . '/override');
+    $request->attributes->set('id', $agentId);
+    $request->attributes->set('toolId', 'llm_configuration');
+    $response = $controller->getOverride($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    // api_key is password → masked; model is returned as-is
+    expect($body['data']['settings']['api_key'])->toBe('***');
+    expect($body['data']['settings']['model'])->toBe('gpt-4o');
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
 });
 
 test('putOverride saves agent-scoped settings and masks passwords', function (): void {

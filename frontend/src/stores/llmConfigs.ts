@@ -52,11 +52,15 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     name: string
     driver_class: string
     settings: Record<string, string>
+    is_default?: boolean
   }): Promise<LLMConfigResource> {
     saving.value = true
     error.value = null
     try {
       const result = await api.post<{ config: LLMConfigResource }>('/llm-configs', payload)
+      if (result.config.is_default) {
+        configs.value = configs.value.map((c) => ({ ...c, is_default: false }))
+      }
       configs.value.push(result.config)
       return result.config
     } catch (e) {

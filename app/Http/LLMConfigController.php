@@ -120,7 +120,10 @@ final class LLMConfigController
         $config->name = $name;
         $config->driver_class = $driverClass;
         $config->settings = $this->llmConfigService->encryptSettings($settings);
-        $config->is_default = false;
+        $config->is_default = !empty($body['is_default']);
+        if ($config->is_default) {
+            LLMDriverConfiguration::where('user_id', $userId)->where('is_default', true)->update(['is_default' => false]);
+        }
         $config->save();
 
         return new JsonResponse(
@@ -220,7 +223,8 @@ final class LLMConfigController
      */
     private function configResource(LLMDriverConfiguration $config): array
     {
-        $settings = $config->getSettings();
+        // Use getRawOriginal to bypass the 'array' cast which double-encodes the encrypted JSON
+        $settings = $this->llmConfigService->decryptSettings($config->getRawOriginal('settings'));
         $schema = $this->getSchemaForDriver($config->driver_class);
         $masked = $this->llmConfigService->maskForApi($settings, $schema);
 

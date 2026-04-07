@@ -12,6 +12,8 @@ use Spora\Http\Middleware\AuthGuard;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOverride;
+use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\InputToolInterface;
@@ -25,6 +27,7 @@ final class AgentController
     public function __construct(
         private readonly AuthService $authService,
         private readonly ToolConfigService $toolConfigService,
+        private readonly LLMConfigService $llmConfigService,
     ) {}
 
     /**
@@ -277,11 +280,39 @@ final class AgentController
      */
     public function getOverride(Request $request): JsonResponse
     {
-        $userId    = AuthGuard::requireAuth($this->authService);
-        $agent     = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
-        $toolClass = $this->resolveToolClassFromRequest($request);
+        $userId = AuthGuard::requireAuth($this->authService);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
 
-        if ($agent === null || $toolClass === null) {
+        if ($agent === null) {
+            return $this->notFound();
+        }
+
+        $toolId    = (string) $request->attributes->get('toolId', '');
+        $toolClass = $this->toolConfigService->resolveToolClass($toolId);
+
+        // llm_configuration is not a registered tool class, so resolveToolClass
+        // returns null. Handle it as a special case: fall back to LLMDriverConfiguration.
+        if ($toolId === 'llm_configuration') {
+            $config = LLMDriverConfiguration::where('user_id', $userId)->where('is_default', true)->first();
+            $settings = $config !== null
+                ? $this->llmConfigService->decryptSettings($config->getRawOriginal('settings'))
+                : [];
+
+            // Mask password fields using the driver's schema
+            $drivers = $this->llmConfigService->getDrivers();
+            $schema  = null;
+            foreach ($drivers as $driver) {
+                if ($config !== null && $driver['driver_class'] === $config->driver_class) {
+                    $schema = $driver['settings_schema'];
+                    break;
+                }
+            }
+            $masked = $schema !== null ? $this->llmConfigService->maskForApi($settings, $schema) : $settings;
+
+            return new JsonResponse(['data' => ['settings' => $masked]]);
+        }
+
+        if ($toolClass === null) {
             return $this->notFound();
         }
 

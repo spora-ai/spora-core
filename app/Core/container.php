@@ -215,6 +215,7 @@ return [
         return new Spora\Http\AgentController(
             $c->get(AuthService::class),
             $c->get(Spora\Services\ToolConfigService::class),
+            $c->get(Spora\Services\LLMConfigService::class),
         );
     },
 

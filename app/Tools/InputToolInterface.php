@@ -23,7 +23,7 @@ interface InputToolInterface
      *
      * @return array{
      *   type: "object",
-     *   properties: array<string, array{type: string, description: string}>,
+     *   properties: array<string, array{type: string, description: string}>|\stdClass,
      *   required: list<string>
      * }
      */

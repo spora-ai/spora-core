@@ -49,10 +49,7 @@ const llmConfig = ref<Record<string, string>>({})
 const llmCheckDone = ref(false)
 
 const llmUnconfigured = computed(() => {
-  if (!llmConfig.value) return false
-  const oai = llmConfig.value['core.openai.api_key']
-  const anthropic = llmConfig.value['core.anthropic.api_key']
-  return (oai === '' || oai === undefined) && (anthropic === '' || anthropic === undefined)
+  return Object.keys(llmConfig.value).length === 0
 })
 
 // ── Relative time ───────────────────────────────────────────────────────────

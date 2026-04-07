@@ -32,7 +32,7 @@ final class CurrentTimeTool implements InputToolInterface
     {
         return [
             'type'       => 'object',
-            'properties' => [],
+            'properties' => json_decode('{}'),
             'required'   => [],
         ];
     }
