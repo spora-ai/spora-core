@@ -144,8 +144,8 @@ class LLMConfigService
     /**
      * Returns the default LLMDriverConfiguration (is_default = true).
      */
-    public function getDefaultConfiguration(): ?LLMDriverConfiguration
+    public function getDefaultConfiguration(int $userId): ?LLMDriverConfiguration
     {
-        return LLMDriverConfiguration::where('is_default', true)->first();
+        return LLMDriverConfiguration::where('user_id', $userId)->where('is_default', true)->first();
     }
 }

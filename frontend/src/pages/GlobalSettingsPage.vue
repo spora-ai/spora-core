@@ -169,7 +169,7 @@ function startCreate(): void {
 }
 
 function cancelLLMForm(): void {
-  llmViewMode.value = llmStore.configs.length > 0 ? 'edit' : 'list'
+  llmViewMode.value = 'list'
   selectedConfigId.value = null
   saveLLMError.value = null
 }
@@ -209,8 +209,17 @@ async function submitEdit(): Promise<void> {
   savingLLMStart()
 
   try {
+    // Strip unchanged password fields: if the form still holds '***' (the masked server value),
+    // omit the key entirely so the backend keeps the existing encrypted value.
+    const settingsToSend: Record<string, string> = {}
+    for (const [key, value] of Object.entries(formSettings.value)) {
+      const serverValue = serverSettingsLLM.value[key]
+      if (serverValue === '***' && value === '***') continue
+      settingsToSend[key] = value
+    }
+
     const updated = await llmStore.updateConfig(selectedConfig.value.id, {
-      settings: { ...formSettings.value },
+      settings: settingsToSend,
     })
     savedLLMFlash.value = true
     setTimeout(() => { savedLLMFlash.value = false }, 2000)

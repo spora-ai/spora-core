@@ -159,12 +159,17 @@ final class LLMConfigController
         }
 
         if (isset($body['settings']) && is_array($body['settings'])) {
+            // Merge with existing decrypted settings so omitted keys (e.g. unchanged passwords
+            // that the API returns as "***" and the client strips before sending) are preserved.
+            $existing = $this->llmConfigService->decryptSettings($config->getRawOriginal('settings') ?? '');
+            $merged   = array_merge($existing, $body['settings']);
+
             $schema = $this->getSchemaForDriver($config->driver_class);
-            $validationError = $this->validateSettings($body['settings'], $schema);
+            $validationError = $this->validateSettings($merged, $schema);
             if ($validationError !== null) {
                 return $this->error('VALIDATION_ERROR', $validationError, Response::HTTP_UNPROCESSABLE_ENTITY);
             }
-            $config->settings = $this->llmConfigService->encryptSettings($body['settings']);
+            $config->settings = $this->llmConfigService->encryptSettings($merged);
         }
 
         $config->save();

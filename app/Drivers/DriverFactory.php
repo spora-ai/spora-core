@@ -37,8 +37,8 @@ class DriverFactory
             }
         }
 
-        // Fall back to global default
-        $defaultConfig = LLMDriverConfiguration::where('is_default', true)->first();
+        // Fall back to global default for this user
+        $defaultConfig = LLMDriverConfiguration::where('user_id', $agent->user_id)->where('is_default', true)->first();
         if ($defaultConfig !== null) {
             return $this->makeDriverFromConfig($defaultConfig);
         }
@@ -63,7 +63,7 @@ class DriverFactory
             throw new RuntimeException("LLM driver class {$driverClass} does not exist.");
         }
 
-        $settings = $this->llmConfigService->decryptSettings($config->settings);
+        $settings = $this->llmConfigService->decryptSettings($config->settings ?? '');
 
         return new $driverClass(
             apiKey: (string) ($settings['api_key'] ?? ''),
