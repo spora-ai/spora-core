@@ -1,9 +1,7 @@
 <script setup lang="ts">
 /**
- * LLMConfigsPage — /settings/llm (legacy)
- *
- * This page is now a passthrough. All LLM configuration functionality
- * lives in GlobalSettingsPage (/settings?section=llm).
+ * LLMConfigsPage — legacy redirect.
+ * All LLM configuration functionality lives in /settings/llm.
  */
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -11,7 +9,7 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 
 onMounted(() => {
-  router.replace({ name: 'settings', query: { section: 'llm' } })
+  router.replace({ name: 'settings-llm' })
 })
 </script>
 

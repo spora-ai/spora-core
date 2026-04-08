@@ -2,34 +2,43 @@
 /**
  * SettingsSidebar — collapsible submenu sidebar for Global Settings.
  *
- * Shows:
- * - Main nav: Tools, LLM
- * - Tools submenu (when Tools active): list of configurable tools
- * - LLM submenu (when LLM active): list of configs + New button
+ * All navigation is driven by vue-router. Active state is derived from the
+ * current route and query params — no props needed for selection state.
  */
+import { useRoute, useRouter } from 'vue-router'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
+import { ChevronRight } from 'lucide-vue-next'
 import type { ToolSchema } from '@/composables/useToolSettings'
-import type { LLMConfigResource } from '@/types/llmConfig'
 
 const props = defineProps<{
-  selectedSection: 'overview' | 'tools' | 'llm'
   allTools: ToolSchema[]
   loadingTools: boolean
-  selectedToolId: string | null
-  selectedConfigId: number | null
 }>()
 
-const emit = defineEmits<{
-  'update:selectedSection': [section: 'overview' | 'tools' | 'llm']
-  selectTool: [toolName: string]
-  selectConfig: [config: LLMConfigResource]
-  startCreate: []
-}>()
-
+const route = useRoute()
+const router = useRouter()
 const llmStore = useLlmConfigsStore()
 
-function toolsWithSettings(): ToolSchema[] {
+const isOverview = () => route.name === 'settings-overview'
+const isTools = () => route.name === 'settings-tools'
+const isLLM = () => route.name === 'settings-llm'
+
+const selectedToolId = () => route.query.tool as string | undefined
+
+function configurableTools(): ToolSchema[] {
   return props.allTools.filter((t) => t.settings_schema.length > 0)
+}
+
+function selectTool(toolName: string): void {
+  router.push({ name: 'settings-tools', query: { tool: toolName } })
+}
+
+function selectConfig(configId: number): void {
+  router.push({ name: 'settings-llm', query: { config: String(configId) } })
+}
+
+function startCreate(): void {
+  router.push({ name: 'settings-llm', query: { create: '1' } })
 }
 </script>
 
@@ -40,55 +49,55 @@ function toolsWithSettings(): ToolSchema[] {
         Settings
       </h2>
       <ul class="flex flex-col gap-0.5">
+
+        <!-- Overview -->
         <li>
           <button
-            @click="emit('update:selectedSection', 'overview')"
-            class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between"
+            @click="router.push({ name: 'settings-overview' })"
+            class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
             :class="
-              selectedSection === 'overview'
+              isOverview()
                 ? 'bg-primary text-primary-foreground font-medium'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             "
           >
-            <span>Overview</span>
+            Overview
           </button>
         </li>
 
+        <!-- Tools -->
         <li>
           <button
-            @click="emit('update:selectedSection', 'tools')"
+            @click="router.push({ name: 'settings-tools' })"
             class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between"
             :class="
-              selectedSection === 'tools'
+              isTools()
                 ? 'bg-primary text-primary-foreground font-medium'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             "
           >
             <span>Tools</span>
-            <svg
+            <ChevronRight
               class="h-3.5 w-3.5 transition-transform"
-              :class="selectedSection === 'tools' ? 'rotate-90' : ''"
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
+              :class="isTools() ? 'rotate-90' : ''"
+            />
           </button>
 
           <!-- Tools submenu -->
-          <div v-if="selectedSection === 'tools'" class="ml-3 mt-1 border-l border-border pl-3">
+          <div v-if="isTools()" class="ml-3 mt-1 border-l border-border pl-3">
             <ul class="flex flex-col gap-0.5">
               <li v-if="loadingTools">
                 <p class="px-3 py-2 text-xs text-muted-foreground">Loading…</p>
               </li>
-              <li v-else-if="toolsWithSettings().length === 0">
+              <li v-else-if="configurableTools().length === 0">
                 <p class="px-3 py-2 text-xs text-muted-foreground">No configurable tools.</p>
               </li>
-              <li v-for="tool in toolsWithSettings()" :key="tool.tool_name">
+              <li v-for="tool in configurableTools()" :key="tool.tool_name">
                 <button
-                  @click="emit('selectTool', tool.tool_name)"
+                  @click="selectTool(tool.tool_name)"
                   class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
                   :class="
-                    selectedToolId === tool.tool_name
+                    selectedToolId() === tool.tool_name
                       ? 'bg-primary/10 text-primary font-medium'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                   "
@@ -100,48 +109,46 @@ function toolsWithSettings(): ToolSchema[] {
           </div>
         </li>
 
+        <!-- LLM -->
         <li>
           <button
-            @click="emit('update:selectedSection', 'llm')"
+            @click="router.push({ name: 'settings-llm' })"
             class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between"
             :class="
-              selectedSection === 'llm'
+              isLLM()
                 ? 'bg-primary text-primary-foreground font-medium'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             "
           >
             <span>LLM</span>
-            <svg
+            <ChevronRight
               class="h-3.5 w-3.5 transition-transform"
-              :class="selectedSection === 'llm' ? 'rotate-90' : ''"
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
+              :class="isLLM() ? 'rotate-90' : ''"
+            />
           </button>
 
           <!-- LLM submenu -->
-          <div v-if="selectedSection === 'llm'" class="ml-3 mt-1 border-l border-border pl-3">
+          <div v-if="isLLM()" class="ml-3 mt-1 border-l border-border pl-3">
             <ul class="flex flex-col gap-0.5">
               <li v-if="llmStore.loadingConfigs">
                 <p class="px-3 py-2 text-xs text-muted-foreground">Loading…</p>
               </li>
               <li v-for="config in llmStore.configs" :key="config.id">
                 <button
-                  @click="emit('selectConfig', config)"
-                  class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
+                  @click="selectConfig(config.id)"
+                  class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors truncate"
                   :class="
-                    selectedConfigId === config.id
+                    route.query.config === String(config.id)
                       ? 'bg-primary/10 text-primary font-medium'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                   "
                 >
-                  <span class="truncate">{{ config.name }}</span>
+                  {{ config.name }}
                 </button>
               </li>
               <li>
                 <button
-                  @click="emit('startCreate')"
+                  @click="startCreate"
                   class="w-full text-left px-3 py-2 rounded-lg text-sm text-primary hover:bg-primary/10 transition-colors mt-1"
                 >
                   + Add New
@@ -150,6 +157,7 @@ function toolsWithSettings(): ToolSchema[] {
             </ul>
           </div>
         </li>
+
       </ul>
     </div>
   </aside>

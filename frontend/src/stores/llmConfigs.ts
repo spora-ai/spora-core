@@ -16,6 +16,10 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
   const saving = ref(false)
   const error = ref<string | null>(null)
 
+  // Tracks whether initial data has been fetched this session.
+  // Prevents duplicate network calls when multiple components mount.
+  const initialized = ref(false)
+
   // ── Load drivers (schema discovery, no auth) ──────────────────────────────
 
   async function loadDrivers(): Promise<void> {
@@ -44,6 +48,16 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     } finally {
       loadingConfigs.value = false
     }
+  }
+
+  // ── Ensure (idempotent init) ──────────────────────────────────────────────
+
+  // Load drivers + configs exactly once per Pinia instance (page session).
+  // Safe to call from multiple components — subsequent calls are no-ops.
+  async function ensure(): Promise<void> {
+    if (initialized.value) return
+    initialized.value = true // set before await so parallel callers skip
+    await Promise.all([loadDrivers(), loadConfigs()])
   }
 
   // ── Create ────────────────────────────────────────────────────────────────
@@ -151,8 +165,10 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     loadingConfigs,
     saving,
     error,
+    initialized,
     loadDrivers,
     loadConfigs,
+    ensure,
     createConfig,
     updateConfig,
     deleteConfig,

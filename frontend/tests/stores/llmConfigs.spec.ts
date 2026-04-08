@@ -179,6 +179,55 @@ describe('useLlmConfigsStore', () => {
     })
   })
 
+  describe('ensure', () => {
+    it('loads drivers and configs on first call', async () => {
+      mockApi.get
+        .mockResolvedValueOnce({ drivers: [mockDriver] })
+        .mockResolvedValueOnce({ configs: [mockConfig] })
+
+      const store = useLlmConfigsStore()
+      await store.ensure()
+
+      expect(store.drivers).toEqual([mockDriver])
+      expect(store.configs).toEqual([mockConfig])
+      expect(store.initialized).toBe(true)
+    })
+
+    it('does not call the API a second time when already initialized', async () => {
+      mockApi.get
+        .mockResolvedValueOnce({ drivers: [mockDriver] })
+        .mockResolvedValueOnce({ configs: [mockConfig] })
+
+      const store = useLlmConfigsStore()
+      await store.ensure()
+      await store.ensure() // second call — must be no-op
+
+      expect(mockApi.get).toHaveBeenCalledTimes(2) // one for drivers, one for configs
+    })
+
+    it('sets initialized=true before awaiting so parallel callers skip', async () => {
+      mockApi.get
+        .mockResolvedValueOnce({ drivers: [mockDriver] })
+        .mockResolvedValueOnce({ configs: [mockConfig] })
+
+      const store = useLlmConfigsStore()
+      // Trigger two concurrent calls
+      const [, ] = await Promise.all([store.ensure(), store.ensure()])
+
+      expect(mockApi.get).toHaveBeenCalledTimes(2) // not 4
+    })
+
+    it('remains initialized even if loading fails (error stored, no retry loop)', async () => {
+      mockApi.get.mockRejectedValue(new ApiError('SERVER_ERROR', 'Oops', 500))
+
+      const store = useLlmConfigsStore()
+      await store.ensure()
+
+      expect(store.initialized).toBe(true)
+      expect(store.error).toBeTruthy()
+    })
+  })
+
   describe('driverForClass', () => {
     it('returns the driver with matching driver_class', () => {
       const store = useLlmConfigsStore()

@@ -36,9 +36,26 @@ const router = createRouter({
     },
     {
       path: '/settings',
-      name: 'settings',
-      component: () => import('@/pages/GlobalSettingsPage.vue'),
+      component: () => import('@/pages/settings/GlobalSettingsLayout.vue'),
       meta: { requiresAuth: true },
+      redirect: { name: 'settings-overview' },
+      children: [
+        {
+          path: 'overview',
+          name: 'settings-overview',
+          component: () => import('@/pages/settings/SettingsOverviewPage.vue'),
+        },
+        {
+          path: 'tools',
+          name: 'settings-tools',
+          component: () => import('@/pages/settings/SettingsToolsPage.vue'),
+        },
+        {
+          path: 'llm',
+          name: 'settings-llm',
+          component: () => import('@/pages/settings/SettingsLLMPage.vue'),
+        },
+      ],
     },
     {
       path: '/tasks/:id',

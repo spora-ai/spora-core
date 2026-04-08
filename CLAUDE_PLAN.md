@@ -44,6 +44,19 @@
 
 ---
 
+## Completed — Frontend Architecture Refactor ✅
+
+| Task | Detail |
+|---|---|
+| Nested settings routes | `/settings/overview`, `/settings/tools`, `/settings/llm` with `GlobalSettingsLayout.vue` (sidebar + `<RouterView />`). |
+| Split GlobalSettingsPage | 703-line monolith replaced by `SettingsOverviewPage`, `SettingsToolsPage`, `SettingsLLMPage` (~50–80 lines each). Deleted. |
+| Tools components | `src/components/settings/tools/ToolList.vue` + `ToolSettingsPanel.vue` (mirrors LLM structure). |
+| LLM components | `src/components/settings/llm/{LLMConfigList,LLMConfigCreateForm,LLMConfigEditForm}.vue`. `Modal.vue` for delete confirmation. |
+| Reusable UI primitives | `AlertBanner.vue` + `ListItemButton.vue` (with `ChevronRight` from lucide). |
+| SettingsSidebar | Uses `router.push()` + `useRoute()` for active state; dropped `selectedSection`/`selectedConfigId` props. |
+
+---
+
 ## Backlog
 
 - **Agent-to-Agent Handovers** — message-driven triggers so one agent can prompt another

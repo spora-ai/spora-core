@@ -299,7 +299,7 @@ async function saveToolConfig(settings: Record<string, string>): Promise<void> {
 }
 
 function goToGlobalSettings(): void {
-  router.push({ name: 'settings' })
+  router.push({ name: 'settings-overview' })
 }
 
 // ── Delete ────────────────────────────────────────────────────────────────────
