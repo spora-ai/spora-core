@@ -29,6 +29,7 @@
 | Frontend task chat | WhatsApp-style bubbles, approve/reject panel, 2s polling | — |
 | Frontend multi-agent + UX | Dashboard, AgentPage, GlobalNavbar, light-default theme | 44 |
 | Global Settings UI | Schema-driven ToolSettingsForm, per-agent LLM config via ToolConfigService | 12 |
+| **Async Agent Loop** | `tick()` wrapped in `lockForUpdate()` transaction; `SPORA_WORKER_MODE` (`sync`|`cron`|`worker`); `QUEUED` status; `bin/worker.php` CLI; `WorkerRunCommand` as cron/daemon drain; `MercurePublisher` + `MercurePublisherInterface` for SSE | +7 |
 
 ---
 
@@ -65,5 +66,4 @@
 - **MCP Server Integration** — plugin-level MCP transport (stdio/HTTP/SSE)
 - **User Management** — multi-user, roles, per-user agent isolation
 - **Installer** — WordPress-style `install.php` web setup
-- **Mercure/SSE** — optional real-time upgrade (FrankenPHP bundles Mercure natively)
 - **Web Push Notifications** — OS notifications on `PENDING_APPROVAL`

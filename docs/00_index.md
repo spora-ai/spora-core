@@ -22,3 +22,4 @@
 |---|---|
 | [04_api.md](04_api.md) | REST API reference — endpoints, request/response envelopes, auth |
 | [08_logging.md](08_logging.md) | Log levels, PII policy, what gets logged and where, best practices |
+| [11_agent_loop_async.md](11_agent_loop_async.md) | Worker modes (`sync`/`cron`/`worker`), tick structure, Mercure SSE, deployment setup |

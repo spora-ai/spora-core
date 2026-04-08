@@ -17,7 +17,7 @@
 | `tool_configurations` | `Spora\Models\ToolConfiguration` | Global per-tool settings. One row per tool class. Password fields encrypted via `SecurityManager`. All access via `ToolConfigService` only. |
 | `agent_tools` | `Spora\Models\AgentTool` | Junction: which tools are enabled per agent. `auto_approve` is 3-state: `0`/`1`/`null` — never cast to boolean (null = use class attribute default). |
 | `agent_tool_overrides` | `Spora\Models\AgentToolOverride` | Per-agent credential overrides for `scope: "agent"` settings. Merged on top of global settings by `ToolConfigService`. |
-| `tasks` | `Spora\Models\Task` | One record per agent run. Status lifecycle: `PENDING → RUNNING → COMPLETED / FAILED / PENDING_APPROVAL ⇄ RUNNING → REJECTED`. `pending_state` is MEDIUMTEXT (full conversation JSON can exceed 65KB). |
+| `tasks` | `Spora\Models\Task` | One record per agent run. Status lifecycle: `QUEUED → RUNNING → COMPLETED / FAILED / PENDING_APPROVAL ⇄ RUNNING → REJECTED`. `QUEUED` is the initial state in cron/worker modes; sync mode starts directly at `RUNNING`. `pending_state` is MEDIUMTEXT (full conversation JSON can exceed 65KB). |
 | `tool_calls` | `Spora\Models\ToolCall` | Append-only audit log of every tool invocation. Stores `proposed_arguments`, `human_description` (frozen at creation, not recomputed), `approved_arguments`, result. |
 | `task_history` | `Spora\Models\TaskHistory` | Append-only LLM conversation history. Ordered by `sequence`. `content` nullable (assistant tool-call messages have no text). |
 

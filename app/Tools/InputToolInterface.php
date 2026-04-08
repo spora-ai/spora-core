@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Tools;
 
 use Spora\Tools\ValueObjects\ToolResult;
+use stdClass;
 
 interface InputToolInterface
 {
@@ -23,7 +24,7 @@ interface InputToolInterface
      *
      * @return array{
      *   type: "object",
-     *   properties: array<string, array{type: string, description: string}>|\stdClass,
+     *   properties: array<string, array{type: string, description: string}>|stdClass,
      *   required: list<string>
      * }
      */

@@ -25,23 +25,37 @@ If approval required → serialize `AgentState` to DB as `PENDING_APPROVAL`, PHP
 
 ## Orchestrator Loop
 
-Runs via `symfony/messenger` — one queue message per `tick()`. Stateless and short-lived (shared hosting compatible).
+Stateless and short-lived. Each `tick()` is one full LLM turn (Think → Act). Structured in three phases to avoid holding a DB connection during network I/O:
+
+1. **Claim** — short `lockForUpdate()` transaction: validate status, increment `step_count`, read all metadata. Lock released before any network call.
+2. **LLM call** — blocking HTTP call outside any transaction.
+3. **Write** — append history rows, update task status.
 
 ```
-start()  → create Task (RUNNING), dispatch TickMessage
-tick()   → load history → LLM call → branch:
+start()  → create Task (QUEUED or RUNNING depending on SPORA_WORKER_MODE), call tick() [sync mode only]
+tick()   → [claim] → [LLM call] → branch:
              text response   → COMPLETED
-             InputTool call  → execute, append, step_count++, re-dispatch
+             InputTool call  → execute, append, step_count++, call tick() again
              OutputTool call → resolve approval:
-                               auto-approved     → execute, append, step_count++, re-dispatch
+                               auto-approved     → execute, append, step_count++, call tick() again
                                requires approval → serialize AgentState → PENDING_APPROVAL, halt
-resume() → execute approved tool → re-dispatch tick()
-reject() → inject rejection into history → re-dispatch tick()
+resume() → [transaction] execute approved tools, write history, set RUNNING → [tick()]
+reject() → [transaction] inject rejection rows, set RUNNING → [tick()]
            (agent chooses alternative action)
 step_count >= max_steps → FAILED ("max_steps_exceeded")
 ```
 
-Status transitions: `PENDING → RUNNING → COMPLETED | FAILED | PENDING_APPROVAL ⇄ RUNNING → REJECTED`
+Status transitions: `QUEUED → RUNNING → COMPLETED | FAILED | PENDING_APPROVAL ⇄ RUNNING → REJECTED`
+
+### Worker Modes (`SPORA_WORKER_MODE`)
+
+| Mode | Default | Behaviour |
+|---|---|---|
+| `sync` | ✓ | `start()` creates task as `RUNNING` and calls `tick()` inline. HTTP response blocked until agent completes. Suitable for dev and lightweight deployments. |
+| `cron` | | `start()` creates task as `QUEUED` and returns immediately. A cron job runs `php bin/worker.php worker:run` every minute to drain the queue. |
+| `worker` | | Same as `cron`. Run `php bin/worker.php worker:run --daemon` as a persistent background process. |
+
+In cron and worker modes, multi-step tasks (multiple LLM turns) still run synchronously within a single worker invocation — the loop continues until `COMPLETED`, `FAILED`, or `PENDING_APPROVAL`.
 
 ---
 

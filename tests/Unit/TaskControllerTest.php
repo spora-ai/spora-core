@@ -7,6 +7,7 @@ use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Http\TaskController;
 use Spora\Models\Agent;
 use Spora\Models\Task;
+use Spora\Services\MercurePublisherInterface;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -16,7 +17,9 @@ function makeTaskController(?OrchestratorInterface $orch = null): array
 {
     $authService = bootAuthLayer();
     $orch      ??= Mockery::mock(OrchestratorInterface::class);
-    $controller  = new TaskController($authService, $orch);
+    $mercure     = Mockery::mock(MercurePublisherInterface::class);
+    $mercure->allows('publish')->andReturn(true);
+    $controller  = new TaskController($authService, $orch, $mercure);
 
     return [$controller, $authService, $orch];
 }

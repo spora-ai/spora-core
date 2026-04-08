@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Spora\Agents\Messages\TickMessage;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Drivers\DriverFactory;
@@ -14,9 +13,6 @@ use Spora\Models\AgentTool;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
-use Symfony\Component\Messenger\Handler\HandlersLocator;
-use Symfony\Component\Messenger\MessageBus;
-use Symfony\Component\Messenger\Middleware\HandleMessageMiddleware;
 use Tests\Fixtures\SpyAgentIdInputTool;
 use Tests\Fixtures\StubAutoApproveOutputTool;
 use Tests\Fixtures\StubFailingTool;
@@ -29,34 +25,16 @@ use Tests\Fixtures\ThrowingTool;
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Build a synchronous Messenger bus + Orchestrator pair.
- */
 function makeOrchestrator(
     DriverFactory $driverFactory,
     array $toolInstances = [],
     ?Psr\Log\LoggerInterface $logger = null,
 ): Orchestrator {
-    $orchestratorRef = null;
-
-    $bus = new MessageBus([
-        new HandleMessageMiddleware(new HandlersLocator([
-            TickMessage::class => [
-                static function (TickMessage $msg) use (&$orchestratorRef): void {
-                    $orchestratorRef->tick($msg->taskId);
-                },
-            ],
-        ])),
-    ]);
-
-    $orchestratorRef = new Orchestrator(
+    return new Orchestrator(
         driverFactory: $driverFactory,
-        bus: $bus,
         toolInstances: $toolInstances,
         logger: $logger,
     );
-
-    return $orchestratorRef;
 }
 
 /**

@@ -8,6 +8,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\LoggerInterface;
 use ReflectionClass;
 use RuntimeException;
+use Spora\Agents\Messages\TickMessage;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
@@ -33,10 +34,10 @@ final class Orchestrator implements OrchestratorInterface
      *                                            are silently skipped — no behaviour change.
      */
     public function __construct(
-        private readonly DriverFactory $driverFactory,
-        private readonly array         $toolInstances = [],
-        private readonly ?LoggerInterface $logger     = null,
-        private readonly WorkerMode    $workerMode    = WorkerMode::Sync,
+        private readonly DriverFactory       $driverFactory,
+        private readonly array               $toolInstances = [],
+        private readonly ?LoggerInterface    $logger        = null,
+        private readonly WorkerMode          $workerMode    = WorkerMode::Sync,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -60,8 +61,8 @@ final class Orchestrator implements OrchestratorInterface
         $this->appendHistory($task->id, 'user', $userPrompt);
 
         if ($this->workerMode === WorkerMode::Sync) {
-            $this->tick($task->id);
-        }
+            $this->bus->dispatch(new TickMessage($task->id));
+        }tick($task->id
 
         return $task->fresh();
     }
@@ -114,79 +115,53 @@ final class Orchestrator implements OrchestratorInterface
             return; // Task was not RUNNING (or hit max_steps) — nothing to do.
         }
 
-        // Phases 2 and 3 run outside any transaction. On unexpected failure, mark the task
-        // FAILED before re-throwing so it never remains stuck in RUNNING indefinitely.
-        try {
-            // Phase 2 — LLM call: no DB lock held during I/O.
-            $response = $this->driverFactory->makeFromAgent($context['agent'])->complete($context['request']);
+        // Phase 2 — LLM call: happens outside any transaction. No DB lock is held during I/O.
+        $response = $this->driverFactory->makeFromAgent($context['agent'])->complete($context['request']);
 
-            // Phase 3 — write results: each tick step's writes are their own atomic unit,
-            // independent of any other tick step. This prevents a failure in a later step from
-            // rolling back history rows already committed by an earlier step.
-            $task           = $context['task'];
-            $agent          = $context['agent'];
-            $enabledClasses = $context['enabledClasses'];
+        // Phase 3 — write results: each tick step's writes are their own atomic unit,
+        // independent of any other tick step. This prevents a failure in a later step from
+        // rolling back history rows already committed by an earlier step.
+        $task           = $context['task'];
+        $agent          = $context['agent'];
+        $enabledClasses = $context['enabledClasses'];
 
-            if ($response->hasToolCalls()) {
-                // Append ONE assistant history row carrying ALL tool calls as a JSON array.
-                // This matches the OpenAI/Anthropic wire format so buildMessages() reconstructs
-                // the conversation correctly for parallel tool call providers.
-                $this->appendHistory(
-                    taskId: $task->id,
-                    role: 'assistant',
-                    content: null,
-                    toolCallPayload: json_encode(
-                        array_map(static fn(DriverToolCall $tc) => [
-                            'id'       => $tc->providerCallId,
-                            'type'     => 'function',
-                            'function' => [
-                                'name'      => $tc->toolName,
-                                'arguments' => json_encode($tc->arguments, JSON_THROW_ON_ERROR),
-                            ],
-                        ], $response->toolCalls),
-                        JSON_THROW_ON_ERROR,
-                    ),
-                    inputTokens: $response->inputTokens,
-                    outputTokens: $response->outputTokens,
-                );
+        if ($response->hasToolCalls()) {
+            // Append ONE assistant history row carrying ALL tool calls as a JSON array.
+            // This matches the OpenAI/Anthropic wire format so buildMessages() reconstructs
+            // the conversation correctly for parallel tool call providers.
+            $this->appendHistory(
+                taskId: $task->id,
+                role: 'assistant',
+                content: null,
+                toolCallPayload: json_encode(
+                    array_map(static fn(DriverToolCall $tc) => [
+                        'id'       => $tc->providerCallId,
+                        'type'     => 'function',
+                        'function' => [
+                            'name'      => $tc->toolName,
+                            'arguments' => json_encode($tc->arguments, JSON_THROW_ON_ERROR),
+                        ],
+                    ], $response->toolCalls),
+                    JSON_THROW_ON_ERROR,
+                ),
+                inputTokens: $response->inputTokens,
+                outputTokens: $response->outputTokens,
+            );
 
-                $this->handleToolCalls($task, $agent, $response->toolCalls, $enabledClasses);
-            } else {
-                // Pure text response — task is complete.
-                $this->appendHistory(
-                    taskId: $task->id,
-                    role: 'assistant',
-                    content: $response->content,
-                    inputTokens: $response->inputTokens,
-                    outputTokens: $response->outputTokens,
-                );
+            $this->handleToolCalls($task, $agent, $response->toolCalls, $enabledClasses);
+        } else {
+            // Pure text response — task is complete.
+            $this->appendHistory(
+                taskId: $task->id,
+                role: 'assistant',
+                content: $response->content,
+                inputTokens: $response->inputTokens,
+                outputTokens: $response->outputTokens,
+            );
 
-                $task->status         = 'COMPLETED';
-                $task->final_response = $response->content;
-                $task->save();
-            }
-        } catch (Throwable $e) {
-            $this->logger?->error('tick() failed — task marked FAILED', [
-                'task_id'         => $taskId,
-                'exception_class' => get_class($e),
-                'message'         => $e->getMessage(),
-            ]);
-
-            // Best-effort write: use a direct query so stale Eloquent model state cannot
-            // interfere. Guard with status='RUNNING' to avoid downgrading a COMPLETED task
-            // if a race somehow already advanced it.
-            try {
-                Task::where('id', $taskId)
-                    ->where('status', 'RUNNING')
-                    ->update([
-                        'status'         => 'FAILED',
-                        'failure_reason' => $e->getMessage(),
-                    ]);
-            } catch (Throwable) {
-                // DB itself may be unavailable — nothing more we can do here.
-            }
-
-            throw $e;
+            $task->status         = 'COMPLETED';
+            $task->final_response = $response->content;
+            $task->save();
         }
     }
 
@@ -270,11 +245,9 @@ final class Orchestrator implements OrchestratorInterface
             }
 
             $task->save();
-        });
 
-        // Tick is called after the transaction commits so the LLM round-trip
-        // does not hold the lockForUpdate open for its full duration.
-        $this->tick($taskId);
+            $this->bus->dispatch(new TickMessage($task->id));
+        });
     }
 
     public function reject(int $taskId, string $reason): void
@@ -314,11 +287,9 @@ final class Orchestrator implements OrchestratorInterface
             $task->status        = 'RUNNING';
             $task->pending_state = null;
             $task->save();
-        });
 
-        // Tick is called after the transaction commits so the LLM round-trip
-        // does not hold the lockForUpdate open for its full duration.
-        $this->tick($taskId);
+            $this->bus->dispatch(new TickMessage($task->id));
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -422,7 +393,7 @@ final class Orchestrator implements OrchestratorInterface
         if ($pendingApproval === []) {
             // All tools in this batch were executed immediately — continue the loop.
             $task->save();
-            $this->tick($task->id);
+            $this->bus->dispatch(new TickMessage($task->id));
         } else {
             // At least one OutputTool needs approval — pause the task.
             // step_count was already incremented for any immediately-executed tools.

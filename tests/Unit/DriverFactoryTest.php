@@ -89,10 +89,12 @@ test('makeFromAgent falls back to global default when agent has no config', func
         ['api_key' => 'sk-global-key', 'model' => 'claude-3-5-sonnet', 'base_url' => 'https://api.anthropic.com/v1/messages'],
         isDefault: true,
         service: $service,
+        userId: 999,
     );
 
     $agent = new Agent();
     $agent->id = 2;
+    $agent->user_id = 999;
     $agent->name = 'Test';
     $agent->llm_driver_config_id = null;
 

@@ -38,10 +38,12 @@ Write / real-world-action tools. The Orchestrator MUST NOT call `execute()` dire
 
 ## `OrchestratorInterface` (`app/Agents/OrchestratorInterface.php`)
 
-- `start(agentId, userPrompt, maxSteps): Task` — creates Task, dispatches first `TickMessage`.
-- `tick(taskId): void` — one loop iteration: load history → LLM call → branch on response type.
-- `resume(taskId, approvedArguments): void` — execute approved tool, re-dispatch tick.
-- `reject(taskId, reason): void` — inject rejection into history, re-dispatch tick.
+- `start(agentId, userPrompt, maxSteps): Task` — creates Task (`RUNNING` in sync mode, `QUEUED` in cron/worker mode), calls `tick()` directly in sync mode.
+- `tick(taskId): void` — one loop iteration structured in three phases: short claim transaction (lock, step_count++, read metadata) → LLM call (outside transaction) → write results. Calls itself recursively when a tool turn completes without requiring approval.
+- `resume(taskId, approvedArguments): void` — in a `lockForUpdate()` transaction: execute approved tools, write history, set status `RUNNING`. Then calls `tick()` after the transaction commits.
+- `reject(taskId, reason): void` — in a `lockForUpdate()` transaction: inject rejection rows, set status `RUNNING`. Then calls `tick()` after the transaction commits.
+
+The `tick()` call in `resume()` and `reject()` is intentionally outside the transaction so the LLM round-trip does not hold a DB connection open during network I/O.
 
 ---
 

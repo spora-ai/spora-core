@@ -3,19 +3,16 @@
 declare(strict_types=1);
 
 use Psr\Container\ContainerInterface;
-use Spora\Agents\Messages\TickMessage;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorInterface;
-use Spora\Agents\OrchestratorProxy;
+use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\SecurityManager;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Plugins\PluginLoader;
 use Spora\Recipes\RecipeScanner;
-use Symfony\Component\Messenger\Handler\HandlersLocator;
-use Symfony\Component\Messenger\MessageBus;
-use Symfony\Component\Messenger\Middleware\HandleMessageMiddleware;
+use Spora\Services\MercurePublisherInterface;
 
 /**
  * PHP-DI definitions array.
@@ -37,6 +34,9 @@ return [
             'app_env'             => 'production',
             'log_level'           => 'WARNING',
             'log_path'            => BASE_PATH . '/storage/spora.log',
+            'worker_mode'         => 'sync',
+            'mercure_url'         => null,
+            'mercure_jwt_key'     => null,
         ];
 
         // Layer 2 — config.php (installer-generated, gitignored, optional)
@@ -78,6 +78,15 @@ return [
         }
         if (($v = $env('SPORA_LOG_PATH')) !== null) {
             $envOverrides['log_path'] = $v;
+        }
+        if (($v = $env('SPORA_WORKER_MODE')) !== null) {
+            $envOverrides['worker_mode'] = $v;
+        }
+        if (($v = $env('SPORA_MERCURE_URL')) !== null) {
+            $envOverrides['mercure_url'] = $v;
+        }
+        if (($v = $env('SPORA_MERCURE_JWT_KEY')) !== null) {
+            $envOverrides['mercure_jwt_key'] = $v;
         }
         return array_merge($defaults, $fileConfig, $envOverrides);
     },
@@ -246,37 +255,28 @@ return [
     },
 
     OrchestratorInterface::class => static function (ContainerInterface $c): OrchestratorInterface {
-        // Break the bootstrap circular dependency (Orchestrator → bus → handler → Orchestrator)
-        // using a typed proxy. The proxy is wired into the bus handler first; the real
-        // Orchestrator is constructed with the bus, then injected into the proxy.
-        $proxy = new OrchestratorProxy();
-
-        $bus = new MessageBus([
-            new HandleMessageMiddleware(new HandlersLocator([
-                TickMessage::class => [
-                    static function (TickMessage $msg) use ($proxy): void {
-                        $proxy->tick($msg->taskId);
-                    },
-                ],
-            ])),
-        ]);
-
-        $orchestrator = new Orchestrator(
+        return new Orchestrator(
             driverFactory: $c->get(Spora\Drivers\DriverFactory::class),
-            bus: $bus,
             toolInstances: $c->get('tool_instances'),
             logger: $c->get(Psr\Log\LoggerInterface::class),
+            workerMode: WorkerMode::from($c->get('config')['worker_mode'] ?? 'sync'),
         );
+    },
 
-        $proxy->setInner($orchestrator);
+    MercurePublisherInterface::class => static function (ContainerInterface $c): MercurePublisherInterface {
+        $config   = $c->get('config');
+        $hubUrl   = $config['mercure_url']   ?? null;
+        $jwtKey   = $config['mercure_jwt_key'] ?? null;
+        $client   = $c->get(Symfony\Contracts\HttpClient\HttpClientInterface::class);
 
-        return $orchestrator;
+        return new Spora\Services\MercurePublisher($client, $hubUrl, $jwtKey);
     },
 
     Spora\Http\TaskController::class => static function (ContainerInterface $c): Spora\Http\TaskController {
         return new Spora\Http\TaskController(
             $c->get(AuthService::class),
             $c->get(OrchestratorInterface::class),
+            $c->get(MercurePublisherInterface::class),
         );
     },
 

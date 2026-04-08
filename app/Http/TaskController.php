@@ -12,6 +12,7 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall;
+use Spora\Services\MercurePublisherInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -19,8 +20,9 @@ use Symfony\Component\HttpFoundation\Response;
 final class TaskController
 {
     public function __construct(
-        private readonly AuthService           $authService,
+        private readonly AuthService             $authService,
         private readonly OrchestratorInterface $orchestrator,
+        private readonly MercurePublisherInterface $mercure,
     ) {}
 
     /**
@@ -95,7 +97,8 @@ final class TaskController
         }
 
         $maxSteps = isset($body['max_steps']) ? (int) $body['max_steps'] : $agent->max_steps;
-        $task     = $this->orchestrator->start($agent->id, $prompt, $maxSteps);
+        $task = $this->orchestrator->start($agent->id, $prompt, $maxSteps);
+        $this->mercure->publish($task->id, $this->taskResource($task));
 
         return new JsonResponse(
             ['data' => ['task' => $this->taskResource($task)]],
@@ -172,8 +175,10 @@ final class TaskController
         }
 
         $this->orchestrator->resume($task->id, $approvedBatch);
+        $fresh = $task->fresh();
+        $this->mercure->publish($fresh->id, $this->taskResource($fresh));
 
-        return new JsonResponse(['data' => ['task' => $this->taskResource($task->fresh())]]);
+        return new JsonResponse(['data' => ['task' => $this->taskResource($fresh)]]);
     }
 
     /**
@@ -210,8 +215,10 @@ final class TaskController
         $reason = trim((string) ($body['reason'] ?? 'No reason provided.'));
 
         $this->orchestrator->reject($task->id, $reason);
+        $fresh = $task->fresh();
+        $this->mercure->publish($fresh->id, $this->taskResource($fresh));
 
-        return new JsonResponse(['data' => ['task' => $this->taskResource($task->fresh())]]);
+        return new JsonResponse(['data' => ['task' => $this->taskResource($fresh)]]);
     }
 
     // -------------------------------------------------------------------------
