@@ -120,3 +120,49 @@ test('Router dispatches 405 for wrong method', function (): void {
 
     expect($response->getStatusCode())->toBe(Response::HTTP_METHOD_NOT_ALLOWED);
 });
+
+// ---------------------------------------------------------------------------
+// Fix: null byte in path param is rejected with 400
+// ---------------------------------------------------------------------------
+
+final class NullByteTestController
+{
+    public function handle(Request $request): Response
+    {
+        return new Response('ok', Response::HTTP_OK);
+    }
+}
+
+test('Router returns 400 when a path variable contains a null byte', function (): void {
+    $container = (new ContainerBuilder())->build();
+    $container->set(NullByteTestController::class, new NullByteTestController());
+
+    $router = new Router($container, function (FastRoute\RouteCollector $r): void {
+        $r->addRoute('GET', '/resources/{toolId}', [NullByteTestController::class, 'handle']);
+    });
+
+    // %00 in the URL is the percent-encoded null byte. FastRoute captures the raw
+    // segment (test%00evil), and urldecode() converts %00 to the actual null byte character.
+    $request = Request::create('/resources/test%00evil', 'GET');
+    $response = $router->dispatch($request);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_BAD_REQUEST);
+
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('BAD_REQUEST');
+});
+
+test('Router allows normal percent-encoded path variables (no null byte)', function (): void {
+    $container = (new ContainerBuilder())->build();
+    $container->set(NullByteTestController::class, new NullByteTestController());
+
+    $router = new Router($container, function (FastRoute\RouteCollector $r): void {
+        $r->addRoute('GET', '/resources/{toolId}', [NullByteTestController::class, 'handle']);
+    });
+
+    // %5C is a backslash — a legitimate case for PHP class names in URLs
+    $request = Request::create('/resources/Spora%5CTools%5CMyTool', 'GET');
+    $response = $router->dispatch($request);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+});

@@ -294,9 +294,13 @@ final class AgentController
         // returns null. Handle it as a special case: fall back to LLMDriverConfiguration.
         if ($toolId === 'llm_configuration') {
             $config = LLMDriverConfiguration::where('user_id', $userId)->where('is_default', true)->first();
-            $settings = $config !== null
-                ? $this->llmConfigService->decryptSettings($config->getRawOriginal('settings'))
-                : [];
+            try {
+                $settings = $config !== null
+                    ? $this->llmConfigService->decryptSettings($config->getRawOriginal('settings'))
+                    : [];
+            } catch (\Throwable) {
+                $settings = [];
+            }
 
             // Mask password fields using the driver's schema
             $drivers = $this->llmConfigService->getDrivers();

@@ -63,7 +63,15 @@ class DriverFactory
             throw new RuntimeException("LLM driver class {$driverClass} does not exist.");
         }
 
-        $settings = $this->llmConfigService->decryptSettings($config->settings ?? '');
+        try {
+            $settings = $this->llmConfigService->decryptSettings($config->settings ?? '');
+        } catch (\Throwable $e) {
+            throw new RuntimeException(
+                "Failed to decrypt settings for LLM config '{$config->name}' (id={$config->id}): " . $e->getMessage(),
+                0,
+                $e,
+            );
+        }
 
         return new $driverClass(
             apiKey: (string) ($settings['api_key'] ?? ''),

@@ -428,6 +428,43 @@ test('getOverride for llm_configuration falls back to the user default LLMDriver
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });
 
+// ---------------------------------------------------------------------------
+// Fix: getOverride llm_configuration gracefully handles corrupted settings
+// ---------------------------------------------------------------------------
+
+test('getOverride for llm_configuration returns empty settings when decryption fails', function (): void {
+    clearSession();
+    [$controller, $authService, , $llmConfig] = makeAgentController();
+    $userId = registerUser($authService);
+    $agentId = createAgent($controller);
+
+    // Create a config encrypted with a DIFFERENT key than the one the controller uses
+    $alienKey      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $alienSecurity = new Spora\Core\SecurityManager($alienKey);
+    $alienService  = new Spora\Services\LLMConfigService($alienSecurity, [OpenAICompatibleDriver::class]);
+
+    $config             = new LLMDriverConfiguration();
+    $config->user_id    = $userId;
+    $config->name       = 'Corrupted Config';
+    $config->driver_class = OpenAICompatibleDriver::class;
+    $config->settings   = $alienService->encryptSettings(['api_key' => 'secret', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1']);
+    $config->is_default = true;
+    $config->save();
+
+    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/llm_configuration/override');
+    $request->attributes->set('id', $agentId);
+    $request->attributes->set('toolId', 'llm_configuration');
+
+    // Must return 200 with empty settings — NOT a 500
+    $response = $controller->getOverride($request);
+    expect($response->getStatusCode())->toBe(200);
+
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['settings'])->toBe([]);
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});
+
 test('putOverride saves agent-scoped settings and masks passwords', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();

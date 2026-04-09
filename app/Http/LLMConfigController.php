@@ -158,7 +158,7 @@ final class LLMConfigController
             $config->name = $name;
         }
 
-        if (isset($body['settings']) && is_array($body['settings'])) {
+        if (isset($body['settings']) && is_array($body['settings']) && !array_is_list($body['settings'])) {
             // Merge with existing decrypted settings so omitted keys (e.g. unchanged passwords
             // that the API returns as "***" and the client strips before sending) are preserved.
             $existing = $this->llmConfigService->decryptSettings($config->getRawOriginal('settings') ?? '');

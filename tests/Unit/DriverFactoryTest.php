@@ -178,3 +178,64 @@ test('makeFromAgent uses agent config over global default', function (): void {
 
     LLMDriverConfiguration::whereIn('id', [$globalConfig->id, $agentConfig->id])->delete();
 });
+
+// ---------------------------------------------------------------------------
+// Fix: decryption failure is wrapped as informative RuntimeException
+// ---------------------------------------------------------------------------
+
+test('makeFromAgent throws RuntimeException with config name when settings decryption fails', function (): void {
+    // Encrypt settings with key A
+    $serviceA = makeSecureLLMConfigService();
+    $config   = createConfigForTest(
+        'Broken Config',
+        OpenAICompatibleDriver::class,
+        ['api_key' => 'sk-key', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1'],
+        true,
+        service: $serviceA,
+        userId: 1,
+    );
+
+    // Factory uses a DIFFERENT key (service B) → decryption will fail
+    $serviceB = makeSecureLLMConfigService();
+    $factory  = new DriverFactory(new NullLogger(), $serviceB);
+
+    $agent                    = new Agent();
+    $agent->user_id           = 1;
+    $agent->llm_driver_config_id = $config->id;
+
+    expect(fn() => $factory->makeFromAgent($agent))
+        ->toThrow(RuntimeException::class, 'Broken Config');
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});
+
+test('makeFromAgent wraps decryption failure including config id in message', function (): void {
+    $serviceA = makeSecureLLMConfigService();
+    $config   = createConfigForTest(
+        'Config X',
+        OpenAICompatibleDriver::class,
+        ['api_key' => 'sk-x', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1'],
+        false,
+        service: $serviceA,
+        userId: 1,
+    );
+
+    $serviceB = makeSecureLLMConfigService();
+    $factory  = new DriverFactory(new NullLogger(), $serviceB);
+
+    $agent                    = new Agent();
+    $agent->user_id           = 1;
+    $agent->llm_driver_config_id = $config->id;
+
+    try {
+        $factory->makeFromAgent($agent);
+        $this->fail('Expected RuntimeException was not thrown');
+    } catch (RuntimeException $e) {
+        // Message must include config name and id for easy debugging
+        expect($e->getMessage())->toContain('Config X')
+            ->and($e->getMessage())->toContain((string) $config->id)
+            ->and($e->getPrevious())->not()->toBeNull();
+    }
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});

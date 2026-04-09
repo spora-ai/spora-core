@@ -371,18 +371,20 @@ final class Orchestrator implements OrchestratorInterface
                     SchemaValidator::validate($toolCall->arguments, $toolInstance->getParametersSchema());
                 } catch (Throwable $e) {
                     $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
-                    $toolCallRecord->update([
-                        'status'         => 'APPROVED',
-                        'result_content' => $result->content,
-                        'executed_at'    => date('Y-m-d H:i:s'),
-                    ]);
-                    $this->appendHistory(
-                        taskId: $task->id,
-                        role: 'tool',
-                        content: $result->content,
-                        toolCallId: $toolCall->providerCallId,
-                        toolName: $toolCall->toolName,
-                    );
+                    Capsule::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
+                        $toolCallRecord->update([
+                            'status'         => 'APPROVED',
+                            'result_content' => $result->content,
+                            'executed_at'    => date('Y-m-d H:i:s'),
+                        ]);
+                        $this->appendHistory(
+                            taskId: $task->id,
+                            role: 'tool',
+                            content: $result->content,
+                            toolCallId: $toolCall->providerCallId,
+                            toolName: $toolCall->toolName,
+                        );
+                    });
                     continue; // Skip execution and don't pause for approval
                 }
 
@@ -390,20 +392,21 @@ final class Orchestrator implements OrchestratorInterface
                     // Fix #5: Safe execution — community plugins may throw.
                     $result = $this->safeExecute($toolInstance, $toolCall->arguments, $agent->id, $task->id);
 
-                    $toolCallRecord->update([
-                        'status'         => 'APPROVED',
-                        'result_content' => $result->content,
-                        'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                        'executed_at'    => date('Y-m-d H:i:s'),
-                    ]);
-
-                    $this->appendHistory(
-                        taskId: $task->id,
-                        role: 'tool',
-                        content: $result->content,
-                        toolCallId: $toolCall->providerCallId,
-                        toolName: $toolCall->toolName,
-                    );
+                    Capsule::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
+                        $toolCallRecord->update([
+                            'status'         => 'APPROVED',
+                            'result_content' => $result->content,
+                            'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
+                            'executed_at'    => date('Y-m-d H:i:s'),
+                        ]);
+                        $this->appendHistory(
+                            taskId: $task->id,
+                            role: 'tool',
+                            content: $result->content,
+                            toolCallId: $toolCall->providerCallId,
+                            toolName: $toolCall->toolName,
+                        );
+                    });
                 } else {
                     $pendingApproval[] = $toolCall;
                 }

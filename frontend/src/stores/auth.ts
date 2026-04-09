@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { api } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 
 export interface User {
   id: number
@@ -10,6 +10,7 @@ export interface User {
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const initialized = ref(false)
+  const initError = ref<Error | null>(null)
 
   // In-flight promise guard: if two navigations fire before the first init() resolves,
   // both await the same promise instead of issuing duplicate /auth/me requests.
@@ -21,11 +22,22 @@ export const useAuthStore = defineStore('auth', () => {
 
     initPromise = (async () => {
       try {
+        initError.value = null
         user.value = await api.get<User>('/auth/me')
-      } catch {
+      } catch (e) {
         user.value = null
+        // 401 means the user is simply not logged in — expected, not an error.
+        // Any other failure (network down, 5xx) is surfaced so the UI can show a retry.
+        const isUnauthenticated = e instanceof ApiError && e.status === 401
+        if (!isUnauthenticated) {
+          initError.value = e instanceof Error ? e : new Error(String(e))
+        }
       } finally {
         initialized.value = true
+        // Clear the promise for non-auth errors so the next navigation can retry.
+        if (initError.value !== null) {
+          initPromise = null
+        }
       }
     })()
 
@@ -50,5 +62,5 @@ export const useAuthStore = defineStore('auth', () => {
     await api.post('/auth/logout').catch(() => {})
   }
 
-  return { user, initialized, init, login, register, logout }
+  return { user, initialized, initError, init, login, register, logout }
 })

@@ -168,8 +168,15 @@ final class TaskController
         if (isset($body['approvals']) && is_array($body['approvals'])) {
             $approvedBatch = $body['approvals'];
         } else {
+            $providerId = trim((string) ($body['provider_call_id'] ?? ''));
+            if ($providerId === '') {
+                return new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required.']],
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                );
+            }
             $approvedBatch = [[
-                'provider_call_id' => (string) ($body['provider_call_id'] ?? ''),
+                'provider_call_id' => $providerId,
                 'arguments'        => (array) ($body['arguments'] ?? []),
             ]];
         }

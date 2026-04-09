@@ -242,7 +242,10 @@ it('approve calls orchestrator resume and returns updated task', function (): vo
         'max_steps'   => 10,
     ]);
 
-    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve", ['arguments' => ['key' => 'value']]);
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve", [
+        'provider_call_id' => 'call_abc',
+        'arguments'        => ['key' => 'value'],
+    ]);
     $req->attributes->set('taskId', $task->id);
 
     $resp = $controller->approve($req);
@@ -293,5 +296,84 @@ it('reject calls orchestrator reject and returns 200', function (): void {
     $req->attributes->set('taskId', $task->id);
 
     $resp = $controller->reject($req);
+    expect($resp->getStatusCode())->toBe(200);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// Fix: legacy approve format must have a non-empty provider_call_id
+// ---------------------------------------------------------------------------
+
+it('approve returns 422 when legacy format omits provider_call_id', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'PENDING_APPROVAL',
+        'user_prompt' => 'test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    // Legacy format with no provider_call_id at all
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve", ['arguments' => ['x' => 1]]);
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->approve($req);
+    expect($resp->getStatusCode())->toBe(422);
+
+    $body = json_decode($resp->getContent(), true);
+    expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('approve returns 422 when legacy format has empty string provider_call_id', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'PENDING_APPROVAL',
+        'user_prompt' => 'test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve", [
+        'provider_call_id' => '   ', // whitespace-only
+        'arguments'        => [],
+    ]);
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->approve($req);
+    expect($resp->getStatusCode())->toBe(422);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('approve legacy format with valid provider_call_id still calls orchestrator resume', function (): void {
+    $orch = Mockery::mock(\Spora\Agents\OrchestratorInterface::class);
+    $orch->expects('resume')->once()->withArgs(function (int $taskId, array $batch): bool {
+        return $batch[0]['provider_call_id'] === 'call_valid';
+    });
+
+    [$controller, $authService] = makeTaskController($orch);
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'PENDING_APPROVAL',
+        'user_prompt' => 'test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve", [
+        'provider_call_id' => 'call_valid',
+        'arguments'        => ['x' => 1],
+    ]);
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->approve($req);
     expect($resp->getStatusCode())->toBe(200);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());

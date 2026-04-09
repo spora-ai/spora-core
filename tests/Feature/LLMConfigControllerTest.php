@@ -346,6 +346,68 @@ test('setDefault() only affects the current user\'s configs', function (): void 
     LLMDriverConfiguration::whereIn('id', [$configA->id, $configB->id])->delete();
 });
 
+// ---------------------------------------------------------------------------
+// Fix: update() ignores settings when value is a JSON array (not an object)
+// ---------------------------------------------------------------------------
+
+test('update() does not corrupt settings when client sends a JSON array instead of object', function (): void {
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    $userId = bootAuth($authService, 'arrayfix@example.com');
+
+    $config = createTestConfig(
+        'Array Guard Test',
+        OpenAICompatibleDriver::class,
+        ['api_key' => 'sk-original', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1'],
+        false,
+        $userId,
+        $llmConfigService,
+    );
+
+    // Send settings as a sequential JSON array — should be silently ignored
+    $request = jsonRequest('PUT', "/api/v1/llm-configs/{$config->id}", [
+        'settings' => [['api_key' => 'sk-hijacked']],
+    ]);
+    $response = $controller->update($request, $config->id);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+
+    // Original settings must be unchanged
+    $config->refresh();
+    $decrypted = $llmConfigService->decryptSettings($config->getRawOriginal('settings'));
+    expect($decrypted['api_key'])->toBe('sk-original');
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});
+
+test('update() applies settings normally when value is a proper JSON object', function (): void {
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    $userId = bootAuth($authService, 'objectupdate@example.com');
+
+    $config = createTestConfig(
+        'Object Update Test',
+        OpenAICompatibleDriver::class,
+        ['api_key' => 'sk-old', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1'],
+        false,
+        $userId,
+        $llmConfigService,
+    );
+
+    $request = jsonRequest('PUT', "/api/v1/llm-configs/{$config->id}", [
+        'settings' => ['model' => 'gpt-4-turbo'],
+    ]);
+    $response = $controller->update($request, $config->id);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+
+    $config->refresh();
+    $decrypted = $llmConfigService->decryptSettings($config->getRawOriginal('settings'));
+    // model updated, api_key preserved via merge
+    expect($decrypted['model'])->toBe('gpt-4-turbo')
+        ->and($decrypted['api_key'])->toBe('sk-old');
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});
+
 test('store() creates a config owned by the current user', function (): void {
     [$controller, $authService] = makeLLMConfigController();
     $userA = bootAuth($authService, 'ownera@example.com');

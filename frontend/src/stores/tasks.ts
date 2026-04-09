@@ -11,6 +11,7 @@ export const useTaskStore = defineStore('tasks', () => {
 
   // Polling handles
   let listPollTimer: ReturnType<typeof setTimeout> | null = null
+  let listPollGeneration = 0
   let detailPollTimer: ReturnType<typeof setTimeout> | null = null
   let lastSequence = 0
 
@@ -43,10 +44,14 @@ export const useTaskStore = defineStore('tasks', () => {
       activeTask.value.final_response = incoming.final_response
       activeTask.value.step_count = incoming.step_count
       activeTask.value.updated_at = incoming.updated_at
-      // Append new history (since_sequence guarantees no duplicates)
+      // Append new history entries, filtering by sequence to guard against
+      // duplicate delivery from concurrent in-flight requests.
       if (incoming.history.length > 0) {
-        activeTask.value.history.push(...incoming.history)
-        lastSequence = incoming.history[incoming.history.length - 1].sequence
+        const newEntries = incoming.history.filter((h) => h.sequence > lastSequence)
+        if (newEntries.length > 0) {
+          activeTask.value.history.push(...newEntries)
+          lastSequence = newEntries[newEntries.length - 1].sequence
+        }
       }
       // Refresh tool_calls on every poll (status may change on resume)
       activeTask.value.tool_calls = incoming.tool_calls
@@ -66,19 +71,27 @@ export const useTaskStore = defineStore('tasks', () => {
   // ── Polling ───────────────────────────────────────────────────────────────
 
   function startListPolling(): void {
-    stopListPolling()
+    const gen = ++listPollGeneration
+    if (listPollTimer !== null) {
+      clearTimeout(listPollTimer)
+      listPollTimer = null
+    }
     const tick = async () => {
+      if (listPollGeneration !== gen) return
       try {
         await fetchTasks()
       } finally {
-        const hasActive = tasks.value.some((t) => !TERMINAL_STATUSES.includes(t.status))
-        listPollTimer = setTimeout(tick, hasActive ? 3000 : 10000)
+        if (listPollGeneration === gen) {
+          const hasActive = tasks.value.some((t) => !TERMINAL_STATUSES.includes(t.status))
+          listPollTimer = setTimeout(tick, hasActive ? 3000 : 10000)
+        }
       }
     }
     listPollTimer = setTimeout(tick, 3000)
   }
 
   function stopListPolling(): void {
+    listPollGeneration++
     if (listPollTimer !== null) {
       clearTimeout(listPollTimer)
       listPollTimer = null

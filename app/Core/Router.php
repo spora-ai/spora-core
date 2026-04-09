@@ -47,6 +47,12 @@ final class Router
         // Handles %5C → \ conversion so ReflectionClass sees a valid class name.
         foreach ($vars as $key => $value) {
             $decoded = urldecode((string) $value);
+            if (str_contains($decoded, "\0")) {
+                return new JsonResponse(
+                    ['error' => ['code' => 'BAD_REQUEST', 'message' => 'Invalid path parameter.']],
+                    Response::HTTP_BAD_REQUEST,
+                );
+            }
             if ($decoded !== $value) {
                 $vars[$key] = $decoded;
             }

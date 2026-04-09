@@ -771,3 +771,67 @@ it('injects the correct agentId into the tool execute scope', function (): void 
     expect($toolCallRecord->status)->toBe('APPROVED')
         ->and($toolCallRecord->result_content)->toBe("Agent ID is: {$agentId}");
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// Fix: handleToolCalls schema-validation failure writes ToolCall + history atomically
+// ---------------------------------------------------------------------------
+
+it('handleToolCalls schema validation failure writes both ToolCall and history row', function (): void {
+    [$agentId] = seedAgent();
+
+    $callCount = 0;
+    $mock      = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+        $callCount++;
+        // First turn: LLM calls stub_output_with_schema without the required 'recipient' field
+        return $callCount === 1
+            ? new LLMResponse(null, [new DriverToolCall('call_schema_fail', 'stub_output_with_schema', [])], 5, 3, 'cmp_1')
+            : new LLMResponse('Recovered.', [], 5, 3, 'cmp_2');
+    });
+
+    $tools = [new StubOutputToolWithSchema()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'Schema fail test', maxSteps: 10);
+
+    $task->refresh();
+    // The error must be fed back to the LLM so the task can complete, not get stuck
+    expect($task->status)->toBe('COMPLETED');
+
+    // ToolCall record must be APPROVED with the validation error message
+    $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
+    expect($toolCallRecord)->not()->toBeNull()
+        ->and($toolCallRecord->status)->toBe('APPROVED')
+        ->and($toolCallRecord->result_content)->toContain('Validation Error');
+
+    // A history row for this tool call must also exist (atomically written with the record above)
+    $toolHistory = TaskHistory::where('task_id', $task->id)
+        ->where('role', 'tool')
+        ->where('tool_call_id', 'call_schema_fail')
+        ->first();
+    expect($toolHistory)->not()->toBeNull()
+        ->and($toolHistory->content)->toContain('Validation Error');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('handleToolCalls schema validation failure does not pause for approval', function (): void {
+    [$agentId] = seedAgent();
+
+    $callCount = 0;
+    $mock      = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+        $callCount++;
+        return $callCount === 1
+            ? new LLMResponse(null, [new DriverToolCall('call_schema_fail2', 'stub_output_with_schema', [])], 5, 3, 'cmp_1')
+            : new LLMResponse('Done.', [], 5, 3, 'cmp_2');
+    });
+
+    $tools = [new StubOutputToolWithSchema()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'Schema fail no approval', maxSteps: 10);
+
+    $task->refresh();
+    // Task must NOT be stuck in PENDING_APPROVAL — validation failure skips the approval gate
+    expect($task->status)->not()->toBe('PENDING_APPROVAL')
+        ->and($task->pending_state)->toBeNull();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
