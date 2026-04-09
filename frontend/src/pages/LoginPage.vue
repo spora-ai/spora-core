@@ -18,8 +18,8 @@ async function submit(): Promise<void> {
   try {
     await auth.login(email.value, password.value)
     router.push({ name: 'dashboard' })
-  } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'An unexpected error occurred.'
+  } catch (e: any) {
+    error.value = e?.name === 'ApiError' ? e.message : 'An unexpected error occurred.'
   } finally {
     loading.value = false
   }

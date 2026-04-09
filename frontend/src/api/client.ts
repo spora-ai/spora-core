@@ -16,15 +16,16 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...(init.headers ? Object.fromEntries(new Headers(init.headers)) : {}),
+  }
+
   const response = await fetch(`${BASE_URL}/api/v1${path}`, {
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...(init.headers ?? {}),
-    },
     ...init,
-    body: init.body,
+    credentials: 'include',
+    headers,
   })
 
   // Parse JSON once; treat an empty body (204, unexpected HTML) as null.
