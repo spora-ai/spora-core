@@ -57,11 +57,13 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
         $url = rtrim($this->baseUrl, '/') . '/chat/completions';
         $this->logger?->debug('LLM Request (OpenAI)', ['url' => $url, 'payload' => $body]);
 
+        $headers = ['Content-Type' => 'application/json'];
+        if ($this->apiKey !== '') {
+            $headers['Authorization'] = 'Bearer ' . $this->apiKey;
+        }
+
         $response = $this->httpClient->request('POST', $url, [
-            'headers' => [
-                'Authorization' => 'Bearer ' . $this->apiKey,
-                'Content-Type'  => 'application/json',
-            ],
+            'headers' => $headers,
             'json'    => $body,
             'timeout' => 45,
         ]);
@@ -143,8 +145,8 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
                 key: 'api_key',
                 label: 'API Key',
                 type: 'password',
-                description: 'API key for the OpenAI-compatible endpoint.',
-                required: true,
+                description: 'API key for the OpenAI-compatible endpoint. Leave empty for local models.',
+                required: false,
                 scope: 'global',
             ),
             new ToolSetting(

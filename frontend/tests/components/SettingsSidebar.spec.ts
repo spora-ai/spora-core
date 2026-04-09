@@ -15,7 +15,7 @@ const makeTool = (name: string, displayName: string) => ({
   tool_name: name,
   display_name: displayName,
   settings_schema: [
-    { key: 'api_key', label: 'API Key', type: 'password', description: '', default: null, required: true, scope: 'global', options: null },
+    { key: 'api_key', label: 'API Key', type: 'password', description: '', default: null, required: false, scope: 'global', options: null },
   ],
 })
 

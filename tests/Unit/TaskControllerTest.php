@@ -351,7 +351,7 @@ it('approve returns 422 when legacy format has empty string provider_call_id', f
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('approve legacy format with valid provider_call_id still calls orchestrator resume', function (): void {
-    $orch = Mockery::mock(\Spora\Agents\OrchestratorInterface::class);
+    $orch = Mockery::mock(OrchestratorInterface::class);
     $orch->expects('resume')->once()->withArgs(function (int $taskId, array $batch): bool {
         return $batch[0]['provider_call_id'] === 'call_valid';
     });

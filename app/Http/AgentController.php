@@ -21,6 +21,7 @@ use Spora\Tools\OutputToolInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 final class AgentController
 {
@@ -298,7 +299,7 @@ final class AgentController
                 $settings = $config !== null
                     ? $this->llmConfigService->decryptSettings($config->getRawOriginal('settings'))
                     : [];
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 $settings = [];
             }
 

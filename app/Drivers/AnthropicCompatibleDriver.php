@@ -54,12 +54,16 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
         $url = rtrim($this->baseUrl, '/');
         $this->logger?->debug('LLM Request (Anthropic)', ['url' => $url, 'payload' => $body]);
 
+        $headers = [
+            'anthropic-version' => self::API_VERSION,
+            'Content-Type'      => 'application/json',
+        ];
+        if ($this->apiKey !== '') {
+            $headers['x-api-key'] = $this->apiKey;
+        }
+
         $response = $this->httpClient->request('POST', $url, [
-            'headers' => [
-                'x-api-key'         => $this->apiKey,
-                'anthropic-version' => self::API_VERSION,
-                'Content-Type'      => 'application/json',
-            ],
+            'headers' => $headers,
             'json'    => $body,
             'timeout' => 45,
         ]);
@@ -243,8 +247,8 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
                 key: 'api_key',
                 label: 'API Key',
                 type: 'password',
-                description: 'API key for the Anthropic-compatible endpoint.',
-                required: true,
+                description: 'API key for the Anthropic-compatible endpoint. Leave empty for local models.',
+                required: false,
                 scope: 'global',
             ),
             new ToolSetting(

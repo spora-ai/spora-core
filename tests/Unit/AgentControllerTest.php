@@ -440,8 +440,8 @@ test('getOverride for llm_configuration returns empty settings when decryption f
 
     // Create a config encrypted with a DIFFERENT key than the one the controller uses
     $alienKey      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-    $alienSecurity = new Spora\Core\SecurityManager($alienKey);
-    $alienService  = new Spora\Services\LLMConfigService($alienSecurity, [OpenAICompatibleDriver::class]);
+    $alienSecurity = new SecurityManager($alienKey);
+    $alienService  = new LLMConfigService($alienSecurity, [OpenAICompatibleDriver::class]);
 
     $config             = new LLMDriverConfiguration();
     $config->user_id    = $userId;

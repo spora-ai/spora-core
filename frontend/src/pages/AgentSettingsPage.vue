@@ -4,10 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { useThemeStore } from '@/stores/theme'
 import type { ToolSchema } from '@/composables/useToolSettings'
-import { useToolSettings } from '@/composables/useToolSettings'
-import ToolSettingsForm from '@/components/settings/ToolSettingsForm.vue'
-import Modal from '@/components/Modal.vue'
-import { useLlmConfigsStore } from '@/stores/llmConfigs'
+import AgentLlmConfigModal from '@/components/agent/AgentLlmConfigModal.vue'
+import AgentToolConfigModal from '@/components/agent/AgentToolConfigModal.vue'
+import AgentToolListItem from '@/components/agent/AgentToolListItem.vue'
 import type { LLMDriverInfo } from '@/types/llmConfig'
 import { ApiError, api } from '@/api/client'
 
@@ -18,15 +17,12 @@ const theme = useThemeStore()
 
 const agentId = computed(() => Number(route.params.id))
 
-// Tool settings composable (per-agent mode)
-const { getSettings, putSettings } = useToolSettings(agentId.value)
-
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
 const toolRegistry = ref<ToolSchema[]>([])
 const loadingTools = ref(false)
 
-// ── LLM Configs (llm_driver_config_id dropdown) ───────────────────────────────
+// ── LLM Configs ───────────────────────────────────────────────────────────────
 
 interface LLMConfigResource {
   id: number
@@ -47,19 +43,12 @@ const llmSettingsError = ref<string | null>(null)
 const llmSettingsSaved = ref(false)
 
 // LLM config creation
-const llmStore = useLlmConfigsStore()
 const showLlmCreate = ref(false)
-const llmCreateForm = ref({
-  name: '',
-  driver_class: '',
-})
-const llmCreateSettings = ref<Record<string, string>>({})
-const llmCreateError = ref<string | null>(null)
-const savingLlmCreate = ref(false)
 
-const activeCreateDriver = computed<LLMDriverInfo | null>(() =>
-  llmDrivers.value.find((d) => d.driver_class === llmCreateForm.value.driver_class) ?? null,
-)
+function onLlmCreated(config: LLMConfigResource): void {
+  llmConfigs.value.push(config)
+  llmSettingsForm.value.llm_driver_config_id = config.id
+}
 
 // ── Identity form ─────────────────────────────────────────────────────────────
 
@@ -74,23 +63,19 @@ const identitySaved = ref(false)
 
 // ── Tools ─────────────────────────────────────────────────────────────────────
 
-interface EnabledTool {
-  tool_class: string
-  tool_name: string
-  auto_approve: boolean | null
-}
+// Track enabled tool names and auto-approve status separately
+const enabledToolNames = ref<Set<string>>(new Set())
+const autoApprovedMap = ref<Record<string, boolean>>({})
 
-const enabledTools = ref<EnabledTool[]>([])
 const savingTools = ref<Record<string, boolean>>({})
 const toolsError = ref<string | null>(null)
 
-// Tool configuration panel
-const configuringTool = ref<string | null>(null) // tool_name being configured
-const serverSettings = ref<Record<string, string>>({})
-const savingToolConfig = ref(false)
-const toolConfigError = ref<string | null>(null)
-const toolConfigSaved = ref(false)
-const globalSettingsExist = ref<Record<string, boolean>>({}) // tool_name -> true if global config exists
+// Tool configuration modal
+const configuringTool = ref<string | null>(null)
+
+function configuringToolSchema(): ToolSchema | null {
+  return toolRegistry.value.find((t) => t.tool_name === configuringTool.value) ?? null
+}
 
 // ── Delete agent ─────────────────────────────────────────────────────────────
 
@@ -111,7 +96,12 @@ onMounted(async () => {
   llmSettingsForm.value = {
     llm_driver_config_id: agent.llm_driver_config_id ?? null,
   }
-  enabledTools.value = [...agent.tools]
+
+  // Seed enabled tools state
+  enabledToolNames.value = new Set(agent.tools.map((t) => t.tool_name))
+  for (const t of agent.tools) {
+    autoApprovedMap.value[t.tool_name] = t.auto_approve === true
+  }
 
   // Fetch tool registry, LLM configs, and LLM drivers in parallel
   const [toolsResult, configsResult, driversResult] = await Promise.all([
@@ -145,7 +135,7 @@ async function saveIdentity(): Promise<void> {
   }
 }
 
-// ── LLM Config (llm_driver_config_id) ───────────────────────────────────────
+// ── LLM Config ───────────────────────────────────────────────────────────────
 
 async function saveLlmSettings(): Promise<void> {
   llmSettingsError.value = null
@@ -164,68 +154,20 @@ async function saveLlmSettings(): Promise<void> {
   }
 }
 
-// ── LLM Config Creation ─────────────────────────────────────────────────────
-
-function startLlmCreate(): void {
-  llmCreateForm.value = { name: '', driver_class: '' }
-  llmCreateSettings.value = {}
-  llmCreateError.value = null
-  showLlmCreate.value = true
-}
-
-function onDriverClassChange(): void {
-  const driver = llmDrivers.value.find((d) => d.driver_class === llmCreateForm.value.driver_class)
-  if (!driver) return
-  const defaults: Record<string, string> = {}
-  for (const field of driver.settings_schema) {
-    if (field.default !== undefined && field.default !== null) {
-      defaults[field.key] = String(field.default)
-    }
-  }
-  llmCreateSettings.value = defaults
-}
-
-async function submitLlmCreate(): Promise<void> {
-  if (!llmCreateForm.value.name.trim() || !llmCreateForm.value.driver_class) return
-  savingLlmCreate.value = true
-  llmCreateError.value = null
-  try {
-    const config = await llmStore.createConfig({
-      name: llmCreateForm.value.name.trim(),
-      driver_class: llmCreateForm.value.driver_class,
-      settings: { ...llmCreateSettings.value },
-    })
-    llmConfigs.value.push(config)
-    llmSettingsForm.value.llm_driver_config_id = config.id
-    showLlmCreate.value = false
-  } catch (e) {
-    llmCreateError.value = e instanceof ApiError ? e.message : 'Failed to create configuration.'
-  } finally {
-    savingLlmCreate.value = false
-  }
-}
-
 // ── Tools ─────────────────────────────────────────────────────────────────────
-
-function isToolEnabled(toolName: string): boolean {
-  return enabledTools.value.some((t) => t.tool_name === toolName)
-}
-
-function isToolAutoApproved(toolName: string): boolean {
-  const tool = enabledTools.value.find((t) => t.tool_name === toolName)
-  return tool?.auto_approve === true
-}
 
 async function toggleTool(toolName: string): Promise<void> {
   savingTools.value[toolName] = true
   toolsError.value = null
   try {
-    if (isToolEnabled(toolName)) {
+    if (enabledToolNames.value.has(toolName)) {
       await agentStore.disableTool(agentId.value, toolName)
-      enabledTools.value = enabledTools.value.filter((t) => t.tool_name !== toolName)
+      enabledToolNames.value.delete(toolName)
+      delete autoApprovedMap.value[toolName]
     } else {
       const tool = await agentStore.enableTool(agentId.value, toolName)
-      enabledTools.value.push(tool)
+      enabledToolNames.value.add(toolName)
+      autoApprovedMap.value[toolName] = tool.auto_approve === true
     }
   } catch (e) {
     toolsError.value = e instanceof ApiError ? e.message : 'Failed to update tool.'
@@ -235,13 +177,12 @@ async function toggleTool(toolName: string): Promise<void> {
 }
 
 async function toggleAutoApprove(toolName: string): Promise<void> {
-  const tool = enabledTools.value.find((t) => t.tool_name === toolName)
-  if (!tool) return
+  if (!enabledToolNames.value.has(toolName)) return
   savingTools.value[toolName] = true
   try {
-    const newValue = tool.auto_approve !== true
+    const newValue = !autoApprovedMap.value[toolName]
     await agentStore.patchTool(agentId.value, toolName, { auto_approve: newValue })
-    tool.auto_approve = newValue
+    autoApprovedMap.value[toolName] = newValue
   } catch (e) {
     toolsError.value = e instanceof ApiError ? e.message : 'Failed to update auto-approve.'
   } finally {
@@ -249,60 +190,7 @@ async function toggleAutoApprove(toolName: string): Promise<void> {
   }
 }
 
-// ── Tool configuration ──────────────────────────────────────────────────────────
-
-function toolSchema(toolName: string): ToolSchema | undefined {
-  return toolRegistry.value.find((t) => t.tool_name === toolName)
-}
-
-async function openToolConfig(toolName: string): Promise<void> {
-  configuringTool.value = toolName
-  toolConfigError.value = null
-  toolConfigSaved.value = false
-
-  // Check if global config exists
-  try {
-    await api.get(`/tools/${encodeURIComponent(toolName)}/settings`)
-    globalSettingsExist.value[toolName] = true
-  } catch {
-    globalSettingsExist.value[toolName] = false
-  }
-
-  // Load effective (merged) settings
-  try {
-    serverSettings.value = await getSettings(toolName)
-  } catch {
-    serverSettings.value = {}
-  }
-}
-
-function closeToolConfig(): void {
-  configuringTool.value = null
-  serverSettings.value = {}
-  toolConfigError.value = null
-  toolConfigSaved.value = false
-}
-
-async function saveToolConfig(settings: Record<string, string>): Promise<void> {
-  if (!configuringTool.value) return
-  savingToolConfig.value = true
-  toolConfigError.value = null
-  try {
-    serverSettings.value = await putSettings(configuringTool.value, settings, serverSettings.value)
-    toolConfigSaved.value = true
-    setTimeout(() => { toolConfigSaved.value = false }, 2000)
-  } catch (e) {
-    toolConfigError.value = e instanceof ApiError ? e.message : 'Failed to save settings.'
-  } finally {
-    savingToolConfig.value = false
-  }
-}
-
-function goToGlobalSettings(): void {
-  router.push({ name: 'settings-overview' })
-}
-
-// ── Delete ────────────────────────────────────────────────────────────────────
+// ── Delete ───────────────────────────────────────────────────────────────────
 
 async function deleteAgent(): Promise<void> {
   if (confirmDeleteName.value !== agentStore.currentAgent?.name) return
@@ -412,7 +300,7 @@ async function deleteAgent(): Promise<void> {
             <div class="flex items-center justify-between">
               <label for="llm-driver-config" class="text-sm font-medium">Configuration</label>
               <button
-                @click="startLlmCreate"
+                @click="showLlmCreate = true"
                 class="inline-flex h-7 items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
               >
                 <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -451,133 +339,21 @@ async function deleteAgent(): Promise<void> {
         </div>
       </section>
 
-      <!-- ── LLM Config Create Modal ─────────────────────────────────────── -->
-      <Modal
-        v-model="showLlmCreate"
-        title="New LLM Configuration"
-        size="md"
-        @close="showLlmCreate = false"
-      >
-        <div class="flex flex-col gap-4">
-          <p v-if="llmCreateError" role="alert" class="text-xs text-destructive">{{ llmCreateError }}</p>
-
-          <!-- Name -->
-          <div class="flex flex-col gap-1.5">
-            <label for="llm-create-name" class="text-sm font-medium">Name</label>
-            <input
-              id="llm-create-name"
-              v-model="llmCreateForm.name"
-              type="text"
-              placeholder="My OpenAI Config"
-              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-            />
-          </div>
-
-          <!-- Driver -->
-          <div class="flex flex-col gap-1.5">
-            <label for="llm-create-driver" class="text-sm font-medium">Driver</label>
-            <select
-              id="llm-create-driver"
-              v-model="llmCreateForm.driver_class"
-              @change="onDriverClassChange"
-              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-            >
-              <option value="">— Select a driver —</option>
-              <option v-for="driver in llmDrivers" :key="driver.driver_class" :value="driver.driver_class">
-                {{ driver.display_name }} ({{ driver.name }})
-              </option>
-            </select>
-          </div>
-
-          <!-- Settings -->
-          <div v-if="activeCreateDriver">
-            <h3 class="text-sm font-semibold mb-3">Settings</h3>
-            <ToolSettingsForm
-              :tool="{ tool_class: activeCreateDriver.driver_class, tool_name: activeCreateDriver.name, display_name: activeCreateDriver.display_name, settings_schema: activeCreateDriver.settings_schema }"
-              :initialSettings="llmCreateSettings"
-              :saving="savingLlmCreate"
-              :error="null"
-              @save="(s) => { llmCreateSettings = s }"
-            />
-          </div>
-        </div>
-
-        <template #footer>
-          <div class="flex justify-end gap-2">
-            <button
-              @click="showLlmCreate = false"
-              class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              @click="submitLlmCreate"
-              :disabled="savingLlmCreate || !llmCreateForm.name.trim() || !llmCreateForm.driver_class"
-              class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-            >
-              {{ savingLlmCreate ? 'Creating…' : 'Create' }}
-            </button>
-          </div>
-        </template>
-      </Modal>
-
       <!-- ── Tools ───────────────────────────────────────────────────────── -->
       <section class="flex flex-col gap-4">
         <h2 class="text-base font-semibold">Tools</h2>
         <div class="rounded-xl border border-border bg-card divide-y divide-border">
-          <div
+          <AgentToolListItem
             v-for="tool in toolRegistry"
             :key="tool.tool_class"
-            class="px-5 py-4 flex items-start gap-4"
-          >
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium">{{ tool.display_name || tool.tool_name }}</p>
-              <p v-if="tool.settings_schema.length > 0" class="text-xs mt-0.5" :class="isToolEnabled(tool.tool_name) ? 'text-muted-foreground' : 'text-muted-foreground/50'">
-                {{ isToolEnabled(tool.tool_name) ? 'Has credentials to configure' : 'Enable to configure credentials' }}
-              </p>
-            </div>
-            <div class="flex items-center gap-3 shrink-0">
-              <!-- Configure button (only for enabled tools with settings_schema) -->
-              <button
-                v-if="isToolEnabled(tool.tool_name) && tool.settings_schema.length > 0"
-                @click="openToolConfig(tool.tool_name)"
-                class="inline-flex h-7 items-center justify-center rounded-lg border border-border bg-background px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Configure
-              </button>
-              <!-- Auto-approve toggle (only if enabled) -->
-              <label
-                v-if="isToolEnabled(tool.tool_name)"
-                class="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer"
-                :title="isToolAutoApproved(tool.tool_name) ? 'Auto-approve is on' : 'Auto-approve is off'"
-              >
-                <span>Auto-approve</span>
-                <button
-                  @click="toggleAutoApprove(tool.tool_name)"
-                  :disabled="savingTools[tool.tool_name]"
-                  class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-                  :class="isToolAutoApproved(tool.tool_name) ? 'bg-primary' : 'bg-muted'"
-                >
-                  <span
-                    class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
-                    :class="isToolAutoApproved(tool.tool_name) ? 'translate-x-4' : 'translate-x-0.5'"
-                  />
-                </button>
-              </label>
-              <!-- Enable/Disable toggle -->
-              <button
-                @click="toggleTool(tool.tool_name)"
-                :disabled="savingTools[tool.tool_name]"
-                class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-                :class="isToolEnabled(tool.tool_name) ? 'bg-primary' : 'bg-muted'"
-              >
-                <span
-                  class="inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform"
-                  :class="isToolEnabled(tool.tool_name) ? 'translate-x-6' : 'translate-x-1'"
-                />
-              </button>
-            </div>
-          </div>
+            :tool="tool"
+            :enabled="enabledToolNames.has(tool.tool_name)"
+            :autoApproved="autoApprovedMap[tool.tool_name] ?? false"
+            :saving="savingTools[tool.tool_name] ?? false"
+            @toggle="toggleTool(tool.tool_name)"
+            @toggleAutoApprove="toggleAutoApprove(tool.tool_name)"
+            @openConfig="configuringTool = tool.tool_name"
+          />
 
           <div v-if="loadingTools" class="px-5 py-4 text-sm text-muted-foreground">
             Loading tools…
@@ -589,39 +365,21 @@ async function deleteAgent(): Promise<void> {
         <p v-if="toolsError" role="alert" class="text-xs text-destructive">{{ toolsError }}</p>
       </section>
 
-      <!-- ── Tool Configuration Modal ─────────────────────────────────── -->
-      <Modal
-        :modelValue="configuringTool !== null"
-        :title="(toolSchema(configuringTool ?? '')?.display_name || (configuringTool ?? ''))"
-        size="md"
-        @update:modelValue="(v) => !v && closeToolConfig()"
-        @close="closeToolConfig"
-      >
-        <!-- No global config warning -->
-        <div
-          v-if="configuringTool && !globalSettingsExist[configuringTool]"
-          class="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950 px-4 py-3 text-sm text-amber-700 dark:text-amber-300 mb-4"
-        >
-          <p class="font-medium mb-1">No global configuration found</p>
-          <p class="text-xs opacity-80 mb-2">This tool has no global credentials set. You can configure it locally for this agent, or set up global defaults first.</p>
-          <button
-            @click="goToGlobalSettings"
-            class="inline-flex h-7 items-center justify-center rounded-lg bg-amber-200 dark:bg-amber-800 px-3 text-xs font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-300 dark:hover:bg-amber-700 transition-colors"
-          >
-            Go to Global Settings →
-          </button>
-        </div>
+      <!-- ── LLM Config Create Modal ─────────────────────────────────────── -->
+      <AgentLlmConfigModal
+        :show="showLlmCreate"
+        :llmDrivers="llmDrivers"
+        @update:show="showLlmCreate = $event"
+        @created="onLlmCreated"
+      />
 
-        <!-- Config form -->
-        <ToolSettingsForm
-          v-if="configuringTool && toolSchema(configuringTool)"
-          :tool="toolSchema(configuringTool)!"
-          :initialSettings="serverSettings"
-          :saving="savingToolConfig"
-          :error="toolConfigError"
-          @save="saveToolConfig"
-        />
-      </Modal>
+      <!-- ── Tool Configuration Modal ─────────────────────────────────── -->
+      <AgentToolConfigModal
+        :toolName="configuringTool"
+        :tool="configuringToolSchema()"
+        :agentId="agentId"
+        @close="configuringTool = null"
+      />
 
       <!-- ── Danger Zone ─────────────────────────────────────────────────── -->
       <section class="flex flex-col gap-4">

@@ -9,6 +9,7 @@ use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\LLMConfigService;
+use Throwable;
 
 /**
  * Builds the correct LLM driver for a given Agent.
@@ -65,7 +66,7 @@ class DriverFactory
 
         try {
             $settings = $this->llmConfigService->decryptSettings($config->settings ?? '');
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             throw new RuntimeException(
                 "Failed to decrypt settings for LLM config '{$config->name}' (id={$config->id}): " . $e->getMessage(),
                 0,

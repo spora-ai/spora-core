@@ -29,7 +29,7 @@ const mockDriver = {
   display_name: 'OpenAI Compatible',
   driver_class: 'Spora\\Drivers\\OpenAICompatibleDriver',
   settings_schema: [
-    { key: 'api_key', label: 'API Key', type: 'password', description: '', default: null, required: true, scope: 'global', options: null },
+    { key: 'api_key', label: 'API Key', type: 'password', description: '', default: null, required: false, scope: 'global', options: null },
     { key: 'model', label: 'Model', type: 'text', description: '', default: 'gpt-4o', required: false, scope: 'global', options: null },
     { key: 'base_url', label: 'Base URL', type: 'text', description: '', default: 'https://api.openai.com/v1', required: false, scope: 'global', options: null },
   ],
