@@ -45,6 +45,15 @@ function mockDriverFactoryForMode(LLMDriverInterface $driver): DriverFactory
     return $factory;
 }
 
+function makeMockContainerForWorker(): Psr\Container\ContainerInterface
+{
+    $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+    $container->allows('get')->with('config')->andReturn([
+        'worker_stale_minutes' => 60,
+    ]);
+    return $container;
+}
+
 function seedAgentForMode(): array
 {
     $authService = bootAuthLayer();
@@ -142,7 +151,7 @@ it('WorkerRunCommand processes a single QUEUED task to completion', function ():
     $output = new NullOutput();
     $input = new ArrayInput(['--limit' => '1']);
 
-    $command = new Spora\Console\Commands\WorkerRunCommand($orch);
+    $command = new Spora\Console\Commands\WorkerRunCommand($orch, new NullLogger(), makeMockContainerForWorker());
     $command->run($input, $output);
 
     $task->refresh();
@@ -170,7 +179,7 @@ it('WorkerRunCommand processes multiple QUEUED tasks in order', function (): voi
     $output = new NullOutput();
     $input = new ArrayInput(['--limit' => '0']);
 
-    $command = new Spora\Console\Commands\WorkerRunCommand($orch);
+    $command = new Spora\Console\Commands\WorkerRunCommand($orch, new NullLogger(), makeMockContainerForWorker());
     $command->run($input, $output);
 
     $task1->refresh();
@@ -195,7 +204,7 @@ it('WorkerRunCommand exits cleanly when no QUEUED tasks exist', function (): voi
     $output = new BufferedOutput();
     $input = new ArrayInput([]);
 
-    $command = new Spora\Console\Commands\WorkerRunCommand($orch);
+    $command = new Spora\Console\Commands\WorkerRunCommand($orch, new NullLogger(), makeMockContainerForWorker());
     $result = $command->run($input, $output);
 
     expect($result)->toBe(Command::SUCCESS);

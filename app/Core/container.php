@@ -34,7 +34,8 @@ return [
             'app_env'             => 'production',
             'log_level'           => 'WARNING',
             'log_path'            => BASE_PATH . '/storage/spora.log',
-            'worker_mode'         => 'sync',
+            'worker_mode'          => 'sync',
+            'worker_stale_minutes' => 60,
             'mercure_url'         => null,
             'mercure_jwt_key'     => null,
         ];
@@ -81,6 +82,9 @@ return [
         }
         if (($v = $env('SPORA_WORKER_MODE')) !== null) {
             $envOverrides['worker_mode'] = $v;
+        }
+        if (($v = $env('SPORA_WORKER_STALE_MINUTES')) !== null) {
+            $envOverrides['worker_stale_minutes'] = (int) $v;
         }
         if (($v = $env('SPORA_MERCURE_URL')) !== null) {
             $envOverrides['mercure_url'] = $v;

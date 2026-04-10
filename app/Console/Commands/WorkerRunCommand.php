@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\Console\Commands;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Psr\Container\ContainerInterface;
+use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Task;
 use Symfony\Component\Console\Command\Command;
@@ -25,9 +27,12 @@ final class WorkerRunCommand extends Command
     private const REAP_INTERVAL_SECONDS = 300;
 
     private bool $shouldQuit = false;
+    private mixed $lockFd = null;
 
     public function __construct(
-        private readonly OrchestratorInterface $orchestrator,
+        private readonly OrchestratorInterface  $orchestrator,
+        private readonly LoggerInterface        $logger,
+        private readonly ContainerInterface     $container,
     ) {
         parent::__construct('worker:run');
     }
@@ -38,24 +43,39 @@ final class WorkerRunCommand extends Command
         $this->addOption('daemon', 'd', InputOption::VALUE_NONE, 'Run as a persistent daemon rather than exiting when empty');
         $this->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Max tasks to process per run (0 = unlimited)', '0');
         $this->addOption('sleep', 's', InputOption::VALUE_REQUIRED, 'Microseconds to sleep when the queue is empty', '500000');
-        $this->addOption('stale-minutes', null, InputOption::VALUE_REQUIRED, 'Minutes after which a RUNNING task is considered orphaned and failed', '30');
+        $this->addOption('stale-minutes', null, InputOption::VALUE_REQUIRED, 'Minutes after which a RUNNING task is orphaned and failed (0 = disabled, omit to use config/default)', '0');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $isDaemon     = (bool) $input->getOption('daemon');
-        $limit        = (int) $input->getOption('limit');
-        $sleep        = (int) $input->getOption('sleep');
-        $staleMinutes = (int) $input->getOption('stale-minutes');
+        $isDaemon = (bool) $input->getOption('daemon');
+
+        // Resolve stale-minutes: CLI always wins; omit flag → config → default (60)
+        $staleMinutesCli = $input->getOption('stale-minutes');
+        $staleMinutes = $staleMinutesCli !== '0'
+            ? (int) $staleMinutesCli
+            : (int) ($this->container->get('config')['worker_stale_minutes'] ?? 60);
+
+        $limit = (int) $input->getOption('limit');
+        $sleep = (int) $input->getOption('sleep');
 
         if ($isDaemon && extension_loaded('pcntl')) {
             pcntl_async_signals(true);
-            pcntl_signal(SIGTERM, function (): void {
+            pcntl_signal(SIGTERM, function () use ($output): void {
                 $this->shouldQuit = true;
+                $this->releaseLock();
+                $output->writeln('<info>Daemon shut down gracefully.</info>');
             });
-            pcntl_signal(SIGINT, function (): void {
+            pcntl_signal(SIGINT, function () use ($output): void {
                 $this->shouldQuit = true;
+                $this->releaseLock();
+                $output->writeln('<info>Daemon shut down gracefully.</info>');
             });
+
+            // Single-instance lock — exit if another daemon is already running.
+            if (!$this->acquireLock($output)) {
+                return Command::FAILURE;
+            }
         }
 
         $processed  = 0;
@@ -63,6 +83,10 @@ final class WorkerRunCommand extends Command
 
         if ($isDaemon) {
             $output->writeln('<info>Starting daemon worker. Press Ctrl+C to exit.</info>');
+            $this->logger->info('Daemon worker started', [
+                'stale_minutes' => $staleMinutes,
+                'limit' => $limit,
+            ]);
         }
 
         // Reap orphaned tasks at startup — covers any tasks left RUNNING by a previous crash.
@@ -96,11 +120,16 @@ final class WorkerRunCommand extends Command
                     return $task;
                 });
             } catch (Throwable $e) {
+                $this->logger->error('Database error during task claim', [
+                    'exception_class' => get_class($e),
+                    'message' => $e->getMessage(),
+                ]);
                 $output->writeln(sprintf('<error>Database error: %s</error>', $e->getMessage()));
                 if ($isDaemon) {
                     usleep($sleep * 5); // back off on DB errors
                     continue;
                 } else {
+                    $this->releaseLock();
                     return Command::FAILURE;
                 }
             }
@@ -113,12 +142,19 @@ final class WorkerRunCommand extends Command
                 break;
             }
 
+            $this->logger->info('Processing task', ['task_id' => $task->id]);
             $output->writeln(sprintf('<info>Processing task %d...</info>', $task->id));
 
             try {
                 $this->orchestrator->tick($task->id);
+                $this->logger->info('Task completed', ['task_id' => $task->id]);
             } catch (Throwable $e) {
                 // tick() already marked the task FAILED and re-threw — log and move on.
+                $this->logger->error('Task failed', [
+                    'task_id' => $task->id,
+                    'exception_class' => get_class($e),
+                    'message' => $e->getMessage(),
+                ]);
                 $output->writeln(sprintf('<error>Task %d failed: %s</error>', $task->id, $e->getMessage()));
             }
 
@@ -130,13 +166,50 @@ final class WorkerRunCommand extends Command
             gc_collect_cycles();
         }
 
+        $this->releaseLock();
+
         if ($isDaemon && $this->shouldQuit) {
-            $output->writeln('<info>Daemon shut down gracefully.</info>');
+            // Message already written by signal handler above
         } else {
             $output->writeln(sprintf('<info>Worker run complete. Processed %d task(s).</info>', $processed));
+            $this->logger->info('Worker run complete', ['processed' => $processed]);
         }
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Acquire an exclusive flock() lock to ensure only one daemon runs at a time.
+     * Returns false if the lock cannot be acquired (another instance is running).
+     */
+    private function acquireLock(OutputInterface $output): bool
+    {
+        $lockFile = rtrim(BASE_PATH . '/storage', '/') . '/spora-worker.lock';
+
+        $this->lockFd = fopen($lockFile, 'c');
+        if (!flock($this->lockFd, LOCK_EX | LOCK_NB)) {
+            $output->writeln('<error>Another worker instance is already running. Exiting.</error>');
+            $this->logger->warning('Could not acquire worker lock — another instance is running');
+            fclose($this->lockFd);
+            $this->lockFd = null;
+            return false;
+        }
+
+        // Write PID for debugging/observability
+        file_put_contents($lockFile, (string) getmypid());
+        return true;
+    }
+
+    /**
+     * Release the flock lock if held.
+     */
+    private function releaseLock(): void
+    {
+        if ($this->lockFd !== null) {
+            flock($this->lockFd, LOCK_UN);
+            fclose($this->lockFd);
+            $this->lockFd = null;
+        }
     }
 
     /**
@@ -151,6 +224,10 @@ final class WorkerRunCommand extends Command
      */
     private function reapStaleTasks(OutputInterface $output, int $staleMinutes): void
     {
+        if ($staleMinutes <= 0) {
+            return; // Reaping disabled
+        }
+
         $cutoff = date('Y-m-d H:i:s', time() - $staleMinutes * 60);
 
         $reaped = Task::where('status', 'RUNNING')
@@ -164,6 +241,10 @@ final class WorkerRunCommand extends Command
             ]);
 
         if ($reaped > 0) {
+            $this->logger->warning('Reaped orphaned RUNNING tasks', [
+                'count' => $reaped,
+                'stale_minutes' => $staleMinutes,
+            ]);
             $output->writeln(sprintf(
                 '<comment>Reaped %d orphaned RUNNING task(s) (idle > %d min).</comment>',
                 $reaped,

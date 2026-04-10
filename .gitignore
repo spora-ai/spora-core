@@ -58,3 +58,5 @@ Thumbs.db
 # ── Misc artefacts ───────────────────────────────────────────────────────────
 # Leftover SQLite in-memory filename that can appear at the project root
 :memory:
+
+/coverage
