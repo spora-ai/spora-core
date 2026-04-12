@@ -3,10 +3,12 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { useThemeStore } from '@/stores/theme'
-import type { ToolSchema } from '@/composables/useToolSettings'
+import { useToolSettings } from '@/composables/useToolSettings'
+import type { ToolSchema, ToolStatus } from '@/composables/useToolSettings'
 import AgentLlmConfigModal from '@/components/agent/AgentLlmConfigModal.vue'
 import AgentToolConfigModal from '@/components/agent/AgentToolConfigModal.vue'
 import AgentToolListItem from '@/components/agent/AgentToolListItem.vue'
+import EnableWarningModal from '@/components/agent/EnableWarningModal.vue'
 import type { LLMDriverInfo } from '@/types/llmConfig'
 import { ApiError, api } from '@/api/client'
 
@@ -21,6 +23,11 @@ const agentId = computed(() => Number(route.params.id))
 
 const toolRegistry = ref<ToolSchema[]>([])
 const loadingTools = ref(false)
+
+// ── Tool status map (missing required settings per tool) ─────────────────────
+
+const toolStatusMap = ref<Record<string, ToolStatus>>({})
+const toolSettings = useToolSettings(agentId.value)
 
 // ── LLM Configs ───────────────────────────────────────────────────────────────
 
@@ -56,6 +63,7 @@ const identityForm = ref({
   name: '',
   description: '',
   system_prompt: '',
+  max_steps: 10,
 })
 const savingIdentity = ref(false)
 const identityError = ref<string | null>(null)
@@ -72,6 +80,13 @@ const toolsError = ref<string | null>(null)
 
 // Tool configuration modal
 const configuringTool = ref<string | null>(null)
+
+// Pre-activation warning modal
+const pendingEnableTool = ref<string | null>(null)
+
+function showEnableWarning(toolName: string): void {
+  pendingEnableTool.value = toolName
+}
 
 function configuringToolSchema(): ToolSchema | null {
   return toolRegistry.value.find((t) => t.tool_name === configuringTool.value) ?? null
@@ -92,6 +107,7 @@ onMounted(async () => {
     name: agent.name,
     description: agent.description ?? '',
     system_prompt: agent.system_prompt ?? '',
+    max_steps: agent.max_steps ?? 10,
   }
   llmSettingsForm.value = {
     llm_driver_config_id: agent.llm_driver_config_id ?? null,
@@ -112,6 +128,19 @@ onMounted(async () => {
   toolRegistry.value = toolsResult.tools
   llmConfigs.value = configsResult.configs
   llmDrivers.value = driversResult.drivers
+
+  // Fetch tool status for each tool in parallel to get missing_required info.
+  // Promise.allSettled is used so a single failed status request doesn't abort
+  // the entire page load — failed entries are simply skipped.
+  const statusPromises = toolsResult.tools.map((tool) =>
+    toolSettings.getToolStatus(tool.tool_name),
+  )
+  const statuses = await Promise.allSettled(statusPromises)
+  for (const [i, result] of statuses.entries()) {
+    if (result.status === 'fulfilled' && result.value !== null) {
+      toolStatusMap.value[toolsResult.tools[i].tool_name] = result.value
+    }
+  }
 })
 
 // ── Identity ─────────────────────────────────────────────────────────────────
@@ -125,6 +154,7 @@ async function saveIdentity(): Promise<void> {
       name: identityForm.value.name,
       description: identityForm.value.description || null,
       system_prompt: identityForm.value.system_prompt || null,
+      max_steps: identityForm.value.max_steps,
     })
     identitySaved.value = true
     setTimeout(() => { identitySaved.value = false }, 2000)
@@ -165,9 +195,35 @@ async function toggleTool(toolName: string): Promise<void> {
       enabledToolNames.value.delete(toolName)
       delete autoApprovedMap.value[toolName]
     } else {
-      const tool = await agentStore.enableTool(agentId.value, toolName)
+      // Pre-check: if we already know it can't be enabled, show modal and block
+      const status = toolStatusMap.value[toolName]
+      if (status && !status.can_enable) {
+        showEnableWarning(toolName)
+        savingTools.value[toolName] = false
+        return
+      }
+      // Attempt enable — backend may still return warning if settings are incomplete
+      const agentTool = await agentStore.enableTool(agentId.value, toolName)
+      // Re-fetch status to confirm the tool is actually ready before marking enabled
+      const newStatus = await toolSettings.getToolStatus(toolName)
+      if (newStatus === null) {
+        // Couldn't verify status — show warning and do NOT mark as enabled
+        showEnableWarning(toolName)
+        savingTools.value[toolName] = false
+        return
+      }
+      if (!newStatus.can_enable) {
+        // Tool is enabled but missing required settings — show warning, keep it disabled
+        toolStatusMap.value[toolName] = newStatus
+        showEnableWarning(toolName)
+        savingTools.value[toolName] = false
+        return
+      }
+      // Tool is fully configured — mark as enabled
       enabledToolNames.value.add(toolName)
-      autoApprovedMap.value[toolName] = tool.auto_approve === true
+      autoApprovedMap.value[toolName] = agentTool.auto_approve === true
+      // Update status map
+      toolStatusMap.value[toolName] = newStatus
     }
   } catch (e) {
     toolsError.value = e instanceof ApiError ? e.message : 'Failed to update tool.'
@@ -187,6 +243,17 @@ async function toggleAutoApprove(toolName: string): Promise<void> {
     toolsError.value = e instanceof ApiError ? e.message : 'Failed to update auto-approve.'
   } finally {
     savingTools.value[toolName] = false
+  }
+}
+
+// ── Tool config saved ─────────────────────────────────────────────────────────
+// Re-fetch tool status after the config modal saves successfully so the
+// "Missing config" badge clears immediately without requiring a page reload.
+
+async function onToolSaved(toolName: string): Promise<void> {
+  const newStatus = await toolSettings.getToolStatus(toolName)
+  if (newStatus !== null) {
+    toolStatusMap.value[toolName] = newStatus
   }
 }
 
@@ -277,6 +344,19 @@ async function deleteAgent(): Promise<void> {
               class="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
+          <div class="flex flex-col gap-1.5">
+            <label for="max-steps" class="text-sm font-medium">Max Steps</label>
+            <input
+              id="max-steps"
+              v-model.number="identityForm.max_steps"
+              type="number"
+              min="1"
+              max="100"
+              placeholder="10"
+              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <p class="text-xs text-muted-foreground">Maximum number of agent turns (1–100).</p>
+          </div>
           <div class="flex items-center justify-between">
             <p v-if="identityError" role="alert" class="text-xs text-destructive">{{ identityError }}</p>
             <span v-else-if="identitySaved" class="text-xs text-green-600 dark:text-green-400">Saved!</span>
@@ -350,6 +430,7 @@ async function deleteAgent(): Promise<void> {
             :enabled="enabledToolNames.has(tool.tool_name)"
             :autoApproved="autoApprovedMap[tool.tool_name] ?? false"
             :saving="savingTools[tool.tool_name] ?? false"
+            :missingRequired="toolStatusMap[tool.tool_name]?.missing_required ?? []"
             @toggle="toggleTool(tool.tool_name)"
             @toggleAutoApprove="toggleAutoApprove(tool.tool_name)"
             @openConfig="configuringTool = tool.tool_name"
@@ -378,7 +459,16 @@ async function deleteAgent(): Promise<void> {
         :toolName="configuringTool"
         :tool="configuringToolSchema()"
         :agentId="agentId"
+        @saved="onToolSaved"
         @close="configuringTool = null"
+      />
+
+      <!-- ── Pre-activation Warning Modal ────────────────────────────── -->
+      <EnableWarningModal
+        :toolName="pendingEnableTool"
+        :missingRequired="pendingEnableTool ? (toolStatusMap[pendingEnableTool]?.missing_required ?? []) : []"
+        @configure="() => { configuringTool = pendingEnableTool; pendingEnableTool = null }"
+        @close="pendingEnableTool = null"
       />
 
       <!-- ── Danger Zone ─────────────────────────────────────────────────── -->

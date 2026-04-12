@@ -26,7 +26,7 @@ final class ToolSetting
          * "agent"   — can be overridden per-agent via agent_tool_overrides.
          */
         public readonly string $scope   = 'agent',
-        /** @var array<string, string> key => label pairs. Only used when type === "select". */
+        /** @var array<array-key, string> key => label pairs. Only used when type === "select". */
         public readonly array  $options = [],
     ) {}
 }

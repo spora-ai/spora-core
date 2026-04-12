@@ -26,11 +26,21 @@ class ToolConfigService
     /** @var array<string, string> tool name (from #[Tool(name:)]) => fully-qualified class name */
     private ?array $toolNameMap = null;
 
+    /** @var list<string> */
+    private readonly array $toolClasses;
+
+    private readonly SecurityManagerInterface $security;
+
+    /**
+     * @param list<string> $toolClasses
+     */
     public function __construct(
-        private readonly SecurityManagerInterface $security,
-        /** @var list<string> */
-        private readonly array $toolClasses = [],
-    ) {}
+        SecurityManagerInterface $security,
+        array $toolClasses = [],
+    ) {
+        $this->security = $security;
+        $this->toolClasses = $toolClasses;
+    }
 
     // -----------------------------------------------------------------------
     // Public API
@@ -378,5 +388,99 @@ class ToolConfigService
         }
 
         return $defaults;
+    }
+
+    /**
+     * Return keys of required settings that have no value (null or empty) in the given effective settings.
+     *
+     * @param  array<string, mixed> $effectiveSettings
+     * @return list<string>
+     */
+    public function getMissingRequiredSettings(string $toolClass, array $effectiveSettings): array
+    {
+        if (!class_exists($toolClass)) {
+            return [];
+        }
+
+        $missing = [];
+        foreach ((new ReflectionClass($toolClass))->getAttributes(ToolSetting::class) as $attr) {
+            /** @var ToolSetting $setting */
+            $setting = $attr->newInstance();
+            if ($setting->required) {
+                $value = $effectiveSettings[$setting->key] ?? null;
+                if ($value === null || $value === '') {
+                    $missing[] = $setting->key;
+                }
+            }
+        }
+
+        return $missing;
+    }
+
+    /**
+     * Return effective settings annotated with their source ('global', 'agent', or 'default').
+     * Used by the frontend to show (global) / (local) badges per field.
+     *
+     * @return array<string, array{value: mixed, source: 'global'|'agent'|'default'}>
+     */
+    public function getEffectiveSettingsWithSource(string $toolClass, int $agentId): array
+    {
+        $global = $this->getGlobalSettings($toolClass);
+        $result = [];
+
+        // Seed from global defaults
+        foreach ($global as $key => $value) {
+            $result[$key] = ['value' => $value, 'source' => 'global'];
+        }
+
+        $override = AgentToolOverride::where('agent_id', $agentId)
+            ->where('tool_class', $toolClass)
+            ->first();
+
+        if ($override !== null) {
+            $overrideSettings = $this->decodeSettings(
+                $toolClass,
+                $override->getRawOriginal('settings'),
+            );
+            $scopeMap = $this->getScopeMap($toolClass);
+
+            foreach ($overrideSettings as $key => $value) {
+                if (($scopeMap[$key] ?? 'agent') === 'agent') {
+                    $result[$key] = ['value' => $value, 'source' => 'agent'];
+                }
+            }
+        }
+
+        // Fill in schema defaults where nothing is set yet
+        $scopeMap = $this->getScopeMap($toolClass);
+        foreach ($scopeMap as $key => $scope) {
+            if (!isset($result[$key])) {
+                $defaults = $this->getSchemaDefaults($toolClass);
+                if (isset($defaults[$key])) {
+                    $result[$key] = ['value' => $defaults[$key], 'source' => 'default'];
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Return only the raw agent override (without merging global defaults).
+     * Used by the frontend to show which fields are actually stored in the override.
+     *
+     * @return array<string, mixed>
+     */
+    public function getRawAgentOverride(string $toolClass, int $agentId): array
+    {
+        $override = AgentToolOverride::where('agent_id', $agentId)
+            ->where('tool_class', $toolClass)
+            ->first();
+
+        if ($override === null) {
+            return [];
+        }
+
+        return $this->decodeSettings($toolClass, $override->getRawOriginal('settings'));
     }
 }

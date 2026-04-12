@@ -24,6 +24,7 @@ use Throwable;
     type: 'password',
     description: 'API key for api.tavily.com/search (Optimized for LLMs)',
     scope: 'agent',
+    required: true,
 )]
 #[ToolParameter(
     name: 'query',

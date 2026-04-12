@@ -64,6 +64,11 @@ export const useAgentStore = defineStore('agent', () => {
     currentAgentTasks.value = result.tasks
   }
 
+  async function deleteTask(taskId: number): Promise<void> {
+    await api.delete(`/tasks/${taskId}`)
+    currentAgentTasks.value = currentAgentTasks.value.filter(t => t.id !== taskId)
+  }
+
   // ── Tools ───────────────────────────────────────────────────────────────────
 
   async function enableTool(agentId: number, toolName: string): Promise<AgentTool> {
@@ -116,6 +121,7 @@ export const useAgentStore = defineStore('agent', () => {
     updateAgent,
     deleteAgent,
     fetchAgentTasks,
+    deleteTask,
     enableTool,
     disableTool,
     patchTool,

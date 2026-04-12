@@ -8,7 +8,10 @@ use FastRoute\Dispatcher;
 
 use function FastRoute\simpleDispatcher;
 
+use LogicException;
 use Psr\Container\ContainerInterface;
+use ReflectionMethod;
+use ReflectionNamedType;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -62,7 +65,41 @@ final class Router
 
         $controller = $this->container->get($controllerClass);
 
-        return $controller->$method($request);
+        // Resolve method parameters using reflection so scalars are coerced to their
+        // declared types (e.g. string "42" → int 42 for (Request $request, int $id)).
+        // Path variables are matched by name; parameters with no matching variable use
+        // their default value (or null if none).
+        $params = (new ReflectionMethod($controllerClass, $method))->getParameters();
+        $args = [];
+        foreach ($params as $i => $param) {
+            if ($i === 0) {
+                $args[] = $request;
+                continue;
+            }
+            // Only pass arguments that correspond to actual path variables.
+            if (!array_key_exists($param->getName(), $vars)) {
+                if (!$param->isOptional()) {
+                    throw new LogicException(
+                        sprintf(
+                            'Required parameter "%s" in %s::%s() has no matching route variable.',
+                            $param->getName(),
+                            $controllerClass,
+                            $method,
+                        ),
+                    );
+                }
+                continue; // let the default value be used
+            }
+            $value = $vars[$param->getName()];
+            $type = $param->getType();
+            if ($type instanceof ReflectionNamedType && $type->getName() === 'int') {
+                $args[] = (int) $value;
+            } else {
+                $args[] = $value;
+            }
+        }
+
+        return $controller->$method(...$args);
     }
 
     private function notFound(): JsonResponse

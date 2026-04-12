@@ -24,6 +24,7 @@ use Throwable;
     type: 'password',
     description: 'API key for google.serper.dev (Google Search)',
     scope: 'agent',
+    required: true,
 )]
 #[ToolParameter(
     name: 'q',

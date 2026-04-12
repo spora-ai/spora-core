@@ -126,7 +126,15 @@ watch(
 
 onMounted(async () => {
   taskStore.clearActiveTask()
-  await taskStore.fetchTaskDetail(taskId.value)
+  try {
+    await taskStore.fetchTaskDetail(taskId.value)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      router.push({ name: 'dashboard' })
+      return
+    }
+    throw e
+  }
   scrollToBottom()
   if (task.value && !taskStore.isTerminal) {
     taskStore.startDetailPolling(taskId.value)

@@ -33,6 +33,7 @@ return static function (RouteCollector $r): void {
     $r->addRoute('POST', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentController::class, 'enableTool']);
     $r->addRoute('PATCH', '/api/v1/agents/{id}/tools/{toolId}', [AgentController::class, 'patchTool']);
     $r->addRoute('DELETE', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentController::class, 'disableTool']);
+    $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/status', [AgentController::class, 'getToolStatus']);
 
     // Agent tools — per-agent credential overrides
     $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/override', [AgentController::class, 'getOverride']);
@@ -50,6 +51,7 @@ return static function (RouteCollector $r): void {
     $r->addRoute('GET', '/api/v1/tasks/{taskId}', [TaskController::class, 'show']);
     $r->addRoute('POST', '/api/v1/tasks/{taskId}/approve', [TaskController::class, 'approve']);
     $r->addRoute('POST', '/api/v1/tasks/{taskId}/reject', [TaskController::class, 'reject']);
+    $r->addRoute('DELETE', '/api/v1/tasks/{taskId}', [TaskController::class, 'destroy']);
 
     // Recipes
     $r->addRoute('GET', '/api/v1/recipes', [RecipeController::class, 'index']);

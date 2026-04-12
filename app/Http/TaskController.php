@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Auth\AuthService;
@@ -226,6 +227,30 @@ final class TaskController
         $this->mercure->publish($fresh->id, $this->taskResource($fresh));
 
         return new JsonResponse(['data' => ['task' => $this->taskResource($fresh)]]);
+    }
+
+    /**
+     * DELETE /api/v1/tasks/{taskId}
+     */
+    public function destroy(Request $request): Response
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
+
+        if ($task === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+
+        Capsule::connection()->transaction(function () use ($task): void {
+            TaskHistory::where('task_id', $task->id)->delete();
+            ToolCall::where('task_id', $task->id)->delete();
+            $task->delete();
+        });
+
+        return new Response(null, Response::HTTP_NO_CONTENT);
     }
 
     // -------------------------------------------------------------------------

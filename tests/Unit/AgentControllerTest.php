@@ -545,36 +545,236 @@ test('deleteOverride removes the override and returns 204', function (): void {
     expect($body['data']['settings'])->toBe([]);
 });
 
-test('putOverride returns 403 when tool is not assigned to the agent', function (): void {
+test('putOverride saves agent-scoped settings even when tool is not enabled', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
     $agentId = createAgent($controller);
 
-    // Attempt to set an override without enabling the tool first
+    // Override is now allowed even without enabling the tool first
     $request = jsonRequest('PUT', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override', ['api_key' => 'secret-key']);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
     $response = $controller->putOverride($request);
 
-    expect($response->getStatusCode())->toBe(403);
+    expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
-    expect($body['error']['code'])->toBe('FORBIDDEN');
+    expect($body['data']['settings']['api_key'])->toBe('***');
 });
 
-test('deleteOverride returns 403 when tool is not assigned to the agent', function (): void {
+test('deleteOverride succeeds even when tool is not enabled', function (): void {
     clearSession();
     [$controller, $authService] = makeAgentController();
     registerUser($authService);
     $agentId = createAgent($controller);
 
-    // Attempt to delete an override without enabling the tool first
-    $request = jsonRequest('DELETE', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override');
+    // First save an override (no enable needed)
+    $putReq = jsonRequest('PUT', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override', ['api_key' => 'secret-key']);
+    $putReq->attributes->set('id', $agentId);
+    $putReq->attributes->set('toolId', 'test_tool');
+    $controller->putOverride($putReq);
+
+    // Now delete without enabling first
+    $delReq = jsonRequest('DELETE', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override');
+    $delReq->attributes->set('id', $agentId);
+    $delReq->attributes->set('toolId', 'test_tool');
+    $response = $controller->deleteOverride($delReq);
+
+    expect($response->getStatusCode())->toBe(204);
+    expect($response->getContent())->toBe('');
+});
+
+// ---------------------------------------------------------------------------
+// getToolStatus
+// ---------------------------------------------------------------------------
+
+test('getToolStatus returns is_enabled false and missing_required when tool not enabled', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/status');
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
-    $response = $controller->deleteOverride($request);
 
-    expect($response->getStatusCode())->toBe(403);
+    $response = $controller->getToolStatus($request);
+
+    expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
-    expect($body['error']['code'])->toBe('FORBIDDEN');
+    expect($body['data']['is_enabled'])->toBe(false);
+    // TestTool has no required settings, so missing_required should be empty
+    expect($body['data']['missing_required'])->toBe([]);
+    expect($body['data']['can_enable'])->toBe(true);
+});
+
+test('getToolStatus returns is_enabled true when tool is enabled', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq->attributes->set('id', $agentId);
+    $enableReq->attributes->set('toolId', 'test_tool');
+    $controller->enableTool($enableReq);
+
+    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/status');
+    $request->attributes->set('id', $agentId);
+    $request->attributes->set('toolId', 'test_tool');
+
+    $response = $controller->getToolStatus($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['is_enabled'])->toBe(true);
+});
+
+test('getToolStatus returns 404 for non-existent agent', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+
+    $request = jsonRequest('GET', '/api/v1/agents/99999/tools/' . urlencode('test_tool') . '/status');
+    $request->attributes->set('id', 99999);
+    $request->attributes->set('toolId', 'test_tool');
+
+    $response = $controller->getToolStatus($request);
+
+    expect($response->getStatusCode())->toBe(404);
+});
+
+// ---------------------------------------------------------------------------
+// enableTool enhanced response with missing_required
+// ---------------------------------------------------------------------------
+
+test('enableTool returns warning and missing_required when settings are incomplete', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    $request = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $request->attributes->set('id', $agentId);
+    $request->attributes->set('toolId', 'test_tool');
+
+    $response = $controller->enableTool($request);
+
+    expect($response->getStatusCode())->toBe(201);
+    $body = json_decode($response->getContent(), true);
+    // TestTool has no required fields so no warning expected
+    expect($body['data']['tool']['tool_class'])->toBe(TestTool::class);
+    expect($body['data'])->not()->toHaveKey('warning');
+});
+
+test('enableTool is idempotent: no warning on already-enabled tool', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq->attributes->set('id', $agentId);
+    $enableReq->attributes->set('toolId', 'test_tool');
+    $controller->enableTool($enableReq); // First call
+
+    $response = $controller->enableTool($enableReq); // Second call (idempotent)
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data'])->not()->toHaveKey('warning');
+});
+
+// ---------------------------------------------------------------------------
+// getOverride with ?raw=true
+// ---------------------------------------------------------------------------
+
+test('getOverride with raw=true returns only stored agent override keys (passwords masked)', function (): void {
+    clearSession();
+    [$controller, $authService, $toolConfig] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    // Enable the tool first
+    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq->attributes->set('id', $agentId);
+    $enableReq->attributes->set('toolId', 'test_tool');
+    $controller->enableTool($enableReq);
+
+    // Set global settings and agent override
+    $toolConfig->putGlobalSettings(TestTool::class, [
+        'api_key'     => 'global-key',
+        'max_results' => '20',
+    ]);
+    $toolConfig->putAgentOverride(TestTool::class, $agentId, [
+        'api_key' => 'agent-key', // scope: agent, stored; type: password → masked by maskForApi
+    ]);
+
+    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override?raw=true');
+    $request->attributes->set('id', $agentId);
+    $request->attributes->set('toolId', 'test_tool');
+
+    $response = $controller->getOverride($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    // api_key is type: password → maskForApi masks it to ***
+    expect($body['data']['settings']['api_key'])->toBe('***');
+    expect(array_key_exists('max_results', $body['data']['settings']))->toBe(false);
+});
+
+test('getOverride with raw=true returns empty when no override exists', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override?raw=true');
+    $request->attributes->set('id', $agentId);
+    $request->attributes->set('toolId', 'test_tool');
+
+    $response = $controller->getOverride($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['settings'])->toBe([]);
+});
+
+test('getOverride returns effective settings with source annotation (without raw param)', function (): void {
+    clearSession();
+    [$controller, $authService, $toolConfig] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    // Enable the tool
+    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq->attributes->set('id', $agentId);
+    $enableReq->attributes->set('toolId', 'test_tool');
+    $controller->enableTool($enableReq);
+
+    // Set global settings and agent override
+    $toolConfig->putGlobalSettings(TestTool::class, [
+        'api_key'     => 'global-key',
+        'max_results' => '20',
+    ]);
+    $toolConfig->putAgentOverride(TestTool::class, $agentId, [
+        'api_key' => 'agent-key',
+    ]);
+
+    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override');
+    $request->attributes->set('id', $agentId);
+    $request->attributes->set('toolId', 'test_tool');
+
+    $response = $controller->getOverride($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    $settings = $body['data']['settings'];
+
+    // api_key is overridden by agent, but is type: password → value is masked
+    expect($settings['api_key']['value'])->toBe('***');
+    expect($settings['api_key']['source'])->toBe('agent');
+    // max_results is from global (not overridden, scope: global)
+    expect($settings['max_results']['value'])->toBe('20');
+    expect($settings['max_results']['source'])->toBe('global');
 });

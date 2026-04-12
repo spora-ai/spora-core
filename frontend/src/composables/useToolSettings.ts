@@ -28,6 +28,20 @@ export interface ToolSchema {
   settings_schema: ToolSettingSchema[]
 }
 
+export interface ToolStatus {
+  tool_class: string
+  is_enabled: boolean
+  missing_required: string[]
+  can_enable: boolean
+}
+
+export interface SettingsWithSource {
+  [key: string]: {
+    value: string | boolean | null
+    source: 'global' | 'agent' | 'default'
+  }
+}
+
 export function useToolSettings(agentId?: number) {
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -105,8 +119,73 @@ export function useToolSettings(agentId?: number) {
     return result.settings ?? {}
   }
 
+  // ── Agent-specific helpers (only when agentId is provided) ─────────────────
+
+  async function getToolStatus(toolId: string): Promise<ToolStatus | null> {
+    if (isGlobal()) {
+      return null
+    }
+    try {
+      return await api.get<ToolStatus>(
+        `/agents/${agentId}/tools/${encodeURIComponent(toolId)}/status`,
+      )
+    } catch {
+      // Return null for any error — lets caller decide how to handle
+      return null
+    }
+  }
+
+  async function getRawOverride(toolId: string): Promise<Record<string, string>> {
+    if (isGlobal()) {
+      return {}
+    }
+    try {
+      const result = await api.get<{ settings: Record<string, string> }>(
+        `/agents/${agentId}/tools/${encodeURIComponent(toolId)}/override?raw=true`,
+      )
+      return result.settings ?? {}
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        return {}
+      }
+      throw e
+    }
+  }
+
+  async function getGlobalSettings(toolId: string): Promise<Record<string, string>> {
+    try {
+      const result = await api.get<{ settings: Record<string, string> }>(
+        `/tools/${encodeURIComponent(toolId)}/settings`,
+      )
+      return result.settings ?? {}
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        return {}
+      }
+      throw e
+    }
+  }
+
+  async function getSettingsWithSource(toolId: string): Promise<SettingsWithSource> {
+    if (isGlobal()) {
+      return {}
+    }
+    try {
+      const result = await api.get<{ settings: SettingsWithSource }>(
+        `/agents/${agentId}/tools/${encodeURIComponent(toolId)}/override`,
+      )
+      return result.settings ?? {}
+    } catch (e) {
+      return {}
+    }
+  }
+
   return {
     getSettings,
     putSettings,
+    getToolStatus,
+    getRawOverride,
+    getGlobalSettings,
+    getSettingsWithSource,
   }
 }

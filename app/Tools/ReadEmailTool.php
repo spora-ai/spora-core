@@ -22,7 +22,7 @@ use Webklex\PHPIMAP\ClientManager;
 #[ToolSetting(key: 'core.imap.port', label: 'IMAP Port', type: 'text', description: 'Usually 993', scope: 'agent')]
 #[ToolSetting(key: 'core.imap.encryption', label: 'IMAP Encryption', type: 'text', description: 'ssl or tls', scope: 'agent')]
 #[ToolSetting(key: 'core.imap.username', label: 'IMAP Username', type: 'text', description: 'Email address', scope: 'agent')]
-#[ToolSetting(key: 'core.imap.password', label: 'IMAP Password', type: 'password', description: 'Email password or App password', scope: 'agent')]
+#[ToolSetting(key: 'core.imap.password', label: 'IMAP Password', type: 'password', description: 'Email password or App password', scope: 'agent', required: true)]
 #[ToolParameter(
     name: 'limit',
     type: 'integer',

@@ -7,6 +7,8 @@ use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Http\TaskController;
 use Spora\Models\Agent;
 use Spora\Models\Task;
+use Spora\Models\TaskHistory;
+use Spora\Models\ToolCall;
 use Spora\Services\MercurePublisherInterface;
 
 // ---------------------------------------------------------------------------
@@ -184,9 +186,9 @@ it('show respects since_sequence to filter task history', function (): void {
         'max_steps'   => 10,
     ]);
 
-    Spora\Models\TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'First']);
-    Spora\Models\TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'Second']);
-    Spora\Models\TaskHistory::create(['task_id' => $task->id, 'sequence' => 2, 'role' => 'user', 'content' => 'Third']);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'First']);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'Second']);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 2, 'role' => 'user', 'content' => 'Third']);
 
     $req = jsonRequest('GET', "/api/v1/tasks/{$task->id}?since_sequence=1");
     $req->attributes->set('taskId', $task->id);
@@ -376,4 +378,141 @@ it('approve legacy format with valid provider_call_id still calls orchestrator r
 
     $resp = $controller->approve($req);
     expect($resp->getStatusCode())->toBe(200);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// destroy()
+// ---------------------------------------------------------------------------
+
+it('destroy throws UnauthenticatedException when not logged in', function (): void {
+    [$controller] = makeTaskController();
+    clearSession();
+
+    $req = jsonRequest('DELETE', '/api/v1/tasks/1');
+    $req->attributes->set('taskId', 1);
+
+    expect(fn() => $controller->destroy($req))
+        ->toThrow(UnauthenticatedException::class);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('destroy returns 404 for unknown task', function (): void {
+    [$controller, $authService] = makeTaskController();
+    seedUserAndAgent($authService);
+
+    $req = jsonRequest('DELETE', '/api/v1/tasks/99999');
+    $req->attributes->set('taskId', 99999);
+
+    $resp = $controller->destroy($req);
+    expect($resp->getStatusCode())->toBe(404);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('destroy returns 404 for task belonging to another user', function (): void {
+    [$controller, $authService] = makeTaskController();
+    $userId = $authService->register('other@example.com', 'Password1!');
+    simulateLoggedInSession($userId, 'other@example.com');
+
+    $otherAgent = Agent::create([
+        'user_id'      => $userId,
+        'name'         => 'Other Agent',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ]);
+    $otherTask = Task::create([
+        'agent_id'    => $otherAgent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'Other user task',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    // Authenticated as a different user — the seeded user has no access
+    [$controller, $authService] = makeTaskController();
+    seedUserAndAgent($authService); // logs in as 'task@example.com'
+
+    $req = jsonRequest('DELETE', "/api/v1/tasks/{$otherTask->id}");
+    $req->attributes->set('taskId', $otherTask->id);
+
+    $resp = $controller->destroy($req);
+    expect($resp->getStatusCode())->toBe(404);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('destroy deletes task and returns 204', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent] = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'Delete me',
+        'step_count'  => 1,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('DELETE', "/api/v1/tasks/{$task->id}");
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->destroy($req);
+    expect($resp->getStatusCode())->toBe(204);
+    expect(Task::find($task->id))->toBeNull();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('destroy cascade-deletes task_history rows', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent] = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'History test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'First']);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'Second']);
+
+    $req = jsonRequest('DELETE', "/api/v1/tasks/{$task->id}");
+    $req->attributes->set('taskId', $task->id);
+
+    $controller->destroy($req);
+
+    expect(TaskHistory::where('task_id', $task->id)->count())->toBe(0);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('destroy cascade-deletes tool_calls rows', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent] = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'ToolCalls test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    ToolCall::create([
+        'task_id'          => $task->id,
+        'agent_id'         => $agent->id,
+        'provider_call_id' => 'call_delete_test',
+        'tool_name'        => 'stub_output',
+        'tool_class'       => 'StubOutputTool',
+        'tool_type'        => 'function',
+        'status'           => 'EXECUTED',
+        'proposed_arguments' => [],
+        'approved_arguments' => ['key' => 'val'],
+    ]);
+
+    $req = jsonRequest('DELETE', "/api/v1/tasks/{$task->id}");
+    $req->attributes->set('taskId', $task->id);
+
+    $controller->destroy($req);
+
+    expect(ToolCall::where('task_id', $task->id)->count())->toBe(0);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());

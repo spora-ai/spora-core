@@ -24,6 +24,7 @@ use Throwable;
     type: 'password',
     description: 'API key for GNews.io',
     scope: 'agent',
+    required: true,
 )]
 #[ToolParameter(
     name: 'q',

@@ -210,7 +210,17 @@ final class AgentController
 
         $tool = AgentTool::where('agent_id', $agent->id)->where('tool_class', $toolClass)->first();
 
-        return new JsonResponse(['data' => ['tool' => $this->toolResource($tool)]], Response::HTTP_CREATED);
+        // Check if required settings are missing
+        $effective = $this->toolConfigService->getEffectiveSettings($toolClass, $agent->id);
+        $missing   = $this->toolConfigService->getMissingRequiredSettings($toolClass, $effective);
+
+        $responseData = ['tool' => $this->toolResource($tool)];
+        if (!empty($missing)) {
+            $responseData['warning'] = 'Required settings are missing. The tool may not work until credentials are configured.';
+            $responseData['missing_required'] = $missing;
+        }
+
+        return new JsonResponse(['data' => $responseData], Response::HTTP_CREATED);
     }
 
     /**
@@ -254,6 +264,35 @@ final class AgentController
     }
 
     /**
+     * GET /api/v1/agents/{id}/tools/{toolId}/status
+     */
+    public function getToolStatus(Request $request): JsonResponse
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
+        $toolId = (string) $request->attributes->get('toolId', '');
+        $toolClass = $this->toolConfigService->resolveToolClass($toolId);
+
+        if ($agent === null || $toolClass === null) {
+            return $this->notFound();
+        }
+
+        $isEnabled = AgentTool::where('agent_id', $agent->id)
+            ->where('tool_class', $toolClass)
+            ->exists();
+
+        $effective = $this->toolConfigService->getEffectiveSettings($toolClass, $agent->id);
+        $missing   = $this->toolConfigService->getMissingRequiredSettings($toolClass, $effective);
+
+        return new JsonResponse(['data' => [
+            'tool_class'      => $toolClass,
+            'is_enabled'      => $isEnabled,
+            'missing_required' => $missing,
+            'can_enable'      => empty($missing),
+        ]]);
+    }
+
+    /**
      * DELETE /api/v1/agents/{id}/tools/{toolClass}/enable
      */
     public function disableTool(Request $request): JsonResponse
@@ -278,6 +317,10 @@ final class AgentController
 
     /**
      * GET /api/v1/agents/{id}/tools/{toolClass}/override
+     *
+     * Query params:
+     *   ?raw=true  — return only the raw agent override (no global merge)
+     *   Otherwise — return effective settings with source annotation per field
      */
     public function getOverride(Request $request): JsonResponse
     {
@@ -290,6 +333,7 @@ final class AgentController
 
         $toolId    = (string) $request->attributes->get('toolId', '');
         $toolClass = $this->toolConfigService->resolveToolClass($toolId);
+        $rawOnly   = $request->query->get('raw') === 'true';
 
         // llm_configuration is not a registered tool class, so resolveToolClass
         // returns null. Handle it as a special case: fall back to LLMDriverConfiguration.
@@ -321,8 +365,31 @@ final class AgentController
             return $this->notFound();
         }
 
-        $settings = $this->toolConfigService->getEffectiveSettings($toolClass, $agent->id);
-        $masked   = $this->toolConfigService->maskForApi($settings, $toolClass);
+        if ($rawOnly) {
+            // Return only the raw agent override (no global merge)
+            $settings = $this->toolConfigService->getRawAgentOverride($toolClass, $agent->id);
+            $masked   = $this->toolConfigService->maskForApi($settings, $toolClass);
+
+            return new JsonResponse(['data' => ['settings' => $masked]]);
+        }
+
+        // Return effective settings with source annotation
+        $annotated = $this->toolConfigService->getEffectiveSettingsWithSource($toolClass, $agent->id);
+        $masked    = [];
+
+        foreach ($annotated as $key => $item) {
+            $masked[$key] = [
+                'value'  => $item['value'],
+                'source' => $item['source'],
+            ];
+            // Mask password values
+            if ($item['value'] !== null && $item['value'] !== '') {
+                $passwordKeys = $this->getToolPasswordKeys($toolClass);
+                if (in_array($key, $passwordKeys, true)) {
+                    $masked[$key]['value'] = '***';
+                }
+            }
+        }
 
         return new JsonResponse(['data' => ['settings' => $masked]]);
     }
@@ -338,18 +405,6 @@ final class AgentController
 
         if ($agent === null || $toolClass === null) {
             return $this->notFound();
-        }
-
-        // Verify the tool is explicitly assigned to this agent before allowing an override
-        $assignedTool = AgentTool::where('agent_id', $agent->id)
-            ->where('tool_class', $toolClass)
-            ->first();
-        if ($assignedTool === null) {
-            return $this->error(
-                'FORBIDDEN',
-                'Tool is not assigned to this agent. Enable the tool first.',
-                Response::HTTP_FORBIDDEN,
-            );
         }
 
         try {
@@ -379,18 +434,6 @@ final class AgentController
 
         if ($agent === null || $toolClass === null) {
             return $this->notFound();
-        }
-
-        // Verify the tool is explicitly assigned to this agent before deleting an override
-        $assignedTool = AgentTool::where('agent_id', $agent->id)
-            ->where('tool_class', $toolClass)
-            ->first();
-        if ($assignedTool === null) {
-            return $this->error(
-                'FORBIDDEN',
-                'Tool is not assigned to this agent. Enable the tool first.',
-                Response::HTTP_FORBIDDEN,
-            );
         }
 
         $this->toolConfigService->deleteAgentOverride($toolClass, $agent->id);
@@ -467,6 +510,29 @@ final class AgentController
         }
 
         return $this->toolConfigService->resolveToolClass($toolId);
+    }
+
+    /**
+     * Return keys of all #[ToolSetting] attributes where type === 'password' on a given class.
+     *
+     * @return list<string>
+     */
+    private function getToolPasswordKeys(string $toolClass): array
+    {
+        if (!class_exists($toolClass)) {
+            return [];
+        }
+
+        $keys = [];
+        foreach ((new ReflectionClass($toolClass))->getAttributes(\Spora\Tools\Attributes\ToolSetting::class) as $attr) {
+            /** @var \Spora\Tools\Attributes\ToolSetting $instance */
+            $instance = $attr->newInstance();
+            if ($instance->type === 'password') {
+                $keys[] = $instance->key;
+            }
+        }
+
+        return $keys;
     }
 
     private function decodeJson(Request $request): array

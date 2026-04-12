@@ -22,7 +22,7 @@ use Throwable;
 )]
 #[ToolSetting(key: 'core.caldav.url', label: 'CalDAV URL', type: 'text', description: 'URL to the Calendar server (e.g. Nextcloud, Baikal)', scope: 'agent')]
 #[ToolSetting(key: 'core.caldav.username', label: 'Username', type: 'text', description: 'CalDAV username', scope: 'agent')]
-#[ToolSetting(key: 'core.caldav.password', label: 'Password', type: 'password', description: 'CalDAV password or app token', scope: 'agent')]
+#[ToolSetting(key: 'core.caldav.password', label: 'Password', type: 'password', description: 'CalDAV password or app token', scope: 'agent', required: true)]
 #[ToolParameter(
     name: 'start_date',
     type: 'string',

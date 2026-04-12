@@ -19,6 +19,7 @@ const agentId = computed(() => Number(route.params.id))
 const prompt = ref('')
 const composerError = ref<string | null>(null)
 const submitting = ref(false)
+const confirmDeleteTaskId = ref<number | null>(null)
 
 async function submitPrompt(): Promise<void> {
   const text = prompt.value.trim()
@@ -40,6 +41,25 @@ function onComposerKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
     e.preventDefault()
     submitPrompt()
+  }
+}
+
+function confirmDelete(taskId: number, event: Event): void {
+  event.stopPropagation()
+  confirmDeleteTaskId.value = taskId
+}
+
+function cancelDelete(event: Event): void {
+  event.stopPropagation()
+  confirmDeleteTaskId.value = null
+}
+
+async function executeDelete(taskId: number, event: Event): Promise<void> {
+  event.stopPropagation()
+  try {
+    await agentStore.deleteTask(taskId)
+  } finally {
+    confirmDeleteTaskId.value = null
   }
 }
 
@@ -232,29 +252,41 @@ onUnmounted(() => {
           <div class="px-6 py-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground border-b border-border">
 
             <!-- LLM info -->
-            <div class="flex items-center gap-1.5">
+            <button
+              @click="router.push({ name: 'agent-settings', params: { id: agentId } })"
+              class="flex items-center gap-1.5 hover:text-foreground transition-colors cursor-pointer"
+              title="Go to agent settings"
+            >
               <svg class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
               </svg>
               <span v-if="agentStore.currentAgent.llm_driver_config_id">Custom LLM config</span>
               <span v-else>Global default LLM config</span>
-            </div>
+            </button>
 
             <!-- Tools count -->
-            <div class="flex items-center gap-1.5">
+            <button
+              @click="router.push({ name: 'agent-settings', params: { id: agentId } })"
+              class="flex items-center gap-1.5 hover:text-foreground transition-colors cursor-pointer"
+              title="Go to agent tools"
+            >
               <svg class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
               </svg>
               <span>{{ agentStore.currentAgent.tools.length }} tools enabled</span>
-            </div>
+            </button>
 
             <!-- Max steps -->
-            <div class="flex items-center gap-1.5">
+            <button
+              @click="router.push({ name: 'agent-settings', params: { id: agentId } })"
+              class="flex items-center gap-1.5 hover:text-foreground transition-colors cursor-pointer"
+              title="Go to agent settings"
+            >
               <svg class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
               <span>Max {{ agentStore.currentAgent.max_steps }} steps</span>
-            </div>
+            </button>
           </div>
 
           <!-- ── Task History ──────────────────────────────────────────── -->
@@ -274,30 +306,71 @@ onUnmounted(() => {
               <li
                 v-for="task in agentStore.currentAgentTasks"
                 :key="task.id"
-                @click="router.push({ name: 'task', params: { id: task.id } })"
-                class="flex items-center gap-4 px-6 py-4 cursor-pointer hover:bg-muted/40 active:bg-muted transition-colors"
+                class="flex items-center gap-4 px-6 py-4 hover:bg-muted/40 active:bg-muted transition-colors"
+                :class="{ 'bg-muted/40': confirmDeleteTaskId === task.id }"
               >
-                <!-- Status indicator -->
-                <span
-                  class="shrink-0 h-2 w-2 rounded-full"
-                  :class="{
-                    'bg-blue-500': task.status === 'RUNNING' || task.status === 'PENDING_APPROVAL',
-                    'bg-green-500': task.status === 'COMPLETED',
-                    'bg-red-500': task.status === 'FAILED',
-                    'bg-muted-foreground': task.status === 'PENDING',
-                  }"
-                />
-                <div class="flex-1 min-w-0">
-                  <p class="text-sm font-medium truncate">{{ task.user_prompt }}</p>
-                  <p class="text-xs text-muted-foreground mt-0.5">
-                    {{ formatRelativeTime(task.updated_at) }}
-                    <span v-if="task.step_count > 0"> · {{ task.step_count }} step{{ task.step_count !== 1 ? 's' : '' }}</span>
-                  </p>
-                </div>
-                <TaskStatusBadge :status="task.status" class="shrink-0" />
-                <svg class="h-4 w-4 text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
+                <!-- Inline delete confirmation -->
+                <template v-if="confirmDeleteTaskId === task.id">
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium truncate">Delete this conversation?</p>
+                  </div>
+                  <button
+                    @click="executeDelete(task.id, $event)"
+                    class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg bg-red-600 hover:bg-red-700 px-3 text-xs font-medium text-white transition-colors"
+                  >
+                    Delete
+                  </button>
+                  <button
+                    @click="cancelDelete"
+                    class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg border border-border bg-background hover:bg-muted px-3 text-xs font-medium text-muted-foreground transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </template>
+
+                <!-- Normal row -->
+                <template v-else>
+                  <!-- Status indicator -->
+                  <span
+                    @click="router.push({ name: 'task', params: { id: task.id } })"
+                    class="shrink-0 h-2 w-2 rounded-full cursor-pointer"
+                    :class="{
+                      'bg-blue-500': task.status === 'RUNNING' || task.status === 'PENDING_APPROVAL',
+                      'bg-green-500': task.status === 'COMPLETED',
+                      'bg-red-500': task.status === 'FAILED',
+                      'bg-muted-foreground': task.status === 'PENDING',
+                    }"
+                  />
+                  <div
+                    @click="router.push({ name: 'task', params: { id: task.id } })"
+                    class="flex-1 min-w-0 cursor-pointer"
+                  >
+                    <p class="text-sm font-medium truncate">{{ task.user_prompt }}</p>
+                    <p class="text-xs text-muted-foreground mt-0.5">
+                      {{ formatRelativeTime(task.updated_at) }}
+                      <span v-if="task.step_count > 0"> · {{ task.step_count }} step{{ task.step_count !== 1 ? 's' : '' }}</span>
+                    </p>
+                  </div>
+                  <TaskStatusBadge :status="task.status" class="shrink-0" />
+                  <!-- Delete button -->
+                  <button
+                    @click="confirmDelete(task.id, $event)"
+                    class="shrink-0 h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                    title="Delete conversation"
+                  >
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                  <!-- Chevron -->
+                  <svg
+                    @click="router.push({ name: 'task', params: { id: task.id } })"
+                    class="h-4 w-4 text-muted-foreground shrink-0 cursor-pointer"
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </template>
               </li>
             </ul>
           </div>
