@@ -8,6 +8,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Core\Database;
 use Spora\Models\Task;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -30,6 +31,7 @@ final class WorkerRunCommand extends Command
     private mixed $lockFd = null;
 
     public function __construct(
+        private readonly Database            $database,
         private readonly OrchestratorInterface  $orchestrator,
         private readonly LoggerInterface        $logger,
         private readonly ContainerInterface     $container,
@@ -48,6 +50,8 @@ final class WorkerRunCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $this->database->bootDatabaseConnectionOnly();
+
         $isDaemon = (bool) $input->getOption('daemon');
 
         // Resolve stale-minutes: CLI always wins; omit flag → config → default (60)

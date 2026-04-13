@@ -26,6 +26,13 @@ use Throwable;
     scope: 'agent',
     required: true,
 )]
+#[ToolSetting(
+    key: 'core.newsapi.http_timeout',
+    label: 'HTTP Timeout',
+    type: 'text',
+    description: 'Seconds before an HTTP request fails (default: 30)',
+    scope: 'agent',
+)]
 #[ToolParameter(
     name: 'q',
     type: 'string',
@@ -39,6 +46,15 @@ final class NewsApiTool implements InputToolInterface
         private readonly HttpClientInterface $httpClient,
         private readonly ?LoggerInterface $logger = null,
     ) {}
+
+    private function effectiveTimeout(array $settings): int
+    {
+        if (isset($settings['core.newsapi.http_timeout']) && (int) $settings['core.newsapi.http_timeout'] > 0) {
+            return (int) $settings['core.newsapi.http_timeout'];
+        }
+        $envTimeout = (int) ($_ENV['SPORA_TOOL_HTTP_TIMEOUT'] ?? getenv('SPORA_TOOL_HTTP_TIMEOUT') ?: 0);
+        return $envTimeout > 0 ? $envTimeout : 30;
+    }
 
     public function execute(array $arguments, int $agentId): ToolResult
     {
@@ -55,6 +71,11 @@ final class NewsApiTool implements InputToolInterface
         }
 
         try {
+            $this->logger?->debug('NewsApiTool: executing request', [
+                'query' => $query,
+                'url' => 'https://newsapi.org/v2/everything',
+            ]);
+
             $response = $this->httpClient->request('GET', 'https://newsapi.org/v2/everything', [
                 'headers' => [
                     'X-Api-Key'  => $apiKey,
@@ -65,10 +86,15 @@ final class NewsApiTool implements InputToolInterface
                     'pageSize' => 10,
                     'sortBy'   => 'publishedAt',
                 ],
-                'timeout' => 30,
+                'timeout' => $this->effectiveTimeout($settings),
             ]);
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('NewsApiTool: response received', [
+                'status_code' => $statusCode,
+                'query' => $query,
+            ]);
+
             if ($statusCode >= 400) {
                 $errorBody = $response->getContent(false);
                 $this->logger?->error('NewsAPI Error', ['status' => $statusCode, 'body' => $errorBody]);

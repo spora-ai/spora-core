@@ -197,3 +197,51 @@ test('complete prepends the system prompt as the first message', function (): vo
     expect($capturedBody['messages'][0])->toBe(['role' => 'system', 'content' => 'Be concise.'])
         ->and($capturedBody['messages'][1])->toBe(['role' => 'user', 'content' => 'Hello']);
 });
+
+// ---------------------------------------------------------------------------
+// Timeout configuration
+// ---------------------------------------------------------------------------
+
+test('complete uses the timeout value passed at construction', function (): void {
+    $capturedOptions = [];
+
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$capturedOptions): MockResponse {
+        $capturedOptions = $options;
+        return new MockResponse(json_encode([
+            'id'      => 'cmp',
+            'choices' => [['finish_reason' => 'stop', 'message' => ['content' => 'ok']]],
+            'usage'   => ['prompt_tokens' => 1, 'completion_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    $driver = new OpenAICompatibleDriver(
+        apiKey: 'test-key',
+        model: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        httpClient: $client,
+        timeout: 120,
+    );
+
+    $driver->complete(makeRequest());
+
+    expect((int) $capturedOptions['timeout'])->toBe(120);
+});
+
+test('complete falls back to 45 seconds when no timeout is passed', function (): void {
+    $capturedOptions = [];
+
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$capturedOptions): MockResponse {
+        $capturedOptions = $options;
+        return new MockResponse(json_encode([
+            'id'      => 'cmp',
+            'choices' => [['finish_reason' => 'stop', 'message' => ['content' => 'ok']]],
+            'usage'   => ['prompt_tokens' => 1, 'completion_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    $driver = makeOpenAIDriver($client);
+
+    $driver->complete(makeRequest());
+
+    expect((int) $capturedOptions['timeout'])->toBe(45);
+});

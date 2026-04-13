@@ -23,6 +23,13 @@ use Throwable;
 #[ToolSetting(key: 'core.caldav.url', label: 'CalDAV URL', type: 'text', description: 'URL to the Calendar server (e.g. Nextcloud, Baikal)', scope: 'agent')]
 #[ToolSetting(key: 'core.caldav.username', label: 'Username', type: 'text', description: 'CalDAV username', scope: 'agent')]
 #[ToolSetting(key: 'core.caldav.password', label: 'Password', type: 'password', description: 'CalDAV password or app token', scope: 'agent', required: true)]
+#[ToolSetting(
+    key: 'core.caldav.http_timeout',
+    label: 'HTTP Timeout',
+    type: 'text',
+    description: 'Seconds before an HTTP request fails (default: 30)',
+    scope: 'agent',
+)]
 #[ToolParameter(
     name: 'start_date',
     type: 'string',
@@ -42,6 +49,15 @@ final class CalDavCalendarTool implements InputToolInterface
         private readonly HttpClientInterface $httpClient,
         private readonly ?LoggerInterface $logger = null,
     ) {}
+
+    private function effectiveTimeout(array $settings): int
+    {
+        if (isset($settings['core.caldav.http_timeout']) && (int) $settings['core.caldav.http_timeout'] > 0) {
+            return (int) $settings['core.caldav.http_timeout'];
+        }
+        $envTimeout = (int) ($_ENV['SPORA_TOOL_HTTP_TIMEOUT'] ?? getenv('SPORA_TOOL_HTTP_TIMEOUT') ?: 0);
+        return $envTimeout > 0 ? $envTimeout : 30;
+    }
 
     public function execute(array $arguments, int $agentId): ToolResult
     {
@@ -91,6 +107,12 @@ final class CalDavCalendarTool implements InputToolInterface
 XML;
 
         try {
+            $this->logger?->debug('CalDavCalendarTool: executing request', [
+                'url' => $url,
+                'start' => $startFormatted,
+                'end' => $endFormatted,
+            ]);
+
             $response = $this->httpClient->request('REPORT', $url, [
                 'headers' => [
                     'Depth'        => '1',
@@ -98,7 +120,11 @@ XML;
                 ],
                 'auth_basic' => [$username, $password],
                 'body'       => $xmlRequest,
-                'timeout'    => 30,
+                'timeout'    => $this->effectiveTimeout($settings),
+            ]);
+
+            $this->logger?->debug('CalDavCalendarTool: response received', [
+                'status_code' => $response->getStatusCode(),
             ]);
 
             if ($response->getStatusCode() >= 400) {

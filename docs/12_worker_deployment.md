@@ -173,8 +173,10 @@ Alert when either count is non-zero for more than 2 consecutive minutes.
 
 | Variable | Default | Config key | Description |
 |---|---|---|---|
-| `SPORA_WORKER_MODE` | `sync` | `worker_mode` | `sync` \| `cron` \| `worker` |
+| `SPORA_SYNC_MODE` | `true` | `sync_mode` | `true` = inline (dev), `false` = queued (worker/cron) |
 | `SPORA_WORKER_STALE_MINUTES` | `60` | `worker_stale_minutes` | Minutes before a `RUNNING` task is considered orphaned (0 = disabled) |
+| `SPORA_LLM_TIMEOUT` | `300` | `llm_timeout` | Seconds for LLM API calls (reasoning models may need 300+) |
+| `SPORA_TOOL_HTTP_TIMEOUT` | `30` | `tool_http_timeout` | Seconds for tool HTTP requests (web search, calendars, etc.) |
 | `SPORA_SECRET_KEY` | — | — | Base64 master encryption key (required for production) |
 | `SPORA_DATABASE_URL` | — | `db_*` keys | Database DSN |
 | `SPORA_LOG_LEVEL` | `warning` | `log_level` | `debug` \| `info` \| `warning` \| `error` |

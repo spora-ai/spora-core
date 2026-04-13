@@ -24,6 +24,7 @@ class DriverFactory
     public function __construct(
         private readonly LoggerInterface    $logger,
         private readonly LLMConfigService $llmConfigService,
+        private readonly int               $llmTimeout = 300,
     ) {}
 
     public function makeFromAgent(Agent $agent): LLMDriverInterface
@@ -53,6 +54,7 @@ class DriverFactory
             baseUrl: 'https://api.openai.com/v1',
             httpClient: \Symfony\Component\HttpClient\HttpClient::create(),
             logger: $this->logger,
+            timeout: $this->llmTimeout,
         );
     }
 
@@ -74,12 +76,18 @@ class DriverFactory
             );
         }
 
+        // Per-LLM-config timeout override; falls back to the global default.
+        $timeout = isset($settings['timeout']) && $settings['timeout'] !== ''
+            ? (int) $settings['timeout']
+            : $this->llmTimeout;
+
         return new $driverClass(
             apiKey: (string) ($settings['api_key'] ?? ''),
             model: (string) ($settings['model'] ?? ''),
             baseUrl: (string) ($settings['base_url'] ?? ''),
             httpClient: \Symfony\Component\HttpClient\HttpClient::create(),
             logger: $this->logger,
+            timeout: $timeout,
         );
     }
 }

@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTaskStore } from '@/stores/tasks'
 import { ApiError } from '@/api/client'
+import { renderMarkdown } from '@/composables/useMarkdown'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
 import type { HistoryEntry } from '@/types/task'
 
@@ -13,6 +14,18 @@ const taskStore = useTaskStore()
 const taskId = computed(() => Number(route.params.id))
 const task = computed(() => taskStore.activeTask)
 const pending = computed(() => taskStore.pendingToolCalls)
+
+// Back navigation: go to the task's agent page if available, otherwise dashboard
+const backDestination = computed(() => {
+  if (task.value?.agent_id) {
+    return { name: 'agent', params: { id: task.value.agent_id } }
+  }
+  return { name: 'dashboard' }
+})
+
+// Track whether we've successfully loaded the task at least once
+// to distinguish "null during init" from "null after deletion"
+let taskLoadSucceeded = false
 
 // Approval state: one editable arguments object per pending tool call (keyed by tool call id)
 const approvalArgs = ref<Record<number, string>>({})
@@ -52,6 +65,15 @@ const chatMessages = computed((): ChatMessage[] => {
     }
     // assistant with null content = tool call request, rendered via pending panel
   }
+  // Deduplicate: skip last assistant bubble if it matches final_response (trimmed)
+  const last = result[result.length - 1]
+  if (
+    last?.kind === 'assistant' &&
+    task.value.final_response !== null &&
+    last.entry.content?.trim() === task.value.final_response.trim()
+  ) {
+    result.pop()
+  }
   return result
 })
 
@@ -64,7 +86,8 @@ function truncate(text: string | null, max = 300): string {
 
 function initApprovalArgs(): void {
   const fresh: Record<number, string> = {}
-  for (const tc of pending.value) {
+  const calls = Array.isArray(pending.value) ? pending.value : []
+  for (const tc of calls) {
     // Preserve any edits the user has made
     if (approvalArgs.value[tc.id] === undefined) {
       fresh[tc.id] = JSON.stringify(tc.proposed_arguments ?? {}, null, 2)
@@ -75,13 +98,13 @@ function initApprovalArgs(): void {
   approvalArgs.value = fresh
 }
 
-watch(() => pending.value.length, initApprovalArgs, { immediate: true })
+watch(() => pending.value?.length ?? 0, initApprovalArgs, { immediate: true })
 
 async function approveAll(): Promise<void> {
   approveError.value = null
   approvingAll.value = true
   try {
-    const approvals = pending.value.map((tc) => {
+    const approvals = (pending.value ?? []).map((tc) => {
       let args: Record<string, unknown> = {}
       try {
         args = JSON.parse(approvalArgs.value[tc.id] ?? '{}') as Record<string, unknown>
@@ -120,24 +143,34 @@ async function reject(): Promise<void> {
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 
 watch(
-  () => task.value?.history.length,
+  () => task.value?.history?.length ?? 0,
   () => scrollToBottom(),
 )
 
-onMounted(async () => {
-  taskStore.clearActiveTask()
-  try {
-    await taskStore.fetchTaskDetail(taskId.value)
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) {
-      router.push({ name: 'dashboard' })
-      return
-    }
-    throw e
+// Redirect to the agent page if task was deleted (e.g. via another tab or polling 404),
+// but only after we successfully loaded it at least once (not on initial null)
+watch(task, (newTask) => {
+  if (taskLoadSucceeded && newTask === null) {
+    router.push(backDestination.value)
   }
+})
+
+onMounted(async () => {
+  const id = taskId.value
+  if (!Number.isFinite(id)) {
+    router.push(backDestination.value)
+    return
+  }
+  taskStore.clearActiveTask()
+  const found = await taskStore.fetchTaskDetail(id)
+  if (!found) {
+    router.push(backDestination.value)
+    return
+  }
+  taskLoadSucceeded = true
   scrollToBottom()
   if (task.value && !taskStore.isTerminal) {
-    taskStore.startDetailPolling(taskId.value)
+    taskStore.startDetailPolling(id)
   }
 })
 
@@ -152,7 +185,7 @@ onUnmounted(() => {
     <!-- Header -->
     <header class="border-b border-border px-4 py-3 flex items-center gap-3 shrink-0">
       <button
-        @click="router.push({ name: 'dashboard' })"
+        @click="router.push(backDestination)"
         class="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -190,9 +223,19 @@ onUnmounted(() => {
               <div class="shrink-0 h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground mt-0.5">
                 AI
               </div>
-              <div class="rounded-2xl rounded-tl-sm border border-border bg-card px-4 py-2.5 text-sm whitespace-pre-wrap break-words">
-                {{ msg.entry.content }}
+              <div class="rounded-2xl rounded-tl-sm border border-border bg-card px-4 py-2.5 text-sm chat-bubble-content">
+                <div v-html="renderMarkdown(msg.entry.content ?? '')" />
               </div>
+            </div>
+          </div>
+
+          <!-- Reasoning foldout -->
+          <div v-if="msg.kind === 'assistant' && msg.entry.reasoning" class="flex justify-start">
+            <div class="ml-9 mt-1 text-xs text-muted-foreground">
+              <details class="rounded-lg border border-border">
+                <summary class="px-3 py-1.5 cursor-pointer select-none">Reasoning</summary>
+                <div class="px-3 py-2 border-t border-border chat-bubble-content" v-html="renderMarkdown(msg.entry.reasoning)" />
+              </details>
             </div>
           </div>
 
@@ -206,8 +249,8 @@ onUnmounted(() => {
                 <span class="font-mono font-medium text-muted-foreground">{{ msg.entry.tool_name }}</span>
                 <span class="text-muted-foreground/60">— result</span>
               </summary>
-              <div class="px-3 py-2 border-t border-border font-mono text-muted-foreground break-all whitespace-pre-wrap">
-                {{ truncate(msg.entry.content) }}
+              <div class="px-3 py-2 border-t border-border chat-bubble-content text-muted-foreground break-all whitespace-pre-wrap">
+                <div v-html="renderMarkdown(truncate(msg.entry.content ?? ''))" />
               </div>
             </details>
           </div>
@@ -231,8 +274,8 @@ onUnmounted(() => {
             <div class="shrink-0 h-7 w-7 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center text-xs font-semibold text-green-700 dark:text-green-300 mt-0.5">
               ✓
             </div>
-            <div class="rounded-2xl rounded-tl-sm border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 px-4 py-2.5 text-sm whitespace-pre-wrap break-words text-green-900 dark:text-green-100">
-              {{ task.final_response }}
+            <div class="rounded-2xl rounded-tl-sm border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 px-4 py-2.5 text-sm chat-bubble-content text-green-900 dark:text-green-100">
+                <div v-html="renderMarkdown(task.final_response ?? '')" />
             </div>
           </div>
         </div>
@@ -245,12 +288,12 @@ onUnmounted(() => {
         </div>
 
         <!-- Scroll anchor -->
-        <div ref="bottomEl" />
+        <div ref="bottomEl"></div>
       </div>
 
       <!-- Pending Approval panel -->
       <div
-        v-if="task.status === 'PENDING_APPROVAL' && pending.length > 0"
+        v-if="task.status === 'PENDING_APPROVAL' && (pending.length ?? 0) > 0"
         class="border-t border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 shrink-0"
       >
         <div class="max-w-2xl w-full mx-auto px-4 py-4 flex flex-col gap-4">
@@ -259,7 +302,7 @@ onUnmounted(() => {
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
             <span class="text-sm font-semibold text-amber-800 dark:text-amber-200">
-              {{ pending.length === 1 ? 'Agent wants to run a tool' : `Agent wants to run ${pending.length} tools` }}
+              {{ (pending.length ?? 0) === 1 ? 'Agent wants to run a tool' : `Agent wants to run ${pending.length} tools` }}
             </span>
           </div>
 

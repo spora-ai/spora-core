@@ -301,6 +301,7 @@ final class TaskController
             'sequence'     => $h->sequence,
             'role'         => $h->role,
             'content'      => $h->content,
+            'reasoning'    => $h->reasoning,
             'tool_call_id' => $h->tool_call_id,
             'tool_name'    => $h->tool_name,
         ])->all();

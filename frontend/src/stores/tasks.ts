@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { api } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import type { Task, TaskDetail, TaskStatus } from '@/types/task'
 
 const TERMINAL_STATUSES: TaskStatus[] = ['COMPLETED', 'FAILED']
@@ -29,9 +29,18 @@ export const useTaskStore = defineStore('tasks', () => {
 
   // ── Task detail ───────────────────────────────────────────────────────────
 
-  async function fetchTaskDetail(taskId: number, sinceSequence?: number): Promise<void> {
+  async function fetchTaskDetail(taskId: number, sinceSequence?: number): Promise<boolean> {
     const query = sinceSequence !== undefined ? `?since_sequence=${sinceSequence}` : ''
-    const result = await api.get<{ task: TaskDetail }>(`/tasks/${taskId}${query}`)
+    let result: { task: TaskDetail }
+    try {
+      result = await api.get<{ task: TaskDetail }>(`/tasks/${taskId}${query}`)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        activeTask.value = null
+        return false
+      }
+      throw e
+    }
     const incoming = result.task
 
     if (activeTask.value === null || activeTask.value.id !== taskId) {
@@ -56,6 +65,7 @@ export const useTaskStore = defineStore('tasks', () => {
       // Refresh tool_calls on every poll (status may change on resume)
       activeTask.value.tool_calls = incoming.tool_calls
     }
+    return true
   }
 
   async function approveTask(taskId: number, approvals: { provider_call_id: string; arguments: Record<string, unknown> }[]): Promise<void> {
@@ -103,12 +113,10 @@ export const useTaskStore = defineStore('tasks', () => {
     const tick = async () => {
       if (activeTask.value === null || activeTask.value.id !== taskId) return
       if (TERMINAL_STATUSES.includes(activeTask.value.status)) return
-      try {
-        await fetchTaskDetail(taskId, lastSequence)
-      } finally {
-        if (activeTask.value && !TERMINAL_STATUSES.includes(activeTask.value.status)) {
-          detailPollTimer = setTimeout(tick, 2000)
-        }
+      const ok = await fetchTaskDetail(taskId, lastSequence)
+      if (!ok) return // task was deleted
+      if (activeTask.value && !TERMINAL_STATUSES.includes(activeTask.value.status)) {
+        detailPollTimer = setTimeout(tick, 2000)
       }
     }
     detailPollTimer = setTimeout(tick, 2000)
@@ -129,9 +137,10 @@ export const useTaskStore = defineStore('tasks', () => {
 
   // ── Derived ───────────────────────────────────────────────────────────────
 
-  const pendingToolCalls = computed(() =>
-    activeTask.value?.tool_calls.filter((tc) => tc.status === 'PENDING') ?? [],
-  )
+  const pendingToolCalls = computed(() => {
+    const calls = activeTask.value?.tool_calls
+    return Array.isArray(calls) ? calls.filter((tc) => tc.status === 'PENDING') : []
+  })
 
   const isTerminal = computed(() =>
     activeTask.value !== null && TERMINAL_STATUSES.includes(activeTask.value.status),

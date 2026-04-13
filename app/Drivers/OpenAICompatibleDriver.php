@@ -16,12 +16,14 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface
 {
     public function __construct(
-        private readonly string              $apiKey,
-        private readonly string              $model,
-        private readonly string              $baseUrl,
+        private readonly string $apiKey,
+        private readonly string $model,
+        private readonly string $baseUrl,
         private readonly HttpClientInterface $httpClient,
-        private readonly ?LoggerInterface    $logger = null,
-    ) {}
+        private readonly ?LoggerInterface $logger = null,
+        private readonly ?int $timeout = null,
+    ) {
+    }
 
     // ── LLMDriverInterface ──────────────────────────────────────────────────────
 
@@ -43,14 +45,14 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
         );
 
         $body = [
-            'model'       => $this->model,
-            'messages'    => $messages,
-            'max_tokens'  => $request->maxTokens,
+            'model' => $this->model,
+            'messages' => $messages,
+            'max_tokens' => $request->maxTokens,
             'temperature' => $request->temperature,
         ];
 
         if ($request->tools !== []) {
-            $body['tools']       = $request->tools;
+            $body['tools'] = $request->tools;
             $body['tool_choice'] = 'auto';
         }
 
@@ -64,8 +66,8 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
 
         $response = $this->httpClient->request('POST', $url, [
             'headers' => $headers,
-            'json'    => $body,
-            'timeout' => 45,
+            'json' => $body,
+            'timeout' => $this->timeout ?? 45,
         ]);
 
         $statusCode = $response->getStatusCode();
@@ -83,20 +85,20 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
         $data = $response->toArray();
         $this->logger?->debug('LLM Response (OpenAI)', ['status' => $statusCode, 'data' => $data]);
 
-        $completionId  = (string) ($data['id'] ?? '');
-        $inputTokens   = (int) ($data['usage']['prompt_tokens'] ?? 0);
-        $outputTokens  = (int) ($data['usage']['completion_tokens'] ?? 0);
+        $completionId = (string) ($data['id'] ?? '');
+        $inputTokens = (int) ($data['usage']['prompt_tokens'] ?? 0);
+        $outputTokens = (int) ($data['usage']['completion_tokens'] ?? 0);
 
-        $choice      = $data['choices'][0] ?? [];
+        $choice = $data['choices'][0] ?? [];
         $finishReason = $choice['finish_reason'] ?? '';
-        $message      = $choice['message'] ?? [];
+        $message = $choice['message'] ?? [];
 
         if ($finishReason === 'tool_calls') {
             $toolCalls = [];
 
             foreach (($message['tool_calls'] ?? []) as $tc) {
                 $rawArguments = $tc['function']['arguments'] ?? '{}';
-                $arguments    = is_string($rawArguments)
+                $arguments = is_string($rawArguments)
                     ? (json_decode($rawArguments, true) ?? [])
                     : (array) $rawArguments;
 
@@ -184,6 +186,15 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
                 required: false,
                 scope: 'global',
                 default: '4096',
+            ),
+            new ToolSetting(
+                key: 'timeout',
+                label: 'Timeout (seconds)',
+                type: 'text',
+                description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).',
+                required: false,
+                scope: 'global',
+                default: '45',
             ),
         ];
     }

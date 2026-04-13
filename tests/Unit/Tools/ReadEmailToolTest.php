@@ -51,3 +51,21 @@ it('attempts to connect to imap but fails gracefully with bad host', function ()
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('Failed to fetch emails');
 });
+
+it('applies custom timeout from settings to the IMAP connection', function () {
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->allows('getEffectiveSettings')->with(ReadEmailTool::class, 1)->andReturn([
+        'core.imap.host' => 'invalid.local.host',
+        'core.imap.port' => '993',
+        'core.imap.username' => 'test',
+        'core.imap.password' => 'test',
+        'core.imap.timeout' => '15',
+    ]);
+
+    $tool = new ReadEmailTool($config);
+    $result = @$tool->execute([], 1);
+
+    // Must fail gracefully — DNS failure is fast, not a timeout
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain('Failed to fetch emails');
+});

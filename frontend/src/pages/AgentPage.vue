@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { useTaskStore } from '@/stores/tasks'
@@ -91,8 +91,10 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null
 function startPolling(): void {
   stopPolling()
   const tick = async () => {
+    const id = agentId.value
+    if (!Number.isFinite(id)) return
     try {
-      await agentStore.fetchAgentTasks(agentId.value)
+      await agentStore.fetchAgentTasks(id)
     } finally {
       const hasActive = agentStore.currentAgentTasks.some(
         (t) => !['COMPLETED', 'FAILED'].includes(t.status),
@@ -112,13 +114,43 @@ function stopPolling(): void {
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
-onMounted(async () => {
+// Refetch when navigating between agents (browser back/forward)
+watch(agentId, async (newId) => {
+  if (!Number.isFinite(newId)) {
+    router.push({ name: 'dashboard' })
+    return
+  }
+  stopPolling()
   agentStore.clearCurrentAgent()
-  await agentStore.fetchAgent(agentId.value)
-  await agentStore.fetchAgentTasks(agentId.value)
+  llmCheckDone.value = false
+  await agentStore.fetchAgents()
+  await agentStore.fetchAgent(newId)
+  await agentStore.fetchAgentTasks(newId)
 
   try {
-    llmConfig.value = (await agentStore.getLLMConfig(agentId.value)) as Record<string, string>
+    llmConfig.value = (await agentStore.getLLMConfig(newId)) as Record<string, string>
+  } catch {
+    llmConfig.value = {}
+  } finally {
+    llmCheckDone.value = true
+  }
+
+  startPolling()
+})
+
+onMounted(async () => {
+  agentStore.clearCurrentAgent()
+  const id = agentId.value
+  if (!Number.isFinite(id)) {
+    router.push({ name: 'dashboard' })
+    return
+  }
+  await agentStore.fetchAgents()
+  await agentStore.fetchAgent(id)
+  await agentStore.fetchAgentTasks(id)
+
+  try {
+    llmConfig.value = (await agentStore.getLLMConfig(id)) as Record<string, string>
   } catch {
     llmConfig.value = {}
   } finally {

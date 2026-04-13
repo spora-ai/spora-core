@@ -19,6 +19,9 @@ final readonly class LLMResponse
 
         /** Provider-issued completion ID for logging/debugging. */
         public string  $completionId,
+
+        /** Provider-side reasoning / chain-of-thought (e.g. Anthropic extended thinking). */
+        public ?string $reasoning = null,
     ) {}
 
     public function hasToolCalls(): bool

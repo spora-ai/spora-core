@@ -26,6 +26,13 @@ use Throwable;
     scope: 'agent',
     required: true,
 )]
+#[ToolSetting(
+    key: 'core.serper.http_timeout',
+    label: 'HTTP Timeout',
+    type: 'text',
+    description: 'Seconds before an HTTP request fails (default: 30)',
+    scope: 'agent',
+)]
 #[ToolParameter(
     name: 'q',
     type: 'string',
@@ -39,6 +46,15 @@ final class SerperSearchTool implements InputToolInterface
         private readonly HttpClientInterface $httpClient,
         private readonly ?LoggerInterface $logger = null,
     ) {}
+
+    private function effectiveTimeout(array $settings): int
+    {
+        if (isset($settings['core.serper.http_timeout']) && (int) $settings['core.serper.http_timeout'] > 0) {
+            return (int) $settings['core.serper.http_timeout'];
+        }
+        $envTimeout = (int) ($_ENV['SPORA_TOOL_HTTP_TIMEOUT'] ?? getenv('SPORA_TOOL_HTTP_TIMEOUT') ?: 0);
+        return $envTimeout > 0 ? $envTimeout : 30;
+    }
 
     public function execute(array $arguments, int $agentId): ToolResult
     {
@@ -55,6 +71,11 @@ final class SerperSearchTool implements InputToolInterface
         }
 
         try {
+            $this->logger?->debug('SerperSearchTool: executing request', [
+                'query' => $query,
+                'url' => 'https://google.serper.dev/search',
+            ]);
+
             $response = $this->httpClient->request('POST', 'https://google.serper.dev/search', [
                 'headers' => [
                     'X-API-KEY'    => $apiKey,
@@ -63,10 +84,15 @@ final class SerperSearchTool implements InputToolInterface
                 'json' => [
                     'q' => $query,
                 ],
-                'timeout' => 30,
+                'timeout' => $this->effectiveTimeout($settings),
             ]);
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('SerperSearchTool: response received', [
+                'status_code' => $statusCode,
+                'query' => $query,
+            ]);
+
             if ($statusCode >= 400) {
                 $errorBody = $response->getContent(false);
                 $this->logger?->error('Serper Search API Error', ['status' => $statusCode, 'body' => $errorBody]);

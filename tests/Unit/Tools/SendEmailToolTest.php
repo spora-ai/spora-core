@@ -141,3 +141,23 @@ it('casts non-numeric port to integer (defaults to 0) rather than passing a stri
     expect($result->success)->toBeFalse();
     expect($result->content)->toContain('Failed to send email');
 });
+
+it('applies custom timeout from settings to the SMTP connection', function () {
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->allows('getEffectiveSettings')->with(SendEmailTool::class, 1)->andReturn([
+        'core.smtp.host' => '127.0.0.1',
+        'core.smtp.port' => '587',
+        'core.smtp.username' => 'user',
+        'core.smtp.password' => 'pass',
+        'core.smtp.from' => 'bot@spora.local',
+        'core.smtp.allowed_recipients' => '*',
+        'core.smtp.timeout' => '120',
+    ]);
+
+    $tool = new SendEmailTool($config);
+    $result = $tool->execute(['to' => 'anyone@test.com', 'subject' => 'Hi', 'body' => 'Body'], 1);
+
+    // Must fail gracefully at connection, not by timeout
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain('Failed to send email');
+});

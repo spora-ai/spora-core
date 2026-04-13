@@ -23,6 +23,7 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
         private readonly string              $baseUrl,
         private readonly HttpClientInterface $httpClient,
         private readonly ?LoggerInterface    $logger = null,
+        private readonly ?int                $timeout = null,
     ) {}
 
     public function getProviderName(): string
@@ -65,7 +66,7 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
         $response = $this->httpClient->request('POST', $url, [
             'headers' => $headers,
             'json'    => $body,
-            'timeout' => 45,
+            'timeout' => $this->timeout ?? 45,
         ]);
 
         $statusCode = $response->getStatusCode();
@@ -277,6 +278,15 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
                 required: false,
                 scope: 'global',
                 default: null,
+            ),
+            new ToolSetting(
+                key: 'timeout',
+                label: 'Timeout (seconds)',
+                type: 'text',
+                description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).',
+                required: false,
+                scope: 'global',
+                default: '45',
             ),
         ];
     }

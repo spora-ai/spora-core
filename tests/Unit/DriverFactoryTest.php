@@ -71,7 +71,7 @@ test('makeFromAgent uses agent-specific llm_driver_config_id', function (): void
     $agent->name = 'Test';
     $agent->llm_driver_config_id = $config->id;
 
-    $factory = new DriverFactory(new NullLogger(), $service);
+    $factory = new DriverFactory(new NullLogger(), $service, 300);
     $driver = $factory->makeFromAgent($agent);
 
     expect($driver)->toBeInstanceOf(OpenAICompatibleDriver::class)
@@ -98,7 +98,7 @@ test('makeFromAgent falls back to global default when agent has no config', func
     $agent->name = 'Test';
     $agent->llm_driver_config_id = null;
 
-    $factory = new DriverFactory(new NullLogger(), $service);
+    $factory = new DriverFactory(new NullLogger(), $service, 300);
     $driver = $factory->makeFromAgent($agent);
 
     expect($driver)->toBeInstanceOf(AnthropicCompatibleDriver::class)
@@ -116,7 +116,7 @@ test('makeFromAgent falls back to OpenAI driver when no config exists', function
     $agent->name = 'Test';
     $agent->llm_driver_config_id = null;
 
-    $factory = new DriverFactory(new NullLogger(), $service);
+    $factory = new DriverFactory(new NullLogger(), $service, 300);
     $driver = $factory->makeFromAgent($agent);
 
     expect($driver)->toBeInstanceOf(OpenAICompatibleDriver::class)
@@ -138,7 +138,7 @@ test('makeFromAgent returns Anthropic driver when that config is set on agent', 
     $agent->name = 'Test';
     $agent->llm_driver_config_id = $config->id;
 
-    $factory = new DriverFactory(new NullLogger(), $service);
+    $factory = new DriverFactory(new NullLogger(), $service, 300);
     $driver = $factory->makeFromAgent($agent);
 
     expect($driver)->toBeInstanceOf(AnthropicCompatibleDriver::class)
@@ -170,7 +170,7 @@ test('makeFromAgent uses agent config over global default', function (): void {
     $agent->name = 'Test';
     $agent->llm_driver_config_id = $agentConfig->id;
 
-    $factory = new DriverFactory(new NullLogger(), $service);
+    $factory = new DriverFactory(new NullLogger(), $service, 300);
     $driver = $factory->makeFromAgent($agent);
 
     expect($driver)->toBeInstanceOf(AnthropicCompatibleDriver::class)
@@ -180,7 +180,71 @@ test('makeFromAgent uses agent config over global default', function (): void {
 });
 
 // ---------------------------------------------------------------------------
-// Fix: decryption failure is wrapped as informative RuntimeException
+// Timeout configuration
+// ---------------------------------------------------------------------------
+
+test('makeDriverFromConfig passes per-LLM-config timeout to the driver', function (): void {
+    $service = makeSecureLLMConfigService();
+    $config = createConfigForTest(
+        'Custom Timeout Config',
+        OpenAICompatibleDriver::class,
+        [
+            'api_key'  => 'sk-key',
+            'model'    => 'gpt-4o',
+            'base_url' => 'https://api.openai.com/v1',
+            'timeout'  => 600,
+        ],
+        service: $service,
+        userId: 1,
+    );
+
+    // Factory has global default of 300, but per-config should override to 600
+    $factory = new DriverFactory(new NullLogger(), $service, 300);
+
+    $agent = new Agent();
+    $agent->id = 99;
+    $agent->name = 'Timeout Test';
+    $agent->llm_driver_config_id = $config->id;
+
+    $driver = $factory->makeFromAgent($agent);
+
+    expect($driver)->toBeInstanceOf(OpenAICompatibleDriver::class);
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});
+
+test('makeDriverFromConfig uses global llmTimeout when config has no timeout', function (): void {
+    $service = makeSecureLLMConfigService();
+    $config = createConfigForTest(
+        'No Timeout Config',
+        OpenAICompatibleDriver::class,
+        [
+            'api_key'  => 'sk-key',
+            'model'    => 'gpt-4o',
+            'base_url' => 'https://api.openai.com/v1',
+            // no 'timeout' key
+        ],
+        service: $service,
+        userId: 1,
+    );
+
+    // Factory global default of 300 should be used
+    $factory = new DriverFactory(new NullLogger(), $service, 300);
+
+    $agent = new Agent();
+    $agent->id = 100;
+    $agent->name = 'Timeout Test';
+    $agent->llm_driver_config_id = $config->id;
+
+    $driver = $factory->makeFromAgent($agent);
+
+    expect($driver)->toBeInstanceOf(OpenAICompatibleDriver::class);
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});
+
+// ---------------------------------------------------------------------------
+// Decryption failure handling
 // ---------------------------------------------------------------------------
 
 test('makeFromAgent throws RuntimeException with config name when settings decryption fails', function (): void {

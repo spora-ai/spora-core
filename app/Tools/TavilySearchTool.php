@@ -26,6 +26,13 @@ use Throwable;
     scope: 'agent',
     required: true,
 )]
+#[ToolSetting(
+    key: 'core.tavily.http_timeout',
+    label: 'HTTP Timeout',
+    type: 'text',
+    description: 'Seconds before an HTTP request fails (default: 30)',
+    scope: 'agent',
+)]
 #[ToolParameter(
     name: 'query',
     type: 'string',
@@ -47,6 +54,15 @@ final class TavilySearchTool implements InputToolInterface
         private readonly ?LoggerInterface $logger = null,
     ) {}
 
+    private function effectiveTimeout(array $settings): int
+    {
+        if (isset($settings['core.tavily.http_timeout']) && (int) $settings['core.tavily.http_timeout'] > 0) {
+            return (int) $settings['core.tavily.http_timeout'];
+        }
+        $envTimeout = (int) ($_ENV['SPORA_TOOL_HTTP_TIMEOUT'] ?? getenv('SPORA_TOOL_HTTP_TIMEOUT') ?: 0);
+        return $envTimeout > 0 ? $envTimeout : 30;
+    }
+
     public function execute(array $arguments, int $agentId): ToolResult
     {
         $query       = trim((string) ($arguments['query'] ?? ''));
@@ -63,6 +79,12 @@ final class TavilySearchTool implements InputToolInterface
         }
 
         try {
+            $this->logger?->debug('TavilySearchTool: executing request', [
+                'query' => $query,
+                'search_depth' => $searchDepth,
+                'url' => 'https://api.tavily.com/search',
+            ]);
+
             $response = $this->httpClient->request('POST', 'https://api.tavily.com/search', [
                 'headers' => [
                     'Content-Type' => 'application/json',
@@ -73,10 +95,15 @@ final class TavilySearchTool implements InputToolInterface
                     'search_depth' => $searchDepth,
                     'include_answer' => true,
                 ],
-                'timeout' => 30,
+                'timeout' => $this->effectiveTimeout($settings),
             ]);
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('TavilySearchTool: response received', [
+                'status_code' => $statusCode,
+                'query' => $query,
+            ]);
+
             if ($statusCode >= 400) {
                 $errorBody = $response->getContent(false);
                 $this->logger?->error('Tavily Search API Error', ['status' => $statusCode, 'body' => $errorBody]);

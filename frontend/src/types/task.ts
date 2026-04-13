@@ -30,6 +30,7 @@ export interface HistoryEntry {
   sequence: number
   role: 'user' | 'assistant' | 'tool'
   content: string | null
+  reasoning: string | null
   tool_call_id: string | null
   tool_name: string | null
 }

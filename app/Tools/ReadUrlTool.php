@@ -6,8 +6,10 @@ namespace Spora\Tools;
 
 use League\HTMLToMarkdown\HtmlConverter;
 use Psr\Log\LoggerInterface;
+use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolParameter;
+use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -16,6 +18,13 @@ use Throwable;
     name: 'read_url',
     description: 'Fetch and read the contents of a URL. Can parse HTML pages into Markdown, and can read XML/RSS feeds. Only http:// and https:// URLs are supported.',
     displayName: 'Read URL',
+)]
+#[ToolSetting(
+    key: 'core.read_url.http_timeout',
+    label: 'HTTP Timeout',
+    type: 'text',
+    description: 'Seconds before an HTTP request fails (default: 15)',
+    scope: 'agent',
 )]
 #[ToolParameter(
     name: 'url',
@@ -33,8 +42,18 @@ final class ReadUrlTool implements InputToolInterface
 
     public function __construct(
         private readonly HttpClientInterface $httpClient,
-        private readonly ?LoggerInterface $logger = null,
+        private readonly ToolConfigService   $configService,
+        private readonly ?LoggerInterface    $logger = null,
     ) {}
+
+    private function effectiveTimeout(array $settings): int
+    {
+        if (isset($settings['core.read_url.http_timeout']) && (int) $settings['core.read_url.http_timeout'] > 0) {
+            return (int) $settings['core.read_url.http_timeout'];
+        }
+        $envTimeout = (int) ($_ENV['SPORA_TOOL_HTTP_TIMEOUT'] ?? getenv('SPORA_TOOL_HTTP_TIMEOUT') ?: 0);
+        return $envTimeout > 0 ? $envTimeout : 15;
+    }
 
     public function execute(array $arguments, int $agentId): ToolResult
     {
@@ -51,9 +70,16 @@ final class ReadUrlTool implements InputToolInterface
             return new ToolResult(false, 'Only http:// and https:// URLs are supported.');
         }
 
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+
         try {
+            $this->logger?->debug('ReadUrlTool: executing request', [
+                'url' => $url,
+                'timeout' => $this->effectiveTimeout($settings),
+            ]);
+
             $response = $this->httpClient->request('GET', $url, [
-                'timeout' => 15,
+                'timeout' => $this->effectiveTimeout($settings),
                 'headers' => [
                     'User-Agent' => 'Spora Agent/1.0 (+https://github.com/spora/spora)',
                     'Accept'     => 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8',

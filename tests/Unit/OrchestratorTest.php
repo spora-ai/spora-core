@@ -835,3 +835,125 @@ it('handleToolCalls schema validation failure does not pause for approval', func
     expect($task->status)->not()->toBe('PENDING_APPROVAL')
         ->and($task->pending_state)->toBeNull();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// Empty arguments normalization (MiniMax/LM Studio compatibility)
+// ---------------------------------------------------------------------------
+
+it('continues correctly when LLM sends tool call with empty array arguments "[]"', function (): void {
+    [$agentId] = seedAgent();
+
+    // Simulate the first LLM response where MiniMax sent "arguments":"[]" (string)
+    // The tool has no parameters, so empty args are valid.
+    // This is stored in tool_call_payload as the string "[]".
+    $task = Task::create([
+        'agent_id'    => $agentId,
+        'user_id'     => Agent::find($agentId)->user_id,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'Get current time',
+        'step_count'  => 1,
+        'max_steps'   => 10,
+    ]);
+
+    // Seed the conversation: user prompt + assistant tool call with "[]" (empty array as string)
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Get current time']);
+    TaskHistory::create([
+        'task_id'           => $task->id,
+        'sequence'          => 1,
+        'role'              => 'assistant',
+        'content'           => null,
+        'tool_call_payload' => json_encode([
+            ['id' => 'call_empty', 'type' => 'function', 'function' => ['name' => 'stub_input', 'arguments' => '[]']],
+        ]),
+    ]);
+    // Tool result with empty content
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 2,
+        'role'         => 'tool',
+        'content'      => 'Current Date & Time: 2026-04-13T15:29:43+00:00',
+        'tool_call_id' => 'call_empty',
+        'tool_name'    => 'stub_input',
+    ]);
+
+    // The LLM should receive "arguments": {} (empty object), NOT "arguments": "[]" (string).
+    // MiniMax/LM Studio reject "[]" when the schema declares type "object".
+    $receivedArgs = null;
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->once()->andReturnUsing(function ($request) use (&$receivedArgs) {
+        // Capture the arguments from the continuation request
+        foreach ($request->messages as $msg) {
+            if (isset($msg['tool_calls'])) {
+                foreach ($msg['tool_calls'] as $tc) {
+                    $receivedArgs = $tc['function']['arguments'];
+                }
+            }
+        }
+        return new LLMResponse('Done.', [], 10, 5, 'cmp_2');
+    });
+
+    $tools = [new StubInputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+
+    $orch->tick($task->id);
+
+    // The task should complete without error
+    $task->refresh();
+    expect($task->status)->toBe('COMPLETED');
+
+    // The arguments sent to the LLM should be "{}" (object), NOT "[]" (array/string)
+    expect($receivedArgs)->not()->toBe('[]')
+        ->and($receivedArgs)->toBe('{}');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('buildMessages normalizes empty array arguments "[]" to empty object "{}" before sending to LLM', function (): void {
+    // This is a unit test for buildMessages specifically
+    [$agentId] = seedAgent();
+
+    $task = Task::create([
+        'agent_id'    => $agentId,
+        'user_id'     => Agent::find($agentId)->user_id,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'Test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    // Insert history with "arguments":"[]" (string form, as MiniMax sends)
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Hi']);
+    TaskHistory::create([
+        'task_id'           => $task->id,
+        'sequence'          => 1,
+        'role'              => 'assistant',
+        'tool_call_payload' => json_encode([
+            ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'stub_input', 'arguments' => '[]']],
+        ]),
+    ]);
+
+    // Capture what buildMessages produces
+    $capturedMessages = null;
+
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->once()->andReturnUsing(function ($request) use (&$capturedMessages) {
+        $capturedMessages = $request->messages;
+        return new LLMResponse('ok', [], 5, 3, 'cmp_1');
+    });
+
+    $tools = [new StubInputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+
+    $orch->tick($task->id);
+
+    // Find the tool call message
+    $toolCallMsg = null;
+    foreach ($capturedMessages as $msg) {
+        if (isset($msg['tool_calls'])) {
+            $toolCallMsg = $msg['tool_calls'][0];
+            break;
+        }
+    }
+
+    expect($toolCallMsg['function']['arguments'])->toBe('{}');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());

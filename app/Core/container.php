@@ -34,8 +34,10 @@ return [
             'app_env'             => 'production',
             'log_level'           => 'WARNING',
             'log_path'            => BASE_PATH . '/storage/spora.log',
-            'worker_mode'          => 'sync',
+            'sync_mode'           => true,
             'worker_stale_minutes' => 60,
+            'llm_timeout'        => 300,
+            'tool_http_timeout'   => 30,
             'mercure_url'         => null,
             'mercure_jwt_key'     => null,
         ];
@@ -80,11 +82,20 @@ return [
         if (($v = $env('SPORA_LOG_PATH')) !== null) {
             $envOverrides['log_path'] = $v;
         }
+        if (($v = $env('SPORA_SYNC_MODE')) !== null) {
+            $envOverrides['worker_mode'] = filter_var($v, FILTER_VALIDATE_BOOLEAN) ? 'sync' : 'worker';
+        }
         if (($v = $env('SPORA_WORKER_MODE')) !== null) {
             $envOverrides['worker_mode'] = $v;
         }
         if (($v = $env('SPORA_WORKER_STALE_MINUTES')) !== null) {
             $envOverrides['worker_stale_minutes'] = (int) $v;
+        }
+        if (($v = $env('SPORA_LLM_TIMEOUT')) !== null) {
+            $envOverrides['llm_timeout'] = (int) $v;
+        }
+        if (($v = $env('SPORA_TOOL_HTTP_TIMEOUT')) !== null) {
+            $envOverrides['tool_http_timeout'] = (int) $v;
         }
         if (($v = $env('SPORA_MERCURE_URL')) !== null) {
             $envOverrides['mercure_url'] = $v;
@@ -184,6 +195,7 @@ return [
         return new Spora\Drivers\DriverFactory(
             $c->get(Psr\Log\LoggerInterface::class),
             $c->get(Spora\Services\LLMConfigService::class),
+            (int) ($c->get('config')['llm_timeout'] ?? 300),
         );
     },
 
@@ -255,6 +267,15 @@ return [
             // Closure defers AuthService (and Delight\Auth\Auth → PDO) construction until after
             // bootDatabaseConnectionOnly() has been called inside execute().
             static fn(): AuthService => $c->get(AuthService::class),
+        );
+    },
+
+    Spora\Console\Commands\WorkerRunCommand::class => static function (ContainerInterface $c): Spora\Console\Commands\WorkerRunCommand {
+        return new Spora\Console\Commands\WorkerRunCommand(
+            $c->get(Database::class),
+            $c->get(OrchestratorInterface::class),
+            $c->get(Psr\Log\LoggerInterface::class),
+            $c,
         );
     },
 

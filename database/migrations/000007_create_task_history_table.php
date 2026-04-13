@@ -17,6 +17,7 @@ return new class extends Migration
             $table->unsignedSmallInteger('sequence');
             $table->string('role', 20);
             $table->text('content')->nullable();
+            $table->text('reasoning')->nullable();
             $table->string('tool_call_id', 100)->nullable();
             $table->string('tool_name', 100)->nullable();
             $table->text('tool_call_payload')->nullable();

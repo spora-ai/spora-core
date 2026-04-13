@@ -26,6 +26,7 @@ use Throwable;
 #[ToolSetting(key: 'core.smtp.password', label: 'Password', type: 'password', description: 'SMTP authentication password', scope: 'agent', required: true)]
 #[ToolSetting(key: 'core.smtp.from', label: 'From Address', type: 'text', description: 'e.g. agent@spora.local', scope: 'agent', required: true)]
 #[ToolSetting(key: 'core.smtp.allowed_recipients', label: 'Allowed Recipients', type: 'text', description: 'Comma-separated list of exact email addresses the agent is allowed to send to (or * for all).', scope: 'agent')]
+#[ToolSetting(key: 'core.smtp.timeout', label: 'Timeout', type: 'text', description: 'Seconds before an SMTP connection fails (default: 30)', scope: 'agent')]
 #[ToolParameter(
     name: 'to',
     type: 'string',
@@ -68,6 +69,7 @@ final class SendEmailTool implements OutputToolInterface
         $pass      = $settings['core.smtp.password'] ?? '';
         $from      = $settings['core.smtp.from'] ?? '';
         $allowedTo = $settings['core.smtp.allowed_recipients'] ?? '';
+        $timeout   = (int) ($settings['core.smtp.timeout'] ?? 30);
 
         if (empty($host) || empty($from)) {
             return new ToolResult(false, 'SMTP configuration is incomplete. Please configure SMTP Host and From Address in settings.');
@@ -77,11 +79,12 @@ final class SendEmailTool implements OutputToolInterface
         // rawurlencode is required here — urlencode() encodes spaces as '+' which
         // breaks DSN parsing. Casting port to int guards against non-numeric values.
         $dsn = sprintf(
-            'smtp://%s:%s@%s:%d',
+            'smtp://%s:%s@%s:%d?timeout=%d',
             rawurlencode($user),
             rawurlencode($pass),
             rawurlencode($host),
             (int) $port,
+            $timeout,
         );
 
         // Security Barrier: Allowed Recipients check
@@ -93,6 +96,12 @@ final class SendEmailTool implements OutputToolInterface
         }
 
         try {
+            $this->logger?->debug('SendEmailTool: executing', [
+                'to' => $to,
+                'subject' => $subject,
+                'host' => $host,
+            ]);
+
             $transport = Transport::fromDsn($dsn);
             $mailer    = new Mailer($transport);
 
@@ -103,6 +112,8 @@ final class SendEmailTool implements OutputToolInterface
                 ->text($body);
 
             $mailer->send($email);
+
+            $this->logger?->debug('SendEmailTool: sent', ['to' => $to]);
 
             return new ToolResult(true, "Email successfully sent to {$to}.");
         } catch (Throwable $e) {

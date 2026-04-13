@@ -23,6 +23,7 @@ use Webklex\PHPIMAP\ClientManager;
 #[ToolSetting(key: 'core.imap.encryption', label: 'IMAP Encryption', type: 'text', description: 'ssl or tls', scope: 'agent')]
 #[ToolSetting(key: 'core.imap.username', label: 'IMAP Username', type: 'text', description: 'Email address', scope: 'agent')]
 #[ToolSetting(key: 'core.imap.password', label: 'IMAP Password', type: 'password', description: 'Email password or App password', scope: 'agent', required: true)]
+#[ToolSetting(key: 'core.imap.timeout', label: 'Timeout', type: 'text', description: 'Seconds before an IMAP connection fails (default: 60)', scope: 'agent')]
 #[ToolParameter(
     name: 'limit',
     type: 'integer',
@@ -59,12 +60,19 @@ final class ReadEmailTool implements InputToolInterface
         $encryption = $settings['core.imap.encryption'] ?? 'ssl';
         $username   = $settings['core.imap.username'] ?? '';
         $password   = $settings['core.imap.password'] ?? '';
+        $timeout    = (int) ($settings['core.imap.timeout'] ?? 60);
 
         if (empty($host) || empty($username) || empty($password)) {
             return new ToolResult(false, 'IMAP configuration is incomplete. Please check the Read Email settings.');
         }
 
         try {
+            $this->logger?->debug('ReadEmailTool: connecting to IMAP', [
+                'host' => $host,
+                'port' => $port,
+                'encryption' => $encryption,
+            ]);
+
             $cm = new ClientManager();
             $client = $cm->make([
                 'host'          => $host,
@@ -74,10 +82,16 @@ final class ReadEmailTool implements InputToolInterface
                 'username'      => $username,
                 'password'      => $password,
                 'protocol'      => 'imap',
+                'timeout'       => $timeout,
             ]);
 
             $client->connect();
             $folder = $client->getFolder('INBOX');
+
+            $this->logger?->debug('ReadEmailTool: fetching messages', [
+                'limit' => $limit,
+                'mark_as_read' => $markAsRead,
+            ]);
 
             // Fetch unseen messages
             $messages = $folder->messages()->unseen()->limit($limit)->get();

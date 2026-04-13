@@ -141,13 +141,17 @@ final class Orchestrator implements OrchestratorInterface
                             'type'     => 'function',
                             'function' => [
                                 'name'      => $tc->toolName,
-                                'arguments' => json_encode($tc->arguments, JSON_THROW_ON_ERROR),
+                                // Normalize empty array [] to {} to satisfy strict providers
+                                // (e.g. LM Studio, MiniMax) that require arguments to be an object
+                                // when the schema declares type "object" with no required properties.
+                                'arguments' => empty($tc->arguments) ? '{}' : json_encode($tc->arguments, JSON_THROW_ON_ERROR),
                             ],
                         ], $response->toolCalls),
                         JSON_THROW_ON_ERROR,
                     ),
                     inputTokens: $response->inputTokens,
                     outputTokens: $response->outputTokens,
+                    reasoning: $response->reasoning,
                 );
 
                 $this->handleToolCalls($task, $agent, $response->toolCalls, $enabledClasses);
@@ -159,6 +163,7 @@ final class Orchestrator implements OrchestratorInterface
                     content: $response->content,
                     inputTokens: $response->inputTokens,
                     outputTokens: $response->outputTokens,
+                    reasoning: $response->reasoning,
                 );
 
                 $task->status         = 'COMPLETED';
@@ -574,6 +579,18 @@ final class Orchestrator implements OrchestratorInterface
             } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
                 // tool_call_payload is a JSON array of tool call objects.
                 $toolCallsData = json_decode($row->tool_call_payload, true);
+                // Normalize arguments: some providers send "[]" (string) for no-params tools.
+                // OpenAI expects {} for empty object, not [] for empty array.
+                foreach ($toolCallsData as &$tc) {
+                    if (array_key_exists('arguments', $tc['function'])) {
+                        $args = $tc['function']['arguments'];
+                        $decodedArgs = is_string($args) ? (json_decode($args, true) ?? []) : (array) $args;
+                        if (empty($decodedArgs)) {
+                            $tc['function']['arguments'] = '{}';
+                        }
+                    }
+                }
+                unset($tc); // break the reference
                 $messages[] = [
                     'role'       => 'assistant',
                     'content'    => null,
@@ -674,10 +691,11 @@ final class Orchestrator implements OrchestratorInterface
         ?string $toolCallPayload = null,
         int     $inputTokens     = 0,
         int     $outputTokens    = 0,
+        ?string $reasoning       = null,
     ): void {
         $nextSeq = TaskHistory::where('task_id', $taskId)->max('sequence') ?? -1;
 
-        TaskHistory::create([
+        $row = [
             'task_id'           => $taskId,
             'sequence'          => $nextSeq + 1,
             'role'              => $role,
@@ -687,6 +705,13 @@ final class Orchestrator implements OrchestratorInterface
             'tool_call_payload' => $toolCallPayload,
             'input_tokens'      => $inputTokens,
             'output_tokens'     => $outputTokens,
-        ]);
+        ];
+
+        // Write reasoning unconditionally as the column is now part of the base schema
+        if ($reasoning !== null) {
+            $row['reasoning'] = $reasoning;
+        }
+
+        TaskHistory::create($row);
     }
 }
