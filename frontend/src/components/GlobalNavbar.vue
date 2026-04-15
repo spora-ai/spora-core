@@ -1,15 +1,29 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
+import { useNotificationStore } from '@/stores/notifications'
+import { useRealtime } from '@/composables/useRealtime'
+import NotificationCenter from './NotificationCenter.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
 const theme = useThemeStore()
+const notificationStore = useNotificationStore()
+
+// Initialize real-time connection (auto-cleans up on unmount)
+useRealtime()
+
+const notificationCenter = ref<InstanceType<typeof NotificationCenter> | null>(null)
 
 async function logout(): Promise<void> {
   await auth.logout()
   router.push({ name: 'login' })
+}
+
+function openNotifications() {
+  notificationCenter.value?.open()
 }
 </script>
 
@@ -40,6 +54,23 @@ async function logout(): Promise<void> {
       <span class="hidden sm:block">Settings</span>
     </RouterLink>
 
+    <!-- Bell / notification icon -->
+    <button
+      @click="openNotifications"
+      class="relative flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+      title="Notifications"
+    >
+      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+      </svg>
+      <span
+        v-if="notificationStore.unreadCount > 0"
+        class="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold px-1"
+      >
+        {{ notificationStore.unreadCount > 99 ? '99+' : notificationStore.unreadCount }}
+      </span>
+    </button>
+
     <!-- Dark mode toggle -->
     <button
       @click="theme.toggle()"
@@ -64,5 +95,8 @@ async function logout(): Promise<void> {
         Sign out
       </button>
     </div>
+
+    <!-- Notification center panel -->
+    <NotificationCenter ref="notificationCenter" />
   </header>
 </template>

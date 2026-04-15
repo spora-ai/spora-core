@@ -11,6 +11,7 @@ use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
 use Spora\Tools\Attributes\ToolSetting;
+use Spora\Drivers\Utilities\LLMContentParser;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface
@@ -22,8 +23,7 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
         private readonly HttpClientInterface $httpClient,
         private readonly ?LoggerInterface $logger = null,
         private readonly ?int $timeout = null,
-    ) {
-    }
+    ) {}
 
     // ── LLMDriverInterface ──────────────────────────────────────────────────────
 
@@ -93,6 +93,8 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
         $finishReason = $choice['finish_reason'] ?? '';
         $message = $choice['message'] ?? [];
 
+        $parsedContent = LLMContentParser::parse($message['content'] ?? null);
+
         if ($finishReason === 'tool_calls') {
             $toolCalls = [];
 
@@ -110,20 +112,22 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
             }
 
             return new LLMResponse(
-                content: null,
+                content: $parsedContent['content'] !== '' ? $parsedContent['content'] : null,
                 toolCalls: $toolCalls,
                 inputTokens: $inputTokens,
                 outputTokens: $outputTokens,
                 completionId: $completionId,
+                reasoning: $parsedContent['reasoning'],
             );
         }
 
         return new LLMResponse(
-            content: (string) ($message['content'] ?? ''),
+            content: $parsedContent['content'],
             toolCalls: [],
             inputTokens: $inputTokens,
             outputTokens: $outputTokens,
             completionId: $completionId,
+            reasoning: $parsedContent['reasoning'],
         );
     }
 

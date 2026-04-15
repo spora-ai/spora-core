@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace Spora\Console\Commands;
 
+use Cron\CronExpression;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Core\Database;
+use Spora\Models\Agent;
+use Spora\Models\AgentPromptTemplate;
+use Spora\Models\ScheduledRun;
 use Spora\Models\Task;
+use Spora\Services\MercurePublisherInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -35,6 +40,7 @@ final class WorkerRunCommand extends Command
         private readonly OrchestratorInterface  $orchestrator,
         private readonly LoggerInterface        $logger,
         private readonly ContainerInterface     $container,
+        private readonly MercurePublisherInterface $mercure,
     ) {
         parent::__construct('worker:run');
     }
@@ -46,6 +52,7 @@ final class WorkerRunCommand extends Command
         $this->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Max tasks to process per run (0 = unlimited)', '0');
         $this->addOption('sleep', 's', InputOption::VALUE_REQUIRED, 'Microseconds to sleep when the queue is empty', '500000');
         $this->addOption('stale-minutes', null, InputOption::VALUE_REQUIRED, 'Minutes after which a RUNNING task is orphaned and failed (0 = disabled, omit to use config/default)', '0');
+        $this->addOption('scheduled', null, InputOption::VALUE_NONE, 'Process due scheduled runs instead of the QUEUED task queue');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -62,8 +69,9 @@ final class WorkerRunCommand extends Command
 
         $limit = (int) $input->getOption('limit');
         $sleep = (int) $input->getOption('sleep');
+        $isScheduled = (bool) $input->getOption('scheduled');
 
-        if ($isDaemon && extension_loaded('pcntl')) {
+        if ($isScheduled && $isDaemon && extension_loaded('pcntl')) {
             pcntl_async_signals(true);
             pcntl_signal(SIGTERM, function () use ($output): void {
                 $this->shouldQuit = true;
@@ -103,6 +111,11 @@ final class WorkerRunCommand extends Command
             if ($isDaemon && (time() - $lastReapAt) >= self::REAP_INTERVAL_SECONDS) {
                 $this->reapStaleTasks($output, $staleMinutes);
                 $lastReapAt = time();
+            }
+
+            if ($isScheduled) {
+                $this->processScheduledRuns($output, $processed);
+                break;
             }
 
             try {
@@ -180,6 +193,112 @@ final class WorkerRunCommand extends Command
         }
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Fetch and process all due scheduled runs.
+     */
+    private function processScheduledRuns(OutputInterface $output, int &$processed): void
+    {
+        $now = date('Y-m-d H:i:s');
+
+        $dueRuns = ScheduledRun::where('is_active', true)
+            ->where('next_run_at', '<=', $now)
+            ->orderBy('next_run_at')
+            ->get();
+
+        foreach ($dueRuns as $run) {
+            // Defensive re-check lock: skip if not active (already dispatched in a previous wake cycle)
+            $run->refresh();
+            if (!$run->is_active) {
+                continue;
+            }
+
+            $agent = Agent::find($run->agent_id);
+            if ($agent === null) {
+                $this->logger->warning('Scheduled run has no agent, skipping', ['run_id' => $run->id]);
+                continue;
+            }
+
+            // Determine prompt
+            $prompt = '';
+            if ($run->template_id !== null) {
+                $template = AgentPromptTemplate::find($run->template_id);
+                $variables = $template?->variables ?? [];
+                $prompt = $this->substituteVariables($template?->prompt_template ?? '', $variables);
+            } else {
+                $prompt = $run->raw_prompt ?? '';
+            }
+
+            // Determine max_steps (priority: scheduled_run.max_steps_override > template.max_steps > agent.max_steps)
+            $maxSteps = $run->max_steps_override
+                ?? ($run->template_id !== null
+                    ? (AgentPromptTemplate::find($run->template_id)?->max_steps ?? $agent->max_steps)
+                    : $agent->max_steps);
+
+            $this->logger->info('Triggering scheduled run', [
+                'run_id' => $run->id,
+                'agent_id' => $run->agent_id,
+            ]);
+            $output->writeln(sprintf('<info>Triggering scheduled run %d for agent %d...</info>', $run->id, $run->agent_id));
+
+            try {
+                $task = $this->orchestrator->start((int) $run->agent_id, $prompt, (int) $maxSteps);
+            } catch (Throwable $e) {
+                $this->logger->error('Scheduled run failed', [
+                    'run_id' => $run->id,
+                    'exception_class' => get_class($e),
+                    'message' => $e->getMessage(),
+                ]);
+                $output->writeln(sprintf('<error>Scheduled run %d failed: %s</error>', $run->id, $e->getMessage()));
+                continue;
+            }
+
+            // Update last_run_at
+            Capsule::table('scheduled_runs')
+                ->where('id', $run->id)
+                ->update(['last_run_at' => date('Y-m-d H:i:s')]);
+
+            // Recompute next_run_at for recurring runs
+            if ($run->cron_expression !== null) {
+                $cron = new CronExpression($run->cron_expression);
+                $nextRun = $cron->getNextRunDate(new \DateTimeImmutable('now', new \DateTimeZone($run->timezone)));
+                Capsule::table('scheduled_runs')
+                    ->where('id', $run->id)
+                    ->update(['next_run_at' => $nextRun->format('Y-m-d H:i:s')]);
+            }
+
+            // Publish Mercure update
+            $taskData = [
+                'id'          => $task->id,
+                'agent_id'    => $task->agent_id,
+                'status'      => $task->status,
+                'user_prompt' => $task->user_prompt,
+            ];
+            $this->mercure->publish($task->id, $taskData);
+
+            $processed++;
+        }
+    }
+
+    /**
+     * Substitute {{variable}} placeholders in a template string.
+     */
+    private function substituteVariables(string $template, array $variables): string
+    {
+        return preg_replace_callback('/\{\{(\w+)\}\}/', function (array $m) use ($variables): string {
+            if ($m[1] === 'date') {
+                return date('Y-m-d');
+            }
+            if ($m[1] === 'time') {
+                return date('H:i');
+            }
+            if ($m[1] === 'datetime') {
+                return date('c');
+            }
+
+            return $variables[$m[1]] ?? $m[0];
+        }, $template);
     }
 
     /**

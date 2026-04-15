@@ -10,6 +10,7 @@ export interface Task {
   final_response: string | null
   step_count: number
   max_steps: number | null
+  parent_task_id?: number
   created_at: string
   updated_at: string
 }

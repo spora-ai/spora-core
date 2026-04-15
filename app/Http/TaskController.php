@@ -98,7 +98,23 @@ final class TaskController
         }
 
         $maxSteps = isset($body['max_steps']) ? (int) $body['max_steps'] : $agent->max_steps;
-        $task = $this->orchestrator->start($agent->id, $prompt, $maxSteps);
+        $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
+
+        // Validate parent_task_id if provided — must belong to the same user.
+        if ($parentTaskId !== null) {
+            $parentTask = Task::where('id', $parentTaskId)
+                ->where('user_id', $userId)
+                ->first();
+
+            if ($parentTask === null) {
+                return new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'parent_task_id is invalid.']],
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                );
+            }
+        }
+
+        $task = $this->orchestrator->start($agent->id, $prompt, $maxSteps, $parentTaskId);
         $this->mercure->publish($task->id, $this->taskResource($task));
 
         return new JsonResponse(
@@ -264,7 +280,7 @@ final class TaskController
 
     private function taskResource(Task $task): array
     {
-        return [
+        $resource = [
             'id'             => $task->id,
             'agent_id'       => $task->agent_id,
             'status'         => $task->status,
@@ -275,6 +291,12 @@ final class TaskController
             'created_at'     => $task->created_at?->toIso8601String(),
             'updated_at'     => $task->updated_at?->toIso8601String(),
         ];
+
+        if ($task->parent_task_id !== null) {
+            $resource['parent_task_id'] = $task->parent_task_id;
+        }
+
+        return $resource;
     }
 
     private function taskDetailResource(Task $task, ?int $sinceSequence = null): array

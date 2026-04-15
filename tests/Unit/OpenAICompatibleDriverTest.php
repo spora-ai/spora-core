@@ -245,3 +245,5 @@ test('complete falls back to 45 seconds when no timeout is passed', function ():
 
     expect((int) $capturedOptions['timeout'])->toBe(45);
 });
+
+

@@ -276,6 +276,7 @@ return [
             $c->get(OrchestratorInterface::class),
             $c->get(Psr\Log\LoggerInterface::class),
             $c,
+            $c->get(MercurePublisherInterface::class),
         );
     },
 
@@ -326,6 +327,41 @@ return [
         return new Spora\Http\RecipeController(
             $c->get(AuthService::class),
             $c->get(RecipeScanner::class),
+        );
+    },
+
+    Spora\Services\NotificationService::class => static function (ContainerInterface $c): Spora\Services\NotificationService {
+        return new Spora\Services\NotificationService(
+            $c->get(MercurePublisherInterface::class),
+        );
+    },
+
+    Spora\Http\NotificationController::class => static function (ContainerInterface $c): Spora\Http\NotificationController {
+        return new Spora\Http\NotificationController(
+            $c->get(AuthService::class),
+        );
+    },
+
+    Spora\Http\PromptTemplateController::class => static function (ContainerInterface $c): Spora\Http\PromptTemplateController {
+        return new Spora\Http\PromptTemplateController(
+            $c->get(AuthService::class),
+        );
+    },
+
+    Spora\Http\ScheduledRunController::class => static function (ContainerInterface $c): Spora\Http\ScheduledRunController {
+        return new Spora\Http\ScheduledRunController(
+            $c->get(AuthService::class),
+            $c->get(OrchestratorInterface::class),
+            $c->get(MercurePublisherInterface::class),
+        );
+    },
+
+    Spora\Http\SseController::class => static function (ContainerInterface $c): Spora\Http\SseController {
+        $config = $c->get('config');
+        return new Spora\Http\SseController(
+            $c->get(AuthService::class),
+            $config['mercure_url'] ?? null,
+            $config['mercure_jwt_key'] ?? null,
         );
     },
 ];

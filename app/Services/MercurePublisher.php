@@ -50,6 +50,31 @@ final class MercurePublisher implements MercurePublisherInterface
     }
 
     /**
+     * Publish a user-scoped notification to the Mercure hub.
+     * Topic: user/{userId}/notifications
+     */
+    public function publishToUser(int $userId, array $data): bool
+    {
+        if ($this->hubUrl === null || $this->jwtKey === null) {
+            return false;
+        }
+
+        try {
+            $this->client->request('POST', $this->hubUrl, [
+                'auth_bearer' => $this->generateJwt(),
+                'body'        => [
+                    'topic' => "user/{$userId}/notifications",
+                    'data'  => json_encode($data, JSON_THROW_ON_ERROR),
+                ],
+            ]);
+
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
      * Generate a minimal HS256 JWT for the Mercure publisher role.
      * Uses base64url encoding (RFC 7515) and a single timestamp to avoid clock-skew bugs.
      */

@@ -1,0 +1,40 @@
+services:
+  spora:
+    build: .
+    ports:
+      - "8080:8080"
+      - "443:443"
+    env_file:
+      - .env.local
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - app_storage:/app/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  mariadb:
+    image: mariadb:11
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: spora
+      MYSQL_USER: spora
+      MYSQL_PASSWORD: spora
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - db_data:/var/lib/mysql
+
+volumes:
+  app_storage:
+  db_data:

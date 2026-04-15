@@ -64,6 +64,7 @@ const identityForm = ref({
   description: '',
   system_prompt: '',
   max_steps: 10,
+  allow_followup: true,
 })
 const savingIdentity = ref(false)
 const identityError = ref<string | null>(null)
@@ -108,6 +109,7 @@ onMounted(async () => {
     description: agent.description ?? '',
     system_prompt: agent.system_prompt ?? '',
     max_steps: agent.max_steps ?? 10,
+    allow_followup: agent.allow_followup !== false,
   }
   llmSettingsForm.value = {
     llm_driver_config_id: agent.llm_driver_config_id ?? null,
@@ -155,6 +157,7 @@ async function saveIdentity(): Promise<void> {
       description: identityForm.value.description || null,
       system_prompt: identityForm.value.system_prompt || null,
       max_steps: identityForm.value.max_steps,
+      allow_followup: identityForm.value.allow_followup,
     })
     identitySaved.value = true
     setTimeout(() => { identitySaved.value = false }, 2000)
@@ -356,6 +359,18 @@ async function deleteAgent(): Promise<void> {
               class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
             <p class="text-xs text-muted-foreground">Maximum number of agent turns (1–100).</p>
+          </div>
+          <div class="flex items-start gap-3">
+            <input
+              id="allow-followup"
+              v-model="identityForm.allow_followup"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded border-border bg-background text-primary focus:ring-1 focus:ring-ring"
+            />
+            <div class="flex flex-col gap-1">
+              <label for="allow-followup" class="text-sm font-medium">Allow follow-up questions</label>
+              <p class="text-xs text-muted-foreground">When enabled, users can continue a conversation after a task completes.</p>
+            </div>
           </div>
           <div class="flex items-center justify-between">
             <p v-if="identityError" role="alert" class="text-xs text-destructive">{{ identityError }}</p>

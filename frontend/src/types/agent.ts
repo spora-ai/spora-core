@@ -13,6 +13,7 @@ export interface Agent {
   llm_driver_config_id: number | null
   max_steps: number
   is_active: boolean
+  allow_followup?: boolean
   tools: AgentTool[]
 }
 

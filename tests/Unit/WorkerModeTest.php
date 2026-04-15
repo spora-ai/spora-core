@@ -5,11 +5,14 @@ declare(strict_types=1);
 use Psr\Log\NullLogger;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\ValueObjects\WorkerMode;
+use Spora\Console\Commands\WorkerRunCommand;
+use Spora\Core\Database;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Models\Agent;
 use Spora\Models\Task;
+use Spora\Services\MercurePublisherInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\BufferedOutput;
@@ -51,6 +54,10 @@ function makeMockContainerForWorker(): Psr\Container\ContainerInterface
     $container->allows('get')->with('config')->andReturn([
         'worker_stale_minutes' => 60,
     ]);
+    $container->allows('get')->with(Database::class)->andReturn(new Database([
+        'db_driver' => 'sqlite',
+        'db_path' => ':memory:',
+    ]));
     return $container;
 }
 
@@ -92,7 +99,7 @@ it('start in sync mode creates RUNNING task and dispatches tick synchronously', 
 
     expect($task->status)->toBe('COMPLETED')
         ->and($task->user_prompt)->toBe('Hello sync');
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
+})->afterEach(fn() => Database::resetBootState());
 
 it('start in cron mode creates QUEUED task without dispatching tick', function (): void {
     [$agentId] = seedAgentForMode();
@@ -107,7 +114,7 @@ it('start in cron mode creates QUEUED task without dispatching tick', function (
         ->and($task->user_prompt)->toBe('Hello cron');
 
     // No tick was dispatched — LLM should never be called.
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
+})->afterEach(fn() => Database::resetBootState());
 
 it('start in worker mode creates QUEUED task without dispatching tick', function (): void {
     [$agentId] = seedAgentForMode();
@@ -120,7 +127,7 @@ it('start in worker mode creates QUEUED task without dispatching tick', function
 
     expect($task->status)->toBe('QUEUED')
         ->and($task->user_prompt)->toBe('Hello worker');
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
+})->afterEach(fn() => Database::resetBootState());
 
 // ---------------------------------------------------------------------------
 // WorkerRunCommand — cron mode drain
@@ -151,13 +158,19 @@ it('WorkerRunCommand processes a single QUEUED task to completion', function ():
     $output = new NullOutput();
     $input = new ArrayInput(['--limit' => '1']);
 
-    $command = new Spora\Console\Commands\WorkerRunCommand($orch, new NullLogger(), makeMockContainerForWorker());
+    $command = new Spora\Console\Commands\WorkerRunCommand(
+        new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']),
+        $orch,
+        new NullLogger(),
+        makeMockContainerForWorker(),
+        Mockery::mock(MercurePublisherInterface::class),
+    );
     $command->run($input, $output);
 
     $task->refresh();
     expect($task->status)->toBe('COMPLETED')
         ->and($task->final_response)->toBe('Step 1');
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
+})->afterEach(fn() => Database::resetBootState());
 
 it('WorkerRunCommand processes multiple QUEUED tasks in order', function (): void {
     [$agentId, $userId] = seedAgentForMode();
@@ -179,7 +192,13 @@ it('WorkerRunCommand processes multiple QUEUED tasks in order', function (): voi
     $output = new NullOutput();
     $input = new ArrayInput(['--limit' => '0']);
 
-    $command = new Spora\Console\Commands\WorkerRunCommand($orch, new NullLogger(), makeMockContainerForWorker());
+    $command = new Spora\Console\Commands\WorkerRunCommand(
+        new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']),
+        $orch,
+        new NullLogger(),
+        makeMockContainerForWorker(),
+        Mockery::mock(MercurePublisherInterface::class),
+    );
     $command->run($input, $output);
 
     $task1->refresh();
@@ -189,7 +208,7 @@ it('WorkerRunCommand processes multiple QUEUED tasks in order', function (): voi
     expect($task1->status)->toBe('COMPLETED')
         ->and($task2->status)->toBe('COMPLETED')
         ->and($task3->status)->toBe('COMPLETED');
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
+})->afterEach(fn() => Database::resetBootState());
 
 it('WorkerRunCommand exits cleanly when no QUEUED tasks exist', function (): void {
     [$agentId] = seedAgentForMode();
@@ -204,11 +223,17 @@ it('WorkerRunCommand exits cleanly when no QUEUED tasks exist', function (): voi
     $output = new BufferedOutput();
     $input = new ArrayInput([]);
 
-    $command = new Spora\Console\Commands\WorkerRunCommand($orch, new NullLogger(), makeMockContainerForWorker());
+    $command = new Spora\Console\Commands\WorkerRunCommand(
+        new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']),
+        $orch,
+        new NullLogger(),
+        makeMockContainerForWorker(),
+        Mockery::mock(MercurePublisherInterface::class),
+    );
     $result = $command->run($input, $output);
 
     expect($result)->toBe(Command::SUCCESS);
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
+})->afterEach(fn() => Database::resetBootState());
 
 // ---------------------------------------------------------------------------
 // tick() with lockForUpdate — concurrent safety
@@ -236,4 +261,4 @@ it('tick is a no-op when task is QUEUED (only RUNNING tasks are processed)', fun
     $task->refresh();
     // Status must remain QUEUED — tick should be a no-op for non-RUNNING tasks.
     expect($task->status)->toBe('QUEUED');
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
+})->afterEach(fn() => Database::resetBootState());

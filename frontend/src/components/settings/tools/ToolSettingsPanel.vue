@@ -50,7 +50,7 @@ async function onSave(settings: Record<string, string>): Promise<void> {
 }
 
 function isPasswordField(key: string): boolean {
-  return props.tool.settings_schema.find((f) => f.key === key)?.type === 'password' ?? false
+  return props.tool.settings_schema.find((f) => f.key === key)?.type === 'password' || false
 }
 
 function displayValue(key: string, value: string): string {

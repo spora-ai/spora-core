@@ -11,6 +11,7 @@ use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
 use Spora\Tools\Attributes\ToolSetting;
+use Spora\Drivers\Utilities\LLMContentParser;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface
@@ -90,6 +91,8 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
         $stopReason   = (string) ($data['stop_reason'] ?? '');
         $contentBlocks = (array) ($data['content'] ?? []);
 
+        $parsedContent = LLMContentParser::parse($contentBlocks);
+
         if ($stopReason === 'tool_use') {
             $toolCalls = [];
 
@@ -106,28 +109,22 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
             }
 
             return new LLMResponse(
-                content: null,
+                content: $parsedContent['content'] !== '' ? $parsedContent['content'] : null,
                 toolCalls: $toolCalls,
                 inputTokens: $inputTokens,
                 outputTokens: $outputTokens,
                 completionId: $completionId,
+                reasoning: $parsedContent['reasoning'],
             );
         }
 
-        // end_turn — extract text from content blocks
-        $textContent = '';
-        foreach ($contentBlocks as $block) {
-            if (($block['type'] ?? '') === 'text') {
-                $textContent .= (string) ($block['text'] ?? '');
-            }
-        }
-
         return new LLMResponse(
-            content: $textContent,
+            content: $parsedContent['content'],
             toolCalls: [],
             inputTokens: $inputTokens,
             outputTokens: $outputTokens,
             completionId: $completionId,
+            reasoning: $parsedContent['reasoning'],
         );
     }
 

@@ -43,18 +43,41 @@ final class Orchestrator implements OrchestratorInterface
     // Public API
     // -------------------------------------------------------------------------
 
-    public function start(int $agentId, string $userPrompt, int $maxSteps = 10): Task
+    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null): Task
     {
         $agent = Agent::findOrFail($agentId);
 
         $task = Task::create([
-            'agent_id'    => $agentId,
-            'user_id'     => $agent->user_id,
-            'status'      => $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED',
-            'user_prompt' => $userPrompt,
-            'step_count'  => 0,
-            'max_steps'   => $maxSteps,
+            'agent_id'      => $agentId,
+            'user_id'       => $agent->user_id,
+            'status'        => $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED',
+            'user_prompt'   => $userPrompt,
+            'step_count'    => 0,
+            'max_steps'     => $maxSteps,
+            'parent_task_id' => $parentTaskId,
         ]);
+
+        // When following up: deep-copy the parent task's history so the new task
+        // continues the same conversation rather than starting fresh.
+        if ($parentTaskId !== null) {
+            $parentRows = TaskHistory::where('task_id', $parentTaskId)
+                ->orderBy('sequence')
+                ->get();
+
+            foreach ($parentRows as $row) {
+                $this->appendHistory(
+                    taskId: $task->id,
+                    role: $row->role,
+                    content: $row->content,
+                    toolCallId: $row->tool_call_id,
+                    toolName: $row->tool_name,
+                    toolCallPayload: $row->tool_call_payload,
+                    inputTokens: $row->input_tokens,
+                    outputTokens: $row->output_tokens,
+                    reasoning: $row->reasoning,
+                );
+            }
+        }
 
         // Seed the conversation with the user's prompt as the first history row.
         $this->appendHistory($task->id, 'user', $userPrompt);

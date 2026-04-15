@@ -44,6 +44,22 @@
 | `GET` | `/tasks/{taskId}` | Yes | Task detail + history + pending tool call |
 | `POST` | `/tasks/{taskId}/approve` | Yes | Approve pending tool call (with optional arg edits) |
 | `POST` | `/tasks/{taskId}/reject` | Yes | Reject pending tool call (reason surfaced to LLM) |
+| `GET` | `/notifications` | Yes | List notifications (paginated, filterable unread) |
+| `POST` | `/notifications/{id}/read` | Yes | Mark notification as read |
+| `POST` | `/notifications/read-all` | Yes | Mark all unread as read |
+| `DELETE` | `/notifications/{id}` | Yes | Delete notification |
+| `GET` | `/sse/auth` | Yes | Mercure hub URL + subscriber JWT for SSE |
+| `GET` | `/agents/{id}/templates` | Yes | List prompt templates |
+| `POST` | `/agents/{id}/templates` | Yes | Create prompt template |
+| `GET` | `/agents/{id}/templates/{tid}` | Yes | Get prompt template |
+| `PUT` | `/agents/{id}/templates/{tid}` | Yes | Update prompt template |
+| `DELETE` | `/agents/{id}/templates/{tid}` | Yes | Delete prompt template |
+| `GET` | `/agents/{id}/scheduled-runs` | Yes | List scheduled runs |
+| `POST` | `/agents/{id}/scheduled-runs` | Yes | Create scheduled run |
+| `GET` | `/agents/{id}/scheduled-runs/{rid}` | Yes | Get scheduled run |
+| `PUT` | `/agents/{id}/scheduled-runs/{rid}` | Yes | Update scheduled run |
+| `DELETE` | `/agents/{id}/scheduled-runs/{rid}` | Yes | Delete scheduled run |
+| `POST` | `/agents/{id}/scheduled-runs/{rid}/trigger` | Yes | Trigger scheduled run immediately |
 | `GET` | `/recipes` | Yes | List available recipes |
 
 **`{toolClass}`** in paths = URL-encoded FQCN, e.g. `Spora%5CTools%5CBuiltin%5CSearchWebTool`.

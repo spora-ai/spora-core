@@ -2,14 +2,18 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTaskStore } from '@/stores/tasks'
+import { useAgentStore } from '@/stores/agent'
 import { ApiError } from '@/api/client'
 import { renderMarkdown } from '@/composables/useMarkdown'
+import { useToast } from '@/composables/useToast'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
 import type { HistoryEntry } from '@/types/task'
 
 const route = useRoute()
 const router = useRouter()
 const taskStore = useTaskStore()
+const agentStore = useAgentStore()
+const toast = useToast()
 
 const taskId = computed(() => Number(route.params.id))
 const task = computed(() => taskStore.activeTask)
@@ -34,6 +38,43 @@ const approvingAll = ref(false)
 const rejectReason = ref('')
 const rejecting = ref(false)
 const showRejectInput = ref(false)
+
+// Per-tool approval state (keyed by tool call id)
+const perToolArgs = ref<Record<number, string>>({})
+const perToolRejectReason = ref<Record<number, string>>({})
+const perToolRejectInput = ref<Record<number, boolean>>({})
+const perToolApproving = ref<Record<number, boolean>>({})
+const perToolRejecting = ref<Record<number, boolean>>({})
+
+// ── Follow-up ─────────────────────────────────────────────────────────────────
+
+const followupPrompt = ref('')
+const submittingFollowup = ref(false)
+const followupError = ref<string | null>(null)
+
+const showFollowupBar = computed(() => {
+  if (!task.value) return false
+  if (task.value.status !== 'COMPLETED' && task.value.status !== 'FAILED') return false
+  const agent = agentStore.currentAgent
+  if (!agent) return false
+  return agent.allow_followup !== false
+})
+
+async function submitFollowup(): Promise<void> {
+  const text = followupPrompt.value.trim()
+  if (!text || !task.value) return
+  followupError.value = null
+  submittingFollowup.value = true
+  try {
+    const newTask = await taskStore.createTaskForAgent(task.value.agent_id, text, task.value.id)
+    followupPrompt.value = ''
+    router.push({ name: 'task', params: { id: newTask.id } })
+  } catch (e) {
+    followupError.value = e instanceof ApiError ? e.message : 'Failed to submit follow-up.'
+  } finally {
+    submittingFollowup.value = false
+  }
+}
 
 // Scroll anchor
 const bottomEl = ref<HTMLDivElement | null>(null)
@@ -86,16 +127,22 @@ function truncate(text: string | null, max = 300): string {
 
 function initApprovalArgs(): void {
   const fresh: Record<number, string> = {}
+  const perToolFresh: Record<number, string> = {}
   const calls = Array.isArray(pending.value) ? pending.value : []
   for (const tc of calls) {
-    // Preserve any edits the user has made
     if (approvalArgs.value[tc.id] === undefined) {
       fresh[tc.id] = JSON.stringify(tc.proposed_arguments ?? {}, null, 2)
     } else {
       fresh[tc.id] = approvalArgs.value[tc.id]
     }
+    if (perToolArgs.value[tc.id] === undefined) {
+      perToolFresh[tc.id] = JSON.stringify(tc.proposed_arguments ?? {}, null, 2)
+    } else {
+      perToolFresh[tc.id] = perToolArgs.value[tc.id]
+    }
   }
   approvalArgs.value = fresh
+  perToolArgs.value = perToolFresh
 }
 
 watch(() => pending.value?.length ?? 0, initApprovalArgs, { immediate: true })
@@ -107,17 +154,20 @@ async function approveAll(): Promise<void> {
     const approvals = (pending.value ?? []).map((tc) => {
       let args: Record<string, unknown> = {}
       try {
-        args = JSON.parse(approvalArgs.value[tc.id] ?? '{}') as Record<string, unknown>
+        args = JSON.parse(perToolArgs.value[tc.id] ?? '{}') as Record<string, unknown>
       } catch {
+        toast.error(`Invalid JSON for tool "${tc.tool_name}".`)
         throw new Error(`Invalid JSON for tool "${tc.tool_name}".`)
       }
       return { provider_call_id: String(tc.id), arguments: args }
     })
     await taskStore.approveTask(taskId.value, approvals)
+    toast.success('All tools approved.')
     showRejectInput.value = false
     taskStore.startDetailPolling(taskId.value)
     scrollToBottom()
   } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Approval failed.')
     approveError.value = e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Approval failed.'
   } finally {
     approvingAll.value = false
@@ -129,18 +179,79 @@ async function reject(): Promise<void> {
   approveError.value = null
   try {
     await taskStore.rejectTask(taskId.value, rejectReason.value || 'No reason provided.')
+    toast.success('Tool rejected.')
     rejectReason.value = ''
     showRejectInput.value = false
     taskStore.startDetailPolling(taskId.value)
     scrollToBottom()
   } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : 'Rejection failed.')
     approveError.value = e instanceof ApiError ? e.message : 'Rejection failed.'
   } finally {
     rejecting.value = false
   }
 }
 
+async function approveToolCall(tc: { id: number; tool_name: string }): Promise<void> {
+  perToolApproving.value[tc.id] = true
+  try {
+    let args: Record<string, unknown> = {}
+    try {
+      args = JSON.parse(perToolArgs.value[tc.id] ?? '{}') as Record<string, unknown>
+    } catch {
+      toast.error(`Invalid JSON for tool "${tc.tool_name}".`)
+      return
+    }
+    await taskStore.approveTask(taskId.value, [{ provider_call_id: String(tc.id), arguments: args }])
+    toast.success(`Tool "${tc.tool_name}" approved.`)
+    taskStore.startDetailPolling(taskId.value)
+    scrollToBottom()
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : `Failed to approve tool "${tc.tool_name}".`)
+  } finally {
+    perToolApproving.value[tc.id] = false
+  }
+}
+
+async function rejectToolCall(tc: { id: number; tool_name: string }): Promise<void> {
+  perToolRejecting.value[tc.id] = true
+  try {
+    const reason = perToolRejectReason.value[tc.id] || 'User rejected'
+    await taskStore.rejectTask(taskId.value, reason)
+    toast.success(`Tool "${tc.tool_name}" rejected.`)
+    taskStore.startDetailPolling(taskId.value)
+    scrollToBottom()
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : `Failed to reject tool "${tc.tool_name}".`)
+  } finally {
+    perToolRejecting.value[tc.id] = false
+    perToolRejectInput.value[tc.id] = false
+    perToolRejectReason.value[tc.id] = ''
+  }
+}
+
 // ── Lifecycle ──────────────────────────────────────────────────────────────
+
+// Re-initialize when navigating between different tasks (component reuse without remount)
+watch(taskId, async (newId, oldId) => {
+  if (!Number.isFinite(newId) || newId === oldId) return
+  taskStore.stopDetailPolling()
+  taskStore.clearActiveTask()
+  taskLoadSucceeded = false
+  const found = await taskStore.fetchTaskDetail(newId)
+  if (!found) {
+    router.push(backDestination.value)
+    return
+  }
+  taskLoadSucceeded = true
+  if (task.value?.agent_id) {
+    await agentStore.fetchAgent(task.value.agent_id)
+  }
+  scrollToBottom()
+  if (task.value && !taskStore.isTerminal) {
+    taskStore.startDetailPolling(newId)
+  }
+})
 
 watch(
   () => task.value?.history?.length ?? 0,
@@ -168,6 +279,12 @@ onMounted(async () => {
     return
   }
   taskLoadSucceeded = true
+
+  // Fetch agent so we can check allow_followup
+  if (task.value?.agent_id) {
+    await agentStore.fetchAgent(task.value.agent_id)
+  }
+
   scrollToBottom()
   if (task.value && !taskStore.isTerminal) {
     taskStore.startDetailPolling(id)
@@ -291,20 +408,71 @@ onUnmounted(() => {
         <div ref="bottomEl"></div>
       </div>
 
-      <!-- Pending Approval panel -->
+      <!-- Sticky Tool Approval Bar -->
       <div
-        v-if="task.status === 'PENDING_APPROVAL' && (pending.length ?? 0) > 0"
-        class="border-t border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 shrink-0"
+        v-if="task.status === 'PENDING_APPROVAL' && pending.length > 0"
+        class="border-t border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 shrink-0 sticky top-0 z-10"
       >
         <div class="max-w-2xl w-full mx-auto px-4 py-4 flex flex-col gap-4">
-          <div class="flex items-center gap-2">
-            <svg class="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            <span class="text-sm font-semibold text-amber-800 dark:text-amber-200">
-              {{ (pending.length ?? 0) === 1 ? 'Agent wants to run a tool' : `Agent wants to run ${pending.length} tools` }}
-            </span>
+
+          <!-- Header: icon + title + Approve All / Reject All (only when >1 tool) -->
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2 min-w-0">
+              <svg class="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span class="text-sm font-semibold text-amber-800 dark:text-amber-200 truncate">
+                {{ pending.length === 1 ? 'Tool approval required' : `${pending.length} tool approvals required` }}
+              </span>
+            </div>
+
+            <!-- Approve All / Reject All — only when multiple tools pending -->
+            <div v-if="pending.length > 1" class="flex gap-2 shrink-0">
+              <button
+                @click="approveAll"
+                :disabled="approvingAll"
+                class="inline-flex h-8 items-center justify-center rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium shadow transition-colors disabled:pointer-events-none disabled:opacity-50"
+              >
+                {{ approvingAll ? 'Approving…' : '✓ Approve All' }}
+              </button>
+              <button
+                v-if="!showRejectInput"
+                @click="showRejectInput = true"
+                class="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-white dark:bg-zinc-900 px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                ✗ Reject All
+              </button>
+              <template v-else>
+                <button
+                  @click="reject"
+                  :disabled="rejecting"
+                  class="inline-flex h-8 items-center justify-center rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/30 px-3 text-xs font-medium text-red-700 dark:text-red-300 hover:bg-red-100 transition-colors disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {{ rejecting ? 'Rejecting…' : 'Confirm Reject All' }}
+                </button>
+                <button
+                  @click="showRejectInput = false; rejectReason = ''"
+                  class="inline-flex h-8 items-center justify-center rounded-lg border border-border px-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+              </template>
+            </div>
           </div>
+
+          <!-- Reject All reason input -->
+          <div v-if="showRejectInput && pending.length > 1" class="flex flex-col gap-1.5">
+            <label class="text-xs font-medium text-muted-foreground">Reason for rejecting all tools</label>
+            <input
+              v-model="rejectReason"
+              type="text"
+              placeholder="Explain why you're rejecting all actions…"
+              class="w-full rounded-lg border border-border bg-white dark:bg-zinc-900 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+
+          <!-- Error message -->
+          <p v-if="approveError" role="alert" class="text-xs text-destructive">{{ approveError }}</p>
 
           <!-- One card per pending tool call -->
           <div
@@ -312,69 +480,113 @@ onUnmounted(() => {
             :key="tc.id"
             class="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-zinc-900 p-4 flex flex-col gap-3"
           >
+            <!-- Tool name + description -->
             <div class="flex items-start justify-between gap-2">
-              <div>
-                <p class="text-sm font-semibold font-mono">{{ tc.tool_name }}</p>
+              <div class="min-w-0">
+                <p class="text-sm font-semibold font-mono text-amber-900 dark:text-amber-100">{{ tc.tool_name }}</p>
                 <p v-if="tc.human_description" class="text-xs text-muted-foreground mt-0.5">
                   {{ tc.human_description }}
                 </p>
               </div>
             </div>
 
+            <!-- Proposed arguments — collapsible JSON tree (read-only) -->
+            <div class="rounded-lg border border-border bg-muted/20 overflow-hidden">
+              <details class="group">
+                <summary class="flex items-center gap-1.5 px-3 py-2 cursor-pointer select-none list-none text-xs text-muted-foreground hover:bg-muted/30 transition-colors">
+                  <svg class="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                  Proposed arguments
+                </summary>
+                <pre class="px-3 py-2 border-t border-border text-xs font-mono text-muted-foreground whitespace-pre-wrap break-all">{{ JSON.stringify(tc.proposed_arguments ?? {}, null, 2) }}</pre>
+              </details>
+            </div>
+
+            <!-- Editable arguments textarea -->
             <div class="flex flex-col gap-1">
-              <label class="text-xs font-medium text-muted-foreground">Arguments (editable)</label>
+              <label class="text-xs font-medium text-muted-foreground">Edit arguments before approving</label>
               <textarea
-                v-model="approvalArgs[tc.id]"
-                rows="4"
+                v-model="perToolArgs[tc.id]"
+                rows="3"
                 class="w-full resize-y rounded-lg border border-border bg-muted/30 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
-          </div>
 
-          <!-- Reject input -->
-          <div v-if="showRejectInput" class="flex flex-col gap-2">
-            <label class="text-xs font-medium text-muted-foreground">Reason for rejection</label>
-            <input
-              v-model="rejectReason"
-              type="text"
-              placeholder="Explain why you're rejecting this action…"
-              class="w-full rounded-lg border border-border bg-white dark:bg-zinc-900 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
+            <!-- Per-tool reject reason input -->
+            <div v-if="perToolRejectInput[tc.id]" class="flex flex-col gap-1">
+              <label class="text-xs font-medium text-muted-foreground">Reason for rejecting "{{ tc.tool_name }}"</label>
+              <input
+                v-model="perToolRejectReason[tc.id]"
+                type="text"
+                :placeholder="`Explain why you're rejecting ${tc.tool_name}…`"
+                class="w-full rounded-lg border border-border bg-white dark:bg-zinc-900 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
 
-          <p v-if="approveError" role="alert" class="text-xs text-destructive">{{ approveError }}</p>
-
-          <div class="flex gap-2">
-            <button
-              @click="approveAll"
-              :disabled="approvingAll"
-              class="inline-flex h-9 flex-1 items-center justify-center rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium shadow transition-colors disabled:pointer-events-none disabled:opacity-50"
-            >
-              {{ approvingAll ? 'Approving…' : 'Approve' }}
-            </button>
-            <button
-              v-if="!showRejectInput"
-              @click="showRejectInput = true"
-              class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-white dark:bg-zinc-900 px-4 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Reject
-            </button>
-            <template v-else>
+            <!-- Per-tool Approve / Reject buttons -->
+            <div class="flex gap-2">
               <button
-                @click="reject"
-                :disabled="rejecting"
-                class="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/30 px-4 text-sm font-medium text-red-700 dark:text-red-300 hover:bg-red-100 transition-colors disabled:pointer-events-none disabled:opacity-50"
+                @click="approveToolCall(tc)"
+                :disabled="perToolApproving[tc.id]"
+                class="inline-flex h-8 flex-1 items-center justify-center rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium shadow transition-colors disabled:pointer-events-none disabled:opacity-50"
               >
-                {{ rejecting ? 'Rejecting…' : 'Confirm Reject' }}
+                {{ perToolApproving[tc.id] ? 'Approving…' : '✓ Approve' }}
               </button>
               <button
-                @click="showRejectInput = false; rejectReason = ''"
-                class="inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                v-if="!perToolRejectInput[tc.id]"
+                @click="perToolRejectInput[tc.id] = true"
+                class="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-white dark:bg-zinc-900 px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
               >
-                Cancel
+                ✗ Reject
               </button>
-            </template>
+              <template v-else>
+                <button
+                  @click="rejectToolCall(tc)"
+                  :disabled="perToolRejecting[tc.id]"
+                  class="inline-flex h-8 items-center justify-center rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/30 px-3 text-xs font-medium text-red-700 dark:text-red-300 hover:bg-red-100 transition-colors disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {{ perToolRejecting[tc.id] ? 'Rejecting…' : 'Confirm Reject' }}
+                </button>
+                <button
+                  @click="perToolRejectInput[tc.id] = false; perToolRejectReason[tc.id] = ''"
+                  class="inline-flex h-8 items-center justify-center rounded-lg border border-border px-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+              </template>
+            </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Follow-up Input Bar -->
+      <div
+        v-if="showFollowupBar"
+        class="border-t border-border bg-background shrink-0"
+      >
+        <div class="max-w-2xl w-full mx-auto px-4 py-4 flex flex-col gap-2">
+          <p class="text-xs text-muted-foreground font-medium">Continue conversation</p>
+          <div class="flex items-end gap-3">
+            <div class="flex-1">
+              <textarea
+                v-model="followupPrompt"
+                rows="1"
+                placeholder="Ask a follow-up question…"
+                class="w-full resize-none rounded-lg border border-border bg-background px-3 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                style="min-height: 42px; max-height: 120px"
+                @keydown.enter.exact.prevent="submitFollowup"
+              />
+            </div>
+            <button
+              @click="submitFollowup"
+              :disabled="submittingFollowup || !followupPrompt.trim()"
+              class="shrink-0 h-10 rounded-lg bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center px-4 text-sm font-medium"
+            >
+              {{ submittingFollowup ? 'Sending…' : 'Send' }}
+            </button>
+          </div>
+          <p v-if="followupError" role="alert" class="text-xs text-destructive">{{ followupError }}</p>
         </div>
       </div>
     </template>

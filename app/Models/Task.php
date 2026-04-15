@@ -20,6 +20,7 @@ use Illuminate\Support\Carbon;
  * @property int         $max_steps
  * @property string|null $pending_state
  * @property string|null $failure_reason
+ * @property int|null    $parent_task_id
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -39,6 +40,7 @@ class Task extends Model
         'max_steps',
         'pending_state',
         'failure_reason',
+        'parent_task_id',
     ];
 
     /** @var array<string, string> */
@@ -67,5 +69,11 @@ class Task extends Model
     public function toolCalls(): HasMany
     {
         return $this->hasMany(ToolCall::class);
+    }
+
+    /** @return BelongsTo<Task, $this>|null */
+    public function parentTask(): BelongsTo
+    {
+        return $this->belongsTo(Task::class, 'parent_task_id');
     }
 }

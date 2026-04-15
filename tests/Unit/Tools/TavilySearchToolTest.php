@@ -70,6 +70,7 @@ it('handles http error codes gracefully', function () {
     $client->expects('request')->andReturn($response);
     $logger = Mockery::mock(LoggerInterface::class);
     $logger->allows('error');
+    $logger->allows('debug');
 
     $tool = new TavilySearchTool($config, $client, $logger);
 
