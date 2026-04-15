@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
+use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Symfony\Component\HttpClient\MockHttpClient;
@@ -161,11 +162,11 @@ test('complete throws LLMProviderException on HTTP 401', function (): void {
     expect(fn() => $driver->complete(makeRequest()))->toThrow(LLMProviderException::class);
 });
 
-test('complete throws LLMProviderException on HTTP 500', function (): void {
+test('complete throws LLMRetryableException on HTTP 500', function (): void {
     $client = new MockHttpClient(new MockResponse('Internal Server Error', ['http_code' => 500]));
     $driver = makeOpenAIDriver($client);
 
-    expect(fn() => $driver->complete(makeRequest()))->toThrow(LLMProviderException::class);
+    expect(fn() => $driver->complete(makeRequest()))->toThrow(LLMRetryableException::class);
 });
 
 // ---------------------------------------------------------------------------

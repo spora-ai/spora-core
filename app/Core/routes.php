@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use FastRoute\RouteCollector;
+use Spora\Http\HealthController;
 use Spora\Http\AgentController;
 use Spora\Http\AuthController;
 use Spora\Http\LLMConfigController;
@@ -13,7 +14,6 @@ use Spora\Http\ScheduledRunController;
 use Spora\Http\TaskController;
 use Spora\Http\SseController;
 use Spora\Http\ToolController;
-use Symfony\Component\HttpFoundation\JsonResponse;
 
 /**
  * Application route definitions.
@@ -22,9 +22,7 @@ use Symfony\Component\HttpFoundation\JsonResponse;
  */
 return static function (RouteCollector $r): void {
     // Health check (no auth)
-    $r->addRoute('GET', '/health', static function (): JsonResponse {
-        return new JsonResponse(['status' => 'ok']);
-    });
+    $r->addRoute('GET', '/health', [HealthController::class, 'check']);
     // Auth
     $r->addRoute('POST', '/api/v1/auth/login', [AuthController::class, 'login']);
     $r->addRoute('POST', '/api/v1/auth/logout', [AuthController::class, 'logout']);
@@ -60,6 +58,7 @@ return static function (RouteCollector $r): void {
     $r->addRoute('GET', '/api/v1/tasks/{taskId}', [TaskController::class, 'show']);
     $r->addRoute('POST', '/api/v1/tasks/{taskId}/approve', [TaskController::class, 'approve']);
     $r->addRoute('POST', '/api/v1/tasks/{taskId}/reject', [TaskController::class, 'reject']);
+    $r->addRoute('POST', '/api/v1/tasks/{taskId}/retry', [TaskController::class, 'retry']);
     $r->addRoute('DELETE', '/api/v1/tasks/{taskId}', [TaskController::class, 'destroy']);
 
     // Recipes
@@ -80,7 +79,8 @@ return static function (RouteCollector $r): void {
     $r->addRoute('POST', '/api/v1/notifications/read-all', [NotificationController::class, 'markAllRead']);
     $r->addRoute('DELETE', '/api/v1/notifications/{id}', [NotificationController::class, 'destroy']);
 
-    // SSE auth (Mercure subscriber token)
+    // SSE
+    $r->addRoute('GET', '/api/v1/sse/status', [SseController::class, 'status']);
     $r->addRoute('GET', '/api/v1/sse/auth', [SseController::class, 'auth']);
 
     // Prompt Templates

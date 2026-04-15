@@ -8,6 +8,12 @@ vi.mock('@/api/client', () => ({
     get: vi.fn(),
     post: vi.fn(),
   },
+  ApiError: class extends Error {
+    constructor(public readonly code: string, message: string, public readonly status: number) {
+      super(message)
+      this.name = 'ApiError'
+    }
+  },
 }))
 
 import { api } from '@/api/client'

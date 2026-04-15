@@ -54,9 +54,9 @@ import { computed } from 'vue'
       </p>
     </div>
     <div class="flex items-center gap-3 shrink-0">
-      <!-- Configure button (shown for all tools with settings_schema, enabled or not) -->
+      <!-- Configure button (only shown when enabled and has settings_schema) -->
       <button
-        v-if="tool.settings_schema.length > 0"
+        v-if="enabled && tool.settings_schema.length > 0"
         @click="emit('openConfig')"
         class="inline-flex h-7 items-center justify-center rounded-lg border border-border bg-background px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
       >

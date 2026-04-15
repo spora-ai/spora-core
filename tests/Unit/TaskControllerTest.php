@@ -516,3 +516,152 @@ it('destroy cascade-deletes tool_calls rows', function (): void {
 
     expect(ToolCall::where('task_id', $task->id)->count())->toBe(0);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// retry()
+// ---------------------------------------------------------------------------
+
+it('retry returns 404 for unknown task', function (): void {
+    [$controller, $authService] = makeTaskController();
+    seedUserAndAgent($authService);
+
+    $req = jsonRequest('POST', '/api/v1/tasks/99999/retry');
+    $req->attributes->set('taskId', 99999);
+
+    $resp = $controller->retry($req);
+    expect($resp->getStatusCode())->toBe(404);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('retry returns 409 when task is not FAILED', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'x',
+        'step_count'  => 1,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/retry");
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->retry($req);
+    expect($resp->getStatusCode())->toBe(409);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('retry calls orchestrator->start() with same agent_id and user_prompt', function (): void {
+    $agentIdCapture = null;
+    $promptCapture = '';
+
+    $mockNewTask = new Task([
+        'id'          => 2,
+        'agent_id'    => 1,
+        'user_id'     => 1,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'Retry me',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+    $mockNewTask->id = 2;
+
+    $orch = Mockery::mock(OrchestratorInterface::class);
+    $orch->expects('start')->once()->withArgs(function (int $agentId, string $prompt, int $maxSteps) use (&$agentIdCapture, &$promptCapture): bool {
+        $agentIdCapture = $agentId;
+        $promptCapture = $prompt;
+        return true;
+    })->andReturn($mockNewTask);
+
+    [$controller, $authService] = makeTaskController($orch);
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'FAILED',
+        'user_prompt' => 'Retry me',
+        'step_count'  => 3,
+        'max_steps'   => 10,
+        'error_code'  => 'SERVER_ERROR',
+        'error_message' => 'The AI service encountered an error.',
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/retry");
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->retry($req);
+    expect($resp->getStatusCode())->toBe(201);
+
+    expect($agentIdCapture)->toBe($agent->id);
+    expect($promptCapture)->toBe('Retry me');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('retry returns 201 with the new task resource', function (): void {
+    $mockTask = new Task([
+        'id'          => 2,
+        'agent_id'    => 1,
+        'user_id'     => 1,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'Retry me',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+    $mockTask->id = 2;
+
+    $orch = Mockery::mock(OrchestratorInterface::class);
+    $orch->allows('start')->andReturn($mockTask);
+
+    [$controller, $authService] = makeTaskController($orch);
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'FAILED',
+        'user_prompt' => 'Retry me',
+        'step_count'  => 1,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/retry");
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->retry($req);
+    expect($resp->getStatusCode())->toBe(201);
+
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['task']['id'])->toBe(2);
+    expect($body['data']['task']['status'])->toBe('RUNNING');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// show() includes error_code and error_message in response
+// ---------------------------------------------------------------------------
+
+it('show returns error_code and error_message when set on task', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'FAILED',
+        'user_prompt' => 'Error test',
+        'step_count'  => 1,
+        'max_steps'   => 10,
+        'error_code'  => 'SERVER_OVERLOADED',
+        'error_message' => 'The AI service is under high load.',
+    ]);
+
+    $req = jsonRequest('GET', "/api/v1/tasks/{$task->id}");
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->show($req);
+    expect($resp->getStatusCode())->toBe(200);
+
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['task']['error_code'])->toBe('SERVER_OVERLOADED');
+    expect($body['data']['task']['error_message'])->toBe('The AI service is under high load.');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());

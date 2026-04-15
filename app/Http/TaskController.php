@@ -269,6 +269,40 @@ final class TaskController
         return new Response(null, Response::HTTP_NO_CONTENT);
     }
 
+    /**
+     * POST /api/v1/tasks/{taskId}/retry
+     *
+     * Creates a new task with the same agent_id and user_prompt as the failed task.
+     * The new task is a fresh attempt — no parent_task_id link.
+     */
+    public function retry(Request $request): JsonResponse
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
+
+        if ($task === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+
+        if ($task->status !== 'FAILED') {
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_STATE', 'message' => 'Only failed tasks can be retried.']],
+                Response::HTTP_CONFLICT,
+            );
+        }
+
+        $newTask = $this->orchestrator->start($task->agent_id, $task->user_prompt, $task->max_steps);
+        $this->mercure->publish($newTask->id, $this->taskResource($newTask));
+
+        return new JsonResponse(
+            ['data' => ['task' => $this->taskResource($newTask)]],
+            Response::HTTP_CREATED,
+        );
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
@@ -294,6 +328,11 @@ final class TaskController
 
         if ($task->parent_task_id !== null) {
             $resource['parent_task_id'] = $task->parent_task_id;
+        }
+
+        if ($task->error_code !== null) {
+            $resource['error_code'] = $task->error_code;
+            $resource['error_message'] = $task->error_message;
         }
 
         return $resource;

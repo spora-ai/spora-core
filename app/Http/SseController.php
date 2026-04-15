@@ -20,6 +20,23 @@ final class SseController
     ) {}
 
     /**
+     * GET /api/v1/sse/status
+     *
+     * Returns whether SSE/Mercure is configured and active.
+     */
+    public function status(): JsonResponse
+    {
+        if ($this->hubUrl === null) {
+            return new JsonResponse(['active' => false]);
+        }
+
+        return new JsonResponse([
+            'active' => true,
+            'hubUrl' => $this->hubUrl,
+        ]);
+    }
+
+    /**
      * GET /api/v1/sse/auth
      *
      * Returns the Mercure hub URL and a subscriber-scoped JWT token.
@@ -52,6 +69,10 @@ final class SseController
      */
     private function generateSubscriberJwt(int $userId): string
     {
+        if ($this->jwtKey === null) {
+            throw new RuntimeException('Mercure JWT key is not configured. Set SPORA_MERCURE_JWT_KEY.');
+        }
+
         $now     = time();
         $header  = $this->base64url(json_encode(['alg' => 'HS256', 'typ' => 'JWT'], JSON_THROW_ON_ERROR));
         $payload = $this->base64url(json_encode([

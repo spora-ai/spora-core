@@ -30,5 +30,6 @@ export default defineConfig({
     environment: 'happy-dom',
     globals: true,
     include: ['tests/**/*.spec.{ts,tsx}'],
+    exclude: ['tests/e2e/**'],
   },
 })

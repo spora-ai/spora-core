@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
+use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
@@ -269,9 +270,9 @@ test('complete throws LLMProviderException on HTTP 401', function (): void {
     expect(fn() => $driver->complete(makeAnthropicRequest()))->toThrow(LLMProviderException::class);
 });
 
-test('complete throws LLMProviderException on HTTP 500', function (): void {
+test('complete throws LLMRetryableException on HTTP 500', function (): void {
     $client = new MockHttpClient(new MockResponse('{"error":{"type":"api_error"}}', ['http_code' => 500]));
     $driver = makeAnthropicDriver($client);
 
-    expect(fn() => $driver->complete(makeAnthropicRequest()))->toThrow(LLMProviderException::class);
+    expect(fn() => $driver->complete(makeAnthropicRequest()))->toThrow(LLMRetryableException::class);
 });

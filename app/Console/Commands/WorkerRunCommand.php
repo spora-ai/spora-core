@@ -14,6 +14,7 @@ use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
 use Spora\Models\Task;
+use Spora\Services\NotificationService;
 use Spora\Services\MercurePublisherInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -41,6 +42,7 @@ final class WorkerRunCommand extends Command
         private readonly LoggerInterface        $logger,
         private readonly ContainerInterface     $container,
         private readonly MercurePublisherInterface $mercure,
+        private readonly NotificationService $notificationService,
     ) {
         parent::__construct('worker:run');
     }
@@ -253,6 +255,8 @@ final class WorkerRunCommand extends Command
                 $output->writeln(sprintf('<error>Scheduled run %d failed: %s</error>', $run->id, $e->getMessage()));
                 continue;
             }
+
+            $this->notificationService->notifyScheduledRunCompleted($run->id, $task);
 
             // Update last_run_at
             Capsule::table('scheduled_runs')

@@ -46,6 +46,29 @@ const perToolRejectInput = ref<Record<number, boolean>>({})
 const perToolApproving = ref<Record<number, boolean>>({})
 const perToolRejecting = ref<Record<number, boolean>>({})
 
+// Error banner state
+const errorBannerDismissed = ref(false)
+
+const RETRYABLE_ERROR_CODES = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'SERVER_ERROR', 'GATEWAY_ERROR'] as const
+
+const showRetryBanner = computed(() => {
+  if (!task.value) return false
+  if (task.value.status !== 'FAILED') return false
+  if (errorBannerDismissed.value) return false
+  return task.value.error_code !== null && RETRYABLE_ERROR_CODES.includes(task.value.error_code as typeof RETRYABLE_ERROR_CODES[number])
+})
+
+async function retryNow(): Promise<void> {
+  if (!task.value) return
+  errorBannerDismissed.value = true
+  try {
+    const newTask = await taskStore.retryTask(task.value.id)
+    router.push({ name: 'task', params: { id: newTask.id } })
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : 'Retry failed.')
+  }
+}
+
 // ── Follow-up ─────────────────────────────────────────────────────────────────
 
 const followupPrompt = ref('')
@@ -235,6 +258,7 @@ async function rejectToolCall(tc: { id: number; tool_name: string }): Promise<vo
 // Re-initialize when navigating between different tasks (component reuse without remount)
 watch(taskId, async (newId, oldId) => {
   if (!Number.isFinite(newId) || newId === oldId) return
+  errorBannerDismissed.value = false
   taskStore.stopDetailPolling()
   taskStore.clearActiveTask()
   taskLoadSucceeded = false
@@ -322,6 +346,35 @@ onUnmounted(() => {
     </div>
 
     <template v-else>
+      <!-- Retryable error banner -->
+      <div
+        v-if="showRetryBanner"
+        data-testid="retry-banner"
+        class="mx-4 mt-4 max-w-2xl mx-auto flex items-start gap-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm"
+      >
+        <svg class="h-5 w-5 shrink-0 text-red-600 dark:text-red-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold text-red-900 dark:text-red-100">Task failed: {{ task.error_code?.replace('_', ' ').toLowerCase() }}</p>
+          <p v-if="task.error_message" class="text-red-700 dark:text-red-300 mt-0.5">{{ task.error_message }}</p>
+        </div>
+        <button
+          data-testid="retry-button"
+          @click="retryNow"
+          class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium shadow transition-colors px-3"
+        >
+          Retry Now
+        </button>
+        <button
+          data-testid="dismiss-retry-banner-button"
+          @click="errorBannerDismissed = true"
+          class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg border border-red-300 dark:border-red-800 text-red-700 dark:text-red-300 text-xs px-2 hover:bg-red-100 dark:hover:bg-red-950/50 transition-colors"
+        >
+          Dismiss
+        </button>
+      </div>
+
       <!-- Chat area -->
       <div class="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-3 max-w-2xl w-full mx-auto">
 

@@ -7,6 +7,7 @@ namespace Spora\Drivers;
 use Psr\Log\LoggerInterface;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
+use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
@@ -74,6 +75,11 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
 
         if ($statusCode === 429) {
             throw new LLMRateLimitException('OpenAI rate limit exceeded (HTTP 429).');
+        }
+
+        if ($statusCode >= 500) {
+            $body = $response->getContent(throw: false);
+            throw new LLMRetryableException("OpenAI API error {$statusCode}: {$body}");
         }
 
         if ($statusCode >= 400) {

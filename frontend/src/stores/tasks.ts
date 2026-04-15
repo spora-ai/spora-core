@@ -77,6 +77,11 @@ export const useTaskStore = defineStore('tasks', () => {
     await fetchTaskDetail(taskId)
   }
 
+  async function retryTask(taskId: number): Promise<Task> {
+    const result = await api.post<{ task: Task }>(`/tasks/${taskId}/retry`)
+    return result.task
+  }
+
   async function rejectTask(taskId: number, reason: string): Promise<void> {
     await api.post(`/tasks/${taskId}/reject`, { reason })
     await fetchTaskDetail(taskId)
@@ -162,6 +167,9 @@ export const useTaskStore = defineStore('tasks', () => {
     if (Array.isArray(data.tool_calls)) {
       activeTask.value.tool_calls = data.tool_calls as TaskDetail['tool_calls']
     }
+    // Merge error fields
+    if (data.error_code !== undefined) activeTask.value.error_code = data.error_code as string | null
+    if (data.error_message !== undefined) activeTask.value.error_message = data.error_message as string | null
   }
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -211,6 +219,7 @@ export const useTaskStore = defineStore('tasks', () => {
     fetchTaskDetail,
     approveTask,
     rejectTask,
+    retryTask,
     startListPolling,
     stopListPolling,
     startDetailPolling,

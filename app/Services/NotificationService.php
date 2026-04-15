@@ -10,7 +10,7 @@ use Spora\Models\Task;
 /**
  * Creates notification records and publishes real-time events via Mercure.
  */
-final class NotificationService
+class NotificationService
 {
     public function __construct(
         private readonly MercurePublisherInterface $mercure,
@@ -38,7 +38,7 @@ final class NotificationService
             'user_id' => $task->user_id,
             'type'    => 'task_failed',
             'title'   => 'Task failed',
-            'body'    => $task->failure_reason ?? 'An error occurred during task execution.',
+            'body'    => $task->failure_reason ?: 'An error occurred during task execution.',
             'data'    => ['task_id' => $task->id, 'agent_id' => $task->agent_id],
         ]);
 

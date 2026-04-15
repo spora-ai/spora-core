@@ -11,6 +11,8 @@ use RuntimeException;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
+use Spora\Drivers\Exceptions\LLMRateLimitException;
+use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
@@ -18,6 +20,7 @@ use Spora\Models\AgentTool;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
+use Spora\Services\NotificationService;
 use Spora\Tools\Attributes\OutputTool;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\InputToolInterface;
@@ -28,15 +31,17 @@ use Throwable;
 final class Orchestrator implements OrchestratorInterface
 {
     /**
-     * @param  list<object>       $toolInstances  Instances of InputToolInterface|OutputToolInterface.
-     * @param  ?LoggerInterface   $logger         Optional PSR-3 logger. When null, all log calls
-     *                                            are silently skipped — no behaviour change.
+     * @param  list<object>           $toolInstances      Instances of InputToolInterface|OutputToolInterface.
+     * @param  ?LoggerInterface       $logger             Optional PSR-3 logger. When null, all log calls
+     *                                                    are silently skipped — no behaviour change.
+     * @param  ?NotificationService   $notificationService Optional notification service for task events.
      */
     public function __construct(
         private readonly DriverFactory $driverFactory,
         private readonly array         $toolInstances = [],
         private readonly ?LoggerInterface $logger     = null,
         private readonly WorkerMode    $workerMode    = WorkerMode::Sync,
+        private readonly ?NotificationService $notificationService = null,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -192,6 +197,8 @@ final class Orchestrator implements OrchestratorInterface
                 $task->status         = 'COMPLETED';
                 $task->final_response = $response->content;
                 $task->save();
+
+                $this->notificationService?->notifyTaskCompleted($task);
             }
         } catch (Throwable $e) {
             $this->logger?->error('tick() failed — task marked FAILED', [
@@ -200,16 +207,29 @@ final class Orchestrator implements OrchestratorInterface
                 'message'         => $e->getMessage(),
             ]);
 
+            $errorCode = $this->classifyError($e);
+
             // Best-effort write: use a direct query so stale Eloquent model state cannot
             // interfere. Guard with status='RUNNING' to avoid downgrading a COMPLETED task
             // if a race somehow already advanced it.
             try {
-                Task::where('id', $taskId)
+                $updated = Task::where('id', $taskId)
                     ->where('status', 'RUNNING')
                     ->update([
                         'status'         => 'FAILED',
                         'failure_reason' => $e->getMessage(),
+                        'error_code'     => $errorCode,
+                        'error_message'  => $this->friendlyMessage($errorCode),
                     ]);
+
+                // Only send notification if the row was actually updated (task was RUNNING).
+                // This avoids sending notifyTaskFailed with a stale COMPLETED task model.
+                if ($updated > 0) {
+                    $failedTask = Task::where('id', $taskId)->first();
+                    if ($failedTask !== null) {
+                        $this->notificationService?->notifyTaskFailed($failedTask);
+                    }
+                }
             } catch (Throwable) {
                 // DB itself may be unavailable — nothing more we can do here.
             }
@@ -470,6 +490,8 @@ final class Orchestrator implements OrchestratorInterface
             $task->status        = 'PENDING_APPROVAL';
             $task->pending_state = $state->toJson();
             $task->save();
+
+            $this->notificationService?->notifyPendingApproval($task);
         }
     }
 
@@ -736,5 +758,55 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         TaskHistory::create($row);
+    }
+
+    /**
+     * Classify a Throwable into a short error code for storage on the task.
+     */
+    private function classifyError(Throwable $e): string
+    {
+        if ($e instanceof LLMRateLimitException) {
+            return 'RATE_LIMIT';
+        }
+
+        if ($e instanceof LLMRetryableException) {
+            $msg = $e->getMessage();
+            if (str_contains($msg, '529')) return 'SERVER_OVERLOADED';
+            if (str_contains($msg, '520') || str_contains($msg, '500')) return 'SERVER_ERROR';
+            return 'GATEWAY_ERROR';
+        }
+
+        if ($e instanceof LLMProviderException) {
+            $msg = $e->getMessage();
+            if (str_contains($msg, '401') || str_contains($msg, '403')) return 'AUTH_ERROR';
+            if (str_contains($msg, '400')) return 'BAD_REQUEST';
+            if ($e->isRetryable()) return 'GATEWAY_ERROR';
+        }
+
+        return 'UNKNOWN';
+    }
+
+    /**
+     * Map a short error code to a human-readable message shown in the UI.
+     *
+     * @return array<string, string>
+     */
+    private function friendlyMessages(): array
+    {
+        return [
+            'RATE_LIMIT'        => 'The AI service is busy. Try again in a moment.',
+            'SERVER_OVERLOADED' => 'The AI service is under high load. Try again shortly.',
+            'SERVER_ERROR'      => 'The AI service encountered an error. Please try again.',
+            'GATEWAY_ERROR'     => 'The AI service is temporarily unavailable. Try again shortly.',
+            'AUTH_ERROR'        => 'API authentication failed. Please check your API key.',
+            'BAD_REQUEST'       => 'Invalid request. Please check your agent configuration.',
+            'TOOL_ERROR'        => 'A tool encountered an error. Check the task history for details.',
+            'UNKNOWN'           => 'An unexpected error occurred. Please try again.',
+        ];
+    }
+
+    private function friendlyMessage(string $errorCode): string
+    {
+        return $this->friendlyMessages()[$errorCode] ?? $this->friendlyMessages()['UNKNOWN'];
     }
 }

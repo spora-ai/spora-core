@@ -7,25 +7,34 @@
 import { ref, onUnmounted } from 'vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useNotificationStore } from '@/stores/notifications'
+import { useAuthStore } from '@/stores/auth'
 import { api } from '@/api/client'
 
 export function useRealtime() {
   const taskStore = useTaskStore()
   const notificationStore = useNotificationStore()
+  const authStore = useAuthStore()
 
   const connected = ref(false)
   let eventSource: EventSource | null = null
-  let pollInterval: ReturnType<typeof setInterval> | null = null
-  let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
-  let reconnectDelay = 1000 // reserved for exponential backoff on reconnect
 
   async function connect(): Promise<void> {
     try {
-      const result = await api.get<{ hubUrl: string; token: string }>('/sse/auth')
+      // First check if SSE is configured and active
+      const statusResponse = await api.get<{ active: boolean; hubUrl?: string }>('/sse/status')
+      if (!statusResponse.active || !statusResponse.hubUrl) {
+        startPollingFallback()
+        return
+      }
 
-      const url = new URL(result.hubUrl)
+      // Fetch auth token and subscribe to user-specific notification topic
+      const authResponse = await api.get<{ hubUrl: string; token: string }>('/sse/auth')
+      const userId = authStore.user?.id
+      const url = new URL(authResponse.hubUrl)
       url.searchParams.set('topic', 'task/*')
-      url.searchParams.set('topic', 'user/*')
+      if (userId !== undefined) {
+        url.searchParams.set('topic', `user/${userId}/notifications`)
+      }
 
       eventSource = new EventSource(url.toString())
 
@@ -38,8 +47,6 @@ export function useRealtime() {
         } else if (data.topic.startsWith('user/')) {
           notificationStore.prependFromSSE(data.data as unknown as Parameters<typeof notificationStore.prependFromSSE>[0])
         }
-        reconnectDelay = 1000 // reset backoff on successful message (reserved for future use)
-        void reconnectDelay
       }
 
       eventSource.onerror = () => {
@@ -64,24 +71,15 @@ export function useRealtime() {
       eventSource = null
     }
 
-    // Poll task list every 3s when active, 10s when idle
-    pollInterval = setInterval(() => {
-      taskStore.startListPolling()
-    }, 30_000)
+    // Start the adaptive polling loop managed entirely by the store.
+    // startListPolling() handles its own de-duplication and adaptive 3s/10s intervals.
+    taskStore.startListPolling()
   }
 
   function disconnect(): void {
     if (eventSource) {
       eventSource.close()
       eventSource = null
-    }
-    if (pollInterval !== null) {
-      clearInterval(pollInterval)
-      pollInterval = null
-    }
-    if (reconnectTimeout !== null) {
-      clearTimeout(reconnectTimeout)
-      reconnectTimeout = null
     }
     connected.value = false
   }

@@ -13,6 +13,7 @@ use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\NotificationService;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\BufferedOutput;
@@ -107,7 +108,7 @@ it('start in cron mode creates QUEUED task without dispatching tick', function (
     $mock = Mockery::mock(LLMDriverInterface::class);
     $mock->allows('complete')->never();
 
-    $orch = makeOrchestratorForMode(mockDriverFactoryForMode($mock), WorkerMode::Cron);
+    $orch = makeOrchestratorForMode(mockDriverFactoryForMode($mock), WorkerMode::Worker);
     $task = $orch->start($agentId, 'Hello cron', maxSteps: 10);
 
     expect($task->status)->toBe('QUEUED')
@@ -143,7 +144,7 @@ it('WorkerRunCommand processes a single QUEUED task to completion', function ():
         return new LLMResponse("Step {$callCount}", [], 5, 3, "cmp_{$callCount}");
     });
 
-    $orch = makeOrchestratorForMode(mockDriverFactoryForMode($mock), WorkerMode::Cron, [new StubInputTool()]);
+    $orch = makeOrchestratorForMode(mockDriverFactoryForMode($mock), WorkerMode::Worker, [new StubInputTool()]);
 
     // Create a pre-existing QUEUED task.
     $task = Task::create([
@@ -164,6 +165,7 @@ it('WorkerRunCommand processes a single QUEUED task to completion', function ():
         new NullLogger(),
         makeMockContainerForWorker(),
         Mockery::mock(MercurePublisherInterface::class),
+        Mockery::mock(NotificationService::class),
     );
     $command->run($input, $output);
 
@@ -182,7 +184,7 @@ it('WorkerRunCommand processes multiple QUEUED tasks in order', function (): voi
         return new LLMResponse("Done {$callCount}", [], 5, 3, "cmp_{$callCount}");
     });
 
-    $orch = makeOrchestratorForMode(mockDriverFactoryForMode($mock), WorkerMode::Cron, [new StubInputTool()]);
+    $orch = makeOrchestratorForMode(mockDriverFactoryForMode($mock), WorkerMode::Worker, [new StubInputTool()]);
 
     // Create three QUEUED tasks.
     $task1 = Task::create(['agent_id' => $agentId, 'user_id' => $userId, 'status' => 'QUEUED', 'user_prompt' => 'Task 1', 'step_count' => 0, 'max_steps' => 10]);
@@ -198,6 +200,7 @@ it('WorkerRunCommand processes multiple QUEUED tasks in order', function (): voi
         new NullLogger(),
         makeMockContainerForWorker(),
         Mockery::mock(MercurePublisherInterface::class),
+        Mockery::mock(NotificationService::class),
     );
     $command->run($input, $output);
 
@@ -216,7 +219,7 @@ it('WorkerRunCommand exits cleanly when no QUEUED tasks exist', function (): voi
     $mock = Mockery::mock(LLMDriverInterface::class);
     $mock->allows('complete')->never();
 
-    $orch = makeOrchestratorForMode(mockDriverFactoryForMode($mock), WorkerMode::Cron);
+    $orch = makeOrchestratorForMode(mockDriverFactoryForMode($mock), WorkerMode::Worker);
 
     // No QUEUED tasks.
 
@@ -229,6 +232,7 @@ it('WorkerRunCommand exits cleanly when no QUEUED tasks exist', function (): voi
         new NullLogger(),
         makeMockContainerForWorker(),
         Mockery::mock(MercurePublisherInterface::class),
+        Mockery::mock(NotificationService::class),
     );
     $result = $command->run($input, $output);
 
@@ -245,7 +249,7 @@ it('tick is a no-op when task is QUEUED (only RUNNING tasks are processed)', fun
     $mock = Mockery::mock(LLMDriverInterface::class);
     $mock->allows('complete')->never();
 
-    $orch = makeOrchestratorForMode(mockDriverFactoryForMode($mock), WorkerMode::Cron);
+    $orch = makeOrchestratorForMode(mockDriverFactoryForMode($mock), WorkerMode::Worker);
 
     $task = Task::create([
         'agent_id' => $agentId,
