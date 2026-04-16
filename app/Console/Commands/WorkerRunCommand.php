@@ -227,9 +227,10 @@ final class WorkerRunCommand extends Command
             if ($run->template_id !== null) {
                 $template = AgentPromptTemplate::find($run->template_id);
                 $variables = $template?->variables ?? [];
-                $prompt = $this->substituteVariables($template?->prompt_template ?? '', $variables);
+                $prompt = $this->substituteVariables($template?->prompt_template ?? '', $variables, $agent);
             } else {
                 $prompt = $run->raw_prompt ?? '';
+                $prompt = $this->substituteVariables($prompt, [], $agent);
             }
 
             // Determine max_steps (priority: scheduled_run.max_steps_override > template.max_steps > agent.max_steps)
@@ -288,20 +289,54 @@ final class WorkerRunCommand extends Command
     /**
      * Substitute {{variable}} placeholders in a template string.
      */
-    private function substituteVariables(string $template, array $variables): string
+    private function substituteVariables(string $template, array $variables, ?Agent $agent = null): string
     {
-        return preg_replace_callback('/\{\{(\w+)\}\}/', function (array $m) use ($variables): string {
-            if ($m[1] === 'date') {
+        // Convert the JSON list to a map of key => default_value
+        $defaults = [];
+        foreach ($variables as $v) {
+            if (isset($v['key'])) {
+                $defaults[$v['key']] = $v['default_value'] ?? null;
+            }
+        }
+
+        return preg_replace_callback('/\{\{(\w+)(?::([^}]*))?\}\}/', function (array $m) use ($defaults, $agent): string {
+            $key = $m[1];
+            $inlineDefault = $m[2] ?? null;
+
+            if ($key === 'current_date' || $key === 'date') {
                 return date('Y-m-d');
             }
-            if ($m[1] === 'time') {
+            if ($key === 'current_time' || $key === 'time') {
                 return date('H:i');
             }
-            if ($m[1] === 'datetime') {
-                return date('c');
+            if ($key === 'current_datetime' || $key === 'datetime') {
+                return date('Y-m-d\TH:i');
+            }
+            if ($key === 'agent_name' && $agent !== null) {
+                return $agent->name;
+            }
+            if ($key === 'user_name' && $agent !== null) {
+                $user = \Spora\Models\User::find($agent->user_id);
+                return $user?->name ?? $key;
+            }
+            if ($key === 'day_of_week') {
+                return date('l');
+            }
+            if ($key === 'day_of_month') {
+                return date('j');
+            }
+            if ($key === 'month') {
+                return date('F');
+            }
+            if ($key === 'year') {
+                return date('Y');
             }
 
-            return $variables[$m[1]] ?? $m[0];
+            if (isset($defaults[$key]) && $defaults[$key] !== null && $defaults[$key] !== '') {
+                return $defaults[$key];
+            }
+
+            return $inlineDefault ?? $m[0];
         }, $template);
     }
 

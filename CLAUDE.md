@@ -12,8 +12,9 @@
 - `final` on all classes unless inheritance is required
 - No DB calls in constructors — boot explicitly via `Database::bootDatabaseConnectionOnly()`
 - `bin/spora` is the single CLI entry point (`spora:install`, `db:seed`, `worker:run`, `worker:run --scheduled`)
+- **Storage:** `storage/` — `database.sqlite` (app db), `spora.log` / `php.log` (logs)
+- **Tests:** Backend Pest (`composer test`), Frontend Vitest (`composer frontend:test`), E2E Playwright (`composer frontend:test:e2e`)
 - Worker async mode is controlled by `SPORA_SYNC_MODE` (`true` = inline/dev, `false` = queued/worker)
-- Tests use Pest — run with `./vendor/bin/pest`
 - `Database` is `final` — cannot be Mockery-mocked; pass a real instance instead
 - No mocks for integration tests that already boot the DB via `beforeEach`
 - Don't add error handling, fallbacks, or abstractions beyond what the task requires

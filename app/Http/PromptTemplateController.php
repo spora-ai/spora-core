@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
+use Psr\Log\LoggerInterface;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
 use Spora\Models\Agent;
@@ -18,6 +19,7 @@ final class PromptTemplateController
 {
     public function __construct(
         private readonly AuthService $authService,
+        private readonly LoggerInterface $logger,
     ) {}
 
     /**
@@ -26,7 +28,7 @@ final class PromptTemplateController
     public function index(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('agentId', 0), $userId);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
 
         if ($agent === null) {
             return $this->notFound();
@@ -46,7 +48,8 @@ final class PromptTemplateController
     public function store(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('agentId', 0), $userId);
+        $agentIdParam = (int) $request->attributes->get('id', 0);
+        $agent  = $this->findAgent($agentIdParam, $userId);
 
         if ($agent === null) {
             return $this->notFound();
@@ -94,7 +97,7 @@ final class PromptTemplateController
     public function show(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('agentId', 0), $userId);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
 
         if ($agent === null) {
             return $this->notFound();
@@ -115,7 +118,7 @@ final class PromptTemplateController
     public function update(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('agentId', 0), $userId);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
 
         if ($agent === null) {
             return $this->notFound();
@@ -155,10 +158,10 @@ final class PromptTemplateController
     /**
      * DELETE /api/v1/agents/{agentId}/templates/{templateId}
      */
-    public function destroy(Request $request): JsonResponse
+    public function destroy(Request $request): Response
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('agentId', 0), $userId);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
 
         if ($agent === null) {
             return $this->notFound();
@@ -172,7 +175,7 @@ final class PromptTemplateController
 
         Capsule::table('agent_prompt_templates')->where('id', $template->id)->delete();
 
-        return new JsonResponse(null, Response::HTTP_NO_CONTENT);
+        return new Response('', Response::HTTP_NO_CONTENT);
     }
 
     private function findAgent(int $id, int $userId): ?Agent

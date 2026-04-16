@@ -350,6 +350,7 @@ return [
     Spora\Http\PromptTemplateController::class => static function (ContainerInterface $c): Spora\Http\PromptTemplateController {
         return new Spora\Http\PromptTemplateController(
             $c->get(AuthService::class),
+            $c->get(Psr\Log\LoggerInterface::class),
         );
     },
 

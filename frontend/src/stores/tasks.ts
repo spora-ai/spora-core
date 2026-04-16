@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api, ApiError } from '@/api/client'
-import type { Task, TaskDetail, TaskStatus, HistoryEntry } from '@/types/task'
+import type { Task, TaskDetail, TaskStatus, HistoryEntry, TaskErrorCode } from '@/types/task'
 
 const TERMINAL_STATUSES: TaskStatus[] = ['COMPLETED', 'FAILED']
 
@@ -168,7 +168,7 @@ export const useTaskStore = defineStore('tasks', () => {
       activeTask.value.tool_calls = data.tool_calls as TaskDetail['tool_calls']
     }
     // Merge error fields
-    if (data.error_code !== undefined) activeTask.value.error_code = data.error_code as string | null
+    if (data.error_code !== undefined) activeTask.value.error_code = data.error_code as TaskErrorCode | null
     if (data.error_message !== undefined) activeTask.value.error_message = data.error_message as string | null
   }
 

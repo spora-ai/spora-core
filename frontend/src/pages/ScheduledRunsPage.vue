@@ -43,13 +43,13 @@ async function loadData(): Promise<void> {
   error.value = null
   try {
     const [agentResult, runsResult] = await Promise.all([
-      api.get<{ data: { agent: AgentSummary } }>(`/agents/${agentId.value}`),
-      api.get<{ data: { scheduled_runs: ScheduledRunResource[] } }>(
+      api.get<{ agent: AgentSummary }>(`/agents/${agentId.value}`),
+      api.get<{ scheduled_runs: ScheduledRunResource[] }>(
         `/agents/${agentId.value}/scheduled-runs`,
       ),
     ])
-    agent.value = agentResult.data.agent
-    runs.value = runsResult.data.scheduled_runs
+    agent.value = agentResult.agent
+    runs.value = runsResult.scheduled_runs
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Failed to load scheduled runs.'
   } finally {
@@ -86,12 +86,12 @@ function formatTs(iso: string | null): string {
 
 async function toggleActive(run: ScheduledRunResource): Promise<void> {
   try {
-    const result = await api.put<{ data: { scheduled_run: ScheduledRunResource } }>(
+    const result = await api.put<{ scheduled_run: ScheduledRunResource }>(
       `/agents/${agentId.value}/scheduled-runs/${run.id}`,
       { is_active: !run.is_active },
     )
     const idx = runs.value.findIndex((r) => r.id === run.id)
-    if (idx !== -1) runs.value[idx] = result.data.scheduled_run
+    if (idx !== -1) runs.value[idx] = result.scheduled_run
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Failed to update scheduled run.'
   }
@@ -109,7 +109,7 @@ async function deleteRun(run: ScheduledRunResource): Promise<void> {
 
 async function triggerRun(run: ScheduledRunResource): Promise<void> {
   try {
-    await api.post<{ data: { scheduled_run: ScheduledRunResource } }>(
+    await api.post<{ scheduled_run: ScheduledRunResource }>(
       `/agents/${agentId.value}/scheduled-runs/${run.id}/trigger`,
     )
     await loadData()
