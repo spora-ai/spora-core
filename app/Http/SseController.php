@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -48,7 +49,7 @@ final class SseController
     {
         $userId = AuthGuard::requireAuth($this->authService);
 
-        if ($this->hubUrl === null) {
+        if ($this->hubUrl === null || $this->jwtKey === null) {
             return new JsonResponse(
                 ['error' => ['code' => 'NOT_CONFIGURED', 'message' => 'SSE not available']],
                 404,

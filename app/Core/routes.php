@@ -3,16 +3,16 @@
 declare(strict_types=1);
 
 use FastRoute\RouteCollector;
-use Spora\Http\HealthController;
 use Spora\Http\AgentController;
 use Spora\Http\AuthController;
+use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\NotificationController;
 use Spora\Http\PromptTemplateController;
 use Spora\Http\RecipeController;
 use Spora\Http\ScheduledRunController;
-use Spora\Http\TaskController;
 use Spora\Http\SseController;
+use Spora\Http\TaskController;
 use Spora\Http\ToolController;
 
 /**

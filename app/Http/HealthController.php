@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Throwable;
 
 final class HealthController
 {
@@ -14,7 +15,7 @@ final class HealthController
         try {
             Capsule::connection()->getPdo()->query('SELECT 1');
             return new JsonResponse(['status' => 'ok', 'database' => 'connected']);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             return new JsonResponse(
                 ['status' => 'error', 'database' => 'unavailable', 'message' => $e->getMessage()],
                 503,

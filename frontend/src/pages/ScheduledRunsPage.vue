@@ -4,14 +4,14 @@
  * Route: /agents/:id/scheduled-runs
  */
 import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { api, ApiError } from '@/api/client'
 import type { ScheduledRunResource } from '@/types/scheduledRun'
+import AgentLayout from '@/components/layout/AgentLayout.vue'
 import SharedScheduleEditor from '@/components/shared/SharedScheduleEditor.vue'
 import Toggle from '@/components/ui/Toggle.vue'
 
 const route = useRoute()
-const router = useRouter()
 
 const agentId = computed(() => Number(route.params.id))
 
@@ -141,38 +141,18 @@ function onSaved(saved: Partial<ScheduledRunResource>): void {
 }
 
 function scheduleName(run: ScheduledRunResource): string {
-  if (run.cron_expression) return `Recurring: ${run.cron_expression}`
-  if (run.run_at) {
-    try {
-      return `One-shot @ ${new Date(run.run_at).toLocaleString()}`
-    } catch {
-      return 'One-shot'
-    }
+  if (run.template_name) return run.template_name
+  if (run.template_id) return `Template #${run.template_id}`
+  if (run.raw_prompt) {
+    const snippet = run.raw_prompt.length > 40 ? run.raw_prompt.slice(0, 40) + '…' : run.raw_prompt
+    return `Custom: ${snippet}`
   }
   return 'Scheduled run'
 }
 </script>
 
 <template>
-  <div class="min-h-screen bg-background flex flex-col">
-
-    <!-- Header -->
-    <header class="border-b border-border px-4 py-3 flex items-center gap-3 shrink-0">
-      <button
-        @click="router.push({ name: 'agent', params: { id: agentId } })"
-        class="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-        </svg>
-        Back
-      </button>
-      <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium truncate">
-          Scheduled Runs — {{ agent?.name ?? 'Loading…' }}
-        </p>
-      </div>
-    </header>
+  <AgentLayout :agent-id="agentId">
 
     <!-- Loading -->
     <div v-if="loading" class="flex-1 flex items-center justify-center text-sm text-muted-foreground">
@@ -240,8 +220,8 @@ function scheduleName(run: ScheduledRunResource): string {
             <p class="text-sm font-medium truncate">{{ scheduleName(run) }}</p>
             <p class="text-xs text-muted-foreground mt-0.5">
               {{ formatSchedule(run) }}
-              <span v-if="run.template_id" class="ml-1 text-primary">· template</span>
-              <span v-else-if="run.raw_prompt" class="ml-1">· custom prompt</span>
+              <span v-if="run.template_id" class="ml-1 text-primary">template</span>
+              <span v-else-if="run.raw_prompt" class="ml-1">custom prompt</span>
             </p>
           </div>
 
@@ -313,5 +293,5 @@ function scheduleName(run: ScheduledRunResource): string {
       @saved="onSaved"
       @closed="editingRun = null"
     />
-  </div>
+  </AgentLayout>
 </template>

@@ -1,4 +1,8 @@
 <script setup lang="ts">
+/**
+ * TaskChatPage — task detail / chat view.
+ * Route: /tasks/:id
+ */
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTaskStore } from '@/stores/tasks'
@@ -6,6 +10,7 @@ import { useAgentStore } from '@/stores/agent'
 import { ApiError } from '@/api/client'
 import { renderMarkdown } from '@/composables/useMarkdown'
 import { useToast } from '@/composables/useToast'
+import AgentLayout from '@/components/layout/AgentLayout.vue'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
 import type { HistoryEntry } from '@/types/task'
 
@@ -19,7 +24,8 @@ const taskId = computed(() => Number(route.params.id))
 const task = computed(() => taskStore.activeTask)
 const pending = computed(() => taskStore.pendingToolCalls)
 
-// Back navigation: go to the task's agent page if available, otherwise dashboard
+// ── Back navigation ─────────────────────────────────────────────────────────
+
 const backDestination = computed(() => {
   if (task.value?.agent_id) {
     return { name: 'agent', params: { id: task.value.agent_id } }
@@ -28,10 +34,10 @@ const backDestination = computed(() => {
 })
 
 // Track whether we've successfully loaded the task at least once
-// to distinguish "null during init" from "null after deletion"
 let taskLoadSucceeded = false
 
-// Approval state: one editable arguments object per pending tool call (keyed by tool call id)
+// ── Approval state ─────────────────────────────────────────────────────────
+
 const approvalArgs = ref<Record<number, string>>({})
 const approveError = ref<string | null>(null)
 const approvingAll = ref(false)
@@ -39,14 +45,14 @@ const rejectReason = ref('')
 const rejecting = ref(false)
 const showRejectInput = ref(false)
 
-// Per-tool approval state (keyed by tool call id)
 const perToolArgs = ref<Record<number, string>>({})
 const perToolRejectReason = ref<Record<number, string>>({})
 const perToolRejectInput = ref<Record<number, boolean>>({})
 const perToolApproving = ref<Record<number, boolean>>({})
 const perToolRejecting = ref<Record<number, boolean>>({})
 
-// Error banner state
+// ── Error banner ───────────────────────────────────────────────────────────
+
 const errorBannerDismissed = ref(false)
 
 const RETRYABLE_ERROR_CODES = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'SERVER_ERROR', 'GATEWAY_ERROR'] as const
@@ -69,7 +75,7 @@ async function retryNow(): Promise<void> {
   }
 }
 
-// ── Follow-up ─────────────────────────────────────────────────────────────────
+// ── Follow-up ───────────────────────────────────────────────────────────────
 
 const followupPrompt = ref('')
 const submittingFollowup = ref(false)
@@ -99,7 +105,8 @@ async function submitFollowup(): Promise<void> {
   }
 }
 
-// Scroll anchor
+// ── Scroll anchor ───────────────────────────────────────────────────────────
+
 const bottomEl = ref<HTMLDivElement | null>(null)
 
 function scrollToBottom(): void {
@@ -108,9 +115,6 @@ function scrollToBottom(): void {
 
 // ── Chat rendering helpers ──────────────────────────────────────────────────
 
-// Render a history entry's display text.
-// assistant entries with null content are tool call requests — skip them;
-// the tool calls array covers that.
 type ChatMessage =
   | { kind: 'user'; entry: HistoryEntry }
   | { kind: 'assistant'; entry: HistoryEntry }
@@ -127,9 +131,7 @@ const chatMessages = computed((): ChatMessage[] => {
     } else if (entry.role === 'tool') {
       result.push({ kind: 'tool-result', entry })
     }
-    // assistant with null content = tool call request, rendered via pending panel
   }
-  // Deduplicate: skip last assistant bubble if it matches final_response (trimmed)
   const last = result[result.length - 1]
   if (
     last?.kind === 'assistant' &&
@@ -255,7 +257,6 @@ async function rejectToolCall(tc: { id: number; tool_name: string }): Promise<vo
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-// Re-initialize when navigating between different tasks (component reuse without remount)
 watch(taskId, async (newId, oldId) => {
   if (!Number.isFinite(newId) || newId === oldId) return
   errorBannerDismissed.value = false
@@ -269,7 +270,10 @@ watch(taskId, async (newId, oldId) => {
   }
   taskLoadSucceeded = true
   if (task.value?.agent_id) {
-    await agentStore.fetchAgent(task.value.agent_id)
+    await Promise.all([
+      agentStore.fetchAgents(),
+      agentStore.fetchAgent(task.value.agent_id),
+    ])
   }
   scrollToBottom()
   if (task.value && !taskStore.isTerminal) {
@@ -282,8 +286,6 @@ watch(
   () => scrollToBottom(),
 )
 
-// Redirect to the agent page if task was deleted (e.g. via another tab or polling 404),
-// but only after we successfully loaded it at least once (not on initial null)
 watch(task, (newTask) => {
   if (taskLoadSucceeded && newTask === null) {
     router.push(backDestination.value)
@@ -304,9 +306,11 @@ onMounted(async () => {
   }
   taskLoadSucceeded = true
 
-  // Fetch agent so we can check allow_followup
   if (task.value?.agent_id) {
-    await agentStore.fetchAgent(task.value.agent_id)
+    await Promise.all([
+      agentStore.fetchAgents(),
+      agentStore.fetchAgent(task.value.agent_id),
+    ])
   }
 
   scrollToBottom()
@@ -321,31 +325,31 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-background flex flex-col">
+  <AgentLayout :agent-id="task?.agent_id ?? 0">
 
-    <!-- Header -->
-    <header class="border-b border-border px-4 py-3 flex items-center gap-3 shrink-0">
-      <button
-        @click="router.push(backDestination)"
-        class="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-        </svg>
-        Back
-      </button>
-      <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium truncate">{{ task?.user_prompt ?? '…' }}</p>
-      </div>
-      <TaskStatusBadge v-if="task" :status="task.status" />
-    </header>
-
-    <!-- Loading state -->
+    <!-- Loading -->
     <div v-if="!task" class="flex-1 flex items-center justify-center text-sm text-muted-foreground">
       Loading…
     </div>
 
     <template v-else>
+      <!-- Task header -->
+      <header class="border-b border-border px-4 py-3 flex items-center gap-3 shrink-0">
+        <button
+          @click="router.push(backDestination)"
+          class="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back
+        </button>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium truncate">{{ task.user_prompt ?? '…' }}</p>
+        </div>
+        <TaskStatusBadge v-if="task" :status="task.status" />
+      </header>
+
       <!-- Retryable error banner -->
       <div
         v-if="showRetryBanner"
@@ -376,25 +380,25 @@ onUnmounted(() => {
       </div>
 
       <!-- Chat area -->
-      <div class="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-3 max-w-2xl w-full mx-auto">
+      <div class="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-3">
 
         <template v-for="msg in chatMessages" :key="msg.entry.sequence">
 
-          <!-- User message — right bubble -->
+          <!-- User message -->
           <div v-if="msg.kind === 'user'" class="flex justify-end">
             <div class="max-w-[75%] rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground whitespace-pre-wrap break-words">
               {{ msg.entry.content }}
             </div>
           </div>
 
-          <!-- Assistant text — left bubble -->
+          <!-- Assistant text -->
           <div v-else-if="msg.kind === 'assistant'" class="flex justify-start">
             <div class="flex gap-2.5 max-w-[85%]">
               <div class="shrink-0 h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground mt-0.5">
                 AI
               </div>
-              <div class="rounded-2xl rounded-tl-sm border border-border bg-card px-4 py-2.5 text-sm chat-bubble-content">
-                <div v-html="renderMarkdown(msg.entry.content ?? '')" />
+              <div class="rounded-2xl rounded-tl-sm border border-border bg-card px-4 py-2.5 text-sm">
+                <div class="chat-bubble-content" v-html="renderMarkdown(msg.entry.content ?? '')" />
               </div>
             </div>
           </div>
@@ -409,7 +413,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Tool result — compact card on the left -->
+          <!-- tool result -->
           <div v-else-if="msg.kind === 'tool-result'" class="flex justify-start">
             <details class="ml-9 max-w-[85%] text-xs rounded-lg border border-border bg-muted/40 overflow-hidden">
               <summary class="flex items-center gap-2 px-3 py-2 cursor-pointer select-none list-none hover:bg-muted/60 transition-colors">
@@ -468,7 +472,6 @@ onUnmounted(() => {
       >
         <div class="max-w-2xl w-full mx-auto px-4 py-4 flex flex-col gap-4">
 
-          <!-- Header: icon + title + Approve All / Reject All (only when >1 tool) -->
           <div class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-2 min-w-0">
               <svg class="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -479,7 +482,6 @@ onUnmounted(() => {
               </span>
             </div>
 
-            <!-- Approve All / Reject All — only when multiple tools pending -->
             <div v-if="pending.length > 1" class="flex gap-2 shrink-0">
               <button
                 @click="approveAll"
@@ -513,7 +515,6 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Reject All reason input -->
           <div v-if="showRejectInput && pending.length > 1" class="flex flex-col gap-1.5">
             <label class="text-xs font-medium text-muted-foreground">Reason for rejecting all tools</label>
             <input
@@ -524,16 +525,13 @@ onUnmounted(() => {
             />
           </div>
 
-          <!-- Error message -->
           <p v-if="approveError" role="alert" class="text-xs text-destructive">{{ approveError }}</p>
 
-          <!-- One card per pending tool call -->
           <div
             v-for="tc in pending"
             :key="tc.id"
             class="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-zinc-900 p-4 flex flex-col gap-3"
           >
-            <!-- Tool name + description -->
             <div class="flex items-start justify-between gap-2">
               <div class="min-w-0">
                 <p class="text-sm font-semibold font-mono text-amber-900 dark:text-amber-100">{{ tc.tool_name }}</p>
@@ -543,7 +541,6 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <!-- Proposed arguments — collapsible JSON tree (read-only) -->
             <div class="rounded-lg border border-border bg-muted/20 overflow-hidden">
               <details class="group">
                 <summary class="flex items-center gap-1.5 px-3 py-2 cursor-pointer select-none list-none text-xs text-muted-foreground hover:bg-muted/30 transition-colors">
@@ -556,7 +553,6 @@ onUnmounted(() => {
               </details>
             </div>
 
-            <!-- Editable arguments textarea -->
             <div class="flex flex-col gap-1">
               <label class="text-xs font-medium text-muted-foreground">Edit arguments before approving</label>
               <textarea
@@ -566,7 +562,6 @@ onUnmounted(() => {
               />
             </div>
 
-            <!-- Per-tool reject reason input -->
             <div v-if="perToolRejectInput[tc.id]" class="flex flex-col gap-1">
               <label class="text-xs font-medium text-muted-foreground">Reason for rejecting "{{ tc.tool_name }}"</label>
               <input
@@ -577,7 +572,6 @@ onUnmounted(() => {
               />
             </div>
 
-            <!-- Per-tool Approve / Reject buttons -->
             <div class="flex gap-2">
               <button
                 @click="approveToolCall(tc)"
@@ -644,5 +638,5 @@ onUnmounted(() => {
       </div>
     </template>
 
-  </div>
+  </AgentLayout>
 </template>

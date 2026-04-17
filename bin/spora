@@ -16,6 +16,7 @@ use Spora\Core\Kernel;
 use Symfony\Component\Console\Application;
 use Spora\Console\Commands\InstallCommand;
 use Spora\Console\Commands\SeedCommand;
+use Spora\Console\Commands\TaskRunCommand;
 use Spora\Console\Commands\WorkerRunCommand;
 
 // 1. Boot Kernel to get the DI container. Each command boots its own DB connection.
@@ -32,6 +33,7 @@ $application = new Application('Spora CLI', \Spora\Core\Version::current());
 // Register Commands Manually or Autowire them from container
 $application->addCommand($container->get(InstallCommand::class));
 $application->addCommand($container->get(SeedCommand::class));
+$application->addCommand($container->get(TaskRunCommand::class));
 $application->addCommand($container->get(WorkerRunCommand::class));
 
 $application->run();

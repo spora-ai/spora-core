@@ -6,7 +6,6 @@ namespace Spora\Http;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
-use Psr\Log\LoggerInterface;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
 use Spora\Models\Agent;
@@ -19,7 +18,6 @@ final class PromptTemplateController
 {
     public function __construct(
         private readonly AuthService $authService,
-        private readonly LoggerInterface $logger,
     ) {}
 
     /**
@@ -199,8 +197,8 @@ final class PromptTemplateController
             'variables'       => $template->variables ?? [],
             'max_steps'       => $template->max_steps,
             'is_active'       => (bool) $template->is_active,
-            'created_at'      => $template->created_at?->toIso8601String(),
-            'updated_at'      => $template->updated_at?->toIso8601String(),
+            'created_at'      => $template->created_at->toIso8601String(),
+            'updated_at'      => $template->updated_at->toIso8601String(),
         ];
     }
 

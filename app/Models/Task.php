@@ -75,7 +75,7 @@ class Task extends Model
         return $this->hasMany(ToolCall::class);
     }
 
-    /** @return BelongsTo<Task, $this>|null */
+    /** @return BelongsTo<Task, $this> */
     public function parentTask(): BelongsTo
     {
         return $this->belongsTo(Task::class, 'parent_task_id');

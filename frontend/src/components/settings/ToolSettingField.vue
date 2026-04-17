@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import Toggle from '@/components/ui/Toggle.vue'
 import type { ToolSettingSchema } from '@/composables/useToolSettings'
 
 const props = defineProps<{
@@ -87,26 +88,17 @@ function onInput(e: Event): void {
       </option>
     </select>
 
-    <!-- toggle (custom checkbox) -->
+    <!-- toggle -->
     <label
       v-else-if="field.type === 'toggle'"
       class="relative inline-flex items-center cursor-pointer gap-3"
       :class="disabled ? 'opacity-50 cursor-not-allowed' : ''"
     >
-      <button
-        type="button"
-        role="switch"
-        :aria-checked="!!modelValue"
-        @click="!disabled && emit('update:modelValue', !modelValue)"
+      <Toggle
+        :model-value="!!modelValue"
         :disabled="disabled"
-        class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-        :class="modelValue ? 'bg-primary' : 'bg-muted'"
-      >
-        <span
-          class="inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform"
-          :class="modelValue ? 'translate-x-6' : 'translate-x-1'"
-        />
-      </button>
+        @update:model-value="!disabled && emit('update:modelValue', !modelValue)"
+      />
       <span v-if="field.description" class="text-xs text-muted-foreground">{{ field.description }}</span>
     </label>
 

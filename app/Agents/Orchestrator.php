@@ -11,6 +11,7 @@ use RuntimeException;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
+use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\ValueObjects\LLMRequest;
@@ -738,11 +739,8 @@ final class Orchestrator implements OrchestratorInterface
         int     $outputTokens    = 0,
         ?string $reasoning       = null,
     ): void {
-        $nextSeq = TaskHistory::where('task_id', $taskId)->max('sequence') ?? -1;
-
         $row = [
             'task_id'           => $taskId,
-            'sequence'          => $nextSeq + 1,
             'role'              => $role,
             'content'           => $content,
             'tool_call_id'      => $toolCallId,
@@ -757,7 +755,11 @@ final class Orchestrator implements OrchestratorInterface
             $row['reasoning'] = $reasoning;
         }
 
-        TaskHistory::create($row);
+        Capsule::connection()->transaction(function () use ($taskId, $row) {
+            $nextSeq = TaskHistory::where('task_id', $taskId)->lockForUpdate()->max('sequence') ?? -1;
+            $row['sequence'] = $nextSeq + 1;
+            TaskHistory::create($row);
+        });
     }
 
     /**
@@ -771,16 +773,26 @@ final class Orchestrator implements OrchestratorInterface
 
         if ($e instanceof LLMRetryableException) {
             $msg = $e->getMessage();
-            if (str_contains($msg, '529')) return 'SERVER_OVERLOADED';
-            if (str_contains($msg, '520') || str_contains($msg, '500')) return 'SERVER_ERROR';
+            if (str_contains($msg, '529')) {
+                return 'SERVER_OVERLOADED';
+            }
+            if (str_contains($msg, '520') || str_contains($msg, '500')) {
+                return 'SERVER_ERROR';
+            }
             return 'GATEWAY_ERROR';
         }
 
         if ($e instanceof LLMProviderException) {
             $msg = $e->getMessage();
-            if (str_contains($msg, '401') || str_contains($msg, '403')) return 'AUTH_ERROR';
-            if (str_contains($msg, '400')) return 'BAD_REQUEST';
-            if ($e->isRetryable()) return 'GATEWAY_ERROR';
+            if (str_contains($msg, '401') || str_contains($msg, '403')) {
+                return 'AUTH_ERROR';
+            }
+            if (str_contains($msg, '400')) {
+                return 'BAD_REQUEST';
+            }
+            if ($e->isRetryable()) {
+                return 'GATEWAY_ERROR';
+            }
         }
 
         return 'UNKNOWN';

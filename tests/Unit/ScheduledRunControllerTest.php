@@ -2,10 +2,7 @@
 
 declare(strict_types=1);
 
-use Cron\CronExpression;
 use Spora\Agents\OrchestratorInterface;
-use Spora\Agents\ValueObjects\WorkerMode;
-use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Http\ScheduledRunController;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
@@ -17,7 +14,7 @@ function makeScheduledRunController(): array
     $authService = bootAuthLayer();
     $orchestrator = Mockery::mock(OrchestratorInterface::class);
     $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps) {
-        return \Spora\Models\Task::create([
+        return Spora\Models\Task::create([
             'agent_id'    => $agentId,
             'user_id'     => 1,
             'status'      => 'RUNNING',
@@ -50,7 +47,7 @@ function registerAndGetAgentForScheduledRun(): array
     return [$userId, $agent->id, $authService];
 }
 
-function makeJsonRequestWithAttrs(string $method, string $path, array $body, array $attrs): \Symfony\Component\HttpFoundation\Request
+function makeJsonRequestWithAttrs(string $method, string $path, array $body, array $attrs): Symfony\Component\HttpFoundation\Request
 {
     $request = jsonRequest($method, $path, $body);
     foreach ($attrs as $k => $v) {
@@ -75,7 +72,7 @@ describe('ScheduledRunController', function (): void {
         ]);
 
         [$controller] = makeScheduledRunController();
-        $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs", [], ['agentId' => $agentId]);
+        $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs", [], ['id' => $agentId]);
         $response = $controller->index($request);
 
         expect($response->getStatusCode())->toBe(200);
@@ -88,7 +85,7 @@ describe('ScheduledRunController', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
         [$controller] = makeScheduledRunController();
-        $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs", [], ['agentId' => $agentId]);
+        $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs", [], ['id' => $agentId]);
         $response = $controller->index($request);
 
         expect($response->getStatusCode())->toBe(200);
@@ -125,7 +122,7 @@ describe('ScheduledRunController', function (): void {
             'cron_expression' => '0 9 * * *',
             'timezone'        => 'UTC',
             'is_active'       => true,
-        ], ['agentId' => $agentId]);
+        ], ['id' => $agentId]);
         $response = $controller->store($request);
 
         expect($response->getStatusCode())->toBe(201);
@@ -144,7 +141,7 @@ describe('ScheduledRunController', function (): void {
             'run_at'     => date('c', strtotime('+1 hour')),
             'timezone'   => 'UTC',
             'is_active'  => true,
-        ], ['agentId' => $agentId]);
+        ], ['id' => $agentId]);
         $response = $controller->store($request);
 
         expect($response->getStatusCode())->toBe(201);
@@ -159,7 +156,7 @@ describe('ScheduledRunController', function (): void {
         [$controller] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'cron_expression' => '0 9 * * *',
-        ], ['agentId' => $agentId]);
+        ], ['id' => $agentId]);
         $response = $controller->store($request);
 
         expect($response->getStatusCode())->toBe(422);
@@ -175,7 +172,7 @@ describe('ScheduledRunController', function (): void {
             'raw_prompt'      => 'Conflicting',
             'cron_expression' => '0 9 * * *',
             'run_at'          => date('c', strtotime('+1 hour')),
-        ], ['agentId' => $agentId]);
+        ], ['id' => $agentId]);
         $response = $controller->store($request);
 
         expect($response->getStatusCode())->toBe(422);
@@ -188,7 +185,7 @@ describe('ScheduledRunController', function (): void {
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt'      => 'Invalid cron',
             'cron_expression' => 'not-a-cron',
-        ], ['agentId' => $agentId]);
+        ], ['id' => $agentId]);
         $response = $controller->store($request);
 
         expect($response->getStatusCode())->toBe(422);
@@ -208,7 +205,7 @@ describe('ScheduledRunController', function (): void {
         ]);
 
         [$controller] = makeScheduledRunController();
-        $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}", [], ['agentId' => $agentId, 'runId' => $run->id]);
+        $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}", [], ['id' => $agentId, 'runId' => $run->id]);
         $response = $controller->show($request);
 
         expect($response->getStatusCode())->toBe(200);
@@ -236,7 +233,7 @@ describe('ScheduledRunController', function (): void {
         ]);
 
         [$controller] = makeScheduledRunController();
-        $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}", [], ['agentId' => $agentId, 'runId' => $run->id]);
+        $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}", [], ['id' => $agentId, 'runId' => $run->id]);
         $response = $controller->show($request);
 
         expect($response->getStatusCode())->toBe(404);
@@ -259,7 +256,7 @@ describe('ScheduledRunController', function (): void {
         $request = makeJsonRequestWithAttrs('PUT', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}", [
             'raw_prompt' => 'Updated prompt',
             'is_active'  => false,
-        ], ['agentId' => $agentId, 'runId' => $run->id]);
+        ], ['id' => $agentId, 'runId' => $run->id]);
         $response = $controller->update($request);
 
         expect($response->getStatusCode())->toBe(200);
@@ -283,7 +280,7 @@ describe('ScheduledRunController', function (): void {
         $runId = $run->id;
 
         [$controller] = makeScheduledRunController();
-        $request = makeJsonRequestWithAttrs('DELETE', "/api/v1/agents/{$agentId}/scheduled-runs/{$runId}", [], ['agentId' => $agentId, 'runId' => $runId]);
+        $request = makeJsonRequestWithAttrs('DELETE', "/api/v1/agents/{$agentId}/scheduled-runs/{$runId}", [], ['id' => $agentId, 'runId' => $runId]);
         $response = $controller->destroy($request);
 
         expect($response->getStatusCode())->toBe(204);
@@ -305,7 +302,7 @@ describe('ScheduledRunController', function (): void {
         ]);
 
         [$controller, $authService, $orchestrator] = makeScheduledRunController();
-        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['agentId' => $agentId, 'runId' => $run->id]);
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['id' => $agentId, 'runId' => $run->id]);
         $response = $controller->trigger($request);
 
         expect($response->getStatusCode())->toBe(200);
@@ -342,7 +339,7 @@ describe('ScheduledRunController', function (): void {
         ]);
 
         [$controller, $authService, $orchestrator] = makeScheduledRunController();
-        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['agentId' => $agentId, 'runId' => $run->id]);
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['id' => $agentId, 'runId' => $run->id]);
         $response = $controller->trigger($request);
 
         expect($response->getStatusCode())->toBe(200);

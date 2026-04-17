@@ -16,6 +16,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property array|null $variables
  * @property int|null $max_steps
  * @property bool $is_active
+ * @property \Carbon\Carbon $created_at
+ * @property \Carbon\Carbon $updated_at
  */
 final class AgentPromptTemplate extends Model
 {

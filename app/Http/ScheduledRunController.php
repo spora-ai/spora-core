@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use Cron\CronExpression;
+use DateTimeImmutable;
+use DateTimeZone;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
 use Spora\Agents\OrchestratorInterface;
@@ -33,13 +35,14 @@ final class ScheduledRunController
     public function index(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('agentId', 0), $userId);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
 
         if ($agent === null) {
             return $this->notFound();
         }
 
-        $runs = ScheduledRun::where('agent_id', $agent->id)
+        $runs = ScheduledRun::with('template')
+            ->where('agent_id', $agent->id)
             ->orderByDesc('created_at')
             ->get()
             ->map(fn(ScheduledRun $r) => $this->resource($r));
@@ -53,7 +56,7 @@ final class ScheduledRunController
     public function store(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('agentId', 0), $userId);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
 
         if ($agent === null) {
             return $this->notFound();
@@ -105,7 +108,7 @@ final class ScheduledRunController
     public function show(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('agentId', 0), $userId);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
 
         if ($agent === null) {
             return $this->notFound();
@@ -126,7 +129,7 @@ final class ScheduledRunController
     public function update(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('agentId', 0), $userId);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
 
         if ($agent === null) {
             return $this->notFound();
@@ -185,7 +188,7 @@ final class ScheduledRunController
     public function destroy(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('agentId', 0), $userId);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
 
         if ($agent === null) {
             return $this->notFound();
@@ -210,7 +213,7 @@ final class ScheduledRunController
     public function trigger(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('agentId', 0), $userId);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
 
         if ($agent === null) {
             return $this->notFound();
@@ -222,13 +225,24 @@ final class ScheduledRunController
             return $this->notFound();
         }
 
-        // Determine prompt
-        $prompt = '';
+        $template = null;
         if ($run->template_id !== null) {
             $template = AgentPromptTemplate::find($run->template_id);
+            if ($template === null) {
+                return $this->error(
+                    'TEMPLATE_NOT_FOUND',
+                    'The prompt template assigned to this scheduled run no longer exists.',
+                    Response::HTTP_NOT_FOUND,
+                );
+            }
+        }
+
+        // Determine prompt
+        $prompt = '';
+        if ($template !== null) {
             $variablesRaw = $template->getAttribute('variables');
             $variables = is_array($variablesRaw) ? $variablesRaw : [];
-            $prompt = $this->substituteVariables($template->prompt_template, $variables, $agent);
+            $prompt = $this->substituteVariables($template->prompt_template ?? '', $variables, $agent);
         } else {
             $prompt = $run->raw_prompt ?? '';
             $prompt = $this->substituteVariables($prompt, [], $agent);
@@ -236,8 +250,8 @@ final class ScheduledRunController
 
         // Determine max_steps
         $maxSteps = $run->max_steps_override
-            ?? ($run->template_id !== null
-                ? (AgentPromptTemplate::find($run->template_id)?->max_steps ?? $agent->max_steps)
+            ?? ($template !== null
+                ? ($template->max_steps ?? $agent->max_steps)
                 : $agent->max_steps);
 
         try {
@@ -287,7 +301,7 @@ final class ScheduledRunController
     {
         $isRecurring       = !empty($body['cron_expression']);
         $isOneShot         = !empty($body['run_at']);
-        $hasTemplate       = isset($body['template_id']) && $body['template_id'] !== null;
+        $hasTemplate       = isset($body['template_id']) && is_int($body['template_id']);
         $hasRawPrompt      = isset($body['raw_prompt']) && trim((string) $body['raw_prompt']) !== '';
 
         if (!$hasTemplate && !$hasRawPrompt) {
@@ -316,7 +330,7 @@ final class ScheduledRunController
 
         if ($isOneShot) {
             $runAt = $this->parseDateTime($body['run_at']);
-            if ($runAt === false || $runAt === null) {
+            if ($runAt === false) {
                 return $this->error(
                     'VALIDATION_ERROR',
                     'run_at must be a valid ISO 8601 datetime.',
@@ -343,7 +357,7 @@ final class ScheduledRunController
     private function computeNextRunAt(string $cronExpression, string $timezone): string
     {
         $cron = new CronExpression($cronExpression);
-        $now  = new \DateTimeImmutable('now', new \DateTimeZone($timezone));
+        $now  = new DateTimeImmutable('now', new DateTimeZone($timezone));
 
         return $cron->getNextRunDate($now)->format('Y-m-d H:i:s');
     }
@@ -355,17 +369,17 @@ final class ScheduledRunController
         }
 
         $dt = $this->parseDateTime($runAt);
-        if ($dt === false || $dt === null) {
+        if ($dt === false) {
             return null;
         }
 
-        return $dt->setTimezone(new \DateTimeZone($timezone))->format('Y-m-d H:i:s');
+        return $dt->setTimezone(new DateTimeZone($timezone))->format('Y-m-d H:i:s');
     }
 
-    private function parseDateTime(string $value): \DateTimeImmutable|false|null
+    private function parseDateTime(string $value): DateTimeImmutable|false
     {
         try {
-            return new \DateTimeImmutable($value);
+            return new DateTimeImmutable($value);
         } catch (Throwable) {
             return false;
         }
@@ -401,7 +415,7 @@ final class ScheduledRunController
             }
             if ($key === 'user_name' && $agent !== null) {
                 $user = \Spora\Models\User::find($agent->user_id);
-                return $user?->name ?? $key;
+                return $user instanceof \Spora\Models\User ? ($user->username ?? $key) : $key;
             }
             if ($key === 'day_of_week') {
                 return date('l');
@@ -416,7 +430,7 @@ final class ScheduledRunController
                 return date('Y');
             }
 
-            if (isset($defaults[$key]) && $defaults[$key] !== null && $defaults[$key] !== '') {
+            if (isset($defaults[$key]) && $defaults[$key] !== '') {
                 return $defaults[$key];
             }
 
@@ -436,10 +450,15 @@ final class ScheduledRunController
 
     private function resource(ScheduledRun $run): array
     {
+        $run->loadMissing('template');
+        /** @var AgentPromptTemplate|null */
+        $template = $run->getRelation('template');
+
         return [
             'id'                => (int) $run->id,
             'agent_id'          => (int) $run->agent_id,
             'template_id'       => $run->template_id,
+            'template_name'     => $template?->name,
             'raw_prompt'        => $run->raw_prompt,
             'cron_expression'   => $run->cron_expression,
             'run_at'            => $run->run_at?->toIso8601String(),
@@ -448,8 +467,8 @@ final class ScheduledRunController
             'is_active'         => (bool) $run->is_active,
             'last_run_at'       => $run->last_run_at?->toIso8601String(),
             'next_run_at'       => $run->next_run_at?->toIso8601String(),
-            'created_at'        => $run->created_at?->toIso8601String(),
-            'updated_at'        => $run->updated_at?->toIso8601String(),
+            'created_at'        => $run->created_at->toIso8601String(),
+            'updated_at'        => $run->updated_at->toIso8601String(),
         ];
     }
 

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Tests\Unit;
 
-use PHPUnit\Framework\Attributes\Test;
+use RuntimeException;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
@@ -23,16 +23,26 @@ function classifyError(Throwable $e): string
 
     if ($e instanceof LLMRetryableException) {
         $msg = $e->getMessage();
-        if (str_contains($msg, '529')) return 'SERVER_OVERLOADED';
-        if (str_contains($msg, '520') || str_contains($msg, '500')) return 'SERVER_ERROR';
+        if (str_contains($msg, '529')) {
+            return 'SERVER_OVERLOADED';
+        }
+        if (str_contains($msg, '520') || str_contains($msg, '500')) {
+            return 'SERVER_ERROR';
+        }
         return 'GATEWAY_ERROR';
     }
 
     if ($e instanceof LLMProviderException) {
         $msg = $e->getMessage();
-        if (str_contains($msg, '401') || str_contains($msg, '403')) return 'AUTH_ERROR';
-        if (str_contains($msg, '400')) return 'BAD_REQUEST';
-        if ($e->isRetryable()) return 'GATEWAY_ERROR';
+        if (str_contains($msg, '401') || str_contains($msg, '403')) {
+            return 'AUTH_ERROR';
+        }
+        if (str_contains($msg, '400')) {
+            return 'BAD_REQUEST';
+        }
+        if ($e->isRetryable()) {
+            return 'GATEWAY_ERROR';
+        }
     }
 
     return 'UNKNOWN';
@@ -118,7 +128,7 @@ describe('OrchestratorErrorClassification', function () {
         });
 
         it('maps unknown exception to UNKNOWN', function () {
-            expect(classifyError(new \RuntimeException('Some unrelated error')))
+            expect(classifyError(new RuntimeException('Some unrelated error')))
                 ->toBe('UNKNOWN');
         });
     });

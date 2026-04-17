@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use DateTimeInterface;
+use Illuminate\Support\Carbon;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
 use Spora\Models\Notification;
-use Illuminate\Support\Carbon;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -53,7 +54,7 @@ final class NotificationController
                 'pagination'   => [
                     'total'       => $paginator->total(),
                     'per_page'    => $paginator->perPage(),
-                    'current_page'=> $paginator->currentPage(),
+                    'current_page' => $paginator->currentPage(),
                     'last_page'   => $paginator->lastPage(),
                 ],
             ],
@@ -129,11 +130,11 @@ final class NotificationController
         $createdAtStr = $attributes['created_at'] ?? null;
         $readAtStr = $attributes['read_at'] ?? null;
 
-        if ($createdAtStr instanceof \DateTimeInterface) {
+        if ($createdAtStr instanceof DateTimeInterface) {
             $createdAtStr = $createdAtStr->format('Y-m-d H:i:s');
         }
 
-        if ($readAtStr instanceof \DateTimeInterface) {
+        if ($readAtStr instanceof DateTimeInterface) {
             $readAtStr = $readAtStr->format('Y-m-d H:i:s');
         }
 
@@ -144,7 +145,7 @@ final class NotificationController
             'body'      => $notification->body,
             'data'      => $notification->data,
             'read_at'   => $readAtStr,
-            'created_at'=> $createdAtStr,
+            'created_at' => $createdAtStr,
         ];
     }
 }

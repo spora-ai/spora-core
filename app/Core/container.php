@@ -12,8 +12,8 @@ use Spora\Core\SecurityManager;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Plugins\PluginLoader;
 use Spora\Recipes\RecipeScanner;
-use Spora\Services\NotificationService;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\NotificationService;
 
 /**
  * PHP-DI definitions array.
@@ -284,6 +284,13 @@ return [
         );
     },
 
+    Spora\Console\Commands\TaskRunCommand::class => static function (ContainerInterface $c): Spora\Console\Commands\TaskRunCommand {
+        return new Spora\Console\Commands\TaskRunCommand(
+            $c->get(Database::class),
+            $c,
+        );
+    },
+
     OrchestratorInterface::class => static function (ContainerInterface $c): OrchestratorInterface {
         return new Orchestrator(
             driverFactory: $c->get(Spora\Drivers\DriverFactory::class),
@@ -335,8 +342,8 @@ return [
         );
     },
 
-    Spora\Services\NotificationService::class => static function (ContainerInterface $c): Spora\Services\NotificationService {
-        return new Spora\Services\NotificationService(
+    NotificationService::class => static function (ContainerInterface $c): NotificationService {
+        return new NotificationService(
             $c->get(MercurePublisherInterface::class),
         );
     },
@@ -350,7 +357,6 @@ return [
     Spora\Http\PromptTemplateController::class => static function (ContainerInterface $c): Spora\Http\PromptTemplateController {
         return new Spora\Http\PromptTemplateController(
             $c->get(AuthService::class),
-            $c->get(Psr\Log\LoggerInterface::class),
         );
     },
 

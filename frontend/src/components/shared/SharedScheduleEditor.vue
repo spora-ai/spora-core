@@ -1,6 +1,10 @@
 <script setup lang="ts">
 /**
- * SharedScheduleEditor — reusable modal for creating one-shot or recurring scheduled runs.
+ * SharedScheduleEditor — 3-step wizard for creating one-shot or recurring scheduled runs.
+ *
+ * Step 1: Template — select existing or create new template (REQUIRED)
+ * Step 2: Schedule Type — choose One-shot or Recurring + timezone
+ * Step 3: Schedule — configure date/time (one-shot) or frequency+cron (recurring)
  *
  * Props:
  *   modelValue   — v-model boolean to show/hide
@@ -26,6 +30,7 @@ import {
   DAY_OF_WEEK_OPTIONS,
   type Frequency,
 } from '@/utils/cron'
+import CronExpression from 'cron-parser'
 
 /** Pre-defined variables available in prompt templates, substituted at runtime by the orchestrator. */
 const PROMPT_VARIABLES = [
@@ -57,6 +62,11 @@ const emit = defineEmits<{
   saved: [resource: ScheduledRunResource]
   closed: []
 }>()
+
+// ── Wizard state ─────────────────────────────────────────────────────────────
+
+const TOTAL_STEPS = 3
+const currentStep = ref(1)
 
 // ── Timezone list (all IANA zones via Intl, common ones sorted first) ─────────
 
@@ -111,19 +121,19 @@ const templateId = ref<number | null>(null)
 const maxStepsOverride = ref<number | null>(null)
 
 // Configurable frequency fields
-const hourlyInterval = ref(1)       // every X hours (1–23)
-const hourlyStartHour = ref(0)       // start hour (0–23)
-const hourlyEndHour = ref(23)       // end hour (0–23)
-const hourlyMinute = ref(0)          // at minute Y (0–59)
+const hourlyInterval = ref(1)
+const hourlyStartHour = ref(0)
+const hourlyEndHour = ref(23)
+const hourlyMinute = ref(0)
 
-const dailyInterval = ref(1)         // every X days (1–31)
-const dailyTime = ref('09:00')      // at HH:MM
+const dailyInterval = ref(1)
+const dailyTime = ref('09:00')
 
-const weeklyDay = ref(1)             // day of week 0=Sun … 6=Sat
-const weeklyTime = ref('09:00')      // at HH:MM
+const weeklyDay = ref(1)
+const weeklyTime = ref('09:00')
 
-const monthlyDay = ref(1)            // day of month (1–31)
-const monthlyTime = ref('09:00')     // at HH:MM
+const monthlyDay = ref(1)
+const monthlyTime = ref('09:00')
 
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -133,12 +143,21 @@ const promptTemplatesStore = usePromptTemplatesStore()
 const showCreateTemplate = ref(false)
 const newTemplateName = ref('')
 
-// ── Computed ─────────────────────────────────────────────────────────────────
+// ── Step 1 validation ─────────────────────────────────────────────────────────
 
-const isEditing = computed(() => !!props.initialData?.id)
-const modalTitle = computed(() => isEditing.value ? 'Edit Schedule' : 'Schedule Run')
+const canProceedFromStep1 = computed(() => {
+  if (templateId.value === null) return false
+  if (templateId.value === -1) {
+    // Creating new template requires a name
+    return newTemplateName.value.trim() !== ''
+  }
+  return true
+})
 
-// Derive a cron string from frequency + periodic inputs
+// ── Step 2: nothing extra to validate beyond mode selection ────────────────────
+
+// ── Step 3 validation ─────────────────────────────────────────────────────────
+
 const computedCron = computed((): string => {
   if (mode.value === 'oneshot') return ''
   if (frequency.value === 'custom') return cronExpression.value.trim()
@@ -166,11 +185,15 @@ const computedCron = computed((): string => {
   return ''
 })
 
-const canSubmit = computed(() => {
+const canProceedFromStep3 = computed(() => {
   if (mode.value === 'oneshot') {
     return !!(runDate.value && runTime.value)
   }
   return !!computedCron.value
+})
+
+const canSubmit = computed(() => {
+  return canProceedFromStep1.value && canProceedFromStep3.value
 })
 
 // Next 3 run previews
@@ -178,19 +201,15 @@ const previewRuns = computed((): string[] => {
   const cron = computedCron.value
   if (!cron) return []
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const Cron = require('cron-parser')
+    const interval = CronExpression.parseExpression(cron, { tz: timezone.value })
     const intervals: string[] = []
-    let date = new Date()
     for (let i = 0; i < 3; i++) {
-      const next = Cron.parseCronExpression(cron).getNextDate(date, { tz: timezone.value })
-      const d = new Date(next.toDate())
-      intervals.push(d.toLocaleString('en-US', {
+      const nextDate = interval.next().toDate()
+      intervals.push(nextDate.toLocaleString('en-US', {
         timeZone: timezone.value,
         dateStyle: 'medium',
         timeStyle: 'short',
       }))
-      date = new Date(d.getTime() + 1000)
     }
     return intervals
   } catch {
@@ -234,8 +253,8 @@ watch(() => props.modelValue, async (open) => {
   error.value = null
   showCreateTemplate.value = false
   newTemplateName.value = ''
+  currentStep.value = 1
 
-  // Fetch templates for the picker
   if (Number.isFinite(props.agentId)) {
     try {
       await promptTemplatesStore.fetchTemplates(props.agentId)
@@ -245,7 +264,6 @@ watch(() => props.modelValue, async (open) => {
   }
 
   if (props.initialData) {
-    // Editing mode — restore values
     mode.value = props.initialData.cron_expression ? 'recurring' : 'oneshot'
     timezone.value = props.initialData.timezone ?? 'UTC'
     templateId.value = props.initialData.template_id ?? null
@@ -254,8 +272,10 @@ watch(() => props.modelValue, async (open) => {
     if (props.initialData.run_at) {
       try {
         const dt = new Date(props.initialData.run_at)
-        runDate.value = dt.toISOString().split('T')[0]
-        runTime.value = dt.toTimeString().slice(0, 5)
+        const dFmt = new Intl.DateTimeFormat('en-CA', { timeZone: timezone.value, year: 'numeric', month: '2-digit', day: '2-digit' })
+        const tFmt = new Intl.DateTimeFormat('en-GB', { timeZone: timezone.value, hour: '2-digit', minute: '2-digit' })
+        runDate.value = dFmt.format(dt)
+        runTime.value = tFmt.format(dt).slice(0, 5)
       } catch {
         runDate.value = ''
         runTime.value = ''
@@ -266,7 +286,6 @@ watch(() => props.modelValue, async (open) => {
       applyParsedCron(props.initialData.cron_expression)
     }
   } else {
-    // Reset
     mode.value = 'oneshot'
     frequency.value = 'daily'
     cronExpression.value = ''
@@ -290,14 +309,33 @@ watch(() => props.modelValue, async (open) => {
 })
 
 // When a template is selected from the dropdown, fill rawPrompt from it
-// Skip when id === -1 (create new template) or null
 watch(templateId, (id) => {
-  if (id === null || id === -1) return
+  if (id === -1) {
+    showCreateTemplate.value = true
+    return
+  }
+  showCreateTemplate.value = false
+  if (id === null) return
+
   const tmpl = promptTemplatesStore.templates.find((t) => t.id === id)
   if (tmpl) {
     rawPrompt.value = tmpl.prompt_template
   }
 })
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+
+function nextStep(): void {
+  if (currentStep.value < TOTAL_STEPS) {
+    currentStep.value++
+  }
+}
+
+function prevStep(): void {
+  if (currentStep.value > 1) {
+    currentStep.value--
+  }
+}
 
 // ── Submit ────────────────────────────────────────────────────────────────────
 
@@ -328,7 +366,7 @@ async function submit(): Promise<void> {
     } else if (rawPrompt.value.trim()) {
       payload.raw_prompt = rawPrompt.value.trim()
     } else {
-      error.value = 'Please provide a prompt or select/create a template.'
+      error.value = 'Please provide a prompt.'
       saving.value = false
       return
     }
@@ -338,16 +376,19 @@ async function submit(): Promise<void> {
     }
 
     if (mode.value === 'oneshot') {
-      const runAt = `${runDate.value}T${runTime.value}:00`
+      // Find the UTC offset for the selected timezone at this date
+      const fakeDt = new Date(`${runDate.value}T${runTime.value}:00Z`)
+      const tzOffsetStr = fakeDt.toLocaleString('en-US', { timeZoneName: 'longOffset', timeZone: timezone.value }).split('GMT')[1] || 'Z'
+      const runAt = `${runDate.value}T${runTime.value}:00${tzOffsetStr}`
       payload.run_at = runAt
     } else {
       payload.cron_expression = computedCron.value
     }
 
     let resource: ScheduledRunResource
-    if (isEditing.value) {
+    if (props.initialData?.id) {
       const result = await api.put<{ scheduled_run: ScheduledRunResource }>(
-        `/agents/${props.agentId}/scheduled-runs/${props.initialData!.id}`,
+        `/agents/${props.agentId}/scheduled-runs/${props.initialData.id}`,
         payload,
       )
       resource = result.scheduled_run
@@ -372,6 +413,13 @@ function close(): void {
   emit('update:modelValue', false)
   emit('closed')
 }
+
+// ── Computed helpers ──────────────────────────────────────────────────────────
+
+const isEditing = computed(() => !!props.initialData?.id)
+const modalTitle = computed(() => isEditing.value ? 'Edit Schedule' : 'Schedule Run')
+
+const stepLabels = ['Template', 'Schedule Type', 'Schedule']
 </script>
 
 <template>
@@ -386,30 +434,37 @@ function close(): void {
 
       <p v-if="error" role="alert" class="text-xs text-destructive">{{ error }}</p>
 
-      <!-- Mode toggle -->
-      <div data-testid="schedule-mode-toggle" class="flex rounded-lg border border-border overflow-hidden text-sm font-medium">
-        <button
-          type="button"
-          data-testid="mode-oneshot"
-          @click="mode = 'oneshot'"
-          class="flex-1 py-2 text-center transition-colors"
-          :class="mode === 'oneshot' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground'"
-        >
-          One-shot
-        </button>
-        <button
-          type="button"
-          data-testid="mode-recurring"
-          @click="mode = 'recurring'"
-          class="flex-1 py-2 text-center transition-colors"
-          :class="mode === 'recurring' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground'"
-        >
-          Recurring
-        </button>
+      <!-- Step indicator -->
+      <div class="flex items-center gap-2">
+        <div v-for="step in [1, 2, 3]" :key="step" class="flex items-center gap-1.5">
+          <div
+            class="h-6 w-6 rounded-full flex items-center justify-center text-xs font-medium transition-colors"
+            :class="currentStep > step
+              ? 'bg-primary text-primary-foreground'
+              : currentStep === step
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-muted text-muted-foreground'"
+          >
+            <svg v-if="currentStep > step" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            <span v-else>{{ step }}</span>
+          </div>
+          <span
+            class="text-xs font-medium"
+            :class="currentStep === step ? 'text-foreground' : 'text-muted-foreground'"
+          >{{ stepLabels[step - 1] }}</span>
+          <div v-if="step < TOTAL_STEPS" class="flex-1 h-px bg-border min-w-4" />
+        </div>
       </div>
 
-      <!-- Prompt source: template picker + raw prompt -->
-      <div class="flex flex-col gap-3">
+      <!-- ── STEP 1: Template ─────────────────────────────────────────────── -->
+
+      <div v-show="currentStep === 1" class="flex flex-col gap-4">
+        <p class="text-sm text-muted-foreground">
+          Choose an existing prompt template or create a new one. A template is required.
+        </p>
+
         <!-- Template picker -->
         <div class="flex flex-col gap-1.5">
           <label class="text-sm font-medium">Prompt template</label>
@@ -417,7 +472,7 @@ function close(): void {
             v-model="templateId"
             class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
           >
-            <option :value="null">— No template —</option>
+            <option :value="null">— Select a template —</option>
             <option
               v-for="tmpl in promptTemplatesStore.templates"
               :key="tmpl.id"
@@ -429,7 +484,7 @@ function close(): void {
           </select>
         </div>
 
-        <!-- Inline create template (shown when "+ Create new template…" is selected) -->
+        <!-- Inline create template -->
         <div
           v-if="templateId === -1"
           class="flex flex-col gap-2 rounded-lg border border-dashed border-border bg-muted/20 p-3"
@@ -451,7 +506,7 @@ function close(): void {
           </p>
         </div>
 
-        <!-- Raw prompt textarea (disabled when a template is selected) -->
+        <!-- Prompt textarea (always editable) -->
         <div class="flex flex-col gap-1.5">
           <label class="text-sm font-medium flex items-center gap-2">
             <span>Prompt</span>
@@ -471,206 +526,271 @@ function close(): void {
         </div>
       </div>
 
-      <!-- One-shot: date + time -->
-      <template v-if="mode === 'oneshot'">
-        <div class="flex flex-col gap-1.5">
-          <label class="text-sm font-medium">Date</label>
-          <input
-            v-model="runDate"
-            type="date"
-            class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-sm font-medium">Time</label>
-          <input
-            v-model="runTime"
-            type="time"
-            class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-        </div>
-      </template>
+      <!-- ── STEP 2: Schedule Type ───────────────────────────────────────── -->
 
-      <!-- Recurring: frequency + cron -->
-      <template v-else>
+      <div v-show="currentStep === 2" class="flex flex-col gap-4">
+        <p class="text-sm text-muted-foreground">
+          Choose whether this schedule runs once or repeats.
+        </p>
+
+        <!-- Mode toggle -->
+        <div data-testid="schedule-mode-toggle" class="flex rounded-lg border border-border overflow-hidden text-sm font-medium">
+          <button
+            type="button"
+            data-testid="mode-oneshot"
+            @click="mode = 'oneshot'"
+            class="flex-1 py-2 text-center transition-colors"
+            :class="mode === 'oneshot' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground'"
+          >
+            One-shot
+          </button>
+          <button
+            type="button"
+            data-testid="mode-recurring"
+            @click="mode = 'recurring'"
+            class="flex-1 py-2 text-center transition-colors"
+            :class="mode === 'recurring' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground'"
+          >
+            Recurring
+          </button>
+        </div>
+      </div>
+
+      <!-- ── STEP 3: Schedule ─────────────────────────────────────────────── -->
+
+      <div v-show="currentStep === 3" class="flex flex-col gap-4">
+
+        <!-- One-shot: date + time -->
+        <template v-if="mode === 'oneshot'">
+          <p class="text-sm text-muted-foreground">
+            Set the date and time for this one-time run.
+          </p>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium">Date</label>
+            <input
+              v-model="runDate"
+              type="date"
+              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium">Time</label>
+            <input
+              v-model="runTime"
+              type="time"
+              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+        </template>
+
+        <!-- Recurring: frequency + cron -->
+        <template v-else>
+          <p class="text-sm text-muted-foreground">
+            Configure how often this schedule should repeat.
+          </p>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium">Frequency</label>
+            <select
+              v-model="frequency"
+              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option v-for="opt in FREQUENCY_OPTIONS" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </div>
+
+          <!-- Hourly panel -->
+          <div v-if="frequency === 'hourly'" class="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-4">
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-muted-foreground">Every</span>
+              <input
+                v-model.number="hourlyInterval"
+                type="number"
+                min="1"
+                max="23"
+                class="w-16 rounded-lg border border-border bg-background px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <span class="text-sm text-muted-foreground">hour(s)</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-muted-foreground">Starting at hour</span>
+              <input
+                v-model.number="hourlyStartHour"
+                type="number"
+                min="0"
+                max="23"
+                class="w-16 rounded-lg border border-border bg-background px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <span class="text-sm text-muted-foreground">through</span>
+              <input
+                v-model.number="hourlyEndHour"
+                type="number"
+                min="0"
+                max="23"
+                class="w-16 rounded-lg border border-border bg-background px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <span class="text-sm text-muted-foreground">at minute</span>
+              <input
+                v-model.number="hourlyMinute"
+                type="number"
+                min="0"
+                max="59"
+                class="w-16 rounded-lg border border-border bg-background px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+            <p class="text-xs text-muted-foreground font-mono">
+              → {{ computedCron || '—' }}
+            </p>
+          </div>
+
+          <!-- Daily panel -->
+          <div v-if="frequency === 'daily'" class="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-4">
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-muted-foreground">Every</span>
+              <input
+                v-model.number="dailyInterval"
+                type="number"
+                min="1"
+                max="31"
+                class="w-16 rounded-lg border border-border bg-background px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <span class="text-sm text-muted-foreground">day(s) at</span>
+              <input
+                v-model="dailyTime"
+                type="time"
+                class="w-28 rounded-lg border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+            <p class="text-xs text-muted-foreground font-mono">
+              → {{ computedCron || '—' }}
+            </p>
+          </div>
+
+          <!-- Weekly panel -->
+          <div v-if="frequency === 'weekly'" class="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-4">
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-muted-foreground">Every</span>
+              <select
+                v-model.number="weeklyDay"
+                class="w-36 rounded-lg border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option v-for="opt in DAY_OF_WEEK_OPTIONS" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+              <span class="text-sm text-muted-foreground">at</span>
+              <input
+                v-model="weeklyTime"
+                type="time"
+                class="w-28 rounded-lg border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+            <p class="text-xs text-muted-foreground font-mono">
+              → {{ computedCron || '—' }}
+            </p>
+          </div>
+
+          <!-- Monthly panel -->
+          <div v-if="frequency === 'monthly'" class="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-4">
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-muted-foreground">Every</span>
+              <input
+                v-model.number="monthlyDay"
+                type="number"
+                min="1"
+                max="31"
+                class="w-16 rounded-lg border border-border bg-background px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <span class="text-sm text-muted-foreground">day of the month at</span>
+              <input
+                v-model="monthlyTime"
+                type="time"
+                class="w-28 rounded-lg border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+            <p class="text-xs text-muted-foreground font-mono">
+              → {{ computedCron || '—' }}
+            </p>
+          </div>
+
+          <!-- Custom cron field -->
+          <div v-if="frequency === 'custom'" class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium">Cron expression</label>
+            <input
+              v-model="cronExpression"
+              type="text"
+              placeholder="*/15 * * * *"
+              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+            />
+            <p class="text-xs text-muted-foreground">
+              Format: <span class="font-mono text-[10px]">minute hour day month weekday</span>
+            </p>
+          </div>
+
+          <!-- Live preview -->
+          <div v-if="previewRuns.length > 0" class="rounded-lg border border-border bg-muted/30 px-4 py-3">
+            <p class="text-xs font-medium text-muted-foreground mb-2">Next 3 runs</p>
+            <ul class="flex flex-col gap-1">
+              <li v-for="(run, i) in previewRuns" :key="i" class="text-sm font-mono text-foreground">
+                {{ run }}
+              </li>
+            </ul>
+          </div>
+          <p v-else-if="computedCron" class="text-xs text-muted-foreground">
+            Could not parse cron expression. Check the syntax.
+          </p>
+        </template>
+
+        <!-- Timezone (common to both modes, shown at the end of Step 3) -->
         <div class="flex flex-col gap-1.5">
-          <label class="text-sm font-medium">Frequency</label>
+          <label class="text-sm font-medium">Timezone</label>
           <select
-            v-model="frequency"
+            v-model="timezone"
             class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
           >
-            <option v-for="opt in FREQUENCY_OPTIONS" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
+            <option v-for="tz in timezones" :key="tz.value" :value="tz.value">
+              {{ tz.label }}
             </option>
           </select>
         </div>
 
-        <!-- Hourly panel -->
-        <div v-if="frequency === 'hourly'" class="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-4">
-          <div class="flex items-center gap-2">
-            <span class="text-sm text-muted-foreground">Every</span>
-            <input
-              v-model.number="hourlyInterval"
-              type="number"
-              min="1"
-              max="23"
-              class="w-16 rounded-lg border border-border bg-background px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <span class="text-sm text-muted-foreground">hour(s)</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-sm text-muted-foreground">Starting at hour</span>
-            <input
-              v-model.number="hourlyStartHour"
-              type="number"
-              min="0"
-              max="23"
-              class="w-16 rounded-lg border border-border bg-background px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <span class="text-sm text-muted-foreground">through</span>
-            <input
-              v-model.number="hourlyEndHour"
-              type="number"
-              min="0"
-              max="23"
-              class="w-16 rounded-lg border border-border bg-background px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <span class="text-sm text-muted-foreground">at minute</span>
-            <input
-              v-model.number="hourlyMinute"
-              type="number"
-              min="0"
-              max="59"
-              class="w-16 rounded-lg border border-border bg-background px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
-          <p class="text-xs text-muted-foreground font-mono">
-            → {{ computedCron || '—' }}
-          </p>
-        </div>
-
-        <!-- Daily panel -->
-        <div v-if="frequency === 'daily'" class="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-4">
-          <div class="flex items-center gap-2">
-            <span class="text-sm text-muted-foreground">Every</span>
-            <input
-              v-model.number="dailyInterval"
-              type="number"
-              min="1"
-              max="31"
-              class="w-16 rounded-lg border border-border bg-background px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <span class="text-sm text-muted-foreground">day(s) at</span>
-            <input
-              v-model="dailyTime"
-              type="time"
-              class="w-28 rounded-lg border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
-          <p class="text-xs text-muted-foreground font-mono">
-            → {{ computedCron || '—' }}
-          </p>
-        </div>
-
-        <!-- Weekly panel -->
-        <div v-if="frequency === 'weekly'" class="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-4">
-          <div class="flex items-center gap-2">
-            <span class="text-sm text-muted-foreground">Every</span>
-            <select
-              v-model.number="weeklyDay"
-              class="w-36 rounded-lg border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              <option v-for="opt in DAY_OF_WEEK_OPTIONS" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </option>
-            </select>
-            <span class="text-sm text-muted-foreground">at</span>
-            <input
-              v-model="weeklyTime"
-              type="time"
-              class="w-28 rounded-lg border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
-          <p class="text-xs text-muted-foreground font-mono">
-            → {{ computedCron || '—' }}
-          </p>
-        </div>
-
-        <!-- Monthly panel -->
-        <div v-if="frequency === 'monthly'" class="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-4">
-          <div class="flex items-center gap-2">
-            <span class="text-sm text-muted-foreground">Every</span>
-            <input
-              v-model.number="monthlyDay"
-              type="number"
-              min="1"
-              max="31"
-              class="w-16 rounded-lg border border-border bg-background px-2 py-1 text-sm text-center focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <span class="text-sm text-muted-foreground">day of the month at</span>
-            <input
-              v-model="monthlyTime"
-              type="time"
-              class="w-28 rounded-lg border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
-          <p class="text-xs text-muted-foreground font-mono">
-            → {{ computedCron || '—' }}
-          </p>
-        </div>
-
-        <!-- Custom cron field (hidden unless custom) -->
-        <div v-if="frequency === 'custom'" class="flex flex-col gap-1.5">
-          <label class="text-sm font-medium">Cron expression</label>
-          <input
-            v-model="cronExpression"
-            type="text"
-            placeholder="*/15 * * * *"
-            class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
-          />
-          <p class="text-xs text-muted-foreground">
-            Format: <span class="font-mono text-[10px]">minute hour day month weekday</span>
-          </p>
-        </div>
-
-        <!-- Live preview -->
-        <div v-if="previewRuns.length > 0" class="rounded-lg border border-border bg-muted/30 px-4 py-3">
-          <p class="text-xs font-medium text-muted-foreground mb-2">Next 3 runs</p>
-          <ul class="flex flex-col gap-1">
-            <li v-for="(run, i) in previewRuns" :key="i" class="text-sm font-mono text-foreground">
-              {{ run }}
-            </li>
-          </ul>
-        </div>
-        <p v-else-if="computedCron" class="text-xs text-muted-foreground">
-          Could not parse cron expression. Check the syntax.
-        </p>
-      </template>
-
-      <!-- Timezone -->
-      <div class="flex flex-col gap-1.5">
-        <label class="text-sm font-medium">Timezone</label>
-        <select
-          v-model="timezone"
-          class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-        >
-          <option v-for="tz in timezones" :key="tz.value" :value="tz.value">
-            {{ tz.label }}
-          </option>
-        </select>
       </div>
 
     </div>
 
     <template #footer>
       <div class="flex justify-end gap-2">
+        <!-- Back button -->
+        <button
+          v-if="currentStep > 1"
+          @click="prevStep"
+          class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Back
+        </button>
+
+        <!-- Cancel -->
         <button
           @click="close"
           class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
           Cancel
         </button>
+
+        <!-- Next / Schedule -->
         <button
+          v-if="currentStep < TOTAL_STEPS"
+          @click="nextStep"
+          :disabled="(currentStep === 1 && !canProceedFromStep1)"
+          class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+        >
+          Next
+        </button>
+
+        <!-- Schedule (final step) -->
+        <button
+          v-else
           data-testid="schedule-submit-button"
           @click="submit"
           :disabled="saving || !canSubmit"

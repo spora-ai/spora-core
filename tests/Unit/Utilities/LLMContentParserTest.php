@@ -83,7 +83,7 @@ test('parse extracts multiple XML <thinking> blocks and concatenates them', func
 test('parse extracts XML <thinking> nested inside a text block', function (): void {
     $raw = [
         [
-            'type' => 'text', 
+            'type' => 'text',
             'text' => '<thinking>Inner thinking within block</thinking>Inner text.',
         ],
     ];
