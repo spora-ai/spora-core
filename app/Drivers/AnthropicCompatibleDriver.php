@@ -7,6 +7,8 @@ namespace Spora\Drivers;
 use Psr\Log\LoggerInterface;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
+use Spora\Drivers\Exceptions\LLMRetryableException;
+use Spora\Drivers\Utilities\LLMContentParser;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
@@ -75,6 +77,11 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
             throw new LLMRateLimitException('Anthropic rate limit exceeded (HTTP 429).');
         }
 
+        if ($statusCode >= 500) {
+            $rawBody = $response->getContent(throw: false);
+            throw new LLMRetryableException("Anthropic API error {$statusCode}: {$rawBody}");
+        }
+
         if ($statusCode >= 400) {
             $rawBody = $response->getContent(throw: false);
             throw new LLMProviderException("Anthropic API error {$statusCode}: {$rawBody}");
@@ -89,6 +96,8 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
         $outputTokens = (int) ($data['usage']['output_tokens'] ?? 0);
         $stopReason   = (string) ($data['stop_reason'] ?? '');
         $contentBlocks = (array) ($data['content'] ?? []);
+
+        $parsedContent = LLMContentParser::parse($contentBlocks);
 
         if ($stopReason === 'tool_use') {
             $toolCalls = [];
@@ -106,28 +115,22 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
             }
 
             return new LLMResponse(
-                content: null,
+                content: $parsedContent['content'] !== '' ? $parsedContent['content'] : null,
                 toolCalls: $toolCalls,
                 inputTokens: $inputTokens,
                 outputTokens: $outputTokens,
                 completionId: $completionId,
+                reasoning: $parsedContent['reasoning'],
             );
         }
 
-        // end_turn — extract text from content blocks
-        $textContent = '';
-        foreach ($contentBlocks as $block) {
-            if (($block['type'] ?? '') === 'text') {
-                $textContent .= (string) ($block['text'] ?? '');
-            }
-        }
-
         return new LLMResponse(
-            content: $textContent,
+            content: $parsedContent['content'],
             toolCalls: [],
             inputTokens: $inputTokens,
             outputTokens: $outputTokens,
             completionId: $completionId,
+            reasoning: $parsedContent['reasoning'],
         );
     }
 

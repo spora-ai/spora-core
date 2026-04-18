@@ -42,6 +42,7 @@ export const useAgentStore = defineStore('agent', () => {
       system_prompt: string | null
       llm_driver_config_id: number | null
       max_steps: number
+      allow_followup: boolean
     }>,
   ): Promise<Agent> {
     const result = await api.patch<{ agent: Agent }>(`/agents/${id}`, data)

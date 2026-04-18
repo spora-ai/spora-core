@@ -112,6 +112,7 @@ it('gracefully handles http client exceptions', function () {
     $client = Mockery::mock(HttpClientInterface::class);
     $logger = Mockery::mock(LoggerInterface::class);
     $logger->allows('error');
+    $logger->allows('debug');
 
     $client->expects('request')->andThrows(new Exception('Network timeout'));
 

@@ -11,9 +11,10 @@
 - `declare(strict_types=1)` on every PHP file
 - `final` on all classes unless inheritance is required
 - No DB calls in constructors — boot explicitly via `Database::bootDatabaseConnectionOnly()`
-- `bin/spora` is the single CLI entry point (`spora:install`, `db:seed`, `worker:run`)
+- `bin/spora` is the single CLI entry point (`spora:install`, `db:seed`, `worker:run`, `worker:run --scheduled`)
+- **Storage:** `storage/` — `database.sqlite` (app db), `spora.log` / `php.log` (logs)
+- **Tests:** Backend Pest (`composer test`), Frontend Vitest (`composer frontend:test`), E2E Playwright (`composer frontend:test:e2e`)
 - Worker async mode is controlled by `SPORA_SYNC_MODE` (`true` = inline/dev, `false` = queued/worker)
-- Tests use Pest — run with `./vendor/bin/pest`
 - `Database` is `final` — cannot be Mockery-mocked; pass a real instance instead
 - No mocks for integration tests that already boot the DB via `beforeEach`
 - Don't add error handling, fallbacks, or abstractions beyond what the task requires
@@ -38,16 +39,19 @@
 | Security Hardening | Multi-tenancy isolation, auth rate limiting, no path leak in prod logs |
 | Frontend | Vue 3 scaffold, auth, task chat, multi-agent dashboard, settings UI |
 | Async Agent Loop | `SPORA_SYNC_MODE`, `QUEUED` status, `WorkerRunCommand`, Mercure SSE |
+| Prompt Templates | `AgentPromptTemplate` model, `PromptTemplateController` CRUD |
+| Scheduled Runs | `ScheduledRun` model, `ScheduledRunController` CRUD, `--scheduled` worker flag, cron scheduling |
+| Follow-Up Questions | `parent_task_id` lineage, `allow_followup` agent setting, deep-copy history |
+| Tool Approval UI | Sticky approval bar in `TaskChatPage.vue` with per-tool approve/reject |
+| Notification Centre | `Notification` model, `NotificationService`, `NotificationController`, real-time via Mercure + SSE |
+| Docker / FrankenPHP | `Dockerfile`, `docker-compose.yml`, Playwright E2E test suite |
+| SSE Realtime | `useRealtime` composable, `SseController`, `GET /api/v1/sse/auth` endpoint |
+| Tests | Comprehensive Pest test suites for NotificationService/Controller, PromptTemplateController, ScheduledRunController, SseController |
 
 ---
 
 ## Backlog
 
-- Validate Approval Functionality
-- Pre-Defined Prompts (System & User)
-- Timed Workflows for predefined prompts
-- Option to allow Follow-Up Questions
-- Notification central (including Notification channels)
 - Agent-to-Agent Handovers
 - Tool Call Abort/Retry
 - Multimodal / Image Inputs
@@ -56,3 +60,4 @@
 - User Management (multi-user, roles)
 - WordPress-style web installer
 - Web Push Notifications on `PENDING_APPROVAL`
+- Scheduled Runs frontend UI (`ScheduledRunsPage.vue`, `SharedScheduleEditor.vue`, composer redesign)

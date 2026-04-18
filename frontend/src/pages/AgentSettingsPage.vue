@@ -2,8 +2,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
-import { useThemeStore } from '@/stores/theme'
+import { useLlmConfigsStore } from '@/stores/llmConfigs'
 import { useToolSettings } from '@/composables/useToolSettings'
+import AgentLayout from '@/components/layout/AgentLayout.vue'
 import type { ToolSchema, ToolStatus } from '@/composables/useToolSettings'
 import AgentLlmConfigModal from '@/components/agent/AgentLlmConfigModal.vue'
 import AgentToolConfigModal from '@/components/agent/AgentToolConfigModal.vue'
@@ -15,7 +16,7 @@ import { ApiError, api } from '@/api/client'
 const route = useRoute()
 const router = useRouter()
 const agentStore = useAgentStore()
-const theme = useThemeStore()
+const llmConfigsStore = useLlmConfigsStore()
 
 const agentId = computed(() => Number(route.params.id))
 
@@ -64,6 +65,7 @@ const identityForm = ref({
   description: '',
   system_prompt: '',
   max_steps: 10,
+  allow_followup: true,
 })
 const savingIdentity = ref(false)
 const identityError = ref<string | null>(null)
@@ -100,7 +102,11 @@ const confirmDeleteName = ref('')
 // ── Load data ────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
-  await agentStore.fetchAgent(agentId.value)
+  await Promise.all([
+    agentStore.fetchAgents(),
+    agentStore.fetchAgent(agentId.value),
+    llmConfigsStore.ensure(),
+  ])
 
   const agent = agentStore.currentAgent!
   identityForm.value = {
@@ -108,6 +114,7 @@ onMounted(async () => {
     description: agent.description ?? '',
     system_prompt: agent.system_prompt ?? '',
     max_steps: agent.max_steps ?? 10,
+    allow_followup: agent.allow_followup !== false,
   }
   llmSettingsForm.value = {
     llm_driver_config_id: agent.llm_driver_config_id ?? null,
@@ -155,6 +162,7 @@ async function saveIdentity(): Promise<void> {
       description: identityForm.value.description || null,
       system_prompt: identityForm.value.system_prompt || null,
       max_steps: identityForm.value.max_steps,
+      allow_followup: identityForm.value.allow_followup,
     })
     identitySaved.value = true
     setTimeout(() => { identitySaved.value = false }, 2000)
@@ -274,109 +282,90 @@ async function deleteAgent(): Promise<void> {
 </script>
 
 <template>
-  <div class="min-h-screen bg-background flex flex-col">
-
-    <!-- Header -->
-    <header class="border-b border-border px-4 py-3 flex items-center gap-3 shrink-0">
-      <button
-        @click="router.push({ name: 'agent', params: { id: agentId } })"
-        class="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-        </svg>
-        Back
-      </button>
-      <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium truncate">Settings</p>
-      </div>
-      <!-- Dark mode toggle -->
-      <button
-        @click="theme.toggle()"
-        class="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-      >
-        <svg v-if="theme.isDark" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-        </svg>
-        <svg v-else class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-        </svg>
-      </button>
-    </header>
+  <AgentLayout :agent-id="agentId">
 
     <!-- Loading -->
     <div v-if="!agentStore.currentAgent" class="flex-1 flex items-center justify-center text-sm text-muted-foreground">
       Loading…
     </div>
 
-    <main v-else class="flex-1 max-w-2xl w-full mx-auto px-4 py-8 flex flex-col gap-8">
+    <main v-else class="flex-1 py-8 px-6 flex flex-col gap-8">
 
       <!-- ── Identity ─────────────────────────────────────────────────────── -->
-      <section class="flex flex-col gap-4">
+      <section class="rounded-xl border border-border bg-card p-5 flex flex-col gap-4">
         <h2 class="text-base font-semibold">Identity</h2>
-        <div class="rounded-xl border border-border bg-card p-5 flex flex-col gap-4">
-          <div class="flex flex-col gap-1.5">
-            <label for="agent-name" class="text-sm font-medium">Name</label>
-            <input
-              id="agent-name"
-              v-model="identityForm.name"
-              type="text"
-              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
+        <div class="flex flex-col gap-1.5">
+          <label for="agent-name" class="text-sm font-medium">Name</label>
+          <input
+            id="agent-name"
+            v-model="identityForm.name"
+            type="text"
+            class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label for="agent-desc" class="text-sm font-medium">Description <span class="text-muted-foreground font-normal">(optional)</span></label>
+          <input
+            id="agent-desc"
+            v-model="identityForm.description"
+            type="text"
+            placeholder="What does this agent do?"
+            class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label for="system-prompt" class="text-sm font-medium">System Prompt <span class="text-muted-foreground font-normal">(optional)</span></label>
+          <textarea
+            id="system-prompt"
+            v-model="identityForm.system_prompt"
+            rows="4"
+            placeholder="Additional instructions for the agent…"
+            class="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label for="max-steps" class="text-sm font-medium">Max Steps</label>
+          <input
+            id="max-steps"
+            v-model.number="identityForm.max_steps"
+            type="number"
+            min="1"
+            max="100"
+            placeholder="10"
+            class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          <p class="text-xs text-muted-foreground">Maximum number of agent turns (1–100).</p>
+        </div>
+        <div class="flex items-start gap-3">
+          <input
+            id="allow-followup"
+            v-model="identityForm.allow_followup"
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 rounded border-border bg-background text-primary focus:ring-1 focus:ring-ring"
+          />
+          <div class="flex flex-col gap-1">
+            <label for="allow-followup" class="text-sm font-medium">Allow follow-up questions</label>
+            <p class="text-xs text-muted-foreground">When enabled, users can continue a conversation after a task completes.</p>
           </div>
-          <div class="flex flex-col gap-1.5">
-            <label for="agent-desc" class="text-sm font-medium">Description <span class="text-muted-foreground font-normal">(optional)</span></label>
-            <input
-              id="agent-desc"
-              v-model="identityForm.description"
-              type="text"
-              placeholder="What does this agent do?"
-              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label for="system-prompt" class="text-sm font-medium">System Prompt <span class="text-muted-foreground font-normal">(optional)</span></label>
-            <textarea
-              id="system-prompt"
-              v-model="identityForm.system_prompt"
-              rows="4"
-              placeholder="Additional instructions for the agent…"
-              class="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label for="max-steps" class="text-sm font-medium">Max Steps</label>
-            <input
-              id="max-steps"
-              v-model.number="identityForm.max_steps"
-              type="number"
-              min="1"
-              max="100"
-              placeholder="10"
-              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <p class="text-xs text-muted-foreground">Maximum number of agent turns (1–100).</p>
-          </div>
-          <div class="flex items-center justify-between">
-            <p v-if="identityError" role="alert" class="text-xs text-destructive">{{ identityError }}</p>
-            <span v-else-if="identitySaved" class="text-xs text-green-600 dark:text-green-400">Saved!</span>
-            <span v-else />
-            <button
-              @click="saveIdentity"
-              :disabled="savingIdentity || !identityForm.name.trim()"
-              class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-            >
-              {{ savingIdentity ? 'Saving…' : 'Save Identity' }}
-            </button>
-          </div>
+        </div>
+        <div class="flex items-center justify-between">
+          <p v-if="identityError" role="alert" class="text-xs text-destructive">{{ identityError }}</p>
+          <span v-else-if="identitySaved" class="text-xs text-green-600 dark:text-green-400">Saved!</span>
+          <span v-else />
+          <button
+            @click="saveIdentity"
+            :disabled="savingIdentity || !identityForm.name.trim()"
+            class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+          >
+            {{ savingIdentity ? 'Saving…' : 'Save Identity' }}
+          </button>
         </div>
       </section>
 
       <!-- ── LLM Configuration ─────────────────────────────────────────────── -->
-      <section class="flex flex-col gap-4">
+      <section class="rounded-xl border border-border bg-card p-5 flex flex-col gap-4">
         <h2 class="text-base font-semibold">LLM Configuration</h2>
-        <div class="rounded-xl border border-border bg-card p-5 flex flex-col gap-4">
-          <div class="flex flex-col gap-1.5">
+        <div class="flex flex-col gap-1.5">
             <div class="flex items-center justify-between">
               <label for="llm-driver-config" class="text-sm font-medium">Configuration</label>
               <button
@@ -416,13 +405,13 @@ async function deleteAgent(): Promise<void> {
               {{ savingLlmSettings ? 'Saving…' : 'Save LLM Configuration' }}
             </button>
           </div>
-        </div>
       </section>
 
       <!-- ── Tools ───────────────────────────────────────────────────────── -->
-      <section class="flex flex-col gap-4">
-        <h2 class="text-base font-semibold">Tools</h2>
-        <div class="rounded-xl border border-border bg-card divide-y divide-border">
+      <section class="rounded-xl border border-border bg-card divide-y divide-border">
+        <div class="px-5 py-4">
+          <h2 class="text-base font-semibold">Tools</h2>
+        </div>
           <AgentToolListItem
             v-for="tool in toolRegistry"
             :key="tool.tool_class"
@@ -442,8 +431,7 @@ async function deleteAgent(): Promise<void> {
           <div v-else-if="toolRegistry.length === 0" class="px-5 py-4 text-sm text-muted-foreground">
             No tools registered.
           </div>
-        </div>
-        <p v-if="toolsError" role="alert" class="text-xs text-destructive">{{ toolsError }}</p>
+          <p v-if="toolsError" role="alert" class="px-5 py-3 text-xs text-destructive">{{ toolsError }}</p>
       </section>
 
       <!-- ── LLM Config Create Modal ─────────────────────────────────────── -->
@@ -472,31 +460,29 @@ async function deleteAgent(): Promise<void> {
       />
 
       <!-- ── Danger Zone ─────────────────────────────────────────────────── -->
-      <section class="flex flex-col gap-4">
+      <section class="rounded-xl border border-destructive/30 bg-card p-5 flex flex-col gap-4">
         <h2 class="text-base font-semibold text-destructive">Danger Zone</h2>
-        <div class="rounded-xl border border-destructive/30 bg-card p-5 flex flex-col gap-4">
-          <div class="flex flex-col gap-1.5">
-            <label for="delete-confirm" class="text-sm font-medium">Confirm deletion</label>
-            <p class="text-xs text-muted-foreground">Type the agent name <strong>{{ agentStore.currentAgent?.name }}</strong> to confirm.</p>
-            <input
-              id="delete-confirm"
-              v-model="confirmDeleteName"
-              type="text"
-              class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
-          <div class="flex justify-end">
-            <button
-              @click="deleteAgent"
-              :disabled="deleting || confirmDeleteName !== agentStore.currentAgent?.name"
-              class="inline-flex h-9 items-center justify-center rounded-lg bg-destructive px-4 text-sm font-medium text-destructive-foreground shadow transition-colors hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-50"
-            >
-              {{ deleting ? 'Deleting…' : 'Delete Agent' }}
-            </button>
-          </div>
+        <div class="flex flex-col gap-1.5">
+          <label for="delete-confirm" class="text-sm font-medium">Confirm deletion</label>
+          <p class="text-xs text-muted-foreground">Type the agent name <strong>{{ agentStore.currentAgent?.name }}</strong> to confirm.</p>
+          <input
+            id="delete-confirm"
+            v-model="confirmDeleteName"
+            type="text"
+            class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <div class="flex justify-end">
+          <button
+            @click="deleteAgent"
+            :disabled="deleting || confirmDeleteName !== agentStore.currentAgent?.name"
+            class="inline-flex h-9 items-center justify-center rounded-lg bg-destructive px-4 text-sm font-medium text-destructive-foreground shadow transition-colors hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-50"
+          >
+            {{ deleting ? 'Deleting…' : 'Delete Agent' }}
+          </button>
         </div>
       </section>
 
     </main>
-  </div>
+  </AgentLayout>
 </template>

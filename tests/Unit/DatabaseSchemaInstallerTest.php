@@ -83,9 +83,18 @@ test('core component row is written to schema_versions after install', function 
     $installer = bootInstaller();
     $installer->install();
 
+    // Version should match the highest-numbered core migration file.
+    $files = glob(BASE_PATH . '/database/migrations/[0-9]*.php') ?: [];
+    $max = 0;
+    foreach ($files as $file) {
+        if (preg_match('/^(\d+)/', basename($file, '.php'), $m)) {
+            $max = max($max, (int) $m[1]);
+        }
+    }
+
     $row = Capsule::table('schema_versions')->where('component', 'core')->first();
     expect($row)->not->toBeNull();
-    expect((int) $row->version)->toBe(DatabaseSchemaInstaller::CORE_VERSION);
+    expect((int) $row->version)->toBe($max);
 })->afterEach(fn() => Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -107,9 +116,11 @@ test('install() skips a component whose stored version is already at code versio
     $installer = bootInstaller();
     $installer->install();
 
+    // Artificially set stored version way above code version so Migrator would
+    // re-run migrations if consulted — stamp bypass should prevent that.
     Capsule::table('schema_versions')
         ->where('component', 'core')
-        ->update(['version' => DatabaseSchemaInstaller::CORE_VERSION + 99]);
+        ->update(['version' => 9999]);
 
     // Would throw duplicate-table error if migrations re-ran.
     $installer->install();

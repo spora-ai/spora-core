@@ -98,7 +98,23 @@ final class TaskController
         }
 
         $maxSteps = isset($body['max_steps']) ? (int) $body['max_steps'] : $agent->max_steps;
-        $task = $this->orchestrator->start($agent->id, $prompt, $maxSteps);
+        $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
+
+        // Validate parent_task_id if provided — must belong to the same user.
+        if ($parentTaskId !== null) {
+            $parentTask = Task::where('id', $parentTaskId)
+                ->where('user_id', $userId)
+                ->first();
+
+            if ($parentTask === null) {
+                return new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'parent_task_id is invalid.']],
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                );
+            }
+        }
+
+        $task = $this->orchestrator->start($agent->id, $prompt, $maxSteps, $parentTaskId);
         $this->mercure->publish($task->id, $this->taskResource($task));
 
         return new JsonResponse(
@@ -253,6 +269,40 @@ final class TaskController
         return new Response(null, Response::HTTP_NO_CONTENT);
     }
 
+    /**
+     * POST /api/v1/tasks/{taskId}/retry
+     *
+     * Creates a new task with the same agent_id and user_prompt as the failed task.
+     * The new task is a fresh attempt — no parent_task_id link.
+     */
+    public function retry(Request $request): JsonResponse
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
+
+        if ($task === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+
+        if ($task->status !== 'FAILED') {
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_STATE', 'message' => 'Only failed tasks can be retried.']],
+                Response::HTTP_CONFLICT,
+            );
+        }
+
+        $newTask = $this->orchestrator->start($task->agent_id, $task->user_prompt, $task->max_steps);
+        $this->mercure->publish($newTask->id, $this->taskResource($newTask));
+
+        return new JsonResponse(
+            ['data' => ['task' => $this->taskResource($newTask)]],
+            Response::HTTP_CREATED,
+        );
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
@@ -264,7 +314,7 @@ final class TaskController
 
     private function taskResource(Task $task): array
     {
-        return [
+        $resource = [
             'id'             => $task->id,
             'agent_id'       => $task->agent_id,
             'status'         => $task->status,
@@ -275,6 +325,17 @@ final class TaskController
             'created_at'     => $task->created_at?->toIso8601String(),
             'updated_at'     => $task->updated_at?->toIso8601String(),
         ];
+
+        if ($task->parent_task_id !== null) {
+            $resource['parent_task_id'] = $task->parent_task_id;
+        }
+
+        if ($task->error_code !== null) {
+            $resource['error_code'] = $task->error_code;
+            $resource['error_message'] = $task->error_message;
+        }
+
+        return $resource;
     }
 
     private function taskDetailResource(Task $task, ?int $sinceSequence = null): array

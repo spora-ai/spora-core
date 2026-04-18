@@ -13,6 +13,7 @@ use Spora\Core\SecurityManagerInterface;
 use Spora\Plugins\PluginLoader;
 use Spora\Recipes\RecipeScanner;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\NotificationService;
 
 /**
  * PHP-DI definitions array.
@@ -34,7 +35,10 @@ return [
             'app_env'             => 'production',
             'log_level'           => 'WARNING',
             'log_path'            => BASE_PATH . '/storage/spora.log',
-            'sync_mode'           => true,
+            // sync_mode (boolean, env: SPORA_SYNC_MODE=true/false)
+            // worker_mode (bool): true = Sync (inline), false = Worker (queued)
+            // SPORA_SYNC_MODE=true → worker_mode=true; SPORA_SYNC_MODE=false → worker_mode=false
+            'worker_mode'        => true,
             'worker_stale_minutes' => 60,
             'llm_timeout'        => 300,
             'tool_http_timeout'   => 30,
@@ -83,10 +87,7 @@ return [
             $envOverrides['log_path'] = $v;
         }
         if (($v = $env('SPORA_SYNC_MODE')) !== null) {
-            $envOverrides['worker_mode'] = filter_var($v, FILTER_VALIDATE_BOOLEAN) ? 'sync' : 'worker';
-        }
-        if (($v = $env('SPORA_WORKER_MODE')) !== null) {
-            $envOverrides['worker_mode'] = $v;
+            $envOverrides['worker_mode'] = filter_var($v, FILTER_VALIDATE_BOOLEAN);
         }
         if (($v = $env('SPORA_WORKER_STALE_MINUTES')) !== null) {
             $envOverrides['worker_stale_minutes'] = (int) $v;
@@ -244,6 +245,8 @@ return [
         );
     },
 
+    Spora\Http\HealthController::class => static fn(): Spora\Http\HealthController => new Spora\Http\HealthController(),
+
     Spora\Http\ToolController::class => static function (ContainerInterface $c): Spora\Http\ToolController {
         return new Spora\Http\ToolController(
             $c->get(AuthService::class),
@@ -276,6 +279,15 @@ return [
             $c->get(OrchestratorInterface::class),
             $c->get(Psr\Log\LoggerInterface::class),
             $c,
+            $c->get(MercurePublisherInterface::class),
+            $c->get(NotificationService::class),
+        );
+    },
+
+    Spora\Console\Commands\TaskRunCommand::class => static function (ContainerInterface $c): Spora\Console\Commands\TaskRunCommand {
+        return new Spora\Console\Commands\TaskRunCommand(
+            $c->get(Database::class),
+            $c,
         );
     },
 
@@ -284,7 +296,8 @@ return [
             driverFactory: $c->get(Spora\Drivers\DriverFactory::class),
             toolInstances: $c->get('tool_instances'),
             logger: $c->get(Psr\Log\LoggerInterface::class),
-            workerMode: WorkerMode::from($c->get('config')['worker_mode'] ?? 'sync'),
+            workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,
+            notificationService: $c->get(NotificationService::class),
         );
     },
 
@@ -326,6 +339,41 @@ return [
         return new Spora\Http\RecipeController(
             $c->get(AuthService::class),
             $c->get(RecipeScanner::class),
+        );
+    },
+
+    NotificationService::class => static function (ContainerInterface $c): NotificationService {
+        return new NotificationService(
+            $c->get(MercurePublisherInterface::class),
+        );
+    },
+
+    Spora\Http\NotificationController::class => static function (ContainerInterface $c): Spora\Http\NotificationController {
+        return new Spora\Http\NotificationController(
+            $c->get(AuthService::class),
+        );
+    },
+
+    Spora\Http\PromptTemplateController::class => static function (ContainerInterface $c): Spora\Http\PromptTemplateController {
+        return new Spora\Http\PromptTemplateController(
+            $c->get(AuthService::class),
+        );
+    },
+
+    Spora\Http\ScheduledRunController::class => static function (ContainerInterface $c): Spora\Http\ScheduledRunController {
+        return new Spora\Http\ScheduledRunController(
+            $c->get(AuthService::class),
+            $c->get(OrchestratorInterface::class),
+            $c->get(MercurePublisherInterface::class),
+        );
+    },
+
+    Spora\Http\SseController::class => static function (ContainerInterface $c): Spora\Http\SseController {
+        $config = $c->get('config');
+        return new Spora\Http\SseController(
+            $c->get(AuthService::class),
+            $config['mercure_url'] ?? null,
+            $config['mercure_jwt_key'] ?? null,
         );
     },
 ];

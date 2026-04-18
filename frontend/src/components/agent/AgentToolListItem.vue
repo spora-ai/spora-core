@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Toggle from '@/components/ui/Toggle.vue'
 import type { ToolSchema } from '@/composables/useToolSettings'
 
 const props = defineProps<{
@@ -54,9 +55,9 @@ import { computed } from 'vue'
       </p>
     </div>
     <div class="flex items-center gap-3 shrink-0">
-      <!-- Configure button (shown for all tools with settings_schema, enabled or not) -->
+      <!-- Configure button (only shown when enabled and has settings_schema) -->
       <button
-        v-if="tool.settings_schema.length > 0"
+        v-if="enabled && tool.settings_schema.length > 0"
         @click="emit('openConfig')"
         class="inline-flex h-7 items-center justify-center rounded-lg border border-border bg-background px-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
       >
@@ -69,30 +70,19 @@ import { computed } from 'vue'
         :title="autoApproved ? 'Auto-approve is on' : 'Auto-approve is off'"
       >
         <span>Auto-approve</span>
-        <button
-          @click="emit('toggleAutoApprove')"
+        <Toggle
+          size="sm"
+          :model-value="autoApproved"
           :disabled="saving"
-          class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-          :class="autoApproved ? 'bg-primary' : 'bg-muted'"
-        >
-          <span
-            class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
-            :class="autoApproved ? 'translate-x-4' : 'translate-x-0.5'"
-          />
-        </button>
+          @update:model-value="emit('toggleAutoApprove')"
+        />
       </label>
       <!-- Enable/Disable toggle -->
-      <button
-        @click="emit('toggle')"
+      <Toggle
+        :model-value="enabled"
         :disabled="saving"
-        class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-        :class="enabled ? 'bg-primary' : 'bg-muted'"
-      >
-        <span
-          class="inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform"
-          :class="enabled ? 'translate-x-6' : 'translate-x-1'"
-        />
-      </button>
+        @update:model-value="emit('toggle')"
+      />
     </div>
   </div>
 </template>

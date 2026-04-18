@@ -32,6 +32,9 @@ storage/.schema_stamp
 storage/*.log
 *.log
 
+# ── Locks ─────────────────────────────────────────────────────────────────────
+storage/*.lock
+
 # ── Composer ─────────────────────────────────────────────────────────────────
 /vendor/
 
@@ -60,3 +63,4 @@ Thumbs.db
 :memory:
 
 /coverage
+/node_modules

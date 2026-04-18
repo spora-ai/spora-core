@@ -11,6 +11,9 @@ use RuntimeException;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
+use Spora\Drivers\Exceptions\LLMProviderException;
+use Spora\Drivers\Exceptions\LLMRateLimitException;
+use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
@@ -18,6 +21,7 @@ use Spora\Models\AgentTool;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
+use Spora\Services\NotificationService;
 use Spora\Tools\Attributes\OutputTool;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\InputToolInterface;
@@ -28,33 +32,67 @@ use Throwable;
 final class Orchestrator implements OrchestratorInterface
 {
     /**
-     * @param  list<object>       $toolInstances  Instances of InputToolInterface|OutputToolInterface.
-     * @param  ?LoggerInterface   $logger         Optional PSR-3 logger. When null, all log calls
-     *                                            are silently skipped — no behaviour change.
+     * @param  list<object>           $toolInstances      Instances of InputToolInterface|OutputToolInterface.
+     * @param  ?LoggerInterface       $logger             Optional PSR-3 logger. When null, all log calls
+     *                                                    are silently skipped — no behaviour change.
+     * @param  ?NotificationService   $notificationService Optional notification service for task events.
      */
     public function __construct(
         private readonly DriverFactory $driverFactory,
         private readonly array         $toolInstances = [],
         private readonly ?LoggerInterface $logger     = null,
         private readonly WorkerMode    $workerMode    = WorkerMode::Sync,
+        private readonly ?NotificationService $notificationService = null,
     ) {}
 
     // -------------------------------------------------------------------------
     // Public API
     // -------------------------------------------------------------------------
 
-    public function start(int $agentId, string $userPrompt, int $maxSteps = 10): Task
+    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null): Task
     {
         $agent = Agent::findOrFail($agentId);
 
         $task = Task::create([
-            'agent_id'    => $agentId,
-            'user_id'     => $agent->user_id,
-            'status'      => $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED',
-            'user_prompt' => $userPrompt,
-            'step_count'  => 0,
-            'max_steps'   => $maxSteps,
+            'agent_id'      => $agentId,
+            'user_id'       => $agent->user_id,
+            'status'        => $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED',
+            'user_prompt'   => $userPrompt,
+            'step_count'    => 0,
+            'max_steps'     => $maxSteps,
+            'parent_task_id' => $parentTaskId,
         ]);
+
+        // When following up: deep-copy the parent task's history so the new task
+        // continues the same conversation rather than starting fresh.
+        if ($parentTaskId !== null) {
+            $parentRows = TaskHistory::where('task_id', $parentTaskId)
+                ->orderBy('sequence')
+                ->get();
+
+            $insertData = [];
+            $seq = 1;
+            $now = \Illuminate\Support\Carbon::now()->format('Y-m-d H:i:s');
+            foreach ($parentRows as $row) {
+                $insertData[] = [
+                    'task_id'           => $task->id,
+                    'sequence'          => $seq++,
+                    'role'              => $row->role,
+                    'content'           => $row->content,
+                    'tool_call_id'      => $row->tool_call_id,
+                    'tool_name'         => $row->tool_name,
+                    'tool_call_payload' => $row->tool_call_payload,
+                    'input_tokens'      => $row->input_tokens,
+                    'output_tokens'     => $row->output_tokens,
+                    'reasoning'         => $row->reasoning,
+                    'created_at'        => $now,
+                    'updated_at'        => $now,
+                ];
+            }
+            if (!empty($insertData)) {
+                TaskHistory::insert($insertData);
+            }
+        }
 
         // Seed the conversation with the user's prompt as the first history row.
         $this->appendHistory($task->id, 'user', $userPrompt);
@@ -169,6 +207,8 @@ final class Orchestrator implements OrchestratorInterface
                 $task->status         = 'COMPLETED';
                 $task->final_response = $response->content;
                 $task->save();
+
+                $this->notificationService?->notifyTaskCompleted($task);
             }
         } catch (Throwable $e) {
             $this->logger?->error('tick() failed — task marked FAILED', [
@@ -177,16 +217,29 @@ final class Orchestrator implements OrchestratorInterface
                 'message'         => $e->getMessage(),
             ]);
 
+            $errorCode = $this->classifyError($e);
+
             // Best-effort write: use a direct query so stale Eloquent model state cannot
             // interfere. Guard with status='RUNNING' to avoid downgrading a COMPLETED task
             // if a race somehow already advanced it.
             try {
-                Task::where('id', $taskId)
+                $updated = Task::where('id', $taskId)
                     ->where('status', 'RUNNING')
                     ->update([
                         'status'         => 'FAILED',
                         'failure_reason' => $e->getMessage(),
+                        'error_code'     => $errorCode,
+                        'error_message'  => $this->friendlyMessage($errorCode),
                     ]);
+
+                // Only send notification if the row was actually updated (task was RUNNING).
+                // This avoids sending notifyTaskFailed with a stale COMPLETED task model.
+                if ($updated > 0) {
+                    $failedTask = Task::where('id', $taskId)->first();
+                    if ($failedTask !== null) {
+                        $this->notificationService?->notifyTaskFailed($failedTask);
+                    }
+                }
             } catch (Throwable) {
                 // DB itself may be unavailable — nothing more we can do here.
             }
@@ -447,6 +500,8 @@ final class Orchestrator implements OrchestratorInterface
             $task->status        = 'PENDING_APPROVAL';
             $task->pending_state = $state->toJson();
             $task->save();
+
+            $this->notificationService?->notifyPendingApproval($task);
         }
     }
 
@@ -693,11 +748,8 @@ final class Orchestrator implements OrchestratorInterface
         int     $outputTokens    = 0,
         ?string $reasoning       = null,
     ): void {
-        $nextSeq = TaskHistory::where('task_id', $taskId)->max('sequence') ?? -1;
-
         $row = [
             'task_id'           => $taskId,
-            'sequence'          => $nextSeq + 1,
             'role'              => $role,
             'content'           => $content,
             'tool_call_id'      => $toolCallId,
@@ -712,6 +764,70 @@ final class Orchestrator implements OrchestratorInterface
             $row['reasoning'] = $reasoning;
         }
 
-        TaskHistory::create($row);
+        Capsule::connection()->transaction(function () use ($taskId, $row) {
+            $nextSeq = TaskHistory::where('task_id', $taskId)->lockForUpdate()->max('sequence') ?? -1;
+            $row['sequence'] = $nextSeq + 1;
+            TaskHistory::create($row);
+        });
+    }
+
+    /**
+     * Classify a Throwable into a short error code for storage on the task.
+     */
+    private function classifyError(Throwable $e): string
+    {
+        if ($e instanceof LLMRateLimitException) {
+            return 'RATE_LIMIT';
+        }
+
+        if ($e instanceof LLMRetryableException) {
+            $msg = $e->getMessage();
+            if (str_contains($msg, '529')) {
+                return 'SERVER_OVERLOADED';
+            }
+            if (str_contains($msg, '520') || str_contains($msg, '500')) {
+                return 'SERVER_ERROR';
+            }
+            return 'GATEWAY_ERROR';
+        }
+
+        if ($e instanceof LLMProviderException) {
+            $msg = $e->getMessage();
+            if (str_contains($msg, '401') || str_contains($msg, '403')) {
+                return 'AUTH_ERROR';
+            }
+            if (str_contains($msg, '400')) {
+                return 'BAD_REQUEST';
+            }
+            if ($e->isRetryable()) {
+                return 'GATEWAY_ERROR';
+            }
+        }
+
+        return 'UNKNOWN';
+    }
+
+    /**
+     * Map a short error code to a human-readable message shown in the UI.
+     *
+     * @return array<string, string>
+     */
+    private function friendlyMessages(): array
+    {
+        return [
+            'RATE_LIMIT'        => 'The AI service is busy. Try again in a moment.',
+            'SERVER_OVERLOADED' => 'The AI service is under high load. Try again shortly.',
+            'SERVER_ERROR'      => 'The AI service encountered an error. Please try again.',
+            'GATEWAY_ERROR'     => 'The AI service is temporarily unavailable. Try again shortly.',
+            'AUTH_ERROR'        => 'API authentication failed. Please check your API key.',
+            'BAD_REQUEST'       => 'Invalid request. Please check your agent configuration.',
+            'TOOL_ERROR'        => 'A tool encountered an error. Check the task history for details.',
+            'UNKNOWN'           => 'An unexpected error occurred. Please try again.',
+        ];
+    }
+
+    private function friendlyMessage(string $errorCode): string
+    {
+        return $this->friendlyMessages()[$errorCode] ?? $this->friendlyMessages()['UNKNOWN'];
     }
 }

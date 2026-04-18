@@ -13,11 +13,12 @@
 | `/login` | `LoginPage.vue` | Auth — login form |
 | `/register` | `RegisterPage.vue` | Auth — register form |
 | `/` | `DashboardPage.vue` | Agent contact list (WhatsApp-style) |
-| `/agents/:id` | `AgentPage.vue` | Agent detail — chat + config |
+| `/agents/:id` | `AgentPage.vue` | Agent detail — chat + config, follow-up input |
 | `/agents/:id/settings` | `AgentSettingsPage.vue` | Agent settings — identity, LLM, tools, danger zone |
+| `/agents/:id/scheduled-runs` | `ScheduledRunsPage.vue` | Manage scheduled runs for an agent |
 | `/settings` | `GlobalSettingsPage.vue` | Global settings — tools, LLM drivers |
 | `/settings/llm` | `LLMConfigsPage.vue` | LLM Driver Configurations — create, edit, delete, set default |
-| `/tasks/:id` | `TaskChatPage.vue` | Full-screen task chat (polling detail view) |
+| `/tasks/:id` | `TaskChatPage.vue` | Full-screen task chat (polling detail view) + approval bar |
 
 ---
 
@@ -29,7 +30,8 @@
 | `theme` | `stores/theme.ts` | Dark mode toggle, `localStorage` persistence, `dark` class on `<html>` |
 | `agent` | `stores/agent.ts` | Multi-agent CRUD, tool enable/disable |
 | `llmConfigs` | `stores/llmConfigs.ts` | LLM Driver Configurations CRUD, set-default |
-| `tasks` | `stores/tasks.ts` | Task list, task detail, polling, approve/reject |
+| `tasks` | `stores/tasks.ts` | Task list, task detail, polling, approve/reject, SSE applyTaskUpdate |
+| `notifications` | `stores/notifications.ts` | Notification list, unread count, mark-read, SSE prepend |
 
 ---
 
@@ -38,10 +40,12 @@
 ```
 Dashboard (agent list)
   └─ Agent card tap → AgentPage (chat + config)
-                        └─ Settings button → /agents/:id/settings (full settings page)
+                        ├─ Settings button → /agents/:id/settings (full settings page)
+                        └─ Scheduled Runs → /agents/:id/scheduled-runs
 
 Navbar (global only)
   ├─ App logo/name (← Dashboard)
+  ├─ Notification bell (opens NotificationCenter slide-in)
   ├─ Dark mode toggle
   └─ User menu (email + sign out)
 ```
@@ -79,10 +83,42 @@ POST   /api/v1/llm-configs/{id}/set-default             → setDefault (user-sco
 ### Tasks
 ```
 GET    /api/v1/tasks                       → index (optional ?agent_id=X)
-POST   /api/v1/tasks                       → store ({ agent_id, prompt })
+POST   /api/v1/tasks                       → store ({ agent_id, prompt, parent_task_id? })
 GET    /api/v1/tasks/{id}                  → show (optional ?since_sequence=X)
 POST   /api/v1/tasks/{id}/approve          → approve ({ approvals: [{provider_call_id, arguments}] })
 POST   /api/v1/tasks/{id}/reject           → reject ({ reason })
+```
+
+### Notifications
+```
+GET    /api/v1/notifications                → index (paginated, ?unread_only=true)
+POST   /api/v1/notifications/{id}/read      → mark read
+POST   /api/v1/notifications/read-all       → mark all read
+DELETE /api/v1/notifications/{id}          → delete
+```
+
+### SSE / Realtime
+```
+GET    /api/v1/sse/auth                     → { hubUrl, token } for Mercure SSE subscription
+```
+
+### Prompt Templates
+```
+GET    /api/v1/agents/{id}/templates        → index
+POST   /api/v1/agents/{id}/templates        → store
+GET    /api/v1/agents/{id}/templates/{tid} → show
+PUT    /api/v1/agents/{id}/templates/{tid} → update
+DELETE /api/v1/agents/{id}/templates/{tid} → delete
+```
+
+### Scheduled Runs
+```
+GET    /api/v1/agents/{id}/scheduled-runs   → index
+POST   /api/v1/agents/{id}/scheduled-runs   → store ({ template_id?, raw_prompt, cron_expression?, run_at?, timezone, max_steps_override? })
+GET    /api/v1/agents/{id}/scheduled-runs/{rid} → show
+PUT    /api/v1/agents/{id}/scheduled-runs/{rid} → update
+DELETE /api/v1/agents/{id}/scheduled-runs/{rid} → delete
+POST   /api/v1/agents/{id}/scheduled-runs/{rid}/trigger → trigger now
 ```
 
 ---
@@ -111,5 +147,30 @@ Located in `frontend/tests/`. Run with `npm test`.
 
 ## Real-Time
 
-**Base (shared hosting safe):** REST polling — `GET /api/v1/tasks/{id}?since_sequence=X` every 2 s.
-**Optional enhancement:** Mercure/SSE via `symfony/mercure` + FrankenPHP Docker image.
+**Primary (polling):** REST polling — `GET /api/v1/tasks/{id}?since_sequence=X` every 2s for active tasks, 10s when idle. Notifications polled every 30s.
+
+**Enhanced (SSE via Mercure):** `useRealtime()` composable (`composables/useRealtime.ts`) automatically detects Mercure availability via `GET /api/v1/sse/auth`. When available, opens `EventSource` to the Mercure hub subscribing to `task/*` and `user/{id}/notifications`. Falls back to HTTP polling on network failure or 404.
+
+**Components:**
+- `NotificationCenter.vue` — slide-in notification panel triggered from the navbar bell icon
+- `GlobalNavbar.vue` — bell icon with unread badge count, wires `useRealtime()`
+- `useRealtime()` composable — auto-connects on mount, cleans up on unmount, reconnects with exponential backoff
+
+## Composer & Templates
+
+The `AgentPage.vue` composer supports:
+- **Prompt templates** — select from saved templates, fill variables, submit
+- **Save as template** — inline mini-modal to save current prompt as a reusable template
+- **Follow-up questions** — after a task completes, a follow-up input bar appears above the composer for continuing the conversation (controlled by `allow_followup` agent setting)
+- **Schedule** — one-shot scheduled run via date/time picker modal
+
+## E2E Tests
+
+Playwright tests in `frontend/tests/e2e/`. Run with `npm run test:e2e` from the `frontend/` directory (requires Docker Compose for the web server).
+
+| File | Tests |
+|---|---|
+| `task-lifecycle.spec.ts` | Create task, wait for completion |
+| `tool-approval.spec.ts` | Enable approval tool, trigger, approve via UI |
+| `scheduled-run.spec.ts` | Create one-shot run, trigger via API |
+| `followup.spec.ts` | Run task, submit follow-up, verify continuation |

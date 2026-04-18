@@ -32,12 +32,14 @@ class Agent extends Model
         'llm_driver_config_id',
         'max_steps',
         'is_active',
+        'allow_followup',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
         'max_steps' => 'integer',
         'llm_driver_config_id' => 'integer',
+        'allow_followup' => 'boolean',
     ];
 
     public function user(): BelongsTo

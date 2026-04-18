@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api, ApiError } from '@/api/client'
-import type { Task, TaskDetail, TaskStatus } from '@/types/task'
+import type { Task, TaskDetail, TaskStatus, HistoryEntry, TaskErrorCode } from '@/types/task'
 
 const TERMINAL_STATUSES: TaskStatus[] = ['COMPLETED', 'FAILED']
 
@@ -22,8 +22,12 @@ export const useTaskStore = defineStore('tasks', () => {
     tasks.value = result.tasks
   }
 
-  async function createTaskForAgent(agentId: number, prompt: string): Promise<Task> {
-    const result = await api.post<{ task: Task }>('/tasks', { agent_id: agentId, prompt })
+  async function createTaskForAgent(agentId: number, prompt: string, parentTaskId?: number): Promise<Task> {
+    const payload: Record<string, unknown> = { agent_id: agentId, prompt }
+    if (parentTaskId !== undefined) {
+      payload.parent_task_id = parentTaskId
+    }
+    const result = await api.post<{ task: Task }>('/tasks', payload)
     return result.task
   }
 
@@ -71,6 +75,11 @@ export const useTaskStore = defineStore('tasks', () => {
   async function approveTask(taskId: number, approvals: { provider_call_id: string; arguments: Record<string, unknown> }[]): Promise<void> {
     await api.post(`/tasks/${taskId}/approve`, { approvals })
     await fetchTaskDetail(taskId)
+  }
+
+  async function retryTask(taskId: number): Promise<Task> {
+    const result = await api.post<{ task: Task }>(`/tasks/${taskId}/retry`)
+    return result.task
   }
 
   async function rejectTask(taskId: number, reason: string): Promise<void> {
@@ -135,6 +144,34 @@ export const useTaskStore = defineStore('tasks', () => {
     lastSequence = 0
   }
 
+  /**
+   * Merge a real-time task update from SSE into activeTask.
+   * Used by useRealtime when Mercure pushes a task/* event.
+   */
+  function applyTaskUpdate(taskId: number, data: Record<string, unknown>): void {
+    if (activeTask.value === null || activeTask.value.id !== taskId) return
+    // Apply scalar fields
+    if (data.status !== undefined) activeTask.value.status = data.status as TaskStatus
+    if (data.final_response !== undefined) activeTask.value.final_response = data.final_response as string | null
+    if (data.step_count !== undefined) activeTask.value.step_count = data.step_count as number
+    if (data.updated_at !== undefined) activeTask.value.updated_at = data.updated_at as string
+    // Merge new history entries
+    if (Array.isArray(data.history)) {
+      const newEntries = (data.history as unknown as HistoryEntry[]).filter(h => h.sequence > lastSequence)
+      if (newEntries.length > 0) {
+        activeTask.value.history.push(...newEntries)
+        lastSequence = newEntries[newEntries.length - 1].sequence
+      }
+    }
+    // Refresh tool_calls
+    if (Array.isArray(data.tool_calls)) {
+      activeTask.value.tool_calls = data.tool_calls as TaskDetail['tool_calls']
+    }
+    // Merge error fields
+    if (data.error_code !== undefined) activeTask.value.error_code = data.error_code as TaskErrorCode | null
+    if (data.error_message !== undefined) activeTask.value.error_message = data.error_message as string | null
+  }
+
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const pendingToolCalls = computed(() => {
@@ -182,10 +219,12 @@ export const useTaskStore = defineStore('tasks', () => {
     fetchTaskDetail,
     approveTask,
     rejectTask,
+    retryTask,
     startListPolling,
     stopListPolling,
     startDetailPolling,
     stopDetailPolling,
     clearActiveTask,
+    applyTaskUpdate,
   }
 })

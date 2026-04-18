@@ -39,7 +39,32 @@ final class MercurePublisher implements MercurePublisherInterface
                 'auth_bearer' => $this->generateJwt(),
                 'body'        => [
                     'topic' => "task/{$taskId}",
-                    'data'  => json_encode($taskData, JSON_THROW_ON_ERROR),
+                    'data'  => json_encode(['topic' => "task/{$taskId}", 'data' => $taskData], JSON_THROW_ON_ERROR),
+                ],
+            ]);
+
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Publish a user-scoped notification to the Mercure hub.
+     * Topic: user/{userId}/notifications
+     */
+    public function publishToUser(int $userId, array $data): bool
+    {
+        if ($this->hubUrl === null || $this->jwtKey === null) {
+            return false;
+        }
+
+        try {
+            $this->client->request('POST', $this->hubUrl, [
+                'auth_bearer' => $this->generateJwt(),
+                'body'        => [
+                    'topic' => "user/{$userId}/notifications",
+                    'data'  => json_encode(['topic' => "user/{$userId}/notifications", 'data' => $data], JSON_THROW_ON_ERROR),
                 ],
             ]);
 
@@ -60,7 +85,7 @@ final class MercurePublisher implements MercurePublisherInterface
         $payload = $this->base64url(json_encode([
             'iat'     => $now,
             'exp'     => $now + 60,
-            'mercure' => ['publish' => ['task/*']],
+            'mercure' => ['publish' => ['task/*', 'user/*/notifications']],
         ], JSON_THROW_ON_ERROR));
 
         $input = "{$header}.{$payload}";

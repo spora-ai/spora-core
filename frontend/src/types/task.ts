@@ -1,5 +1,7 @@
 export type TaskStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'PENDING_APPROVAL'
 
+export type TaskErrorCode = 'RATE_LIMIT' | 'SERVER_OVERLOADED' | 'SERVER_ERROR' | 'GATEWAY_ERROR' | 'AUTH_ERROR' | 'BAD_REQUEST' | 'TOOL_ERROR' | 'UNKNOWN'
+
 export type ToolCallStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED'
 
 export interface Task {
@@ -10,6 +12,9 @@ export interface Task {
   final_response: string | null
   step_count: number
   max_steps: number | null
+  parent_task_id?: number
+  error_code?: TaskErrorCode | null
+  error_message?: string | null
   created_at: string
   updated_at: string
 }

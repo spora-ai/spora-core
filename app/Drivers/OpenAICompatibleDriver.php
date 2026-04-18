@@ -7,6 +7,8 @@ namespace Spora\Drivers;
 use Psr\Log\LoggerInterface;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
+use Spora\Drivers\Exceptions\LLMRetryableException;
+use Spora\Drivers\Utilities\LLMContentParser;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
@@ -22,8 +24,7 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
         private readonly HttpClientInterface $httpClient,
         private readonly ?LoggerInterface $logger = null,
         private readonly ?int $timeout = null,
-    ) {
-    }
+    ) {}
 
     // ── LLMDriverInterface ──────────────────────────────────────────────────────
 
@@ -76,6 +77,11 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
             throw new LLMRateLimitException('OpenAI rate limit exceeded (HTTP 429).');
         }
 
+        if ($statusCode >= 500) {
+            $body = $response->getContent(throw: false);
+            throw new LLMRetryableException("OpenAI API error {$statusCode}: {$body}");
+        }
+
         if ($statusCode >= 400) {
             $body = $response->getContent(throw: false);
             throw new LLMProviderException("OpenAI API error {$statusCode}: {$body}");
@@ -92,6 +98,8 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
         $choice = $data['choices'][0] ?? [];
         $finishReason = $choice['finish_reason'] ?? '';
         $message = $choice['message'] ?? [];
+
+        $parsedContent = LLMContentParser::parse($message['content'] ?? null);
 
         if ($finishReason === 'tool_calls') {
             $toolCalls = [];
@@ -110,20 +118,22 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
             }
 
             return new LLMResponse(
-                content: null,
+                content: $parsedContent['content'] !== '' ? $parsedContent['content'] : null,
                 toolCalls: $toolCalls,
                 inputTokens: $inputTokens,
                 outputTokens: $outputTokens,
                 completionId: $completionId,
+                reasoning: $parsedContent['reasoning'],
             );
         }
 
         return new LLMResponse(
-            content: (string) ($message['content'] ?? ''),
+            content: $parsedContent['content'],
             toolCalls: [],
             inputTokens: $inputTokens,
             outputTokens: $outputTokens,
             completionId: $completionId,
+            reasoning: $parsedContent['reasoning'],
         );
     }
 

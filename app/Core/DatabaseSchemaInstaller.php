@@ -34,9 +34,6 @@ use Spora\Plugins\PluginLoader;
  */
 final class DatabaseSchemaInstaller
 {
-    /** Increment when new core migration files are added. */
-    public const CORE_VERSION = 5;
-
     private const CORE_MIGRATIONS_PATH = BASE_PATH . '/database/migrations';
 
     /**
@@ -62,7 +59,7 @@ final class DatabaseSchemaInstaller
 
         $migrator = $this->buildMigrator();
 
-        $this->runComponent($migrator, 'core', self::CORE_VERSION, self::CORE_MIGRATIONS_PATH);
+        $this->runComponent($migrator, 'core', $this->getCoreMigrationVersion(), self::CORE_MIGRATIONS_PATH);
 
         if ($this->pluginLoader !== null) {
             foreach ($this->pluginLoader->pluginMigrationPaths() as $slug => $entry) {
@@ -88,7 +85,7 @@ final class DatabaseSchemaInstaller
      */
     private function computeStampHash(): string
     {
-        $parts = ['core_v' . self::CORE_VERSION];
+        $parts = ['core_v' . $this->getCoreMigrationVersion()];
 
         if ($this->pluginLoader !== null) {
             $pluginParts = [];
@@ -100,6 +97,28 @@ final class DatabaseSchemaInstaller
         }
 
         return implode('|', $parts);
+    }
+
+    /**
+     * Derive the core schema version from the highest-numbered migration file.
+     * This eliminates the need to manually bump a constant when adding migrations.
+     */
+    private function getCoreMigrationVersion(): int
+    {
+        $files = glob(self::CORE_MIGRATIONS_PATH . '/[0-9]*.php') ?: [];
+
+        $max = 0;
+        foreach ($files as $file) {
+            $basename = basename($file, '.php');
+            if (preg_match('/^(\d+)/', $basename, $m)) {
+                $num = (int) $m[1];
+                if ($num > $max) {
+                    $max = $num;
+                }
+            }
+        }
+
+        return $max;
     }
 
     private function isStampCurrent(string $hash): bool

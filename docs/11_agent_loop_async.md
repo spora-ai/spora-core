@@ -64,42 +64,34 @@ QUEUED ────────────────────────�
 
 ## Worker CLI
 
-**Entry point:** `bin/worker.php`  
-**Command:** `worker:run` (`app/Console/Commands/WorkerRunCommand.php`)
-
+**Entry point:** `bin/spora` (via `WorkerRunCommand`)
+**Commands:**
 ```bash
-# Cron mode — drain queue once and exit
-php bin/worker.php worker:run
+# Process queued tasks (sync or async mode)
+php bin/spora worker:run
+
+# Process due scheduled runs (add to crontab)
+php bin/spora worker:run --scheduled
 
 # Daemon mode — run until SIGTERM/SIGINT
-php bin/worker.php worker:run --daemon
+php bin/spora worker:run --daemon
 
 # Options
 --limit=N    Max tasks to process (0 = unlimited, default: 0)
 --sleep=N    Microseconds to sleep when queue is empty (default: 500000)
+--scheduled  Check due scheduled_runs and dispatch them
 ```
-
-**Claim logic** (inside a `lockForUpdate()` transaction):
-1. Select the oldest `QUEUED` task
-2. Set `status = 'RUNNING'`
-3. Commit → call `orchestrator->tick($taskId)` directly
-
-Only one worker ever processes a given task — the pessimistic lock in step 1 prevents concurrent claims.
 
 **Cron setup (shared hosting):**
 ```
-* * * * * /usr/bin/php /path/to/spora/bin/worker.php worker:run >> /storage/worker.log 2>&1
+# Worker queue — every minute
+* * * * * /usr/bin/php /path/to/spora/bin/spora worker:run >> /storage/worker.log 2>&1
+
+# Scheduled runs — every 10 minutes (or whatever interval the host allows)
+*/10 * * * * /usr/bin/php /path/to/spora/bin/spora worker:run --scheduled >> /storage/scheduled.log 2>&1
 ```
 
-**Docker Compose (daemon mode):**
-```yaml
-worker:
-  build: .
-  command: php bin/worker.php worker:run --daemon
-  restart: unless-stopped
-  environment:
-    SPORA_WORKER_MODE: worker
-```
+The `--scheduled` flag uses the same `storage/spora-worker.lock` as the regular worker, so they cannot overlap. After each scheduled run, `next_run_at` is recomputed using `dragonmantank/cron-expression` so arbitrarily-delayed cron invocations (common on shared hosts) are handled correctly.
 
 ---
 

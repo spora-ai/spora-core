@@ -7,6 +7,13 @@ vi.mock('@/api/client', () => ({
   api: {
     get: vi.fn(),
     post: vi.fn(),
+    patch: vi.fn(),
+  },
+  ApiError: class extends Error {
+    constructor(public readonly code: string, message: string, public readonly status: number) {
+      super(message)
+      this.name = 'ApiError'
+    }
   },
 }))
 
@@ -22,19 +29,19 @@ describe('useAuthStore', () => {
 
   describe('init', () => {
     it('sets user from /auth/me on success', async () => {
-      const mockUser = { id: 1, email: 'test@example.com' }
-      mockApi.get.mockResolvedValueOnce(mockUser)
+      mockApi.get.mockResolvedValueOnce({ user: { id: 1, email: 'test@example.com' } })
 
       const store = useAuthStore()
       const promise = store.init()
       await promise
 
-      expect(store.user).toEqual(mockUser)
+      expect(store.user).toEqual({ id: 1, email: 'test@example.com' })
       expect(store.initialized).toBe(true)
     })
 
-    it('sets user to null on error', async () => {
-      mockApi.get.mockRejectedValueOnce(new Error('Unauthorized'))
+    it('sets user to null on 401 error', async () => {
+      const { ApiError } = await import('@/api/client')
+      mockApi.get.mockRejectedValueOnce(new ApiError('UNAUTHENTICATED', 'Not logged in', 401))
 
       const store = useAuthStore()
       await store.init()
@@ -44,22 +51,18 @@ describe('useAuthStore', () => {
     })
 
     it('deduplicates concurrent init calls by calling API only once', async () => {
-      // Make the mock return an unresolved promise so both calls overlap
       let resolve: (v: unknown) => void
       const pendingPromise = new Promise((r) => { resolve = r })
       mockApi.get.mockReturnValue(pendingPromise as any)
 
       const store = useAuthStore()
 
-      // Fire two init calls synchronously — second call should not hit the API
       store.init()
       store.init()
 
-      // Only one API call due to deduplication
       expect(mockApi.get).toHaveBeenCalledTimes(1)
 
-      // Resolve the pending promise
-      resolve!({ id: 1, email: 'a@b.com' })
+      resolve!({ user: { id: 1, email: 'a@b.com' } })
       await pendingPromise
 
       expect(store.user).toEqual({ id: 1, email: 'a@b.com' })
@@ -69,8 +72,7 @@ describe('useAuthStore', () => {
 
   describe('login', () => {
     it('sets user on success', async () => {
-      const mockUser = { id: 1, email: 'test@example.com' }
-      mockApi.post.mockResolvedValueOnce(mockUser)
+      mockApi.post.mockResolvedValueOnce({ id: 1, email: 'test@example.com' })
 
       const store = useAuthStore()
       await store.login('test@example.com', 'password')
@@ -79,7 +81,7 @@ describe('useAuthStore', () => {
         email: 'test@example.com',
         password: 'password',
       })
-      expect(store.user).toEqual(mockUser)
+      expect(store.user).toEqual({ id: 1, email: 'test@example.com' })
     })
   })
 
@@ -95,6 +97,8 @@ describe('useAuthStore', () => {
 
       expect(store.user).toBe(null)
       expect(store.initialized).toBe(false)
+      expect(mockApi.post).toHaveBeenCalledTimes(1)
+      expect(mockApi.post.mock.calls[0][0]).toBe('/auth/logout')
     })
   })
 
@@ -111,6 +115,34 @@ describe('useAuthStore', () => {
         password: 'password123',
       })
       expect(store.user).toEqual(mockUser)
+    })
+  })
+
+  describe('changePassword', () => {
+    it('calls PATCH /auth/password with correct body', async () => {
+      mockApi.patch.mockResolvedValueOnce({ message: 'Password updated' })
+
+      const store = useAuthStore()
+      await store.changePassword('oldPass123', 'newPass456')
+
+      expect(mockApi.patch).toHaveBeenCalledWith('/auth/password', {
+        current_password: 'oldPass123',
+        new_password: 'newPass456',
+      })
+    })
+  })
+
+  describe('updateAccount', () => {
+    it('calls PATCH /auth/account and updates user', async () => {
+      mockApi.patch.mockResolvedValueOnce({
+        user: { id: 1, email: 'test@example.com', username: 'newname' },
+      })
+
+      const store = useAuthStore()
+      await store.updateAccount('newname')
+
+      expect(mockApi.patch).toHaveBeenCalledWith('/auth/account', { username: 'newname' })
+      expect(store.user).toEqual({ id: 1, email: 'test@example.com', username: 'newname' })
     })
   })
 })

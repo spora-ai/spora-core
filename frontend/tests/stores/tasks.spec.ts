@@ -197,6 +197,57 @@ describe('useTaskStore', () => {
     })
   })
 
+  describe('retryTask', () => {
+    it('calls POST /tasks/${taskId}/retry', async () => {
+      mockApi.post.mockResolvedValueOnce({ task: { ...mockTask, id: 2 } })
+
+      const store = useTaskStore()
+      await store.retryTask(1)
+
+      expect(mockApi.post).toHaveBeenCalledWith('/tasks/1/retry')
+    })
+
+    it('returns the new task from the API response', async () => {
+      const newTask = { ...mockTask, id: 2, status: 'RUNNING' }
+      mockApi.post.mockResolvedValueOnce({ task: newTask })
+
+      const store = useTaskStore()
+      const result = await store.retryTask(1)
+
+      expect(result).toEqual(newTask)
+    })
+  })
+
+  describe('applyTaskUpdate', () => {
+    it('merges error_code and error_message from SSE data', () => {
+      const store = useTaskStore()
+      store.activeTask = { ...mockTaskDetail, status: 'RUNNING', error_code: null, error_message: null }
+
+      store.applyTaskUpdate(1, {
+        status: 'FAILED',
+        error_code: 'RATE_LIMIT',
+        error_message: 'API rate limit exceeded.',
+      })
+
+      expect(store.activeTask!.status).toBe('FAILED')
+      expect(store.activeTask!.error_code).toBe('RATE_LIMIT')
+      expect(store.activeTask!.error_message).toBe('API rate limit exceeded.')
+    })
+
+    it('does nothing when activeTask is null', () => {
+      const store = useTaskStore()
+      // Should not throw
+      store.applyTaskUpdate(999, { error_code: 'SERVER_ERROR' })
+    })
+
+    it('does nothing when taskId does not match activeTask', () => {
+      const store = useTaskStore()
+      store.activeTask = { ...mockTaskDetail }
+      store.applyTaskUpdate(999, { error_code: 'SERVER_ERROR' })
+      expect(store.activeTask!.error_code).toBeUndefined()
+    })
+  })
+
   describe('lastTaskByAgent', () => {
     it('returns most recent task per agent', () => {
       const store = useTaskStore()

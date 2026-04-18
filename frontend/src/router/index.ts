@@ -23,9 +23,21 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/account',
+      name: 'account',
+      component: () => import('@/pages/AccountPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/agents/:id',
       name: 'agent',
       component: () => import('@/pages/AgentPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/agents/:id/scheduled-runs',
+      name: 'scheduled-runs',
+      component: () => import('@/pages/ScheduledRunsPage.vue'),
       meta: { requiresAuth: true },
     },
     {
