@@ -3,9 +3,10 @@
  * AgentSidebar — left sidebar showing agent list.
  * Used inside AgentLayout on lg+ (desktop) and toggled on mobile.
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
+import CreateAgentModal from '@/components/agent/CreateAgentModal.vue'
 
 const props = defineProps<{
   agentId: number
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 const router = useRouter()
 const agentStore = useAgentStore()
 
+const showNewAgentModal = ref(false)
 const activeAgentId = computed(() => props.agentId)
 
 function navigateToAgent(id: number): void {
@@ -36,9 +38,9 @@ function navigateToAgent(id: number): void {
     <div class="px-4 py-3 border-b border-border flex items-center justify-between">
       <span class="text-sm font-medium text-muted-foreground">Agents</span>
       <button
-        @click="router.push({ name: 'dashboard' })"
+        @click="showNewAgentModal = true"
         class="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-        title="Back to messages"
+        title="New Agent"
       >
         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
@@ -70,5 +72,7 @@ function navigateToAgent(id: number): void {
 
     <!-- Extra slot (e.g. "+ New Agent" button) -->
     <slot name="extra" />
+
+    <CreateAgentModal v-model="showNewAgentModal" />
   </aside>
 </template>
