@@ -28,6 +28,8 @@ return static function (RouteCollector $r): void {
     $r->addRoute('POST', '/api/v1/auth/logout', [AuthController::class, 'logout']);
     $r->addRoute('GET', '/api/v1/auth/me', [AuthController::class, 'me']);
     $r->addRoute('POST', '/api/v1/auth/register', [AuthController::class, 'register']);
+    $r->addRoute('PATCH', '/api/v1/auth/password', [AuthController::class, 'password']);
+    $r->addRoute('PATCH', '/api/v1/auth/account', [AuthController::class, 'account']);
 
     // Agents — CRUD
     $r->addRoute('GET', '/api/v1/agents', [AgentController::class, 'index']);

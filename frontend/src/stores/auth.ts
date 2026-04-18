@@ -5,6 +5,7 @@ import { api, ApiError } from '@/api/client'
 export interface User {
   id: number
   email: string
+  username?: string
 }
 
 export const useAuthStore = defineStore('auth', () => {
@@ -16,6 +17,10 @@ export const useAuthStore = defineStore('auth', () => {
   // both await the same promise instead of issuing duplicate /auth/me requests.
   let initPromise: Promise<void> | null = null
 
+  interface MeResponse {
+  user: User
+}
+
   /** Called once on app boot to restore session from the server cookie. */
   function init(): Promise<void> {
     if (initPromise !== null) return initPromise
@@ -23,7 +28,8 @@ export const useAuthStore = defineStore('auth', () => {
     initPromise = (async () => {
       try {
         initError.value = null
-        user.value = await api.get<User>('/auth/me')
+        const res = await api.get<MeResponse>('/auth/me')
+        user.value = res.user
       } catch (e) {
         user.value = null
         // 401 means the user is simply not logged in — expected, not an error.
@@ -62,5 +68,14 @@ export const useAuthStore = defineStore('auth', () => {
     await api.post('/auth/logout').catch(() => {})
   }
 
-  return { user, initialized, initError, init, login, register, logout }
+  async function changePassword(current: string, next: string): Promise<void> {
+    await api.patch('/auth/password', { current_password: current, new_password: next })
+  }
+
+  async function updateAccount(username: string): Promise<void> {
+    const updated = await api.patch<{ user: User }>('/auth/account', { username })
+    user.value = updated.user
+  }
+
+  return { user, initialized, initError, init, login, register, logout, changePassword, updateAccount }
 })

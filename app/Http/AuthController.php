@@ -147,6 +147,69 @@ final class AuthController
         );
     }
 
+    public function password(Request $request, array $vars = []): JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+        }
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+
+        if ($this->missingFields($body, ['current_password', 'new_password'])) {
+            return $this->error('VALIDATION_ERROR', 'The fields "current_password" and "new_password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        try {
+            $this->authService->changePassword((string) $body['current_password'], (string) $body['new_password']);
+        } catch (\Delight\Auth\NotLoggedInException) {
+            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+        } catch (\Delight\Auth\InvalidPasswordException) {
+            return $this->error('INVALID_PASSWORD', 'The new password does not meet the minimum requirements.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Delight\Auth\AuthError) {
+            return $this->error('WRONG_PASSWORD', 'The current password is incorrect.', Response::HTTP_UNAUTHORIZED);
+        }
+
+        return new JsonResponse(['message' => 'Password updated'], Response::HTTP_OK);
+    }
+
+    public function account(Request $request, array $vars = []): JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+        }
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+
+        $user = User::find($userId);
+        if ($user === null) {
+            return $this->error('NOT_FOUND', 'User not found.', Response::HTTP_NOT_FOUND);
+        }
+
+        if (isset($body['username'])) {
+            $user->username = (string) $body['username'];
+        }
+        $user->save();
+
+        return new JsonResponse(
+            ['data' => ['user' => [
+                'id'       => (int) $user->id,
+                'email'    => $user->email,
+                'username' => $user->username,
+            ]]],
+            Response::HTTP_OK,
+        );
+    }
+
     private function getClientIp(Request $request): string
     {
         $serverVar = $request->server->get('HTTP_X_FORWARDED_FOR');

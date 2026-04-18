@@ -95,4 +95,16 @@ final class AuthService
 
         return $this->auth->getEmail();
     }
+
+    /**
+     * Change the password of the currently authenticated user.
+     *
+     * @throws \Delight\Auth\NotLoggedInException if the user is not logged in
+     * @throws InvalidPasswordException if the new password is invalid
+     * @throws \Delight\Auth\AuthError if the old password is incorrect
+     */
+    public function changePassword(string $oldPassword, string $newPassword): void
+    {
+        $this->auth->changePassword($oldPassword, $newPassword);
+    }
 }

@@ -149,3 +149,91 @@ test('successful login clears rate limit bucket', function (): void {
         expect($response->getStatusCode())->not()->toBe(Response::HTTP_TOO_MANY_REQUESTS);
     }
 });
+
+test('password endpoint changes password', function (): void {
+    [$controller, $authService] = makeAuthController();
+    $authService->register('pwuser@example.com', 'OldPassword1!');
+
+    // Login first
+    $req = jsonRequest('POST', '/api/v1/auth/login', [
+        'email' => 'pwuser@example.com',
+        'password' => 'OldPassword1!',
+    ]);
+    $controller->login($req);
+
+    // Change password
+    $req = jsonRequest('PATCH', '/api/v1/auth/password', [
+        'current_password' => 'OldPassword1!',
+        'new_password' => 'NewPassword1!',
+    ]);
+    $response = $controller->password($req);
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+    $body = json_decode($response->getContent(), true);
+    expect($body['message'])->toBe('Password updated');
+
+    // Login with new password should work
+    $req = jsonRequest('POST', '/api/v1/auth/login', [
+        'email' => 'pwuser@example.com',
+        'password' => 'NewPassword1!',
+    ]);
+    $response = $controller->login($req);
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+});
+
+test('password endpoint requires authentication', function (): void {
+    [$controller] = makeAuthController();
+
+    $req = jsonRequest('PATCH', '/api/v1/auth/password', [
+        'current_password' => 'old',
+        'new_password' => 'new',
+    ]);
+    $response = $controller->password($req);
+    expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+});
+
+test('password endpoint validates required fields', function (): void {
+    [$controller, $authService] = makeAuthController();
+    $authService->register('pwvalidate@example.com', 'Password1!');
+
+    $req = jsonRequest('POST', '/api/v1/auth/login', [
+        'email' => 'pwvalidate@example.com',
+        'password' => 'Password1!',
+    ]);
+    $controller->login($req);
+
+    $req = jsonRequest('PATCH', '/api/v1/auth/password', [
+        'current_password' => 'old',
+        // missing new_password
+    ]);
+    $response = $controller->password($req);
+    expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+});
+
+test('account endpoint updates username', function (): void {
+    [$controller, $authService] = makeAuthController();
+    $authService->register('accuser@example.com', 'Password1!');
+
+    $req = jsonRequest('POST', '/api/v1/auth/login', [
+        'email' => 'accuser@example.com',
+        'password' => 'Password1!',
+    ]);
+    $controller->login($req);
+
+    $req = jsonRequest('PATCH', '/api/v1/auth/account', [
+        'username' => 'Neuer Name',
+    ]);
+    $response = $controller->account($req);
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['user']['username'])->toBe('Neuer Name');
+});
+
+test('account endpoint requires authentication', function (): void {
+    [$controller] = makeAuthController();
+
+    $req = jsonRequest('PATCH', '/api/v1/auth/account', [
+        'username' => 'AnyName',
+    ]);
+    $response = $controller->account($req);
+    expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+});
