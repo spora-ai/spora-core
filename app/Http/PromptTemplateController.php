@@ -81,7 +81,7 @@ final class PromptTemplateController
             'updated_at'       => date('Y-m-d H:i:s'),
         ]);
 
-        $template = AgentPromptTemplate::find($id);
+        $template = AgentPromptTemplate::findOrFail($id);
 
         return new JsonResponse(
             ['data' => ['template' => $this->resource($template)]],

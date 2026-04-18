@@ -45,7 +45,11 @@ export function useRealtime() {
           const taskId = parseInt(data.topic.split('/')[1], 10)
           taskStore.applyTaskUpdate(taskId, data.data as Record<string, unknown>)
         } else if (data.topic.startsWith('user/')) {
-          notificationStore.prependFromSSE(data.data as unknown as Parameters<typeof notificationStore.prependFromSSE>[0])
+          type MercurePayload = { notification: Parameters<typeof notificationStore.prependFromSSE>[0] }
+          const payload = data.data as unknown as MercurePayload
+          if (payload.notification) {
+            notificationStore.prependFromSSE(payload.notification)
+          }
         }
       }
 

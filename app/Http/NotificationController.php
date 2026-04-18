@@ -125,27 +125,14 @@ final class NotificationController
 
     private function resource(Notification $notification): array
     {
-        $attributes = $notification->getAttributes();
-
-        $createdAtStr = $attributes['created_at'] ?? null;
-        $readAtStr = $attributes['read_at'] ?? null;
-
-        if ($createdAtStr instanceof DateTimeInterface) {
-            $createdAtStr = $createdAtStr->format('Y-m-d H:i:s');
-        }
-
-        if ($readAtStr instanceof DateTimeInterface) {
-            $readAtStr = $readAtStr->format('Y-m-d H:i:s');
-        }
-
         return [
-            'id'        => $notification->id,
-            'type'      => $notification->type,
-            'title'     => $notification->title,
-            'body'      => $notification->body,
-            'data'      => $notification->data,
-            'read_at'   => $readAtStr,
-            'created_at' => $createdAtStr,
+            'id'         => $notification->id,
+            'type'       => $notification->type,
+            'title'      => $notification->title,
+            'body'       => $notification->body,
+            'data'       => $notification->data,
+            'read_at'    => $notification->read_at?->toIso8601String(),
+            'created_at' => $notification->created_at?->toIso8601String(),
         ];
     }
 }

@@ -70,18 +70,27 @@ final class Orchestrator implements OrchestratorInterface
                 ->orderBy('sequence')
                 ->get();
 
+            $insertData = [];
+            $seq = 1;
+            $now = \Illuminate\Support\Carbon::now()->format('Y-m-d H:i:s');
             foreach ($parentRows as $row) {
-                $this->appendHistory(
-                    taskId: $task->id,
-                    role: $row->role,
-                    content: $row->content,
-                    toolCallId: $row->tool_call_id,
-                    toolName: $row->tool_name,
-                    toolCallPayload: $row->tool_call_payload,
-                    inputTokens: $row->input_tokens,
-                    outputTokens: $row->output_tokens,
-                    reasoning: $row->reasoning,
-                );
+                $insertData[] = [
+                    'task_id'           => $task->id,
+                    'sequence'          => $seq++,
+                    'role'              => $row->role,
+                    'content'           => $row->content,
+                    'tool_call_id'      => $row->tool_call_id,
+                    'tool_name'         => $row->tool_name,
+                    'tool_call_payload' => $row->tool_call_payload,
+                    'input_tokens'      => $row->input_tokens,
+                    'output_tokens'     => $row->output_tokens,
+                    'reasoning'         => $row->reasoning,
+                    'created_at'        => $now,
+                    'updated_at'        => $now,
+                ];
+            }
+            if (!empty($insertData)) {
+                TaskHistory::insert($insertData);
             }
         }
 

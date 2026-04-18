@@ -63,3 +63,4 @@ Thumbs.db
 :memory:
 
 /coverage
+/node_modules

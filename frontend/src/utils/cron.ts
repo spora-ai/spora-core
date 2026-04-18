@@ -68,11 +68,18 @@ export function parseCron(
   const min = parseInt(minute, 10)
   const hr = parseInt(hour, 10)
 
+  const validate = (result: { frequency: Frequency; fields: any }) => {
+    if (result.fields && !Object.values(result.fields).every((v) => Number.isFinite(v))) {
+      return { frequency: 'custom', fields: null } as const
+    }
+    return result as { frequency: Frequency; fields: any }
+  }
+
   // Hourly: M H-E/X * * *  OR  M * * * * (every hour)
   const hourlyMatch = hour.match(/^(\d+)-(\d+)\/(\d+)$/)
   if (dayOfMonth === '*' && dayOfWeek === '*') {
     if (hourlyMatch) {
-      return {
+      return validate({
         frequency: 'hourly',
         fields: {
           interval: parseInt(hourlyMatch[3], 10),
@@ -80,51 +87,51 @@ export function parseCron(
           endHour: parseInt(hourlyMatch[2], 10),
           minute: min,
         },
-      }
+      })
     }
     if (hour === '*') {
-      return {
+      return validate({
         frequency: 'hourly',
         fields: { interval: 1, startHour: 0, endHour: 23, minute: min },
-      }
+      })
     }
   }
 
   // Daily: M H */X * *
   const dailyMatch = dayOfMonth.match(/^\*\/(\d+)$/)
   if (dailyMatch && hour !== '*' && dayOfWeek === '*') {
-    return {
+    return validate({
       frequency: 'daily',
       fields: {
         interval: parseInt(dailyMatch[1], 10),
         hour: hr,
         minute: min,
       },
-    }
+    })
   }
 
   // Weekly: M H * * D
   if (dayOfMonth === '*' && dayOfWeek !== '*' && !dayOfWeek.includes(',') && !hour.includes(',')) {
-    return {
+    return validate({
       frequency: 'weekly',
       fields: {
         day: parseInt(dayOfWeek, 10),
         hour: hr,
         minute: min,
       },
-    }
+    })
   }
 
   // Monthly: M H D * *
   if (dayOfMonth !== '*' && /^\d+$/.test(dayOfMonth) && dayOfWeek === '*') {
-    return {
+    return validate({
       frequency: 'monthly',
       fields: {
         day: parseInt(dayOfMonth, 10),
         hour: hr,
         minute: min,
       },
-    }
+    })
   }
 
   return { frequency: 'custom', fields: null }

@@ -201,7 +201,7 @@ const previewRuns = computed((): string[] => {
   const cron = computedCron.value
   if (!cron) return []
   try {
-    const interval = CronExpression.parseExpression(cron, { tz: timezone.value })
+    const interval = CronExpression.parse(cron, { tz: timezone.value })
     const intervals: string[] = []
     for (let i = 0; i < 3; i++) {
       const nextDate = interval.next().toDate()
