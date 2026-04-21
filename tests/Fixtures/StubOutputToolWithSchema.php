@@ -4,23 +4,31 @@ declare(strict_types=1);
 
 namespace Tests\Fixtures;
 
-use Spora\Tools\Attributes\OutputTool;
 use Spora\Tools\Attributes\Tool;
-use Spora\Tools\OutputToolInterface;
+use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\Traits\HasOperations;
+use Spora\Tools\ToolInterface;
 use Spora\Tools\ValueObjects\ToolResult;
 
 #[Tool(name: 'stub_output_with_schema', description: 'A stub output tool with a required field in its schema')]
-#[OutputTool(requiresApproval: true)]
-final class StubOutputToolWithSchema implements OutputToolInterface
+#[ToolOperation(name: 'default', description: 'Run the schema-validated output', enabledByDefault: true, requiresApprovalByDefault: true)]
+final class StubOutputToolWithSchema implements ToolInterface
 {
+    use HasOperations;
+
     public function execute(array $arguments, int $agentId): ToolResult
     {
-        return new ToolResult(true, 'output_with_schema_result');
+        return $this->run($arguments, $agentId);
     }
 
     public function describeAction(array $arguments): string
     {
         return 'Will perform a schema-validated output action.';
+    }
+
+    public function run(array $arguments, int $agentId): ToolResult
+    {
+        return new ToolResult(true, 'output_with_schema_result');
     }
 
     public function getParametersSchema(): array

@@ -11,13 +11,13 @@ use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
+use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\AgentToolOverride;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
-use Spora\Tools\InputToolInterface;
-use Spora\Tools\OutputToolInterface;
+use Spora\Tools\Traits\HasOperations;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -171,15 +171,18 @@ final class AgentController
             return new JsonResponse(['data' => ['tool' => $this->toolResource($existing)]], Response::HTTP_OK);
         }
 
-        // Determine auto_approve default based on tool type:
-        // InputToolInterface → true (read-only, auto-approve by default)
-        // OutputToolInterface → null (defer to class attribute / manual approval)
+        // Determine auto_approve default based on tool operations.
+        // If all operations have requiresApprovalByDefault: false, auto_approve = true.
+        // Otherwise null (per-operation approval is used).
         $autoApprove = null;
         if (class_exists($toolClass)) {
             $ref = new ReflectionClass($toolClass);
-            $interfaces = $ref->getInterfaceNames();
-            if (in_array(InputToolInterface::class, $interfaces, true)) {
-                $autoApprove = true;
+            if (in_array(HasOperations::class, class_uses_recursive($toolClass), true)) {
+                $instance = $ref->newInstanceWithoutConstructor();
+                $operations = $instance->getOperations();
+                if ($operations !== [] && array_all($operations, fn($op) => $op->requiresApprovalByDefault === false)) {
+                    $autoApprove = true;
+                }
             }
         }
 
@@ -444,9 +447,167 @@ final class AgentController
         return $response;
     }
 
+    /**
+     * GET /api/v1/agents/{id}/tools/{toolClass}/operations/{operation}
+     */
+    public function getOperationOverride(Request $request): JsonResponse
+    {
+        $userId     = AuthGuard::requireAuth($this->authService);
+        $agent      = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
+        $toolClass  = $this->resolveToolClassFromRequest($request);
+        $operation  = (string) $request->attributes->get('operation', '');
+
+        if ($agent === null || $toolClass === null || $operation === '') {
+            return $this->notFound();
+        }
+
+        /** @var AgentToolOperationOverride|null $row */
+        $row = AgentToolOperationOverride::where('agent_id', $agent->id)
+            ->where('tool_class', $toolClass)
+            ->where('operation', $operation)
+            ->first();
+
+        $effectiveEnabled  = $this->resolveOperationEffectiveEnabled($toolClass, $operation, $agent->id);
+        $effectiveRequiresApproval = $this->resolveOperationEffectiveRequiresApproval($toolClass, $operation, $agent->id);
+
+        return new JsonResponse(['data' => [
+            'operation'                  => $operation,
+            'tool_class'                 => $toolClass,
+            'enabled'                    => $row !== null ? (int) $row->enabled === 1 : null,
+            'default_requires_approval'  => $row !== null ? (int) $row->default_requires_approval === 1 : null,
+            'effective_enabled'          => $effectiveEnabled,
+            'effective_requires_approval' => $effectiveRequiresApproval,
+        ]]);
+    }
+
+    /**
+     * PATCH /api/v1/agents/{id}/tools/{toolClass}/operations/{operation}
+     */
+    public function patchOperationOverride(Request $request): JsonResponse
+    {
+        $userId     = AuthGuard::requireAuth($this->authService);
+        $agent      = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
+        $toolClass  = $this->resolveToolClassFromRequest($request);
+        $operation  = (string) $request->attributes->get('operation', '');
+
+        if ($agent === null || $toolClass === null || $operation === '') {
+            return $this->notFound();
+        }
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+
+        $enabled             = array_key_exists('enabled', $body) ? ($body['enabled'] ? 1 : ($body['enabled'] === false ? 0 : null)) : null;
+        $defaultRequiresApproval = array_key_exists('default_requires_approval', $body)
+            ? ($body['default_requires_approval'] ? 1 : ($body['default_requires_approval'] === false ? 0 : null))
+            : null;
+
+        /** @var AgentToolOperationOverride|null $existing */
+        $existing = AgentToolOperationOverride::where('agent_id', $agent->id)
+            ->where('tool_class', $toolClass)
+            ->where('operation', $operation)
+            ->first();
+
+        if ($existing !== null) {
+            $updateData = [];
+            if ($enabled !== null) {
+                $updateData['enabled'] = $enabled;
+            }
+            if ($defaultRequiresApproval !== null) {
+                $updateData['default_requires_approval'] = $defaultRequiresApproval;
+            }
+            if ($updateData !== []) {
+                $updateData['updated_at'] = date('Y-m-d H:i:s');
+                Capsule::table('agent_tool_operation_overrides')
+                    ->where('id', $existing->id)
+                    ->update($updateData);
+            }
+        } else {
+            $insertData = [
+                'agent_id' => $agent->id,
+                'tool_class' => $toolClass,
+                'operation' => $operation,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+            if ($enabled !== null) {
+                $insertData['enabled'] = $enabled;
+            }
+            if ($defaultRequiresApproval !== null) {
+                $insertData['default_requires_approval'] = $defaultRequiresApproval;
+            }
+            Capsule::table('agent_tool_operation_overrides')->insert($insertData);
+        }
+
+        return $this->getOperationOverride($request);
+    }
+
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
+
+    private function resolveOperationEffectiveEnabled(string $toolClass, string $operation, int $agentId): bool
+    {
+        $override = AgentToolOperationOverride::where('agent_id', $agentId)
+            ->where('tool_class', $toolClass)
+            ->where('operation', $operation)
+            ->first();
+
+        if ($override !== null) {
+            $raw = $override->getRawOriginal('enabled');
+            if ($raw !== null) {
+                return (bool) $raw;
+            }
+        }
+
+        if (class_exists($toolClass)) {
+            $instance = $this->resolveToolInstance($toolClass);
+            if ($instance !== null && in_array(HasOperations::class, class_uses_recursive($toolClass), true)) {
+                return $instance->isEnabledByDefault($operation);
+            }
+        }
+
+        return true;
+    }
+
+    private function resolveOperationEffectiveRequiresApproval(string $toolClass, string $operation, int $agentId): bool
+    {
+        $override = AgentToolOperationOverride::where('agent_id', $agentId)
+            ->where('tool_class', $toolClass)
+            ->where('operation', $operation)
+            ->first();
+
+        if ($override !== null) {
+            $raw = $override->getRawOriginal('default_requires_approval');
+            if ($raw !== null) {
+                return !((bool) $raw);
+            }
+        }
+
+        if (class_exists($toolClass)) {
+            $instance = $this->resolveToolInstance($toolClass);
+            if ($instance !== null && in_array(HasOperations::class, class_uses_recursive($toolClass), true)) {
+                return $instance->requiresApprovalByDefault($operation);
+            }
+        }
+
+        return true;
+    }
+
+    private function resolveToolInstance(string $toolClass): ?object
+    {
+        static $instances = [];
+        if (!class_exists($toolClass)) {
+            return null;
+        }
+        if (!isset($instances[$toolClass])) {
+            $instances[$toolClass] = new $toolClass();
+        }
+        return $instances[$toolClass];
+    }
 
     private function findAgent(int $id, int $userId): ?Agent
     {

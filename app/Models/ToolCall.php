@@ -41,6 +41,8 @@ class ToolCall extends Model
         'tool_name',
         'tool_class',
         'tool_type',
+        'operation',
+        'operation_description',
         'status',
         'proposed_arguments',
         'human_description',
@@ -54,10 +56,12 @@ class ToolCall extends Model
 
     /** @var array<string, string> */
     protected $casts = [
-        'proposed_arguments' => 'array',
-        'approved_arguments' => 'array',
-        'result_data'        => 'array',
-        'executed_at'        => 'datetime',
+        'proposed_arguments'      => 'array',
+        'approved_arguments'      => 'array',
+        'result_data'             => 'array',
+        'operation'              => 'string',
+        'operation_description'  => 'string',
+        'executed_at'            => 'datetime',
     ];
 
     public function task(): BelongsTo

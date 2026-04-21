@@ -6,6 +6,7 @@ import {
   buildMonthlyCron,
   parseCron,
   DAY_OF_WEEK_OPTIONS,
+  getTimezoneOffsetMinutes,
 } from '@/utils/cron'
 
 describe('buildHourlyCron', () => {
@@ -215,5 +216,42 @@ describe('DAY_OF_WEEK_OPTIONS', () => {
     expect(DAY_OF_WEEK_OPTIONS).toHaveLength(7)
     expect(DAY_OF_WEEK_OPTIONS[0]).toEqual({ value: 0, label: 'Sunday' })
     expect(DAY_OF_WEEK_OPTIONS[6]).toEqual({ value: 6, label: 'Saturday' })
+  })
+})
+
+describe('getTimezoneOffsetMinutes', () => {
+  it('returns +02:00 for Europe/Berlin in April (CEST)', () => {
+    const instant = new Date(Date.UTC(2026, 3, 20, 10, 0, 0))
+    expect(getTimezoneOffsetMinutes('Europe/Berlin', instant)).toBe(120)
+  })
+
+  it('returns +01:00 for Europe/Berlin in January (CET)', () => {
+    const instant = new Date(Date.UTC(2026, 0, 15, 10, 0, 0))
+    expect(getTimezoneOffsetMinutes('Europe/Berlin', instant)).toBe(60)
+  })
+
+  it('returns +05:30 for Asia/Kolkata (half-hour offset)', () => {
+    const instant = new Date(Date.UTC(2026, 3, 20, 0, 0, 0))
+    expect(getTimezoneOffsetMinutes('Asia/Kolkata', instant)).toBe(330)
+  })
+
+  it('returns 0 for UTC', () => {
+    const instant = new Date(Date.UTC(2026, 3, 20, 10, 0, 0))
+    expect(getTimezoneOffsetMinutes('UTC', instant)).toBe(0)
+  })
+
+  it('returns -05:00 for America/New_York in January (EST)', () => {
+    const instant = new Date(Date.UTC(2026, 0, 15, 12, 0, 0))
+    expect(getTimezoneOffsetMinutes('America/New_York', instant)).toBe(-300)
+  })
+
+  it('returns -04:00 for America/New_York in July (EDT)', () => {
+    const instant = new Date(Date.UTC(2026, 6, 15, 12, 0, 0))
+    expect(getTimezoneOffsetMinutes('America/New_York', instant)).toBe(-240)
+  })
+
+  it('returns -03:30 for America/St_Johns (NST)', () => {
+    const instant = new Date(Date.UTC(2026, 0, 15, 12, 0, 0))
+    expect(getTimezoneOffsetMinutes('America/St_Johns', instant)).toBe(-210)
   })
 })

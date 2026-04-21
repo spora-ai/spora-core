@@ -138,7 +138,7 @@ describe('useTaskStore', () => {
       store.activeTask = {
         ...mockTaskDetail,
         tool_calls: [
-          { id: 1, tool_name: 'WebSearch', tool_type: 'search', status: 'PENDING', proposed_arguments: {}, approved_arguments: null, human_description: null, result_content: null, executed_at: null },
+          { id: 1, tool_name: 'WebSearch', tool_type: 'search', status: 'PENDING_APPROVAL', proposed_arguments: {}, approved_arguments: null, human_description: null, result_content: null, executed_at: null },
           { id: 2, tool_name: 'Calculator', tool_type: 'calc', status: 'EXECUTED', proposed_arguments: {}, approved_arguments: {}, human_description: null, result_content: '42', executed_at: null },
         ],
       }

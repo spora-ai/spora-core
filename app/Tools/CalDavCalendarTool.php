@@ -9,8 +9,10 @@ use DateTimeZone;
 use Psr\Log\LoggerInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
+use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -19,7 +21,9 @@ use Throwable;
     name: 'calendar_list_events',
     description: 'Fetch upcoming events from the configured CalDAV calendar within a selected timezone. Always query real-time dates rather than assuming.',
     displayName: 'Calendar',
+    category: 'productivity',
 )]
+#[ToolOperation(name: 'list_events', description: 'Fetch upcoming events from CalDAV calendar', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolSetting(key: 'core.caldav.url', label: 'CalDAV URL', type: 'text', description: 'URL to the Calendar server (e.g. Nextcloud, Baikal)', scope: 'agent')]
 #[ToolSetting(key: 'core.caldav.username', label: 'Username', type: 'text', description: 'CalDAV username', scope: 'agent')]
 #[ToolSetting(key: 'core.caldav.password', label: 'Password', type: 'password', description: 'CalDAV password or app token', scope: 'agent', required: true)]
@@ -42,8 +46,9 @@ use Throwable;
     description: 'End date in ISO-8601 format (e.g. 2026-04-30T23:59:59Z)',
     required: true,
 )]
-final class CalDavCalendarTool implements InputToolInterface
+final class CalDavCalendarTool implements ToolInterface
 {
+    use HasOperations;
     public function __construct(
         private readonly ToolConfigService $configService,
         private readonly HttpClientInterface $httpClient,
@@ -60,6 +65,18 @@ final class CalDavCalendarTool implements InputToolInterface
     }
 
     public function execute(array $arguments, int $agentId): ToolResult
+    {
+        return $this->listEvents($arguments, $agentId);
+    }
+
+    public function describeAction(array $arguments): string
+    {
+        $start = trim((string) ($arguments['start_date'] ?? ''));
+        $end   = trim((string) ($arguments['end_date'] ?? ''));
+        return "Fetch CalDAV calendar events from {$start} to {$end}";
+    }
+
+    public function listEvents(array $arguments, int $agentId): ToolResult
     {
         $startDateStr = $arguments['start_date'] ?? '';
         $endDateStr   = $arguments['end_date'] ?? '';

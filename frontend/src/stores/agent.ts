@@ -90,6 +90,47 @@ export const useAgentStore = defineStore('agent', () => {
     return result.tool
   }
 
+  async function getOperationOverride(
+    agentId: number,
+    toolName: string,
+    operation: string,
+  ): Promise<{
+    operation: string
+    tool_class: string
+    enabled: boolean | null
+    default_requires_approval: boolean | null
+    effective_enabled: boolean
+    effective_requires_approval: boolean
+  }> {
+    const result = await api.get<{
+      enabled: boolean | null
+      default_requires_approval: boolean | null
+      effective_enabled: boolean
+      effective_requires_approval: boolean
+    }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/operations/${encodeURIComponent(operation)}`)
+    return result as any
+  }
+
+  async function patchOperationOverride(
+    agentId: number,
+    toolName: string,
+    operation: string,
+    data: { enabled?: boolean | null; default_requires_approval?: boolean | null },
+  ): Promise<{
+    enabled: boolean | null
+    default_requires_approval: boolean | null
+    effective_enabled: boolean
+    effective_requires_approval: boolean
+  }> {
+    const result = await api.patch<{
+      enabled: boolean | null
+      default_requires_approval: boolean | null
+      effective_enabled: boolean
+      effective_requires_approval: boolean
+    }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/operations/${encodeURIComponent(operation)}`, data)
+    return result as any
+  }
+
   // ── LLM Config (setup detection) ────────────────────────────────────────────
 
   async function getLLMConfig(agentId: number): Promise<LLMConfigSettings> {
@@ -126,6 +167,8 @@ export const useAgentStore = defineStore('agent', () => {
     enableTool,
     disableTool,
     patchTool,
+    getOperationOverride,
+    patchOperationOverride,
     getLLMConfig,
     putLLMConfig,
     clearCurrentAgent,

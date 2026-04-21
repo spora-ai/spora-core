@@ -55,14 +55,44 @@ const perToolRejecting = ref<Record<number, boolean>>({})
 
 const errorBannerDismissed = ref(false)
 
-const RETRYABLE_ERROR_CODES = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'SERVER_ERROR', 'GATEWAY_ERROR'] as const
+const RETRYABLE_ERROR_CODES = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'SERVER_ERROR', 'GATEWAY_ERROR', 'ORPHANED'] as const
 
 const showRetryBanner = computed(() => {
   if (!task.value) return false
   if (task.value.status !== 'FAILED') return false
   if (errorBannerDismissed.value) return false
+  if (task.value.retry_after) return false  // countdown shown instead
   return task.value.error_code !== null && RETRYABLE_ERROR_CODES.includes(task.value.error_code as typeof RETRYABLE_ERROR_CODES[number])
 })
+
+// Countdown for auto-retry (retry_after set but not yet elapsed)
+const showCountdown = computed(() =>
+  task.value?.status === 'FAILED' && task.value.retry_after !== null
+)
+
+const countdown = computed(() => {
+  if (!task.value?.retry_after) return ''
+  const ms = Math.max(0, new Date(task.value.retry_after).getTime() - Date.now())
+  if (ms <= 0) return '0:00'
+  const m = Math.floor(ms / 60000)
+  const s = Math.floor((ms % 60000) / 1000)
+  return `${m}:${s.toString().padStart(2, '0')}`
+})
+
+const cancelling = ref(false)
+
+async function cancelRetryChain(): Promise<void> {
+  if (!task.value) return
+  cancelling.value = true
+  try {
+    await taskStore.cancelRetryChain(task.value.id)
+    await taskStore.fetchTask(task.value.id)
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : 'Failed to cancel retry.')
+  } finally {
+    cancelling.value = false
+  }
+}
 
 async function retryNow(): Promise<void> {
   if (!task.value) return
@@ -96,6 +126,11 @@ async function submitFollowup(): Promise<void> {
   submittingFollowup.value = true
   try {
     const newTask = await taskStore.createTaskForAgent(task.value.agent_id, text, task.value.id)
+    // Guard: prevent navigation to undefined/NaN if server returns malformed response
+    if (!Number.isFinite(newTask.id)) {
+      followupError.value = 'Failed to create follow-up task. Please try again.'
+      return
+    }
     followupPrompt.value = ''
     router.push({ name: 'task', params: { id: newTask.id } })
   } catch (e) {
@@ -379,6 +414,34 @@ onUnmounted(() => {
         </button>
       </div>
 
+      <!-- Auto-retry countdown -->
+      <div
+        v-if="showCountdown"
+        data-testid="retry-countdown"
+        class="mx-4 mt-4 max-w-2xl mx-auto flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm"
+      >
+        <svg class="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold text-amber-900 dark:text-amber-100">Retrying in {{ countdown }}…</p>
+          <p v-if="task.error_code === 'ORPHANED'" class="text-amber-700 dark:text-amber-300 mt-0.5">
+            Task was interrupted. A retry attempt is scheduled automatically.
+          </p>
+          <p v-else class="text-amber-700 dark:text-amber-300 mt-0.5">
+            Task failed and will be retried automatically.
+          </p>
+        </div>
+        <button
+          data-testid="cancel-retry-button"
+          @click="cancelRetryChain"
+          :disabled="cancelling"
+          class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-xs px-3 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors disabled:opacity-50"
+        >
+          {{ cancelling ? 'Cancelling…' : 'Cancel Retry' }}
+        </button>
+      </div>
+
       <!-- Chat area -->
       <div class="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-3">
 
@@ -534,8 +597,25 @@ onUnmounted(() => {
           >
             <div class="flex items-start justify-between gap-2">
               <div class="min-w-0">
-                <p class="text-sm font-semibold font-mono text-amber-900 dark:text-amber-100">{{ tc.tool_name }}</p>
-                <p v-if="tc.human_description" class="text-xs text-muted-foreground mt-0.5">
+                <div class="flex items-center gap-2">
+                  <p class="text-sm font-semibold font-mono text-amber-900 dark:text-amber-100">{{ tc.tool_name }}</p>
+                  <span
+                    v-if="tc.operation && tc.operation !== 'default'"
+                    class="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300"
+                  >
+                    {{ tc.operation }}
+                  </span>
+                </div>
+                <p
+                  v-if="tc.operation_description"
+                  class="text-xs text-muted-foreground mt-0.5"
+                >
+                  {{ tc.operation_description }}
+                </p>
+                <p
+                  v-else-if="tc.human_description"
+                  class="text-xs text-muted-foreground mt-0.5"
+                >
                   {{ tc.human_description }}
                 </p>
               </div>

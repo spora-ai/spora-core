@@ -6,73 +6,41 @@ namespace Spora\Tools;
 
 use Spora\Models\AgentMemory;
 use Spora\Tools\Attributes\Tool;
+use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
+use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 
 #[Tool(
     name: 'scratchpad',
     description: 'Provides a persistent Key-Value store where you can save long-term memory about the user or draft complex reports. Memories are persisted across all tasks for this agent.',
     displayName: 'Scratchpad',
+    category: 'productivity',
 )]
-#[ToolParameter(
-    name: 'action',
-    type: 'string',
-    description: 'The action to perform: "read", "write", or "delete".',
-    required: true,
-    enum: ['read', 'write', 'delete'],
-)]
-#[ToolParameter(
-    name: 'key',
-    type: 'string',
-    description: 'The identifier for the memory (e.g. "user_preferences"). Limit to 100 characters, alphanumeric and underscores.',
-    required: true,
-)]
-#[ToolParameter(
-    name: 'value',
-    type: 'string',
-    description: 'The content to store. Required when action is "write".',
-    required: false,
-)]
-final class ScratchpadTool implements InputToolInterface
+#[ToolOperation(name: 'read',   description: 'Read a memory value by key',    enabledByDefault: true,  requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'write',  description: 'Write a memory value to a key', enabledByDefault: true,  requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'delete', description: 'Delete a memory by key',         enabledByDefault: true,  requiresApprovalByDefault: false)]
+final class ScratchpadTool implements ToolInterface
 {
+    use HasOperations;
+
     public function execute(array $arguments, int $agentId): ToolResult
     {
-        $action = (string) ($arguments['action'] ?? '');
+        $operation = $this->getOperationName($arguments);
+
+        return match ($operation) {
+            'read'   => $this->read($arguments, $agentId),
+            'write'  => $this->write($arguments, $agentId),
+            'delete' => $this->delete($arguments, $agentId),
+            default  => new ToolResult(false, 'Invalid action. Must be read, write, or delete.'),
+        };
+    }
+
+    public function describeAction(array $arguments): string
+    {
+        $action = (string) ($arguments['action'] ?? $this->getOperationName($arguments));
         $key    = (string) ($arguments['key'] ?? '');
-
-        if ($key === '') {
-            return new ToolResult(false, 'Error: Key is required.');
-        }
-
-        switch ($action) {
-            case 'read':
-                $memory = AgentMemory::where('agent_id', $agentId)->where('key', $key)->first();
-                if ($memory) {
-                    return new ToolResult(true, "Found memory [{$key}]:\n{$memory->value}");
-                }
-                return new ToolResult(false, "Memory [{$key}] not found.");
-
-            case 'write':
-                $value = (string) ($arguments['value'] ?? '');
-                if ($value === '') {
-                    return new ToolResult(false, 'Error: Value is required for write action.');
-                }
-                AgentMemory::updateOrCreate(
-                    ['agent_id' => $agentId, 'key' => $key],
-                    ['value' => $value],
-                );
-                return new ToolResult(true, "Successfully saved memory [{$key}].");
-
-            case 'delete':
-                $deleted = AgentMemory::where('agent_id', $agentId)->where('key', $key)->delete();
-                if ($deleted) {
-                    return new ToolResult(true, "Successfully deleted memory [{$key}].");
-                }
-                return new ToolResult(false, "Memory [{$key}] not found to delete.");
-
-            default:
-                return new ToolResult(false, 'Error: Invalid action. Must be read, write, or delete.');
-        }
+        return "Scratchpad {$action} on key: {$key}";
     }
 
     public function getParametersSchema(): array
@@ -96,5 +64,54 @@ final class ScratchpadTool implements InputToolInterface
             ],
             'required' => ['action', 'key'],
         ];
+    }
+
+    public function read(array $arguments, int $agentId): ToolResult
+    {
+        $key = (string) ($arguments['key'] ?? '');
+
+        if ($key === '') {
+            return new ToolResult(false, 'Error: Key is required.');
+        }
+
+        $memory = AgentMemory::where('agent_id', $agentId)->where('key', $key)->first();
+        if ($memory) {
+            return new ToolResult(true, "Found memory [{$key}]:\n{$memory->value}");
+        }
+        return new ToolResult(false, "Memory [{$key}] not found.");
+    }
+
+    public function write(array $arguments, int $agentId): ToolResult
+    {
+        $key   = (string) ($arguments['key'] ?? '');
+        $value = (string) ($arguments['value'] ?? '');
+
+        if ($key === '') {
+            return new ToolResult(false, 'Error: Key is required.');
+        }
+        if ($value === '') {
+            return new ToolResult(false, 'Error: Value is required for write action.');
+        }
+
+        AgentMemory::updateOrCreate(
+            ['agent_id' => $agentId, 'key' => $key],
+            ['value' => $value],
+        );
+        return new ToolResult(true, "Successfully saved memory [{$key}].");
+    }
+
+    public function delete(array $arguments, int $agentId): ToolResult
+    {
+        $key = (string) ($arguments['key'] ?? '');
+
+        if ($key === '') {
+            return new ToolResult(false, 'Error: Key is required.');
+        }
+
+        $deleted = AgentMemory::where('agent_id', $agentId)->where('key', $key)->delete();
+        if ($deleted) {
+            return new ToolResult(true, "Successfully deleted memory [{$key}].");
+        }
+        return new ToolResult(false, "Memory [{$key}] not found to delete.");
     }
 }

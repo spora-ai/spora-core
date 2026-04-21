@@ -2,7 +2,6 @@
 import { ref, computed, inject, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToolSettings } from '@/composables/useToolSettings'
-import ToolList from '@/components/settings/tools/ToolList.vue'
 import ToolSettingsPanel from '@/components/settings/tools/ToolSettingsPanel.vue'
 import AlertBanner from '@/components/ui/AlertBanner.vue'
 import type { ToolSchema } from '@/composables/useToolSettings'
@@ -26,6 +25,30 @@ const selectedTool = computed<ToolSchema | null>(
 )
 const serverSettings = ref<Record<string, string>>({})
 const loadError = ref<string | null>(null)
+
+// ── Tools by category ────────────────────────────────────────────────────────
+
+function toLabel(cat: string): string {
+  return cat.charAt(0).toUpperCase() + cat.slice(1)
+}
+
+const toolsByCategory = computed(() => {
+  const groups: Record<string, ToolSchema[]> = {}
+  for (const tool of allTools.value) {
+    const cat = tool.category ?? 'general'
+    if (!groups[cat]) groups[cat] = []
+    groups[cat].push(tool)
+  }
+  return groups
+})
+
+const sortedCategories = computed(() =>
+  Object.keys(toolsByCategory.value).sort((a, b) => toLabel(a).localeCompare(toLabel(b))),
+)
+
+// ── Category collapse state ───────────────────────────────────────────────────
+
+const collapsedCategories = ref<Record<string, boolean>>({})
 
 async function selectTool(toolName: string): Promise<void> {
   loadError.value = null
@@ -89,13 +112,39 @@ onMounted(() => {
       :initialSettings="serverSettings"
       @back="goBack"
     />
-    <!-- Mobile: keep select visible for switching tools -->
+    <!-- Mobile: keep categorized list visible for switching tools -->
     <div class="md:hidden mt-6">
-      <ToolList
-        :tools="allTools"
-        :selectedToolId="selectedToolId"
-        @select="selectTool"
-      />
+      <div class="rounded-xl border border-border bg-card divide-y divide-border">
+        <template v-for="cat in sortedCategories" :key="cat">
+          <div
+            class="px-4 py-2.5 flex items-center justify-between bg-muted/30 cursor-pointer select-none"
+            @click="collapsedCategories[cat] = !collapsedCategories[cat]"
+          >
+            <h3 class="text-xs font-medium">{{ toLabel(cat) }}</h3>
+            <svg
+              class="h-3.5 w-3.5 text-muted-foreground transition-transform"
+              :class="{ '-rotate-90': collapsedCategories[cat] }"
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          <template v-if="!collapsedCategories[cat]">
+            <div
+              v-for="tool in toolsByCategory[cat].filter(t => t.settings_schema.length > 0)"
+              :key="tool.tool_class"
+              class="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-muted/20 transition-colors"
+              :class="{ 'text-primary font-medium': tool.tool_name === selectedToolId }"
+              @click="selectTool(tool.tool_name)"
+            >
+              <span class="text-sm">{{ tool.display_name ?? tool.tool_name }}</span>
+              <svg v-if="tool.tool_name === selectedToolId" class="h-4 w-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+          </template>
+        </template>
+      </div>
     </div>
   </template>
 
@@ -112,11 +161,43 @@ onMounted(() => {
     >
       No configurable tools available.
     </div>
-    <ToolList
+    <div
       v-else
-      :tools="allTools"
-      :selectedToolId="null"
-      @select="selectTool"
-    />
+      class="rounded-xl border border-border bg-card divide-y divide-border"
+    >
+      <template v-for="cat in sortedCategories" :key="cat">
+        <div
+          class="px-5 py-3 flex items-center justify-between bg-muted/30 cursor-pointer select-none"
+          @click="collapsedCategories[cat] = !collapsedCategories[cat]"
+        >
+          <h3 class="text-sm font-medium">{{ toLabel(cat) }}</h3>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-muted-foreground">{{ toolsByCategory[cat].length }}</span>
+            <svg
+              class="h-4 w-4 text-muted-foreground transition-transform"
+              :class="{ '-rotate-90': collapsedCategories[cat] }"
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+        </div>
+        <template v-if="!collapsedCategories[cat]">
+          <div
+            v-for="tool in toolsByCategory[cat].filter(t => t.settings_schema.length > 0)"
+            :key="tool.tool_class"
+            class="px-5 py-3.5 flex items-center justify-between cursor-pointer hover:bg-muted/20 transition-colors"
+            @click="selectTool(tool.tool_name)"
+          >
+            <div class="flex items-center gap-3">
+              <span class="text-sm font-medium">{{ tool.display_name ?? tool.tool_name }}</span>
+            </div>
+            <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        </template>
+      </template>
+    </div>
   </template>
 </template>

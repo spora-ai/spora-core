@@ -42,11 +42,19 @@ final readonly class AgentState
         $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
 
         $pendingToolCalls = array_map(
-            static fn(array $tc) => new ToolCall(
-                providerCallId: $tc['provider_call_id'],
-                toolName: $tc['tool_name'],
-                arguments: $tc['arguments'],
-            ),
+            static function (array $tc): ToolCall {
+                $args = $tc['arguments'] ?? [];
+                // Defensive: if arguments came from a stdClass or other object, flatten to array.
+                if (is_object($args)) {
+                    $args = (array) $args;
+                }
+
+                return new ToolCall(
+                    providerCallId: $tc['provider_call_id'],
+                    toolName: $tc['tool_name'],
+                    arguments: $args,
+                );
+            },
             $data['pending_tool_calls'],
         );
 

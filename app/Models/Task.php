@@ -23,6 +23,9 @@ use Illuminate\Support\Carbon;
  * @property string|null $error_code
  * @property string|null $error_message
  * @property int|null    $parent_task_id
+ * @property int|null    $retry_of_task_id
+ * @property int         $retry_count
+ * @property Carbon|null $retry_after
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */

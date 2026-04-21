@@ -19,5 +19,7 @@ final class Tool
         public readonly string $description,
         /** Human-readable name for UI display, e.g. "Tavily Search". Falls back to name if omitted. */
         public readonly ?string $displayName = null,
+        /** Category for grouping tools in the Settings UI, e.g. "research", "communication". Falls back to "general". */
+        public readonly string $category = 'general',
     ) {}
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use ReflectionClass;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Core\ValueObjects\EncryptedValue;
 use Spora\Drivers\LLMDriverConfigInterface;
@@ -66,11 +67,11 @@ class LLMConfigService
      */
     private function buildSchemaFromClass(string $class): array
     {
-        /** @var list<ToolSetting> $settings */
-        $settings = $class::getSettingsSchema();
+        $ref = new ReflectionClass($class);
 
         $schema = [];
-        foreach ($settings as $setting) {
+        foreach ($ref->getAttributes(ToolSetting::class) as $attr) {
+            $setting = $attr->newInstance();
             $schema[] = [
                 'key' => $setting->key,
                 'label' => $setting->label,

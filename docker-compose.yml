@@ -3,31 +3,28 @@ services:
     build: .
     container_name: spora-app
     restart: always
+    command: ["/usr/bin/supervisord", "-c", "/app/supervisord.conf"]
     ports:
       - "80:80"
       - "443:443"
-      - "443:443/udp"  # HTTP/3 / QUIC
+      - "443:443/udp"
     env_file:
       - .env.local
     environment:
-      # FrankenPHP worker mode for async task processing
-      FRANKENPHP_CONFIG: "worker ./bin/spora worker:run"
-      # Or sync mode for development:
-      # FRANKENPHP_CONFIG: "worker ./bin/spora"
+      SPORA_WORKER_MODE: worker
     depends_on:
       mariadb:
         condition: service_healthy
-    volumes:
-      - ./storage:/app/storage
-      # Mount Caddy volumes for certificate persistence
-      - caddy_data:/data
-      - caddy_config:/config
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+    volumes:
+      - ./storage:/app/storage
+      - caddy_data:/data
+      - caddy_config:/config
     networks:
       - spora
 

@@ -18,21 +18,32 @@ use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
+use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\NotificationService;
-use Spora\Tools\Attributes\OutputTool;
 use Spora\Tools\Attributes\Tool;
-use Spora\Tools\InputToolInterface;
-use Spora\Tools\OutputToolInterface;
+use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\ToolInterface;
+use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
 final class Orchestrator implements OrchestratorInterface
 {
+    /** Error codes that qualify for auto-retry. */
+    private const RETRYABLE_ERROR_CODES = [
+        'RATE_LIMIT',
+        'SERVER_OVERLOADED',
+        'SERVER_ERROR',
+        'GATEWAY_ERROR',
+        'AUTH_ERROR',
+        'ORPHANED',
+    ];
+
     /**
-     * @param  list<object>           $toolInstances      Instances of InputToolInterface|OutputToolInterface.
+     * @param  list<object>           $toolInstances      Instances of ToolInterface.
      * @param  ?LoggerInterface       $logger             Optional PSR-3 logger. When null, all log calls
      *                                                    are silently skipped — no behaviour change.
      * @param  ?NotificationService   $notificationService Optional notification service for task events.
@@ -86,7 +97,6 @@ final class Orchestrator implements OrchestratorInterface
                     'output_tokens'     => $row->output_tokens,
                     'reasoning'         => $row->reasoning,
                     'created_at'        => $now,
-                    'updated_at'        => $now,
                 ];
             }
             if (!empty($insertData)) {
@@ -143,7 +153,7 @@ final class Orchestrator implements OrchestratorInterface
                 'request'        => new LLMRequest(
                     systemPrompt: $systemPrompt,
                     messages: $this->buildMessages($taskId),
-                    tools: $this->buildToolDefinitions($enabledClasses),
+                    tools: $this->buildToolDefinitions($enabledClasses, $agent->id),
                 ),
             ];
         });
@@ -238,6 +248,9 @@ final class Orchestrator implements OrchestratorInterface
                     $failedTask = Task::where('id', $taskId)->first();
                     if ($failedTask !== null) {
                         $this->notificationService?->notifyTaskFailed($failedTask);
+
+                        // Auto-retry: check if error is retryable and agent has retry config
+                        $this->scheduleAutoRetry($failedTask, $errorCode);
                     }
                 }
             } catch (Throwable) {
@@ -269,6 +282,11 @@ final class Orchestrator implements OrchestratorInterface
             $task->status        = 'RUNNING';
             $task->pending_state = null;
             $task->save();
+
+            $this->logger?->info('Task resumed after approval', [
+                'task_id' => $task->id,
+                'approved_count' => count($approvedBatch),
+            ]);
 
             // Build a map from providerCallId → approved arguments for O(1) lookup.
             $approvedMap = [];
@@ -386,8 +404,8 @@ final class Orchestrator implements OrchestratorInterface
     /**
      * Process a batch of tool calls from a single LLM response turn.
      *
-     * Immediately executes InputTools and auto-approved OutputTools.
-     * Collects any OutputTools that need approval into a batch; if any exist,
+     * Immediately executes tools that are enabled and not requiring approval.
+     * Collects any tools that need approval into a batch; if any exist,
      * the task is paused and the full batch is serialised into pending_state.
      *
      * @param  list<DriverToolCall>  $toolCalls
@@ -407,22 +425,56 @@ final class Orchestrator implements OrchestratorInterface
                     throw new RuntimeException("The LLM attempted to call tool '{$toolCall->toolName}' which is not enabled for this agent.");
                 }
 
-                $toolType         = $toolInstance instanceof OutputToolInterface ? 'output' : 'input';
-                $requiresApproval = $this->resolveRequiresApproval($toolInstance, $toolClass, $agent->id);
+                // Resolve operation name and description if tool uses HasOperations.
+                $operationName        = 'default';
+                $operationDescription = null;
+                $usesOperations       = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
+
+                if ($usesOperations) {
+                    $operationName        = $this->callTraitMethod($toolInstance, 'getOperationName', [$toolCall->arguments]);
+                    $operationDescription = $this->callTraitMethod($toolInstance, 'getOperationDescription', [$operationName]);
+
+                    // Check if this specific operation is enabled for this agent.
+                    if (!$this->isOperationEnabled($toolInstance, $operationName, $agent->id)) {
+                        ToolCallModel::create([
+                            'task_id'               => $task->id,
+                            'agent_id'              => $agent->id,
+                            'provider_call_id'      => $toolCall->providerCallId,
+                            'tool_name'             => $toolCall->toolName,
+                            'tool_class'            => $toolClass,
+                            'tool_type'             => 'operation',
+                            'operation'             => $operationName,
+                            'operation_description' => $operationDescription,
+                            'status'                => 'DISABLED',
+                            'proposed_arguments'    => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
+                            'human_description'     => $operationDescription,
+                        ]);
+                        $this->appendHistory(
+                            taskId: $task->id,
+                            role: 'tool',
+                            content: "Operation '{$operationName}' is disabled for this agent.",
+                            toolCallId: $toolCall->providerCallId,
+                            toolName: $toolCall->toolName,
+                        );
+                        continue;
+                    }
+                }
+
+                $requiresApproval = $this->resolveRequiresApproval($toolInstance, $toolClass, $agent->id, $toolCall->arguments);
 
                 // Persist the ToolCall record so the UI can surface it immediately.
                 $toolCallRecord = ToolCallModel::create([
-                    'task_id'            => $task->id,
-                    'agent_id'           => $agent->id,
-                    'provider_call_id'   => $toolCall->providerCallId,
-                    'tool_name'          => $toolCall->toolName,
-                    'tool_class'         => $toolClass,
-                    'tool_type'          => $toolType,
-                    'status'             => 'PENDING_APPROVAL',
-                    'proposed_arguments' => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
-                    'human_description'  => $toolInstance instanceof OutputToolInterface
-                        ? $toolInstance->describeAction($toolCall->arguments)
-                        : null,
+                    'task_id'               => $task->id,
+                    'agent_id'              => $agent->id,
+                    'provider_call_id'      => $toolCall->providerCallId,
+                    'tool_name'             => $toolCall->toolName,
+                    'tool_class'            => $toolClass,
+                    'tool_type'             => $requiresApproval ? 'output' : 'input',
+                    'operation'             => $operationName,
+                    'operation_description' => $operationDescription,
+                    'status'                => 'PENDING_APPROVAL',
+                    'proposed_arguments'    => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
+                    'human_description'     => $toolInstance->describeAction($toolCall->arguments),
                 ]);
 
                 try {
@@ -446,8 +498,8 @@ final class Orchestrator implements OrchestratorInterface
                     continue; // Skip execution and don't pause for approval
                 }
 
-                if ($toolInstance instanceof InputToolInterface || !$requiresApproval) {
-                    // Fix #5: Safe execution — community plugins may throw.
+                if (!$requiresApproval) {
+                    // Execute immediately — tool is auto-approved.
                     $result = $this->safeExecute($toolInstance, $toolCall->arguments, $agent->id, $task->id);
 
                     Capsule::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
@@ -485,8 +537,7 @@ final class Orchestrator implements OrchestratorInterface
             $task->save();
             $this->tick($task->id);
         } else {
-            // At least one OutputTool needs approval — pause the task.
-            // step_count was already incremented for any immediately-executed tools.
+            // At least one tool needs approval — pause the task.
             $state = new AgentState(
                 taskId: $task->id,
                 agentId: $agent->id,
@@ -500,6 +551,15 @@ final class Orchestrator implements OrchestratorInterface
             $task->status        = 'PENDING_APPROVAL';
             $task->pending_state = $state->toJson();
             $task->save();
+
+            $toolNames = implode(', ', array_unique(array_map(
+                static fn(DriverToolCall $tc) => $tc->toolName, $pendingApproval,
+            )));
+            $this->logger?->info('Task paused — approval needed', [
+                'task_id' => $task->id,
+                'tool_count' => count($pendingApproval),
+                'tools' => $toolNames,
+            ]);
 
             $this->notificationService?->notifyPendingApproval($task);
         }
@@ -520,7 +580,7 @@ final class Orchestrator implements OrchestratorInterface
      *           aggregators that may have broader access or retention than DEBUG logs.
      */
     private function safeExecute(
-        InputToolInterface|OutputToolInterface $toolInstance,
+        ToolInterface $toolInstance,
         array $arguments,
         int $agentId,
         int $taskId,
@@ -575,35 +635,84 @@ final class Orchestrator implements OrchestratorInterface
 
     /**
      * Resolve whether the tool requires human approval before execution.
-     *   1. AgentTool row override (null means "not set").
-     *   2. Class-level #[OutputTool(requiresApproval:)] attribute (default: true).
-     *   Returns true → pause for approval, false → execute immediately.
+     *
+     * Precedence for operation-aware tools (uses HasOperations):
+     *   1. agent_tool_operation_overrides.default_requires_approval for this agent + tool_class + operation
+     *   2. #[ToolOperation(name:)].requiresApprovalByDefault on the operation
+     *
+     *
+     * Returns true → pause for approval, false → execute immediately.
+     *
+     * @param  array<string, mixed> $arguments  Arguments from the LLM tool call.
      */
-    private function resolveRequiresApproval(object $toolInstance, string $toolClass, int $agentId): bool
+    private function resolveRequiresApproval(object $toolInstance, string $toolClass, int $agentId, array|object $arguments = []): bool
     {
-        if (!$toolInstance instanceof OutputToolInterface) {
-            return false;
+        if (is_object($arguments)) {
+            $arguments = (array) $arguments;
         }
 
-        /** @var AgentTool|null $row */
-        $row = AgentTool::where('agent_id', $agentId)->where('tool_class', $toolClass)->first();
+        $usesOperations = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
 
-        if ($row !== null) {
-            $raw = $row->getRawOriginal('auto_approve');
+        if ($usesOperations) {
+            $operationName = $toolInstance->getOperationName($arguments);
+
+            /** @var AgentToolOperationOverride|null $override */
+            $override = AgentToolOperationOverride::where('agent_id', $agentId)
+                ->where('tool_class', $toolClass)
+                ->where('operation', $operationName)
+                ->first();
+
+            if ($override !== null) {
+                $raw = $override->getRawOriginal('default_requires_approval');
+                if ($raw !== null) {
+                    return (bool) $raw; // 1 = approval required → true, 0 = auto-approve → false
+                }
+            }
+
+            // No per-operation override — fall back to the agent_tools.auto_approve flag.
+            // This is the value the UI toggles when enabling/disabling auto-approve per tool.
+            $agentTool = AgentTool::where('agent_id', $agentId)
+                ->where('tool_class', $toolClass)
+                ->first();
+            if ($agentTool !== null) {
+                $autoApproveRaw = $agentTool->getRawOriginal('auto_approve');
+                if ($autoApproveRaw !== null) {
+                    return !(bool) $autoApproveRaw; // auto_approve=1 → false (no approval), auto_approve=0 → true (approval required)
+                }
+            }
+
+            return $toolInstance->requiresApprovalByDefault($operationName);
+        }
+
+        // All tools now use HasOperations; this fallback should never be reached.
+        return false;
+    }
+
+    /**
+     * Check whether a specific operation is enabled for an agent.
+     *
+     * Precedence:
+     *   1. agent_tool_operation_overrides.enabled for this agent + tool_class + operation
+     *   2. #[ToolOperation(name:)].enabledByDefault on the operation
+     */
+    private function isOperationEnabled(object $toolInstance, string $operationName, int $agentId): bool
+    {
+        $toolClass = get_class($toolInstance);
+
+        /** @var AgentToolOperationOverride|null $override */
+        $override = AgentToolOperationOverride::where('agent_id', $agentId)
+            ->where('tool_class', $toolClass)
+            ->where('operation', $operationName)
+            ->first();
+
+        if ($override !== null) {
+            $raw = $override->getRawOriginal('enabled');
             if ($raw !== null) {
-                return !((bool) $raw); // auto_approve=1 → no approval needed → false
+                return (bool) $raw;
             }
         }
 
-        // Fall back to class attribute.
-        $ref   = new ReflectionClass($toolClass);
-        $attrs = $ref->getAttributes(OutputTool::class);
-        if ($attrs !== []) {
-            $attr = $attrs[0]->newInstance();
-            return $attr->requiresApproval;
-        }
-
-        return true; // safe default: require approval
+        return $toolInstance->isEnabledByDefault($operationName);
     }
 
     /**
@@ -668,12 +777,21 @@ final class Orchestrator implements OrchestratorInterface
      * @param  list<string> $enabledClasses
      * @return list<array{type: "function", function: array{name: string, description: string, parameters: array}}>
      */
-    private function buildToolDefinitions(array $enabledClasses): array
+    private function buildToolDefinitions(array $enabledClasses, int $agentId): array
     {
         $defs = [];
 
+        // Fetch all operation overrides for this agent in one query.
+        $overrides = AgentToolOperationOverride::where('agent_id', $agentId)
+            ->whereIn('tool_class', $enabledClasses)
+            ->get()
+            ->groupBy(fn($row) => $row->tool_class)
+            ->map(fn($group) => $group->keyBy('operation'));
+
         foreach ($this->toolInstances as $instance) {
-            if (!in_array(get_class($instance), $enabledClasses, true)) {
+            $toolClass = get_class($instance);
+
+            if (!in_array($toolClass, $enabledClasses, true)) {
                 continue;
             }
 
@@ -687,25 +805,114 @@ final class Orchestrator implements OrchestratorInterface
             /** @var Tool $toolAttr */
             $toolAttr = $attrs[0]->newInstance();
 
-            $schema = $instance->getParametersSchema();
+            // Check if tool uses HasOperations — if so, filter to only enabled operations.
+            $usesOperations = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
 
-            // Normalize empty "properties" from [] to (object)[] so it encodes as {} in JSON.
-            // The OpenAI API requires properties to be a JSON object, not an empty sequential array.
-            if (isset($schema['properties']) && $schema['properties'] === []) {
-                $schema['properties'] = (object) [];
+            if ($usesOperations) {
+                $schema = $instance->getParametersSchema();
+                $allowedOps = [];
+
+                foreach ($instance->getOperations() as $op) {
+                    $opOverride = $overrides[$toolClass][$op->name] ?? null;
+
+                    // Resolve enabled: override takes precedence, else use enabledByDefault.
+                    if ($opOverride !== null && $opOverride->enabled !== null) {
+                        $isEnabled = (bool) $opOverride->enabled;
+                    } else {
+                        $isEnabled = $op->enabledByDefault;
+                    }
+
+                    if ($isEnabled) {
+                        $allowedOps[] = $op->name;
+                    }
+                }
+
+                // If no operations are enabled, skip this tool entirely.
+                if ($allowedOps === []) {
+                    continue;
+                }
+
+                // Filter the schema's action enum and parameter descriptions to only the enabled ops.
+                $filteredSchema = $this->filterSchemaForOperations($schema, $allowedOps);
+
+                $defs[] = [
+                    'type'     => 'function',
+                    'function' => [
+                        'name'        => $toolAttr->name,
+                        'description' => $toolAttr->description,
+                        'parameters'  => $filteredSchema,
+                    ],
+                ];
+            } else {
+                // Single-operation tool: include as-is.
+                $schema = $instance->getParametersSchema();
+
+                // Normalize empty "properties" from [] to (object)[] so it encodes as {} in JSON.
+                if (isset($schema['properties']) && $schema['properties'] === []) {
+                    $schema['properties'] = (object) [];
+                }
+
+                $defs[] = [
+                    'type'     => 'function',
+                    'function' => [
+                        'name'        => $toolAttr->name,
+                        'description' => $toolAttr->description,
+                        'parameters'  => $schema,
+                    ],
+                ];
             }
-
-            $defs[] = [
-                'type'     => 'function',
-                'function' => [
-                    'name'        => $toolAttr->name,
-                    'description' => $toolAttr->description,
-                    'parameters'  => $schema,
-                ],
-            ];
         }
 
         return $defs;
+    }
+
+    /**
+     * Filter a tool schema to only include the given operation names.
+     * - Restricts the `action` enum to only allowed operations.
+     * - Removes parameters that only apply to excluded operations.
+     */
+    private function filterSchemaForOperations(array $schema, array $allowedOps): array
+    {
+        $allowedOpsSet = array_flip($allowedOps);
+
+        // properties may be a stdClass (from json_decode('{}')) or an array.
+        // Normalize to array for consistent access, then back to stdClass at the end.
+        $properties = $schema['properties'] ?? [];
+        if (is_object($properties)) {
+            $properties = (array) $properties;
+        }
+
+        // Restrict action enum.
+        if (isset($properties['action']['enum'])) {
+            $properties['action']['enum'] = array_values(array_filter(
+                $properties['action']['enum'],
+                static fn($op) => isset($allowedOpsSet[$op]),
+            ));
+        }
+
+        // Remove parameters that are only used by excluded operations.
+        // Parameters shared by multiple ops (like 'action') are kept.
+        // Operation-specific params: we keep them all for now since the LLM
+        // will only call with allowed ops. Cleaning unused params would require
+        // mapping which param belongs to which op — keep it simple.
+        $schema['properties'] = (object) $properties;
+
+        return $schema;
+    }
+
+    /**
+     * Call a trait method on an object via dynamic dispatch.
+     *
+     * @param  object       $object
+     * @param  string       $method
+     * @param  array<mixed> $args
+     * @return mixed
+     */
+    private function callTraitMethod(object $object, string $method, array $args): mixed
+    {
+        /** @var callable */
+        $callable = [$object, $method];
+        return $callable(...$args);
     }
 
     /**
@@ -713,7 +920,7 @@ final class Orchestrator implements OrchestratorInterface
      *
      * @throws RuntimeException  When no matching tool is registered.
      */
-    private function resolveToolByName(string $toolName): InputToolInterface|OutputToolInterface
+    private function resolveToolByName(string $toolName): ToolInterface
     {
         foreach ($this->toolInstances as $instance) {
             $ref   = new ReflectionClass($instance);
@@ -829,5 +1036,56 @@ final class Orchestrator implements OrchestratorInterface
     private function friendlyMessage(string $errorCode): string
     {
         return $this->friendlyMessages()[$errorCode] ?? $this->friendlyMessages()['UNKNOWN'];
+    }
+
+    /**
+     * Schedule an automatic retry if the error is retryable and the agent has retry config.
+     *
+     * All retry tasks link to the ROOT original task (not immediate parent) so that
+     * the entire chain can be cancelled with a single WHERE clause:
+     * WHERE retry_of_task_id = rootId AND retry_count >= N
+     */
+    private function scheduleAutoRetry(Task $failedTask, string $errorCode): void
+    {
+        if (!in_array($errorCode, self::RETRYABLE_ERROR_CODES, true)) {
+            return; // Non-retryable error — user must click Retry manually
+        }
+
+        /** @var Agent|null $agent */
+        $agent = Agent::find($failedTask->agent_id);
+        if ($agent === null) {
+            return;
+        }
+        $retryAfterMinutes = Agent::where('id', $failedTask->agent_id)->value('retry_after_minutes') ?? 0;
+        $maxRetries = Agent::where('id', $failedTask->agent_id)->value('max_retries') ?? 0;
+        if ($retryAfterMinutes <= 0 || $maxRetries <= 0) {
+            return; // Auto-retry not configured for this agent
+        }
+
+        // Always link to the ROOT original task (enables single-query cancel)
+        $rootTaskId = $failedTask->retry_of_task_id ?? $failedTask->id;
+        $retryCount = (int) ($failedTask->retry_count ?? 0) + 1;
+
+        if ($retryCount > $maxRetries) {
+            return; // Max retries exceeded
+        }
+
+        try {
+            $retryTask = $this->start($agent->id, $failedTask->user_prompt, $failedTask->max_steps, $failedTask->id);
+            $retryTask->update([
+                'retry_of_task_id' => $rootTaskId,
+                'retry_count'      => $retryCount,
+                'retry_after'      => date('Y-m-d H:i:s', time() + $retryAfterMinutes * 60),
+                'status'           => 'QUEUED',
+            ]);
+
+            $this->notificationService?->notifyRetryQueued($retryTask, $retryCount, $maxRetries);
+        } catch (Throwable $e) {
+            $this->logger?->warning('Failed to schedule auto-retry', [
+                'task_id'          => $failedTask->id,
+                'exception_class'  => get_class($e),
+                'message'          => $e->getMessage(),
+            ]);
+        }
     }
 }

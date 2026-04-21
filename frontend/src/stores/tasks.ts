@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { api, ApiError } from '@/api/client'
 import type { Task, TaskDetail, TaskStatus, HistoryEntry, TaskErrorCode } from '@/types/task'
 
-const TERMINAL_STATUSES: TaskStatus[] = ['COMPLETED', 'FAILED']
+const TERMINAL_STATUSES: TaskStatus[] = ['COMPLETED', 'FAILED', 'CANCELLED']
 
 export const useTaskStore = defineStore('tasks', () => {
   const tasks = ref<Task[]>([])
@@ -85,6 +85,24 @@ export const useTaskStore = defineStore('tasks', () => {
   async function rejectTask(taskId: number, reason: string): Promise<void> {
     await api.post(`/tasks/${taskId}/reject`, { reason })
     await fetchTaskDetail(taskId)
+  }
+
+  async function cancelRetryChain(taskId: number): Promise<void> {
+    await api.delete(`/tasks/${taskId}/retry-chain`)
+  }
+
+  async function fetchTask(taskId: number): Promise<Task> {
+    const result = await api.get<{ task: Task }>(`/tasks/${taskId}`)
+    if (activeTask.value?.id === taskId) {
+      // Refresh scalar fields from the fetched task
+      activeTask.value.status = result.task.status
+      activeTask.value.final_response = result.task.final_response
+      activeTask.value.step_count = result.task.step_count
+      activeTask.value.updated_at = result.task.updated_at
+      activeTask.value.error_code = result.task.error_code
+      activeTask.value.error_message = result.task.error_message
+    }
+    return result.task
   }
 
   // ── Polling ───────────────────────────────────────────────────────────────
@@ -170,13 +188,17 @@ export const useTaskStore = defineStore('tasks', () => {
     // Merge error fields
     if (data.error_code !== undefined) activeTask.value.error_code = data.error_code as TaskErrorCode | null
     if (data.error_message !== undefined) activeTask.value.error_message = data.error_message as string | null
+    // Merge retry fields
+    if (data.retry_of_task_id !== undefined) activeTask.value.retry_of_task_id = data.retry_of_task_id as number | null
+    if (data.retry_count !== undefined) activeTask.value.retry_count = data.retry_count as number | undefined
+    if (data.retry_after !== undefined) activeTask.value.retry_after = data.retry_after as string | null
   }
 
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const pendingToolCalls = computed(() => {
     const calls = activeTask.value?.tool_calls
-    return Array.isArray(calls) ? calls.filter((tc) => tc.status === 'PENDING') : []
+    return Array.isArray(calls) ? calls.filter((tc) => tc.status === 'PENDING_APPROVAL') : []
   })
 
   const isTerminal = computed(() =>
@@ -217,9 +239,11 @@ export const useTaskStore = defineStore('tasks', () => {
     fetchTasks,
     createTaskForAgent,
     fetchTaskDetail,
+    fetchTask,
     approveTask,
     rejectTask,
     retryTask,
+    cancelRetryChain,
     startListPolling,
     stopListPolling,
     startDetailPolling,

@@ -7,8 +7,10 @@ namespace Spora\Tools;
 use Psr\Log\LoggerInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
+use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -17,7 +19,9 @@ use Throwable;
     name: 'tavily_search',
     description: 'Search the web using Tavily AI (optimized for agents). Use this for fact-checking, recent events, research, or finding current data online. This provides direct concise answers.',
     displayName: 'Tavily Search',
+    category: 'research',
 )]
+#[ToolOperation(name: 'search', description: 'Search the web using Tavily AI', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolSetting(
     key: 'core.tavily.api_key',
     label: 'Tavily API Key',
@@ -46,8 +50,9 @@ use Throwable;
     required: false,
     enum: ['basic', 'advanced'],
 )]
-final class TavilySearchTool implements InputToolInterface
+final class TavilySearchTool implements ToolInterface
 {
+    use HasOperations;
     public function __construct(
         private readonly ToolConfigService $configService,
         private readonly HttpClientInterface $httpClient,
@@ -64,6 +69,17 @@ final class TavilySearchTool implements InputToolInterface
     }
 
     public function execute(array $arguments, int $agentId): ToolResult
+    {
+        return $this->search($arguments, $agentId);
+    }
+
+    public function describeAction(array $arguments): string
+    {
+        $query = trim((string) ($arguments['query'] ?? ''));
+        return "Search the web using Tavily AI for: '{$query}'";
+    }
+
+    public function search(array $arguments, int $agentId): ToolResult
     {
         $query       = trim((string) ($arguments['query'] ?? ''));
         $searchDepth = trim((string) ($arguments['search_depth'] ?? 'basic'));

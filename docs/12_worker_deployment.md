@@ -6,39 +6,39 @@ This guide covers deployment and operations for the Spora agent worker in `cron`
 
 ## Modes at a Glance
 
-| Mode | Startup | When to use |
-|---|---|---|
-| `sync` (default) | N/A | Local dev only. HTTP request blocks until agent completes. |
-| `cron` | `php bin/worker.php worker:run` fired by system cron every minute | Shared hosting, low-traffic, single-server |
-| `worker` | `php bin/worker.php worker:run --daemon` as a background process | VPS/Docker, persistent, always-on |
+| Mode | Startup | Scheduled runs | When to use |
+|---|---|---|---|
+| `SPORA_SYNC_MODE=true` | N/A | — | Local dev only. HTTP request blocks until agent completes. |
+| `SPORA_SYNC_MODE=false` + cron | `php bin/spora worker:run --once --include-queue` every minute | Via `--once` | Shared hosting, low-traffic |
+| `SPORA_SYNC_MODE=false` + daemon | `php bin/spora worker:run --daemon` as background process | Every poll cycle | VPS/Docker, persistent, always-on |
 
 ---
 
-## `SPORA_WORKER_MODE` Environment Variable
+## `SPORA_SYNC_MODE` Environment Variable
 
 Controls how new tasks are created by `Orchestrator::start()`:
 
 | Value | `tasks.status` on start | Who calls `tick()` |
 |---|---|---|
-| `sync` | `RUNNING` | Called inline in `start()` — HTTP blocks |
-| `cron` | `QUEUED` | Fired by system cron |
-| `worker` | `QUEUED` | Persistent daemon |
+| `true` (default) | `RUNNING` | Called inline in `start()` — HTTP blocks |
+| `false` | `QUEUED` | Worker daemon or cron |
 
-This variable only affects how `start()` behaves. The `WorkerRunCommand` always drains `QUEUED` tasks regardless of the mode.
+When `false`, the worker (daemon or cron) is responsible for calling `tick()` via the QUEUED queue drain. The daemon always processes both QUEUED tasks and due `scheduled_runs_next` entries. The cron mode processes one or both depending on flags.
 
 ---
 
-## Cron Mode (Shared Hosting)
+## Cron Mode (Shared Hosting with SPORA_SYNC_MODE=false)
 
 ```
-* * * * * /usr/bin/php /path/to/spora/bin/worker.php worker:run >> /storage/worker.log 2>&1
+* * * * * /usr/bin/php /path/to/spora/bin/spora worker:run --once --include-queue >> /storage/worker.log 2>&1
 ```
 
 Each invocation:
-1. Claims the oldest `QUEUED` task (`lockForUpdate`)
-2. Sets it to `RUNNING`
-3. Processes it to completion (or `PENDING_APPROVAL`)
-4. Exits
+1. Claims and processes all due `scheduled_runs_next` entries (atomic `UPDATE ... SET status = 'CLAIMED' WHERE status = 'PENDING' AND due_at <= now`)
+2. Claims the oldest `QUEUED` task (`lockForUpdate`)
+3. Sets it to `RUNNING`
+4. Processes it to completion (or `PENDING_APPROVAL`)
+5. Exits
 
 **Limitation:** If a task takes longer than one minute, the next cron fire will start a second worker while the first is still running. Both run concurrently — `lockForUpdate` prevents double-claiming the same task, so no data corruption occurs. However, both processes consume memory and CPU, and the LLM provider receives parallel requests. For tasks that regularly exceed 1 minute, use **daemon mode** instead.
 
@@ -47,17 +47,20 @@ Each invocation:
 ## Daemon Mode (VPS / Docker)
 
 ```bash
-php bin/worker.php worker:run --daemon
+php bin/spora worker:run --daemon
 ```
+
+The daemon polls both the QUEUED task queue and the `scheduled_runs_next` table every iteration. It runs until `SIGTERM` or `SIGINT`.
 
 Options:
 
 | Flag | Default | Description |
 |---|---|---|
 | `--daemon` / `-d` | — | Run as persistent daemon (exit on SIGTERM/SIGINT) |
-| `--limit` / `-l` | `0` (unlimited) | Max tasks to process per invocation (0 = unlimited) |
-| `--sleep` | `500000` (μs = 0.5s) | How long to sleep when queue is empty |
+| `--limit` / `-l` | `0` (unlimited) | Max QUEUED tasks to process per iteration (0 = unlimited) |
+| `--sleep` | `500000` (μs = 0.5s) | How long to sleep when both queues are empty |
 | `--stale-minutes` | `60` (config) | Minutes after which a `RUNNING` task is treated as orphaned (0 = disabled) |
+| `--workers` / `-w` | `0` (unlimited) | Max concurrent child processes (0 = unlimited, single-threaded) |
 
 ### Daemon + Docker Compose
 
@@ -173,7 +176,7 @@ Alert when either count is non-zero for more than 2 consecutive minutes.
 
 | Variable | Default | Config key | Description |
 |---|---|---|---|
-| `SPORA_SYNC_MODE` | `true` | `sync_mode` | `true` = inline (dev), `false` = queued (worker/cron) |
+| `SPORA_SYNC_MODE` | `true` | `sync_mode` | `true` = inline/dev (HTTP blocks), `false` = queued (worker drains) |
 | `SPORA_WORKER_STALE_MINUTES` | `60` | `worker_stale_minutes` | Minutes before a `RUNNING` task is considered orphaned (0 = disabled) |
 | `SPORA_LLM_TIMEOUT` | `300` | `llm_timeout` | Seconds for LLM API calls (reasoning models may need 300+) |
 | `SPORA_TOOL_HTTP_TIMEOUT` | `30` | `tool_http_timeout` | Seconds for tool HTTP requests (web search, calendars, etc.) |

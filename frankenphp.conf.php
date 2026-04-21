@@ -15,7 +15,4 @@
     logging {
         level info
     }
-    environment {
-        FRANKENPHP_CONFIG "worker bin/spora worker:run"
-    }
 }

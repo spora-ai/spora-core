@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Http\ScheduledRunController;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
+use Spora\Models\ScheduledRunNext;
 use Spora\Services\MercurePublisherInterface;
 
 function makeScheduledRunController(): array
@@ -301,6 +303,15 @@ describe('ScheduledRunController', function (): void {
             'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 hour')),
         ]);
 
+        // Pre-create PENDING entry (as store() would have done)
+        Capsule::table('scheduled_runs_next')->insert([
+            'scheduled_run_id' => $run->id,
+            'due_at'          => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'status'          => 'PENDING',
+            'created_at'      => date('Y-m-d H:i:s'),
+            'updated_at'      => date('Y-m-d H:i:s'),
+        ]);
+
         [$controller, $authService, $orchestrator] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['id' => $agentId, 'runId' => $run->id]);
         $response = $controller->trigger($request);
@@ -345,5 +356,248 @@ describe('ScheduledRunController', function (): void {
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
         expect($body['data']['task_id'])->not->toBeNull();
+    });
+
+    it('store computes next_run_at correctly in Europe/Berlin timezone for one-shot', function (): void {
+        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+
+        [$controller] = makeScheduledRunController();
+        // User selects 10:00 in Europe/Berlin (CEST, UTC+02:00) → 08:00 UTC
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
+            'raw_prompt' => 'Berlin test',
+            'run_at'     => '2026-04-20T10:00:00+02:00',
+            'timezone'   => 'Europe/Berlin',
+            'is_active'  => true,
+        ], ['id' => $agentId]);
+        $response = $controller->store($request);
+
+        expect($response->getStatusCode())->toBe(201);
+        $body = json_decode($response->getContent(), true);
+        // next_run_at must be 2026-04-20 10:00:00 in Europe/Berlin, which is 08:00 UTC
+        // The stored value is Y-m-d H:i:s in the timezone, so it should be 2026-04-20 10:00:00
+        // When serialized to ISO8601 it becomes 2026-04-20T10:00:00+02:00
+        $nextRunAt = $body['data']['scheduled_run']['next_run_at'];
+        expect($nextRunAt)->not->toBeNull();
+        // The ISO8601 string must reflect 10:00 Berlin time, not a different hour
+        $parsed = new DateTimeImmutable($nextRunAt);
+        $berlin = $parsed->setTimezone(new DateTimeZone('Europe/Berlin'));
+        expect((int) $berlin->format('H'))->toBe(10);
+        expect((int) $berlin->format('i'))->toBe(0);
+    });
+
+    it('store computes next_run_at correctly in Europe/Berlin timezone for recurring', function (): void {
+        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+
+        [$controller] = makeScheduledRunController();
+        // Daily at 09:00 Berlin
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
+            'raw_prompt'      => 'Berlin daily',
+            'cron_expression' => '0 9 * * *',
+            'timezone'        => 'Europe/Berlin',
+            'is_active'       => true,
+        ], ['id' => $agentId]);
+        $response = $controller->store($request);
+
+        expect($response->getStatusCode())->toBe(201);
+        $body = json_decode($response->getContent(), true);
+        $nextRunAt = $body['data']['scheduled_run']['next_run_at'];
+        expect($nextRunAt)->not->toBeNull();
+        // Next run must be 09:00 Berlin time
+        $parsed = new DateTimeImmutable($nextRunAt);
+        $berlin = $parsed->setTimezone(new DateTimeZone('Europe/Berlin'));
+        expect((int) $berlin->format('H'))->toBe(9);
+        expect((int) $berlin->format('i'))->toBe(0);
+    });
+
+    it('store normalizes run_at from ISO 8601 offset to UTC Y-m-d H:i:s', function (): void {
+        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+
+        [$controller] = makeScheduledRunController();
+        // Frontend sends: 10:00 in Europe/Berlin (CEST, +02:00) → UTC is 08:00
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
+            'raw_prompt' => 'Normalize test',
+            'run_at'     => '2026-04-20T10:00:00+02:00',
+            'timezone'   => 'Europe/Berlin',
+            'is_active'  => true,
+        ], ['id' => $agentId]);
+        $response = $controller->store($request);
+
+        expect($response->getStatusCode())->toBe(201);
+        $body = json_decode($response->getContent(), true);
+        $runAtReturned = $body['data']['scheduled_run']['run_at'];
+        expect($runAtReturned)->not->toBeNull();
+        // run_at in response must be 10:00 Berlin (with offset +02:00), not 08:00 UTC
+        $parsed = new DateTimeImmutable($runAtReturned);
+        $berlin = $parsed->setTimezone(new DateTimeZone('Europe/Berlin'));
+        expect((int) $berlin->format('H'))->toBe(10);
+    });
+
+    it('store creates a PENDING scheduled_runs_next entry for recurring runs', function (): void {
+        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+
+        [$controller] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
+            'raw_prompt'      => 'Daily check',
+            'cron_expression' => '0 9 * * *',
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ], ['id' => $agentId]);
+        $response = $controller->store($request);
+
+        expect($response->getStatusCode())->toBe(201);
+        $body = json_decode($response->getContent(), true);
+        $runId = $body['data']['scheduled_run']['id'];
+
+        $entry = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $runId)
+            ->first();
+        expect($entry)->not->toBeNull();
+        expect($entry->status)->toBe('PENDING');
+    });
+
+    it('store creates a PENDING scheduled_runs_next entry for one-shot runs', function (): void {
+        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+
+        [$controller] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
+            'raw_prompt' => 'One-time task',
+            'run_at'     => date('c', strtotime('+1 hour')),
+            'timezone'   => 'UTC',
+            'is_active'  => true,
+        ], ['id' => $agentId]);
+        $response = $controller->store($request);
+
+        expect($response->getStatusCode())->toBe(201);
+        $body = json_decode($response->getContent(), true);
+        $runId = $body['data']['scheduled_run']['id'];
+
+        $entry = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $runId)
+            ->first();
+        expect($entry)->not->toBeNull();
+        expect($entry->status)->toBe('PENDING');
+    });
+
+    it('trigger marks PENDING entry as DONE and inserts next PENDING for recurring runs', function (): void {
+        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+
+        $run = ScheduledRun::create([
+            'agent_id'      => $agentId,
+            'user_id'       => $userId,
+            'raw_prompt'    => 'Trigger me',
+            'cron_expression' => '0 9 * * *',
+            'run_at'        => null,
+            'timezone'      => 'UTC',
+            'is_active'     => true,
+            'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 hour')),
+        ]);
+
+        // Pre-create a PENDING entry (simulating what store() would have done)
+        Capsule::table('scheduled_runs_next')->insert([
+            'scheduled_run_id' => $run->id,
+            'due_at'          => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'status'          => 'PENDING',
+            'created_at'      => date('Y-m-d H:i:s'),
+            'updated_at'      => date('Y-m-d H:i:s'),
+        ]);
+
+        [$controller] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['id' => $agentId, 'runId' => $run->id]);
+        $response = $controller->trigger($request);
+
+        expect($response->getStatusCode())->toBe(200);
+
+        // Previous PENDING should now be DONE
+        $doneEntry = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $run->id)
+            ->where('status', 'DONE')
+            ->first();
+        expect($doneEntry)->not->toBeNull();
+
+        // A new PENDING entry should exist for the recurring schedule
+        $nextEntry = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $run->id)
+            ->where('status', 'PENDING')
+            ->first();
+        expect($nextEntry)->not->toBeNull();
+        expect($nextEntry->due_at)->not->toBeNull();
+    });
+
+    it('trigger marks PENDING entry as DONE with no new entry for one-shot', function (): void {
+        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+
+        $run = ScheduledRun::create([
+            'agent_id'      => $agentId,
+            'user_id'       => $userId,
+            'raw_prompt'    => 'One-shot task',
+            'cron_expression' => null,
+            'run_at'        => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'timezone'      => 'UTC',
+            'is_active'     => true,
+            'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 hour')),
+        ]);
+
+        Capsule::table('scheduled_runs_next')->insert([
+            'scheduled_run_id' => $run->id,
+            'due_at'          => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'status'          => 'PENDING',
+            'created_at'      => date('Y-m-d H:i:s'),
+            'updated_at'      => date('Y-m-d H:i:s'),
+        ]);
+
+        [$controller] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['id' => $agentId, 'runId' => $run->id]);
+        $response = $controller->trigger($request);
+
+        expect($response->getStatusCode())->toBe(200);
+
+        // Previous PENDING should now be DONE
+        $doneEntry = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $run->id)
+            ->where('status', 'DONE')
+            ->first();
+        expect($doneEntry)->not->toBeNull();
+
+        // No new PENDING entry for one-shot
+        $pendingCount = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $run->id)
+            ->where('status', 'PENDING')
+            ->count();
+        expect($pendingCount)->toBe(0);
+    });
+
+    it('resource returns next_run_at from PENDING scheduled_runs_next entry', function (): void {
+        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+
+        $run = ScheduledRun::create([
+            'agent_id'      => $agentId,
+            'user_id'       => $userId,
+            'raw_prompt'    => 'Show me',
+            'cron_expression' => '0 9 * * *',
+            'timezone'      => 'UTC',
+            'is_active'     => true,
+            'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 day')),
+        ]);
+
+        // Insert a PENDING entry with a deterministic 09:00 UTC due_at
+        $futureDue = date('Y-m-d 09:00:00', strtotime('+2 days'));
+        Capsule::table('scheduled_runs_next')->insert([
+            'scheduled_run_id' => $run->id,
+            'due_at'          => $futureDue,
+            'status'          => 'PENDING',
+            'created_at'      => date('Y-m-d H:i:s'),
+            'updated_at'      => date('Y-m-d H:i:s'),
+        ]);
+
+        [$controller] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}", [], ['id' => $agentId, 'runId' => $run->id]);
+        $response = $controller->show($request);
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['scheduled_run']['next_run_at'])->not->toBeNull();
+        // next_run_at should reflect the PENDING entry's due_at (UTC 09:00 next day = ISO8601)
+        $parsed = new DateTimeImmutable($body['data']['scheduled_run']['next_run_at']);
+        expect((int) $parsed->format('H'))->toBe(9);
     });
 });

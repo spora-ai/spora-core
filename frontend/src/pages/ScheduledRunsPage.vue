@@ -65,7 +65,7 @@ function formatSchedule(run: ScheduledRunResource): string {
   }
   if (run.run_at) {
     try {
-      return `One-shot: ${new Date(run.run_at).toLocaleString()}`
+      return `One-shot: ${new Date(run.run_at).toLocaleString(undefined, { timeZone: run.timezone })}`
     } catch {
       return 'One-shot'
     }
@@ -73,10 +73,10 @@ function formatSchedule(run: ScheduledRunResource): string {
   return 'Unknown'
 }
 
-function formatTs(iso: string | null): string {
+function formatTs(iso: string | null, tz: string): string {
   if (!iso) return '—'
   try {
-    return new Date(iso).toLocaleString()
+    return new Date(iso).toLocaleString(undefined, { timeZone: tz })
   } catch {
     return iso
   }
@@ -167,7 +167,7 @@ function scheduleName(run: ScheduledRunResource): string {
     <!-- Empty -->
     <div
       v-else-if="runs.length === 0"
-      class="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center"
+      class="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center"
     >
       <div class="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
         <svg class="h-6 w-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -228,13 +228,13 @@ function scheduleName(run: ScheduledRunResource): string {
           <!-- Last run -->
           <div class="shrink-0 text-right hidden sm:block">
             <p class="text-xs text-muted-foreground">Last run</p>
-            <p class="text-xs font-medium mt-0.5">{{ formatTs(run.last_run_at) }}</p>
+            <p class="text-xs font-medium mt-0.5">{{ formatTs(run.last_run_at, run.timezone) }} <span class="text-muted-foreground text-[10px]">{{ run.timezone }}</span></p>
           </div>
 
           <!-- Next run -->
           <div class="shrink-0 text-right hidden md:block">
             <p class="text-xs text-muted-foreground">Next run</p>
-            <p class="text-xs font-medium mt-0.5">{{ formatTs(run.next_run_at) }}</p>
+            <p class="text-xs font-medium mt-0.5">{{ formatTs(run.next_run_at, run.timezone) }} <span class="text-muted-foreground text-[10px]">{{ run.timezone }}</span></p>
           </div>
 
           <!-- Active toggle -->

@@ -21,11 +21,20 @@ export interface ToolSettingSchema {
   options: string[] | null
 }
 
+export interface ToolOperationSchema {
+  name: string
+  description: string
+  enabledByDefault: boolean
+  requiresApprovalByDefault: boolean
+}
+
 export interface ToolSchema {
   tool_class: string
   tool_name: string
   display_name: string | null
+  category: string
   settings_schema: ToolSettingSchema[]
+  operations: ToolOperationSchema[]
 }
 
 export interface ToolStatus {

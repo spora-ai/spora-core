@@ -144,7 +144,9 @@ return [
     },
 
     Database::class => static function (ContainerInterface $c): Database {
-        return new Database($c->get('config'), $c->get(PluginLoader::class));
+        $db = new Database($c->get('config'), $c->get(PluginLoader::class));
+        $db->bootDatabaseConnectionOnly();
+        return $db;
     },
 
     Psr\Log\LoggerInterface::class => static function (ContainerInterface $c): Psr\Log\LoggerInterface {
@@ -218,9 +220,9 @@ return [
         Spora\Tools\ReadUrlTool::class,
         Spora\Tools\NewsApiTool::class,
         Spora\Tools\GNewsTool::class,
-        Spora\Tools\ReadEmailTool::class,
-        Spora\Tools\SendEmailTool::class,
+        Spora\Tools\EmailTool::class,
         Spora\Tools\CalDavCalendarTool::class,
+        Spora\Tools\UserInfoTool::class,
     ],
 
     Spora\Http\LLMConfigController::class => static function (ContainerInterface $c): Spora\Http\LLMConfigController {
@@ -374,6 +376,12 @@ return [
             $c->get(AuthService::class),
             $config['mercure_url'] ?? null,
             $config['mercure_jwt_key'] ?? null,
+        );
+    },
+
+    Spora\Http\UserProfileController::class => static function (ContainerInterface $c): Spora\Http\UserProfileController {
+        return new Spora\Http\UserProfileController(
+            $c->get(AuthService::class),
         );
     },
 ];

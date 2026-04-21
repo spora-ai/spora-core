@@ -7,8 +7,10 @@ namespace Spora\Tools;
 use Psr\Log\LoggerInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
+use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -17,7 +19,9 @@ use Throwable;
     name: 'gnews_search',
     description: 'Fetch the latest news headlines from GNews.io. Use this to find out what is happening in the world right now regarding a specific topic.',
     displayName: 'GNews Search',
+    category: 'research',
 )]
+#[ToolOperation(name: 'search', description: 'Fetch latest news from GNews.io', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolSetting(
     key: 'core.gnews.api_key',
     label: 'GNews.io API Key',
@@ -39,8 +43,9 @@ use Throwable;
     description: 'Keywords or phrases to search for in the news.',
     required: true,
 )]
-final class GNewsTool implements InputToolInterface
+final class GNewsTool implements ToolInterface
 {
+    use HasOperations;
     public function __construct(
         private readonly ToolConfigService $configService,
         private readonly HttpClientInterface $httpClient,
@@ -57,6 +62,17 @@ final class GNewsTool implements InputToolInterface
     }
 
     public function execute(array $arguments, int $agentId): ToolResult
+    {
+        return $this->search($arguments, $agentId);
+    }
+
+    public function describeAction(array $arguments): string
+    {
+        $query = trim((string) ($arguments['q'] ?? ''));
+        return "Fetch news from GNews.io for: '{$query}'";
+    }
+
+    public function search(array $arguments, int $agentId): ToolResult
     {
         $query = trim((string) ($arguments['q'] ?? ''));
 

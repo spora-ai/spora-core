@@ -198,6 +198,15 @@ final class TaskController
             ]];
         }
 
+        // Normalize arguments: ensure all approved argument objects are arrays,
+        // not stdClass (which can happen when request body is JSON-decoded).
+        foreach ($approvedBatch as &$item) {
+            if (isset($item['arguments']) && is_object($item['arguments'])) {
+                $item['arguments'] = (array) $item['arguments'];
+            }
+        }
+        unset($item);
+
         $this->orchestrator->resume($task->id, $approvedBatch);
         $fresh = $task->fresh();
         $this->mercure->publish($fresh->id, $this->taskResource($fresh));
@@ -303,6 +312,40 @@ final class TaskController
         );
     }
 
+    /**
+     * DELETE /api/v1/tasks/{taskId}/retry-chain
+     *
+     * Cancels this task and ALL subsequent retry tasks in the same retry chain.
+     * All retry tasks share the same retry_of_task_id (the root original task),
+     * so a single WHERE clause cancels the entire chain.
+     */
+    public function cancelRetryChain(Request $request): Response
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
+
+        if ($task === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+
+        if ($task->retry_of_task_id === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_STATE', 'message' => 'This task is not part of a retry chain.']],
+                Response::HTTP_CONFLICT,
+            );
+        }
+
+        Capsule::table('tasks')
+            ->where('retry_of_task_id', $task->retry_of_task_id)
+            ->where('retry_count', '>=', $task->retry_count)
+            ->update(['status' => 'CANCELLED']);
+
+        return new Response(null, Response::HTTP_NO_CONTENT);
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
@@ -333,6 +376,15 @@ final class TaskController
         if ($task->error_code !== null) {
             $resource['error_code'] = $task->error_code;
             $resource['error_message'] = $task->error_message;
+        }
+
+        if ($task->retry_of_task_id !== null) {
+            $resource['retry_of_task_id'] = $task->retry_of_task_id;
+            $resource['retry_count'] = $task->retry_count;
+        }
+
+        if ($task->retry_after !== null) {
+            $resource['retry_after'] = $task->retry_after->toIso8601String();
         }
 
         return $resource;

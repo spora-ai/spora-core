@@ -66,6 +66,8 @@ const identityForm = ref({
   system_prompt: '',
   max_steps: 10,
   allow_followup: true,
+  retry_after_minutes: 0,
+  max_retries: 0,
 })
 const savingIdentity = ref(false)
 const identityError = ref<string | null>(null)
@@ -77,6 +79,9 @@ const identitySaved = ref(false)
 const enabledToolNames = ref<Set<string>>(new Set())
 const autoApprovedMap = ref<Record<string, boolean>>({})
 
+// Per-operation effective states: Record<toolName, Record<operationName, { enabled, requiresApproval }>>
+const operationStates = ref<Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>>>({})
+
 const savingTools = ref<Record<string, boolean>>({})
 const toolsError = ref<string | null>(null)
 
@@ -85,6 +90,29 @@ const configuringTool = ref<string | null>(null)
 
 // Pre-activation warning modal
 const pendingEnableTool = ref<string | null>(null)
+
+// Collapsed state per category
+const collapsedCategories = ref<Record<string, boolean>>({})
+
+// ── Tools by category ────────────────────────────────────────────────────────
+
+function toLabel(cat: string): string {
+  return cat.charAt(0).toUpperCase() + cat.slice(1)
+}
+
+const toolsByCategory = computed(() => {
+  const groups: Record<string, ToolSchema[]> = {}
+  for (const tool of toolRegistry.value) {
+    const cat = (tool as any).category ?? 'general'
+    if (!groups[cat]) groups[cat] = []
+    groups[cat].push(tool)
+  }
+  return groups
+})
+
+const sortedCategories = computed(() =>
+  Object.keys(toolsByCategory.value).sort((a, b) => toLabel(a).localeCompare(toLabel(b))),
+)
 
 function showEnableWarning(toolName: string): void {
   pendingEnableTool.value = toolName
@@ -115,6 +143,8 @@ onMounted(async () => {
     system_prompt: agent.system_prompt ?? '',
     max_steps: agent.max_steps ?? 10,
     allow_followup: agent.allow_followup !== false,
+    retry_after_minutes: agent.retry_after_minutes ?? 0,
+    max_retries: agent.max_retries ?? 0,
   }
   llmSettingsForm.value = {
     llm_driver_config_id: agent.llm_driver_config_id ?? null,
@@ -148,6 +178,9 @@ onMounted(async () => {
       toolStatusMap.value[toolsResult.tools[i].tool_name] = result.value
     }
   }
+
+  // Load operation overrides for all enabled tools that have operations
+  await loadOperationOverrides()
 })
 
 // ── Identity ─────────────────────────────────────────────────────────────────
@@ -163,6 +196,8 @@ async function saveIdentity(): Promise<void> {
       system_prompt: identityForm.value.system_prompt || null,
       max_steps: identityForm.value.max_steps,
       allow_followup: identityForm.value.allow_followup,
+      retry_after_minutes: identityForm.value.retry_after_minutes,
+      max_retries: identityForm.value.max_retries,
     })
     identitySaved.value = true
     setTimeout(() => { identitySaved.value = false }, 2000)
@@ -240,6 +275,32 @@ async function toggleTool(toolName: string): Promise<void> {
   }
 }
 
+async function loadOperationOverrides(): Promise<void> {
+  const enabledToolsWithOps = toolRegistry.value.filter(
+    (t) => t.operations && t.operations.length > 0 && enabledToolNames.value.has(t.tool_name),
+  )
+  if (enabledToolsWithOps.length === 0) return
+
+  const promises = enabledToolsWithOps.flatMap((tool) =>
+    (tool.operations ?? []).map((op) =>
+      agentStore.getOperationOverride(agentId.value, tool.tool_name, op.name)
+        .then((result) => ({ toolName: tool.tool_name, opName: op.name, result }))
+        .catch(() => null),
+    ),
+  )
+  const results = await Promise.all(promises)
+  for (const r of results) {
+    if (!r) continue
+    if (!operationStates.value[r.toolName]) {
+      operationStates.value[r.toolName] = {}
+    }
+    operationStates.value[r.toolName][r.opName] = {
+      enabled: r.result.effective_enabled,
+      requiresApproval: r.result.effective_requires_approval,
+    }
+  }
+}
+
 async function toggleAutoApprove(toolName: string): Promise<void> {
   if (!enabledToolNames.value.has(toolName)) return
   savingTools.value[toolName] = true
@@ -249,6 +310,63 @@ async function toggleAutoApprove(toolName: string): Promise<void> {
     autoApprovedMap.value[toolName] = newValue
   } catch (e) {
     toolsError.value = e instanceof ApiError ? e.message : 'Failed to update auto-approve.'
+  } finally {
+    savingTools.value[toolName] = false
+  }
+}
+
+async function toggleOperationEnabled(toolName: string, operationName: string): Promise<void> {
+  savingTools.value[toolName] = true
+  toolsError.value = null
+  try {
+    const current = operationStates.value[toolName]?.[operationName]
+    const newEnabled = !current?.enabled
+
+    await agentStore.patchOperationOverride(agentId.value, toolName, operationName, { enabled: newEnabled })
+
+    if (!operationStates.value[toolName]) {
+      operationStates.value[toolName] = {}
+    }
+    if (!operationStates.value[toolName][operationName]) {
+      operationStates.value[toolName][operationName] = { enabled: true, requiresApproval: true }
+    }
+    operationStates.value[toolName][operationName] = {
+      ...operationStates.value[toolName][operationName],
+      enabled: newEnabled,
+    }
+  } catch (e) {
+    toolsError.value = e instanceof ApiError ? e.message : 'Failed to update operation.'
+  } finally {
+    savingTools.value[toolName] = false
+  }
+}
+
+async function toggleOperationAutoApprove(toolName: string, operationName: string): Promise<void> {
+  savingTools.value[toolName] = true
+  toolsError.value = null
+  try {
+    const current = operationStates.value[toolName]?.[operationName]
+    // Toggling auto-approve ON means default_requires_approval = false
+    // Toggling auto-approve OFF means default_requires_approval = true
+    const currentRequiresApproval = current?.requiresApproval ?? true
+    const newRequiresApproval = !currentRequiresApproval
+
+    await agentStore.patchOperationOverride(agentId.value, toolName, operationName, {
+      default_requires_approval: newRequiresApproval,
+    })
+
+    if (!operationStates.value[toolName]) {
+      operationStates.value[toolName] = {}
+    }
+    if (!operationStates.value[toolName][operationName]) {
+      operationStates.value[toolName][operationName] = { enabled: true, requiresApproval: true }
+    }
+    operationStates.value[toolName][operationName] = {
+      ...operationStates.value[toolName][operationName],
+      requiresApproval: newRequiresApproval,
+    }
+  } catch (e) {
+    toolsError.value = e instanceof ApiError ? e.message : 'Failed to update operation auto-approve.'
   } finally {
     savingTools.value[toolName] = false
   }
@@ -348,6 +466,37 @@ async function deleteAgent(): Promise<void> {
             <p class="text-xs text-muted-foreground">When enabled, users can continue a conversation after a task completes.</p>
           </div>
         </div>
+
+        <!-- Auto-Retry -->
+        <div class="border-t border-border pt-4 mt-2 flex flex-col gap-4">
+          <h3 class="text-sm font-semibold">Auto-Retry</h3>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5">
+              <label for="retry-after-minutes" class="text-sm font-medium">Retry after (minutes)</label>
+              <input
+                id="retry-after-minutes"
+                v-model.number="identityForm.retry_after_minutes"
+                type="number"
+                min="0"
+                placeholder="0 = disabled"
+                class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <p class="text-xs text-muted-foreground">Wait time before auto-retry (0 = disabled).</p>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label for="max-retries" class="text-sm font-medium">Max retries</label>
+              <input
+                id="max-retries"
+                v-model.number="identityForm.max_retries"
+                type="number"
+                min="0"
+                placeholder="0 = no auto-retry"
+                class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <p class="text-xs text-muted-foreground">Maximum retry attempts (0 = no auto-retry).</p>
+            </div>
+          </div>
+        </div>
         <div class="flex items-center justify-between">
           <p v-if="identityError" role="alert" class="text-xs text-destructive">{{ identityError }}</p>
           <span v-else-if="identitySaved" class="text-xs text-green-600 dark:text-green-400">Saved!</span>
@@ -412,26 +561,46 @@ async function deleteAgent(): Promise<void> {
         <div class="px-5 py-4">
           <h2 class="text-base font-semibold">Tools</h2>
         </div>
-          <AgentToolListItem
-            v-for="tool in toolRegistry"
-            :key="tool.tool_class"
-            :tool="tool"
-            :enabled="enabledToolNames.has(tool.tool_name)"
-            :autoApproved="autoApprovedMap[tool.tool_name] ?? false"
-            :saving="savingTools[tool.tool_name] ?? false"
-            :missingRequired="toolStatusMap[tool.tool_name]?.missing_required ?? []"
-            @toggle="toggleTool(tool.tool_name)"
-            @toggleAutoApprove="toggleAutoApprove(tool.tool_name)"
-            @openConfig="configuringTool = tool.tool_name"
-          />
 
-          <div v-if="loadingTools" class="px-5 py-4 text-sm text-muted-foreground">
-            Loading tools…
+        <template v-for="cat in sortedCategories" :key="cat">
+          <div class="px-5 py-3 flex items-center justify-between bg-muted/30 cursor-pointer select-none"
+               @click="collapsedCategories[cat] = !collapsedCategories[cat]">
+            <h3 class="text-sm font-medium">{{ toLabel(cat) }}</h3>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-muted-foreground">{{ toolsByCategory[cat].length }}</span>
+              <svg class="h-4 w-4 text-muted-foreground transition-transform"
+                   :class="{ '-rotate-90': collapsedCategories[cat] }"
+                   fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
           </div>
-          <div v-else-if="toolRegistry.length === 0" class="px-5 py-4 text-sm text-muted-foreground">
-            No tools registered.
-          </div>
-          <p v-if="toolsError" role="alert" class="px-5 py-3 text-xs text-destructive">{{ toolsError }}</p>
+          <template v-if="!collapsedCategories[cat]">
+            <AgentToolListItem
+              v-for="tool in toolsByCategory[cat]"
+              :key="tool.tool_class"
+              :tool="tool"
+              :enabled="enabledToolNames.has(tool.tool_name)"
+              :autoApproved="autoApprovedMap[tool.tool_name] ?? false"
+              :saving="savingTools[tool.tool_name] ?? false"
+              :missingRequired="toolStatusMap[tool.tool_name]?.missing_required ?? []"
+              :operationStates="operationStates[tool.tool_name]"
+              @toggle="toggleTool(tool.tool_name)"
+              @toggleAutoApprove="toggleAutoApprove(tool.tool_name)"
+              @openConfig="configuringTool = tool.tool_name"
+              @toggleOperationEnabled="(op) => toggleOperationEnabled(tool.tool_name, op)"
+              @toggleOperationAutoApprove="(op) => toggleOperationAutoApprove(tool.tool_name, op)"
+            />
+          </template>
+        </template>
+
+        <div v-if="loadingTools" class="px-5 py-4 text-sm text-muted-foreground">
+          Loading tools…
+        </div>
+        <div v-else-if="toolRegistry.length === 0" class="px-5 py-4 text-sm text-muted-foreground">
+          No tools registered.
+        </div>
+        <p v-if="toolsError" role="alert" class="px-5 py-3 text-xs text-destructive">{{ toolsError }}</p>
       </section>
 
       <!-- ── LLM Config Create Modal ─────────────────────────────────────── -->
