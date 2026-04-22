@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use JsonException;
 use Illuminate\Support\Carbon;
+use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
 use Spora\Models\User;
@@ -13,7 +13,6 @@ use Spora\Models\UserLocation;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Throwable;
 
 final class UserProfileController
 {
@@ -93,7 +92,12 @@ final class UserProfileController
         AuthGuard::requireAuth($this->authService);
 
         $userId = $this->authService->currentUserId();
-        $locations = User::find($userId)->locations ?? collect();
+        $user = User::find($userId);
+
+        if ($user === null) {
+            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'User not found.']], 404);
+        }
+        $locations = $user->locations ?? collect();
 
         $data = $locations->map(fn(UserLocation $loc) => [
             'id'        => $loc->id,
@@ -173,10 +177,18 @@ final class UserProfileController
         }
 
         if (isset($body['name'])) {
-            $location->name = trim((string) $body['name']) ?: null;
+            $name = trim((string) $body['name']);
+            if ($name === '') {
+                return new JsonResponse(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'name is required and cannot be empty.']], 422);
+            }
+            $location->name = $name;
         }
         if (isset($body['address'])) {
-            $location->address = trim((string) $body['address']) ?: null;
+            $address = trim((string) $body['address']);
+            if ($address === '') {
+                return new JsonResponse(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'address is required and cannot be empty.']], 422);
+            }
+            $location->address = $address;
         }
         if (isset($body['is_default'])) {
             if ($body['is_default'] === true) {

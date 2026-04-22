@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use DateTimeInterface;
 use Illuminate\Support\Carbon;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;

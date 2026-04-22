@@ -473,8 +473,8 @@ final class AgentController
         return new JsonResponse(['data' => [
             'operation'                  => $operation,
             'tool_class'                 => $toolClass,
-            'enabled'                    => $row !== null ? (int) $row->enabled === 1 : null,
-            'default_requires_approval'  => $row !== null ? (int) $row->default_requires_approval === 1 : null,
+            'enabled'                    => ($row !== null && $row->getRawOriginal('enabled') !== null) ? (int) $row->getRawOriginal('enabled') === 1 : null,
+            'default_requires_approval'  => ($row !== null && $row->getRawOriginal('default_requires_approval') !== null) ? (int) $row->getRawOriginal('default_requires_approval') === 1 : null,
             'effective_enabled'          => $effectiveEnabled,
             'effective_requires_approval' => $effectiveRequiresApproval,
         ]]);
@@ -500,9 +500,11 @@ final class AgentController
             return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         }
 
-        $enabled             = array_key_exists('enabled', $body) ? ($body['enabled'] ? 1 : ($body['enabled'] === false ? 0 : null)) : null;
+        $enabled = array_key_exists('enabled', $body)
+            ? ($body['enabled'] === null ? null : (filter_var($body['enabled'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0))
+            : null;
         $defaultRequiresApproval = array_key_exists('default_requires_approval', $body)
-            ? ($body['default_requires_approval'] ? 1 : ($body['default_requires_approval'] === false ? 0 : null))
+            ? ($body['default_requires_approval'] === null ? null : (filter_var($body['default_requires_approval'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0))
             : null;
 
         /** @var AgentToolOperationOverride|null $existing */
@@ -583,7 +585,7 @@ final class AgentController
         if ($override !== null) {
             $raw = $override->getRawOriginal('default_requires_approval');
             if ($raw !== null) {
-                return !((bool) $raw);
+                return (bool) $raw;
             }
         }
 
@@ -604,7 +606,11 @@ final class AgentController
             return null;
         }
         if (!isset($instances[$toolClass])) {
-            $instances[$toolClass] = new $toolClass();
+            try {
+                $instances[$toolClass] = (new ReflectionClass($toolClass))->newInstanceWithoutConstructor();
+            } catch (Throwable $e) {
+                return null;
+            }
         }
         return $instances[$toolClass];
     }

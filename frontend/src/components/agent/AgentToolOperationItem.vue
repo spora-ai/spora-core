@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import Toggle from '@/components/ui/Toggle.vue'
 
 const props = defineProps<{

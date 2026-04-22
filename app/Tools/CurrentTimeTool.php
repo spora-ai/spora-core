@@ -6,11 +6,11 @@ namespace Spora\Tools;
 
 use DateTimeImmutable;
 use DateTimeInterface;
-use stdClass;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
+use stdClass;
 
 #[Tool(
     name: 'current_time',
@@ -49,7 +49,7 @@ final class CurrentTimeTool implements ToolInterface
     {
         return [
             'type'       => 'object',
-            'properties' => [],
+            'properties' => new stdClass(),
             'required'   => [],
         ];
     }

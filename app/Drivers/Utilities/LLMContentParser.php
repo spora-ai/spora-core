@@ -7,13 +7,6 @@ namespace Spora\Drivers\Utilities;
 final class LLMContentParser
 {
     /**
-     * Parses raw API message content into structured text and reasoning.
-     *
-     * Handles:
-     * - Array of blocks (OpenAI o1/o3, LM Studio)
-     * - Array of Anthropic blocks
-     * - Strings containing <thinking>...</thinking> XML tags (DeepSeek, open-source models via litellm)
-     *
      * @param string|array<int, mixed>|null $rawContent
      * @return array{content: string, reasoning: string|null}
      */
@@ -23,7 +16,7 @@ final class LLMContentParser
         $reasoning   = null;
 
         if (is_array($rawContent)) {
-            // Process blocks (e.g. [{'type':'text','text':'...'}, {'type':'thinking','thinking':'...'}])
+            // Block array format: [{'type':'text','text':'...'}, {'type':'thinking','thinking':'...'}]
             foreach ($rawContent as $block) {
                 if (!is_array($block)) {
                     continue;
@@ -68,20 +61,23 @@ final class LLMContentParser
         $textContent = '';
         $reasoning   = null;
 
-        // Some providers embed thinking as XML tags inside a plain string.
-        if (preg_match_all('/<thinking\b[^>]*>(.*?)<\/thinking>/is', $rawContent, $matches)) {
-            $reasoning = implode("\n", array_map('trim', $matches[1]));
-            $textContent = trim(
-                preg_replace_callback(
-                    '/<\/?text[^>]*>/is',
-                    static fn(): string => ' ',
-                    $rawContent,
-                ),
-            );
-            $textContent = preg_replace('/<thinking\b[^>]*>.*?<\/thinking>/is', '', $textContent);
-            $textContent = trim(preg_replace('/\s+/', ' ', $textContent));
-        } else {
-            $textContent = $rawContent;
+        // Match <think>...</think> (Anthropic), <thinking>...</thinking>, <thought>...</thought>
+        $textContent = $rawContent;
+        foreach ([
+            '#<think>(.*?)</think>#is',
+            '/<thinking\b[^>]*>(.*?)<\/thinking>/is',
+            '/<thought\b[^>]*>(.*?)<\/thought>/is',
+        ] as $pattern) {
+            if (preg_match_all($pattern, $rawContent, $matches)) {
+                $reasoning = implode("\n", array_map('trim', $matches[1]));
+                // Strip <text>...</text> wrappers and replace with space
+                $textContent = preg_replace_callback('/<\/?text[^>]*>/is', static fn(): string => ' ', $textContent);
+                // Remove thinking tags
+                $textContent = preg_replace($pattern, '', $textContent);
+                // Collapse horizontal whitespace only (preserve newlines)
+                $textContent = trim(preg_replace('/[ \t]+/', ' ', $textContent));
+                break;
+            }
         }
 
         return [

@@ -179,6 +179,11 @@ final class ScheduledRunController
             // Recompute next_run_at if scheduling fields change
             if (array_key_exists('cron_expression', $data) || array_key_exists('run_at', $data) || array_key_exists('timezone', $data)) {
                 $cron     = $data['cron_expression'] ?? $run->cron_expression;
+
+                if (array_key_exists('run_at', $data) && is_string($data['run_at'])) {
+                    $data['run_at'] = $this->normalizeRunAtToUtc($data['run_at']);
+                }
+
                 $runAt    = $data['run_at'] ?? $run->run_at?->toDateTimeString();
                 $timezone = $data['timezone'] ?? $run->timezone;
                 $isRecurring = !empty($cron);
@@ -186,9 +191,7 @@ final class ScheduledRunController
                     ? $this->computeNextRunAt($cron, $timezone)
                     : $this->computeOneShotNextRunAt($runAt, $timezone);
 
-                // If the run is recurring, mark all existing PENDING entries as SKIPPED
-                // and insert a new PENDING entry with the updated due_at.
-                if ($isRecurring) {
+                if ($data['next_run_at'] !== null) {
                     $now = date('Y-m-d H:i:s');
                     Capsule::table('scheduled_runs_next')
                         ->where('scheduled_run_id', $run->id)

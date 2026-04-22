@@ -167,7 +167,7 @@ function scheduleName(run: ScheduledRunResource): string {
     <!-- Empty -->
     <div
       v-else-if="runs.length === 0"
-      class="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center"
+      class="flex-1 flex flex-col items-center justify-center gap-4 px-6 py-16 text-center"
     >
       <div class="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
         <svg class="h-6 w-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">

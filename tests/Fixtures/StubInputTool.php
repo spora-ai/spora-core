@@ -6,8 +6,8 @@ namespace Tests\Fixtures;
 
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ToolInterface;
+use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 
 #[Tool(name: 'stub_input', description: 'A stub input tool for testing')]

@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Spora\Http\Middleware\AuthGuard;
 use Spora\Http\UserProfileController;
 use Spora\Models\User;
 use Spora\Models\UserLocation;

@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Spora\Tools;
 
 use Spora\Tools\Attributes\ToolOperation;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
+use stdClass;
 
 /**
  * Unified tool interface — replaces InputToolInterface and OutputToolInterface.
@@ -43,7 +43,7 @@ interface ToolInterface
      *
      * @return array{
      *   type: "object",
-     *   properties: array<string, array{type: string, description: string}>,
+     *   properties: array<string, array{type: string, description: string}>|stdClass,
      *   required: list<string>
      * }
      */

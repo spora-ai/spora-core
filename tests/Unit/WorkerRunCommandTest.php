@@ -28,8 +28,8 @@ function makeWorkerRunCommand(): array
     $db->boot();
 
     $orchestrator = Mockery::mock(OrchestratorInterface::class);
-    $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): \Spora\Models\Task {
-        return \Spora\Models\Task::create([
+    $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Spora\Models\Task {
+        return Spora\Models\Task::create([
             'agent_id'    => $agentId,
             'user_id'     => 1,
             'status'      => 'RUNNING',
@@ -45,7 +45,7 @@ function makeWorkerRunCommand(): array
     $notificationService = Mockery::mock(NotificationService::class);
     $notificationService->allows('notifyScheduledRunCompleted')->andReturnNull();
 
-    $container = Mockery::mock(\Psr\Container\ContainerInterface::class);
+    $container = Mockery::mock(Psr\Container\ContainerInterface::class);
     $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
 
     $command = new WorkerRunCommand(
@@ -64,7 +64,7 @@ function makeWorkerRunCommand(): array
  * Registers an agent in the same DB that makeWorkerRunCommand() boots.
  * Must be called AFTER makeWorkerRunCommand() so both share the same in-memory DB.
  */
-function registerAgentInWorkerDb(): array
+function registerAgentInWorkerDb($db = null): array
 {
     // Use the already-booted global Capsule (set up by makeWorkerRunCommand).
     // Do NOT call resetBootState() or boot() here — that would create a
@@ -231,7 +231,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         expect($nextEntry)->not->toBeNull();
 
-        $nextDue = new \DateTimeImmutable($nextEntry->due_at, new \DateTimeZone('UTC'));
+        $nextDue = new DateTimeImmutable($nextEntry->due_at, new DateTimeZone('UTC'));
         // last_run_at = 2025-01-01 08:00:00 UTC → next run at 09:00 UTC = same day (Jan 1)
         expect($nextDue->format('Y-m-d H:i'))->toBe('2025-01-01 09:00');
     });
@@ -300,8 +300,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         expect($nextEntry)->not->toBeNull();
 
-        $nextDue = new \DateTimeImmutable($nextEntry->due_at, new \DateTimeZone('UTC'));
-        $berlin = $nextDue->setTimezone(new \DateTimeZone('Europe/Berlin'));
+        $nextDue = new DateTimeImmutable($nextEntry->due_at, new DateTimeZone('UTC'));
+        $berlin = $nextDue->setTimezone(new DateTimeZone('Europe/Berlin'));
         expect((int) $berlin->format('H'))->toBe(9);
         expect((int) $berlin->format('i'))->toBe(0);
     });

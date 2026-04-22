@@ -7,11 +7,9 @@ namespace Spora\Tools;
 use Illuminate\Support\Carbon;
 use Spora\Models\Agent;
 use Spora\Models\User;
-use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
-use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 
@@ -21,20 +19,13 @@ use Spora\Tools\ValueObjects\ToolResult;
     displayName: 'User Info',
     category: 'data',
 )]
-#[ToolOperation(name: 'get_base_data',    description: 'Get the users base profile data', enabledByDefault: true,  requiresApprovalByDefault: false)]
-#[ToolOperation(name: 'get_locations',    description: 'Get the users saved locations',   enabledByDefault: true,  requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'get_base_data', description: 'Get the users base profile data', enabledByDefault: true, requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'get_locations', description: 'Get the users saved locations', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolOperation(name: 'get_health_data', description: 'Get the users health measurements', enabledByDefault: false, requiresApprovalByDefault: true)]
-#[ToolSetting(key: 'user_info.health_data.enabled', label: 'Enable Health Data', type: 'toggle', scope: 'agent', description: 'Allow the agent to access health measurements', default: false)]
 #[ToolParameter(name: 'action', type: 'string', description: 'The operation to perform: get_base_data, get_locations, get_health_data', required: true, enum: ['get_base_data', 'get_locations', 'get_health_data'])]
 final class UserInfoTool implements ToolInterface
 {
     use HasOperations;
-
-    private const KEY_HEALTH_ENABLED = 'user_info.health_data.enabled';
-
-    public function __construct(
-        private readonly ToolConfigService $configService,
-    ) {}
 
     private function getUser(int $agentId): ?User
     {
@@ -54,7 +45,7 @@ final class UserInfoTool implements ToolInterface
         return match ($operation) {
             'get_base_data'    => $this->getBaseData($agentId),
             'get_locations'    => $this->getLocations($agentId),
-            'get_health_data'  => $this->getHealthData($arguments, $agentId),
+            'get_health_data'  => $this->getHealthData($agentId),
             default            => new ToolResult(false, "Unknown user info operation: {$operation}"),
         };
     }
@@ -119,13 +110,8 @@ final class UserInfoTool implements ToolInterface
         return new ToolResult(true, $output);
     }
 
-    private function getHealthData(array $arguments, int $agentId): ToolResult
+    private function getHealthData(int $agentId): ToolResult
     {
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
-        if (($settings[self::KEY_HEALTH_ENABLED] ?? false) !== true) {
-            return new ToolResult(false, 'Health data access is not enabled for this agent. Please enable the "Enable Health Data" setting.');
-        }
-
         $user = $this->getUser($agentId);
         if ($user === null) {
             return new ToolResult(false, 'User not found.');

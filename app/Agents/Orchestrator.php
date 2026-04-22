@@ -553,7 +553,8 @@ final class Orchestrator implements OrchestratorInterface
             $task->save();
 
             $toolNames = implode(', ', array_unique(array_map(
-                static fn(DriverToolCall $tc) => $tc->toolName, $pendingApproval,
+                static fn(DriverToolCall $tc) => $tc->toolName,
+                $pendingApproval,
             )));
             $this->logger?->info('Task paused — approval needed', [
                 'task_id' => $task->id,

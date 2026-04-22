@@ -7,7 +7,6 @@ namespace Spora\Tools;
 use Spora\Models\AgentMemory;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
-use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 
@@ -17,9 +16,9 @@ use Spora\Tools\ValueObjects\ToolResult;
     displayName: 'Scratchpad',
     category: 'productivity',
 )]
-#[ToolOperation(name: 'read',   description: 'Read a memory value by key',    enabledByDefault: true,  requiresApprovalByDefault: false)]
-#[ToolOperation(name: 'write',  description: 'Write a memory value to a key', enabledByDefault: true,  requiresApprovalByDefault: false)]
-#[ToolOperation(name: 'delete', description: 'Delete a memory by key',         enabledByDefault: true,  requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'read', description: 'Read a memory value by key', enabledByDefault: true, requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'write', description: 'Write a memory value to a key', enabledByDefault: true, requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'delete', description: 'Delete a memory by key', enabledByDefault: true, requiresApprovalByDefault: false)]
 final class ScratchpadTool implements ToolInterface
 {
     use HasOperations;

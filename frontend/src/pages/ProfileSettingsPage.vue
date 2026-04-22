@@ -32,6 +32,7 @@ const profileLoading = ref(false)
 const profileSaving = ref(false)
 const profileError = ref<string | null>(null)
 const profileSuccess = ref(false)
+const healthSuccess = ref(false)
 
 // ── Locations ────────────────────────────────────────────────────────────────
 
@@ -147,6 +148,22 @@ async function saveProfile(): Promise<void> {
     setTimeout(() => { profileSuccess.value = false }, 3000)
   } catch (e: any) {
     profileError.value = e instanceof ApiError ? e.message : 'Failed to save profile.'
+  } finally {
+    profileSaving.value = false
+  }
+}
+
+async function saveHealthData(): Promise<void> {
+  profileSaving.value = true
+  profileError.value = null
+  healthSuccess.value = false
+  try {
+    const res = await api.put<UserProfile>('/me/profile', profile.value)
+    profile.value = res
+    healthSuccess.value = true
+    setTimeout(() => { healthSuccess.value = false }, 3000)
+  } catch (e: any) {
+    profileError.value = e instanceof ApiError ? e.message : 'Failed to save health data.'
   } finally {
     profileSaving.value = false
   }
@@ -294,6 +311,18 @@ async function saveProfile(): Promise<void> {
                 placeholder="e.g. 70.5"
                 class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
+            </div>
+            <div class="flex items-center justify-between">
+              <p v-if="profileError" role="alert" class="text-xs text-destructive">{{ profileError }}</p>
+              <span v-else-if="healthSuccess" class="text-xs text-green-600">Saved!</span>
+              <span v-else />
+              <button
+                @click="saveHealthData"
+                :disabled="profileSaving"
+                class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+              >
+                {{ profileSaving ? 'Saving…' : 'Save Health Data' }}
+              </button>
             </div>
           </div>
         </section>

@@ -8,7 +8,6 @@ use Spora\Http\ScheduledRunController;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
-use Spora\Models\ScheduledRunNext;
 use Spora\Services\MercurePublisherInterface;
 
 function makeScheduledRunController(): array

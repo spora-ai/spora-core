@@ -1,0 +1,59 @@
+<think>The user asked "Wie wird das Wetter heute in Deutschland?" (How is the weather today in Germany?). I fetched the WetterOnline page for Germany weather. Let me summarize the key weather information from this page.
+
+Key findings from the page:
+
+1. Date: Mittwoch, 22.04. (Wednesday, April 22)
+2. The headline says "Später bis 20 Grad Sonne satt und tiefblauer Himmel" (Later up to 20 degrees, plenty of sun and deep blue sky)
+
+Current conditions across Germany:
+- All major cities show sunny weather (sonnig) with temperatures ranging from 14°C to 19°C
+- Berlin: 18°C, sunny
+- Dresden: 16°C, sunny
+- Emden: 14°C, sunny
+- Frankfurt: 18°C, sunny
+- Freiburg: 18°C, sunny
+- Hamburg: 17°C, sunny
+- Kassel: 17°C, sunny
+- Köln: 19°C, sunny
+- München: 14°C, sunny
+- Rostock: 16°C, sunny
+- Saarbrücken: 17°C, sunny
+- Stuttgart: 16°C, sunny
+
+Top temperatures: Schleswig 15.2°C highest
+Lowest temperatures: Schorndorf-Knöbling -4.2°C (in higher altitudes)
+
+Highest wind gusts: Feldberg/Schwarzwald 86 km/h
+
+Precipitation: Light rain in some areas (2.0 l/m2 in Markt Erlbach-Hagenhofen and Pforzheim-Ispringen)
+
+Let me provide this summary in German.</think>
+
+## Wetter in Deutschland heute (Mittwoch, 22. April)
+
+Laut **WetterOnline** ist es heute großteils **sonnig** mit viel blauem Himmel! Die Headline lautet: "Später bis 20 Grad – Sonne satt und tiefblauer Himmel" ☀️
+
+### Aktuelle Temperaturen in den großen Städten:
+
+| Stadt | Wetter | Temperatur |
+|-------|--------|------------|
+| **Köln** | ☀️ sonnig | 19°C |
+| **Berlin** | ☀️ sonnig | 18°C |
+| **Frankfurt** | ☀️ sonnig | 18°C |
+| **Freiburg** | ☀️ sonnig | 18°C |
+| **Hamburg** | ☀️ sonnig | 17°C |
+| **Kassel** | ☀️ sonnig | 17°C |
+| **Saarbrücken** | ☀️ sonnig | 17°C |
+| **Dresden** | ☀️ sonnig | 16°C |
+| **Rostock** | ☀️ sonnig | 16°C |
+| **Stuttgart** | ☀️ sonnig | 16°C |
+| **Emden** | ☀️ sonnig | 14°C |
+| **München** | ☀️ sonnig | 14°C |
+
+### Extremwerte heute:
+- **Höchste Temperatur:** Schleswig mit 15,2°C
+- **Kälteste Werte:** Schorndorf-Knöbling mit -4,2°C (in Höhenlagen)
+- **Stärkste Windböen:** Feldberg/Schwarzwald mit 86 km/h
+- **Niederschlag:** Leichter Regen in einigen Regionen (z.B. Pforzheim 2,0 l/m²)
+
+**Zusammenfassung:** Ein überwiegend sonniger und milder Apriltag in ganz Deutschland! 🌤️

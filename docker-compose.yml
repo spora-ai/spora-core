@@ -11,7 +11,7 @@ services:
     env_file:
       - .env.local
     environment:
-      SPORA_WORKER_MODE: worker
+      SPORA_SYNC_MODE: worker
     depends_on:
       mariadb:
         condition: service_healthy

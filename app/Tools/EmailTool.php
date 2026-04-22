@@ -24,11 +24,11 @@ use Webklex\PHPIMAP\ClientManager;
     displayName: 'Email',
     category: 'communication',
 )]
-#[ToolOperation(name: 'read_inbox',     description: 'Read unread emails from the INBOX',                        enabledByDefault: true,  requiresApprovalByDefault: false)]
-#[ToolOperation(name: 'list_folders',  description: 'List all available email folders',                         enabledByDefault: true,  requiresApprovalByDefault: false)]
-#[ToolOperation(name: 'read_folder',   description: 'Read emails from a specific folder by name',               enabledByDefault: true,  requiresApprovalByDefault: false)]
-#[ToolOperation(name: 'create_draft',  description: 'Prepare an email draft (shows the composed email for review)', enabledByDefault: false, requiresApprovalByDefault: false)]
-#[ToolOperation(name: 'send_email',    description: 'Send an email to a recipient',                            enabledByDefault: false, requiresApprovalByDefault: true)]
+#[ToolOperation(name: 'read_inbox', description: 'Read unread emails from the INBOX', enabledByDefault: true, requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'list_folders', description: 'List all available email folders', enabledByDefault: true, requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'read_folder', description: 'Read emails from a specific folder by name', enabledByDefault: true, requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'create_draft', description: 'Prepare an email draft (shows the composed email for review)', enabledByDefault: false, requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'send_email', description: 'Send an email to a recipient', enabledByDefault: false, requiresApprovalByDefault: true)]
 // IMAP settings (for read operations)
 #[ToolSetting(key: 'core.imap.host', label: 'IMAP Host', type: 'text', description: 'e.g. imap.example.com', scope: 'agent')]
 #[ToolSetting(key: 'core.imap.port', label: 'IMAP Port', type: 'text', description: 'Usually 993', scope: 'agent')]

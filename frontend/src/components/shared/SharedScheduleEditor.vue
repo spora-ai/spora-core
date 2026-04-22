@@ -390,7 +390,7 @@ async function submit(): Promise<void> {
       const localDt = new Date(utcMs)
       // Use formatOffset to get ±HH:MM in clean ISO 8601 form, handling half-hour offsets like +05:30
       const offsetMinutes = getTimezoneOffsetMinutes(timezone.value, localDt)
-      const sign = offsetMinutes <= 0 ? '+' : '-'
+      const sign = offsetMinutes >= 0 ? '+' : '-'
       const abs = Math.abs(offsetMinutes)
       const tzOffsetStr = `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`
       payload.run_at = `${runDate.value}T${runTime.value}:00${tzOffsetStr}`

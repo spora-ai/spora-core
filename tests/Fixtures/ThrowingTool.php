@@ -7,8 +7,8 @@ namespace Tests\Fixtures;
 use RuntimeException;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ToolInterface;
+use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 
 #[Tool(name: 'throwing_tool', description: 'A stub tool that always throws')]

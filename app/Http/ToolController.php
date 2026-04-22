@@ -10,7 +10,6 @@ use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
-use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\Traits\HasOperations;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -95,7 +94,7 @@ final class ToolController
         $toolAttrs = $reflection->getAttributes(Tool::class);
         $toolAttr  = $toolAttrs !== [] ? $toolAttrs[0]->newInstance() : null;
         $toolName  = $toolAttr->name ?? $reflection->getShortName();
-        $displayName = $toolAttr->displayName;
+        $displayName = $toolAttr->displayName ?? $toolName;
         $category = $toolAttr->category ?? 'general';
 
         $schema = [];

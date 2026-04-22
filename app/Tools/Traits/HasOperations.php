@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Tools\Traits;
 
+use ReflectionAttribute;
 use ReflectionClass;
 use RuntimeException;
 use Spora\Tools\Attributes\ToolOperation;
@@ -30,7 +31,7 @@ trait HasOperations
         if ($operations === []) {
             throw new RuntimeException(
                 'getOperationName() called on a tool that has no #[ToolOperation] attributes. '
-                . 'Either add #[ToolOperation] declarations or do not use the HasOperations trait.'
+                . 'Either add #[ToolOperation] declarations or do not use the HasOperations trait.',
             );
         }
 
@@ -100,7 +101,7 @@ trait HasOperations
     {
         $ref = new ReflectionClass($this);
         return array_map(
-            fn (\ReflectionAttribute $attr) => $attr->newInstance(),
+            fn(ReflectionAttribute $attr) => $attr->newInstance(),
             $ref->getAttributes(ToolOperation::class),
         );
     }

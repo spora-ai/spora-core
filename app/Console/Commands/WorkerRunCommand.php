@@ -700,7 +700,7 @@ final class WorkerRunCommand extends Command
         $agentIds = array_unique(array_column($retryTasks, 'agent_id'));
         /** @var Agent[] $allAgents */
         $allAgents = Agent::findMany($agentIds);
-        $agentMaxRetries = collect($allAgents)->keyBy->id->map(fn (Agent $a) => $a->max_retries)->toArray();
+        $agentMaxRetries = collect($allAgents)->keyBy->id->map(fn(Agent $a) => $a->max_retries)->toArray();
 
         foreach ($allRetryTasks as $retryTask) {
             $retryCount = (int) $retryTask->retry_count;

@@ -2,10 +2,9 @@
 
 declare(strict_types=1);
 
-use PHPUnit\Framework\ExpectationFailedException;
-use Spora\Tools\UserInfoTool;
-use Spora\Services\ToolConfigService;
 use Spora\Core\SecurityManager;
+use Spora\Services\ToolConfigService;
+use Spora\Tools\UserInfoTool;
 
 describe('UserInfoTool', function (): void {
 
@@ -14,9 +13,10 @@ describe('UserInfoTool', function (): void {
         $userId = bootAuth($authService, 'userinfo@example.com', 'Password1!');
         simulateLoggedInSession($userId, 'userinfo@example.com');
 
-        $tool = new UserInfoTool($authService, makeUserInfoToolConfigService());
+        $tool = new UserInfoTool(makeUserInfoToolConfigService());
 
-        $result = $tool->execute(['action' => 'get_base_data'], agentId: 1);
+        $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
+        $result = $tool->execute(['action' => 'get_base_data'], agentId: $agentId);
 
         expect($result->success)->toBeTrue();
         expect($result->content)->toContain('Name: (not set)');
@@ -35,8 +35,9 @@ describe('UserInfoTool', function (): void {
         $user->about_me = 'Hello world';
         $user->save();
 
-        $tool = new UserInfoTool($authService, makeUserInfoToolConfigService());
-        $result = $tool->execute(['action' => 'get_base_data'], agentId: 1);
+        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
+        $result = $tool->execute(['action' => 'get_base_data'], agentId: $agentId);
 
         expect($result->success)->toBeTrue();
         expect($result->content)->toContain('Name: Alice');
@@ -44,15 +45,13 @@ describe('UserInfoTool', function (): void {
         expect($result->content)->toContain('About Me: Hello world');
     });
 
-    it('returns error when not authenticated', function (): void {
-        clearSession();
-        $authService = bootAuthLayer();
-
-        $tool = new UserInfoTool($authService, makeUserInfoToolConfigService());
-        $result = $tool->execute(['action' => 'get_base_data'], agentId: 1);
+    it('returns error when user not found', function (): void {
+        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        // Use an agent ID that doesn't exist
+        $result = $tool->execute(['action' => 'get_base_data'], agentId: 9999);
 
         expect($result->success)->toBeFalse();
-        expect($result->content)->toContain('Not authenticated');
+        expect($result->content)->toContain('User not found.');
     });
 
     it('get_locations returns no locations when none exist', function (): void {
@@ -60,8 +59,9 @@ describe('UserInfoTool', function (): void {
         $userId = bootAuth($authService, 'userinfo3@example.com', 'Password1!');
         simulateLoggedInSession($userId, 'userinfo3@example.com');
 
-        $tool = new UserInfoTool($authService, makeUserInfoToolConfigService());
-        $result = $tool->execute(['action' => 'get_locations'], agentId: 1);
+        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
+        $result = $tool->execute(['action' => 'get_locations'], agentId: $agentId);
 
         expect($result->success)->toBeTrue();
         expect($result->content)->toContain('No locations saved');
@@ -79,8 +79,9 @@ describe('UserInfoTool', function (): void {
             'is_default' => true,
         ]);
 
-        $tool = new UserInfoTool($authService, makeUserInfoToolConfigService());
-        $result = $tool->execute(['action' => 'get_locations'], agentId: 1);
+        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
+        $result = $tool->execute(['action' => 'get_locations'], agentId: $agentId);
 
         expect($result->success)->toBeTrue();
         expect($result->content)->toContain('Home');
@@ -88,32 +89,28 @@ describe('UserInfoTool', function (): void {
         expect($result->content)->toContain('(default)');
     });
 
-    it('get_health_data returns error when health data is not enabled', function (): void {
+    it('get_health_data returns health data for user with health measurements', function (): void {
         $authService = bootAuthLayer();
-        $userId = bootAuth($authService, 'userinfo5@example.com', 'Password1!');
-        simulateLoggedInSession($userId, 'userinfo5@example.com');
+        $userId = bootAuth($authService, 'userinfo6@example.com', 'Password1!');
+        simulateLoggedInSession($userId, 'userinfo6@example.com');
 
-        $tool = new UserInfoTool($authService, makeUserInfoToolConfigService());
-        $result = $tool->execute(['action' => 'get_health_data'], agentId: 1);
+        $user = Spora\Models\User::find($userId);
+        $user->height_cm = 175;
+        $user->weight_kg = 70.5;
+        $user->save();
 
-        expect($result->success)->toBeFalse();
-        expect($result->content)->toContain('Health data access is not enabled');
-    });
+        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
+        $result = $tool->execute(['action' => 'get_health_data'], agentId: $agentId);
 
-    it('get_health_data returns error when not authenticated', function (): void {
-        clearSession();
-        $authService = bootAuthLayer();
-
-        $tool = new UserInfoTool($authService, makeUserInfoToolConfigService());
-        $result = $tool->execute(['action' => 'get_health_data'], agentId: 1);
-
-        expect($result->success)->toBeFalse();
-        expect($result->content)->toContain('Not authenticated');
+        expect($result->success)->toBeTrue();
+        expect($result->content)->toContain('Height: 175 cm');
+        expect($result->content)->toContain('Weight: 70.5 kg');
     });
 
     it('describeAction returns correct descriptions', function (): void {
         $authService = bootAuthLayer();
-        $tool = new UserInfoTool($authService, makeUserInfoToolConfigService());
+        $tool = new UserInfoTool(makeUserInfoToolConfigService());
 
         expect($tool->describeAction(['action' => 'get_base_data']))->toContain('base profile data');
         expect($tool->describeAction(['action' => 'get_locations']))->toContain('saved locations');
@@ -123,7 +120,7 @@ describe('UserInfoTool', function (): void {
 
     it('getParametersSchema returns valid schema', function (): void {
         $authService = bootAuthLayer();
-        $tool = new UserInfoTool($authService, makeUserInfoToolConfigService());
+        $tool = new UserInfoTool(makeUserInfoToolConfigService());
         $schema = $tool->getParametersSchema();
 
         expect($schema['type'])->toBe('object');
@@ -140,7 +137,7 @@ function makeUserInfoToolConfigService(): ToolConfigService
     $toolClasses = [
         Spora\Tools\CurrentTimeTool::class,
         Spora\Tools\CalculatorTool::class,
-        Spora\Tools\UserInfoTool::class,
+        UserInfoTool::class,
     ];
     $securityManager = new SecurityManager(random_bytes(32));
 
