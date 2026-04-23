@@ -193,7 +193,7 @@ return [
         );
     },
 
-    Spora\Services\ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
+    ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
         return new ToolConfigService(
             $c->get(SecurityManagerInterface::class),
             $c->get(Psr\Log\LoggerInterface::class),
@@ -250,7 +250,7 @@ return [
     Spora\Http\AgentController::class => static function (ContainerInterface $c): Spora\Http\AgentController {
         return new Spora\Http\AgentController(
             $c->get(AuthService::class),
-            $c->get(Spora\Services\ToolConfigService::class),
+            $c->get(ToolConfigService::class),
             $c->get(Spora\Services\LLMConfigService::class),
         );
     },
@@ -260,7 +260,7 @@ return [
     Spora\Http\ToolController::class => static function (ContainerInterface $c): Spora\Http\ToolController {
         return new Spora\Http\ToolController(
             $c->get(AuthService::class),
-            $c->get(Spora\Services\ToolConfigService::class),
+            $c->get(ToolConfigService::class),
             $c->get('tool_classes'),
         );
     },
@@ -303,7 +303,7 @@ return [
 
     OrchestratorInterface::class => static function (ContainerInterface $c): OrchestratorInterface {
         return new Orchestrator(
-            driverFactory: $c->get(Spora\Drivers\DriverFactory::class),
+            driverFactory: $c->get(DriverFactory::class),
             toolInstances: $c->get('tool_instances'),
             logger: $c->get(Psr\Log\LoggerInterface::class),
             workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,

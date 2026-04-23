@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Tools\Attributes;
 
 use Attribute;
+use InvalidArgumentException;
 
 /**
  * Applied at class level. Provides the LLM-facing tool name and description.
@@ -25,7 +26,7 @@ final class Tool
         public readonly string $category = 'general',
     ) {
         if (!preg_match(self::NAME_REGEX, $this->name)) {
-            throw new \InvalidArgumentException(
+            throw new InvalidArgumentException(
                 "Tool name '{$this->name}' must match /^[a-z][a-z0-9_]*$/ (snake_case, lowercase alphanumeric + underscore).",
             );
         }
