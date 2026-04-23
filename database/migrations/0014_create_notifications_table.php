@@ -18,7 +18,7 @@ return new class extends Migration
             $table->text('body')->nullable();
             $table->mediumText('data')->nullable();
             $table->datetime('read_at')->nullable();
-            $table->datetime('created_at')->useCurrent();
+            $table->datetime('created_at')->nullable();
             $table->datetime('updated_at')->nullable();
             $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
             $table->index(['user_id', 'read_at', 'created_at']);

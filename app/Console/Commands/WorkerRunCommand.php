@@ -65,7 +65,7 @@ final class WorkerRunCommand extends Command
         $this->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Max QUEUED tasks to process per run (0 = unlimited)', '0');
         $this->addOption('sleep', 's', InputOption::VALUE_REQUIRED, 'Microseconds to sleep when the queue is empty', '500000');
         $this->addOption('stale-minutes', null, InputOption::VALUE_REQUIRED, 'Minutes after which a RUNNING task is orphaned and failed (0 = disabled, omit to use config/default)', '0');
-        $this->addOption('workers', 'w', InputOption::VALUE_REQUIRED, 'Max concurrent child processes in daemon mode (0 = unlimited, default: 0)', '0');
+        $this->addOption('workers', 'w', InputOption::VALUE_OPTIONAL, 'Max concurrent child processes (0 = unlimited, default: unlimited)', null);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -90,7 +90,13 @@ final class WorkerRunCommand extends Command
 
         $limit = (int) $input->getOption('limit');
         $sleep = (int) $input->getOption('sleep');
-        $maxWorkers = (int) $input->getOption('workers');
+
+        // Resolution: CLI --workers N (>0) → cap at N; CLI absent/0 → config → 0 (unlimited)
+        $workersCli = $input->getOption('workers');
+        $maxWorkers = match (true) {
+            $workersCli !== null && $workersCli !== '0' => (int) $workersCli,
+            default => (int) ($this->container->get('config')['max_workers'] ?? 0),
+        };
 
         // In daemon mode, always use a single-instance lock and set up graceful signal handling.
         if ($isDaemon && extension_loaded('pcntl')) {
@@ -133,9 +139,10 @@ final class WorkerRunCommand extends Command
         $this->reapStaleTasks($output, $staleMinutes);
         $lastReapAt = time();
 
-        // Child processes (--workers > 0) give true parallelism for QUEUED tasks.
+        // Child processes give true parallelism for QUEUED tasks in daemon mode.
+        // maxWorkers 0 = unlimited (spawn a child for every QUEUED task).
         // Scheduled runs are always processed synchronously in the parent.
-        $useChildProcesses = $isDaemon && $maxWorkers > 0;
+        $useChildProcesses = $isDaemon;
 
         while (!$this->shouldQuit && ($limit === 0 || $processed < $limit)) {
             if ($isDaemon && (time() - $lastReapAt) >= self::REAP_INTERVAL_SECONDS) {
@@ -566,51 +573,47 @@ final class WorkerRunCommand extends Command
     }
 
     /**
-     * Claim a QUEUED task and spawn a child process via proc_open() to handle it.
-     * The parent monitors children non-blockingly and reaps them on each iteration.
+     * Spawn child processes for all available QUEUED tasks.
+     * The parent claims each task (QUEUED → RUNNING) before spawning its child.
+     * The child skips re-claiming since the parent already did it.
+     * Loops until either maxWorkers (0 = unlimited) is reached or no more QUEUED tasks exist.
      */
     private function processQueuedTaskWithChild(OutputInterface $output, int $maxWorkers, int $sleep, int &$processed): void
     {
-        $activeChildren = count($this->childProcs);
-        if ($maxWorkers > 0 && $activeChildren >= $maxWorkers) {
-            usleep($sleep);
-            return;
-        }
+        while ($maxWorkers === 0 || count($this->childProcs) < $maxWorkers) {
+            $task = Capsule::connection()->transaction(function (): ?Task {
+                /** @var Task|null $task */
+                $task = Task::where('status', 'QUEUED')
+                    ->where('retry_of_task_id', null)
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->first();
 
-        $task = Capsule::connection()->transaction(function (): ?Task {
-            /** @var Task|null $task */
-            $task = Task::where('status', 'QUEUED')
-                ->where('retry_of_task_id', null) // skip retry tasks (handled by processRetryQueue)
-                ->orderBy('id')
-                ->lockForUpdate()
-                ->first();
+                if ($task === null) {
+                    return null;
+                }
+
+                $task->status = 'RUNNING';
+                $task->save();
+
+                return $task;
+            });
 
             if ($task === null) {
-                return null;
+                break;
             }
 
-            $task->status = 'RUNNING';
-            $task->save();
+            $pid = $this->spawnChild($task->id);
+            if ($pid === null) {
+                $task->status = 'QUEUED';
+                $task->save();
+                $this->logger->warning('Failed to spawn child for task, reverting to QUEUED', ['task_id' => $task->id]);
+                break;
+            }
 
-            return $task;
-        });
-
-        if ($task === null) {
-            usleep($sleep);
-            return;
+            $output->writeln(sprintf('<info>Spawned child %d for task %d</info>', $pid, $task->id));
+            $processed++;
         }
-
-        $pid = $this->spawnChild($task->id);
-        if ($pid === null) {
-            $task->status = 'QUEUED';
-            $task->save();
-            $this->logger->warning('Failed to spawn child for task, reverting to QUEUED', ['task_id' => $task->id]);
-            usleep($sleep);
-            return;
-        }
-
-        $output->writeln(sprintf('<info>Spawned child %d for task %d</info>', $pid, $task->id));
-        $processed++;
     }
 
     /**

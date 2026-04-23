@@ -50,6 +50,7 @@ const perToolRejectReason = ref<Record<number, string>>({})
 const perToolRejectInput = ref<Record<number, boolean>>({})
 const perToolApproving = ref<Record<number, boolean>>({})
 const perToolRejecting = ref<Record<number, boolean>>({})
+const expandedTools = ref<Record<number, boolean>>({})
 
 // ── Error banner ───────────────────────────────────────────────────────────
 
@@ -191,6 +192,22 @@ const chatMessages = computed((): ChatMessage[] => {
 function truncate(text: string | null, max = 300): string {
   if (!text) return '(empty)'
   return text.length <= max ? text : text.slice(0, max) + '…'
+}
+
+function isTruncated(text: string | null, max = 300): boolean {
+  return text !== null && text.length > max
+}
+
+function toggleExpanded(toolId: number): void {
+  expandedTools.value[toolId] = !expandedTools.value[toolId]
+}
+
+function getToolContent(entry: HistoryEntry): string {
+  return entry.content ?? ''
+}
+
+function isToolExpanded(toolId: number): boolean {
+  return expandedTools.value[toolId] ?? false
 }
 
 // ── Approval ───────────────────────────────────────────────────────────────
@@ -499,7 +516,16 @@ onUnmounted(() => {
                 <span class="text-muted-foreground/60">— result</span>
               </summary>
               <div class="px-3 py-2 border-t border-border chat-bubble-content text-muted-foreground break-all whitespace-pre-wrap">
-                <div v-html="renderMarkdown(truncate(msg.entry.content ?? ''))" />
+                <div v-if="isTruncated(msg.entry.content ?? '')" class="flex flex-col gap-2">
+                  <div v-html="renderMarkdown(isToolExpanded(msg.entry.sequence) ? msg.entry.content ?? '' : truncate(msg.entry.content ?? ''))" />
+                  <button
+                    @click.stop="toggleExpanded(msg.entry.sequence)"
+                    class="mt-1 inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors border border-transparent hover:border-border"
+                  >
+                    {{ isToolExpanded(msg.entry.sequence) ? '▲ less' : '▼ more' }}
+                  </button>
+                </div>
+                <div v-else v-html="renderMarkdown(truncate(msg.entry.content ?? ''))" />
               </div>
             </details>
           </div>

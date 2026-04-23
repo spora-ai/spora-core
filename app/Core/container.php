@@ -40,6 +40,7 @@ return [
             // SPORA_SYNC_MODE=true → worker_mode=true; SPORA_SYNC_MODE=false → worker_mode=false
             'worker_mode'        => true,
             'worker_stale_minutes' => 60,
+            'max_workers'        => 0,  // 0 = unlimited (spawn a child for every QUEUED task)
             'llm_timeout'        => 300,
             'tool_http_timeout'   => 30,
             'mercure_url'         => null,
@@ -91,6 +92,9 @@ return [
         }
         if (($v = $env('SPORA_WORKER_STALE_MINUTES')) !== null) {
             $envOverrides['worker_stale_minutes'] = (int) $v;
+        }
+        if (($v = $env('SPORA_MAX_WORKERS')) !== null) {
+            $envOverrides['max_workers'] = (int) $v;
         }
         if (($v = $env('SPORA_LLM_TIMEOUT')) !== null) {
             $envOverrides['llm_timeout'] = (int) $v;
@@ -223,6 +227,7 @@ return [
         Spora\Tools\EmailTool::class,
         Spora\Tools\CalDavCalendarTool::class,
         Spora\Tools\UserInfoTool::class,
+        Spora\Tools\SemanticScholarTool::class,
     ],
 
     Spora\Http\LLMConfigController::class => static function (ContainerInterface $c): Spora\Http\LLMConfigController {
@@ -300,6 +305,7 @@ return [
             logger: $c->get(Psr\Log\LoggerInterface::class),
             workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,
             notificationService: $c->get(NotificationService::class),
+            pluginLoader: $c->get(PluginLoader::class),
         );
     },
 

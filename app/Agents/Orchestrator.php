@@ -18,6 +18,7 @@ use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
+use Spora\Plugins\PluginLoader;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
@@ -43,17 +44,18 @@ final class Orchestrator implements OrchestratorInterface
     ];
 
     /**
-     * @param  list<object>           $toolInstances      Instances of ToolInterface.
-     * @param  ?LoggerInterface       $logger             Optional PSR-3 logger. When null, all log calls
+     * @param  list<object>         $toolInstances      Instances of ToolInterface.
+     * @param  ?LoggerInterface     $logger             Optional PSR-3 logger. When null, all log calls
      *                                                    are silently skipped — no behaviour change.
-     * @param  ?NotificationService   $notificationService Optional notification service for task events.
+     * @param  ?NotificationService $notificationService Optional notification service for task events.
      */
     public function __construct(
-        private readonly DriverFactory $driverFactory,
-        private readonly array         $toolInstances = [],
-        private readonly ?LoggerInterface $logger     = null,
-        private readonly WorkerMode    $workerMode    = WorkerMode::Sync,
-        private readonly ?NotificationService $notificationService = null,
+        private readonly DriverFactory              $driverFactory,
+        private readonly array                      $toolInstances = [],
+        private readonly ?LoggerInterface           $logger         = null,
+        private readonly WorkerMode                 $workerMode     = WorkerMode::Sync,
+        private readonly ?NotificationService      $notificationService = null,
+        private readonly ?PluginLoader              $pluginLoader   = null,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -775,6 +777,9 @@ final class Orchestrator implements OrchestratorInterface
     /**
      * Build the tool definitions array for the LLM request from registered tool instances.
      *
+     * Plugin-contributed tools are prefixed with "{slug}:" to ensure global uniqueness.
+     * Core tools are sent with their plain name.
+     *
      * @param  list<string> $enabledClasses
      * @return list<array{type: "function", function: array{name: string, description: string, parameters: array}}>
      */
@@ -805,6 +810,9 @@ final class Orchestrator implements OrchestratorInterface
 
             /** @var Tool $toolAttr */
             $toolAttr = $attrs[0]->newInstance();
+
+            // Prefix with plugin slug if this is a plugin tool, else plain name.
+            $qualifiedName = $this->qualifiedToolName($toolClass, $toolAttr->name);
 
             // Check if tool uses HasOperations — if so, filter to only enabled operations.
             $usesOperations = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
@@ -839,7 +847,7 @@ final class Orchestrator implements OrchestratorInterface
                 $defs[] = [
                     'type'     => 'function',
                     'function' => [
-                        'name'        => $toolAttr->name,
+                        'name'        => $qualifiedName,
                         'description' => $toolAttr->description,
                         'parameters'  => $filteredSchema,
                     ],
@@ -856,7 +864,7 @@ final class Orchestrator implements OrchestratorInterface
                 $defs[] = [
                     'type'     => 'function',
                     'function' => [
-                        'name'        => $toolAttr->name,
+                        'name'        => $qualifiedName,
                         'description' => $toolAttr->description,
                         'parameters'  => $schema,
                     ],
@@ -919,10 +927,20 @@ final class Orchestrator implements OrchestratorInterface
     /**
      * Find the tool instance matching the given tool name (from #[Tool(name:)] attribute).
      *
+     * Accepts both plain names ("web_search") and namespaced names ("my-plugin:web_search").
+     * For namespaced names the slug is stripped before lookup, so the class's #[Tool] attribute
+     * always holds the plain name — only the LLM-facing wire format is namespaced.
+     *
      * @throws RuntimeException  When no matching tool is registered.
      */
     private function resolveToolByName(string $toolName): ToolInterface
     {
+        // Strip plugin slug prefix if present (e.g. "my-plugin:web_search" → "web_search").
+        $plainName = $toolName;
+        if (str_contains($toolName, ':')) {
+            $plainName = substr($toolName, strpos($toolName, ':') + 1);
+        }
+
         foreach ($this->toolInstances as $instance) {
             $ref   = new ReflectionClass($instance);
             $attrs = $ref->getAttributes(Tool::class);
@@ -934,12 +952,33 @@ final class Orchestrator implements OrchestratorInterface
             /** @var Tool $toolAttr */
             $toolAttr = $attrs[0]->newInstance();
 
-            if ($toolAttr->name === $toolName) {
+            if ($toolAttr->name === $plainName) {
                 return $instance;
             }
         }
 
         throw new RuntimeException("No tool registered with name '{$toolName}'.");
+    }
+
+    /**
+     * Return the LLM-facing tool name, prefixed with the plugin slug if the tool
+     * was contributed by a plugin. Core tools use their plain name.
+     *
+     * @param  class-string $toolClass
+     * @param  string       $plainName  From #[Tool(name:)]
+     * @return string                 e.g. "my-plugin:web_search" or "web_search"
+     */
+    private function qualifiedToolName(string $toolClass, string $plainName): string
+    {
+        if ($this->pluginLoader !== null) {
+            foreach ($this->pluginLoader->getPlugins() as $slug => $plugin) {
+                if (in_array($toolClass, $plugin->tools(), true)) {
+                    return "{$slug}:{$plainName}";
+                }
+            }
+        }
+
+        return $plainName;
     }
 
     /**
