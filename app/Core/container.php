@@ -10,6 +10,7 @@ use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\SecurityManager;
 use Spora\Core\SecurityManagerInterface;
+use Spora\Drivers\DriverFactory;
 use Spora\Plugins\PluginLoader;
 use Spora\Recipes\RecipeScanner;
 use Spora\Services\MercurePublisherInterface;
@@ -191,15 +192,15 @@ return [
         );
     },
 
-    Spora\Services\ToolConfigService::class => static function (ContainerInterface $c): Spora\Services\ToolConfigService {
-        return new Spora\Services\ToolConfigService(
+    ToolConfigServiceInterface::class => static function (ContainerInterface $c): ToolConfigService {
+        return new ToolConfigService(
             $c->get(SecurityManagerInterface::class),
             $c->get('tool_classes'),
         );
     },
 
-    Spora\Drivers\DriverFactory::class => static function (ContainerInterface $c): Spora\Drivers\DriverFactory {
-        return new Spora\Drivers\DriverFactory(
+    DriverFactoryInterface::class => static function (ContainerInterface $c): DriverFactory {
+        return new DriverFactory(
             $c->get(Psr\Log\LoggerInterface::class),
             $c->get(Spora\Services\LLMConfigService::class),
             (int) ($c->get('config')['llm_timeout'] ?? 300),

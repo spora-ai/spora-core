@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Illuminate\Support\Carbon;
 use Spora\Models\Notification;
 use Spora\Models\Task;
 
@@ -150,6 +151,7 @@ class NotificationService
     {
         $notification = new Notification();
         $notification->fill($attributes);
+        $notification->created_at = Carbon::now();
         $notification->save();
 
         return $notification;

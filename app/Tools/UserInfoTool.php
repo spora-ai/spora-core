@@ -94,7 +94,12 @@ final class UserInfoTool implements ToolInterface
 
     private function getLocations(int $agentId): ToolResult
     {
-        $locations = $this->getUser($agentId)->locations ?? collect();
+        $user = $this->getUser($agentId);
+        if ($user === null) {
+            return new ToolResult(false, 'User not found.');
+        }
+
+        $locations = $user->locations ?? collect();
 
         if ($locations->isEmpty()) {
             return new ToolResult(true, 'No locations saved.');

@@ -29,7 +29,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-class Task extends Model
+final class Task extends Model
 {
     /** @var string */
     protected $table = 'tasks';

@@ -54,6 +54,15 @@ describe('UserInfoTool', function (): void {
         expect($result->content)->toContain('User not found.');
     });
 
+    it('get_locations returns error when agent does not exist', function (): void {
+        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        // Use an agent ID that doesn't exist
+        $result = $tool->execute(['action' => 'get_locations'], agentId: 9999);
+
+        expect($result->success)->toBeFalse();
+        expect($result->content)->toContain('User not found.');
+    });
+
     it('get_locations returns no locations when none exist', function (): void {
         $authService = bootAuthLayer();
         $userId = bootAuth($authService, 'userinfo3@example.com', 'Password1!');

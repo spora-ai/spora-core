@@ -117,7 +117,7 @@ final class AgentController
             return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         }
 
-        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps'];
+        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'retry_after_minutes', 'max_retries'];
         $data    = array_intersect_key($body, array_flip($allowed));
 
         if ($data !== []) {
@@ -633,6 +633,8 @@ final class AgentController
             'llm_driver_config_id' => $agent->llm_driver_config_id,
             'max_steps'     => (int) $agent->max_steps,
             'is_active'     => (bool) $agent->is_active,
+            'retry_after_minutes' => (int) ($agent->retry_after_minutes ?? 0),
+            'max_retries'   => (int) ($agent->max_retries ?? 0),
             'tools'         => $tools->map(fn(AgentTool $t) => $this->toolResource($t))->values()->toArray(),
         ];
     }

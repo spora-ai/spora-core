@@ -10,7 +10,7 @@ use LogicException;
 /**
  * @method static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
  */
-class ToolConfiguration extends Model
+final class ToolConfiguration extends Model
 {
     /** @var string */
     protected $table = 'tool_configurations';

@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $enabled
  * @property int|null $default_requires_approval
  */
-class AgentToolOperationOverride extends Model
+final class AgentToolOperationOverride extends Model
 {
     protected $table = 'agent_tool_operation_overrides';
 

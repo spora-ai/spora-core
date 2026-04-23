@@ -12,6 +12,7 @@ use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Models\Agent;
 use Spora\Models\Task;
+use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 
 // ---------------------------------------------------------------------------
@@ -67,6 +68,9 @@ describe('TaskRunCommand — task claiming', function (): void {
             'worker_mode' => true,
             'llm_timeout' => 300,
         ]);
+        $mockMercure = Mockery::mock(MercurePublisherInterface::class);
+        $mockMercure->allows('publish')->andReturn(true);
+        $mockMercure->allows('publishToUser')->andReturn(true);
         $this->container->allows('get')->with(NotificationService::class)->andReturn(
             Mockery::mock(NotificationService::class),
         );

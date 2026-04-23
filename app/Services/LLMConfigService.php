@@ -21,7 +21,7 @@ use Spora\Tools\Attributes\ToolSetting;
  *
  * Settings are encrypted using SecurityManager before being stored in the DB.
  */
-class LLMConfigService
+final class LLMConfigService
 {
     /**
      * @param list<class-string<LLMDriverConfigInterface>> $driverClasses

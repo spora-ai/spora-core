@@ -28,7 +28,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null      $created_at
  * @property Carbon|null      $updated_at
  */
-class ToolCall extends Model
+final class ToolCall extends Model
 {
     /** @var string */
     protected $table = 'tool_calls';

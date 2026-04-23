@@ -24,7 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @method static User|null find(mixed $id, array $columns = ['*'])
  * @method static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
  */
-class User extends Model
+final class User extends Model
 {
     /** @var string */
     protected $table = 'users';
