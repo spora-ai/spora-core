@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $key
  * @property string|null $value
  */
-class AgentMemory extends Model
+final class AgentMemory extends Model
 {
     protected $table = 'agent_memory';
 

@@ -144,6 +144,14 @@ The slug prefix is enforced at install time — `DatabaseSchemaInstaller` throws
 
 ---
 
+## Tool namespacing
+
+Plugin tools are automatically prefixed with their `slug` when sent to the LLM, e.g. a tool with `#[Tool(name: 'web_search')]` in a plugin with slug `acme-search` is exposed to the LLM as `acme-search:web_search`. This ensures plugin tools never collide with core tools or tools from other plugins.
+
+Core tools use their plain `#[Tool(name:)]` value without any prefix.
+
+The Orchestrator derives the prefix automatically from `PluginLoader` — no changes to the plugin's `#[Tool]` attribute are needed.
+
 ## Shipping third-party dependencies
 
 For plugins that depend on external Composer packages, run `composer install --no-dev`

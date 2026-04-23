@@ -11,6 +11,7 @@ use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\Traits\HasOperations;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -85,14 +86,16 @@ final class ToolController
     private function toolSchemaResource(string $toolClass): array
     {
         if (!class_exists($toolClass)) {
-            return ['tool_class' => $toolClass, 'tool_name' => basename(str_replace('\\', '/', $toolClass)), 'settings_schema' => []];
+            return ['tool_class' => $toolClass, 'tool_name' => basename(str_replace('\\', '/', $toolClass)), 'settings_schema' => [], 'operations' => []];
         }
 
         $reflection = new ReflectionClass($toolClass);
 
         $toolAttrs = $reflection->getAttributes(Tool::class);
-        $toolName  = $toolAttrs !== [] ? $toolAttrs[0]->newInstance()->name : $reflection->getShortName();
-        $displayName = $toolAttrs !== [] ? $toolAttrs[0]->newInstance()->displayName : null;
+        $toolAttr  = $toolAttrs !== [] ? $toolAttrs[0]->newInstance() : null;
+        $toolName  = $toolAttr->name ?? $reflection->getShortName();
+        $displayName = $toolAttr->displayName ?? $toolName;
+        $category = $toolAttr->category ?? 'general';
 
         $schema = [];
         foreach ($reflection->getAttributes(ToolSetting::class) as $attribute) {
@@ -109,11 +112,28 @@ final class ToolController
             ];
         }
 
+        $operations = [];
+        $usesOperations = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
+        if ($usesOperations) {
+            $instance = $reflection->newInstanceWithoutConstructor();
+            foreach ($instance->getOperations() as $op) {
+                $operations[] = [
+                    'name'                          => $op->name,
+                    'description'                   => $op->description,
+                    'enabledByDefault'              => $op->enabledByDefault,
+                    'requiresApprovalByDefault'      => $op->requiresApprovalByDefault,
+                    'discriminatorKey'              => $op->discriminatorKey,
+                ];
+            }
+        }
+
         return [
             'tool_class'      => $toolClass,
             'tool_name'       => $toolName,
             'display_name'    => $displayName,
+            'category'        => $category,
             'settings_schema' => $schema,
+            'operations'      => $operations,
         ];
     }
 

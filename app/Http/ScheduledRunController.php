@@ -15,6 +15,7 @@ use Spora\Http\Middleware\AuthGuard;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
+use Spora\Models\ScheduledRunNext;
 use Spora\Services\MercurePublisherInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -83,7 +84,9 @@ final class ScheduledRunController
             'template_id'       => isset($body['template_id']) ? (int) $body['template_id'] : null,
             'raw_prompt'        => isset($body['raw_prompt']) ? trim((string) $body['raw_prompt']) : null,
             'cron_expression'   => $isRecurring ? trim((string) $body['cron_expression']) : null,
-            'run_at'            => !$isRecurring && isset($body['run_at']) ? $body['run_at'] : null,
+            'run_at'            => !$isRecurring && isset($body['run_at'])
+                ? $this->normalizeRunAtToUtc($body['run_at'])
+                : null,
             'timezone'          => trim((string) ($body['timezone'] ?? 'UTC')),
             'max_steps_override' => isset($body['max_steps_override']) ? (int) $body['max_steps_override'] : null,
             'is_active'         => isset($body['is_active']) ? ($body['is_active'] ? 1 : 0) : 1,
@@ -93,6 +96,17 @@ final class ScheduledRunController
             'created_at'        => date('Y-m-d H:i:s'),
             'updated_at'        => date('Y-m-d H:i:s'),
         ]);
+
+        // Insert first PENDING entry into scheduled_runs_next
+        if ($nextRunAt !== null) {
+            Capsule::table('scheduled_runs_next')->insert([
+                'scheduled_run_id' => $id,
+                'due_at'           => $nextRunAt,
+                'status'           => ScheduledRunNext::STATUS_PENDING,
+                'created_at'       => date('Y-m-d H:i:s'),
+                'updated_at'       => date('Y-m-d H:i:s'),
+            ]);
+        }
 
         $run = ScheduledRun::find($id);
 
@@ -164,13 +178,37 @@ final class ScheduledRunController
 
             // Recompute next_run_at if scheduling fields change
             if (array_key_exists('cron_expression', $data) || array_key_exists('run_at', $data) || array_key_exists('timezone', $data)) {
-                $cron    = $data['cron_expression'] ?? $run->cron_expression;
-                $runAt   = $data['run_at'] ?? $run->run_at?->toDateTimeString();
+                $cron     = $data['cron_expression'] ?? $run->cron_expression;
+
+                if (array_key_exists('run_at', $data) && is_string($data['run_at'])) {
+                    $data['run_at'] = $this->normalizeRunAtToUtc($data['run_at']);
+                }
+
+                $runAt    = $data['run_at'] ?? $run->run_at?->toDateTimeString();
                 $timezone = $data['timezone'] ?? $run->timezone;
                 $isRecurring = !empty($cron);
                 $data['next_run_at'] = $isRecurring
                     ? $this->computeNextRunAt($cron, $timezone)
                     : $this->computeOneShotNextRunAt($runAt, $timezone);
+
+                if ($data['next_run_at'] !== null) {
+                    $now = date('Y-m-d H:i:s');
+                    Capsule::table('scheduled_runs_next')
+                        ->where('scheduled_run_id', $run->id)
+                        ->where('status', ScheduledRunNext::STATUS_PENDING)
+                        ->update([
+                            'status'       => ScheduledRunNext::STATUS_SKIPPED,
+                            'completed_at' => $now,
+                        ]);
+
+                    Capsule::table('scheduled_runs_next')->insert([
+                        'scheduled_run_id' => $run->id,
+                        'due_at'          => $data['next_run_at'],
+                        'status'          => ScheduledRunNext::STATUS_PENDING,
+                        'created_at'      => $now,
+                        'updated_at'      => $now,
+                    ]);
+                }
             }
 
             Capsule::table('scheduled_runs')
@@ -264,19 +302,59 @@ final class ScheduledRunController
             );
         }
 
-        // Update last_run_at
-        Capsule::table('scheduled_runs')
-            ->where('id', $run->id)
+        $lastRunAt = date('Y-m-d H:i:s');
+
+        // Mark the current PENDING entry as DONE
+        Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $run->id)
+            ->where('status', ScheduledRunNext::STATUS_PENDING)
             ->update([
-                'last_run_at' => date('Y-m-d H:i:s'),
-                'updated_at'  => date('Y-m-d H:i:s'),
+                'status'       => ScheduledRunNext::STATUS_DONE,
+                'claimed_at'   => $lastRunAt,
+                'completed_at' => $lastRunAt,
             ]);
 
-        // One-shot: deactivate after triggering
-        if ($run->cron_expression === null) {
+        // Insert next PENDING entry for recurring schedules
+        if ($run->cron_expression !== null) {
+            // Compute next due_at from the actual last run time, NOT wall-clock now.
+            // This prevents drift when the worker is delayed (same fix as in WorkerRunCommand).
+            $lastRunAtRaw = $run->last_run_at;
+            $lastRunAtUtc = $lastRunAtRaw
+                ? new DateTimeImmutable($lastRunAtRaw->toDateTimeString(), new DateTimeZone('UTC'))
+                : new DateTimeImmutable($lastRunAt, new DateTimeZone('UTC'));
+            $lastRunAtInScheduleTz = $lastRunAtUtc->setTimezone(new DateTimeZone($run->timezone));
+
+            $nextDueAt = (new CronExpression($run->cron_expression))
+                ->getNextRunDate($lastRunAtInScheduleTz, 0, false, $run->timezone)
+                ->setTimezone(new DateTimeZone('UTC'))
+                ->format('Y-m-d H:i:s');
+
+            Capsule::table('scheduled_runs_next')->insert([
+                'scheduled_run_id' => $run->id,
+                'due_at'          => $nextDueAt,
+                'status'          => ScheduledRunNext::STATUS_PENDING,
+                'created_at'      => $lastRunAt,
+                'updated_at'      => $lastRunAt,
+            ]);
+
+            // Update cached next_run_at on scheduled_runs
             Capsule::table('scheduled_runs')
                 ->where('id', $run->id)
-                ->update(['is_active' => 0]);
+                ->update([
+                    'last_run_at' => $lastRunAt,
+                    'next_run_at' => $nextDueAt,
+                    'updated_at'  => $lastRunAt,
+                ]);
+        } else {
+            // One-shot: update last_run_at, clear next_run_at cache, deactivate
+            Capsule::table('scheduled_runs')
+                ->where('id', $run->id)
+                ->update([
+                    'last_run_at' => $lastRunAt,
+                    'next_run_at' => null,
+                    'is_active'   => 0,
+                    'updated_at'  => $lastRunAt,
+                ]);
         }
 
         // Publish Mercure update
@@ -359,7 +437,7 @@ final class ScheduledRunController
         $cron = new CronExpression($cronExpression);
         $now  = new DateTimeImmutable('now', new DateTimeZone($timezone));
 
-        return $cron->getNextRunDate($now)->format('Y-m-d H:i:s');
+        return $cron->getNextRunDate($now, 0, false, $timezone)->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
     }
 
     private function computeOneShotNextRunAt(?string $runAt, string $timezone): ?string
@@ -373,7 +451,17 @@ final class ScheduledRunController
             return null;
         }
 
-        return $dt->setTimezone(new DateTimeZone($timezone))->format('Y-m-d H:i:s');
+        return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+    }
+
+    private function normalizeRunAtToUtc(string $runAt): string
+    {
+        $dt = $this->parseDateTime($runAt);
+        if ($dt === false) {
+            return $runAt; // store as-is if unparseable
+        }
+        // Parse the offset (e.g. +02:00) and convert to UTC, then strip offset for storage
+        return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
     }
 
     private function parseDateTime(string $value): DateTimeImmutable|false
@@ -454,6 +542,20 @@ final class ScheduledRunController
         /** @var AgentPromptTemplate|null */
         $template = $run->getRelation('template');
 
+        // Get next_run_at from the next PENDING entry in scheduled_runs_next
+        $nextEntry = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $run->id)
+            ->where('status', ScheduledRunNext::STATUS_PENDING)
+            ->orderBy('due_at')
+            ->first();
+
+        $nextRunAt = null;
+        if ($nextEntry !== null) {
+            $nextRunAt = (new DateTimeImmutable($nextEntry->due_at, new DateTimeZone('UTC')))
+                ->setTimezone(new DateTimeZone($run->timezone))
+                ->format('Y-m-d\TH:i:sP');
+        }
+
         return [
             'id'                => (int) $run->id,
             'agent_id'          => (int) $run->agent_id,
@@ -461,12 +563,14 @@ final class ScheduledRunController
             'template_name'     => $template?->name,
             'raw_prompt'        => $run->raw_prompt,
             'cron_expression'   => $run->cron_expression,
-            'run_at'            => $run->run_at?->toIso8601String(),
+            'run_at'            => $run->run_at !== null
+                ? $run->run_at->setTimezone(new DateTimeZone($run->timezone))->toIso8601String()
+                : null,
             'timezone'          => $run->timezone,
             'max_steps_override' => $run->max_steps_override,
             'is_active'         => (bool) $run->is_active,
             'last_run_at'       => $run->last_run_at?->toIso8601String(),
-            'next_run_at'       => $run->next_run_at?->toIso8601String(),
+            'next_run_at'       => $nextRunAt,
             'created_at'        => $run->created_at->toIso8601String(),
             'updated_at'        => $run->updated_at->toIso8601String(),
         ];

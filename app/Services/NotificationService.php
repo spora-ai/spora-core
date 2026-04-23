@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Illuminate\Support\Carbon;
 use Spora\Models\Notification;
 use Spora\Models\Task;
 
@@ -84,6 +85,65 @@ class NotificationService
         );
     }
 
+    public function notifyTaskOrphaned(Task $task): void
+    {
+        $notification = $this->create([
+            'user_id' => $task->user_id,
+            'type'    => 'task_orphaned',
+            'title'   => 'Task interrupted',
+            'body'    => 'The task was interrupted and has been stopped. You can retry it manually.',
+            'data'    => ['task_id' => $task->id, 'agent_id' => $task->agent_id],
+        ]);
+
+        $this->mercure->publishToUser(
+            $task->user_id,
+            ['event' => 'notification', 'type' => 'task_orphaned', 'notification' => $this->toResource($notification)],
+        );
+    }
+
+    public function notifyRetryQueued(Task $retryTask, int $attempt, int $max): void
+    {
+        $notification = $this->create([
+            'user_id' => $retryTask->user_id,
+            'type'    => 'task_retry_queued',
+            'title'   => 'Retry scheduled',
+            'body'    => "Retry {$attempt}/{$max} scheduled.",
+            'data'    => [
+                'task_id'      => $retryTask->id,
+                'agent_id'     => $retryTask->agent_id,
+                'attempt'      => $attempt,
+                'max'          => $max,
+                'retry_after'  => $retryTask->retry_after->toIso8601String(),
+            ],
+        ]);
+
+        $this->mercure->publishToUser(
+            $retryTask->user_id,
+            ['event' => 'notification', 'type' => 'task_retry_queued', 'notification' => $this->toResource($notification)],
+        );
+    }
+
+    public function notifyTaskRetrying(Task $task, int $attempt, int $max): void
+    {
+        $notification = $this->create([
+            'user_id' => $task->user_id,
+            'type'    => 'task_retrying',
+            'title'   => 'Retrying task',
+            'body'    => "Retrying task (attempt {$attempt}/{$max})...",
+            'data'    => [
+                'task_id' => $task->id,
+                'agent_id' => $task->agent_id,
+                'attempt'  => $attempt,
+                'max'      => $max,
+            ],
+        ]);
+
+        $this->mercure->publishToUser(
+            $task->user_id,
+            ['event' => 'notification', 'type' => 'task_retrying', 'notification' => $this->toResource($notification)],
+        );
+    }
+
     /**
      * @param array{user_id: int, type: string, title: string, body: string|null, data: array|null} $attributes
      */
@@ -91,6 +151,7 @@ class NotificationService
     {
         $notification = new Notification();
         $notification->fill($attributes);
+        $notification->created_at = Carbon::now();
         $notification->save();
 
         return $notification;

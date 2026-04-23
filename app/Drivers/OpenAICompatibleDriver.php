@@ -15,15 +15,21 @@ use Spora\Drivers\ValueObjects\ToolCall;
 use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
+#[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', description: 'API key for the OpenAI-compatible endpoint. Leave empty for local models.', required: false, scope: 'global')]
+#[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.openai.com/v1).', required: false, scope: 'global', default: 'https://api.openai.com/v1')]
+#[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Model identifier (e.g. gpt-4o, gpt-4-turbo, o1-preview).', required: false, scope: 'global', default: 'gpt-4o')]
+#[ToolSetting(key: 'temperature', label: 'Temperature', type: 'text', description: 'Sampling temperature (0.0–2.0). Lower is more deterministic.', required: false, scope: 'global', default: '0.7')]
+#[ToolSetting(key: 'max_tokens', label: 'Max Tokens', type: 'text', description: 'Maximum number of tokens to generate.', required: false, scope: 'global', default: '4096')]
+#[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, scope: 'global', default: '45')]
 final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface
 {
     public function __construct(
-        private readonly string $apiKey,
-        private readonly string $model,
-        private readonly string $baseUrl,
+        private readonly string              $apiKey,
+        private readonly string              $model,
+        private readonly string              $baseUrl,
         private readonly HttpClientInterface $httpClient,
-        private readonly ?LoggerInterface $logger = null,
-        private readonly ?int $timeout = null,
+        private readonly ?LoggerInterface    $logger = null,
+        private readonly ?int                $timeout = null,
     ) {}
 
     // ── LLMDriverInterface ──────────────────────────────────────────────────────
@@ -147,66 +153,6 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
     public static function getDisplayName(): string
     {
         return 'OpenAI Compatible';
-    }
-
-    /** @return list<ToolSetting> */
-    public static function getSettingsSchema(): array
-    {
-        return [
-            new ToolSetting(
-                key: 'api_key',
-                label: 'API Key',
-                type: 'password',
-                description: 'API key for the OpenAI-compatible endpoint. Leave empty for local models.',
-                required: false,
-                scope: 'global',
-            ),
-            new ToolSetting(
-                key: 'base_url',
-                label: 'Base URL',
-                type: 'text',
-                description: 'Base URL of the API endpoint (e.g. https://api.openai.com/v1).',
-                required: false,
-                scope: 'global',
-                default: 'https://api.openai.com/v1',
-            ),
-            new ToolSetting(
-                key: 'model',
-                label: 'Model',
-                type: 'text',
-                description: 'Model identifier (e.g. gpt-4o, gpt-4-turbo, o1-preview).',
-                required: false,
-                scope: 'global',
-                default: 'gpt-4o',
-            ),
-            new ToolSetting(
-                key: 'temperature',
-                label: 'Temperature',
-                type: 'text',
-                description: 'Sampling temperature (0.0–2.0). Lower is more deterministic.',
-                required: false,
-                scope: 'global',
-                default: '0.7',
-            ),
-            new ToolSetting(
-                key: 'max_tokens',
-                label: 'Max Tokens',
-                type: 'text',
-                description: 'Maximum number of tokens to generate.',
-                required: false,
-                scope: 'global',
-                default: '4096',
-            ),
-            new ToolSetting(
-                key: 'timeout',
-                label: 'Timeout (seconds)',
-                type: 'text',
-                description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).',
-                required: false,
-                scope: 'global',
-                default: '45',
-            ),
-        ];
     }
 
     /** @return list<class-string> */

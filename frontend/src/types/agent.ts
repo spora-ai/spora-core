@@ -14,6 +14,8 @@ export interface Agent {
   max_steps: number
   is_active: boolean
   allow_followup?: boolean
+  retry_after_minutes?: number
+  max_retries?: number
   tools: AgentTool[]
 }
 

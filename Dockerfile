@@ -14,16 +14,13 @@ RUN composer install --no-dev --optimize-autoloader --no-interaction
 # Copy application
 COPY . .
 
-# Ensure storage directory exists and is writable
+# Install supervisord for process supervision
+RUN apt-get update && apt-get install -y --no-install-recommends supervisord && rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p /app/storage/logs /app/storage/framework/cache && \
     chmod -R 775 /app/storage
 
-# ------------------------------------------------------------------
-# Recommended: run as non-root for production security
-# Uncomment the following and adjust UID/GID as needed:
-# USER www-data:www-data
-# ------------------------------------------------------------------
-
 EXPOSE 80 443 443/udp
 
-CMD ["frankenphp", "run", "--config", "frankenphp.conf.php"]
+# Run supervisord which manages both frankenphp (web) and the worker daemon
+CMD ["/usr/bin/supervisord", "-c", "/app/supervisord.conf"]

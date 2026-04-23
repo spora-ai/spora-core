@@ -28,6 +28,7 @@ import {
   buildMonthlyCron,
   parseCron,
   DAY_OF_WEEK_OPTIONS,
+  getTimezoneOffsetMinutes,
   type Frequency,
 } from '@/utils/cron'
 import CronExpression from 'cron-parser'
@@ -285,6 +286,13 @@ watch(() => props.modelValue, async (open) => {
       cronExpression.value = props.initialData.cron_expression
       applyParsedCron(props.initialData.cron_expression)
     }
+    // If a template is selected, fill raw_prompt from it (may have been loaded above).
+    if (props.initialData.template_id !== null) {
+      const tmpl = promptTemplatesStore.templates.find((t) => t.id === props.initialData!.template_id)
+      if (tmpl) {
+        rawPrompt.value = tmpl.prompt_template
+      }
+    }
   } else {
     mode.value = 'oneshot'
     frequency.value = 'daily'
@@ -376,11 +384,16 @@ async function submit(): Promise<void> {
     }
 
     if (mode.value === 'oneshot') {
-      // Find the UTC offset for the selected timezone at this date
-      const fakeDt = new Date(`${runDate.value}T${runTime.value}:00Z`)
-      const tzOffsetStr = fakeDt.toLocaleString('en-US', { timeZoneName: 'longOffset', timeZone: timezone.value }).split('GMT')[1] || 'Z'
-      const runAt = `${runDate.value}T${runTime.value}:00${tzOffsetStr}`
-      payload.run_at = runAt
+      const [year, month, day] = runDate.value.split('-').map(Number)
+      const [hour, minute] = runTime.value.split(':').map(Number)
+      const utcMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0)
+      const localDt = new Date(utcMs)
+      // Use formatOffset to get ±HH:MM in clean ISO 8601 form, handling half-hour offsets like +05:30
+      const offsetMinutes = getTimezoneOffsetMinutes(timezone.value, localDt)
+      const sign = offsetMinutes >= 0 ? '+' : '-'
+      const abs = Math.abs(offsetMinutes)
+      const tzOffsetStr = `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`
+      payload.run_at = `${runDate.value}T${runTime.value}:00${tzOffsetStr}`
     } else {
       payload.cron_expression = computedCron.value
     }

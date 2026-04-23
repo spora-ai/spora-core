@@ -8,8 +8,10 @@ use League\HTMLToMarkdown\HtmlConverter;
 use Psr\Log\LoggerInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
+use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -18,7 +20,9 @@ use Throwable;
     name: 'read_url',
     description: 'Fetch and read the contents of a URL. Can parse HTML pages into Markdown, and can read XML/RSS feeds. Only http:// and https:// URLs are supported.',
     displayName: 'Read URL',
+    category: 'data',
 )]
+#[ToolOperation(name: 'fetch', description: 'Fetch and read the contents of a URL', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolSetting(
     key: 'core.read_url.http_timeout',
     label: 'HTTP Timeout',
@@ -32,8 +36,9 @@ use Throwable;
     description: 'The absolute http:// or https:// URL to read (e.g., https://example.com).',
     required: true,
 )]
-final class ReadUrlTool implements InputToolInterface
+final class ReadUrlTool implements ToolInterface
 {
+    use HasOperations;
     /** Maximum output length in characters before truncation. */
     private const MAX_OUTPUT_CHARS = 40_000;
 
@@ -56,6 +61,17 @@ final class ReadUrlTool implements InputToolInterface
     }
 
     public function execute(array $arguments, int $agentId): ToolResult
+    {
+        return $this->fetch($arguments, $agentId);
+    }
+
+    public function describeAction(array $arguments): string
+    {
+        $url = trim((string) ($arguments['url'] ?? ''));
+        return "Fetch content from URL: {$url}";
+    }
+
+    public function fetch(array $arguments, int $agentId): ToolResult
     {
         $url = trim((string) ($arguments['url'] ?? ''));
 

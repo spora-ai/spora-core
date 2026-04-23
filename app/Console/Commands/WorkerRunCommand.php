@@ -15,6 +15,7 @@ use Spora\Core\Database;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
+use Spora\Models\ScheduledRunNext;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
@@ -41,6 +42,9 @@ final class WorkerRunCommand extends Command
     /** @var array<int, resource> */
     private array $childProcs = [];
 
+    /** Tracks how many scheduled runs were processed in the last processScheduledRuns() call (testing hook). */
+    public int $lastScheduledProcessed = 0;
+
     public function __construct(
         private readonly Database            $database,
         private readonly OrchestratorInterface  $orchestrator,
@@ -54,13 +58,14 @@ final class WorkerRunCommand extends Command
 
     protected function configure(): void
     {
-        $this->setDescription('Drain QUEUED tasks, or run as a persistent daemon.');
-        $this->addOption('daemon', 'd', InputOption::VALUE_NONE, 'Run as a persistent daemon rather than exiting when empty');
-        $this->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Max tasks to process per run (0 = unlimited)', '0');
+        $this->setDescription('Drain QUEUED tasks, process scheduled runs, or run as a persistent daemon.');
+        $this->addOption('daemon', 'd', InputOption::VALUE_NONE, 'Run as a persistent daemon that processes both QUEUED tasks and due scheduled runs on each iteration');
+        $this->addOption('once', null, InputOption::VALUE_NONE, 'Run once: process all due scheduled runs (and QUEUED tasks with --include-queue), then exit. Ideal for cron-driven deployments.');
+        $this->addOption('include-queue', null, InputOption::VALUE_NONE, 'With --once: also drain the QUEUED task queue in the same run');
+        $this->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Max QUEUED tasks to process per run (0 = unlimited)', '0');
         $this->addOption('sleep', 's', InputOption::VALUE_REQUIRED, 'Microseconds to sleep when the queue is empty', '500000');
         $this->addOption('stale-minutes', null, InputOption::VALUE_REQUIRED, 'Minutes after which a RUNNING task is orphaned and failed (0 = disabled, omit to use config/default)', '0');
-        $this->addOption('scheduled', null, InputOption::VALUE_NONE, 'Process due scheduled runs instead of the QUEUED task queue');
-        $this->addOption('workers', 'w', InputOption::VALUE_REQUIRED, 'Max concurrent child processes in daemon mode (0 = unlimited, default: 0)', '0');
+        $this->addOption('workers', 'w', InputOption::VALUE_OPTIONAL, 'Max concurrent child processes (0 = unlimited, default: unlimited)', null);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -68,6 +73,14 @@ final class WorkerRunCommand extends Command
         $this->database->bootDatabaseConnectionOnly();
 
         $isDaemon = (bool) $input->getOption('daemon');
+        $isOnce = (bool) $input->getOption('once');
+        $includeQueue = (bool) $input->getOption('include-queue');
+
+        // --daemon and --once are mutually exclusive
+        if ($isDaemon && $isOnce) {
+            $output->writeln('<error>--daemon and --once cannot be used together.</error>');
+            return Command::FAILURE;
+        }
 
         // Resolve stale-minutes: CLI always wins; omit flag → config → default (60)
         $staleMinutesCli = $input->getOption('stale-minutes');
@@ -77,11 +90,15 @@ final class WorkerRunCommand extends Command
 
         $limit = (int) $input->getOption('limit');
         $sleep = (int) $input->getOption('sleep');
-        $isScheduled = (bool) $input->getOption('scheduled');
-        $maxWorkers = (int) $input->getOption('workers');
 
-        // In daemon mode (with or without --scheduled), always use a single-instance lock
-        // and set up graceful signal handling.
+        // Resolution: CLI --workers N (>0) → cap at N; CLI absent/0 → config → 0 (unlimited)
+        $workersCli = $input->getOption('workers');
+        $maxWorkers = match (true) {
+            $workersCli !== null && $workersCli !== '0' => (int) $workersCli,
+            default => (int) ($this->container->get('config')['max_workers'] ?? 0),
+        };
+
+        // In daemon mode, always use a single-instance lock and set up graceful signal handling.
         if ($isDaemon && extension_loaded('pcntl')) {
             pcntl_async_signals(true);
             pcntl_signal(SIGTERM, function () use ($output): void {
@@ -109,16 +126,23 @@ final class WorkerRunCommand extends Command
                 'stale_minutes' => $staleMinutes,
                 'limit' => $limit,
             ]);
+        } elseif ($isOnce) {
+            $modeLabel = $includeQueue ? 'scheduled runs + QUEUED tasks' : 'scheduled runs';
+            $output->writeln(sprintf('<info>Running in --once mode: processing %s then exiting.</info>', $modeLabel));
+            $this->logger->info('Worker run (--once)', ['include_queue' => $includeQueue]);
+        } else {
+            $output->writeln('<info>Running in default (cron) mode: processing QUEUED tasks once then exiting.</info>');
+            $this->logger->info('Worker run (default/cron)');
         }
 
         // Reap orphaned tasks at startup — covers any tasks left RUNNING by a previous crash.
         $this->reapStaleTasks($output, $staleMinutes);
         $lastReapAt = time();
 
-        // Decide which processing mode to use.
-        // Child processes (--workers > 0) give true parallelism for regular QUEUED tasks.
-        // --scheduled runs are always processed synchronously in the parent.
-        $useChildProcesses = $isDaemon && $maxWorkers > 0 && !$isScheduled;
+        // Child processes give true parallelism for QUEUED tasks in daemon mode.
+        // maxWorkers 0 = unlimited (spawn a child for every QUEUED task).
+        // Scheduled runs are always processed synchronously in the parent.
+        $useChildProcesses = $isDaemon;
 
         while (!$this->shouldQuit && ($limit === 0 || $processed < $limit)) {
             if ($isDaemon && (time() - $lastReapAt) >= self::REAP_INTERVAL_SECONDS) {
@@ -126,18 +150,36 @@ final class WorkerRunCommand extends Command
                 $lastReapAt = time();
             }
 
-            if ($isScheduled) {
-                $this->processScheduledRuns($output, $processed);
-                break;
+            // Always process due scheduled runs in daemon mode and --once mode.
+            // In --once mode this runs once per iteration (which is exactly one).
+            if ($isDaemon || $isOnce) {
+                $this->processScheduledRuns($output);
             }
 
             // Reap finished children on each iteration to avoid zombie procs.
             $this->reapChildren();
 
-            if ($useChildProcesses) {
-                $this->processQueuedTaskWithChild($output, $maxWorkers, $sleep, $processed);
-            } else {
-                $this->processQueuedTaskSync($output, $sleep, $processed);
+            // Process QUEUED tasks: always in daemon mode, only with --include-queue in --once mode.
+            $shouldProcessQueue = $isDaemon || ($isOnce && $includeQueue);
+            if ($shouldProcessQueue) {
+                // Process retry queue first (retry tasks have retry_after timestamp)
+                $this->processRetryQueue($output);
+
+                if ($useChildProcesses) {
+                    $this->processQueuedTaskWithChild($output, $maxWorkers, $sleep, $processed);
+                } else {
+                    $this->processQueuedTaskSync($output, $sleep, $processed);
+                }
+            }
+
+            // In --once mode, exit after one iteration.
+            if ($isOnce) {
+                break;
+            }
+
+            // Daemon: sleep before next poll cycle.
+            if ($isDaemon) {
+                usleep($sleep);
             }
 
             gc_collect_cycles();
@@ -158,98 +200,174 @@ final class WorkerRunCommand extends Command
     /**
      * Fetch and process all due scheduled runs.
      */
-    private function processScheduledRuns(OutputInterface $output, int &$processed): void
+    private function processScheduledRuns(OutputInterface $output): void
     {
+        $processed = 0;
         $now = date('Y-m-d H:i:s');
 
-        $dueRuns = ScheduledRun::where('is_active', true)
-            ->where('next_run_at', '<=', $now)
-            ->orderBy('next_run_at')
-            ->get();
-
-        foreach ($dueRuns as $run) {
-            // N+1 deliberately retained: This call to $run->refresh() creates an N+1 query pattern,
-            // but it is an intentional trade-off to handle multi-worker concurrency. Because Spora
-            // uses SQLite (which lacks robust row-level locking like SELECT ... FOR UPDATE),
-            // this refresh prevents the same task from being executed multiple times if two
-            // background workers pick up the same batch simultaneously.
-            $run->refresh();
-            if (!$run->is_active) {
-                continue;
-            }
-
-            $agent = Agent::find($run->agent_id);
-            if ($agent === null) {
-                $this->logger->warning('Scheduled run has no agent, skipping', ['run_id' => $run->id]);
-                continue;
-            }
-
-            $template = null;
-            if ($run->template_id !== null) {
-                $template = AgentPromptTemplate::find($run->template_id);
-            }
-
-            // Determine prompt
-            $prompt = '';
-            if ($template !== null) {
-                $variables = $template->variables ?? [];
-                $prompt = $this->substituteVariables($template->prompt_template ?? '', $variables, $agent);
-            } else {
-                $prompt = $run->raw_prompt ?? '';
-                $prompt = $this->substituteVariables($prompt, [], $agent);
-            }
-
-            // Determine max_steps (priority: scheduled_run.max_steps_override > template.max_steps > agent.max_steps)
-            $maxSteps = $run->max_steps_override
-                ?? ($template !== null
-                    ? ($template->max_steps ?? $agent->max_steps)
-                    : $agent->max_steps);
-
-            $this->logger->info('Triggering scheduled run', [
-                'run_id' => $run->id,
-                'agent_id' => $run->agent_id,
+        // Atomic claim: UPDATE ... WHERE status = 'PENDING' AND due_at <= $now
+        // Works atomically in SQLite since the WHERE clause is evaluated at write time.
+        $claimed = Capsule::table('scheduled_runs_next')
+            ->where('status', ScheduledRunNext::STATUS_PENDING)
+            ->where('due_at', '<=', $now)
+            ->limit(1)
+            ->update([
+                'status'     => ScheduledRunNext::STATUS_CLAIMED,
+                'claimed_at' => $now,
             ]);
-            $output->writeln(sprintf('<info>Triggering scheduled run %d for agent %d...</info>', $run->id, $run->agent_id));
 
-            try {
-                $task = $this->orchestrator->start((int) $run->agent_id, $prompt, (int) $maxSteps);
-            } catch (Throwable $e) {
-                $this->logger->error('Scheduled run failed', [
-                    'run_id' => $run->id,
-                    'exception_class' => get_class($e),
-                    'message' => $e->getMessage(),
+        if ($claimed === 0) {
+            return; // Nothing due right now
+        }
+
+        // Re-read the claimed entry
+        $entry = Capsule::table('scheduled_runs_next')
+            ->where('status', ScheduledRunNext::STATUS_CLAIMED)
+            ->where('due_at', '<=', $now)
+            ->orderBy('due_at')
+            ->first();
+
+        if ($entry === null) {
+            return;
+        }
+
+        /** @var ScheduledRun|null $run */
+        $run = ScheduledRun::find((int) $entry->scheduled_run_id);
+
+        if ($run === null || !$run->is_active) {
+            // Mark as SKIPPED if the schedule was deactivated or deleted
+            Capsule::table('scheduled_runs_next')
+                ->where('id', $entry->id)
+                ->update(['status' => ScheduledRunNext::STATUS_SKIPPED]);
+            return;
+        }
+
+        $agent = Agent::find($run->agent_id);
+        if ($agent === null) {
+            $this->logger->warning('Scheduled run has no agent, skipping', ['run_id' => $run->id]);
+            Capsule::table('scheduled_runs_next')
+                ->where('id', $entry->id)
+                ->update(['status' => ScheduledRunNext::STATUS_SKIPPED]);
+            return;
+        }
+
+        $template = null;
+        if ($run->template_id !== null) {
+            $template = AgentPromptTemplate::find($run->template_id);
+        }
+
+        // Determine prompt
+        $prompt = '';
+        if ($template !== null) {
+            $variables = $template->variables ?? [];
+            $prompt = $this->substituteVariables($template->prompt_template ?? '', $variables, $agent);
+        } else {
+            $prompt = $run->raw_prompt ?? '';
+            $prompt = $this->substituteVariables($prompt, [], $agent);
+        }
+
+        // Determine max_steps (priority: scheduled_run.max_steps_override > template.max_steps > agent.max_steps)
+        $maxSteps = $run->max_steps_override
+            ?? ($template !== null
+                ? ($template->max_steps ?? $agent->max_steps)
+                : $agent->max_steps);
+
+        $this->logger->info('Triggering scheduled run', [
+            'run_id' => $run->id,
+            'agent_id' => $run->agent_id,
+        ]);
+        $output->writeln(sprintf('<info>Triggering scheduled run %d for agent %d...</info>', $run->id, $run->agent_id));
+
+        try {
+            $task = $this->orchestrator->start((int) $run->agent_id, $prompt, (int) $maxSteps);
+        } catch (Throwable $e) {
+            $this->logger->error('Scheduled run failed', [
+                'run_id' => $run->id,
+                'exception_class' => get_class($e),
+                'message' => $e->getMessage(),
+            ]);
+            Capsule::table('scheduled_runs_next')
+                ->where('id', $entry->id)
+                ->update(['status' => ScheduledRunNext::STATUS_SKIPPED]);
+            $output->writeln(sprintf('<error>Scheduled run %d failed: %s</error>', $run->id, $e->getMessage()));
+            return;
+        }
+
+        // Mark entry DONE and update scheduled_runs
+        $completedAt = date('Y-m-d H:i:s');
+
+        if ($run->cron_expression !== null) {
+            // For recurring schedules, compute the next due_at from $run->last_run_at
+            // (the actual last scheduled time, not wall-clock $completedAt).
+            // This ensures correct cron scheduling even when the worker is delayed.
+            $lastRunAtRaw = $run->last_run_at;
+            $lastRunAtUtc = $lastRunAtRaw
+                ? new DateTimeImmutable($lastRunAtRaw->toDateTimeString(), new DateTimeZone('UTC'))
+                : new DateTimeImmutable($completedAt, new DateTimeZone('UTC'));
+            $lastRunAtInScheduleTz = $lastRunAtUtc->setTimezone(new DateTimeZone($run->timezone));
+
+            $nextDueAt = (new CronExpression($run->cron_expression))
+                ->getNextRunDate($lastRunAtInScheduleTz, 0, false, $run->timezone)
+                ->setTimezone(new DateTimeZone('UTC'))
+                ->format('Y-m-d H:i:s');
+
+            // The trigger endpoint may have already inserted this exact due_at entry
+            // (race: user clicks "Trigger now" while this worker is also processing).
+            // Mark any matching PENDING entry as SKIPPED before inserting to avoid
+            // a duplicate-key violation on (scheduled_run_id, due_at).
+            Capsule::table('scheduled_runs_next')
+                ->where('scheduled_run_id', $run->id)
+                ->where('due_at', $nextDueAt)
+                ->where('status', ScheduledRunNext::STATUS_PENDING)
+                ->update([
+                    'status'       => ScheduledRunNext::STATUS_SKIPPED,
+                    'completed_at' => $completedAt,
                 ]);
-                $output->writeln(sprintf('<error>Scheduled run %d failed: %s</error>', $run->id, $e->getMessage()));
-                continue;
-            }
 
-            $this->notificationService->notifyScheduledRunCompleted($run->id, $task);
+            Capsule::table('scheduled_runs_next')->insert([
+                'scheduled_run_id' => $run->id,
+                'due_at'          => $nextDueAt,
+                'status'          => ScheduledRunNext::STATUS_PENDING,
+                'created_at'      => $completedAt,
+                'updated_at'      => $completedAt,
+            ]);
 
-            // Update last_run_at
             Capsule::table('scheduled_runs')
                 ->where('id', $run->id)
-                ->update(['last_run_at' => date('Y-m-d H:i:s')]);
-
-            // Recompute next_run_at for recurring runs
-            if ($run->cron_expression !== null) {
-                $cron = new CronExpression($run->cron_expression);
-                $nextRun = $cron->getNextRunDate(new DateTimeImmutable('now', new DateTimeZone($run->timezone)));
-                Capsule::table('scheduled_runs')
-                    ->where('id', $run->id)
-                    ->update(['next_run_at' => $nextRun->format('Y-m-d H:i:s')]);
-            }
-
-            // Publish Mercure update
-            $taskData = [
-                'id'          => $task->id,
-                'agent_id'    => $task->agent_id,
-                'status'      => $task->status,
-                'user_prompt' => $task->user_prompt,
-            ];
-            $this->mercure->publish($task->id, $taskData);
-
-            $processed++;
+                ->update([
+                    'last_run_at' => $completedAt,
+                    'next_run_at' => $nextDueAt,
+                ]);
+        } else {
+            Capsule::table('scheduled_runs')
+                ->where('id', $run->id)
+                ->update([
+                    'last_run_at' => $completedAt,
+                    'next_run_at' => null,
+                    'is_active'   => 0,
+                ]);
         }
+
+        Capsule::table('scheduled_runs_next')
+            ->where('id', $entry->id)
+            ->update([
+                'status'       => ScheduledRunNext::STATUS_DONE,
+                'completed_at' => $completedAt,
+            ]);
+
+        $this->notificationService->notifyScheduledRunCompleted($run->id, $task);
+
+        // Publish Mercure update
+        $taskData = [
+            'id'          => $task->id,
+            'agent_id'    => $task->agent_id,
+            'status'      => $task->status,
+            'user_prompt' => $task->user_prompt,
+        ];
+        $this->mercure->publish($task->id, $taskData);
+
+        $processed++;
+        $this->lastScheduledProcessed = 1;
     }
 
     /**
@@ -358,26 +476,42 @@ final class WorkerRunCommand extends Command
 
         $cutoff = date('Y-m-d H:i:s', time() - $staleMinutes * 60);
 
-        $reaped = Task::where('status', 'RUNNING')
+        // Capture IDs before UPDATE so we can notify after
+        $orphanedIds = Task::where('status', 'RUNNING')
             ->where('updated_at', '<', $cutoff)
-            ->update([
-                'status'         => 'FAILED',
-                'failure_reason' => sprintf(
-                    'Task orphaned: still RUNNING after %d minutes — worker process likely crashed or was restarted.',
-                    $staleMinutes,
-                ),
-            ]);
+            ->pluck('id')
+            ->toArray();
 
-        if ($reaped > 0) {
+        if ($orphanedIds === []) {
+            return;
+        }
+
+        $updated = Task::whereIn('id', $orphanedIds)->update([
+            'status'         => 'FAILED',
+            'failure_reason' => sprintf(
+                'Task orphaned: still RUNNING after %d minutes — worker process likely crashed or was restarted.',
+                $staleMinutes,
+            ),
+            'error_code'    => 'ORPHANED',
+            'error_message' => 'The task was interrupted. Click Retry to start a fresh attempt.',
+        ]);
+
+        if ($updated > 0) {
             $this->logger->warning('Reaped orphaned RUNNING tasks', [
-                'count' => $reaped,
+                'count' => $updated,
                 'stale_minutes' => $staleMinutes,
             ]);
             $output->writeln(sprintf(
                 '<comment>Reaped %d orphaned RUNNING task(s) (idle > %d min).</comment>',
-                $reaped,
+                $updated,
                 $staleMinutes,
             ));
+
+            // Batch-fetch + send orphaned notifications
+            $orphaned = Task::findMany($orphanedIds);
+            foreach ($orphaned as $task) {
+                $this->notificationService->notifyTaskOrphaned($task);
+            }
         }
     }
 
@@ -391,6 +525,7 @@ final class WorkerRunCommand extends Command
             $task = Capsule::connection()->transaction(function (): ?Task {
                 /** @var Task|null $task */
                 $task = Task::where('status', 'QUEUED')
+                    ->where('retry_of_task_id', null) // skip retry tasks (handled by processRetryQueue)
                     ->orderBy('id')
                     ->lockForUpdate()
                     ->first();
@@ -438,50 +573,47 @@ final class WorkerRunCommand extends Command
     }
 
     /**
-     * Claim a QUEUED task and spawn a child process via proc_open() to handle it.
-     * The parent monitors children non-blockingly and reaps them on each iteration.
+     * Spawn child processes for all available QUEUED tasks.
+     * The parent claims each task (QUEUED → RUNNING) before spawning its child.
+     * The child skips re-claiming since the parent already did it.
+     * Loops until either maxWorkers (0 = unlimited) is reached or no more QUEUED tasks exist.
      */
     private function processQueuedTaskWithChild(OutputInterface $output, int $maxWorkers, int $sleep, int &$processed): void
     {
-        $activeChildren = count($this->childProcs);
-        if ($maxWorkers > 0 && $activeChildren >= $maxWorkers) {
-            usleep($sleep);
-            return;
-        }
+        while ($maxWorkers === 0 || count($this->childProcs) < $maxWorkers) {
+            $task = Capsule::connection()->transaction(function (): ?Task {
+                /** @var Task|null $task */
+                $task = Task::where('status', 'QUEUED')
+                    ->where('retry_of_task_id', null)
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->first();
 
-        $task = Capsule::connection()->transaction(function (): ?Task {
-            /** @var Task|null $task */
-            $task = Task::where('status', 'QUEUED')
-                ->orderBy('id')
-                ->lockForUpdate()
-                ->first();
+                if ($task === null) {
+                    return null;
+                }
+
+                $task->status = 'RUNNING';
+                $task->save();
+
+                return $task;
+            });
 
             if ($task === null) {
-                return null;
+                break;
             }
 
-            $task->status = 'RUNNING';
-            $task->save();
+            $pid = $this->spawnChild($task->id);
+            if ($pid === null) {
+                $task->status = 'QUEUED';
+                $task->save();
+                $this->logger->warning('Failed to spawn child for task, reverting to QUEUED', ['task_id' => $task->id]);
+                break;
+            }
 
-            return $task;
-        });
-
-        if ($task === null) {
-            usleep($sleep);
-            return;
+            $output->writeln(sprintf('<info>Spawned child %d for task %d</info>', $pid, $task->id));
+            $processed++;
         }
-
-        $pid = $this->spawnChild($task->id);
-        if ($pid === null) {
-            $task->status = 'QUEUED';
-            $task->save();
-            $this->logger->warning('Failed to spawn child for task, reverting to QUEUED', ['task_id' => $task->id]);
-            usleep($sleep);
-            return;
-        }
-
-        $output->writeln(sprintf('<info>Spawned child %d for task %d</info>', $pid, $task->id));
-        $processed++;
     }
 
     /**
@@ -524,6 +656,62 @@ final class WorkerRunCommand extends Command
                 proc_close($proc);
                 unset($this->childProcs[$pid]);
             }
+        }
+    }
+
+    /**
+     * Process tasks that are waiting for a retry after a failure.
+     *
+     * Retry tasks have retry_of_task_id (→ root original), retry_count, and
+     * retry_after (UTC timestamp). When retry_after <= now, the task is picked
+     * up, marked RUNNING, notified, and processed via tick().
+     *
+     * All retry tasks always link to the ROOT original task (not the immediate
+     * parent), enabling single-query cancellation: WHERE retry_of_task_id = root
+     * AND retry_count >= N.
+     */
+    private function processRetryQueue(OutputInterface $output): void
+    {
+        $now = date('Y-m-d H:i:s');
+
+        // Single query: fetch retry tasks JOINed with root task status.
+        // Filters out retry tasks whose root is CANCELLED.
+        $retryTasks = Capsule::connection()->select("
+            SELECT t.id, t.retry_of_task_id, t.retry_count, o.status AS original_status, o.agent_id
+            FROM tasks t
+            JOIN tasks o ON o.id = t.retry_of_task_id
+            WHERE t.status = 'QUEUED'
+              AND t.retry_after IS NOT NULL
+              AND t.retry_after <= ?
+              AND o.status != 'CANCELLED'
+        ", [$now]);
+
+        if ($retryTasks === []) {
+            return;
+        }
+
+        $taskIds = array_column($retryTasks, 'id');
+
+        // Single batch UPDATE: mark all due retry tasks as RUNNING
+        Capsule::table('tasks')
+            ->whereIn('id', $taskIds)
+            ->update(['status' => 'RUNNING']);
+
+        // Batch-fetch tasks + agents (2 queries regardless of N)
+        /** @var Task[] $allRetryTasks */
+        $allRetryTasks = Task::findMany($taskIds);
+        $agentIds = array_unique(array_column($retryTasks, 'agent_id'));
+        /** @var Agent[] $allAgents */
+        $allAgents = Agent::findMany($agentIds);
+        $agentMaxRetries = collect($allAgents)->keyBy->id->map(fn(Agent $a) => $a->max_retries)->toArray();
+
+        foreach ($allRetryTasks as $retryTask) {
+            $retryCount = (int) $retryTask->retry_count;
+            $maxRetries = $agentMaxRetries[$retryTask->agent_id] ?? 0;
+
+            $this->notificationService->notifyTaskRetrying($retryTask, $retryCount, $maxRetries);
+
+            $this->orchestrator->tick((int) $retryTask->id);
         }
     }
 

@@ -1,8 +1,8 @@
-export type TaskStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'PENDING_APPROVAL'
+export type TaskStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'PENDING_APPROVAL' | 'CANCELLED'
 
-export type TaskErrorCode = 'RATE_LIMIT' | 'SERVER_OVERLOADED' | 'SERVER_ERROR' | 'GATEWAY_ERROR' | 'AUTH_ERROR' | 'BAD_REQUEST' | 'TOOL_ERROR' | 'UNKNOWN'
+export type TaskErrorCode = 'RATE_LIMIT' | 'SERVER_OVERLOADED' | 'SERVER_ERROR' | 'GATEWAY_ERROR' | 'AUTH_ERROR' | 'BAD_REQUEST' | 'TOOL_ERROR' | 'UNKNOWN' | 'ORPHANED'
 
-export type ToolCallStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED'
+export type ToolCallStatus = 'PENDING' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'FAILED' | 'DISABLED'
 
 export interface Task {
   id: number
@@ -15,6 +15,9 @@ export interface Task {
   parent_task_id?: number
   error_code?: TaskErrorCode | null
   error_message?: string | null
+  retry_of_task_id?: number | null
+  retry_count?: number
+  retry_after?: string | null
   created_at: string
   updated_at: string
 }
@@ -23,6 +26,8 @@ export interface ToolCall {
   id: number
   tool_name: string
   tool_type: string
+  operation: string | null
+  operation_description: string | null
   status: ToolCallStatus
   proposed_arguments: Record<string, unknown> | null
   approved_arguments: Record<string, unknown> | null

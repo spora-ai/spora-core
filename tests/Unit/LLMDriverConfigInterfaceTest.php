@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\LLMDriverConfigInterface;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Tools\Attributes\ToolSetting;
 
 test('OpenAICompatibleDriver implements LLMDriverConfigInterface', function (): void {
     expect(OpenAICompatibleDriver::class)->toImplement(LLMDriverConfigInterface::class);
@@ -30,21 +31,21 @@ test('AnthropicCompatibleDriver::getDisplayName returns Anthropic Compatible', f
     expect(AnthropicCompatibleDriver::getDisplayName())->toBe('Anthropic Compatible');
 });
 
-test('OpenAICompatibleDriver::getSettingsSchema returns non-empty array', function (): void {
-    $schema = OpenAICompatibleDriver::getSettingsSchema();
-    expect($schema)->toBeArray()
-        ->and($schema)->not->toBeEmpty();
+test('OpenAICompatibleDriver settings are declared via #[ToolSetting] attributes', function (): void {
+    $ref = new ReflectionClass(OpenAICompatibleDriver::class);
+    $attrs = $ref->getAttributes(ToolSetting::class);
+    expect($attrs)->not->toBeEmpty();
 });
 
-test('AnthropicCompatibleDriver::getSettingsSchema returns non-empty array', function (): void {
-    $schema = AnthropicCompatibleDriver::getSettingsSchema();
-    expect($schema)->toBeArray()
-        ->and($schema)->not->toBeEmpty();
+test('AnthropicCompatibleDriver settings are declared via #[ToolSetting] attributes', function (): void {
+    $ref = new ReflectionClass(AnthropicCompatibleDriver::class);
+    $attrs = $ref->getAttributes(ToolSetting::class);
+    expect($attrs)->not->toBeEmpty();
 });
 
 test('OpenAICompatibleDriver schema contains expected keys', function (): void {
-    $schema = OpenAICompatibleDriver::getSettingsSchema();
-    $keys = array_map(fn($field) => $field->key, $schema);
+    $ref = new ReflectionClass(OpenAICompatibleDriver::class);
+    $keys = array_map(fn($attr) => $attr->newInstance()->key, $ref->getAttributes(ToolSetting::class));
 
     expect($keys)->toContain('api_key')
         ->and($keys)->toContain('base_url')
@@ -52,8 +53,8 @@ test('OpenAICompatibleDriver schema contains expected keys', function (): void {
 });
 
 test('AnthropicCompatibleDriver schema contains expected keys', function (): void {
-    $schema = AnthropicCompatibleDriver::getSettingsSchema();
-    $keys = array_map(fn($field) => $field->key, $schema);
+    $ref = new ReflectionClass(AnthropicCompatibleDriver::class);
+    $keys = array_map(fn($attr) => $attr->newInstance()->key, $ref->getAttributes(ToolSetting::class));
 
     expect($keys)->toContain('api_key')
         ->and($keys)->toContain('base_url')
@@ -61,16 +62,16 @@ test('AnthropicCompatibleDriver schema contains expected keys', function (): voi
 });
 
 test('OpenAICompatibleDriver schema fields have correct scope', function (): void {
-    $schema = OpenAICompatibleDriver::getSettingsSchema();
-    foreach ($schema as $field) {
-        expect($field->scope)->toBe('global');
+    $ref = new ReflectionClass(OpenAICompatibleDriver::class);
+    foreach ($ref->getAttributes(ToolSetting::class) as $attr) {
+        expect($attr->newInstance()->scope)->toBe('global');
     }
 });
 
 test('AnthropicCompatibleDriver schema fields have correct scope', function (): void {
-    $schema = AnthropicCompatibleDriver::getSettingsSchema();
-    foreach ($schema as $field) {
-        expect($field->scope)->toBe('global');
+    $ref = new ReflectionClass(AnthropicCompatibleDriver::class);
+    foreach ($ref->getAttributes(ToolSetting::class) as $attr) {
+        expect($attr->newInstance()->scope)->toBe('global');
     }
 });
 

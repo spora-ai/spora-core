@@ -21,7 +21,7 @@ interface PluginInterface
     /**
      * Tool classes this plugin contributes to the Tool Registry.
      *
-     * @return array<class-string<\Spora\Tools\InputToolInterface|\Spora\Tools\OutputToolInterface>>
+     * @return array<class-string<\Spora\Tools\ToolInterface>>
      */
     public function tools(): array;
 

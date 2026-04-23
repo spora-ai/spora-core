@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Drivers;
 
-use Spora\Tools\Attributes\ToolSetting;
-
 /**
  * Interface for LLM driver configurations.
  *
@@ -28,14 +26,6 @@ interface LLMDriverConfigInterface
      * e.g. "OpenAI Compatible", "Anthropic Compatible".
      */
     public static function getDisplayName(): string;
-
-    /**
-     * Returns the settings schema as #[ToolSetting] attribute instances.
-     * Discovered via ReflectionClass::getAttributes(ToolSetting::class).
-     *
-     * @return list<ToolSetting>
-     */
-    public static function getSettingsSchema(): array;
 
     /**
      * List of tool class names available by default for this driver.

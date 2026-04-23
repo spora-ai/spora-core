@@ -7,8 +7,10 @@ namespace Spora\Tools;
 use Psr\Log\LoggerInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
+use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -17,7 +19,9 @@ use Throwable;
     name: 'serper_search',
     description: 'Search the web using Google Search via Serper.dev. Use this for general queries, looking up specific websites, or finding real-time information.',
     displayName: 'Serper Search',
+    category: 'research',
 )]
+#[ToolOperation(name: 'search', description: 'Search the web using Google via Serper.dev', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolSetting(
     key: 'core.serper.api_key',
     label: 'Serper.dev API Key',
@@ -39,8 +43,9 @@ use Throwable;
     description: 'The search query to send to Google.',
     required: true,
 )]
-final class SerperSearchTool implements InputToolInterface
+final class SerperSearchTool implements ToolInterface
 {
+    use HasOperations;
     public function __construct(
         private readonly ToolConfigService $configService,
         private readonly HttpClientInterface $httpClient,
@@ -57,6 +62,17 @@ final class SerperSearchTool implements InputToolInterface
     }
 
     public function execute(array $arguments, int $agentId): ToolResult
+    {
+        return $this->search($arguments, $agentId);
+    }
+
+    public function describeAction(array $arguments): string
+    {
+        $query = trim((string) ($arguments['q'] ?? ''));
+        return "Search Google via Serper.dev for: '{$query}'";
+    }
+
+    public function search(array $arguments, int $agentId): ToolResult
     {
         $query = trim((string) ($arguments['q'] ?? ''));
 

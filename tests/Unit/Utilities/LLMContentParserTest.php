@@ -93,3 +93,71 @@ test('parse extracts XML <thinking> nested inside a text block', function (): vo
     expect($response['content'])->toBe('Inner text.')
         ->and($response['reasoning'])->toBe('Inner thinking within block');
 });
+
+test('parse extracts <thought> tags as reasoning from plain string content', function (): void {
+    $raw = '<thought>I should calculate the total first.</thought><text>The total is $42.</text>';
+
+    $response = LLMContentParser::parse($raw);
+
+    expect($response['content'])->toBe('The total is $42.')
+        ->and($response['reasoning'])->toBe('I should calculate the total first.');
+});
+
+test('parse extracts Anthropic-style thinking tags and preserves newlines in content', function (): void {
+    $raw = "<think>Step one.\nStep two.\n</think>\n\n## Header\n\nList item 1\nList item 2";
+
+    $response = LLMContentParser::parse($raw);
+
+    expect($response['reasoning'])->toBe("Step one.\nStep two.");
+    // Newlines should be preserved, not collapsed to spaces
+    expect($response['content'])->toBe("## Header\n\nList item 1\nList item 2");
+});
+
+test('parse preserves newlines in content when stripping thinking tags', function (): void {
+    $raw = "<thinking>First thought</thinking>\n\n## Header\n\nParagraph here";
+
+    $response = LLMContentParser::parse($raw);
+
+    // Newlines should NOT be collapsed to spaces - only spaces/tabs collapsed
+    expect($response['content'])->toBe("## Header\n\nParagraph here");
+    expect($response['content'])->not()->toContain('  '); // no double spaces
+});
+
+test('parse extracts Anthropic thinking from response02.txt and preserves markdown formatting', function (): void {
+    $raw = file_get_contents(__DIR__ . '/response02.txt');
+
+    $response = LLMContentParser::parse($raw);
+
+    // Thinking should be extracted into reasoning field
+    expect($response['reasoning'])->not()->toBeNull();
+    expect($response['reasoning'])->toContain('Wie wird das Wetter');
+
+    // Content should NOT contain thinking tags
+    expect($response['content'])->not()->toContain('</think>');
+    expect($response['content'])->not()->toContain('<think>');
+
+    // Content should start with markdown heading, not with thinking tag
+    expect(trim($response['content']))->toStartWith('## Wetter in Deutschland');
+
+    // Markdown formatting (tables) should be preserved with newlines
+    expect($response['content'])->toContain("| Stadt |");
+    expect($response['content'])->toContain("|-------|");
+    expect($response['content'])->toContain("| **Köln**");
+});
+
+test('parse extracts Anthropic thinking from response01.txt and preserves content', function (): void {
+    $raw = file_get_contents(__DIR__ . '/response01.txt');
+
+    $response = LLMContentParser::parse($raw);
+
+    // Thinking should be extracted
+    expect($response['reasoning'])->not()->toBeNull();
+    expect($response['reasoning'])->toContain('6x7');
+
+    // Content should NOT contain thinking tags
+    expect($response['content'])->not()->toContain('</think>');
+    expect($response['content'])->not()->toContain('<think>');
+
+    // Content should be the simple answer
+    expect(trim($response['content']))->toBe("6 × 7 = **42**");
+});

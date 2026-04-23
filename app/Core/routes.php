@@ -14,6 +14,7 @@ use Spora\Http\ScheduledRunController;
 use Spora\Http\SseController;
 use Spora\Http\TaskController;
 use Spora\Http\ToolController;
+use Spora\Http\UserProfileController;
 
 /**
  * Application route definitions.
@@ -49,6 +50,10 @@ return static function (RouteCollector $r): void {
     $r->addRoute('PUT', '/api/v1/agents/{id}/tools/{toolId}/override', [AgentController::class, 'putOverride']);
     $r->addRoute('DELETE', '/api/v1/agents/{id}/tools/{toolId}/override', [AgentController::class, 'deleteOverride']);
 
+    // Agent tool operations — per-operation enable/auto-approve overrides
+    $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentController::class, 'getOperationOverride']);
+    $r->addRoute('PATCH', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentController::class, 'patchOperationOverride']);
+
     // Tool registry — global settings
     $r->addRoute('GET', '/api/v1/tools', [ToolController::class, 'index']);
     $r->addRoute('GET', '/api/v1/tools/{toolId}/settings', [ToolController::class, 'getSettings']);
@@ -61,6 +66,7 @@ return static function (RouteCollector $r): void {
     $r->addRoute('POST', '/api/v1/tasks/{taskId}/approve', [TaskController::class, 'approve']);
     $r->addRoute('POST', '/api/v1/tasks/{taskId}/reject', [TaskController::class, 'reject']);
     $r->addRoute('POST', '/api/v1/tasks/{taskId}/retry', [TaskController::class, 'retry']);
+    $r->addRoute('DELETE', '/api/v1/tasks/{taskId}/retry-chain', [TaskController::class, 'cancelRetryChain']);
     $r->addRoute('DELETE', '/api/v1/tasks/{taskId}', [TaskController::class, 'destroy']);
 
     // Recipes
@@ -80,6 +86,14 @@ return static function (RouteCollector $r): void {
     $r->addRoute('POST', '/api/v1/notifications/{id}/read', [NotificationController::class, 'markRead']);
     $r->addRoute('POST', '/api/v1/notifications/read-all', [NotificationController::class, 'markAllRead']);
     $r->addRoute('DELETE', '/api/v1/notifications/{id}', [NotificationController::class, 'destroy']);
+
+    // User Profile
+    $r->addRoute('GET', '/api/v1/me/profile', [UserProfileController::class, 'getProfile']);
+    $r->addRoute('PUT', '/api/v1/me/profile', [UserProfileController::class, 'putProfile']);
+    $r->addRoute('GET', '/api/v1/me/locations', [UserProfileController::class, 'getLocations']);
+    $r->addRoute('POST', '/api/v1/me/locations', [UserProfileController::class, 'postLocation']);
+    $r->addRoute('PUT', '/api/v1/me/locations/{id}', [UserProfileController::class, 'putLocation']);
+    $r->addRoute('DELETE', '/api/v1/me/locations/{id}', [UserProfileController::class, 'deleteLocation']);
 
     // SSE
     $r->addRoute('GET', '/api/v1/sse/status', [SseController::class, 'status']);

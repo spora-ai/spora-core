@@ -1,8 +1,34 @@
-# Spora Tool Settings Key Convention
+# Spora Tool System
 
-This document defines the naming convention for all `#[ToolSetting]` keys used throughout the Spora platform — both for built-in core tools and third-party plugin tools.
+This document covers tool naming conventions, the `#[Tool]` attribute, and how tools are sent to the LLM.
 
-## Key Format
+---
+
+## Tool naming
+
+Every tool carries a **unique LLM-facing name** declared via the `#[Tool(name:)]` attribute:
+
+```php
+#[Tool(
+    name: 'web_search',   // snake_case, /^[a-z][a-z0-9_]*$/
+    description: 'Search the web.'
+)]
+```
+
+Names must match `/^[a-z][a-z0-9_]*$/` (lowercase alphanumeric + underscore, starting with a letter). An `InvalidArgumentException` is thrown at class instantiation time if the name is invalid.
+
+### Core vs Plugin namespacing
+
+- **Core tools** (built-in): sent to the LLM with their plain name, e.g. `web_search`.
+- **Plugin tools**: prefixed with the plugin slug and a colon, e.g. `my-plugin:web_search`.
+
+This ensures global uniqueness — two plugins can never produce a tool name collision. The prefix is derived automatically from `plugin.json` and requires no changes to the plugin's `#[Tool]` attribute.
+
+> **Note:** core tools intentionally do **not** use a `core:` prefix. Adding it would change every tool name currently known to the LLM, breaking existing agents. Only plugin tools get the slug prefix.
+
+---
+
+## Tool Settings Key Convention
 
 All setting keys follow a **dot-separated hierarchical format**:
 

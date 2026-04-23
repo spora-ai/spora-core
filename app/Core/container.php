@@ -10,6 +10,7 @@ use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\SecurityManager;
 use Spora\Core\SecurityManagerInterface;
+use Spora\Drivers\DriverFactory;
 use Spora\Plugins\PluginLoader;
 use Spora\Recipes\RecipeScanner;
 use Spora\Services\MercurePublisherInterface;
@@ -40,6 +41,7 @@ return [
             // SPORA_SYNC_MODE=true → worker_mode=true; SPORA_SYNC_MODE=false → worker_mode=false
             'worker_mode'        => true,
             'worker_stale_minutes' => 60,
+            'max_workers'        => 0,  // 0 = unlimited (spawn a child for every QUEUED task)
             'llm_timeout'        => 300,
             'tool_http_timeout'   => 30,
             'mercure_url'         => null,
@@ -91,6 +93,9 @@ return [
         }
         if (($v = $env('SPORA_WORKER_STALE_MINUTES')) !== null) {
             $envOverrides['worker_stale_minutes'] = (int) $v;
+        }
+        if (($v = $env('SPORA_MAX_WORKERS')) !== null) {
+            $envOverrides['max_workers'] = (int) $v;
         }
         if (($v = $env('SPORA_LLM_TIMEOUT')) !== null) {
             $envOverrides['llm_timeout'] = (int) $v;
@@ -144,7 +149,9 @@ return [
     },
 
     Database::class => static function (ContainerInterface $c): Database {
-        return new Database($c->get('config'), $c->get(PluginLoader::class));
+        $db = new Database($c->get('config'), $c->get(PluginLoader::class));
+        $db->bootDatabaseConnectionOnly();
+        return $db;
     },
 
     Psr\Log\LoggerInterface::class => static function (ContainerInterface $c): Psr\Log\LoggerInterface {
@@ -185,15 +192,15 @@ return [
         );
     },
 
-    Spora\Services\ToolConfigService::class => static function (ContainerInterface $c): Spora\Services\ToolConfigService {
-        return new Spora\Services\ToolConfigService(
+    ToolConfigServiceInterface::class => static function (ContainerInterface $c): ToolConfigService {
+        return new ToolConfigService(
             $c->get(SecurityManagerInterface::class),
             $c->get('tool_classes'),
         );
     },
 
-    Spora\Drivers\DriverFactory::class => static function (ContainerInterface $c): Spora\Drivers\DriverFactory {
-        return new Spora\Drivers\DriverFactory(
+    DriverFactoryInterface::class => static function (ContainerInterface $c): DriverFactory {
+        return new DriverFactory(
             $c->get(Psr\Log\LoggerInterface::class),
             $c->get(Spora\Services\LLMConfigService::class),
             (int) ($c->get('config')['llm_timeout'] ?? 300),
@@ -218,9 +225,10 @@ return [
         Spora\Tools\ReadUrlTool::class,
         Spora\Tools\NewsApiTool::class,
         Spora\Tools\GNewsTool::class,
-        Spora\Tools\ReadEmailTool::class,
-        Spora\Tools\SendEmailTool::class,
+        Spora\Tools\EmailTool::class,
         Spora\Tools\CalDavCalendarTool::class,
+        Spora\Tools\UserInfoTool::class,
+        Spora\Tools\SemanticScholarTool::class,
     ],
 
     Spora\Http\LLMConfigController::class => static function (ContainerInterface $c): Spora\Http\LLMConfigController {
@@ -298,6 +306,7 @@ return [
             logger: $c->get(Psr\Log\LoggerInterface::class),
             workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,
             notificationService: $c->get(NotificationService::class),
+            pluginLoader: $c->get(PluginLoader::class),
         );
     },
 
@@ -374,6 +383,12 @@ return [
             $c->get(AuthService::class),
             $config['mercure_url'] ?? null,
             $config['mercure_jwt_key'] ?? null,
+        );
+    },
+
+    Spora\Http\UserProfileController::class => static function (ContainerInterface $c): Spora\Http\UserProfileController {
+        return new Spora\Http\UserProfileController(
+            $c->get(AuthService::class),
         );
     },
 ];

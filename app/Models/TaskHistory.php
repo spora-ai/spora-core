@@ -22,7 +22,7 @@ use Illuminate\Support\Carbon;
  * @property int|null    $output_tokens
  * @property Carbon|null $created_at
  */
-class TaskHistory extends Model
+final class TaskHistory extends Model
 {
     /** @var string */
     protected $table = 'task_history';

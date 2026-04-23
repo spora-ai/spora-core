@@ -61,10 +61,11 @@ final class TaskRunCommand extends Command
         $orchestrator = $this->buildOrchestrator($output);
 
         // Claim the task (QUEUED → RUNNING) inside a lock-safe transaction.
+        // If the task is already RUNNING, the parent already claimed it — just proceed.
         $task = Capsule::connection()->transaction(function () use ($taskId): ?Task {
             /** @var Task|null $task */
             $task = Task::where('id', $taskId)
-                ->where('status', 'QUEUED')
+                ->whereIn('status', ['QUEUED', 'RUNNING'])
                 ->lockForUpdate()
                 ->first();
 
@@ -72,8 +73,10 @@ final class TaskRunCommand extends Command
                 return null;
             }
 
-            $task->status = 'RUNNING';
-            $task->save();
+            if ($task->status === 'QUEUED') {
+                $task->status = 'RUNNING';
+                $task->save();
+            }
 
             return $task;
         });

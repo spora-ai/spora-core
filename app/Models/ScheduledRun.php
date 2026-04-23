@@ -6,6 +6,7 @@ namespace Spora\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property int $id
@@ -57,5 +58,10 @@ final class ScheduledRun extends Model
     public function template(): BelongsTo
     {
         return $this->belongsTo(AgentPromptTemplate::class, 'template_id');
+    }
+
+    public function nextRuns(): HasMany
+    {
+        return $this->hasMany(ScheduledRunNext::class)->orderBy('due_at');
     }
 }

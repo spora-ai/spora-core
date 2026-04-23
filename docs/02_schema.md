@@ -15,7 +15,8 @@
 | `llm_driver_configurations` | `Spora\Models\LLMDriverConfiguration` | User-scoped LLM driver configs. One row per user+driver. `settings` is encrypted JSON. `is_default` marks user's fallback. |
 | `agents` | `Spora\Models\Agent` | One agent per user. Stores identity, `llm_driver_config_id` (FK), `recipe_id`, `max_steps`, `allow_followup`. |
 | `agent_prompt_templates` | `Spora\Models\AgentPromptTemplate` | Reusable prompt templates per agent. Stores `prompt_template` with Mustache vars, `variables` JSON schema, `max_steps` override. |
-| `scheduled_runs` | `Spora\Models\ScheduledRun` | Scheduled or one-shot task triggers. Stores `cron_expression` or `run_at`, `template_id` FK, `next_run_at` precomputed. |
+| `scheduled_runs` | `Spora\Models\ScheduledRun` | Scheduled or one-shot task triggers. Stores `cron_expression` or `run_at`, `template_id` FK, `next_run_at` precomputed. `scheduled_runs_next` holds one concrete due execution per row. |
+| `scheduled_runs_next` | `Spora\Models\ScheduledRunNext` | One row per concrete scheduled execution. Status lifecycle: `PENDING → CLAIMED → DONE / SKIPPED`. Atomic claim via `UPDATE ... SET status = 'CLAIMED' WHERE status = 'PENDING' AND due_at <= now`. Unique constraint on `(scheduled_run_id, due_at)` prevents duplicates. `next_run_at` on `scheduled_runs` is a cached derivative updated whenever a new PENDING row is inserted. |
 | `tool_configurations` | `Spora\Models\ToolConfiguration` | Global per-tool settings. One row per tool class. Password fields encrypted via `SecurityManager`. All access via `ToolConfigService` only. |
 | `agent_tools` | `Spora\Models\AgentTool` | Junction: which tools are enabled per agent. `auto_approve` is 3-state: `0`/`1`/`null` — never cast to boolean (null = use class attribute default). |
 | `agent_tool_overrides` | `Spora\Models\AgentToolOverride` | Per-agent credential overrides for `scope: "agent"` settings. Merged on top of global settings by `ToolConfigService`. |
@@ -38,7 +39,7 @@
 
 **Both `tool_name` and `tool_class` stored in `tool_calls`** — `tool_name` is what the LLM uses; `tool_class` is what PHP uses to instantiate. Both needed for unambiguous resolution and audit.
 
-**Migration order:** `users` → `llm_driver_configurations` → `agents` → `agent_prompt_templates` → `scheduled_runs` → `tool_configurations` → `agent_tools` → `agent_tool_overrides` → `tasks` → `tool_calls` → `task_history` → `notifications`
+**Migration order:** `users` → `llm_driver_configurations` → `agents` → `agent_prompt_templates` → `scheduled_runs` → `scheduled_runs_next` → `tool_configurations` → `agent_tools` → `agent_tool_overrides` → `tasks` → `tool_calls` → `task_history` → `notifications`
 
 ---
 

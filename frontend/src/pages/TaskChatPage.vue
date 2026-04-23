@@ -50,19 +50,50 @@ const perToolRejectReason = ref<Record<number, string>>({})
 const perToolRejectInput = ref<Record<number, boolean>>({})
 const perToolApproving = ref<Record<number, boolean>>({})
 const perToolRejecting = ref<Record<number, boolean>>({})
+const expandedTools = ref<Record<number, boolean>>({})
 
 // ── Error banner ───────────────────────────────────────────────────────────
 
 const errorBannerDismissed = ref(false)
 
-const RETRYABLE_ERROR_CODES = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'SERVER_ERROR', 'GATEWAY_ERROR'] as const
+const RETRYABLE_ERROR_CODES = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'SERVER_ERROR', 'GATEWAY_ERROR', 'ORPHANED'] as const
 
 const showRetryBanner = computed(() => {
   if (!task.value) return false
   if (task.value.status !== 'FAILED') return false
   if (errorBannerDismissed.value) return false
+  if (task.value.retry_after) return false  // countdown shown instead
   return task.value.error_code !== null && RETRYABLE_ERROR_CODES.includes(task.value.error_code as typeof RETRYABLE_ERROR_CODES[number])
 })
+
+// Countdown for auto-retry (retry_after set but not yet elapsed)
+const showCountdown = computed(() =>
+  task.value?.status === 'FAILED' && task.value.retry_after !== null
+)
+
+const countdown = computed(() => {
+  if (!task.value?.retry_after) return ''
+  const ms = Math.max(0, new Date(task.value.retry_after).getTime() - Date.now())
+  if (ms <= 0) return '0:00'
+  const m = Math.floor(ms / 60000)
+  const s = Math.floor((ms % 60000) / 1000)
+  return `${m}:${s.toString().padStart(2, '0')}`
+})
+
+const cancelling = ref(false)
+
+async function cancelRetryChain(): Promise<void> {
+  if (!task.value) return
+  cancelling.value = true
+  try {
+    await taskStore.cancelRetryChain(task.value.id)
+    await taskStore.fetchTask(task.value.id)
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : 'Failed to cancel retry.')
+  } finally {
+    cancelling.value = false
+  }
+}
 
 async function retryNow(): Promise<void> {
   if (!task.value) return
@@ -96,6 +127,11 @@ async function submitFollowup(): Promise<void> {
   submittingFollowup.value = true
   try {
     const newTask = await taskStore.createTaskForAgent(task.value.agent_id, text, task.value.id)
+    // Guard: prevent navigation to undefined/NaN if server returns malformed response
+    if (!Number.isFinite(newTask.id)) {
+      followupError.value = 'Failed to create follow-up task. Please try again.'
+      return
+    }
     followupPrompt.value = ''
     router.push({ name: 'task', params: { id: newTask.id } })
   } catch (e) {
@@ -119,6 +155,16 @@ type ChatMessage =
   | { kind: 'user'; entry: HistoryEntry }
   | { kind: 'assistant'; entry: HistoryEntry }
   | { kind: 'tool-result'; entry: HistoryEntry }
+
+// Reasoning from the last assistant message (before deduplication) - shown even when content is hidden
+const finalReasoning = computed((): string | null => {
+  if (!task.value?.history?.length || !task.value.final_response) return null
+  const last = task.value.history[task.value.history.length - 1]
+  if (last?.role === 'assistant' && last.reasoning && last.content?.trim() === task.value.final_response.trim()) {
+    return last.reasoning
+  }
+  return null
+})
 
 const chatMessages = computed((): ChatMessage[] => {
   if (!task.value) return []
@@ -146,6 +192,22 @@ const chatMessages = computed((): ChatMessage[] => {
 function truncate(text: string | null, max = 300): string {
   if (!text) return '(empty)'
   return text.length <= max ? text : text.slice(0, max) + '…'
+}
+
+function isTruncated(text: string | null, max = 300): boolean {
+  return text !== null && text.length > max
+}
+
+function toggleExpanded(toolId: number): void {
+  expandedTools.value[toolId] = !expandedTools.value[toolId]
+}
+
+function getToolContent(entry: HistoryEntry): string {
+  return entry.content ?? ''
+}
+
+function isToolExpanded(toolId: number): boolean {
+  return expandedTools.value[toolId] ?? false
 }
 
 // ── Approval ───────────────────────────────────────────────────────────────
@@ -379,6 +441,34 @@ onUnmounted(() => {
         </button>
       </div>
 
+      <!-- Auto-retry countdown -->
+      <div
+        v-if="showCountdown"
+        data-testid="retry-countdown"
+        class="mx-4 mt-4 max-w-2xl mx-auto flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm"
+      >
+        <svg class="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold text-amber-900 dark:text-amber-100">Retrying in {{ countdown }}…</p>
+          <p v-if="task.error_code === 'ORPHANED'" class="text-amber-700 dark:text-amber-300 mt-0.5">
+            Task was interrupted. A retry attempt is scheduled automatically.
+          </p>
+          <p v-else class="text-amber-700 dark:text-amber-300 mt-0.5">
+            Task failed and will be retried automatically.
+          </p>
+        </div>
+        <button
+          data-testid="cancel-retry-button"
+          @click="cancelRetryChain"
+          :disabled="cancelling"
+          class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-xs px-3 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors disabled:opacity-50"
+        >
+          {{ cancelling ? 'Cancelling…' : 'Cancel Retry' }}
+        </button>
+      </div>
+
       <!-- Chat area -->
       <div class="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-3">
 
@@ -391,30 +481,32 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Assistant text -->
-          <div v-else-if="msg.kind === 'assistant'" class="flex justify-start">
-            <div class="flex gap-2.5 max-w-[85%]">
-              <div class="shrink-0 h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground mt-0.5">
-                AI
-              </div>
-              <div class="rounded-2xl rounded-tl-sm border border-border bg-card px-4 py-2.5 text-sm">
-                <div class="chat-bubble-content" v-html="renderMarkdown(msg.entry.content ?? '')" />
+          <!-- Assistant message: reasoning (above) + text (below) -->
+          <template v-if="msg.kind === 'assistant'">
+            <!-- Reasoning foldout -->
+            <div v-if="msg.entry.reasoning" class="flex justify-start">
+              <div class="ml-9 mt-1 text-xs text-muted-foreground">
+                <details class="rounded-lg border border-border">
+                  <summary class="px-3 py-1.5 cursor-pointer select-none">Reasoning</summary>
+                  <div class="px-3 py-2 border-t border-border chat-bubble-content" v-html="renderMarkdown(msg.entry.reasoning)" />
+                </details>
               </div>
             </div>
-          </div>
-
-          <!-- Reasoning foldout -->
-          <div v-if="msg.kind === 'assistant' && msg.entry.reasoning" class="flex justify-start">
-            <div class="ml-9 mt-1 text-xs text-muted-foreground">
-              <details class="rounded-lg border border-border">
-                <summary class="px-3 py-1.5 cursor-pointer select-none">Reasoning</summary>
-                <div class="px-3 py-2 border-t border-border chat-bubble-content" v-html="renderMarkdown(msg.entry.reasoning)" />
-              </details>
+            <!-- Assistant text -->
+            <div class="flex justify-start">
+              <div class="flex gap-2.5 max-w-[85%]">
+                <div class="shrink-0 h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground mt-0.5">
+                  AI
+                </div>
+                <div class="rounded-2xl rounded-tl-sm border border-border bg-card px-4 py-2.5 text-sm">
+                  <div class="chat-bubble-content" v-html="renderMarkdown(msg.entry.content ?? '')" />
+                </div>
+              </div>
             </div>
-          </div>
+          </template>
 
-          <!-- tool result -->
-          <div v-else-if="msg.kind === 'tool-result'" class="flex justify-start">
+          <!-- Tool result -->
+          <div v-if="msg.kind === 'tool-result'" class="flex justify-start">
             <details class="ml-9 max-w-[85%] text-xs rounded-lg border border-border bg-muted/40 overflow-hidden">
               <summary class="flex items-center gap-2 px-3 py-2 cursor-pointer select-none list-none hover:bg-muted/60 transition-colors">
                 <svg class="h-3.5 w-3.5 text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -424,12 +516,31 @@ onUnmounted(() => {
                 <span class="text-muted-foreground/60">— result</span>
               </summary>
               <div class="px-3 py-2 border-t border-border chat-bubble-content text-muted-foreground break-all whitespace-pre-wrap">
-                <div v-html="renderMarkdown(truncate(msg.entry.content ?? ''))" />
+                <div v-if="isTruncated(msg.entry.content ?? '')" class="flex flex-col gap-2">
+                  <div v-html="renderMarkdown(isToolExpanded(msg.entry.sequence) ? msg.entry.content ?? '' : truncate(msg.entry.content ?? ''))" />
+                  <button
+                    @click.stop="toggleExpanded(msg.entry.sequence)"
+                    class="mt-1 inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors border border-transparent hover:border-border"
+                  >
+                    {{ isToolExpanded(msg.entry.sequence) ? '▲ less' : '▼ more' }}
+                  </button>
+                </div>
+                <div v-else v-html="renderMarkdown(truncate(msg.entry.content ?? ''))" />
               </div>
             </details>
           </div>
 
         </template>
+
+        <!-- Final reasoning (from last message before deduplication) -->
+        <div v-if="finalReasoning" class="flex justify-start">
+          <div class="ml-9 mt-1 text-xs text-muted-foreground">
+            <details class="rounded-lg border border-border">
+              <summary class="px-3 py-1.5 cursor-pointer select-none">Reasoning</summary>
+              <div class="px-3 py-2 border-t border-border chat-bubble-content" v-html="renderMarkdown(finalReasoning)" />
+            </details>
+          </div>
+        </div>
 
         <!-- Running indicator -->
         <div v-if="task.status === 'RUNNING'" class="flex justify-start">
@@ -534,8 +645,25 @@ onUnmounted(() => {
           >
             <div class="flex items-start justify-between gap-2">
               <div class="min-w-0">
-                <p class="text-sm font-semibold font-mono text-amber-900 dark:text-amber-100">{{ tc.tool_name }}</p>
-                <p v-if="tc.human_description" class="text-xs text-muted-foreground mt-0.5">
+                <div class="flex items-center gap-2">
+                  <p class="text-sm font-semibold font-mono text-amber-900 dark:text-amber-100">{{ tc.tool_name }}</p>
+                  <span
+                    v-if="tc.operation && tc.operation !== 'default'"
+                    class="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300"
+                  >
+                    {{ tc.operation }}
+                  </span>
+                </div>
+                <p
+                  v-if="tc.operation_description"
+                  class="text-xs text-muted-foreground mt-0.5"
+                >
+                  {{ tc.operation_description }}
+                </p>
+                <p
+                  v-else-if="tc.human_description"
+                  class="text-xs text-muted-foreground mt-0.5"
+                >
                   {{ tc.human_description }}
                 </p>
               </div>

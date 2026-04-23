@@ -146,3 +146,50 @@ export const DAY_OF_WEEK_OPTIONS = [
   { value: 5, label: 'Friday' },
   { value: 6, label: 'Saturday' },
 ] as const
+
+/**
+ * Returns the timezone offset in minutes for a given IANA timezone at a specific instant.
+ * Handles fractional offsets like +05:30 (India) correctly by computing the exact difference
+ * between local time and UTC.
+ */
+export function getTimezoneOffsetMinutes(timezone: string, instant: Date): number {
+  // Get the local time in the target timezone and the corresponding UTC time
+  const tzFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+  const utcFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+  const tzParts = tzFormatter.formatToParts(instant)
+  const utcParts = utcFormatter.formatToParts(instant)
+  const pad = (n: number) => String(n).padStart(2, '0')
+
+  const toDate = (parts: Intl.DateTimeFormatPart[]) => {
+    const y = parts.find(p => p.type === 'year')!.value
+    const mo = parts.find(p => p.type === 'month')!.value
+    const d = parts.find(p => p.type === 'day')!.value
+    const h = parts.find(p => p.type === 'hour')!.value
+    const mi = parts.find(p => p.type === 'minute')!.value
+    const s = parts.find(p => p.type === 'second')!.value
+    return new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`)
+  }
+
+  const tzInstant = toDate(tzParts)
+  const utcInstant = toDate(utcParts)
+
+  return Math.round((tzInstant.getTime() - utcInstant.getTime()) / 60000)
+}

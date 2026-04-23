@@ -10,6 +10,7 @@ use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
+use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
@@ -405,17 +406,24 @@ it('OutputTool with requiresApproval=false executes immediately', function (): v
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
-// tick() — OutputTool auto-approved via AgentTool row override
+// tick() — Operation auto-approved via AgentToolOperationOverride
 // ---------------------------------------------------------------------------
 
-it('AgentTool row auto_approve=1 overrides class-level requiresApproval=true', function (): void {
+it('AgentToolOperationOverride.default_requires_approval=0 overrides requiresApprovalByDefault=true', function (): void {
     [$agentId] = seedAgent();
 
     AgentTool::create([
         'agent_id'     => $agentId,
         'tool_class'   => StubOutputTool::class,
         'tool_name'    => 'stub_output',
-        'auto_approve' => 1,
+    ]);
+
+    // Override the operation to auto-approve instead of requiring approval.
+    AgentToolOperationOverride::create([
+        'agent_id'                  => $agentId,
+        'tool_class'                => StubOutputTool::class,
+        'operation'                 => 'default',
+        'default_requires_approval' => 0, // false
     ]);
 
     $callCount = 0;

@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property \Carbon\Carbon $created_at
  * @property \Carbon\Carbon $updated_at
  */
-class LLMDriverConfiguration extends Model
+final class LLMDriverConfiguration extends Model
 {
     protected $table = 'llm_driver_configurations';
 
