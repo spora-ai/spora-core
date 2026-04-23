@@ -15,6 +15,7 @@ use Spora\Plugins\PluginLoader;
 use Spora\Recipes\RecipeScanner;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\ToolConfigService;
 
 /**
  * PHP-DI definitions array.
@@ -192,14 +193,15 @@ return [
         );
     },
 
-    ToolConfigServiceInterface::class => static function (ContainerInterface $c): ToolConfigService {
+    Spora\Services\ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
         return new ToolConfigService(
             $c->get(SecurityManagerInterface::class),
+            $c->get(Psr\Log\LoggerInterface::class),
             $c->get('tool_classes'),
         );
     },
 
-    DriverFactoryInterface::class => static function (ContainerInterface $c): DriverFactory {
+    DriverFactory::class => static function (ContainerInterface $c): DriverFactory {
         return new DriverFactory(
             $c->get(Psr\Log\LoggerInterface::class),
             $c->get(Spora\Services\LLMConfigService::class),
@@ -223,12 +225,12 @@ return [
         Spora\Tools\TavilySearchTool::class,
         Spora\Tools\SerperSearchTool::class,
         Spora\Tools\ReadUrlTool::class,
-        Spora\Tools\NewsApiTool::class,
-        Spora\Tools\GNewsTool::class,
+        Spora\Tools\WorldNewsApiTool::class,
         Spora\Tools\EmailTool::class,
         Spora\Tools\CalDavCalendarTool::class,
         Spora\Tools\UserInfoTool::class,
         Spora\Tools\SemanticScholarTool::class,
+        Spora\Tools\WeatherApiTool::class,
     ],
 
     Spora\Http\LLMConfigController::class => static function (ContainerInterface $c): Spora\Http\LLMConfigController {

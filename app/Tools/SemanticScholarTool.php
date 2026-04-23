@@ -501,7 +501,7 @@ final class SemanticScholarTool implements ToolInterface
         if ($authors === []) {
             return 'Unknown';
         }
-        $names = array_map(fn($a) => $a['name'] ?? 'Unknown', $authors);
+        $names = array_map(fn($a) => $a['name'], $authors);
         if (count($names) > 3) {
             return implode(', ', array_slice($names, 0, 3)) . ', et al.';
         }

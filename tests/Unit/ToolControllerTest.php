@@ -23,7 +23,8 @@ function makeToolController(array $toolClasses = []): array
 
     $key        = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security   = new SecurityManager($key);
-    $toolConfig = new ToolConfigService($security, $toolClasses);
+    $logger     = new Monolog\Logger('test');
+    $toolConfig = new ToolConfigService($security, $logger, $toolClasses);
     $controller = new ToolController($authService, $toolConfig, $toolClasses);
 
     return [$controller, $authService, $toolConfig];
@@ -177,4 +178,34 @@ test('putSettings accepts settings nested under a settings key', function (): vo
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
     expect($body['data']['settings']['max_results'])->toBe('5');
+});
+
+test('getSettings resolves tool by name for real tool classes', function (): void {
+    clearSession();
+    [$controller, $authService] = makeToolController([Spora\Tools\ReadUrlTool::class]);
+    $userId = $authService->register('user@example.com', 'Password1!');
+    simulateLoggedInSession($userId, 'user@example.com');
+
+    $request = jsonRequest('GET', '/api/v1/tools/read_url/settings');
+    $request->attributes->set('toolId', 'read_url');
+    $response = $controller->getSettings($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['settings'])->toBe([]);
+});
+
+test('getSettings returns 404 for unknown tool name', function (): void {
+    clearSession();
+    [$controller, $authService] = makeToolController([Spora\Tools\ReadUrlTool::class]);
+    $userId = $authService->register('user@example.com', 'Password1!');
+    simulateLoggedInSession($userId, 'user@example.com');
+
+    $request = jsonRequest('GET', '/api/v1/tools/nonexistent_tool/settings');
+    $request->attributes->set('toolId', 'nonexistent_tool');
+    $response = $controller->getSettings($request);
+
+    expect($response->getStatusCode())->toBe(404);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('NOT_FOUND');
 });

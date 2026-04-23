@@ -149,6 +149,7 @@ function makeUserInfoToolConfigService(): ToolConfigService
         UserInfoTool::class,
     ];
     $securityManager = new SecurityManager(random_bytes(32));
+    $logger = new Monolog\Logger('test');
 
-    return new ToolConfigService($securityManager, $toolClasses);
+    return new ToolConfigService($securityManager, $logger, $toolClasses);
 }

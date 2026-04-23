@@ -28,7 +28,8 @@ function makeAgentController(): array
 
     $key        = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security   = new SecurityManager($key);
-    $toolConfig = new ToolConfigService($security, [TestTool::class]);
+    $logger     = new Monolog\Logger('test');
+    $toolConfig = new ToolConfigService($security, $logger, [TestTool::class]);
     $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class]);
     $controller = new AgentController($authService, $toolConfig, $llmConfig);
 

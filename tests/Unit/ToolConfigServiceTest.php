@@ -25,7 +25,8 @@ function makeToolConfigService(): array
 
     $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new SecurityManager($key);
-    $service  = new ToolConfigService($security);
+    $logger   = new Monolog\Logger('test');
+    $service  = new ToolConfigService($security, $logger, []);
 
     return [$service, $security, $authService];
 }

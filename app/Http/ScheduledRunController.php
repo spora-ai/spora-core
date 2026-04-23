@@ -554,6 +554,12 @@ final class ScheduledRunController
             $nextRunAt = (new DateTimeImmutable($nextEntry->due_at, new DateTimeZone('UTC')))
                 ->setTimezone(new DateTimeZone($run->timezone))
                 ->format('Y-m-d\TH:i:sP');
+        } elseif ($run->next_run_at !== null) {
+            // Fall back to cached next_run_at when no PENDING entry exists
+            // (e.g. all entries are CLAIMED/DONE during worker processing)
+            $nextRunAt = (new DateTimeImmutable($run->next_run_at->toDateTimeString(), new DateTimeZone('UTC')))
+                ->setTimezone(new DateTimeZone($run->timezone))
+                ->format('Y-m-d\TH:i:sP');
         }
 
         return [

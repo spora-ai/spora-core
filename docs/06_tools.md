@@ -151,8 +151,7 @@ The `ToolConfigService::getEffectiveSettings()` method resolves settings by scan
 | `core.anthropic.api_key`      | password | `LLMConfiguration`   | Anthropic Claude API key |
 | `core.tavily.api_key`         | password | `TavilySearchTool`   | Tavily web search key |
 | `core.serper.api_key`         | password | `SerperSearchTool`   | Serper.dev Google search key |
-| `core.newsapi.api_key`        | password | `NewsApiTool`        | NewsAPI.org key |
-| `core.gnews.api_key`          | password | `GNewsTool`          | GNews.io key |
+| `core.worldnewsapi.api_key`   | password | `WorldNewsApiTool`   | WorldNewsAPI key |
 | `core.imap.host`              | text     | `ReadEmailTool`      | IMAP server hostname |
 | `core.imap.port`              | text     | `ReadEmailTool`      | IMAP port (default 993) |
 | `core.imap.encryption`        | text     | `ReadEmailTool`      | `ssl` or `tls` |

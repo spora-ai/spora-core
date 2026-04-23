@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Psr\Log\LoggerInterface;
 use ReflectionClass;
 use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\SecurityManagerInterface;
@@ -31,14 +32,18 @@ class ToolConfigService
 
     private readonly SecurityManagerInterface $security;
 
+    private readonly LoggerInterface $logger;
+
     /**
      * @param list<string> $toolClasses
      */
     public function __construct(
         SecurityManagerInterface $security,
+        LoggerInterface $logger,
         array $toolClasses = [],
     ) {
         $this->security = $security;
+        $this->logger = $logger;
         $this->toolClasses = $toolClasses;
     }
 
@@ -346,6 +351,10 @@ class ToolConfigService
 
         $this->toolNameMap = [];
         foreach ($this->toolClasses as $class) {
+            if (!class_exists($class)) {
+                $this->logger->warning('buildToolNameMap: skipping non-existent class', ['class' => $class]);
+                continue;
+            }
             $reflection = new ReflectionClass($class);
             $attrs = $reflection->getAttributes(Tool::class);
             if ($attrs !== []) {
