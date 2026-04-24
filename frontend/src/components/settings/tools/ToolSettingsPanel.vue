@@ -26,11 +26,11 @@ let flashTimer: ReturnType<typeof setTimeout> | null = null
 onUnmounted(() => { if (flashTimer) clearTimeout(flashTimer) })
 
 const hasExistingSettings = computed(() =>
-  Object.values(props.initialSettings).some((v) => v !== '' && v !== null),
+  Object.values(serverSettings.value).some((v) => v !== '' && v !== null),
 )
 
 const settingsCount = computed(() =>
-  Object.values(props.initialSettings).filter((v) => v !== '' && v !== null).length,
+  Object.values(serverSettings.value).filter((v) => v !== '' && v !== null).length,
 )
 
 async function onSave(settings: Record<string, string>): Promise<void> {
@@ -88,7 +88,7 @@ function displayValue(key: string, value: string): string {
         >
           <span class="text-muted-foreground">{{ field.label }}:</span>
           <span class="font-mono text-muted-foreground/80">
-            {{ displayValue(field.key, initialSettings[field.key] ?? '') }}
+            {{ displayValue(field.key, serverSettings[field.key] ?? '') }}
           </span>
         </div>
       </div>

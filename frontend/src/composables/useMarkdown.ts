@@ -27,9 +27,9 @@ export function renderMarkdown(src: string): string {
       'p', 'br', 'strong', 'em', 'code', 'pre',
       'ul', 'ol', 'li', 'h1', 'h2', 'h3',
       'blockquote', 'a', 'table', 'thead', 'tbody',
-      'tr', 'th', 'td', 'span', 'div',
+      'tr', 'th', 'td', 'span', 'div', 'img',
     ],
-    ALLOWED_ATTR: ['href', 'class'],
+    ALLOWED_ATTR: ['href', 'class', 'src', 'alt', 'title'],
     ALLOWED_URI_REGEXP: /^(?!javascript:|data:)/,
   })
 }

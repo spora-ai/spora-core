@@ -52,6 +52,7 @@ use Throwable;
     type: 'select',
     description: 'Metric or Imperial units',
     scope: 'agent',
+    options: ['metric' => 'Metric (°C, km/h)', 'imperial' => 'Imperial (°F, mph)'],
 )]
 #[ToolSetting(
     key: 'core.weatherapi.http_timeout',
@@ -150,9 +151,11 @@ final class WeatherApiTool implements ToolInterface
         $timeout = $this->effectiveTimeout($settings);
 
         try {
-            $this->logger?->debug('WeatherApiTool: fetching current weather', [
-                'location' => $location,
-                'base_url' => $baseUrl,
+            $this->logger?->debug('WeatherApiTool: HTTP request', [
+                'method' => 'GET',
+                'url' => "{$baseUrl}/current.json",
+                'query' => ['key' => '***', 'q' => $location],
+                'timeout' => $timeout,
             ]);
 
             $response = $this->httpClient->request('GET', "{$baseUrl}/current.json", [
@@ -164,6 +167,11 @@ final class WeatherApiTool implements ToolInterface
             ]);
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('WeatherApiTool: HTTP response', [
+                'status_code' => $statusCode,
+                'url' => "{$baseUrl}/current.json",
+            ]);
+
             if ($statusCode >= 400) {
                 $errorBody = $response->getContent(false);
                 $this->logger?->error('WeatherAPI current error', [
@@ -237,10 +245,11 @@ final class WeatherApiTool implements ToolInterface
         $units = $this->effectiveUnits($settings);
 
         try {
-            $this->logger?->debug('WeatherApiTool: fetching forecast', [
-                'location' => $location,
-                'days'     => $days,
-                'base_url' => $baseUrl,
+            $this->logger?->debug('WeatherApiTool: HTTP request', [
+                'method' => 'GET',
+                'url' => "{$baseUrl}/forecast.json",
+                'query' => ['key' => '***', 'q' => $location, 'days' => $days],
+                'timeout' => $timeout,
             ]);
 
             $response = $this->httpClient->request('GET', "{$baseUrl}/forecast.json", [
@@ -253,6 +262,11 @@ final class WeatherApiTool implements ToolInterface
             ]);
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('WeatherApiTool: HTTP response', [
+                'status_code' => $statusCode,
+                'url' => "{$baseUrl}/forecast.json",
+            ]);
+
             if ($statusCode >= 400) {
                 $errorBody = $response->getContent(false);
                 $this->logger?->error('WeatherAPI forecast error', [
@@ -316,9 +330,11 @@ final class WeatherApiTool implements ToolInterface
         $timeout = $this->effectiveTimeout($settings);
 
         try {
-            $this->logger?->debug('WeatherApiTool: searching locations', [
-                'query'    => $query,
-                'base_url' => $baseUrl,
+            $this->logger?->debug('WeatherApiTool: HTTP request', [
+                'method' => 'GET',
+                'url' => "{$baseUrl}/search.json",
+                'query' => ['key' => '***', 'q' => $query],
+                'timeout' => $timeout,
             ]);
 
             $response = $this->httpClient->request('GET', "{$baseUrl}/search.json", [
@@ -330,6 +346,11 @@ final class WeatherApiTool implements ToolInterface
             ]);
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('WeatherApiTool: HTTP response', [
+                'status_code' => $statusCode,
+                'url' => "{$baseUrl}/search.json",
+            ]);
+
             if ($statusCode >= 400) {
                 $errorBody = $response->getContent(false);
                 $this->logger?->error('WeatherAPI search error', [
@@ -397,10 +418,11 @@ final class WeatherApiTool implements ToolInterface
         }
 
         try {
-            $this->logger?->debug('WeatherApiTool: fetching astronomy', [
-                'location' => $location,
-                'date'     => $date ?: 'today',
-                'base_url' => $baseUrl,
+            $this->logger?->debug('WeatherApiTool: HTTP request', [
+                'method' => 'GET',
+                'url' => "{$baseUrl}/astronomy.json",
+                'query' => ['key' => '***', 'q' => $location, 'dt' => $date ?: null],
+                'timeout' => $timeout,
             ]);
 
             $response = $this->httpClient->request('GET', "{$baseUrl}/astronomy.json", [
@@ -409,6 +431,11 @@ final class WeatherApiTool implements ToolInterface
             ]);
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('WeatherApiTool: HTTP response', [
+                'status_code' => $statusCode,
+                'url' => "{$baseUrl}/astronomy.json",
+            ]);
+
             if ($statusCode >= 400) {
                 $errorBody = $response->getContent(false);
                 $this->logger?->error('WeatherAPI astronomy error', [

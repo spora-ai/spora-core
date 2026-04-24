@@ -146,15 +146,26 @@ final class SemanticScholarTool implements ToolInterface
         }
 
         try {
-            $this->logger?->debug('SemanticScholarTool: paper_search', ['query' => $query]);
+            $url = self::BASE_URL . '/graph/v1/paper/search';
+            $this->logger?->debug('SemanticScholarTool: HTTP request', [
+                'method' => 'GET',
+                'url' => $url,
+                'query' => $params,
+                'timeout' => $this->effectiveTimeout($settings),
+            ]);
 
             $response = $this->httpClient->request(
                 'GET',
-                self::BASE_URL . '/graph/v1/paper/search',
+                $url,
                 ['query' => $params, 'timeout' => $this->effectiveTimeout($settings)],
             );
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('SemanticScholarTool: HTTP response', [
+                'status_code' => $statusCode,
+                'url' => $url,
+            ]);
+
             if ($statusCode >= 400) {
                 $this->logger?->error('SemanticScholar API error', ['status' => $statusCode]);
                 return new ToolResult(false, "Research tool failed with HTTP {$statusCode}");
@@ -195,11 +206,17 @@ final class SemanticScholarTool implements ToolInterface
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
 
         try {
-            $this->logger?->debug('SemanticScholarTool: get_paper', ['paper_id' => $paperId]);
+            $url = self::BASE_URL . '/graph/v1/paper/' . urlencode($paperId);
+            $this->logger?->debug('SemanticScholarTool: HTTP request', [
+                'method' => 'GET',
+                'url' => $url,
+                'query' => ['fields' => self::GRAPH_FIELDS],
+                'timeout' => $this->effectiveTimeout($settings),
+            ]);
 
             $response = $this->httpClient->request(
                 'GET',
-                self::BASE_URL . '/graph/v1/paper/' . urlencode($paperId),
+                $url,
                 [
                     'query' => ['fields' => self::GRAPH_FIELDS],
                     'timeout' => $this->effectiveTimeout($settings),
@@ -207,6 +224,11 @@ final class SemanticScholarTool implements ToolInterface
             );
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('SemanticScholarTool: HTTP response', [
+                'status_code' => $statusCode,
+                'url' => $url,
+            ]);
+
             if ($statusCode >= 400) {
                 $this->logger?->error('SemanticScholar API error', ['status' => $statusCode]);
                 return new ToolResult(false, "Research tool failed with HTTP {$statusCode}");
@@ -237,11 +259,21 @@ final class SemanticScholarTool implements ToolInterface
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
 
         try {
-            $this->logger?->debug('SemanticScholarTool: get_citations', ['paper_id' => $paperId]);
+            $url = self::BASE_URL . '/graph/v1/paper/' . urlencode($paperId) . '/citations';
+            $this->logger?->debug('SemanticScholarTool: HTTP request', [
+                'method' => 'GET',
+                'url' => $url,
+                'query' => [
+                    'limit' => $limit,
+                    'offset' => $offset,
+                    'fields' => self::GRAPH_FIELDS,
+                ],
+                'timeout' => $this->effectiveTimeout($settings),
+            ]);
 
             $response = $this->httpClient->request(
                 'GET',
-                self::BASE_URL . '/graph/v1/paper/' . urlencode($paperId) . '/citations',
+                $url,
                 [
                     'query' => [
                         'limit' => $limit,
@@ -253,6 +285,11 @@ final class SemanticScholarTool implements ToolInterface
             );
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('SemanticScholarTool: HTTP response', [
+                'status_code' => $statusCode,
+                'url' => $url,
+            ]);
+
             if ($statusCode >= 400) {
                 $this->logger?->error('SemanticScholar API error', ['status' => $statusCode]);
                 return new ToolResult(false, "Research tool failed with HTTP {$statusCode}");
@@ -298,11 +335,21 @@ final class SemanticScholarTool implements ToolInterface
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
 
         try {
-            $this->logger?->debug('SemanticScholarTool: get_references', ['paper_id' => $paperId]);
+            $url = self::BASE_URL . '/graph/v1/paper/' . urlencode($paperId) . '/references';
+            $this->logger?->debug('SemanticScholarTool: HTTP request', [
+                'method' => 'GET',
+                'url' => $url,
+                'query' => [
+                    'limit' => $limit,
+                    'offset' => $offset,
+                    'fields' => self::GRAPH_FIELDS,
+                ],
+                'timeout' => $this->effectiveTimeout($settings),
+            ]);
 
             $response = $this->httpClient->request(
                 'GET',
-                self::BASE_URL . '/graph/v1/paper/' . urlencode($paperId) . '/references',
+                $url,
                 [
                     'query' => [
                         'limit' => $limit,
@@ -314,6 +361,11 @@ final class SemanticScholarTool implements ToolInterface
             );
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('SemanticScholarTool: HTTP response', [
+                'status_code' => $statusCode,
+                'url' => $url,
+            ]);
+
             if ($statusCode >= 400) {
                 $this->logger?->error('SemanticScholar API error', ['status' => $statusCode]);
                 return new ToolResult(false, "Research tool failed with HTTP {$statusCode}");
@@ -330,7 +382,7 @@ final class SemanticScholarTool implements ToolInterface
             $output = "REFERENCES OF {$paperId} ({$total} total, showing " . count($references) . " from offset {$offset})\n\n";
             foreach ($references as $i => $entry) {
                 $num = $i + 1;
-                $referencedPaper = $entry['referencedPaper'] ?? [];
+                $referencedPaper = $entry['citedPaper'] ?? [];
                 $output .= "[{$num}] " . $this->formatPaperSummary($referencedPaper) . "\n\n";
             }
 
@@ -358,11 +410,20 @@ final class SemanticScholarTool implements ToolInterface
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
 
         try {
-            $this->logger?->debug('SemanticScholarTool: get_recommendations', ['paper_id' => $paperId]);
+            $url = self::BASE_URL . '/recommendations/v1/papers/forpaper/' . urlencode($paperId);
+            $this->logger?->debug('SemanticScholarTool: HTTP request', [
+                'method' => 'GET',
+                'url' => $url,
+                'query' => [
+                    'limit' => $limit,
+                    'fields' => self::REC_FIELDS,
+                ],
+                'timeout' => $this->effectiveTimeout($settings),
+            ]);
 
             $response = $this->httpClient->request(
                 'GET',
-                self::BASE_URL . '/recommendations/v1/papers/forpaper/' . urlencode($paperId),
+                $url,
                 [
                     'query' => [
                         'limit' => $limit,
@@ -373,6 +434,11 @@ final class SemanticScholarTool implements ToolInterface
             );
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('SemanticScholarTool: HTTP response', [
+                'status_code' => $statusCode,
+                'url' => $url,
+            ]);
+
             if ($statusCode >= 400) {
                 $this->logger?->error('SemanticScholar API error', ['status' => $statusCode]);
                 return new ToolResult(false, "Research tool failed with HTTP {$statusCode}");

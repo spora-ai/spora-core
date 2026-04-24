@@ -89,8 +89,13 @@ final class ReadUrlTool implements ToolInterface
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
 
         try {
-            $this->logger?->debug('ReadUrlTool: executing request', [
+            $this->logger?->debug('ReadUrlTool: HTTP request', [
+                'method' => 'GET',
                 'url' => $url,
+                'headers' => [
+                    'User-Agent' => 'Spora Agent/1.0 (+https://github.com/spora/spora)',
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8',
+                ],
                 'timeout' => $this->effectiveTimeout($settings),
             ]);
 
@@ -103,6 +108,12 @@ final class ReadUrlTool implements ToolInterface
             ]);
 
             $statusCode = $response->getStatusCode();
+            $this->logger?->debug('ReadUrlTool: HTTP response', [
+                'status_code' => $statusCode,
+                'url' => $url,
+                'content_type' => $response->getHeaders()['content-type'][0] ?? 'unknown',
+            ]);
+
             if ($statusCode >= 400) {
                 return new ToolResult(false, "Failed to fetch URL. HTTP Status: {$statusCode}");
             }

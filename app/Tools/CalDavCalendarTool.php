@@ -124,10 +124,15 @@ final class CalDavCalendarTool implements ToolInterface
 XML;
 
         try {
-            $this->logger?->debug('CalDavCalendarTool: executing request', [
+            $this->logger?->debug('CalDavCalendarTool: HTTP request', [
+                'method' => 'REPORT',
                 'url' => $url,
-                'start' => $startFormatted,
-                'end' => $endFormatted,
+                'headers' => [
+                    'Depth' => '1',
+                    'Content-Type' => 'application/xml; charset=utf-8',
+                    'Authorization' => '***',
+                ],
+                'timeout' => $this->effectiveTimeout($settings),
             ]);
 
             $response = $this->httpClient->request('REPORT', $url, [
@@ -140,8 +145,9 @@ XML;
                 'timeout'    => $this->effectiveTimeout($settings),
             ]);
 
-            $this->logger?->debug('CalDavCalendarTool: response received', [
+            $this->logger?->debug('CalDavCalendarTool: HTTP response', [
                 'status_code' => $response->getStatusCode(),
+                'url' => $url,
             ]);
 
             if ($response->getStatusCode() >= 400) {

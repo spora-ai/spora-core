@@ -93,12 +93,26 @@ final class WorldNewsApiTool implements ToolInterface
         }
 
         try {
-            $this->logger?->debug('WorldNewsApiTool: executing search', [
-                'query' => $query,
-                'url' => self::BASE_URL . '/search',
+            $url = self::BASE_URL . '/search-news';
+            $this->logger?->debug('WorldNewsApiTool: HTTP request', [
+                'method' => 'GET',
+                'url' => $url,
+                'headers' => ['x-api-key' => '***'],
+                'query' => [
+                    'text' => $query,
+                    'number' => min(100, (int) ($arguments['number'] ?? 10)),
+                    'offset' => (int) ($arguments['offset'] ?? 0),
+                    'source-country' => $arguments['source-country'] ?? null,
+                    'language' => $arguments['language'] ?? null,
+                    'category' => $arguments['category'] ?? null,
+                    'earliest-publish-date' => $arguments['earliest-publish-date'] ?? null,
+                    'latest-publish-date' => $arguments['latest-publish-date'] ?? null,
+                    'entities' => isset($arguments['entities']) ? implode(',', $arguments['entities']) : null,
+                ],
+                'timeout' => $this->effectiveTimeout($settings),
             ]);
 
-            $response = $this->httpClient->request('GET', self::BASE_URL . '/search-news', [
+            $response = $this->httpClient->request('GET', $url, [
                 'headers' => [
                     'x-api-key' => $apiKey,
                 ],
@@ -117,9 +131,9 @@ final class WorldNewsApiTool implements ToolInterface
             ]);
 
             $statusCode = $response->getStatusCode();
-            $this->logger?->debug('WorldNewsApiTool: search response received', [
+            $this->logger?->debug('WorldNewsApiTool: HTTP response', [
                 'status_code' => $statusCode,
-                'query' => $query,
+                'url' => $url,
             ]);
 
             if ($statusCode >= 400) {
@@ -152,12 +166,19 @@ final class WorldNewsApiTool implements ToolInterface
         }
 
         try {
-            $this->logger?->debug('WorldNewsApiTool: executing top-news', [
-                'country' => $country,
-                'url' => self::BASE_URL . '/top-news',
+            $url = self::BASE_URL . '/top-news';
+            $this->logger?->debug('WorldNewsApiTool: HTTP request', [
+                'method' => 'GET',
+                'url' => $url,
+                'headers' => ['Authorization' => '***'],
+                'query' => [
+                    'source-country' => $country,
+                    'language' => $arguments['language'] ?? null,
+                ],
+                'timeout' => $this->effectiveTimeout($settings),
             ]);
 
-            $response = $this->httpClient->request('GET', self::BASE_URL . '/top-news', [
+            $response = $this->httpClient->request('GET', $url, [
                 'headers' => [
                     'Authorization' => $apiKey,
                 ],
@@ -169,9 +190,9 @@ final class WorldNewsApiTool implements ToolInterface
             ]);
 
             $statusCode = $response->getStatusCode();
-            $this->logger?->debug('WorldNewsApiTool: top-news response received', [
+            $this->logger?->debug('WorldNewsApiTool: HTTP response', [
                 'status_code' => $statusCode,
-                'country' => $country,
+                'url' => $url,
             ]);
 
             if ($statusCode >= 400) {

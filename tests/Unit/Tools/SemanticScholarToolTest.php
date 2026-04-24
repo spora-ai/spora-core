@@ -222,7 +222,7 @@ it('get_references returns referenced papers', function () {
     $response->allows('toArray')->andReturn([
         'total' => 1,
         'data' => [
-            ['referencedPaper' => [
+            ['citedPaper' => [
                 'title' => 'Sequence to sequence learning with neural networks',
                 'authors' => [['name' => 'Ilya Sutskever', 'authorId' => 's1']],
                 'year' => 2014,

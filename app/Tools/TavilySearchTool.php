@@ -95,29 +95,34 @@ final class TavilySearchTool implements ToolInterface
         }
 
         try {
-            $this->logger?->debug('TavilySearchTool: executing request', [
-                'query' => $query,
+            $url = 'https://api.tavily.com/search';
+            $payload = [
+                'api_key'      => $apiKey,
+                'query'        => $query,
                 'search_depth' => $searchDepth,
-                'url' => 'https://api.tavily.com/search',
+                'include_answer' => true,
+            ];
+
+            $this->logger?->debug('TavilySearchTool: HTTP request', [
+                'method' => 'POST',
+                'url' => $url,
+                'headers' => ['Content-Type' => 'application/json'],
+                'payload' => ['api_key' => '***', 'query' => $query, 'search_depth' => $searchDepth, 'include_answer' => true],
+                'timeout' => $this->effectiveTimeout($settings),
             ]);
 
-            $response = $this->httpClient->request('POST', 'https://api.tavily.com/search', [
+            $response = $this->httpClient->request('POST', $url, [
                 'headers' => [
                     'Content-Type' => 'application/json',
                 ],
-                'json' => [
-                    'api_key'      => $apiKey,
-                    'query'        => $query,
-                    'search_depth' => $searchDepth,
-                    'include_answer' => true,
-                ],
+                'json' => $payload,
                 'timeout' => $this->effectiveTimeout($settings),
             ]);
 
             $statusCode = $response->getStatusCode();
-            $this->logger?->debug('TavilySearchTool: response received', [
+            $this->logger?->debug('TavilySearchTool: HTTP response', [
                 'status_code' => $statusCode,
-                'query' => $query,
+                'url' => $url,
             ]);
 
             if ($statusCode >= 400) {
