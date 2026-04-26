@@ -61,17 +61,18 @@ describe('useToolSettings', () => {
     })
 
     describe('putSettings', () => {
-      it('omits unchanged password fields (serverValue=***, same value)', async () => {
+      it('omits unchanged password fields (serverValue=***, same empty value)', async () => {
         const serverSettings = { 'core.openai.api_key': '***' }
-        const callerSettings = { 'core.openai.api_key': '' } // user cleared it → send ''
+        const callerSettings = { 'core.openai.api_key': '' } // was masked, user left empty → preserve existing
 
-        mockApi.put.mockResolvedValueOnce({ settings: { 'core.openai.api_key': '' } })
+        mockApi.put.mockResolvedValueOnce({ settings: {} })
 
         await putSettings('llm_configuration', callerSettings, serverSettings)
 
+        // Empty value with serverValue=*** means "preserve unchanged" → omit from payload
         expect(mockApi.put).toHaveBeenCalledWith(
           '/tools/llm_configuration/settings',
-          { settings: { 'core.openai.api_key': '' } },
+          { settings: {} },
         )
       })
 
@@ -117,18 +118,17 @@ describe('useToolSettings', () => {
         )
       })
 
-      it('omits password field when user leaves *** unchanged (empty string from masked)', async () => {
+      it('sends new password value when user types in a masked field', async () => {
         const serverSettings = { 'core.openai.api_key': '***' }
-        const callerSettings = { 'core.openai.api_key': '' } // was masked, user left it empty
+        const callerSettings = { 'core.openai.api_key': 'sk-new-value' }
 
-        mockApi.put.mockResolvedValueOnce({ settings: {} })
+        mockApi.put.mockResolvedValueOnce({ settings: { 'core.openai.api_key': 'sk-new-value' } })
 
         await putSettings('llm_configuration', callerSettings, serverSettings)
 
-        // Empty string from masked → user cleared it → send ''
         expect(mockApi.put).toHaveBeenCalledWith(
           '/tools/llm_configuration/settings',
-          { settings: { 'core.openai.api_key': '' } },
+          { settings: { 'core.openai.api_key': 'sk-new-value' } },
         )
       })
     })

@@ -38,4 +38,14 @@ interface OrchestratorInterface
      * @param  string $reason  Surfaced to the LLM so it can choose an alternative action.
      */
     public function reject(int $taskId, string $reason): void;
+
+    /**
+     * Continue a completed or failed task with a new prompt.
+     *
+     * @param  int      $taskId
+     * @param  string   $newPrompt
+     * @param  int|null $additionalSteps  Override max_steps for this continuation.
+     * @return Task
+     */
+    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null): Task;
 }

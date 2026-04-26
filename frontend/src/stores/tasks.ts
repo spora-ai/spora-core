@@ -82,6 +82,11 @@ export const useTaskStore = defineStore('tasks', () => {
     return result.task
   }
 
+  async function continueTask(taskId: number, prompt: string): Promise<Task> {
+    const result = await api.post<{ task: Task }>(`/tasks/${taskId}/continue`, { prompt })
+    return result.task
+  }
+
   async function rejectTask(taskId: number, reason: string): Promise<void> {
     await api.post(`/tasks/${taskId}/reject`, { reason })
     await fetchTaskDetail(taskId)
@@ -243,6 +248,7 @@ export const useTaskStore = defineStore('tasks', () => {
     approveTask,
     rejectTask,
     retryTask,
+    continueTask,
     cancelRetryChain,
     startListPolling,
     stopListPolling,

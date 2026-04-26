@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 
-test('follow-up: run task to completion, submit follow-up, verify continuation', async ({ page }) => {
+test('continuation: run task to completion, submit continuation, verify task continues on same page', async ({ page }) => {
   await page.goto('http://localhost:8080/agents/1')
 
   // Submit a task
@@ -12,13 +12,21 @@ test('follow-up: run task to completion, submit follow-up, verify continuation',
     return document.querySelector('[data-testid="task-status"]')?.textContent === 'COMPLETED'
   }, { timeout: 60000 })
 
-  // Submit follow-up
+  // Capture the original task URL
+  const originalUrl = page.url()
+  const taskIdMatch = originalUrl.match(/\/tasks\/(\d+)/)
+  expect(taskIdMatch).not.toBeNull()
+  const originalTaskId = taskIdMatch![1]
+
+  // Submit continuation
   await page.fill('[data-testid="followup-textarea"]', 'What about 3+3?')
   await page.click('[data-testid="followup-submit"]')
 
-  // Should navigate to new task
-  await expect(page).toHaveURL(/\/tasks\/\d+/)
+  // Should stay on the SAME task page (no navigation to new task)
+  await expect(page).toHaveURL(new RegExp(`/tasks/${originalTaskId}`))
 
-  // Verify new task shows the original question in context
-  await page.waitForSelector('[data-testid="task-status"]')
+  // Wait for the continued task to complete
+  await page.waitForFunction(() => {
+    return document.querySelector('[data-testid="task-status"]')?.textContent === 'COMPLETED'
+  }, { timeout: 60000 })
 })

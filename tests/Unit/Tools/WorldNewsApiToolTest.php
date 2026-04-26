@@ -84,7 +84,7 @@ it('makes correct top-news request and parses clustered results', function () {
     $client->allows('request')->with('GET', 'https://api.worldnewsapi.com/top-news', Mockery::any())->andReturn($response);
 
     $tool = new WorldNewsApiTool($config, $client);
-    $result = $tool->execute(['operation' => 'top-news', 'source-country' => 'us'], 1);
+    $result = $tool->execute(['operation' => 'top-news', 'source-country' => 'us', 'language' => 'en'], 1);
 
     expect($result->success)->toBeTrue()
         ->and($result->content)->toContain('Top Story')

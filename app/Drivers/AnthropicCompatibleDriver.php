@@ -16,10 +16,10 @@ use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', description: 'API key for the Anthropic-compatible endpoint. Leave empty for local models.', required: false, scope: 'global')]
-#[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint.', required: false, scope: 'global', default: 'https://api.anthropic.com/v1/messages')]
+#[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.anthropic.com).', required: false, scope: 'global', default: 'https://api.anthropic.com')]
 #[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Model identifier (e.g. claude-3-5-sonnet-20241022, claude-3-opus).', required: false, scope: 'global', default: 'claude-3-5-sonnet-20241022')]
 #[ToolSetting(key: 'thinking_budget', label: 'Thinking Budget (tokens)', type: 'text', description: 'Maximum tokens for extended thinking (Claude 3.7+).', required: false, scope: 'global')]
-#[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, scope: 'global', default: '45')]
+#[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, scope: 'global', default: '300')]
 final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface
 {
     private const API_VERSION = '2023-06-01';
@@ -59,7 +59,7 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
             $body['tools'] = $tools;
         }
 
-        $url = rtrim($this->baseUrl, '/');
+        $url = rtrim($this->baseUrl, '/') . '/v1/messages';
         $this->logger?->debug('LLM Request (Anthropic)', ['url' => $url, 'payload' => $body]);
 
         $headers = [
@@ -73,7 +73,7 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
         $response = $this->httpClient->request('POST', $url, [
             'headers' => $headers,
             'json'    => $body,
-            'timeout' => $this->timeout ?? 45,
+            'timeout' => $this->timeout ?? 300,
         ]);
 
         $statusCode = $response->getStatusCode();

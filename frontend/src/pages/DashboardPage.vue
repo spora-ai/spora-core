@@ -60,7 +60,7 @@ onMounted(async () => {
     <main class="flex-1 flex flex-col">
       <!-- Header -->
       <div class="px-6 py-4 flex items-center justify-between border-b border-border shrink-0">
-        <h1 class="text-lg font-semibold">Messages</h1>
+        <h1 class="text-lg font-semibold">Agents</h1>
         <button
           @click="showNewAgentModal = true"
           class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors"

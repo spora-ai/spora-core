@@ -42,7 +42,9 @@ export const useAgentStore = defineStore('agent', () => {
       system_prompt: string | null
       llm_driver_config_id: number | null
       max_steps: number
-      allow_followup: boolean
+      allow_continuation: boolean
+      retry_after_minutes: number
+      max_retries: number
     }>,
   ): Promise<Agent> {
     const result = await api.patch<{ agent: Agent }>(`/agents/${id}`, data)
@@ -55,7 +57,10 @@ export const useAgentStore = defineStore('agent', () => {
   async function deleteAgent(id: number): Promise<void> {
     await api.delete(`/agents/${id}`)
     agents.value = agents.value.filter((a) => a.id !== id)
-    if (currentAgent.value?.id === id) currentAgent.value = null
+    if (currentAgent.value?.id === id) {
+      currentAgent.value = null
+      currentAgentTasks.value = []
+    }
   }
 
   // ── Tasks ───────────────────────────────────────────────────────────────────

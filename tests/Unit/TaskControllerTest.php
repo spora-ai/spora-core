@@ -665,3 +665,262 @@ it('show returns error_code and error_message when set on task', function (): vo
     expect($body['data']['task']['error_code'])->toBe('SERVER_OVERLOADED');
     expect($body['data']['task']['error_message'])->toBe('The AI service is under high load.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// continue()
+// ---------------------------------------------------------------------------
+
+it('continue returns 200 and resets task for completed task', function (): void {
+    $orch = Mockery::mock(OrchestratorInterface::class);
+    $orch->expects('continue')->once()->with(
+        Mockery::any(),
+        'continue prompt',
+        null,
+    )->andReturnUsing(function ($taskId) {
+        return Task::find($taskId);
+    });
+
+    [$controller, $authService] = makeTaskController($orch);
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'original',
+        'step_count'  => 5,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/continue", ['prompt' => 'continue prompt']);
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->continue($req);
+    expect($resp->getStatusCode())->toBe(200);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('continue returns 200 and resets task for failed task', function (): void {
+    $orch = Mockery::mock(OrchestratorInterface::class);
+    $orch->expects('continue')->once()->with(
+        Mockery::any(),
+        'retry prompt',
+        20,
+    )->andReturnUsing(function ($taskId) {
+        return Task::find($taskId);
+    });
+
+    [$controller, $authService] = makeTaskController($orch);
+    [$userId, $agent]          = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'FAILED',
+        'user_prompt' => 'original',
+        'step_count'  => 5,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/continue", [
+        'prompt'           => 'retry prompt',
+        'additional_steps' => 20,
+    ]);
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->continue($req);
+    expect($resp->getStatusCode())->toBe(200);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('continue returns 422 when prompt is missing', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'original',
+        'step_count'  => 5,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/continue", []);
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->continue($req);
+    expect($resp->getStatusCode())->toBe(422);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('continue returns 422 when additional_steps is out of range', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'original',
+        'step_count'  => 5,
+        'max_steps'   => 10,
+    ]);
+
+    foreach ([0, -1, 101] as $badValue) {
+        $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/continue", [
+            'prompt'           => 'test',
+            'additional_steps' => $badValue,
+        ]);
+        $req->attributes->set('taskId', $task->id);
+
+        $resp = $controller->continue($req);
+        expect($resp->getStatusCode())->toBe(422);
+    }
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('continue returns 409 when task is not completed or failed', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'original',
+        'step_count'  => 5,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/continue", ['prompt' => 'test']);
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->continue($req);
+    expect($resp->getStatusCode())->toBe(409);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('continue returns 404 for unknown task', function (): void {
+    [$controller, $authService] = makeTaskController();
+    seedUserAndAgent($authService);
+
+    $req = jsonRequest('POST', '/api/v1/tasks/99999/continue', ['prompt' => 'test']);
+    $req->attributes->set('taskId', 99999);
+
+    $resp = $controller->continue($req);
+    expect($resp->getStatusCode())->toBe(404);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// cancelRetryChain()
+// ---------------------------------------------------------------------------
+
+it('cancelRetryChain returns 404 for unknown task', function (): void {
+    [$controller, $authService] = makeTaskController();
+    seedUserAndAgent($authService);
+
+    $req = jsonRequest('DELETE', '/api/v1/tasks/99999/cancel-retry-chain');
+    $req->attributes->set('taskId', 99999);
+
+    $resp = $controller->cancelRetryChain($req);
+    expect($resp->getStatusCode())->toBe(404);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('cancelRetryChain returns 409 when task is not in a retry chain', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'test',
+        'step_count'  => 5,
+        'max_steps'   => 10,
+        'retry_of_task_id' => null,
+    ]);
+
+    $req = jsonRequest('DELETE', "/api/v1/tasks/{$task->id}/cancel-retry-chain");
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->cancelRetryChain($req);
+    expect($resp->getStatusCode())->toBe(409);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('cancelRetryChain returns 204 and cancels chain for valid retry task', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]           = seedUserAndAgent($authService);
+
+    $root = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'root',
+        'step_count'  => 5,
+        'max_steps'   => 10,
+    ]);
+
+    $retry1 = Task::create([
+        'agent_id'          => $agent->id,
+        'user_id'           => $userId,
+        'status'            => 'FAILED',
+        'user_prompt'      => 'retry 1',
+        'step_count'        => 1,
+        'max_steps'         => 10,
+        'retry_of_task_id'  => $root->id,
+        'retry_count'       => 1,
+    ]);
+
+    $retry2 = Task::create([
+        'agent_id'          => $agent->id,
+        'user_id'           => $userId,
+        'status'            => 'FAILED',
+        'user_prompt'      => 'retry 2',
+        'step_count'        => 1,
+        'max_steps'         => 10,
+        'retry_of_task_id'  => $root->id,
+        'retry_count'       => 2,
+    ]);
+
+    $req = jsonRequest('DELETE', "/api/v1/tasks/{$retry1->id}/cancel-retry-chain");
+    $req->attributes->set('taskId', $retry1->id);
+
+    $resp = $controller->cancelRetryChain($req);
+    expect($resp->getStatusCode())->toBe(204);
+
+    $retry1->refresh();
+    $retry2->refresh();
+    expect($retry1->status)->toBe('CANCELLED');
+    expect($retry2->status)->toBe('CANCELLED');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('cancelRetryChain returns 404 when trying to cancel another users retry chain', function (): void {
+    [$controller, $authService] = makeTaskController();
+    [$userId, $agent]            = seedUserAndAgent($authService);
+
+    $otherUserId = $authService->register('other@example.com', 'Password1!');
+    $otherUser = Spora\Models\User::where('email', 'other@example.com')->first();
+
+    $root = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $otherUser->id,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'root',
+        'step_count'  => 5,
+        'max_steps'   => 10,
+    ]);
+
+    $retry = Task::create([
+        'agent_id'          => $agent->id,
+        'user_id'           => $otherUser->id,
+        'status'            => 'FAILED',
+        'user_prompt'      => 'retry',
+        'step_count'        => 1,
+        'max_steps'         => 10,
+        'retry_of_task_id'  => $root->id,
+        'retry_count'       => 1,
+    ]);
+
+    // Authenticated as userId, but trying to cancel a task owned by otherUser
+    $req = jsonRequest('DELETE', "/api/v1/tasks/{$retry->id}/cancel-retry-chain");
+    $req->attributes->set('taskId', $retry->id);
+
+    $resp = $controller->cancelRetryChain($req);
+    expect($resp->getStatusCode())->toBe(404);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());

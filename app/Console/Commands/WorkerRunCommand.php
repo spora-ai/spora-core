@@ -293,13 +293,13 @@ final class WorkerRunCommand extends Command
             return;
         }
 
-        // Mark entry DONE and update scheduled_runs
         $completedAt = date('Y-m-d H:i:s');
 
+        // Compute next_due_at BEFORE the transaction so it's known before we claim.
+        // Use last_run_at (the actual last scheduled time) to avoid drift when the
+        // worker is delayed. Fall back to completedAt if last_run_at is null.
+        $nextDueAt = null;
         if ($run->cron_expression !== null) {
-            // For recurring schedules, compute the next due_at from $run->last_run_at
-            // (the actual last scheduled time, not wall-clock $completedAt).
-            // This ensures correct cron scheduling even when the worker is delayed.
             $lastRunAtRaw = $run->last_run_at;
             $lastRunAtUtc = $lastRunAtRaw
                 ? new DateTimeImmutable($lastRunAtRaw->toDateTimeString(), new DateTimeZone('UTC'))
@@ -310,50 +310,57 @@ final class WorkerRunCommand extends Command
                 ->getNextRunDate($lastRunAtInScheduleTz, 0, false, $run->timezone)
                 ->setTimezone(new DateTimeZone('UTC'))
                 ->format('Y-m-d H:i:s');
+        }
 
-            // The trigger endpoint may have already inserted this exact due_at entry
-            // (race: user clicks "Trigger now" while this worker is also processing).
-            // Mark any matching PENDING entry as SKIPPED before inserting to avoid
-            // a duplicate-key violation on (scheduled_run_id, due_at).
+        // Atomically: mark current entry DONE + insert next PENDING entry (if recurring).
+        // This prevents the gap where the old entry is CLAIMED/DONE but the next entry
+        // was never created (e.g. process crash or signal interruption between steps).
+        Capsule::connection()->transaction(function () use ($run, $entry, $completedAt, $nextDueAt): void {
+            // Mark current PENDING entry as DONE
             Capsule::table('scheduled_runs_next')
-                ->where('scheduled_run_id', $run->id)
-                ->where('due_at', $nextDueAt)
-                ->where('status', ScheduledRunNext::STATUS_PENDING)
+                ->where('id', $entry->id)
                 ->update([
-                    'status'       => ScheduledRunNext::STATUS_SKIPPED,
+                    'status'       => ScheduledRunNext::STATUS_DONE,
                     'completed_at' => $completedAt,
                 ]);
 
-            Capsule::table('scheduled_runs_next')->insert([
-                'scheduled_run_id' => $run->id,
-                'due_at'          => $nextDueAt,
-                'status'          => ScheduledRunNext::STATUS_PENDING,
-                'created_at'      => $completedAt,
-                'updated_at'      => $completedAt,
-            ]);
+            if ($nextDueAt !== null) {
+                // Insert next PENDING entry for the recurring schedule.
+                // Skip any existing PENDING entry with the same due_at (race with trigger endpoint).
+                Capsule::table('scheduled_runs_next')
+                    ->where('scheduled_run_id', $run->id)
+                    ->where('due_at', $nextDueAt)
+                    ->where('status', ScheduledRunNext::STATUS_PENDING)
+                    ->update([
+                        'status'       => ScheduledRunNext::STATUS_SKIPPED,
+                        'completed_at' => $completedAt,
+                    ]);
 
-            Capsule::table('scheduled_runs')
-                ->where('id', $run->id)
-                ->update([
-                    'last_run_at' => $completedAt,
-                    'next_run_at' => $nextDueAt,
+                Capsule::table('scheduled_runs_next')->insert([
+                    'scheduled_run_id' => $run->id,
+                    'due_at'          => $nextDueAt,
+                    'status'          => ScheduledRunNext::STATUS_PENDING,
+                    'created_at'      => $completedAt,
+                    'updated_at'      => $completedAt,
                 ]);
-        } else {
-            Capsule::table('scheduled_runs')
-                ->where('id', $run->id)
-                ->update([
-                    'last_run_at' => $completedAt,
-                    'next_run_at' => null,
-                    'is_active'   => 0,
-                ]);
-        }
 
-        Capsule::table('scheduled_runs_next')
-            ->where('id', $entry->id)
-            ->update([
-                'status'       => ScheduledRunNext::STATUS_DONE,
-                'completed_at' => $completedAt,
-            ]);
+                Capsule::table('scheduled_runs')
+                    ->where('id', $run->id)
+                    ->update([
+                        'last_run_at' => $completedAt,
+                        'next_run_at' => $nextDueAt,
+                    ]);
+            } else {
+                // One-shot: update last_run_at, clear next_run_at, deactivate
+                Capsule::table('scheduled_runs')
+                    ->where('id', $run->id)
+                    ->update([
+                        'last_run_at' => $completedAt,
+                        'next_run_at' => null,
+                        'is_active'   => 0,
+                    ]);
+            }
+        });
 
         $this->notificationService->notifyScheduledRunCompleted($run->id, $task);
 
@@ -608,7 +615,7 @@ final class WorkerRunCommand extends Command
                 $task->status = 'QUEUED';
                 $task->save();
                 $this->logger->warning('Failed to spawn child for task, reverting to QUEUED', ['task_id' => $task->id]);
-                break;
+                continue;
             }
 
             $output->writeln(sprintf('<info>Spawned child %d for task %d</info>', $pid, $task->id));

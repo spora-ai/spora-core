@@ -73,7 +73,7 @@ final class WorldNewsApiTool implements ToolInterface
         $operation = $arguments['operation'] ?? 'search';
 
         return match ($operation) {
-            'top-news' => "Fetch top news from WorldNewsAPI for country: '{$arguments['source-country']}'",
+            'top-news' => "Fetch top news from WorldNewsAPI for country: '" . ($arguments['source-country'] ?? 'unknown') . "'",
             default => "Search WorldNewsAPI for: '{$arguments['q']}'",
         };
     }
@@ -154,9 +154,14 @@ final class WorldNewsApiTool implements ToolInterface
     public function topNews(array $arguments, int $agentId): ToolResult
     {
         $country = trim((string) ($arguments['source-country'] ?? ''));
+        $language = trim((string) ($arguments['language'] ?? ''));
 
         if ($country === '') {
             return new ToolResult(false, 'source-country is required for top-news.');
+        }
+
+        if ($language === '') {
+            return new ToolResult(false, 'language is required for top-news.');
         }
 
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
@@ -170,21 +175,21 @@ final class WorldNewsApiTool implements ToolInterface
             $this->logger?->debug('WorldNewsApiTool: HTTP request', [
                 'method' => 'GET',
                 'url' => $url,
-                'headers' => ['Authorization' => '***'],
+                'headers' => ['x-api-key' => '***'],
                 'query' => [
                     'source-country' => $country,
-                    'language' => $arguments['language'] ?? null,
+                    'language' => $language,
                 ],
                 'timeout' => $this->effectiveTimeout($settings),
             ]);
 
             $response = $this->httpClient->request('GET', $url, [
                 'headers' => [
-                    'Authorization' => $apiKey,
+                    'x-api-key' => $apiKey,
                 ],
                 'query' => [
                     'source-country' => $country,
-                    'language' => $arguments['language'] ?? null,
+                    'language' => $language,
                 ],
                 'timeout' => $this->effectiveTimeout($settings),
             ]);
@@ -282,7 +287,7 @@ final class WorldNewsApiTool implements ToolInterface
                 ],
                 'language' => [
                     'type' => 'string',
-                    'description' => 'ISO 2-letter language code, e.g. "en" or "de".',
+                    'description' => 'ISO 2-letter language code, e.g. "en" or "de" (required for top-news).',
                 ],
                 'category' => [
                     'type' => 'string',
@@ -310,7 +315,7 @@ final class WorldNewsApiTool implements ToolInterface
                     'description' => 'Pagination offset.',
                 ],
             ],
-            'required' => ['q'],
+            'required' => [],
         ];
     }
 }

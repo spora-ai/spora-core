@@ -244,5 +244,5 @@ test('complete falls back to 45 seconds when no timeout is passed', function ():
 
     $driver->complete(makeRequest());
 
-    expect((int) $capturedOptions['timeout'])->toBe(45);
+    expect((int) $capturedOptions['timeout'])->toBe(300);
 });

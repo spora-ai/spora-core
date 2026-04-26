@@ -2,7 +2,6 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import AgentToolConfigModal from '@/components/agent/AgentToolConfigModal.vue'
 
-// Inline Modal stub — renders slot content directly, avoids Teleport issues in JSDOM
 const ModalStub = {
   name: 'Modal',
   props: ['modelValue', 'title', 'size'],
@@ -55,7 +54,6 @@ const makeTool = (overrides = {}) => ({
 describe('AgentToolConfigModal', () => {
   beforeEach(() => {
     vi.resetAllMocks()
-    // Default mock — individual tests can override
     mockUseToolSettings.mockReturnValue({
       getSettings: vi.fn().mockReturnValue(Promise.resolve({})),
       putSettings: vi.fn().mockReturnValue(Promise.resolve({})),
@@ -94,26 +92,6 @@ describe('AgentToolConfigModal', () => {
       expect(wrapper.find('.modal-stub').exists()).toBe(true)
     })
 
-    // Skipped: requires fake timers to properly test loading state with pending promises
-    it.skip('shows loading state while fetching settings', async () => {
-      mockUseToolSettings.mockReturnValue({
-        getSettings: vi.fn().mockResolvedValue({}),
-        putSettings: vi.fn().mockResolvedValue({}),
-        getGlobalSettings: vi.fn().mockImplementation(() => new Promise((r) => setTimeout(() => r({}), 100))),
-        getRawOverride: vi.fn().mockImplementation(() => new Promise((r) => setTimeout(() => r({}), 100))),
-        getSettingsWithSource: vi.fn().mockImplementation(() => new Promise((r) => setTimeout(() => r({}), 100))),
-      })
-      mockApi.get = vi.fn().mockResolvedValue({})
-
-      const wrapper = mount(AgentToolConfigModal, {
-        props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
-        global: { stubs: { Modal: ModalStub } },
-      })
-
-      await flushPromises()
-      expect(wrapper.text()).toContain('Loading settings')
-    })
-
     it('shows no global config warning when globalSettingsExist is false', async () => {
       mockUseToolSettings.mockReturnValue({
         getSettings: vi.fn().mockResolvedValue({}),
@@ -134,168 +112,42 @@ describe('AgentToolConfigModal', () => {
     })
   })
 
-  describe('loadSettings behavior', () => {
-    // Skipped: component calls getGlobalSettings/getRawOverride/getSettingsWithSource, not getSettings
-    it.skip('calls getSettings with correct toolName', async () => {
-      const getSettings = vi.fn().mockResolvedValue({ 'api_key': 'sk-123' })
-      const putSettings = vi.fn().mockResolvedValue({})
-      mockUseToolSettings.mockReturnValue({
-        getSettings,
-        putSettings,
-        getGlobalSettings: vi.fn().mockResolvedValue({}),
-        getRawOverride: vi.fn().mockResolvedValue({}),
-        getSettingsWithSource: vi.fn().mockResolvedValue({}),
-      })
-      mockApi.get = vi.fn().mockResolvedValue({})
+  it('globalSettingsExist becomes true when global settings API succeeds', async () => {
+    mockUseToolSettings.mockReturnValue({
+      getSettings: vi.fn().mockResolvedValue({ 'api_key': 'sk-123' }),
+      putSettings: vi.fn().mockResolvedValue({}),
+      getGlobalSettings: vi.fn().mockResolvedValue({ 'api_key': 'sk-123' }),
+      getRawOverride: vi.fn().mockResolvedValue({}),
+      getSettingsWithSource: vi.fn().mockResolvedValue({}),
+    })
+    mockApi.get = vi.fn().mockResolvedValue({})
 
-      mount(AgentToolConfigModal, {
-        props: { toolName: 'web_search', tool: makeTool(), agentId: 42 },
-        global: { stubs: { Modal: ModalStub } },
-      })
-
-      await flushPromises()
-      expect(getSettings).toHaveBeenCalledWith('web_search')
+    const wrapper = mount(AgentToolConfigModal, {
+      props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
+      global: { stubs: { Modal: ModalStub } },
     })
 
-    // Skipped: component uses toolSettings.getGlobalSettings internally, not api.get directly
-    it.skip('calls api.get to check global settings existence', async () => {
-      mockUseToolSettings.mockReturnValue({
-        getSettings: vi.fn().mockResolvedValue({}),
-        putSettings: vi.fn().mockResolvedValue({}),
-        getGlobalSettings: vi.fn().mockResolvedValue({}),
-        getRawOverride: vi.fn().mockResolvedValue({}),
-        getSettingsWithSource: vi.fn().mockResolvedValue({}),
-      })
-      mockApi.get = vi.fn().mockResolvedValue({})
-
-      mount(AgentToolConfigModal, {
-        props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
-        global: { stubs: { Modal: ModalStub } },
-      })
-
-      await flushPromises()
-      expect(mockApi.get).toHaveBeenCalledWith('/tools/web_search/settings')
-    })
-
-    it('globalSettingsExist becomes true when global settings API succeeds', async () => {
-      mockUseToolSettings.mockReturnValue({
-        getSettings: vi.fn().mockResolvedValue({ 'api_key': 'sk-123' }),
-        putSettings: vi.fn().mockResolvedValue({}),
-        getGlobalSettings: vi.fn().mockResolvedValue({ 'api_key': 'sk-123' }),
-        getRawOverride: vi.fn().mockResolvedValue({}),
-        getSettingsWithSource: vi.fn().mockResolvedValue({}),
-      })
-      mockApi.get = vi.fn().mockResolvedValue({})
-
-      const wrapper = mount(AgentToolConfigModal, {
-        props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
-        global: { stubs: { Modal: ModalStub } },
-      })
-
-      await flushPromises()
-      // Warning should NOT appear when globalSettingsExist is true
-      expect(wrapper.text()).not.toContain('No global configuration found')
-    })
-
-    it('globalSettingsExist becomes false when global settings API fails with 404', async () => {
-      const { ApiError } = await import('@/api/client')
-      mockUseToolSettings.mockReturnValue({
-        getSettings: vi.fn().mockResolvedValue({}),
-        putSettings: vi.fn().mockResolvedValue({}),
-        getGlobalSettings: vi.fn().mockRejectedValue(new ApiError('NOT_FOUND', 'Not found', 404)),
-        getRawOverride: vi.fn().mockResolvedValue({}),
-        getSettingsWithSource: vi.fn().mockResolvedValue({}),
-      })
-      mockApi.get = vi.fn().mockRejectedValue(new ApiError('NOT_FOUND', 'Not found', 404))
-
-      const wrapper = mount(AgentToolConfigModal, {
-        props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
-        global: { stubs: { Modal: ModalStub } },
-      })
-
-      await flushPromises()
-      expect(wrapper.text()).toContain('No global configuration found')
-    })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('No global configuration found')
   })
 
-  // Skipped: component uses api.put directly and emits 'saved'/'close', not ToolSettingsForm
-  describe.skip('save flow', () => {
-    it('calls putSettings on ToolSettingsForm save event', async () => {
-      const savedSettings = { 'api_key': 'sk-new' }
-      mockUseToolSettings.mockReturnValue({
-        getSettings: vi.fn().mockResolvedValue({}),
-        putSettings: vi.fn().mockResolvedValue(savedSettings),
-        getGlobalSettings: vi.fn().mockResolvedValue({}),
-        getRawOverride: vi.fn().mockResolvedValue({}),
-        getSettingsWithSource: vi.fn().mockResolvedValue({}),
-      })
-      mockApi.get = vi.fn().mockResolvedValue({})
+  it('globalSettingsExist becomes false when global settings API fails with 404', async () => {
+    const { ApiError } = await import('@/api/client')
+    mockUseToolSettings.mockReturnValue({
+      getSettings: vi.fn().mockResolvedValue({}),
+      putSettings: vi.fn().mockResolvedValue({}),
+      getGlobalSettings: vi.fn().mockRejectedValue(new ApiError('NOT_FOUND', 'Not found', 404)),
+      getRawOverride: vi.fn().mockResolvedValue({}),
+      getSettingsWithSource: vi.fn().mockResolvedValue({}),
+    })
+    mockApi.get = vi.fn().mockRejectedValue(new ApiError('NOT_FOUND', 'Not found', 404))
 
-      const wrapper = mount(AgentToolConfigModal, {
-        props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
-        global: { stubs: { Modal: ModalStub } },
-      })
-
-      await flushPromises()
-
-      // Emit save from the ToolSettingsForm stub
-      const toolSettingsForm = wrapper.findComponent({ name: 'ToolSettingsForm' })
-      await toolSettingsForm.vm.$emit('save', savedSettings)
-
-      await flushPromises()
-
-      const putSettings = mockUseToolSettings().putSettings
-      expect(putSettings).toHaveBeenCalledWith('web_search', savedSettings, {})
+    const wrapper = mount(AgentToolConfigModal, {
+      props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
+      global: { stubs: { Modal: ModalStub } },
     })
 
-    it('emits close when save succeeds', async () => {
-      mockUseToolSettings.mockReturnValue({
-        getSettings: vi.fn().mockResolvedValue({}),
-        putSettings: vi.fn().mockResolvedValue({ 'api_key': 'sk-new' }),
-        getGlobalSettings: vi.fn().mockResolvedValue({}),
-        getRawOverride: vi.fn().mockResolvedValue({}),
-        getSettingsWithSource: vi.fn().mockResolvedValue({}),
-      })
-      mockApi.get = vi.fn().mockResolvedValue({})
-
-      const wrapper = mount(AgentToolConfigModal, {
-        props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
-        global: { stubs: { Modal: ModalStub } },
-      })
-
-      await flushPromises()
-
-      const toolSettingsForm = wrapper.findComponent({ name: 'ToolSettingsForm' })
-      await toolSettingsForm.vm.$emit('save', { 'api_key': 'sk-new' })
-
-      await flushPromises()
-      expect(wrapper.emitted('close')).toBeDefined()
-    })
-
-    it('shows error when save fails', async () => {
-      const { ApiError } = await import('@/api/client')
-      mockUseToolSettings.mockReturnValue({
-        getSettings: vi.fn().mockResolvedValue({}),
-        putSettings: vi.fn().mockRejectedValue(new ApiError('SERVER_ERROR', 'Save failed', 500)),
-        getGlobalSettings: vi.fn().mockResolvedValue({}),
-        getRawOverride: vi.fn().mockResolvedValue({}),
-        getSettingsWithSource: vi.fn().mockResolvedValue({}),
-      })
-      mockApi.get = vi.fn().mockResolvedValue({})
-
-      const wrapper = mount(AgentToolConfigModal, {
-        props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
-        global: { stubs: { Modal: ModalStub } },
-      })
-
-      await flushPromises()
-
-      const toolSettingsForm = wrapper.findComponent({ name: 'ToolSettingsForm' })
-      await toolSettingsForm.vm.$emit('save', {})
-
-      await flushPromises()
-      // Error should appear in the ToolSettingsForm
-      expect(wrapper.text()).toContain('Save failed')
-    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('No global configuration found')
   })
 })

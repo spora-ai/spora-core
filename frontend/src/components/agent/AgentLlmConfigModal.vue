@@ -116,7 +116,7 @@ function close(): void {
       <div v-if="activeDriver">
         <h3 class="text-sm font-semibold mb-3">Settings</h3>
         <ToolSettingsForm
-          :tool="{ tool_class: activeDriver.driver_class, tool_name: activeDriver.name, display_name: activeDriver.display_name, settings_schema: activeDriver.settings_schema }"
+          :tool="{ tool_class: activeDriver.driver_class, tool_name: activeDriver.name, display_name: activeDriver.display_name, category: '', settings_schema: activeDriver.settings_schema, operations: [] }"
           :initialSettings="formSettings"
           :saving="saving"
           :error="null"

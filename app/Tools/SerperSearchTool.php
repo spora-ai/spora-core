@@ -120,12 +120,6 @@ final class SerperSearchTool implements ToolInterface
         return $descriptions[$operation] ?? "Serper search: '{$query}'";
     }
 
-    private function getApiKey(int $agentId): string
-    {
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
-        return $settings['core.serper.api_key'] ?? '';
-    }
-
     private function makeSerperRequest(string $endpoint, array $payload, array $settings): array
     {
         $url = "https://google.serper.dev/{$endpoint}";

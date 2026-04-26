@@ -36,7 +36,7 @@ it('makes correct http request and parses organic and answer box results', funct
         ],
     ]);
 
-    $client->expects('request')->with('POST', 'https://serper.dev/search', Mockery::on(function ($options) {
+    $client->expects('request')->with('POST', 'https://google.serper.dev/search', Mockery::on(function ($options) {
         return $options['headers']['X-API-KEY'] === 'serp_123' && $options['json']['q'] === 'apple';
     }))->andReturn($response);
 
@@ -63,7 +63,7 @@ it('image_search makes correct http request and parses results', function () {
         ],
     ]);
 
-    $client->expects('request')->with('POST', 'https://serper.dev/images', Mockery::on(function ($options) {
+    $client->expects('request')->with('POST', 'https://google.serper.dev/images', Mockery::on(function ($options) {
         return $options['headers']['X-API-KEY'] === 'serp_123' && $options['json']['q'] === 'iphone';
     }))->andReturn($response);
 
@@ -89,7 +89,7 @@ it('news_search makes correct http request and parses results', function () {
         ],
     ]);
 
-    $client->expects('request')->with('POST', 'https://serper.dev/news', Mockery::on(function ($options) {
+    $client->expects('request')->with('POST', 'https://google.serper.dev/news', Mockery::on(function ($options) {
         return $options['headers']['X-API-KEY'] === 'serp_123' && $options['json']['q'] === 'tech';
     }))->andReturn($response);
 
@@ -116,7 +116,7 @@ it('video_search makes correct http request and parses results', function () {
         ],
     ]);
 
-    $client->expects('request')->with('POST', 'https://serper.dev/videos', Mockery::on(function ($options) {
+    $client->expects('request')->with('POST', 'https://google.serper.dev/videos', Mockery::on(function ($options) {
         return $options['headers']['X-API-KEY'] === 'serp_123' && $options['json']['q'] === 'php';
     }))->andReturn($response);
 
@@ -142,7 +142,7 @@ it('scholar_search makes correct http request and parses results', function () {
         ],
     ]);
 
-    $client->expects('request')->with('POST', 'https://serper.dev/scholar', Mockery::on(function ($options) {
+    $client->expects('request')->with('POST', 'https://google.serper.dev/scholar', Mockery::on(function ($options) {
         return $options['headers']['X-API-KEY'] === 'serp_123' && $options['json']['q'] === 'machine learning';
     }))->andReturn($response);
 
@@ -168,7 +168,7 @@ it('shopping_search makes correct http request and parses results', function () 
         ],
     ]);
 
-    $client->expects('request')->with('POST', 'https://serper.dev/shopping', Mockery::on(function ($options) {
+    $client->expects('request')->with('POST', 'https://google.serper.dev/shopping', Mockery::on(function ($options) {
         return $options['headers']['X-API-KEY'] === 'serp_123' && $options['json']['q'] === 'macbook';
     }))->andReturn($response);
 
@@ -195,7 +195,7 @@ it('patents_search makes correct http request and parses results', function () {
         ],
     ]);
 
-    $client->expects('request')->with('POST', 'https://serper.dev/patents', Mockery::on(function ($options) {
+    $client->expects('request')->with('POST', 'https://google.serper.dev/patents', Mockery::on(function ($options) {
         return $options['headers']['X-API-KEY'] === 'serp_123' && $options['json']['q'] === 'battery';
     }))->andReturn($response);
 
@@ -221,7 +221,7 @@ it('maps_search makes correct http request and parses results', function () {
         ],
     ]);
 
-    $client->expects('request')->with('POST', 'https://serper.dev/maps', Mockery::on(function ($options) {
+    $client->expects('request')->with('POST', 'https://google.serper.dev/maps', Mockery::on(function ($options) {
         return $options['headers']['X-API-KEY'] === 'serp_123' && $options['json']['q'] === 'coffee';
     }))->andReturn($response);
 
@@ -248,7 +248,7 @@ it('places_search makes correct http request and parses results', function () {
         ],
     ]);
 
-    $client->expects('request')->with('POST', 'https://serper.dev/places', Mockery::on(function ($options) {
+    $client->expects('request')->with('POST', 'https://google.serper.dev/places', Mockery::on(function ($options) {
         return $options['headers']['X-API-KEY'] === 'serp_123' && $options['json']['q'] === 'restaurant';
     }))->andReturn($response);
 

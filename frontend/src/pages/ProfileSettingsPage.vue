@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useAuthStore } from '@/stores/auth'
 import GlobalNavbar from '@/components/GlobalNavbar.vue'
 import { ApiError, api } from '@/api/client'
 

@@ -56,14 +56,18 @@ const expandedTools = ref<Record<number, boolean>>({})
 
 const errorBannerDismissed = ref(false)
 
-const RETRYABLE_ERROR_CODES = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'SERVER_ERROR', 'GATEWAY_ERROR', 'ORPHANED'] as const
+const RETRYABLE_ERROR_CODES = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'SERVER_ERROR', 'GATEWAY_ERROR', 'LLM_TIMEOUT', 'ORPHANED'] as const
 
 const showRetryBanner = computed(() => {
   if (!task.value) return false
   if (task.value.status !== 'FAILED') return false
   if (errorBannerDismissed.value) return false
   if (task.value.retry_after) return false  // countdown shown instead
-  return task.value.error_code !== null && RETRYABLE_ERROR_CODES.includes(task.value.error_code as typeof RETRYABLE_ERROR_CODES[number])
+  if (task.value.error_code === null) return false
+  if (!RETRYABLE_ERROR_CODES.includes(task.value.error_code as typeof RETRYABLE_ERROR_CODES[number])) return false
+  // Auto-retry is disabled: still show banner so user can manually retry
+  if ((task.value.max_retries ?? 0) === 0) return true
+  return false
 })
 
 // Countdown for auto-retry (retry_after set but not yet elapsed)
@@ -79,6 +83,36 @@ const countdown = computed(() => {
   const s = Math.floor((ms % 60000) / 1000)
   return `${m}:${s.toString().padStart(2, '0')}`
 })
+
+// Whether the task is inside a retry chain (is itself a retry task)
+const isRetryTask = computed(() => task.value?.retry_of_task_id !== null)
+
+// max_retries > 0 means auto-retry is configured on the agent
+const autoRetryConfigured = computed(() =>
+  !isRetryTask.value && (task.value?.max_retries ?? 0) > 0
+)
+
+// Attempt counter (1-indexed, matching backend retry_count semantics)
+// retry_count=0 on a root task means no retries attempted yet
+const retryAttempt = computed(() => (task.value?.retry_count ?? 0) + 1)
+const maxRetryAttempts = computed(() => task.value?.max_retries ?? 0)
+
+// True when retry_after is set AND we still have retries left
+const canAutoRetry = computed(() =>
+  autoRetryConfigured.value &&
+  (task.value?.retry_count ?? 0) < (task.value?.max_retries ?? 0)
+)
+
+// True when retry_after is set AND retries are exhausted
+const retriesExhausted = computed(() =>
+  autoRetryConfigured.value &&
+  (task.value?.retry_count ?? 0) >= (task.value?.max_retries ?? 0)
+)
+
+// True when retry_after is set AND max_retries is 0 (will never fire)
+const autoRetryDisabled = computed(() =>
+  !isRetryTask.value && (task.value?.max_retries ?? 0) === 0 && (task.value?.retry_after !== null)
+)
 
 const cancelling = ref(false)
 
@@ -117,7 +151,7 @@ const showFollowupBar = computed(() => {
   if (task.value.status !== 'COMPLETED' && task.value.status !== 'FAILED') return false
   const agent = agentStore.currentAgent
   if (!agent) return false
-  return agent.allow_followup !== false
+  return agent.allow_continuation !== false
 })
 
 async function submitFollowup(): Promise<void> {
@@ -126,14 +160,13 @@ async function submitFollowup(): Promise<void> {
   followupError.value = null
   submittingFollowup.value = true
   try {
-    const newTask = await taskStore.createTaskForAgent(task.value.agent_id, text, task.value.id)
-    // Guard: prevent navigation to undefined/NaN if server returns malformed response
-    if (!Number.isFinite(newTask.id)) {
-      followupError.value = 'Failed to create follow-up task. Please try again.'
-      return
+    await taskStore.continueTask(task.value.id, text)
+    await taskStore.fetchTaskDetail(task.value.id)
+    // Restart polling since the task is now RUNNING again
+    if (!taskStore.isTerminal) {
+      taskStore.startDetailPolling(task.value.id)
     }
     followupPrompt.value = ''
-    router.push({ name: 'task', params: { id: newTask.id } })
   } catch (e) {
     followupError.value = e instanceof ApiError ? e.message : 'Failed to submit follow-up.'
   } finally {
@@ -200,10 +233,6 @@ function isTruncated(text: string | null, max = 300): boolean {
 
 function toggleExpanded(toolId: number): void {
   expandedTools.value[toolId] = !expandedTools.value[toolId]
-}
-
-function getToolContent(entry: HistoryEntry): string {
-  return entry.content ?? ''
 }
 
 function isToolExpanded(toolId: number): boolean {
@@ -287,6 +316,7 @@ async function approveToolCall(tc: { id: number; tool_name: string }): Promise<v
       args = JSON.parse(perToolArgs.value[tc.id] ?? '{}') as Record<string, unknown>
     } catch {
       toast.error(`Invalid JSON for tool "${tc.tool_name}".`)
+      perToolApproving.value[tc.id] = false
       return
     }
     await taskStore.approveTask(taskId.value, [{ provider_call_id: String(tc.id), arguments: args }])
@@ -332,10 +362,7 @@ watch(taskId, async (newId, oldId) => {
   }
   taskLoadSucceeded = true
   if (task.value?.agent_id) {
-    await Promise.all([
-      agentStore.fetchAgents(),
-      agentStore.fetchAgent(task.value.agent_id),
-    ])
+    await agentStore.fetchAgent(task.value.agent_id)
   }
   scrollToBottom()
   if (task.value && !taskStore.isTerminal) {
@@ -369,10 +396,7 @@ onMounted(async () => {
   taskLoadSucceeded = true
 
   if (task.value?.agent_id) {
-    await Promise.all([
-      agentStore.fetchAgents(),
-      agentStore.fetchAgent(task.value.agent_id),
-    ])
+    await agentStore.fetchAgent(task.value.agent_id)
   }
 
   scrollToBottom()
@@ -441,9 +465,10 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- Auto-retry countdown -->
+      <!-- Auto-retry countdown — three states -->
+      <!-- 1. Auto-retry active: countdown + attempt counter + Retry Now + Cancel -->
       <div
-        v-if="showCountdown"
+        v-if="showCountdown && canAutoRetry"
         data-testid="retry-countdown"
         class="mx-4 mt-4 max-w-2xl mx-auto flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm"
       >
@@ -451,7 +476,9 @@ onUnmounted(() => {
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <div class="flex-1 min-w-0">
-          <p class="font-semibold text-amber-900 dark:text-amber-100">Retrying in {{ countdown }}…</p>
+          <p class="font-semibold text-amber-900 dark:text-amber-100">
+            Retrying in {{ countdown }} — Attempt {{ retryAttempt }} of {{ maxRetryAttempts }}
+          </p>
           <p v-if="task.error_code === 'ORPHANED'" class="text-amber-700 dark:text-amber-300 mt-0.5">
             Task was interrupted. A retry attempt is scheduled automatically.
           </p>
@@ -460,12 +487,67 @@ onUnmounted(() => {
           </p>
         </div>
         <button
+          data-testid="retry-button"
+          @click="retryNow"
+          class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium shadow transition-colors px-3"
+        >
+          Retry Now
+        </button>
+        <button
           data-testid="cancel-retry-button"
           @click="cancelRetryChain"
           :disabled="cancelling"
           class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-xs px-3 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors disabled:opacity-50"
         >
-          {{ cancelling ? 'Cancelling…' : 'Cancel Retry' }}
+          {{ cancelling ? 'Cancelling…' : 'Cancel' }}
+        </button>
+      </div>
+
+      <!-- 2. Retries exhausted: show Retry Now instead of Cancel -->
+      <div
+        v-else-if="showCountdown && retriesExhausted"
+        data-testid="retry-countdown"
+        class="mx-4 mt-4 max-w-2xl mx-auto flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm"
+      >
+        <svg class="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold text-amber-900 dark:text-amber-100">All retries exhausted.</p>
+          <p class="text-amber-700 dark:text-amber-300 mt-0.5">
+            No more automatic retries remaining.
+          </p>
+        </div>
+        <button
+          data-testid="retry-button"
+          @click="retryNow"
+          class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium shadow transition-colors px-3"
+        >
+          Retry Now
+        </button>
+      </div>
+
+      <!-- 3. Auto-retry disabled (max_retries=0): show Retry Now -->
+      <div
+        v-else-if="showCountdown && autoRetryDisabled"
+        data-testid="retry-countdown"
+        class="mx-4 mt-4 max-w-2xl mx-auto flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm"
+      >
+        <svg class="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold text-amber-900 dark:text-amber-100">Auto-retry not configured.</p>
+          <p class="text-amber-700 dark:text-amber-300 mt-0.5">
+            This task will not be retried automatically.
+          </p>
+        </div>
+        <button
+          data-testid="retry-button"
+          @click="retryNow"
+          class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium shadow transition-colors px-3"
+        >
+          Retry Now
         </button>
       </div>
 

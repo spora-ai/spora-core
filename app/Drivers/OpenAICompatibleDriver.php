@@ -20,7 +20,7 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 #[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Model identifier (e.g. gpt-4o, gpt-4-turbo, o1-preview).', required: false, scope: 'global', default: 'gpt-4o')]
 #[ToolSetting(key: 'temperature', label: 'Temperature', type: 'text', description: 'Sampling temperature (0.0–2.0). Lower is more deterministic.', required: false, scope: 'global', default: '0.7')]
 #[ToolSetting(key: 'max_tokens', label: 'Max Tokens', type: 'text', description: 'Maximum number of tokens to generate.', required: false, scope: 'global', default: '4096')]
-#[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, scope: 'global', default: '45')]
+#[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, scope: 'global', default: '300')]
 final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface
 {
     public function __construct(
@@ -74,7 +74,7 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
         $response = $this->httpClient->request('POST', $url, [
             'headers' => $headers,
             'json' => $body,
-            'timeout' => $this->timeout ?? 45,
+            'timeout' => $this->timeout ?? 300,
         ]);
 
         $statusCode = $response->getStatusCode();

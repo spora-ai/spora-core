@@ -65,7 +65,7 @@ const identityForm = ref({
   description: '',
   system_prompt: '',
   max_steps: 10,
-  allow_followup: true,
+  allow_continuation: true,
   retry_after_minutes: 0,
   max_retries: 0,
 })
@@ -142,7 +142,7 @@ onMounted(async () => {
     description: agent.description ?? '',
     system_prompt: agent.system_prompt ?? '',
     max_steps: agent.max_steps ?? 10,
-    allow_followup: agent.allow_followup !== false,
+    allow_continuation: agent.allow_continuation !== false,
     retry_after_minutes: agent.retry_after_minutes ?? 0,
     max_retries: agent.max_retries ?? 0,
   }
@@ -195,7 +195,7 @@ async function saveIdentity(): Promise<void> {
       description: identityForm.value.description || null,
       system_prompt: identityForm.value.system_prompt || null,
       max_steps: identityForm.value.max_steps,
-      allow_followup: identityForm.value.allow_followup,
+      allow_continuation: identityForm.value.allow_continuation,
       retry_after_minutes: identityForm.value.retry_after_minutes,
       max_retries: identityForm.value.max_retries,
     })
@@ -267,6 +267,8 @@ async function toggleTool(toolName: string): Promise<void> {
       autoApprovedMap.value[toolName] = agentTool.auto_approve === true
       // Update status map
       toolStatusMap.value[toolName] = newStatus
+      // Load operation overrides for newly enabled tool
+      await loadOperationOverrides()
     }
   } catch (e) {
     toolsError.value = e instanceof ApiError ? e.message : 'Failed to update tool.'
@@ -318,24 +320,24 @@ async function toggleAutoApprove(toolName: string): Promise<void> {
 async function toggleOperationEnabled(toolName: string, operationName: string): Promise<void> {
   savingTools.value[toolName] = true
   toolsError.value = null
+  const prev = operationStates.value[toolName]?.[operationName]
   try {
-    const current = operationStates.value[toolName]?.[operationName]
-    const newEnabled = !current?.enabled
+    const newEnabled = !prev?.enabled
 
     await agentStore.patchOperationOverride(agentId.value, toolName, operationName, { enabled: newEnabled })
 
     if (!operationStates.value[toolName]) {
       operationStates.value[toolName] = {}
     }
-    if (!operationStates.value[toolName][operationName]) {
-      operationStates.value[toolName][operationName] = { enabled: true, requiresApproval: true }
-    }
     operationStates.value[toolName][operationName] = {
-      ...operationStates.value[toolName][operationName],
       enabled: newEnabled,
+      requiresApproval: prev?.requiresApproval ?? true,
     }
   } catch (e) {
     toolsError.value = e instanceof ApiError ? e.message : 'Failed to update operation.'
+    operationStates.value[toolName]?.[operationName] && (
+      operationStates.value[toolName][operationName] = prev
+    )
   } finally {
     savingTools.value[toolName] = false
   }
@@ -344,11 +346,9 @@ async function toggleOperationEnabled(toolName: string, operationName: string): 
 async function toggleOperationAutoApprove(toolName: string, operationName: string): Promise<void> {
   savingTools.value[toolName] = true
   toolsError.value = null
+  const prev = operationStates.value[toolName]?.[operationName]
   try {
-    const current = operationStates.value[toolName]?.[operationName]
-    // Toggling auto-approve ON means default_requires_approval = false
-    // Toggling auto-approve OFF means default_requires_approval = true
-    const currentRequiresApproval = current?.requiresApproval ?? true
+    const currentRequiresApproval = prev?.requiresApproval ?? true
     const newRequiresApproval = !currentRequiresApproval
 
     await agentStore.patchOperationOverride(agentId.value, toolName, operationName, {
@@ -358,15 +358,15 @@ async function toggleOperationAutoApprove(toolName: string, operationName: strin
     if (!operationStates.value[toolName]) {
       operationStates.value[toolName] = {}
     }
-    if (!operationStates.value[toolName][operationName]) {
-      operationStates.value[toolName][operationName] = { enabled: true, requiresApproval: true }
-    }
     operationStates.value[toolName][operationName] = {
-      ...operationStates.value[toolName][operationName],
+      enabled: prev?.enabled ?? true,
       requiresApproval: newRequiresApproval,
     }
   } catch (e) {
     toolsError.value = e instanceof ApiError ? e.message : 'Failed to update operation auto-approve.'
+    operationStates.value[toolName]?.[operationName] && (
+      operationStates.value[toolName][operationName] = prev
+    )
   } finally {
     savingTools.value[toolName] = false
   }
@@ -456,13 +456,13 @@ async function deleteAgent(): Promise<void> {
         </div>
         <div class="flex items-start gap-3">
           <input
-            id="allow-followup"
-            v-model="identityForm.allow_followup"
+            id="allow-continuation"
+            v-model="identityForm.allow_continuation"
             type="checkbox"
             class="mt-0.5 h-4 w-4 rounded border-border bg-background text-primary focus:ring-1 focus:ring-ring"
           />
           <div class="flex flex-col gap-1">
-            <label for="allow-followup" class="text-sm font-medium">Allow follow-up questions</label>
+            <label for="allow-continuation" class="text-sm font-medium">Allow continuation</label>
             <p class="text-xs text-muted-foreground">When enabled, users can continue a conversation after a task completes.</p>
           </div>
         </div>

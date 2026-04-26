@@ -48,12 +48,16 @@ final class Task extends Model
         'error_code',
         'error_message',
         'parent_task_id',
+        'retry_of_task_id',
+        'retry_count',
     ];
 
     /** @var array<string, string> */
     protected $casts = [
-        'step_count' => 'integer',
-        'max_steps'  => 'integer',
+        'step_count'       => 'integer',
+        'max_steps'        => 'integer',
+        'retry_count'      => 'integer',
+        'retry_of_task_id' => 'integer',
     ];
 
     public function agent(): BelongsTo

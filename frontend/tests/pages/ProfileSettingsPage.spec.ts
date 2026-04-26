@@ -1,7 +1,15 @@
+import { mount, flushPromises } from '@vue/test-utils'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import { setActivePinia, createPinia } from 'pinia'
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import ProfileSettingsPage from '@/pages/ProfileSettingsPage.vue'
 
 vi.mock('@/api/client', () => ({
+  ApiError: class extends Error {
+    constructor(public override message: string, public readonly status = 500) {
+      super(message)
+    }
+  },
   api: {
     get: vi.fn(),
     post: vi.fn(),
@@ -9,15 +17,10 @@ vi.mock('@/api/client', () => ({
     delete: vi.fn(),
   },
 }))
-vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({
-    user: { id: 1, email: 'test@example.com' },
-  }),
-}))
 
 import { api } from '@/api/client'
 
-const mockApi = api as ReturnType<typeof vi.fn>
+const mockApi = api as unknown as { get: ReturnType<typeof vi.fn>; post: ReturnType<typeof vi.fn>; put: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> }
 
 const mockProfile = {
   name: 'Alice',
@@ -28,99 +31,141 @@ const mockProfile = {
 }
 
 const mockLocations = [
-  { id: 1, name: 'Home', type: 'home', address: '123 Main St', is_default: true },
-  { id: 2, name: 'Work', type: 'work', address: '456 Office Blvd', is_default: false },
+  { id: 1, name: 'Home', address: '123 Main St', is_default: true },
+  { id: 2, name: 'Work', address: '456 Office Blvd', is_default: false },
 ]
 
-const mockLocation = { id: 1, name: 'Home', type: 'home', address: '123 Main St', is_default: true }
+function makeRouter() {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/profile', name: 'profile', component: { template: '<div />' } }],
+  })
+}
 
 describe('ProfileSettingsPage', () => {
+  let pinia: ReturnType<typeof createPinia>
+
   beforeEach(() => {
-    vi.resetAllMocks()
-    setActivePinia(createPinia())
-    mockApi.get.mockReset()
-    mockApi.post.mockReset()
-    mockApi.put.mockReset()
-    mockApi.delete.mockReset()
+    pinia = createPinia()
+    setActivePinia(pinia)
+    vi.useRealTimers()
   })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.resetAllMocks()
+  })
+
+  async function mountPage(profileData: any = mockProfile, locationsData: any = { locations: mockLocations }) {
+    mockApi.get.mockImplementation((path: string) => {
+      if (path === '/me/profile') return Promise.resolve(profileData)
+      if (path === '/me/locations') return Promise.resolve(locationsData)
+      if (path === '/tasks') return Promise.resolve({ tasks: [] }) // prevent polling crash
+      return Promise.resolve(null)
+    })
+
+    const router = makeRouter()
+    await router.push('/profile')
+    await router.isReady()
+
+    const wrapper = mount(ProfileSettingsPage, {
+      global: { plugins: [router, pinia] },
+    })
+    await flushPromises()
+    // Allow onMounted async operations to complete
+    await new Promise(r => setTimeout(r, 0))
+    await flushPromises()
+
+    return { wrapper, router }
+  }
 
   describe('initial data loading', () => {
     it('loads profile and locations on mount', async () => {
-      mockApi.get
-        .mockResolvedValueOnce(mockProfile)
-        .mockResolvedValueOnce({ locations: mockLocations })
-
-      const { default: ProfileSettingsPage } = await import('@/pages/ProfileSettingsPage.vue')
+      const { wrapper } = await mountPage()
       expect(mockApi.get).toHaveBeenCalledWith('/me/profile')
       expect(mockApi.get).toHaveBeenCalledWith('/me/locations')
+      wrapper.unmount()
     })
 
-    it('pre-populates form with existing profile data', async () => {
-      mockApi.get
-        .mockResolvedValueOnce(mockProfile)
-        .mockResolvedValueOnce({ locations: [] })
+    it('shows locations list from API', async () => {
+      const { wrapper } = await mountPage()
+      expect(wrapper.text()).toContain('Home')
+      expect(wrapper.text()).toContain('Work')
+      wrapper.unmount()
+    })
 
-      await import('@/pages/ProfileSettingsPage.vue')
-      // Profile data should be set after mount
-      expect(mockApi.get).toHaveBeenCalled()
+    it('shows empty message when no locations', async () => {
+      const { wrapper } = await mountPage(mockProfile, { locations: [] })
+      expect(wrapper.text()).toContain('No locations saved yet')
+      wrapper.unmount()
     })
   })
 
   describe('saving profile', () => {
-    it('PUTs updated profile data to /me/profile', async () => {
-      mockApi.get
-        .mockResolvedValueOnce(mockProfile)
-        .mockResolvedValueOnce({ locations: [] })
+    it('shows error when profile save fails', async () => {
+      mockApi.put.mockRejectedValueOnce(new Error('Server error'))
 
-      const updatedProfile = { ...mockProfile, name: 'Bob' }
-      mockApi.put.mockResolvedValueOnce(updatedProfile)
+      const { wrapper } = await mountPage()
 
-      const { useProfile } = await import('@/pages/ProfileSettingsPage.vue')
-      const vm = {} // The component handles save internally in onMounted
+      await wrapper.find('[id="profile-name"]').setValue('Bob')
+      await wrapper.findAll('button').find(b => b.text().includes('Save Base Data'))!.trigger('click')
+      await flushPromises()
 
-      expect(mockApi.put).not.toHaveBeenCalled()
+      expect(wrapper.text()).toContain('Failed to save profile')
+      wrapper.unmount()
     })
   })
 
   describe('locations CRUD', () => {
-    it('displays locations list from API', async () => {
-      mockApi.get
-        .mockResolvedValueOnce(mockProfile)
-        .mockResolvedValueOnce({ locations: mockLocations })
-
-      await import('@/pages/ProfileSettingsPage.vue')
-
-      expect(mockApi.get).toHaveBeenCalledWith('/me/locations')
-    })
-
     it('POSTs new location to /me/locations', async () => {
-      mockApi.get
-        .mockResolvedValueOnce(mockProfile)
-        .mockResolvedValueOnce({ locations: [] })
-      mockApi.post.mockResolvedValueOnce(mockLocation)
+      mockApi.post.mockResolvedValueOnce({ id: 1, name: 'Home', address: '123 Main St', is_default: true })
 
-      const { openAddLocation, saveLocation } = await import('@/pages/ProfileSettingsPage.vue')
-      // Component opens form and saves
-      expect(mockApi.post).not.toHaveBeenCalled()
+      const { wrapper } = await mountPage()
+
+      await wrapper.findAll('button').find(b => b.text().includes('Add location'))!.trigger('click')
+      await flushPromises()
+
+      await wrapper.find('[id="loc-name"]').setValue('Home')
+      await wrapper.find('[id="loc-address"]').setValue('123 Main St')
+      await wrapper.findAll('button').find(b => b.text().includes('Save Location'))!.trigger('click')
+      await flushPromises()
+
+      expect(mockApi.post).toHaveBeenCalledWith('/me/locations', expect.objectContaining({ name: 'Home' }))
+      wrapper.unmount()
     })
 
-    it('DELETE removes location from list optimistically', async () => {
-      mockApi.get
-        .mockResolvedValueOnce(mockProfile)
-        .mockResolvedValueOnce({ locations: mockLocations })
-      mockApi.delete.mockResolvedValueOnce({ data: { deleted: true } })
+    it('calls delete API when delete button is clicked', async () => {
+      mockApi.delete.mockResolvedValueOnce({} as any)
 
-      expect(mockApi.delete).not.toHaveBeenCalled()
+      const { wrapper } = await mountPage()
+
+      // Find delete buttons by their trash SVG content
+      const allButtons = wrapper.findAll('button')
+      const deleteBtn = allButtons.find(w => w.html().includes('M19 7l-.867'))
+      expect(deleteBtn).toBeDefined()
+
+      await deleteBtn!.trigger('click')
+      await flushPromises()
+      await new Promise(r => setTimeout(r, 0))
+      await flushPromises()
+
+      expect(mockApi.delete).toHaveBeenCalled()
+      wrapper.unmount()
     })
+  })
 
-    it('validates required fields before saving location', async () => {
-      mockApi.get
-        .mockResolvedValueOnce(mockProfile)
-        .mockResolvedValueOnce({ locations: [] })
+  describe('health data', () => {
+    it('saves health data via PUT /me/profile', async () => {
+      mockApi.put.mockResolvedValueOnce({ ...mockProfile, height_cm: 180 })
 
-      await import('@/pages/ProfileSettingsPage.vue')
+      const { wrapper } = await mountPage()
 
-      expect(mockApi.post).not.toHaveBeenCalled()
+      await wrapper.find('[id="health-height"]').setValue('180')
+      await wrapper.findAll('button').find(b => b.text().includes('Save Health Data'))!.trigger('click')
+      await flushPromises()
+
+      expect(mockApi.put).toHaveBeenCalledWith('/me/profile', expect.objectContaining({ height_cm: 180 }))
+      wrapper.unmount()
     })
   })
 })
@@ -128,7 +173,6 @@ describe('ProfileSettingsPage', () => {
 describe('SettingsSidebar', () => {
   it('includes Profile nav item', async () => {
     const { default: SettingsSidebar } = await import('@/components/settings/SettingsSidebar.vue')
-    // Sidebar should have Profile button
-    expect(true).toBe(true)
+    expect(SettingsSidebar).toBeDefined()
   })
 })

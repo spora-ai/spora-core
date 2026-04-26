@@ -176,7 +176,6 @@ export function getTimezoneOffsetMinutes(timezone: string, instant: Date): numbe
   })
   const tzParts = tzFormatter.formatToParts(instant)
   const utcParts = utcFormatter.formatToParts(instant)
-  const pad = (n: number) => String(n).padStart(2, '0')
 
   const toDate = (parts: Intl.DateTimeFormatPart[]) => {
     const y = parts.find(p => p.type === 'year')!.value

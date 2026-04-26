@@ -25,10 +25,10 @@ use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\NotificationService;
 use Spora\Tools\Attributes\Tool;
-use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
+use Symfony\Contracts\HttpClient\Exception\TimeoutExceptionInterface;
 use Throwable;
 
 final class Orchestrator implements OrchestratorInterface
@@ -40,6 +40,7 @@ final class Orchestrator implements OrchestratorInterface
         'SERVER_ERROR',
         'GATEWAY_ERROR',
         'AUTH_ERROR',
+        'LLM_TIMEOUT',
         'ORPHANED',
     ];
 
@@ -76,38 +77,34 @@ final class Orchestrator implements OrchestratorInterface
             'parent_task_id' => $parentTaskId,
         ]);
 
-        // When following up: deep-copy the parent task's history so the new task
-        // continues the same conversation rather than starting fresh.
-        if ($parentTaskId !== null) {
-            $parentRows = TaskHistory::where('task_id', $parentTaskId)
-                ->orderBy('sequence')
-                ->get();
-
-            $insertData = [];
-            $seq = 1;
-            $now = \Illuminate\Support\Carbon::now()->format('Y-m-d H:i:s');
-            foreach ($parentRows as $row) {
-                $insertData[] = [
-                    'task_id'           => $task->id,
-                    'sequence'          => $seq++,
-                    'role'              => $row->role,
-                    'content'           => $row->content,
-                    'tool_call_id'      => $row->tool_call_id,
-                    'tool_name'         => $row->tool_name,
-                    'tool_call_payload' => $row->tool_call_payload,
-                    'input_tokens'      => $row->input_tokens,
-                    'output_tokens'     => $row->output_tokens,
-                    'reasoning'         => $row->reasoning,
-                    'created_at'        => $now,
-                ];
-            }
-            if (!empty($insertData)) {
-                TaskHistory::insert($insertData);
-            }
-        }
-
         // Seed the conversation with the user's prompt as the first history row.
         $this->appendHistory($task->id, 'user', $userPrompt);
+
+        if ($this->workerMode === WorkerMode::Sync) {
+            $this->tick($task->id);
+        }
+
+        return $task->fresh();
+    }
+
+    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null): Task
+    {
+        $task = Task::findOrFail($taskId);
+
+        if (!in_array($task->status, ['COMPLETED', 'FAILED'], true)) {
+            throw new RuntimeException('Can only continue completed or failed tasks.');
+        }
+
+        $this->appendHistory($task->id, 'user', $newPrompt);
+
+        $task->status = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
+        $task->step_count = 0;
+
+        if ($additionalSteps !== null) {
+            $task->max_steps = $additionalSteps;
+        }
+
+        $task->save();
 
         if ($this->workerMode === WorkerMode::Sync) {
             $this->tick($task->id);
@@ -249,10 +246,17 @@ final class Orchestrator implements OrchestratorInterface
                 if ($updated > 0) {
                     $failedTask = Task::where('id', $taskId)->first();
                     if ($failedTask !== null) {
-                        $this->notificationService?->notifyTaskFailed($failedTask);
+                        try {
+                            $this->notificationService?->notifyTaskFailed($failedTask);
+                        } catch (Throwable $e) {
+                            $this->logger?->warning('Notification failed', ['task_id' => $failedTask->id, 'exception' => $e->getMessage()]);
+                        }
 
-                        // Auto-retry: check if error is retryable and agent has retry config
-                        $this->scheduleAutoRetry($failedTask, $errorCode);
+                        try {
+                            $this->scheduleAutoRetry($failedTask, $errorCode);
+                        } catch (Throwable $e) {
+                            $this->logger?->warning('Auto-retry scheduling failed', ['task_id' => $failedTask->id, 'exception' => $e->getMessage()]);
+                        }
                     }
                 }
             } catch (Throwable) {
@@ -688,7 +692,7 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         // All tools now use HasOperations; this fallback should never be reached.
-        return false;
+        throw new RuntimeException("Tool '{$toolClass}' does not use HasOperations trait.");
     }
 
     /**
@@ -1051,6 +1055,10 @@ final class Orchestrator implements OrchestratorInterface
             }
         }
 
+        if ($e instanceof TimeoutExceptionInterface) {
+            return 'LLM_TIMEOUT';
+        }
+
         return 'UNKNOWN';
     }
 
@@ -1067,6 +1075,7 @@ final class Orchestrator implements OrchestratorInterface
             'SERVER_ERROR'      => 'The AI service encountered an error. Please try again.',
             'GATEWAY_ERROR'     => 'The AI service is temporarily unavailable. Try again shortly.',
             'AUTH_ERROR'        => 'API authentication failed. Please check your API key.',
+            'LLM_TIMEOUT'       => 'The AI request timed out. Check your model or increase the timeout setting.',
             'BAD_REQUEST'       => 'Invalid request. Please check your agent configuration.',
             'TOOL_ERROR'        => 'A tool encountered an error. Check the task history for details.',
             'UNKNOWN'           => 'An unexpected error occurred. Please try again.',
@@ -1096,8 +1105,8 @@ final class Orchestrator implements OrchestratorInterface
         if ($agent === null) {
             return;
         }
-        $retryAfterMinutes = Agent::where('id', $failedTask->agent_id)->value('retry_after_minutes') ?? 0;
-        $maxRetries = Agent::where('id', $failedTask->agent_id)->value('max_retries') ?? 0;
+        $retryAfterMinutes = $agent->retry_after_minutes ?? 0;
+        $maxRetries = $agent->max_retries ?? 0;
         if ($retryAfterMinutes <= 0 || $maxRetries <= 0) {
             return; // Auto-retry not configured for this agent
         }
@@ -1111,12 +1120,17 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         try {
-            $retryTask = $this->start($agent->id, $failedTask->user_prompt, $failedTask->max_steps, $failedTask->id);
+            $retryTask = $this->start($agent->id, $failedTask->user_prompt, $failedTask->max_steps);
             $retryTask->update([
                 'retry_of_task_id' => $rootTaskId,
                 'retry_count'      => $retryCount,
                 'retry_after'      => date('Y-m-d H:i:s', time() + $retryAfterMinutes * 60),
                 'status'           => 'QUEUED',
+            ]);
+
+            // Set retry_after on the root task so the UI can show a countdown immediately
+            $failedTask->update([
+                'retry_after' => $retryTask->retry_after,
             ]);
 
             $this->notificationService?->notifyRetryQueued($retryTask, $retryCount, $maxRetries);

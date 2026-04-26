@@ -66,6 +66,7 @@ return static function (RouteCollector $r): void {
     $r->addRoute('POST', '/api/v1/tasks/{taskId}/approve', [TaskController::class, 'approve']);
     $r->addRoute('POST', '/api/v1/tasks/{taskId}/reject', [TaskController::class, 'reject']);
     $r->addRoute('POST', '/api/v1/tasks/{taskId}/retry', [TaskController::class, 'retry']);
+    $r->addRoute('POST', '/api/v1/tasks/{taskId}/continue', [TaskController::class, 'continue']);
     $r->addRoute('DELETE', '/api/v1/tasks/{taskId}/retry-chain', [TaskController::class, 'cancelRetryChain']);
     $r->addRoute('DELETE', '/api/v1/tasks/{taskId}', [TaskController::class, 'destroy']);
 

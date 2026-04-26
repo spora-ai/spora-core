@@ -270,6 +270,10 @@ final class TaskController
         }
 
         Capsule::connection()->transaction(function () use ($task): void {
+            // Delete retry chain if this is a root task
+            if ($task->retry_of_task_id === null) {
+                Task::where('retry_of_task_id', $task->id)->delete();
+            }
             TaskHistory::where('task_id', $task->id)->delete();
             ToolCall::where('task_id', $task->id)->delete();
             $task->delete();
@@ -313,6 +317,66 @@ final class TaskController
     }
 
     /**
+     * POST /api/v1/tasks/{taskId}/continue
+     *
+     * Continues a completed or failed task with a new prompt.
+     * Appends the new prompt to the existing task's history and resumes execution.
+     */
+    public function continue(Request $request): JsonResponse
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
+
+        if ($task === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+
+        if (!in_array($task->status, ['COMPLETED', 'FAILED'], true)) {
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_STATE', 'message' => 'Can only continue completed or failed tasks.']],
+                Response::HTTP_CONFLICT,
+            );
+        }
+
+        $body = json_decode($request->getContent(), true) ?? [];
+
+        $prompt = $body['prompt'] ?? null;
+        if (!is_string($prompt) || trim($prompt) === '') {
+            return new JsonResponse(
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'prompt is required and must be a non-empty string.']],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
+
+        $additionalSteps = null;
+        if (isset($body['additional_steps'])) {
+            if (!is_int($body['additional_steps']) || $body['additional_steps'] < 1 || $body['additional_steps'] > 100) {
+                return new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'additional_steps must be an integer between 1 and 100.']],
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                );
+            }
+            $additionalSteps = $body['additional_steps'];
+        }
+
+        $continuedTask = $this->orchestrator->continue(
+            $task->id,
+            $prompt,
+            $additionalSteps,
+        );
+
+        $this->mercure->publish($continuedTask->id, $this->taskResource($continuedTask));
+
+        return new JsonResponse(
+            ['data' => ['task' => $this->taskResource($continuedTask)]],
+            Response::HTTP_OK,
+        );
+    }
+
+    /**
      * DELETE /api/v1/tasks/{taskId}/retry-chain
      *
      * Cancels this task and ALL subsequent retry tasks in the same retry chain.
@@ -339,6 +403,7 @@ final class TaskController
         }
 
         Capsule::table('tasks')
+            ->where('user_id', $userId)
             ->where('retry_of_task_id', $task->retry_of_task_id)
             ->where('retry_count', '>=', $task->retry_count)
             ->update(['status' => 'CANCELLED']);
@@ -381,6 +446,11 @@ final class TaskController
         if ($task->retry_of_task_id !== null) {
             $resource['retry_of_task_id'] = $task->retry_of_task_id;
             $resource['retry_count'] = $task->retry_count;
+        } else {
+            // Root task: include retry config from the agent
+            $agent = Agent::find($task->agent_id);
+            $resource['max_retries'] = $agent->max_retries ?? 0;
+            $resource['retry_after_minutes'] = $agent->retry_after_minutes ?? 0;
         }
 
         if ($task->retry_after !== null) {
