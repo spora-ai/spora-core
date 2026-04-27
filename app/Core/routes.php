@@ -43,6 +43,8 @@ return static function (RouteCollector $r): void {
     $r->addRoute('POST', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentController::class, 'enableTool']);
     $r->addRoute('PATCH', '/api/v1/agents/{id}/tools/{toolId}', [AgentController::class, 'patchTool']);
     $r->addRoute('DELETE', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentController::class, 'disableTool']);
+    // Batch status endpoint MUST be registered before per-tool status to avoid FastRoute overlap
+    $r->addRoute('GET', '/api/v1/agents/{id}/tools/status', [AgentController::class, 'getToolsStatus']);
     $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/status', [AgentController::class, 'getToolStatus']);
 
     // Agent tools — per-agent credential overrides
@@ -51,6 +53,8 @@ return static function (RouteCollector $r): void {
     $r->addRoute('DELETE', '/api/v1/agents/{id}/tools/{toolId}/override', [AgentController::class, 'deleteOverride']);
 
     // Agent tool operations — per-operation enable/auto-approve overrides
+    // Batch endpoint MUST be before per-operation route (2 static segments vs 3)
+    $r->addRoute('GET', '/api/v1/agents/{id}/tools/operations', [AgentController::class, 'getToolsOperations']);
     $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentController::class, 'getOperationOverride']);
     $r->addRoute('PATCH', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentController::class, 'patchOperationOverride']);
 

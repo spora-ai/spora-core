@@ -646,6 +646,51 @@ test('getToolStatus returns 404 for non-existent agent', function (): void {
 });
 
 // ---------------------------------------------------------------------------
+// getToolsStatus (batch)
+// ---------------------------------------------------------------------------
+
+test('getToolsStatus returns all registered tools with correct is_enabled and missing_required', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    // Enable one tool
+    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq->attributes->set('id', $agentId);
+    $enableReq->attributes->set('toolId', 'test_tool');
+    $controller->enableTool($enableReq);
+
+    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/status');
+    $request->attributes->set('id', $agentId);
+
+    $response = $controller->getToolsStatus($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['statuses'])->toBeArray();
+
+    // Find the test_tool entry
+    $testToolStatus = collect($body['data']['statuses'])
+        ->first(fn($s) => $s['tool_class'] === TestTool::class);
+    expect($testToolStatus['is_enabled'])->toBe(true);
+    expect($testToolStatus['can_enable'])->toBe(true);
+});
+
+test('getToolsStatus returns 404 for non-existent agent', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+
+    $request = jsonRequest('GET', '/api/v1/agents/99999/tools/status');
+    $request->attributes->set('id', 99999);
+
+    $response = $controller->getToolsStatus($request);
+
+    expect($response->getStatusCode())->toBe(404);
+});
+
+// ---------------------------------------------------------------------------
 // enableTool enhanced response with missing_required
 // ---------------------------------------------------------------------------
 
@@ -778,4 +823,65 @@ test('getOverride returns effective settings with source annotation (without raw
     // max_results is from global (not overridden, scope: global)
     expect($settings['max_results']['value'])->toBe('20');
     expect($settings['max_results']['source'])->toBe('global');
+});
+
+// ---------------------------------------------------------------------------
+// getToolsOperations (batch)
+// ---------------------------------------------------------------------------
+
+test('getToolsOperations returns all operations for enabled tools with operations', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    // Enable TestTool (it has one operation: "default")
+    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq->attributes->set('id', $agentId);
+    $enableReq->attributes->set('toolId', 'test_tool');
+    $controller->enableTool($enableReq);
+
+    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/operations');
+    $request->attributes->set('id', $agentId);
+
+    $response = $controller->getToolsOperations($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['operations'])->toBeArray();
+
+    // TestTool has operation "default"
+    $defaultOp = collect($body['data']['operations'])
+        ->first(fn($s) => $s['tool_class'] === TestTool::class && $s['operation'] === 'default');
+    expect($defaultOp['effective_enabled'])->toBe(true); // enabledByDefault: true
+    expect($defaultOp['effective_requires_approval'])->toBe(false); // requiresApprovalByDefault: false
+});
+
+test('getToolsOperations returns empty operations array when no tools are enabled', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/operations');
+    $request->attributes->set('id', $agentId);
+
+    $response = $controller->getToolsOperations($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['operations'])->toBe([]);
+});
+
+test('getToolsOperations returns 404 for non-existent agent', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+
+    $request = jsonRequest('GET', '/api/v1/agents/99999/tools/operations');
+    $request->attributes->set('id', 99999);
+
+    $response = $controller->getToolsOperations($request);
+
+    expect($response->getStatusCode())->toBe(404);
 });

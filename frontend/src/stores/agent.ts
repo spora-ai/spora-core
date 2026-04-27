@@ -116,6 +116,35 @@ export const useAgentStore = defineStore('agent', () => {
     return result as any
   }
 
+  /**
+   * GET /api/v1/agents/{id}/tools/operations — all operation overrides for all enabled tools.
+   * Returns a flat array; caller transforms it into the nested Record used by the UI.
+   */
+  async function getAllOperationOverrides(
+    agentId: number,
+  ): Promise<Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>>> {
+    const result = await api.get<{
+      operations: Array<{
+        tool_class: string
+        operation: string
+        effective_enabled: boolean
+        effective_requires_approval: boolean
+      }>
+    }>(`/agents/${agentId}/tools/operations`)
+
+    const map: Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>> = {}
+    for (const op of result.operations) {
+      if (!map[op.tool_class]) {
+        map[op.tool_class] = {}
+      }
+      map[op.tool_class][op.operation] = {
+        enabled: op.effective_enabled,
+        requiresApproval: op.effective_requires_approval,
+      }
+    }
+    return map
+  }
+
   async function patchOperationOverride(
     agentId: number,
     toolName: string,
@@ -173,6 +202,7 @@ export const useAgentStore = defineStore('agent', () => {
     disableTool,
     patchTool,
     getOperationOverride,
+    getAllOperationOverrides,
     patchOperationOverride,
     getLLMConfig,
     putLLMConfig,

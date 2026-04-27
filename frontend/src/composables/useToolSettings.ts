@@ -142,6 +142,24 @@ export function useToolSettings(agentId?: number) {
     }
   }
 
+  async function getAllToolStatuses(): Promise<Record<string, ToolStatus>> {
+    if (isGlobal()) {
+      return {}
+    }
+    try {
+      const result = await api.get<{ statuses: ToolStatus[] }>(
+        `/agents/${agentId}/tools/status`,
+      )
+      const map: Record<string, ToolStatus> = {}
+      for (const status of result.statuses) {
+        map[status.tool_class] = status
+      }
+      return map
+    } catch {
+      return {}
+    }
+  }
+
   async function getRawOverride(toolId: string): Promise<Record<string, string>> {
     if (isGlobal()) {
       return {}
@@ -191,6 +209,7 @@ export function useToolSettings(agentId?: number) {
     getSettings,
     putSettings,
     getToolStatus,
+    getAllToolStatuses,
     getRawOverride,
     getGlobalSettings,
     getSettingsWithSource,

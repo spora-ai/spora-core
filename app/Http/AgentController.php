@@ -296,6 +296,102 @@ final class AgentController
     }
 
     /**
+     * GET /api/v1/agents/{id}/tools/status
+     *
+     * Returns status for every registered tool class in a single response.
+     * Used by AgentSettingsPage to replace N parallel per-tool status calls.
+     */
+    public function getToolsStatus(Request $request): JsonResponse
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
+
+        if ($agent === null) {
+            return $this->notFound();
+        }
+
+        $toolClasses = $this->toolConfigService->getRegisteredToolClasses();
+        $statuses    = [];
+
+        $enabledTools = AgentTool::where('agent_id', $agent->id)
+            ->pluck('tool_class')
+            ->flip()
+            ->toArray();
+
+        foreach ($toolClasses as $toolClass) {
+            $isEnabled = isset($enabledTools[$toolClass]);
+            $effective = $this->toolConfigService->getEffectiveSettings($toolClass, $agent->id);
+            $missing   = $this->toolConfigService->getMissingRequiredSettings($toolClass, $effective);
+
+            $statuses[] = [
+                'tool_class'      => $toolClass,
+                'is_enabled'      => $isEnabled,
+                'missing_required' => $missing,
+                'can_enable'      => empty($missing),
+            ];
+        }
+
+        return new JsonResponse(['data' => ['statuses' => $statuses]]);
+    }
+
+    /**
+     * GET /api/v1/agents/{id}/tools/operations
+     *
+     * Returns operation override state for every operation of every enabled tool.
+     * Used by AgentSettingsPage to replace N×M parallel per-operation calls.
+     */
+    public function getToolsOperations(Request $request): JsonResponse
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
+
+        if ($agent === null) {
+            return $this->notFound();
+        }
+
+        $enabledTools = AgentTool::where('agent_id', $agent->id)->get();
+        $operations  = [];
+
+        // Fetch all overrides for this agent in one query
+        $overrides = AgentToolOperationOverride::where('agent_id', $agent->id)
+            ->get()
+            ->keyBy(fn($row) => $row->tool_class . '::' . $row->operation);
+
+        foreach ($enabledTools as $tool) {
+            if (!class_exists($tool->tool_class)) {
+                continue;
+            }
+            if (!in_array(HasOperations::class, class_uses_recursive($tool->tool_class), true)) {
+                continue;
+            }
+
+            $instance = $this->resolveToolInstance($tool->tool_class);
+            if ($instance === null) {
+                continue;
+            }
+
+            foreach ($instance->getOperations() as $op) {
+                $key = $tool->tool_class . '::' . $op->name;
+                $row = $overrides->get($key);
+
+                $effectiveEnabled         = $this->resolveOperationEffectiveEnabled($tool->tool_class, $op->name, $agent->id);
+                $effectiveRequiresApproval = $this->resolveOperationEffectiveRequiresApproval($tool->tool_class, $op->name, $agent->id);
+
+                $operations[] = [
+                    'tool_class'                  => $tool->tool_class,
+                    'operation'                   => $op->name,
+                    'enabled'                     => ($row !== null && $row->getRawOriginal('enabled') !== null) ? (int) $row->getRawOriginal('enabled') === 1 : null,
+                    'default_requires_approval'  => ($row !== null && $row->getRawOriginal('default_requires_approval') !== null) ? (int) $row->getRawOriginal('default_requires_approval') === 1 : null,
+                    'effective_enabled'           => $effectiveEnabled,
+                    'effective_requires_approval' => $effectiveRequiresApproval,
+                ];
+            }
+        }
+
+        return new JsonResponse(['data' => ['operations' => $operations]]);
+    }
+
+    /**
      * DELETE /api/v1/agents/{id}/tools/{toolClass}/enable
      */
     public function disableTool(Request $request): JsonResponse

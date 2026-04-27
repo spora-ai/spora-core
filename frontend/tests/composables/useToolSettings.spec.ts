@@ -28,7 +28,7 @@ describe('useToolSettings', () => {
   })
 
   describe('global mode (no agentId)', () => {
-    const { getSettings, putSettings } = useToolSettings()
+    const { getSettings, putSettings, getAllToolStatuses } = useToolSettings()
 
     describe('getSettings', () => {
       it('calls GET /tools/{toolId}/settings', async () => {
@@ -132,10 +132,18 @@ describe('useToolSettings', () => {
         )
       })
     })
+
+    describe('getAllToolStatuses', () => {
+      it('returns empty object immediately in global mode', async () => {
+        const result = await getAllToolStatuses()
+        expect(result).toEqual({})
+        expect(mockApi.get).not.toHaveBeenCalled()
+      })
+    })
   })
 
   describe('per-agent mode (agentId provided)', () => {
-    const { getSettings, putSettings } = useToolSettings(42)
+    const { getSettings, putSettings, getAllToolStatuses } = useToolSettings(42)
 
     describe('getSettings', () => {
       it('calls GET /agents/{id}/tools/{toolId}/override', async () => {
@@ -162,6 +170,30 @@ describe('useToolSettings', () => {
           '/agents/42/tools/llm_configuration/override',
           { settings: { 'core.openai.api_key': 'sk-updated' } },
         )
+      })
+    })
+
+    describe('getAllToolStatuses', () => {
+      it('calls GET /agents/{id}/tools/status', async () => {
+        const statuses = [
+          { tool_class: 'TestTool', is_enabled: true, missing_required: [], can_enable: true },
+        ]
+        mockApi.get.mockResolvedValueOnce({ statuses })
+
+        const result = await getAllToolStatuses()
+
+        expect(mockApi.get).toHaveBeenCalledWith('/agents/42/tools/status')
+        expect(result).toEqual({ TestTool: statuses[0] })
+      })
+
+      it('returns empty object on error', async () => {
+        const { ApiError } = await import('@/api/client')
+        const err = new ApiError('SERVER_ERROR', 'Server error', 500)
+        mockApi.get.mockRejectedValueOnce(err)
+
+        const result = await getAllToolStatuses()
+
+        expect(result).toEqual({})
       })
     })
   })

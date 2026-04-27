@@ -362,6 +362,7 @@ watch(taskId, async (newId, oldId) => {
   }
   taskLoadSucceeded = true
   if (task.value?.agent_id) {
+    await agentStore.fetchAgents()
     await agentStore.fetchAgent(task.value.agent_id)
   }
   scrollToBottom()
@@ -396,6 +397,7 @@ onMounted(async () => {
   taskLoadSucceeded = true
 
   if (task.value?.agent_id) {
+    await agentStore.fetchAgents()
     await agentStore.fetchAgent(task.value.agent_id)
   }
 

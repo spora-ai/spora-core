@@ -166,18 +166,9 @@ onMounted(async () => {
   llmConfigs.value = configsResult.configs
   llmDrivers.value = driversResult.drivers
 
-  // Fetch tool status for each tool in parallel to get missing_required info.
-  // Promise.allSettled is used so a single failed status request doesn't abort
-  // the entire page load — failed entries are simply skipped.
-  const statusPromises = toolsResult.tools.map((tool) =>
-    toolSettings.getToolStatus(tool.tool_name),
-  )
-  const statuses = await Promise.allSettled(statusPromises)
-  for (const [i, result] of statuses.entries()) {
-    if (result.status === 'fulfilled' && result.value !== null) {
-      toolStatusMap.value[toolsResult.tools[i].tool_name] = result.value
-    }
-  }
+  // Fetch tool status for all tools in a single batch request
+  const allStatuses = await toolSettings.getAllToolStatuses()
+  toolStatusMap.value = allStatuses
 
   // Load operation overrides for all enabled tools that have operations
   await loadOperationOverrides()
@@ -278,29 +269,9 @@ async function toggleTool(toolName: string): Promise<void> {
 }
 
 async function loadOperationOverrides(): Promise<void> {
-  const enabledToolsWithOps = toolRegistry.value.filter(
-    (t) => t.operations && t.operations.length > 0 && enabledToolNames.value.has(t.tool_name),
-  )
-  if (enabledToolsWithOps.length === 0) return
-
-  const promises = enabledToolsWithOps.flatMap((tool) =>
-    (tool.operations ?? []).map((op) =>
-      agentStore.getOperationOverride(agentId.value, tool.tool_name, op.name)
-        .then((result) => ({ toolName: tool.tool_name, opName: op.name, result }))
-        .catch(() => null),
-    ),
-  )
-  const results = await Promise.all(promises)
-  for (const r of results) {
-    if (!r) continue
-    if (!operationStates.value[r.toolName]) {
-      operationStates.value[r.toolName] = {}
-    }
-    operationStates.value[r.toolName][r.opName] = {
-      enabled: r.result.effective_enabled,
-      requiresApproval: r.result.effective_requires_approval,
-    }
-  }
+  // Single batch request for all operations of all enabled tools
+  const allStates = await agentStore.getAllOperationOverrides(agentId.value)
+  operationStates.value = allStates
 }
 
 async function toggleAutoApprove(toolName: string): Promise<void> {

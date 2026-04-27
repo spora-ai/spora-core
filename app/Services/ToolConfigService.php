@@ -376,6 +376,16 @@ class ToolConfigService
     }
 
     /**
+     * Return all registered tool class names.
+     *
+     * @return list<string>
+     */
+    public function getRegisteredToolClasses(): array
+    {
+        return $this->toolClasses;
+    }
+
+    /**
      * Return schema defaults as key => default_value for all #[ToolSetting] fields.
      * Used to pre-seed agent overrides when enabling a tool.
      *
