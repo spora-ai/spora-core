@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Spora\Core;
 
+use Delight\Auth\Role;
 use ReflectionClass;
 use Spora\Auth\AuthService;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
+use Spora\Models\MailTemplate;
 use Spora\Models\User;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\CurrentTimeTool;
@@ -35,6 +37,13 @@ final class DatabaseSeeder
             echo "Admin user already exists.\n";
             $userId = $user->id;
         }
+
+        // 1b. Grant ADMIN role to the user and mark as verified (seeder admin bypasses email verification).
+        User::where('id', $userId)->update([
+            'roles_mask' => Role::ADMIN,
+            'verified' => 1,
+            'status' => 1,
+        ]);
 
         // 2. Create or ensure default Agent exists.
         $agent = Agent::where('user_id', $userId)->where('name', 'Spora Core Agent')->first();
@@ -69,6 +78,37 @@ final class DatabaseSeeder
         }
 
         echo "Enabled " . count($toolsToEnable) . " Base Tools for the Agent.\n";
+
+        // 4. Seed default mail templates.
+        $mailTemplates = [
+            [
+                'name' => 'email_verification',
+                'subject' => 'Verify your email address',
+                'body_text' => "Please click the link below to verify your email address:\n\n{{verification_link}}\n\nIf you did not create an account, please ignore this email.",
+                'body_html' => null,
+            ],
+            [
+                'name' => 'password_reset',
+                'subject' => 'Reset your password',
+                'body_text' => "Please click the link below to reset your password:\n\n{{reset_link}}\n\nIf you did not request a password reset, please ignore this email.",
+                'body_html' => null,
+            ],
+            [
+                'name' => 'welcome',
+                'subject' => 'Welcome to Spora',
+                'body_text' => "Hello {{user_name}},\n\nWelcome to Spora! Your account has been created with the email {{email}}.\n\nYou can now start using your AI agent.\n\nBest regards,\nThe Spora Team",
+                'body_html' => null,
+            ],
+        ];
+
+        foreach ($mailTemplates as $template) {
+            MailTemplate::updateOrCreate(
+                ['name' => $template['name']],
+                $template,
+            );
+        }
+        echo "Seeded " . count($mailTemplates) . " Mail Templates.\n";
+
         echo "Database Seeding Complete!\n";
     }
 }

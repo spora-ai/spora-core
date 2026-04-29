@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Http\UserProfileController;
 use Spora\Models\User;
 use Spora\Models\UserLocation;
+use Spora\Services\UserService;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -13,9 +14,10 @@ use Spora\Models\UserLocation;
 function makeUserProfileController(): array
 {
     $authService = bootAuthLayer();
-    $controller = new UserProfileController($authService);
+    $userService = new UserService();
+    $controller = new UserProfileController($authService, $userService);
 
-    return [$controller, $authService];
+    return [$controller, $authService, $userService];
 }
 
 // ---------------------------------------------------------------------------

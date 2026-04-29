@@ -79,6 +79,47 @@ final class ToolController
         return new JsonResponse(['data' => ['settings' => $masked]]);
     }
 
+    public function getUserSettings(Request $request, string $toolId): JsonResponse
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $toolClass = $this->toolConfigService->resolveToolClass($toolId);
+
+        if ($toolClass === null) {
+            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Tool not found.']], 404);
+        }
+
+        $settings = $this->toolConfigService->getUserSettings($toolClass, $userId);
+        $masked = $this->toolConfigService->maskForApi($settings, $toolClass);
+
+        return new JsonResponse(['data' => ['settings' => $masked]]);
+    }
+
+    public function putUserSettings(Request $request, string $toolId): JsonResponse
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $toolClass = $this->toolConfigService->resolveToolClass($toolId);
+
+        if ($toolClass === null) {
+            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Tool not found.']], 404);
+        }
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_JSON', 'message' => 'Request body must be valid JSON.']],
+                Response::HTTP_BAD_REQUEST,
+            );
+        }
+
+        $settings = isset($body['settings']) && is_array($body['settings']) ? $body['settings'] : [];
+
+        $saved = $this->toolConfigService->putUserSettings($toolClass, $userId, $settings);
+        $masked = $this->toolConfigService->maskForApi($saved, $toolClass);
+
+        return new JsonResponse(['data' => ['settings' => $masked]]);
+    }
+
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------

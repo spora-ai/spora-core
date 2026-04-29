@@ -11,11 +11,23 @@ use Spora\Core\Database;
 use Spora\Core\SecurityManager;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Drivers\DriverFactory;
+use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
 use Spora\Recipes\RecipeScanner;
+use Spora\Services\AgentServiceInterface;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\ScheduledRunServiceInterface;
+use Spora\Services\SystemMailer;
+use Spora\Services\TaskService;
+use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolConfigService;
+use Spora\Services\UserService;
+use Spora\Services\UserServiceInterface;
+use Spora\Services\PromptTemplateService;
+use Spora\Services\PromptTemplateServiceInterface;
+use Spora\Services\MailTemplateService;
+use Spora\Services\MailTemplateServiceInterface;
 
 /**
  * PHP-DI definitions array.
@@ -179,7 +191,10 @@ return [
     },
 
     AuthService::class => static function (ContainerInterface $c): AuthService {
-        return new AuthService($c->get(Delight\Auth\Auth::class));
+        $authService = new AuthService($c->get(Delight\Auth\Auth::class));
+        $authService->setSystemMailer($c->get(SystemMailer::class));
+        $authService->setAppUrl($c->get('config')['app_url'] ?? 'http://localhost');
+        return $authService;
     },
 
     Symfony\Contracts\HttpClient\HttpClientInterface::class => static function (): Symfony\Contracts\HttpClient\HttpClientInterface {
@@ -189,6 +204,7 @@ return [
     Spora\Http\AuthController::class => static function (ContainerInterface $c): Spora\Http\AuthController {
         return new Spora\Http\AuthController(
             $c->get(AuthService::class),
+            $c->get(Spora\Services\UserServiceInterface::class),
             $c->get('config'),
         );
     },
@@ -204,7 +220,7 @@ return [
     DriverFactory::class => static function (ContainerInterface $c): DriverFactory {
         return new DriverFactory(
             $c->get(Psr\Log\LoggerInterface::class),
-            $c->get(Spora\Services\LLMConfigService::class),
+            $c->get(Spora\Services\LLMConfigServiceInterface::class),
             (int) ($c->get('config')['llm_timeout'] ?? 300),
         );
     },
@@ -236,7 +252,7 @@ return [
     Spora\Http\LLMConfigController::class => static function (ContainerInterface $c): Spora\Http\LLMConfigController {
         return new Spora\Http\LLMConfigController(
             $c->get(AuthService::class),
-            $c->get(Spora\Services\LLMConfigService::class),
+            $c->get(Spora\Services\LLMConfigServiceInterface::class),
         );
     },
 
@@ -247,11 +263,26 @@ return [
         );
     },
 
+    Spora\Services\LLMConfigServiceInterface::class => static function (ContainerInterface $c): Spora\Services\LLMConfigServiceInterface {
+        return $c->get(Spora\Services\LLMConfigService::class);
+    },
+
+    Spora\Services\AgentServiceInterface::class => static function (ContainerInterface $c): AgentServiceInterface {
+        return new Spora\Services\AgentService(
+            $c->get(ToolConfigService::class),
+            $c->get(Spora\Services\LLMConfigService::class),
+        );
+    },
+
+    Spora\Services\UserServiceInterface::class => static function (): UserServiceInterface {
+        return new Spora\Services\UserService();
+    },
+
     Spora\Http\AgentController::class => static function (ContainerInterface $c): Spora\Http\AgentController {
         return new Spora\Http\AgentController(
             $c->get(AuthService::class),
+            $c->get(Spora\Services\AgentServiceInterface::class),
             $c->get(ToolConfigService::class),
-            $c->get(Spora\Services\LLMConfigService::class),
         );
     },
 
@@ -304,6 +335,7 @@ return [
     OrchestratorInterface::class => static function (ContainerInterface $c): OrchestratorInterface {
         return new Orchestrator(
             driverFactory: $c->get(DriverFactory::class),
+            llmConfigService: $c->get(Spora\Services\LLMConfigService::class),
             toolInstances: $c->get('tool_instances'),
             logger: $c->get(Psr\Log\LoggerInterface::class),
             workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,
@@ -324,6 +356,12 @@ return [
     Spora\Http\TaskController::class => static function (ContainerInterface $c): Spora\Http\TaskController {
         return new Spora\Http\TaskController(
             $c->get(AuthService::class),
+            $c->get(TaskServiceInterface::class),
+        );
+    },
+
+    TaskServiceInterface::class => static function (ContainerInterface $c): TaskServiceInterface {
+        return new TaskService(
             $c->get(OrchestratorInterface::class),
             $c->get(MercurePublisherInterface::class),
         );
@@ -359,23 +397,43 @@ return [
         );
     },
 
+    Spora\Services\NotificationServiceInterface::class => static function (ContainerInterface $c): Spora\Services\NotificationServiceInterface {
+        return $c->get(NotificationService::class);
+    },
+
     Spora\Http\NotificationController::class => static function (ContainerInterface $c): Spora\Http\NotificationController {
         return new Spora\Http\NotificationController(
             $c->get(AuthService::class),
+            $c->get(Spora\Services\NotificationServiceInterface::class),
         );
+    },
+
+    Spora\Services\PromptTemplateServiceInterface::class => static function (): PromptTemplateServiceInterface {
+        return new Spora\Services\PromptTemplateService();
+    },
+
+    Spora\Services\MailTemplateServiceInterface::class => static function (): MailTemplateServiceInterface {
+        return new Spora\Services\MailTemplateService();
     },
 
     Spora\Http\PromptTemplateController::class => static function (ContainerInterface $c): Spora\Http\PromptTemplateController {
         return new Spora\Http\PromptTemplateController(
             $c->get(AuthService::class),
+            $c->get(Spora\Services\PromptTemplateServiceInterface::class),
+        );
+    },
+
+    Spora\Services\ScheduledRunServiceInterface::class => static function (ContainerInterface $c): ScheduledRunServiceInterface {
+        return new Spora\Services\ScheduledRunService(
+            $c->get(OrchestratorInterface::class),
+            $c->get(MercurePublisherInterface::class),
         );
     },
 
     Spora\Http\ScheduledRunController::class => static function (ContainerInterface $c): Spora\Http\ScheduledRunController {
         return new Spora\Http\ScheduledRunController(
             $c->get(AuthService::class),
-            $c->get(OrchestratorInterface::class),
-            $c->get(MercurePublisherInterface::class),
+            $c->get(Spora\Services\ScheduledRunServiceInterface::class),
         );
     },
 
@@ -391,6 +449,43 @@ return [
     Spora\Http\UserProfileController::class => static function (ContainerInterface $c): Spora\Http\UserProfileController {
         return new Spora\Http\UserProfileController(
             $c->get(AuthService::class),
+            $c->get(Spora\Services\UserServiceInterface::class),
         );
     },
+
+    Spora\Http\Middleware\AdminMiddleware::class => static function (ContainerInterface $c): Spora\Http\Middleware\AdminMiddleware {
+        return new Spora\Http\Middleware\AdminMiddleware(
+            $c->get(AuthService::class),
+        );
+    },
+
+    Spora\Http\UserController::class => static function (ContainerInterface $c): Spora\Http\UserController {
+        return new Spora\Http\UserController(
+            $c->get(AuthService::class),
+            $c->get(Spora\Services\UserServiceInterface::class),
+        );
+    },
+
+    Spora\Http\MailConfigController::class => static function (ContainerInterface $c): Spora\Http\MailConfigController {
+        return new Spora\Http\MailConfigController(
+            $c->get(AuthService::class),
+            $c->get(SystemMailer::class),
+            $c->get('config'),
+        );
+    },
+
+    Spora\Http\MailTemplateController::class => static function (ContainerInterface $c): Spora\Http\MailTemplateController {
+        return new Spora\Http\MailTemplateController(
+            $c->get(AuthService::class),
+            $c->get(Spora\Services\MailTemplateServiceInterface::class),
+        );
+    },
+
+    SystemMailer::class => static function (ContainerInterface $c): SystemMailer {
+        return new SystemMailer(
+            $c->get('config'),
+        );
+    },
+
+    MailTemplate::class => static fn(): MailTemplate => new MailTemplate(),
 ];

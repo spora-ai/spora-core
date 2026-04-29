@@ -142,7 +142,15 @@ export const useAgentStore = defineStore('agent', () => {
         requiresApproval: op.effective_requires_approval,
       }
     }
-    return map
+    // Re-key by tool_name using the short-name derivation (basename + snake_case).
+    // patchOperationOverride uses tool_name as the URL identifier, so the map must use tool_name keys.
+    const byName: Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>> = {}
+    for (const toolClass of Object.keys(map)) {
+      const toolName = toolClass.replace(/\\/g, '/').split('/').pop()!
+        .replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '')
+      byName[toolName] = map[toolClass]
+    }
+    return byName
   }
 
   async function patchOperationOverride(

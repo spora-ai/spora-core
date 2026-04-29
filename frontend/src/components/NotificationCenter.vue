@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotificationStore } from '@/stores/notifications'
 import type { Notification } from '@/stores/notifications'
+import Icon from '@/components/ui/Icon.vue'
 
 const router = useRouter()
 const store = useNotificationStore()
@@ -18,13 +19,13 @@ function closePanel() {
   open.value = false
 }
 
-function notificationIcon(type: Notification['type']): string {
+function notificationIconName(type: Notification['type']): string {
   switch (type) {
-    case 'task_completed': return '✓'
-    case 'task_failed': return '✗'
-    case 'pending_approval': return '⏳'
-    case 'scheduled_run_completed': return '⏰'
-    default: return '🔔'
+    case 'task_completed': return 'check'
+    case 'task_failed': return 'x'
+    case 'pending_approval': return 'hourglass'
+    case 'scheduled_run_completed': return 'clock'
+    default: return 'bell'
   }
 }
 
@@ -112,7 +113,7 @@ defineExpose({ open: openPanel })
               v-if="store.notifications.length === 0"
               class="flex flex-col items-center justify-center h-full text-center text-muted-foreground text-sm gap-2 px-4"
             >
-              <span class="text-2xl">🔔</span>
+              <span class="text-2xl"><Icon name="bell" class="h-6 w-6" /></span>
               <span>No notifications yet</span>
             </div>
 
@@ -132,9 +133,10 @@ defineExpose({ open: openPanel })
                 />
 
                 <!-- Icon -->
-                <div class="text-lg shrink-0 mt-0.5" :class="notificationIconColor(notification.type)">
-                  {{ notificationIcon(notification.type) }}
-                </div>
+                <Icon
+                    :name="notificationIconName(notification.type)"
+                    :class="`shrink-0 mt-0.5 ${notificationIconColor(notification.type)}`"
+                  />
 
                 <!-- Content -->
                 <div class="flex-1 min-w-0">
@@ -154,9 +156,7 @@ defineExpose({ open: openPanel })
                   class="text-muted-foreground hover:text-destructive transition-colors p-1 shrink-0"
                   title="Delete"
                 >
-                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+                  <Icon name="x" class="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>

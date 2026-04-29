@@ -13,6 +13,7 @@
  * Auto-dismiss: error=never, warning=8s, success/info=4s
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import Icon from '@/components/ui/Icon.vue'
 
 const props = withDefaults(defineProps<{
   id: string
@@ -97,11 +98,11 @@ const severityClasses = computed(() => ({
   },
 }[props.severity]))
 
-const icons = {
-  error: `<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 8v4M12 16h.01"/></svg>`,
-  warning: `<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>`,
-  success: `<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
-  info: `<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
+const iconNames = {
+  error: 'error-circle',
+  warning: 'warning',
+  success: 'check-circle',
+  info: 'info',
 }
 </script>
 
@@ -113,7 +114,9 @@ const icons = {
     aria-live="assertive"
   >
     <!-- Icon -->
-    <div class="shrink-0 pl-4 pt-3" :class="severityClasses.icon" v-html="icons[severity]" />
+    <div class="shrink-0 pl-4 pt-3" :class="severityClasses.icon">
+      <Icon :name="iconNames[severity]" class="h-5 w-5" />
+    </div>
 
     <!-- Content -->
     <div class="flex-1 py-3 pr-2 min-w-0">
@@ -134,9 +137,7 @@ const icons = {
       class="shrink-0 pr-3 pt-2 text-muted-foreground hover:text-foreground transition-colors"
       aria-label="Dismiss notification"
     >
-      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-      </svg>
+      <Icon name="x" class="h-4 w-4" />
     </button>
 
     <!-- Progress bar (only for auto-dismissing toasts) -->

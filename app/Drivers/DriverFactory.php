@@ -45,6 +45,14 @@ class DriverFactory
             return $this->makeDriverFromConfig($defaultConfig);
         }
 
+        // Fall back to global default (is_global=true AND is_default=true)
+        $globalDefault = LLMDriverConfiguration::where('is_global', true)
+            ->where('is_default', true)
+            ->first();
+        if ($globalDefault !== null) {
+            return $this->makeDriverFromConfig($globalDefault);
+        }
+
         // Ultimate fallback: OpenAICompatibleDriver with empty settings
         $this->logger->warning('No LLMDriverConfiguration found, using fallback OpenAI driver.');
 
@@ -67,7 +75,7 @@ class DriverFactory
         }
 
         try {
-            $settings = $this->llmConfigService->decryptSettings($config->settings ?? '');
+            $settings = $this->llmConfigService->decodeSettings($config->driver_class, $config->settings ?? '');
         } catch (Throwable $e) {
             throw new RuntimeException(
                 "Failed to decrypt settings for LLM config '{$config->name}' (id={$config->id}): " . $e->getMessage(),
@@ -81,13 +89,27 @@ class DriverFactory
             ? (int) $settings['timeout']
             : $this->llmTimeout;
 
-        return new $driverClass(
-            apiKey: (string) ($settings['api_key'] ?? ''),
-            model: (string) ($settings['model'] ?? ''),
-            baseUrl: (string) ($settings['base_url'] ?? ''),
-            httpClient: \Symfony\Component\HttpClient\HttpClient::create(),
-            logger: $this->logger,
-            timeout: $timeout,
-        );
+        $commonArgs = [
+            'apiKey' => (string) ($settings['api_key'] ?? ''),
+            'model' => (string) ($settings['model'] ?? ''),
+            'baseUrl' => (string) ($settings['base_url'] ?? ''),
+            'httpClient' => \Symfony\Component\HttpClient\HttpClient::create(),
+            'logger' => $this->logger,
+            'timeout' => $timeout,
+        ];
+
+        if ($driverClass === AnthropicCompatibleDriver::class) {
+            return new AnthropicCompatibleDriver(
+                ...$commonArgs,
+                temperature: isset($settings['temperature']) && $settings['temperature'] !== ''
+                    ? (float) $settings['temperature']
+                    : null,
+                thinkingBudget: isset($settings['thinking_budget']) && $settings['thinking_budget'] !== ''
+                    ? (int) $settings['thinking_budget']
+                    : null,
+            );
+        }
+
+        return new $driverClass(...$commonArgs);
     }
 }

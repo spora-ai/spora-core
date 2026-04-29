@@ -4,18 +4,24 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Http\AuthController;
+use Spora\Services\UserServiceInterface;
 
 /**
  * Build an AuthController backed by a fresh database.
  * Pass custom config overrides (e.g. ['allow_registration' => false]).
  */
-function makeAuthController(array $configOverrides = []): array
+function makeAuthController(array $configOverrides = [], ?callable $userServiceSetup = null): array
 {
     $service    = bootAuthLayer();
     $config     = array_merge(['allow_registration' => true, 'app_env' => 'testing'], $configOverrides);
-    $controller = new AuthController($service, $config);
+    $userService = Mockery::mock(UserServiceInterface::class);
+    $userService->allows('getUser')->andReturn(null)->byDefault();
+    if ($userServiceSetup !== null) {
+        $userServiceSetup($userService);
+    }
+    $controller = new AuthController($service, $userService, $config);
 
-    return [$controller, $service];
+    return [$controller, $service, $userService];
 }
 
 // ---------------------------------------------------------------------------
@@ -169,12 +175,25 @@ test('login with unknown email returns 401 INVALID_CREDENTIALS', function (): vo
 
 test('me when logged in returns 200 with user data including ISO 8601 registered', function (): void {
     clearSession();
-    [$controller, $service] = makeAuthController();
+    [$controller, $service, $userService] = makeAuthController();
 
     $userId = $service->register('grace@example.com', 'Password1!');
 
     // Simulate session as if login() had been called
     simulateLoggedInSession($userId, 'grace@example.com');
+
+    // Mock getUser to return the real user data
+    $userService->expects('getUser')
+        ->with($userId)
+        ->andReturn([
+            'user' => [
+                'id'       => $userId,
+                'email'    => 'grace@example.com',
+                'username' => 'grace',
+                'registered' => time(),
+                'roles'    => [],
+            ],
+        ]);
 
     $response = $controller->me(jsonRequest('GET', '/api/v1/auth/me'));
 

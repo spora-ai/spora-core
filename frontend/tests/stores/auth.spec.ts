@@ -35,7 +35,7 @@ describe('useAuthStore', () => {
       const promise = store.init()
       await promise
 
-      expect(store.user).toEqual({ id: 1, email: 'test@example.com' })
+      expect(store.user).toEqual({ id: 1, email: 'test@example.com', roles: [] })
       expect(store.initialized).toBe(true)
     })
 
@@ -65,7 +65,7 @@ describe('useAuthStore', () => {
       resolve!({ user: { id: 1, email: 'a@b.com' } })
       await pendingPromise
 
-      expect(store.user).toEqual({ id: 1, email: 'a@b.com' })
+      expect(store.user).toEqual({ id: 1, email: 'a@b.com', roles: [] })
       expect(store.initialized).toBe(true)
     })
   })
@@ -81,7 +81,7 @@ describe('useAuthStore', () => {
         email: 'test@example.com',
         password: 'password',
       })
-      expect(store.user).toEqual({ id: 1, email: 'test@example.com' })
+      expect(store.user).toEqual({ id: 1, email: 'test@example.com', roles: [] })
     })
   })
 
@@ -104,7 +104,7 @@ describe('useAuthStore', () => {
 
   describe('register', () => {
     it('sets user on success', async () => {
-      const mockUser = { id: 2, email: 'new@example.com' }
+      const mockUser = { id: 2, email: 'new@example.com', roles: [] }
       mockApi.post.mockResolvedValueOnce(mockUser)
 
       const store = useAuthStore()
@@ -142,7 +142,7 @@ describe('useAuthStore', () => {
       await store.updateAccount('newname')
 
       expect(mockApi.patch).toHaveBeenCalledWith('/auth/account', { username: 'newname' })
-      expect(store.user).toEqual({ id: 1, email: 'test@example.com', username: 'newname' })
+      expect(store.user).toEqual({ id: 1, email: 'test@example.com', username: 'newname', roles: [] })
     })
   })
 })

@@ -224,7 +224,7 @@ describe('useAgentStore', () => {
 
       expect(mockApi.get).toHaveBeenCalledWith('/agents/1/tools/operations')
       expect(result).toEqual({
-        TestTool: {
+        test_tool: {
           search: { enabled: true, requiresApproval: false },
           scrape: { enabled: false, requiresApproval: true },
         },

@@ -7,10 +7,9 @@ namespace Spora\Http;
 use JsonException;
 use ReflectionClass;
 use Spora\Auth\AuthService;
+use Spora\Http\Middleware\AdminGuard;
 use Spora\Http\Middleware\AuthGuard;
-use Spora\Models\Agent;
-use Spora\Models\LLMDriverConfiguration;
-use Spora\Services\LLMConfigService;
+use Spora\Services\LLMConfigServiceInterface;
 use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -32,7 +31,7 @@ final class LLMConfigController
 {
     public function __construct(
         private readonly AuthService $authService,
-        private readonly LLMConfigService $llmConfigService,
+        private readonly LLMConfigServiceInterface $llmConfigService,
     ) {}
 
     // ── Schema discovery ────────────────────────────────────────────────────
@@ -54,15 +53,29 @@ final class LLMConfigController
 
     /**
      * GET /llm-configs
+     *
+     * Returns the current user's personal configs merged with all global configs
+     * (for browsing and selecting defaults). Use globalConfigs() for admin management.
      */
     public function index(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
 
-        $configs = LLMDriverConfiguration::where('user_id', $userId)
-            ->get()
-            ->map(fn(LLMDriverConfiguration $config): array => $this->configResource($config))
-            ->all();
+        $configs = $this->llmConfigService->getConfigurationsForUser($userId);
+
+        return new JsonResponse(['data' => ['configs' => $configs]]);
+    }
+
+    /**
+     * GET /llm-configs/global
+     *
+     * Returns all global configs (for admin management). Personal configs are excluded.
+     */
+    public function globalConfigs(Request $request): JsonResponse
+    {
+        AdminGuard::requireAdmin($this->authService);
+
+        $configs = $this->llmConfigService->getGlobalConfigurations();
 
         return new JsonResponse(['data' => ['configs' => $configs]]);
     }
@@ -74,12 +87,12 @@ final class LLMConfigController
     {
         $userId = AuthGuard::requireAuth($this->authService);
 
-        $config = LLMDriverConfiguration::where('id', $id)->where('user_id', $userId)->first();
+        $config = $this->llmConfigService->getConfiguration($id, $userId);
         if ($config === null) {
             return $this->notFound();
         }
 
-        return new JsonResponse(['data' => ['config' => $this->configResource($config)]]);
+        return new JsonResponse(['data' => ['config' => $this->llmConfigService->configResource($config)]]);
     }
 
     /**
@@ -88,6 +101,7 @@ final class LLMConfigController
     public function store(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
+        $isAdmin = $this->authService->isAdmin();
 
         try {
             $body = $this->decodeJson($request);
@@ -105,29 +119,38 @@ final class LLMConfigController
             return $this->error('VALIDATION_ERROR', 'Invalid driver_class.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $rawSettings = $body['settings'] ?? null;
-        $settings = is_array($rawSettings) ? $rawSettings : [];
-
         // Validate required fields against schema
         $schema = $this->getSchemaForDriver($driverClass);
+        $rawSettings = $body['settings'] ?? null;
+        $settings = is_array($rawSettings) ? $rawSettings : [];
         $validationError = $this->validateSettings($settings, $schema);
         if ($validationError !== null) {
             return $this->error('VALIDATION_ERROR', $validationError, Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $config = new LLMDriverConfiguration();
-        $config->user_id = $userId;
-        $config->name = $name;
-        $config->driver_class = $driverClass;
-        $config->settings = $this->llmConfigService->encryptSettings($settings);
-        $config->is_default = !empty($body['is_default']);
-        if ($config->is_default) {
-            LLMDriverConfiguration::where('user_id', $userId)->where('is_default', true)->update(['is_default' => false]);
+        $data = $body;
+        $data['name'] = $name;
+        $data['driver_class'] = $driverClass;
+        $data['settings'] = $settings;
+        $data['is_global'] = !empty($body['is_global']);
+        $data['is_default'] = !empty($body['is_default']);
+        if (isset($body['context_window'])) {
+            $data['context_window'] = (int) $body['context_window'];
         }
-        $config->save();
+        if (isset($body['max_tokens_output'])) {
+            $data['max_tokens_output'] = (int) $body['max_tokens_output'];
+        }
+
+        $config = $this->llmConfigService->createConfiguration($userId, $data, $isAdmin);
+        if ($config === null) {
+            if (!empty($data['is_global']) && !$isAdmin) {
+                return $this->error('VALIDATION_ERROR', 'Only admins can create global configurations.', Response::HTTP_UNPROCESSABLE_ENTITY);
+            }
+            return $this->error('VALIDATION_ERROR', 'Failed to create configuration.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         return new JsonResponse(
-            ['data' => ['config' => $this->configResource($config)]],
+            ['data' => ['config' => $this->llmConfigService->configResource($config)]],
             Response::HTTP_CREATED,
         );
     }
@@ -138,10 +161,18 @@ final class LLMConfigController
     public function update(Request $request, int $id): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
+        $isAdmin = $this->authService->isAdmin();
 
-        $config = LLMDriverConfiguration::where('id', $id)->where('user_id', $userId)->first();
+        // Check if config exists and is accessible
+        $config = $this->llmConfigService->getConfiguration($id, $userId);
         if ($config === null) {
-            return $this->notFound();
+            // Check if it might be a global config (admins can access it)
+            $existingConfig = $this->llmConfigService->findConfiguration($id);
+            if ($existingConfig === null || (!$isAdmin && $existingConfig->is_global)) {
+                return $this->forbidden();
+            }
+            // Admin trying to update global config - reload as admin access
+            $config = $existingConfig;
         }
 
         try {
@@ -155,26 +186,32 @@ final class LLMConfigController
             if ($name === '') {
                 return $this->error('VALIDATION_ERROR', 'Name cannot be empty.', Response::HTTP_UNPROCESSABLE_ENTITY);
             }
-            $config->name = $name;
         }
 
         if (isset($body['settings']) && is_array($body['settings']) && !array_is_list($body['settings'])) {
-            // Merge with existing decrypted settings so omitted keys (e.g. unchanged passwords
-            // that the API returns as "***" and the client strips before sending) are preserved.
-            $existing = $this->llmConfigService->decryptSettings($config->getRawOriginal('settings') ?? '');
-            $merged   = array_merge($existing, $body['settings']);
-
             $schema = $this->getSchemaForDriver($config->driver_class);
+            $existing = $this->llmConfigService->decodeSettings($config->driver_class, $config->getRawOriginal('settings') ?? '');
+            $merged = array_merge($existing, $body['settings']);
             $validationError = $this->validateSettings($merged, $schema);
             if ($validationError !== null) {
                 return $this->error('VALIDATION_ERROR', $validationError, Response::HTTP_UNPROCESSABLE_ENTITY);
             }
-            $config->settings = $this->llmConfigService->encryptSettings($merged);
         }
 
-        $config->save();
+        $data = $body;
+        if (isset($body['context_window'])) {
+            $data['context_window'] = (int) $body['context_window'];
+        }
+        if (isset($body['max_tokens_output'])) {
+            $data['max_tokens_output'] = (int) $body['max_tokens_output'];
+        }
 
-        return new JsonResponse(['data' => ['config' => $this->configResource($config)]]);
+        $updatedConfig = $this->llmConfigService->updateConfiguration($id, $userId, $data, $isAdmin);
+        if ($updatedConfig === null) {
+            return $this->forbidden();
+        }
+
+        return new JsonResponse(['data' => ['config' => $this->llmConfigService->configResource($updatedConfig)]]);
     }
 
     /**
@@ -183,19 +220,15 @@ final class LLMConfigController
     public function destroy(Request $request, int $id): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
+        $isAdmin = $this->authService->isAdmin();
 
-        $config = LLMDriverConfiguration::where('id', $id)->where('user_id', $userId)->first();
-        if ($config === null) {
-            return $this->notFound();
+        $deleted = $this->llmConfigService->deleteConfiguration($id, $userId, $isAdmin);
+        if (!$deleted) {
+            return $this->forbidden();
         }
 
-        // Unset any agents using this config
-        Agent::where('llm_driver_config_id', $id)
-            ->update(['llm_driver_config_id' => null]);
-
-        $config->delete();
-
-        return new JsonResponse(null, Response::HTTP_NO_CONTENT);
+        $response = new JsonResponse('', Response::HTTP_NO_CONTENT);
+        return $response;
     }
 
     /**
@@ -204,46 +237,14 @@ final class LLMConfigController
     public function setDefault(Request $request, int $id): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
+        $isAdmin = $this->authService->isAdmin();
 
-        $config = LLMDriverConfiguration::where('id', $id)->where('user_id', $userId)->first();
+        $config = $this->llmConfigService->setDefaultConfiguration($id, $userId, $isAdmin);
         if ($config === null) {
-            return $this->notFound();
+            return $this->forbidden();
         }
 
-        // Clear existing default for this user
-        LLMDriverConfiguration::where('user_id', $userId)->where('is_default', true)->update(['is_default' => false]);
-
-        $config->is_default = true;
-        $config->save();
-
-        return new JsonResponse(['data' => ['config' => $this->configResource($config)]]);
-    }
-
-    // ── Resource transformation ─────────────────────────────────────────────
-
-    /**
-     * Transform a model into an API resource.
-     *
-     * @return array<string, mixed>
-     */
-    private function configResource(LLMDriverConfiguration $config): array
-    {
-        // Use getRawOriginal to bypass the 'array' cast which double-encodes the encrypted JSON
-        $settings = $this->llmConfigService->decryptSettings($config->getRawOriginal('settings'));
-        $schema = $this->getSchemaForDriver($config->driver_class);
-        $masked = $this->llmConfigService->maskForApi($settings, $schema);
-
-        return [
-            'id' => $config->id,
-            'name' => $config->name,
-            'driver_class' => $config->driver_class,
-            'driver_name' => $this->getDriverName($config->driver_class),
-            'driver_display_name' => $this->getDriverDisplayName($config->driver_class),
-            'settings' => $masked,
-            'is_default' => $config->is_default,
-            'created_at' => $config->created_at->toIso8601String(),
-            'updated_at' => $config->updated_at->toIso8601String(),
-        ];
+        return new JsonResponse(['data' => ['config' => $this->llmConfigService->configResource($config)]]);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -268,25 +269,10 @@ final class LLMConfigController
                 'required' => $setting->required,
                 'scope' => $setting->scope,
                 'options' => $setting->options,
+                'validation' => $setting->validation,
             ];
         }
         return $schema;
-    }
-
-    private function getDriverName(string $driverClass): string
-    {
-        if (! class_exists($driverClass)) {
-            return $driverClass;
-        }
-        return $driverClass::getName();
-    }
-
-    private function getDriverDisplayName(string $driverClass): string
-    {
-        if (! class_exists($driverClass)) {
-            return $driverClass;
-        }
-        return $driverClass::getDisplayName();
     }
 
     private function validateSettings(array $settings, array $schema): ?string
@@ -297,6 +283,14 @@ final class LLMConfigController
 
             if ($required && (! array_key_exists($key, $settings) || $settings[$key] === '')) {
                 return "Field '{$field['label']}' is required.";
+            }
+
+            if (array_key_exists($key, $settings) && $settings[$key] !== '') {
+                $value = (string) $settings[$key];
+                $validation = $field['validation'] ?? '';
+                if ($validation !== '' && !preg_match($validation, $value)) {
+                    return "Field '{$field['label']}' has an invalid value.";
+                }
             }
         }
         return null;
@@ -322,6 +316,14 @@ final class LLMConfigController
         return new JsonResponse(
             ['error' => ['code' => 'NOT_FOUND', 'message' => 'Configuration not found.']],
             Response::HTTP_NOT_FOUND,
+        );
+    }
+
+    private function forbidden(): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'FORBIDDEN', 'message' => 'You do not have permission to perform this action.']],
+            Response::HTTP_FORBIDDEN,
         );
     }
 }

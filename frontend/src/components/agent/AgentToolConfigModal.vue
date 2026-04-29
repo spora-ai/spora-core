@@ -5,6 +5,7 @@ import ToolSettingField from '@/components/settings/ToolSettingField.vue'
 import type { ToolSchema, SettingsWithSource } from '@/composables/useToolSettings'
 import { useToolSettings } from '@/composables/useToolSettings'
 import { ApiError, api } from '@/api/client'
+import Icon from '@/components/ui/Icon.vue'
 import { useRouter } from 'vue-router'
 
 const props = defineProps<{
@@ -235,9 +236,7 @@ function goToGlobalSettings(): void {
           <div class="flex items-center justify-between px-4 py-2 border-b border-border">
             <span class="text-xs font-medium text-muted-foreground">Global Configuration (inherited)</span>
             <span class="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
+              <Icon name="check" class="h-3 w-3" />
               Configured
             </span>
           </div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from 'vue'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
+import { useAuthStore } from '@/stores/auth'
 import { ApiError } from '@/api/client'
 import ToolSettingsForm from '@/components/settings/ToolSettingsForm.vue'
 import AlertBanner from '@/components/ui/AlertBanner.vue'
@@ -18,8 +19,11 @@ const emit = defineEmits<{
 }>()
 
 const llmStore = useLlmConfigsStore()
+const authStore = useAuthStore()
 
 const activeDriver = computed(() => llmStore.driverForClass(props.config.driver_class) ?? null)
+const isAdmin = computed(() => authStore.user?.is_admin === true)
+const isReadOnly = computed(() => props.config.is_global && !isAdmin.value)
 
 const serverSettings = ref<Record<string, string>>({ ...props.config.settings })
 const saving = ref(false)
@@ -95,6 +99,14 @@ function formatDate(iso: string): string {
 
   <AlertBanner v-if="savedFlash" type="success" message="Configuration saved." class="mb-4" />
 
+  <!-- Read-only global config banner -->
+  <AlertBanner
+    v-if="isReadOnly"
+    type="warning"
+    message="Global configuration — available to all users. Contact your administrator to modify."
+    class="mb-4"
+  />
+
   <div v-if="activeDriver" class="rounded-xl border border-border bg-card p-5">
     <!-- Name -->
     <div class="mb-5">
@@ -111,7 +123,14 @@ function formatDate(iso: string): string {
     <!-- Settings -->
     <div class="mb-5">
       <h3 class="text-sm font-semibold mb-3">Settings</h3>
+      <div v-if="isReadOnly" class="text-sm space-y-2">
+        <div v-for="(value, key) in serverSettings" :key="key" class="flex justify-between py-1 border-b border-border">
+          <span class="text-muted-foreground">{{ key }}</span>
+          <span class="font-mono text-xs">{{ value === '***' ? '••••••••' : value }}</span>
+        </div>
+      </div>
       <ToolSettingsForm
+        v-else
         :tool="{ tool_class: activeDriver.driver_class, tool_name: activeDriver.name, display_name: activeDriver.display_name, category: '', settings_schema: activeDriver.settings_schema, operations: [] }"
         :initialSettings="serverSettings"
         :saving="saving"
@@ -121,7 +140,7 @@ function formatDate(iso: string): string {
     </div>
 
     <!-- Actions -->
-    <div class="flex items-center justify-between gap-4 pt-4 border-t border-border">
+    <div v-if="!isReadOnly" class="flex items-center justify-between gap-4 pt-4 border-t border-border">
       <div class="flex gap-2">
         <button
           v-if="!config.is_default"

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Core\Database;
+use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
 use Spora\Services\ToolConfigService;
@@ -56,7 +57,7 @@ function makeAgent(mixed $authService, string $suffix = ''): int
 // putGlobalSettings / getGlobalSettings
 // ---------------------------------------------------------------------------
 
-test('putGlobalSettings encrypts password field at rest and getGlobalSettings decrypts it', function (): void {
+test('putGlobalSettings encrypts entire settings blob at rest and getGlobalSettings decrypts it', function (): void {
     [$service] = makeToolConfigService();
     $toolClass = TestTool::class;
 
@@ -65,20 +66,21 @@ test('putGlobalSettings encrypts password field at rest and getGlobalSettings de
         'max_results' => '25',
     ]);
 
-    // Verify raw DB value is NOT the plaintext (it must be an encrypted blob)
+    // Verify raw DB value is NOT valid JSON (it's an encrypted blob under wholesale encryption)
     $rawJson = Capsule::table('tool_configurations')
         ->where('tool_class', $toolClass)
         ->value('settings');
 
-    $raw = json_decode($rawJson, true);
-    expect($raw['api_key'])->not()->toBe('my-secret-api-key');
+    $decoded = json_decode($rawJson, true);
+    expect($decoded)->toBeNull(); // encrypted blob is not valid JSON
 
     // Verify decryption round-trip returns the original value
     $settings = $service->getGlobalSettings($toolClass);
     expect($settings['api_key'])->toBe('my-secret-api-key');
+    expect($settings['max_results'])->toBe('25');
 });
 
-test('non-password field is stored and returned as plain string without encryption', function (): void {
+test('non-password field is also encrypted at rest under wholesale encryption but returned correctly', function (): void {
     [$service] = makeToolConfigService();
     $toolClass = TestTool::class;
 
@@ -86,15 +88,15 @@ test('non-password field is stored and returned as plain string without encrypti
         'max_results' => '50',
     ]);
 
-    // Raw DB value must be the plaintext string
+    // Under wholesale encryption, the entire blob is encrypted — raw DB value is NOT valid JSON
     $rawJson = Capsule::table('tool_configurations')
         ->where('tool_class', $toolClass)
         ->value('settings');
 
-    $raw = json_decode($rawJson, true);
-    expect($raw['max_results'])->toBe('50');
+    $decoded = json_decode($rawJson, true);
+    expect($decoded)->toBeNull(); // encrypted blob is not plain JSON
 
-    // Service also returns it unchanged
+    // Service still returns the correct decrypted value
     $settings = $service->getGlobalSettings($toolClass);
     expect($settings['max_results'])->toBe('50');
 });
@@ -197,7 +199,7 @@ test('getEffectiveSettings with override: global-scoped key is not overridden by
 // DecryptionFailedException resilience
 // ---------------------------------------------------------------------------
 
-test('getGlobalSettings returns null for a field whose ciphertext is corrupted in the DB', function (): void {
+test('getGlobalSettings throws for a completely corrupted encrypted blob in the DB', function (): void {
     [$service] = makeToolConfigService();
     $toolClass = TestTool::class;
 
@@ -206,26 +208,14 @@ test('getGlobalSettings returns null for a field whose ciphertext is corrupted i
         'max_results' => '10',
     ]);
 
-    // Corrupt the api_key ciphertext by writing garbage bytes that decode as a
-    // valid base64 blob but will fail the sodium MAC check.
-    $rawJson = Capsule::table('tool_configurations')
-        ->where('tool_class', $toolClass)
-        ->value('settings');
-
-    $raw             = json_decode($rawJson, true);
-    $raw['api_key']  = base64_encode(str_repeat('X', 50)); // 50 bytes > 24-byte nonce min, wrong MAC
+    // Write a completely corrupted blob (looks like encrypted but fails MAC check)
+    $corruptedBlob = base64_encode(str_repeat('X', 64)); // large enough to pass looksEncrypted()
 
     Capsule::table('tool_configurations')
         ->where('tool_class', $toolClass)
-        ->update(['settings' => json_encode($raw)]);
+        ->update(['settings' => $corruptedBlob]);
 
-    $settings = $service->getGlobalSettings($toolClass);
-
-    // DecryptionFailedException must be caught; the field returns null
-    expect($settings['api_key'])->toBeNull();
-
-    // Non-password fields must be unaffected
-    expect($settings['max_results'])->toBe('10');
+    expect(fn() => $service->getGlobalSettings($toolClass))->toThrow(DecryptionFailedException::class);
 });
 
 // ---------------------------------------------------------------------------

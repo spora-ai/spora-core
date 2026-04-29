@@ -8,6 +8,7 @@ import { useTaskStore } from '@/stores/tasks'
 import { ApiError } from '@/api/client'
 import SharedScheduleEditor from '@/components/shared/SharedScheduleEditor.vue'
 import PromptTemplateDialog from '@/components/PromptTemplateDialog.vue'
+import Icon from '@/components/ui/Icon.vue'
 
 const props = defineProps<{
   llmUnconfigured: boolean
@@ -144,9 +145,7 @@ function onScheduleSaved(): void {
           @click="router.push({ name: 'dashboard' })"
           class="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors lg:hidden"
         >
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
+          <Icon name="chevron-left" />
         </button>
 
         <div class="flex-1 min-w-0">
@@ -166,10 +165,7 @@ function onScheduleSaved(): void {
           class="flex items-center justify-center h-9 w-9 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted font-medium transition-colors"
           title="Agent Settings"
         >
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
+          <Icon name="settings" class="h-4 w-4" />
         </button>
 
         <!-- Schedule runs link -->
@@ -178,9 +174,7 @@ function onScheduleSaved(): void {
           class="flex items-center justify-center h-9 w-9 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           title="Scheduled Runs"
         >
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+          <Icon name="clock" class="h-4 w-4" />
         </button>
       </div>
     </div>
@@ -190,9 +184,7 @@ function onScheduleSaved(): void {
       v-if="llmUnconfigured"
       class="mx-6 mt-4 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 flex items-start gap-3"
     >
-      <svg class="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-      </svg>
+      <Icon name="warning" class="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
       <div class="flex-1 min-w-0">
         <p class="text-sm font-semibold text-amber-800 dark:text-amber-200">LLM not configured</p>
         <p class="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
@@ -235,9 +227,7 @@ function onScheduleSaved(): void {
                 class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
                 title="Delete template"
               >
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
+                <Icon name="trash" class="h-3.5 w-3.5" />
               </button>
 
               <button
@@ -246,9 +236,7 @@ function onScheduleSaved(): void {
                 class="inline-flex h-8 items-center gap-1.5 px-3 rounded-[8px] text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                 title="Save prompt as template"
               >
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                   <path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                </svg>
+                <Icon name="star" class="h-3.5 w-3.5" />
                 <span>Save</span>
               </button>
 
@@ -260,9 +248,7 @@ function onScheduleSaved(): void {
                class="inline-flex h-8 items-center gap-1.5 px-3 rounded-[8px] border border-border text-xs font-medium bg-background text-muted-foreground hover:border-muted-foreground hover:text-foreground transition-colors shadow-sm"
                title="Schedule a run"
              >
-               <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-               </svg>
+               <Icon name="clock" class="h-3 w-3" />
                Schedule
              </button>
           </div>
@@ -290,9 +276,7 @@ function onScheduleSaved(): void {
                   class="flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer"
                   title="Go to agent settings"
                 >
-                  <svg class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
+                  <Icon name="computer" class="h-3 w-3 shrink-0" />
                   <span v-if="agentStore.currentAgent?.llm_driver_config_id">
                     {{ configName }}
                   </span>
@@ -307,9 +291,7 @@ function onScheduleSaved(): void {
                   class="flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer"
                   title="Go to agent tools"
                 >
-                  <svg class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                  </svg>
+                  <Icon name="tools" class="h-3 w-3 shrink-0" />
                   <span>{{ agentStore.currentAgent.tools.length }} tools</span>
                 </button>
 
@@ -319,9 +301,7 @@ function onScheduleSaved(): void {
                   class="flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer"
                   title="Go to agent settings"
                 >
-                  <svg class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
+                  <Icon name="lightning" class="h-3 w-3 shrink-0" />
                   <span>Max {{ agentStore.currentAgent.max_steps }} steps</span>
                 </button>
              </div>
@@ -332,9 +312,7 @@ function onScheduleSaved(): void {
                :disabled="submitting || !promptText.trim()"
                class="shrink-0 h-9 w-9 rounded-full bg-primary text-primary-foreground shadow-md hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center z-10"
              >
-               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-                 <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12h15m0 0l-6.75-6.75M19.5 12l-6.75 6.75" />
-               </svg>
+               <Icon name="arrow-right" class="h-4 w-4" />
              </button>
           </div>
         </div>

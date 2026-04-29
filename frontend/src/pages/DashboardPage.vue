@@ -5,6 +5,7 @@ import { useAgentStore } from '@/stores/agent'
 import { useTaskStore } from '@/stores/tasks'
 import GlobalNavbar from '@/components/GlobalNavbar.vue'
 import CreateAgentModal from '@/components/agent/CreateAgentModal.vue'
+import Icon from '@/components/ui/Icon.vue'
 
 const router = useRouter()
 const agentStore = useAgentStore()
@@ -66,9 +67,7 @@ onMounted(async () => {
           class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors"
           title="New Agent"
         >
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
+          <Icon name="plus" class="h-4 w-4" />
         </button>
       </div>
 
@@ -78,9 +77,7 @@ onMounted(async () => {
         class="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center"
       >
         <div class="h-16 w-16 rounded-full bg-muted flex items-center justify-center">
-          <svg class="h-8 w-8 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
-          </svg>
+          <Icon name="agents" class="h-8 w-8 text-muted-foreground" />
         </div>
         <div>
           <p class="text-sm font-medium">No conversations yet</p>
@@ -90,9 +87,7 @@ onMounted(async () => {
           @click="showNewAgentModal = true"
           class="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
         >
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
+          <Icon name="plus" class="h-4 w-4" />
           New Agent
         </button>
       </div>
@@ -129,12 +124,7 @@ onMounted(async () => {
               </p>
             </div>
           </div>
-          <svg
-            class="h-4 w-4 text-muted-foreground shrink-0"
-            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
+          <Icon name="chevron-right" class="h-4 w-4 text-muted-foreground shrink-0" />
         </li>
       </ul>
     </main>

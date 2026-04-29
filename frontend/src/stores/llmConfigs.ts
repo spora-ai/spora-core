@@ -2,7 +2,7 @@
  * llmConfigs store — manages LLM driver configurations.
  */
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { api, ApiError } from '@/api/client'
 import type { LLMConfigResource, LLMDriverInfo } from '@/types/llmConfig'
 
@@ -19,6 +19,17 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
   // Tracks whether initial data has been fetched this session.
   // Prevents duplicate network calls when multiple components mount.
   const initialized = ref(false)
+
+  const globalDefaultConfig = ref<LLMConfigResource | null>(null)
+
+  // Separate list for admin-only global config management (DriversSettingsPage)
+  const globalAdminConfigs = ref<LLMConfigResource[]>([])
+  const loadingGlobalAdminConfigs = ref(false)
+
+  // ── Computed helpers ───────────────────────────────────────────────────────
+
+  const globalConfigs = computed(() => configs.value.filter((c) => c.is_global))
+  const personalConfigs = computed(() => configs.value.filter((c) => !c.is_global))
 
   // ── Load drivers (schema discovery, no auth) ──────────────────────────────
 
@@ -50,6 +61,34 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     }
   }
 
+  // ── Load global default config (auth required) ────────────────────────────
+
+  async function loadGlobalDefault(): Promise<void> {
+    try {
+      const result = await api.get<{ configs: LLMConfigResource[] }>('/llm-configs/global')
+      // Pick the first config marked is_default, fall back to first, fall back to null
+      const all = result.configs ?? []
+      globalDefaultConfig.value = all.find((c) => c.is_default) ?? all[0] ?? null
+    } catch {
+      globalDefaultConfig.value = null
+    }
+  }
+
+  // ── Load all global configs (admin-only, for DriversSettingsPage) ──────────
+
+  async function loadGlobalAdminConfigs(): Promise<void> {
+    loadingGlobalAdminConfigs.value = true
+    error.value = null
+    try {
+      const result = await api.get<{ configs: LLMConfigResource[] }>('/llm-configs/global')
+      globalAdminConfigs.value = result.configs ?? []
+    } catch (e) {
+      error.value = e instanceof ApiError ? e.message : 'Failed to load global configurations.'
+    } finally {
+      loadingGlobalAdminConfigs.value = false
+    }
+  }
+
   // ── Ensure (idempotent init) ──────────────────────────────────────────────
 
   // Load drivers + configs exactly once per Pinia instance (page session).
@@ -57,7 +96,7 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
   async function ensure(): Promise<void> {
     if (initialized.value) return
     initialized.value = true // set before await so parallel callers skip
-    await Promise.all([loadDrivers(), loadConfigs()])
+    await Promise.all([loadDrivers(), loadConfigs(), loadGlobalDefault()])
   }
 
   // ── Create ────────────────────────────────────────────────────────────────
@@ -67,6 +106,7 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     driver_class: string
     settings: Record<string, string>
     is_default?: boolean
+    is_global?: boolean
   }): Promise<LLMConfigResource> {
     saving.value = true
     error.value = null
@@ -166,8 +206,15 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     saving,
     error,
     initialized,
+    globalConfigs,
+    personalConfigs,
+    globalDefaultConfig,
+    globalAdminConfigs,
+    loadingGlobalAdminConfigs,
     loadDrivers,
     loadConfigs,
+    loadGlobalDefault,
+    loadGlobalAdminConfigs,
     ensure,
     createConfig,
     updateConfig,

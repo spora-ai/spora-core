@@ -18,6 +18,7 @@
  */
 import { ref, computed, watch } from 'vue'
 import Modal from '@/components/Modal.vue'
+import Icon from '@/components/ui/Icon.vue'
 import { api, ApiError } from '@/api/client'
 import type { ScheduledRunResource } from '@/types/scheduledRun'
 import { usePromptTemplatesStore } from '@/stores/promptTemplates'
@@ -458,9 +459,7 @@ const stepLabels = ['Template', 'Schedule Type', 'Schedule']
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-muted text-muted-foreground'"
           >
-            <svg v-if="currentStep > step" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
+            <Icon v-if="currentStep > step" name="check" class="h-3.5 w-3.5" />
             <span v-else>{{ step }}</span>
           </div>
           <span
@@ -503,9 +502,7 @@ const stepLabels = ['Template', 'Schedule Type', 'Schedule']
           class="flex flex-col gap-2 rounded-lg border border-dashed border-border bg-muted/20 p-3"
         >
           <div class="flex items-center gap-2">
-            <svg class="h-4 w-4 text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
+            <Icon name="plus" class="h-4 w-4 text-muted-foreground shrink-0" />
             <span class="text-sm font-medium">New template</span>
           </div>
           <input

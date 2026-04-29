@@ -12,6 +12,7 @@ import AgentToolListItem from '@/components/agent/AgentToolListItem.vue'
 import EnableWarningModal from '@/components/agent/EnableWarningModal.vue'
 import type { LLMDriverInfo } from '@/types/llmConfig'
 import { ApiError, api } from '@/api/client'
+import Icon from '@/components/ui/Icon.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -492,9 +493,7 @@ async function deleteAgent(): Promise<void> {
                 @click="showLlmCreate = true"
                 class="inline-flex h-7 items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
               >
-                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
+                <Icon name="plus" class="h-3.5 w-3.5" />
                 Create new
               </button>
             </div>
@@ -539,11 +538,10 @@ async function deleteAgent(): Promise<void> {
             <h3 class="text-sm font-medium">{{ toLabel(cat) }}</h3>
             <div class="flex items-center gap-2">
               <span class="text-xs text-muted-foreground">{{ toolsByCategory[cat].length }}</span>
-              <svg class="h-4 w-4 text-muted-foreground transition-transform"
-                   :class="{ '-rotate-90': collapsedCategories[cat] }"
-                   fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
+              <Icon
+                   name="chevron-down"
+                   :class="`h-4 w-4 text-muted-foreground transition-transform ${collapsedCategories[cat] ? '-rotate-90' : ''}`"
+                />
             </div>
           </div>
           <template v-if="!collapsedCategories[cat]">
@@ -554,7 +552,7 @@ async function deleteAgent(): Promise<void> {
               :enabled="enabledToolNames.has(tool.tool_name)"
               :autoApproved="autoApprovedMap[tool.tool_name] ?? false"
               :saving="savingTools[tool.tool_name] ?? false"
-              :missingRequired="toolStatusMap[tool.tool_name]?.missing_required ?? []"
+              :missingRequired="toolStatusMap[tool.tool_class]?.missing_required ?? []"
               :operationStates="operationStates[tool.tool_name]"
               @toggle="toggleTool(tool.tool_name)"
               @toggleAutoApprove="toggleAutoApprove(tool.tool_name)"

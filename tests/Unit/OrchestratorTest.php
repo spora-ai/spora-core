@@ -33,6 +33,7 @@ function makeOrchestrator(
 ): Orchestrator {
     return new Orchestrator(
         driverFactory: $driverFactory,
+        llmConfigService: null,
         toolInstances: $toolInstances,
         logger: $logger,
     );
@@ -964,4 +965,104 @@ it('buildMessages normalizes empty array arguments "[]" to empty object "{}" bef
     }
 
     expect($toolCallMsg['function']['arguments'])->toBe('{}');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('buildMessages skips rows covered by a summary and includes the summary row itself', function (): void {
+    [$agentId] = seedAgent();
+
+    $task = Task::create([
+        'agent_id'    => $agentId,
+        'user_id'     => Agent::find($agentId)->user_id,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'Test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    // Insert history: 3 user messages (sequences 0, 1, 2) then a summary row
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Hello']);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'Hi there']);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 2, 'role' => 'user', 'content' => 'What is the time?']);
+    // Summary covering sequences 0-2
+    TaskHistory::create([
+        'task_id' => $task->id,
+        'sequence' => 3,
+        'role' => 'summary',
+        'content' => 'User asked about time. Assistant responded.',
+        'summarized_sequence_range' => '0-2',
+    ]);
+    // Recent history after the summary
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 4, 'role' => 'user', 'content' => 'Thanks']);
+
+    // Capture what buildMessages produces
+    $capturedMessages = null;
+
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->once()->andReturnUsing(function ($request) use (&$capturedMessages) {
+        $capturedMessages = $request->messages;
+        return new LLMResponse('Done', [], 5, 3, 'cmp_1');
+    });
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+
+    $orch->tick($task->id);
+
+    // Should have exactly 2 messages: the summary row and the "Thanks" user message
+    // The original 3 rows (sequences 0-2) should be skipped
+    expect(count($capturedMessages))->toBe(2);
+
+    expect($capturedMessages[0]['role'])->toBe('summary');
+    expect($capturedMessages[0]['content'])->toBe('User asked about time. Assistant responded.');
+
+    expect($capturedMessages[1]['role'])->toBe('user');
+    expect($capturedMessages[1]['content'])->toBe('Thanks');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('buildMessages skips multiple summary ranges and only includes post-summary rows', function (): void {
+    [$agentId] = seedAgent();
+
+    $task = Task::create([
+        'agent_id'    => $agentId,
+        'user_id'     => Agent::find($agentId)->user_id,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'Test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    // First conversation block: user message -> summary covering only that message
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'First']);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'summary', 'content' => 'First summary', 'summarized_sequence_range' => '0-0']);
+    // Second conversation block: user message -> summary covering only that message
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 2, 'role' => 'user', 'content' => 'Second']);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 3, 'role' => 'summary', 'content' => 'Second summary', 'summarized_sequence_range' => '2-2']);
+    // Recent history
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 4, 'role' => 'user', 'content' => 'Recent']);
+
+    $capturedMessages = null;
+
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->once()->andReturnUsing(function ($request) use (&$capturedMessages) {
+        $capturedMessages = $request->messages;
+        return new LLMResponse('Done', [], 5, 3, 'cmp_1');
+    });
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+
+    $orch->tick($task->id);
+
+    // buildMessages iterates sequentially: when summary-2 (seq 3, range 2-2) is encountered,
+    // it removes messages with sequence <= 2. summary-1 (seq 1) is NOT in range 2-2, so it is preserved.
+    // Result: First summary + Second summary + Recent = 3 messages.
+    expect(count($capturedMessages))->toBe(3);
+    expect($capturedMessages[0]['role'])->toBe('summary');
+    expect($capturedMessages[0]['content'])->toBe('First summary');
+    expect($capturedMessages[1]['role'])->toBe('summary');
+    expect($capturedMessages[1]['content'])->toBe('Second summary');
+    expect($capturedMessages[2]['role'])->toBe('user');
+    expect($capturedMessages[2]['content'])->toBe('Recent');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());

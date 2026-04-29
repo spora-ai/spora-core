@@ -73,7 +73,6 @@
             "cd frontend && npm run build"
         ],
         "frontend:test": "cd frontend && npm test",
-        "frontend:test:e2e": "cd frontend && npm run test:e2e",
         "frontend:preview": "cd frontend && npm run preview"
     },
     "config": {

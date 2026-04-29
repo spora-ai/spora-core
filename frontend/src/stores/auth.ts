@@ -6,12 +6,22 @@ export interface User {
   id: number
   email: string
   username?: string
+  is_admin?: boolean
+  roles?: string[]
 }
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const initialized = ref(false)
   const initError = ref<Error | null>(null)
+
+  // Normalize is_admin from the backend into roles so existing checks work.
+  function normalizeUser(raw: User | null): User | null {
+    if (raw === null) return null
+    const roles: string[] = []
+    if (raw.is_admin) roles.push('ADMIN')
+    return { ...raw, roles }
+  }
 
   // In-flight promise guard: if two navigations fire before the first init() resolves,
   // both await the same promise instead of issuing duplicate /auth/me requests.
@@ -29,7 +39,7 @@ export const useAuthStore = defineStore('auth', () => {
       try {
         initError.value = null
         const res = await api.get<MeResponse>('/auth/me')
-        user.value = res.user
+        user.value = normalizeUser(res.user)
       } catch (e) {
         user.value = null
         // 401 means the user is simply not logged in — expected, not an error.
@@ -51,11 +61,11 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function login(email: string, password: string): Promise<void> {
-    user.value = await api.post<User>('/auth/login', { email, password })
+    user.value = normalizeUser(await api.post<User>('/auth/login', { email, password }))
   }
 
   async function register(email: string, password: string): Promise<void> {
-    user.value = await api.post<User>('/auth/register', { email, password })
+    user.value = normalizeUser(await api.post<User>('/auth/register', { email, password }))
   }
 
   async function logout(): Promise<void> {
@@ -74,7 +84,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function updateAccount(username: string): Promise<void> {
     const updated = await api.patch<{ user: User }>('/auth/account', { username })
-    user.value = updated.user
+    user.value = normalizeUser(updated.user)
   }
 
   return { user, initialized, initError, init, login, register, logout, changePassword, updateAccount }

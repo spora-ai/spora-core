@@ -20,6 +20,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $tool_call_payload
  * @property int|null    $input_tokens
  * @property int|null    $output_tokens
+ * @property string|null $summarized_sequence_range
  * @property Carbon|null $created_at
  */
 final class TaskHistory extends Model
@@ -42,6 +43,7 @@ final class TaskHistory extends Model
         'tool_call_payload',
         'input_tokens',
         'output_tokens',
+        'summarized_sequence_range',
     ];
 
     public function task(): BelongsTo

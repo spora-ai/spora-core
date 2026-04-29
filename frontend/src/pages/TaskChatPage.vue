@@ -12,6 +12,7 @@ import { renderMarkdown } from '@/composables/useMarkdown'
 import { useToast } from '@/composables/useToast'
 import AgentLayout from '@/components/layout/AgentLayout.vue'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
+import Icon from '@/components/ui/Icon.vue'
 import type { HistoryEntry } from '@/types/task'
 
 const route = useRoute()
@@ -427,9 +428,7 @@ onUnmounted(() => {
           @click="router.push(backDestination)"
           class="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
+          <Icon name="chevron-left" class="h-4 w-4" />
           Back
         </button>
         <div class="flex-1 min-w-0">
@@ -444,9 +443,7 @@ onUnmounted(() => {
         data-testid="retry-banner"
         class="mx-4 mt-4 max-w-2xl mx-auto flex items-start gap-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm"
       >
-        <svg class="h-5 w-5 shrink-0 text-red-600 dark:text-red-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
+        <Icon name="warning" class="h-5 w-5 shrink-0 text-red-600 dark:text-red-400 mt-0.5" />
         <div class="flex-1 min-w-0">
           <p class="font-semibold text-red-900 dark:text-red-100">Task failed: {{ task.error_code?.replace('_', ' ').toLowerCase() }}</p>
           <p v-if="task.error_message" class="text-red-700 dark:text-red-300 mt-0.5">{{ task.error_message }}</p>
@@ -474,9 +471,7 @@ onUnmounted(() => {
         data-testid="retry-countdown"
         class="mx-4 mt-4 max-w-2xl mx-auto flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm"
       >
-        <svg class="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
+        <Icon name="clock" class="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
         <div class="flex-1 min-w-0">
           <p class="font-semibold text-amber-900 dark:text-amber-100">
             Retrying in {{ countdown }} — Attempt {{ retryAttempt }} of {{ maxRetryAttempts }}
@@ -511,9 +506,7 @@ onUnmounted(() => {
         data-testid="retry-countdown"
         class="mx-4 mt-4 max-w-2xl mx-auto flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm"
       >
-        <svg class="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
+        <Icon name="clock" class="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
         <div class="flex-1 min-w-0">
           <p class="font-semibold text-amber-900 dark:text-amber-100">All retries exhausted.</p>
           <p class="text-amber-700 dark:text-amber-300 mt-0.5">
@@ -535,9 +528,7 @@ onUnmounted(() => {
         data-testid="retry-countdown"
         class="mx-4 mt-4 max-w-2xl mx-auto flex items-center gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm"
       >
-        <svg class="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
+        <Icon name="clock" class="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
         <div class="flex-1 min-w-0">
           <p class="font-semibold text-amber-900 dark:text-amber-100">Auto-retry not configured.</p>
           <p class="text-amber-700 dark:text-amber-300 mt-0.5">
@@ -593,9 +584,7 @@ onUnmounted(() => {
           <div v-if="msg.kind === 'tool-result'" class="flex justify-start">
             <details class="ml-9 max-w-[85%] text-xs rounded-lg border border-border bg-muted/40 overflow-hidden">
               <summary class="flex items-center gap-2 px-3 py-2 cursor-pointer select-none list-none hover:bg-muted/60 transition-colors">
-                <svg class="h-3.5 w-3.5 text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
-                </svg>
+                <Icon name="file" class="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 <span class="font-mono font-medium text-muted-foreground">{{ msg.entry.tool_name }}</span>
                 <span class="text-muted-foreground/60">— result</span>
               </summary>
@@ -669,9 +658,7 @@ onUnmounted(() => {
 
           <div class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-2 min-w-0">
-              <svg class="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
+              <Icon name="warning" class="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
               <span class="text-sm font-semibold text-amber-800 dark:text-amber-200 truncate">
                 {{ pending.length === 1 ? 'Tool approval required' : `${pending.length} tool approvals required` }}
               </span>
@@ -756,9 +743,7 @@ onUnmounted(() => {
             <div class="rounded-lg border border-border bg-muted/20 overflow-hidden">
               <details class="group">
                 <summary class="flex items-center gap-1.5 px-3 py-2 cursor-pointer select-none list-none text-xs text-muted-foreground hover:bg-muted/30 transition-colors">
-                  <svg class="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
+                  <Icon name="chevron-right" class="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
                   Proposed arguments
                 </summary>
                 <pre class="px-3 py-2 border-t border-border text-xs font-mono text-muted-foreground whitespace-pre-wrap break-all">{{ JSON.stringify(tc.proposed_arguments ?? {}, null, 2) }}</pre>

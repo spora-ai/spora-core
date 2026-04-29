@@ -15,7 +15,7 @@ const { allTools, loadingTools } = inject('settingsTools') as {
   loadingTools: Ref<boolean>
 }
 
-const { getSettings } = useToolSettings()
+const { getGlobalSettings } = useToolSettings()
 
 // null = list view, string = settings form for that tool
 const selectedToolId = ref<string | null>(null)
@@ -23,7 +23,7 @@ const selectedToolId = ref<string | null>(null)
 const selectedTool = computed<ToolSchema | null>(
   () => allTools.value.find((t) => t.tool_name === selectedToolId.value) ?? null,
 )
-const serverSettings = ref<Record<string, string>>({})
+const globalDefaults = ref<Record<string, string>>({})
 const loadError = ref<string | null>(null)
 
 // ── Tools by category ────────────────────────────────────────────────────────
@@ -53,9 +53,9 @@ const collapsedCategories = ref<Record<string, boolean>>({})
 async function selectTool(toolName: string): Promise<void> {
   loadError.value = null
   try {
-    serverSettings.value = await getSettings(toolName)
+    globalDefaults.value = await getGlobalSettings(toolName)
   } catch {
-    serverSettings.value = {}
+    globalDefaults.value = {}
   }
   selectedToolId.value = toolName
   router.replace({ name: 'settings-tools', query: { tool: toolName } })
@@ -109,7 +109,8 @@ onMounted(() => {
     <AlertBanner v-if="loadError" type="error" :message="loadError" class="mb-4" />
     <ToolSettingsPanel
       :tool="selectedTool"
-      :initialSettings="serverSettings"
+      :globalDefaults="globalDefaults"
+      mode="user"
       @back="goBack"
     />
     <!-- Mobile: keep categorized list visible for switching tools -->
@@ -121,13 +122,10 @@ onMounted(() => {
             @click="collapsedCategories[cat] = !collapsedCategories[cat]"
           >
             <h3 class="text-xs font-medium">{{ toLabel(cat) }}</h3>
-            <svg
-              class="h-3.5 w-3.5 text-muted-foreground transition-transform"
-              :class="{ '-rotate-90': collapsedCategories[cat] }"
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
+            <Icon
+              name="chevron-down"
+              :class="`h-3.5 w-3.5 text-muted-foreground transition-transform ${collapsedCategories[cat] ? '-rotate-90' : ''}`"
+            />
           </div>
           <template v-if="!collapsedCategories[cat]">
             <div
@@ -138,9 +136,7 @@ onMounted(() => {
               @click="selectTool(tool.tool_name)"
             >
               <span class="text-sm">{{ tool.display_name ?? tool.tool_name }}</span>
-              <svg v-if="tool.tool_name === selectedToolId" class="h-4 w-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
+              <Icon name="check" class="h-4 w-4 text-primary" />
             </div>
           </template>
         </template>
@@ -173,13 +169,10 @@ onMounted(() => {
           <h3 class="text-sm font-medium">{{ toLabel(cat) }}</h3>
           <div class="flex items-center gap-2">
             <span class="text-xs text-muted-foreground">{{ toolsByCategory[cat].length }}</span>
-            <svg
-              class="h-4 w-4 text-muted-foreground transition-transform"
-              :class="{ '-rotate-90': collapsedCategories[cat] }"
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
+            <Icon
+              name="chevron-down"
+              :class="`h-4 w-4 text-muted-foreground transition-transform ${collapsedCategories[cat] ? '-rotate-90' : ''}`"
+            />
           </div>
         </div>
         <template v-if="!collapsedCategories[cat]">
@@ -192,9 +185,7 @@ onMounted(() => {
             <div class="flex items-center gap-3">
               <span class="text-sm font-medium">{{ tool.display_name ?? tool.tool_name }}</span>
             </div>
-            <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
+            <Icon name="chevron-right" class="h-4 w-4 text-muted-foreground" />
           </div>
         </template>
       </template>

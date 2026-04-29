@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { ApiError } from '@/api/client'
+import Icon from '@/components/ui/Icon.vue'
 
 defineProps<{
   modelValue: boolean
@@ -59,9 +60,7 @@ function close(): void {
             @click="close"
             class="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icon name="x" class="h-4 w-4" />
           </button>
         </div>
         <form @submit.prevent="submit" class="flex flex-col gap-3">

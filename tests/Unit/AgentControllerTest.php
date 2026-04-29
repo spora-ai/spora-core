@@ -10,6 +10,7 @@ use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Http\AgentController;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\AgentService;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\HttpFoundation\Request;
@@ -20,7 +21,7 @@ use Tests\Fixtures\TestTool;
 // ---------------------------------------------------------------------------
 
 /**
- * Boot a fresh in-memory DB and return AgentController + AuthService + ToolConfigService.
+ * Boot a fresh in-memory DB and return AgentController + AuthService + supporting services.
  */
 function makeAgentController(): array
 {
@@ -31,7 +32,8 @@ function makeAgentController(): array
     $logger     = new Monolog\Logger('test');
     $toolConfig = new ToolConfigService($security, $logger, [TestTool::class]);
     $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class]);
-    $controller = new AgentController($authService, $toolConfig, $llmConfig);
+    $agentService = new AgentService($toolConfig, $llmConfig);
+    $controller = new AgentController($authService, $agentService, $toolConfig);
 
     return [$controller, $authService, $toolConfig, $llmConfig];
 }
@@ -408,10 +410,10 @@ test('getOverride for llm_configuration falls back to the user default LLMDriver
     $config->user_id = $userId;
     $config->name = 'Test Default';
     $config->driver_class = OpenAICompatibleDriver::class;
-    $config->settings = $llmConfig->encryptSettings([
+    $config->settings = json_encode($llmConfig->encodeSettings(OpenAICompatibleDriver::class, [
         'api_key' => 'sk-test-secret',
         'model' => 'gpt-4o',
-    ]);
+    ]));
     $config->is_default = true;
     $config->save();
 
@@ -439,7 +441,9 @@ test('getOverride for llm_configuration returns empty settings when decryption f
     $userId = registerUser($authService);
     $agentId = createAgent($controller);
 
-    // Create a config encrypted with a DIFFERENT key than the one the controller uses
+    // Create a config encoded with a DIFFERENT key than the one the controller uses.
+    // With per-field encryption: non-password fields (model, base_url) decrypt fine,
+    // but api_key was encrypted with the alien key so it becomes null after decryption.
     $alienKey      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $alienSecurity = new SecurityManager($alienKey);
     $alienService  = new LLMConfigService($alienSecurity, [OpenAICompatibleDriver::class]);
@@ -448,7 +452,7 @@ test('getOverride for llm_configuration returns empty settings when decryption f
     $config->user_id    = $userId;
     $config->name       = 'Corrupted Config';
     $config->driver_class = OpenAICompatibleDriver::class;
-    $config->settings   = $alienService->encryptSettings(['api_key' => 'secret', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1']);
+    $config->settings   = json_encode($alienService->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'secret', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1']));
     $config->is_default = true;
     $config->save();
 
@@ -461,7 +465,11 @@ test('getOverride for llm_configuration returns empty settings when decryption f
     expect($response->getStatusCode())->toBe(200);
 
     $body = json_decode($response->getContent(), true);
-    expect($body['data']['settings'])->toBe([]);
+    // api_key (password) fails to decrypt with wrong key → becomes null → masked as '***'
+    // model and base_url are non-password fields and are stored as plain JSON → returned as-is
+    expect($body['data']['settings']['api_key'])->toBe('***');
+    expect($body['data']['settings']['model'])->toBe('gpt-4o');
+    expect($body['data']['settings']['base_url'])->toBe('https://api.openai.com/v1');
 
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });

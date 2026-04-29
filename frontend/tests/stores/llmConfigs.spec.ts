@@ -43,6 +43,8 @@ const mockConfig = {
   driver_display_name: 'OpenAI Compatible',
   settings: { api_key: '***', model: 'gpt-4o', base_url: 'https://api.openai.com/v1' },
   is_default: false,
+  is_global: false,
+  user_id: 1,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:01Z',
 }
@@ -197,24 +199,26 @@ describe('useLlmConfigsStore', () => {
       mockApi.get
         .mockResolvedValueOnce({ drivers: [mockDriver] })
         .mockResolvedValueOnce({ configs: [mockConfig] })
+        .mockResolvedValueOnce({ config: null })
 
       const store = useLlmConfigsStore()
       await store.ensure()
       await store.ensure() // second call — must be no-op
 
-      expect(mockApi.get).toHaveBeenCalledTimes(2) // one for drivers, one for configs
+      expect(mockApi.get).toHaveBeenCalledTimes(3) // one for drivers, one for configs, one for global default
     })
 
     it('sets initialized=true before awaiting so parallel callers skip', async () => {
       mockApi.get
         .mockResolvedValueOnce({ drivers: [mockDriver] })
         .mockResolvedValueOnce({ configs: [mockConfig] })
+        .mockResolvedValueOnce({ config: null })
 
       const store = useLlmConfigsStore()
       // Trigger two concurrent calls
       const [, ] = await Promise.all([store.ensure(), store.ensure()])
 
-      expect(mockApi.get).toHaveBeenCalledTimes(2) // not 4
+      expect(mockApi.get).toHaveBeenCalledTimes(3) // not 6
     })
 
     it('remains initialized even if loading fails (error stored, no retry loop)', async () => {

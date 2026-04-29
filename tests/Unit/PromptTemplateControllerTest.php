@@ -6,13 +6,15 @@ use Spora\Auth\AuthService;
 use Spora\Http\PromptTemplateController;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
+use Spora\Services\PromptTemplateService;
 
 function makePromptTemplateController(): array
 {
     $authService = bootAuthLayer();
-    $controller = new PromptTemplateController($authService, new MonologLogger("test"));
+    $promptTemplateService = new PromptTemplateService();
+    $controller = new PromptTemplateController($authService, $promptTemplateService);
 
-    return [$controller, $authService];
+    return [$controller, $authService, $promptTemplateService];
 }
 
 function registerAndGetAgentId(AuthService $authService): array
@@ -51,7 +53,7 @@ describe('PromptTemplateController', function (): void {
             'is_active' => true,
         ]);
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new Monolog\Logger("test"));
+        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
         $request = jsonRequest('GET', "/api/v1/agents/{$agentId}/templates");
         $request->attributes->set('id', $agentId);
         $response = $controller->index($request);
@@ -64,7 +66,7 @@ describe('PromptTemplateController', function (): void {
     it('index returns empty array when agent has no templates', function (): void {
         [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new Monolog\Logger("test"));
+        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
         $request = jsonRequest('GET', "/api/v1/agents/{$agentId}/templates");
         $request->attributes->set('id', $agentId);
         $response = $controller->index($request);
@@ -87,7 +89,7 @@ describe('PromptTemplateController', function (): void {
             'is_active' => true,
         ]);
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new Monolog\Logger("test"));
+        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
         $request = jsonRequest('GET', "/api/v1/agents/{$agent->id}/templates");
         $request->attributes->set('agentId', $agent->id);
         $response = $controller->index($request);
@@ -98,7 +100,7 @@ describe('PromptTemplateController', function (): void {
     it('store creates a new template', function (): void {
         [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new Monolog\Logger("test"));
+        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
         $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/templates", [
             'name'             => 'My Template',
             'prompt_template' => 'Hello {{name}}, today is {{date}}',
@@ -121,7 +123,7 @@ describe('PromptTemplateController', function (): void {
     it('store returns 422 when name is missing', function (): void {
         [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new Monolog\Logger("test"));
+        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
         $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/templates", [
             'prompt_template' => 'Hello',
         ]);
@@ -134,7 +136,7 @@ describe('PromptTemplateController', function (): void {
     it('store returns 422 when prompt_template is missing', function (): void {
         [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new Monolog\Logger("test"));
+        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
         $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/templates", [
             'name' => 'No Prompt Template',
         ]);
@@ -154,7 +156,7 @@ describe('PromptTemplateController', function (): void {
             'is_active' => true,
         ]);
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new Monolog\Logger("test"));
+        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
         $request = jsonRequest('GET', "/api/v1/agents/{$agentId}/templates/{$template->id}");
         $request->attributes->set('id', $agentId);
         $request->attributes->set('templateId', $template->id);
@@ -181,7 +183,7 @@ describe('PromptTemplateController', function (): void {
             'is_active' => true,
         ]);
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new Monolog\Logger("test"));
+        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
         $request = jsonRequest('GET', "/api/v1/agents/{$agentId}/templates/{$template->id}");
         $request->attributes->set('id', $agentId);
         $request->attributes->set('templateId', $template->id);
@@ -200,7 +202,7 @@ describe('PromptTemplateController', function (): void {
             'is_active' => true,
         ]);
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new Monolog\Logger("test"));
+        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
         $request = jsonRequest('PUT', "/api/v1/agents/{$agentId}/templates/{$template->id}", [
             'name' => 'Updated Name',
             'prompt_template' => 'Updated prompt',
@@ -227,7 +229,7 @@ describe('PromptTemplateController', function (): void {
         ]);
         $templateId = $template->id;
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new Monolog\Logger("test"));
+        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
         $request = jsonRequest('DELETE', "/api/v1/agents/{$agentId}/templates/{$templateId}");
         $request->attributes->set('id', $agentId);
         $request->attributes->set('templateId', $templateId);
@@ -253,7 +255,7 @@ describe('PromptTemplateController', function (): void {
             'is_active' => true,
         ]);
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new Monolog\Logger("test"));
+        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
         $request = jsonRequest('DELETE', "/api/v1/agents/{$agentId}/templates/{$template->id}");
         $request->attributes->set('id', $agentId);
         $request->attributes->set('templateId', $template->id);

@@ -11,7 +11,7 @@ use Spora\Models\Task;
 /**
  * Creates notification records and publishes real-time events via Mercure.
  */
-class NotificationService
+class NotificationService implements NotificationServiceInterface
 {
     public function __construct(
         private readonly MercurePublisherInterface $mercure,
@@ -168,5 +168,70 @@ class NotificationService
             'read_at'   => $notification->read_at?->toIso8601String(),
             'created_at' => $notification->created_at?->toIso8601String(),
         ];
+    }
+
+    // ── CRUD ─────────────────────────────────────────────────────────────────
+
+    /**
+     * @return array{data: list<array>, pagination: array{total: int, per_page: int, current_page: int, last_page: int}}
+     */
+    public function getNotifications(int $userId, int $perPage, bool $unreadOnly): array
+    {
+        $query = Notification::where('user_id', $userId)->orderByDesc('created_at');
+
+        if ($unreadOnly) {
+            $query->whereNull('read_at');
+        }
+
+        $paginator = $query->paginate($perPage);
+
+        $data = $paginator->getCollection()->map(fn(Notification $n) => $this->toResource($n))->all();
+
+        return [
+            'data' => $data,
+            'pagination' => [
+                'total'       => $paginator->total(),
+                'per_page'    => $paginator->perPage(),
+                'current_page' => $paginator->currentPage(),
+                'last_page'   => $paginator->lastPage(),
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function markAsRead(int $notificationId, int $userId): ?array
+    {
+        $notification = Notification::where('id', $notificationId)->where('user_id', $userId)->first();
+
+        if ($notification === null) {
+            return null;
+        }
+
+        if ($notification->read_at === null) {
+            $notification->read_at = Carbon::now();
+            $notification->save();
+        }
+
+        return $this->toResource($notification);
+    }
+
+    public function markAllAsRead(int $userId): void
+    {
+        Notification::where('user_id', $userId)->whereNull('read_at')->update(['read_at' => Carbon::now()]);
+    }
+
+    public function deleteNotification(int $notificationId, int $userId): bool
+    {
+        $notification = Notification::where('id', $notificationId)->where('user_id', $userId)->first();
+
+        if ($notification === null) {
+            return false;
+        }
+
+        $notification->delete();
+
+        return true;
     }
 }

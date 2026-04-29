@@ -7,6 +7,7 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import CreateAgentModal from '@/components/agent/CreateAgentModal.vue'
+import Icon from '@/components/ui/Icon.vue'
 
 const props = defineProps<{
   agentId: number
@@ -42,9 +43,7 @@ function navigateToAgent(id: number): void {
         class="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         title="New Agent"
       >
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-        </svg>
+        <Icon name="plus" />
       </button>
     </div>
 
