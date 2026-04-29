@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use InvalidArgumentException;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Agent;
 use Spora\Models\Task;
@@ -42,13 +43,13 @@ final class TaskService implements TaskServiceInterface
     {
         $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
         if ($agent === null) {
-            throw new \InvalidArgumentException('Agent not found.');
+            throw new InvalidArgumentException('Agent not found.');
         }
 
         if ($parentTaskId !== null) {
             $parentTask = Task::where('id', $parentTaskId)->where('user_id', $userId)->first();
             if ($parentTask === null) {
-                throw new \InvalidArgumentException('parent_task_id is invalid.');
+                throw new InvalidArgumentException('parent_task_id is invalid.');
             }
         }
 
@@ -92,11 +93,11 @@ final class TaskService implements TaskServiceInterface
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
-            throw new \InvalidArgumentException('Task not found.');
+            throw new InvalidArgumentException('Task not found.');
         }
 
         if ($task->status !== 'PENDING_APPROVAL') {
-            throw new \InvalidArgumentException('Task is not pending approval.');
+            throw new InvalidArgumentException('Task is not pending approval.');
         }
 
         $this->orchestrator->resume($task->id, $approvals);
@@ -115,11 +116,11 @@ final class TaskService implements TaskServiceInterface
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
-            throw new \InvalidArgumentException('Task not found.');
+            throw new InvalidArgumentException('Task not found.');
         }
 
         if ($task->status !== 'PENDING_APPROVAL') {
-            throw new \InvalidArgumentException('Task is not pending approval.');
+            throw new InvalidArgumentException('Task is not pending approval.');
         }
 
         $this->orchestrator->reject($task->id, $reason);
@@ -138,11 +139,11 @@ final class TaskService implements TaskServiceInterface
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
-            throw new \InvalidArgumentException('Task not found.');
+            throw new InvalidArgumentException('Task not found.');
         }
 
         if ($task->status !== 'FAILED') {
-            throw new \InvalidArgumentException('Only failed tasks can be retried.');
+            throw new InvalidArgumentException('Only failed tasks can be retried.');
         }
 
         $newTask = $this->orchestrator->start($task->agent_id, $task->user_prompt, $task->max_steps);
@@ -160,15 +161,15 @@ final class TaskService implements TaskServiceInterface
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
-            throw new \InvalidArgumentException('Task not found.');
+            throw new InvalidArgumentException('Task not found.');
         }
 
         if (!in_array($task->status, ['COMPLETED', 'FAILED'], true)) {
-            throw new \InvalidArgumentException('Can only continue completed or failed tasks.');
+            throw new InvalidArgumentException('Can only continue completed or failed tasks.');
         }
 
         if ($additionalSteps !== null && ($additionalSteps < 1 || $additionalSteps > 100)) {
-            throw new \InvalidArgumentException('additional_steps must be an integer between 1 and 100.');
+            throw new InvalidArgumentException('additional_steps must be an integer between 1 and 100.');
         }
 
         $continuedTask = $this->orchestrator->continue($task->id, $prompt, $additionalSteps);
@@ -212,7 +213,7 @@ final class TaskService implements TaskServiceInterface
         }
 
         if ($task->retry_of_task_id === null) {
-            throw new \InvalidArgumentException('This task is not part of a retry chain.');
+            throw new InvalidArgumentException('This task is not part of a retry chain.');
         }
 
         Capsule::table('tasks')

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use RuntimeException;
+
 /**
  * Service interface for scheduled run management.
  */
@@ -48,7 +50,7 @@ interface ScheduledRunServiceInterface
      * Trigger a scheduled run immediately.
      *
      * @return array{scheduled_run: array, task_id: int}
-     * @throws \RuntimeException If template not found or orchestration fails
+     * @throws RuntimeException If template not found or orchestration fails
      */
     public function triggerRun(int $runId, int $agentId, int $userId): array;
 }

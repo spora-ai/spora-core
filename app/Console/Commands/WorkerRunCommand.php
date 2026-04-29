@@ -295,19 +295,19 @@ final class WorkerRunCommand extends Command
 
         $completedAt = date('Y-m-d H:i:s');
 
-        // Compute next_due_at BEFORE the transaction so it's known before we claim.
-        // Use last_run_at (the actual last scheduled time) to avoid drift when the
-        // worker is delayed. Fall back to completedAt if last_run_at is null.
+        // Compute next_due_at BEFORE the transaction.
+        // Use wall-clock now as cron reference to avoid the same-day skip: when
+        // last_run_at is just before the scheduled time (e.g. 06:58 UTC for a 07:10
+        // UTC schedule), getNextRunDate(last_run_at) returns the same day's 07:10
+        // which is already past. Using now as reference always yields the next future
+        // occurrence. last_run_at is still tracked separately for historical accuracy.
         $nextDueAt = null;
         if ($run->cron_expression !== null) {
-            $lastRunAtRaw = $run->last_run_at;
-            $lastRunAtUtc = $lastRunAtRaw
-                ? new DateTimeImmutable($lastRunAtRaw->toDateTimeString(), new DateTimeZone('UTC'))
-                : new DateTimeImmutable($completedAt, new DateTimeZone('UTC'));
-            $lastRunAtInScheduleTz = $lastRunAtUtc->setTimezone(new DateTimeZone($run->timezone));
+            $nowInScheduleTz = (new DateTimeImmutable('now', new DateTimeZone('UTC')))
+                ->setTimezone(new DateTimeZone($run->timezone));
 
             $nextDueAt = (new CronExpression($run->cron_expression))
-                ->getNextRunDate($lastRunAtInScheduleTz, 0, false, $run->timezone)
+                ->getNextRunDate($nowInScheduleTz, 0, false, $run->timezone)
                 ->setTimezone(new DateTimeZone('UTC'))
                 ->format('Y-m-d H:i:s');
         }

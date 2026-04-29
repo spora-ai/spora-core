@@ -12,6 +12,7 @@ use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\AgentToolOverride;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Tools\Traits\HasOperations;
+use Throwable;
 
 /**
  * Service for agent lifecycle, tool management, and operation overrides.
@@ -495,7 +496,7 @@ final class AgentService implements AgentServiceInterface
         if (!isset($instances[$toolClass])) {
             try {
                 $instances[$toolClass] = (new ReflectionClass($toolClass))->newInstanceWithoutConstructor();
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 return null;
             }
         }
@@ -546,7 +547,7 @@ final class AgentService implements AgentServiceInterface
             $settings = $config !== null
                 ? $this->llmConfig->decodeSettings($config->driver_class, $config->getRawOriginal('settings'))
                 : [];
-        } catch (\Throwable) {
+        } catch (Throwable) {
             $settings = [];
         }
 

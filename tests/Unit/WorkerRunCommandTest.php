@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Cron\CronExpression;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\NullLogger;
 use Spora\Agents\OrchestratorInterface;
@@ -232,8 +233,14 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         expect($nextEntry)->not->toBeNull();
 
         $nextDue = new DateTimeImmutable($nextEntry->due_at, new DateTimeZone('UTC'));
-        // last_run_at = 2025-01-01 08:00:00 UTC → next run at 09:00 UTC = same day (Jan 1)
-        expect($nextDue->format('Y-m-d H:i'))->toBe('2025-01-01 09:00');
+        // next run is computed from wall-clock now, not from last_run_at.
+        // With cron '0 9 * * *' and the current date being past 9 AM,
+        // the next occurrence is tomorrow 09:00 UTC.
+        $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        $expected = (new CronExpression('0 9 * * *'))
+            ->getNextRunDate($now, 0, false, 'UTC')
+            ->setTimezone(new DateTimeZone('UTC'));
+        expect($nextDue->format('Y-m-d H:i'))->toBe($expected->format('Y-m-d H:i'));
     });
 
     it('skips PENDING entry for deactivated scheduled runs and marks it SKIPPED', function (): void {

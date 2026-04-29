@@ -11,6 +11,7 @@ use Spora\Services\MailTemplateServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 final class MailTemplateController
 {
@@ -129,7 +130,7 @@ final class MailTemplateController
 
         try {
             $result = $this->mailTemplateService->previewTemplate($name, $variables);
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return $this->error('NOT_FOUND', 'Mail template not found.', Response::HTTP_NOT_FOUND);
         }
 

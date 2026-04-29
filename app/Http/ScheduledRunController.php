@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use Cron\CronExpression;
+use DateTimeImmutable;
 use JsonException;
+use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\ScheduledRunServiceInterface;
@@ -63,7 +65,7 @@ final class ScheduledRunController
                 ['data' => $result],
                 Response::HTTP_CREATED,
             );
-        } catch (\RuntimeException) {
+        } catch (RuntimeException) {
             return $this->notFound();
         }
     }
@@ -142,7 +144,7 @@ final class ScheduledRunController
         try {
             $result = $this->scheduledRunService->triggerRun($runId, $agentId, $userId);
             return new JsonResponse(['data' => $result]);
-        } catch (\RuntimeException $e) {
+        } catch (RuntimeException $e) {
             if (str_contains($e->getMessage(), 'not found')) {
                 return $this->notFound();
             }
@@ -215,10 +217,10 @@ final class ScheduledRunController
         return null;
     }
 
-    private function parseDateTime(string $value): \DateTimeImmutable|false
+    private function parseDateTime(string $value): DateTimeImmutable|false
     {
         try {
-            return new \DateTimeImmutable($value);
+            return new DateTimeImmutable($value);
         } catch (Throwable) {
             return false;
         }

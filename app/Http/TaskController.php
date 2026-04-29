@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
@@ -73,7 +74,7 @@ final class TaskController
 
         try {
             $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId);
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             return new JsonResponse(
                 ['error' => ['code' => 'NOT_FOUND', 'message' => $e->getMessage()]],
                 Response::HTTP_NOT_FOUND,
@@ -160,7 +161,7 @@ final class TaskController
 
         try {
             $task = $this->taskService->approveTask($taskId, $userId, $approvedBatch);
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             if ($e->getMessage() === 'Task not found.') {
                 return new JsonResponse(
                     ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
@@ -197,7 +198,7 @@ final class TaskController
 
         try {
             $task = $this->taskService->rejectTask($taskId, $userId, $reason);
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             if ($e->getMessage() === 'Task not found.') {
                 return new JsonResponse(
                     ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
@@ -244,7 +245,7 @@ final class TaskController
 
         try {
             $task = $this->taskService->retryTask($taskId, $userId);
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             if ($e->getMessage() === 'Task not found.') {
                 return new JsonResponse(
                     ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
@@ -297,7 +298,7 @@ final class TaskController
 
         try {
             $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps);
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             if ($e->getMessage() === 'Task not found.') {
                 return new JsonResponse(
                     ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
@@ -330,7 +331,7 @@ final class TaskController
 
         try {
             $this->taskService->cancelRetryChain($taskId, $userId);
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             if ($e->getMessage() === 'Task not found.') {
                 return new JsonResponse(
                     ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],

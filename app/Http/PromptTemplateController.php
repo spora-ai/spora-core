@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use JsonException;
+use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\PromptTemplateServiceInterface;
@@ -66,7 +67,7 @@ final class PromptTemplateController
                 ['data' => $result],
                 Response::HTTP_CREATED,
             );
-        } catch (\RuntimeException) {
+        } catch (RuntimeException) {
             return $this->notFound();
         }
     }

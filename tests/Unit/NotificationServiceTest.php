@@ -8,7 +8,6 @@ use Spora\Models\Notification;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
-use Spora\Services\NotificationServiceInterface;
 
 // ---------------------------------------------------------------------------
 // Helpers

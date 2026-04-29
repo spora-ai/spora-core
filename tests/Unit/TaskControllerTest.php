@@ -105,7 +105,7 @@ it('store returns 404 when user has no agent', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('startTask')
         ->once()
-        ->andThrow(new \InvalidArgumentException('Agent not found.'));
+        ->andThrow(new InvalidArgumentException('Agent not found.'));
 
     [$controller, $authService] = makeTaskController($taskService);
     $userId = $authService->register('noagent@example.com', 'Password1!');
@@ -251,7 +251,7 @@ it('approve returns 409 when task is not PENDING_APPROVAL', function (): void {
     $taskService->expects('approveTask')
         ->once()
         ->with(Mockery::any(), Mockery::any(), Mockery::any())
-        ->andThrow(new \InvalidArgumentException('Task is not pending approval.'));
+        ->andThrow(new InvalidArgumentException('Task is not pending approval.'));
 
     [$controller, $authService] = makeTaskController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
@@ -329,7 +329,7 @@ it('reject returns 409 when task is not PENDING_APPROVAL', function (): void {
     $taskService->expects('rejectTask')
         ->once()
         ->with(1, 1, Mockery::any())
-        ->andThrow(new \InvalidArgumentException('Task is not pending approval.'));
+        ->andThrow(new InvalidArgumentException('Task is not pending approval.'));
 
     [$controller, $authService] = makeTaskController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
@@ -659,7 +659,7 @@ it('retry returns 404 for unknown task', function (): void {
     $taskService->expects('retryTask')
         ->once()
         ->with(99999, 1)
-        ->andThrow(new \InvalidArgumentException('Task not found.'));
+        ->andThrow(new InvalidArgumentException('Task not found.'));
 
     [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);
@@ -676,7 +676,7 @@ it('retry returns 409 when task is not FAILED', function (): void {
     $taskService->expects('retryTask')
         ->once()
         ->with(1, 1)
-        ->andThrow(new \InvalidArgumentException('Only failed tasks can be retried.'));
+        ->andThrow(new InvalidArgumentException('Only failed tasks can be retried.'));
 
     [$controller, $authService] = makeTaskController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
@@ -959,7 +959,7 @@ it('continue returns 409 when task is not completed or failed', function (): voi
     $taskService->expects('continueTask')
         ->once()
         ->with(1, 1, 'test', null)
-        ->andThrow(new \InvalidArgumentException('Can only continue completed or failed tasks.'));
+        ->andThrow(new InvalidArgumentException('Can only continue completed or failed tasks.'));
 
     [$controller, $authService] = makeTaskController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
@@ -985,7 +985,7 @@ it('continue returns 404 for unknown task', function (): void {
     $taskService->expects('continueTask')
         ->once()
         ->with(99999, 1, 'test', null)
-        ->andThrow(new \InvalidArgumentException('Task not found.'));
+        ->andThrow(new InvalidArgumentException('Task not found.'));
 
     [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);
@@ -1006,7 +1006,7 @@ it('cancelRetryChain returns 404 for unknown task', function (): void {
     $taskService->expects('cancelRetryChain')
         ->once()
         ->with(99999, 1)
-        ->andThrow(new \InvalidArgumentException('Task not found.'));
+        ->andThrow(new InvalidArgumentException('Task not found.'));
 
     [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);
@@ -1023,7 +1023,7 @@ it('cancelRetryChain returns 409 when task is not in a retry chain', function ()
     $taskService->expects('cancelRetryChain')
         ->once()
         ->with(1, 1)
-        ->andThrow(new \InvalidArgumentException('This task is not part of a retry chain.'));
+        ->andThrow(new InvalidArgumentException('This task is not part of a retry chain.'));
 
     [$controller, $authService] = makeTaskController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
@@ -1103,7 +1103,7 @@ it('cancelRetryChain returns 404 when trying to cancel another users retry chain
     $taskService->expects('cancelRetryChain')
         ->once()
         ->with(Mockery::any(), Mockery::any())
-        ->andThrow(new \InvalidArgumentException('Task not found.'));
+        ->andThrow(new InvalidArgumentException('Task not found.'));
 
     [$controller, $authService] = makeTaskController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);

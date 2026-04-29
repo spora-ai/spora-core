@@ -15,8 +15,12 @@ use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
 use Spora\Recipes\RecipeScanner;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\MailTemplateService;
+use Spora\Services\MailTemplateServiceInterface;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\PromptTemplateService;
+use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunServiceInterface;
 use Spora\Services\SystemMailer;
 use Spora\Services\TaskService;
@@ -24,10 +28,6 @@ use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
-use Spora\Services\PromptTemplateService;
-use Spora\Services\PromptTemplateServiceInterface;
-use Spora\Services\MailTemplateService;
-use Spora\Services\MailTemplateServiceInterface;
 
 /**
  * PHP-DI definitions array.
@@ -204,7 +204,7 @@ return [
     Spora\Http\AuthController::class => static function (ContainerInterface $c): Spora\Http\AuthController {
         return new Spora\Http\AuthController(
             $c->get(AuthService::class),
-            $c->get(Spora\Services\UserServiceInterface::class),
+            $c->get(UserServiceInterface::class),
             $c->get('config'),
         );
     },
@@ -267,21 +267,21 @@ return [
         return $c->get(Spora\Services\LLMConfigService::class);
     },
 
-    Spora\Services\AgentServiceInterface::class => static function (ContainerInterface $c): AgentServiceInterface {
+    AgentServiceInterface::class => static function (ContainerInterface $c): AgentServiceInterface {
         return new Spora\Services\AgentService(
             $c->get(ToolConfigService::class),
             $c->get(Spora\Services\LLMConfigService::class),
         );
     },
 
-    Spora\Services\UserServiceInterface::class => static function (): UserServiceInterface {
-        return new Spora\Services\UserService();
+    UserServiceInterface::class => static function (): UserServiceInterface {
+        return new UserService();
     },
 
     Spora\Http\AgentController::class => static function (ContainerInterface $c): Spora\Http\AgentController {
         return new Spora\Http\AgentController(
             $c->get(AuthService::class),
-            $c->get(Spora\Services\AgentServiceInterface::class),
+            $c->get(AgentServiceInterface::class),
             $c->get(ToolConfigService::class),
         );
     },
@@ -408,22 +408,22 @@ return [
         );
     },
 
-    Spora\Services\PromptTemplateServiceInterface::class => static function (): PromptTemplateServiceInterface {
-        return new Spora\Services\PromptTemplateService();
+    PromptTemplateServiceInterface::class => static function (): PromptTemplateServiceInterface {
+        return new PromptTemplateService();
     },
 
-    Spora\Services\MailTemplateServiceInterface::class => static function (): MailTemplateServiceInterface {
-        return new Spora\Services\MailTemplateService();
+    MailTemplateServiceInterface::class => static function (): MailTemplateServiceInterface {
+        return new MailTemplateService();
     },
 
     Spora\Http\PromptTemplateController::class => static function (ContainerInterface $c): Spora\Http\PromptTemplateController {
         return new Spora\Http\PromptTemplateController(
             $c->get(AuthService::class),
-            $c->get(Spora\Services\PromptTemplateServiceInterface::class),
+            $c->get(PromptTemplateServiceInterface::class),
         );
     },
 
-    Spora\Services\ScheduledRunServiceInterface::class => static function (ContainerInterface $c): ScheduledRunServiceInterface {
+    ScheduledRunServiceInterface::class => static function (ContainerInterface $c): ScheduledRunServiceInterface {
         return new Spora\Services\ScheduledRunService(
             $c->get(OrchestratorInterface::class),
             $c->get(MercurePublisherInterface::class),
@@ -433,7 +433,7 @@ return [
     Spora\Http\ScheduledRunController::class => static function (ContainerInterface $c): Spora\Http\ScheduledRunController {
         return new Spora\Http\ScheduledRunController(
             $c->get(AuthService::class),
-            $c->get(Spora\Services\ScheduledRunServiceInterface::class),
+            $c->get(ScheduledRunServiceInterface::class),
         );
     },
 
@@ -449,7 +449,7 @@ return [
     Spora\Http\UserProfileController::class => static function (ContainerInterface $c): Spora\Http\UserProfileController {
         return new Spora\Http\UserProfileController(
             $c->get(AuthService::class),
-            $c->get(Spora\Services\UserServiceInterface::class),
+            $c->get(UserServiceInterface::class),
         );
     },
 
@@ -462,7 +462,7 @@ return [
     Spora\Http\UserController::class => static function (ContainerInterface $c): Spora\Http\UserController {
         return new Spora\Http\UserController(
             $c->get(AuthService::class),
-            $c->get(Spora\Services\UserServiceInterface::class),
+            $c->get(UserServiceInterface::class),
         );
     },
 
@@ -477,7 +477,7 @@ return [
     Spora\Http\MailTemplateController::class => static function (ContainerInterface $c): Spora\Http\MailTemplateController {
         return new Spora\Http\MailTemplateController(
             $c->get(AuthService::class),
-            $c->get(Spora\Services\MailTemplateServiceInterface::class),
+            $c->get(MailTemplateServiceInterface::class),
         );
     },
 
