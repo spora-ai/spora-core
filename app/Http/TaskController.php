@@ -4,16 +4,11 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use Illuminate\Database\Capsule\Manager as Capsule;
+use InvalidArgumentException;
 use JsonException;
-use Spora\Agents\OrchestratorInterface;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
-use Spora\Models\Agent;
-use Spora\Models\Task;
-use Spora\Models\TaskHistory;
-use Spora\Models\ToolCall;
-use Spora\Services\MercurePublisherInterface;
+use Spora\Services\TaskServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -21,9 +16,8 @@ use Symfony\Component\HttpFoundation\Response;
 final class TaskController
 {
     public function __construct(
-        private readonly AuthService             $authService,
-        private readonly OrchestratorInterface $orchestrator,
-        private readonly MercurePublisherInterface $mercure,
+        private readonly AuthService $authService,
+        private readonly TaskServiceInterface $taskService,
     ) {}
 
     /**
@@ -35,23 +29,10 @@ final class TaskController
         $userId  = AuthGuard::requireAuth($this->authService);
         $agentId = $request->query->has('agent_id') ? (int) $request->query->get('agent_id') : null;
 
-        $query = Task::where('user_id', $userId)->orderByDesc('created_at');
+        // Agent ownership validation is done inside the service
+        $tasks = $this->taskService->getTasksForUser($userId, $agentId);
 
-        if ($agentId !== null) {
-            // Verify the agent belongs to this user before filtering
-            $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
-            if ($agent === null) {
-                return new JsonResponse(
-                    ['error' => ['code' => 'NOT_FOUND', 'message' => 'Agent not found.']],
-                    Response::HTTP_NOT_FOUND,
-                );
-            }
-            $query->where('agent_id', $agentId);
-        }
-
-        $tasks = $query->get()->map(fn(Task $t) => $this->taskResource($t));
-
-        return new JsonResponse(['data' => ['tasks' => $tasks->all()]]);
+        return new JsonResponse(['data' => ['tasks' => $tasks]]);
     }
 
     /**
@@ -88,37 +69,20 @@ final class TaskController
             );
         }
 
-        $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
+        $maxSteps = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
+        $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
 
-        if ($agent === null) {
+        try {
+            $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId);
+        } catch (InvalidArgumentException $e) {
             return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Agent not found.']],
+                ['error' => ['code' => 'NOT_FOUND', 'message' => $e->getMessage()]],
                 Response::HTTP_NOT_FOUND,
             );
         }
 
-        $maxSteps = isset($body['max_steps']) ? (int) $body['max_steps'] : $agent->max_steps;
-        $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
-
-        // Validate parent_task_id if provided — must belong to the same user.
-        if ($parentTaskId !== null) {
-            $parentTask = Task::where('id', $parentTaskId)
-                ->where('user_id', $userId)
-                ->first();
-
-            if ($parentTask === null) {
-                return new JsonResponse(
-                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'parent_task_id is invalid.']],
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
-            }
-        }
-
-        $task = $this->orchestrator->start($agent->id, $prompt, $maxSteps, $parentTaskId);
-        $this->mercure->publish($task->id, $this->taskResource($task));
-
         return new JsonResponse(
-            ['data' => ['task' => $this->taskResource($task)]],
+            ['data' => ['task' => $task]],
             Response::HTTP_CREATED,
         );
     }
@@ -129,14 +93,7 @@ final class TaskController
     public function show(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
-
-        if ($task === null) {
-            return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
-                Response::HTTP_NOT_FOUND,
-            );
-        }
+        $taskId = (int) $request->attributes->get('taskId', 0);
 
         $sinceSequence = null;
         if ($request->query->has('since_sequence')) {
@@ -146,16 +103,7 @@ final class TaskController
             }
         }
 
-        return new JsonResponse(['data' => ['task' => $this->taskDetailResource($task, $sinceSequence)]]);
-    }
-
-    /**
-     * POST /api/v1/tasks/{taskId}/approve
-     */
-    public function approve(Request $request): JsonResponse
-    {
-        $userId = AuthGuard::requireAuth($this->authService);
-        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
+        $task = $this->taskService->getTaskWithHistory($taskId, $userId, $sinceSequence);
 
         if ($task === null) {
             return new JsonResponse(
@@ -164,12 +112,16 @@ final class TaskController
             );
         }
 
-        if ($task->status !== 'PENDING_APPROVAL') {
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_STATE', 'message' => 'Task is not pending approval.']],
-                Response::HTTP_CONFLICT,
-            );
-        }
+        return new JsonResponse(['data' => ['task' => $task]]);
+    }
+
+    /**
+     * POST /api/v1/tasks/{taskId}/approve
+     */
+    public function approve(Request $request): JsonResponse
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $taskId = (int) $request->attributes->get('taskId', 0);
 
         try {
             $body = $this->decodeJson($request);
@@ -180,8 +132,8 @@ final class TaskController
             );
         }
 
-        // Accept either a modern batch payload  { "approvals": [{ "provider_call_id": "...", "arguments": {...} }] }
-        // or the legacy single-tool format       { "arguments": {...} }  (auto-wrapped for backward compatibility).
+        // Accept either a modern batch payload { "approvals": [...] }
+        // or the legacy single-tool format { "provider_call_id": "...", "arguments": {...} }
         if (isset($body['approvals']) && is_array($body['approvals'])) {
             $approvedBatch = $body['approvals'];
         } else {
@@ -207,11 +159,22 @@ final class TaskController
         }
         unset($item);
 
-        $this->orchestrator->resume($task->id, $approvedBatch);
-        $fresh = $task->fresh();
-        $this->mercure->publish($fresh->id, $this->taskResource($fresh));
+        try {
+            $task = $this->taskService->approveTask($taskId, $userId, $approvedBatch);
+        } catch (InvalidArgumentException $e) {
+            if ($e->getMessage() === 'Task not found.') {
+                return new JsonResponse(
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                    Response::HTTP_NOT_FOUND,
+                );
+            }
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
+                Response::HTTP_CONFLICT,
+            );
+        }
 
-        return new JsonResponse(['data' => ['task' => $this->taskResource($fresh)]]);
+        return new JsonResponse(['data' => ['task' => $task]]);
     }
 
     /**
@@ -220,21 +183,7 @@ final class TaskController
     public function reject(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
-
-        if ($task === null) {
-            return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
-                Response::HTTP_NOT_FOUND,
-            );
-        }
-
-        if ($task->status !== 'PENDING_APPROVAL') {
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_STATE', 'message' => 'Task is not pending approval.']],
-                Response::HTTP_CONFLICT,
-            );
-        }
+        $taskId = (int) $request->attributes->get('taskId', 0);
 
         try {
             $body = $this->decodeJson($request);
@@ -247,11 +196,22 @@ final class TaskController
 
         $reason = trim((string) ($body['reason'] ?? 'No reason provided.'));
 
-        $this->orchestrator->reject($task->id, $reason);
-        $fresh = $task->fresh();
-        $this->mercure->publish($fresh->id, $this->taskResource($fresh));
+        try {
+            $task = $this->taskService->rejectTask($taskId, $userId, $reason);
+        } catch (InvalidArgumentException $e) {
+            if ($e->getMessage() === 'Task not found.') {
+                return new JsonResponse(
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                    Response::HTTP_NOT_FOUND,
+                );
+            }
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
+                Response::HTTP_CONFLICT,
+            );
+        }
 
-        return new JsonResponse(['data' => ['task' => $this->taskResource($fresh)]]);
+        return new JsonResponse(['data' => ['task' => $task]]);
     }
 
     /**
@@ -260,24 +220,14 @@ final class TaskController
     public function destroy(Request $request): Response
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
+        $taskId = (int) $request->attributes->get('taskId', 0);
 
-        if ($task === null) {
+        if (!$this->taskService->deleteTask($taskId, $userId)) {
             return new JsonResponse(
                 ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
                 Response::HTTP_NOT_FOUND,
             );
         }
-
-        Capsule::connection()->transaction(function () use ($task): void {
-            // Delete retry chain if this is a root task
-            if ($task->retry_of_task_id === null) {
-                Task::where('retry_of_task_id', $task->id)->delete();
-            }
-            TaskHistory::where('task_id', $task->id)->delete();
-            ToolCall::where('task_id', $task->id)->delete();
-            $task->delete();
-        });
 
         return new Response(null, Response::HTTP_NO_CONTENT);
     }
@@ -291,27 +241,25 @@ final class TaskController
     public function retry(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
+        $taskId = (int) $request->attributes->get('taskId', 0);
 
-        if ($task === null) {
+        try {
+            $task = $this->taskService->retryTask($taskId, $userId);
+        } catch (InvalidArgumentException $e) {
+            if ($e->getMessage() === 'Task not found.') {
+                return new JsonResponse(
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                    Response::HTTP_NOT_FOUND,
+                );
+            }
             return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
-                Response::HTTP_NOT_FOUND,
-            );
-        }
-
-        if ($task->status !== 'FAILED') {
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_STATE', 'message' => 'Only failed tasks can be retried.']],
+                ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
                 Response::HTTP_CONFLICT,
             );
         }
 
-        $newTask = $this->orchestrator->start($task->agent_id, $task->user_prompt, $task->max_steps);
-        $this->mercure->publish($newTask->id, $this->taskResource($newTask));
-
         return new JsonResponse(
-            ['data' => ['task' => $this->taskResource($newTask)]],
+            ['data' => ['task' => $task]],
             Response::HTTP_CREATED,
         );
     }
@@ -325,21 +273,7 @@ final class TaskController
     public function continue(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
-
-        if ($task === null) {
-            return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
-                Response::HTTP_NOT_FOUND,
-            );
-        }
-
-        if (!in_array($task->status, ['COMPLETED', 'FAILED'], true)) {
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_STATE', 'message' => 'Can only continue completed or failed tasks.']],
-                Response::HTTP_CONFLICT,
-            );
-        }
+        $taskId = (int) $request->attributes->get('taskId', 0);
 
         $body = json_decode($request->getContent(), true) ?? [];
 
@@ -362,16 +296,23 @@ final class TaskController
             $additionalSteps = $body['additional_steps'];
         }
 
-        $continuedTask = $this->orchestrator->continue(
-            $task->id,
-            $prompt,
-            $additionalSteps,
-        );
-
-        $this->mercure->publish($continuedTask->id, $this->taskResource($continuedTask));
+        try {
+            $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps);
+        } catch (InvalidArgumentException $e) {
+            if ($e->getMessage() === 'Task not found.') {
+                return new JsonResponse(
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                    Response::HTTP_NOT_FOUND,
+                );
+            }
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
+                Response::HTTP_CONFLICT,
+            );
+        }
 
         return new JsonResponse(
-            ['data' => ['task' => $this->taskResource($continuedTask)]],
+            ['data' => ['task' => $task]],
             Response::HTTP_OK,
         );
     }
@@ -386,27 +327,22 @@ final class TaskController
     public function cancelRetryChain(Request $request): Response
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $task   = $this->findTask((int) $request->attributes->get('taskId', 0), $userId);
+        $taskId = (int) $request->attributes->get('taskId', 0);
 
-        if ($task === null) {
+        try {
+            $this->taskService->cancelRetryChain($taskId, $userId);
+        } catch (InvalidArgumentException $e) {
+            if ($e->getMessage() === 'Task not found.') {
+                return new JsonResponse(
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                    Response::HTTP_NOT_FOUND,
+                );
+            }
             return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
-                Response::HTTP_NOT_FOUND,
-            );
-        }
-
-        if ($task->retry_of_task_id === null) {
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_STATE', 'message' => 'This task is not part of a retry chain.']],
+                ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
                 Response::HTTP_CONFLICT,
             );
         }
-
-        Capsule::table('tasks')
-            ->where('user_id', $userId)
-            ->where('retry_of_task_id', $task->retry_of_task_id)
-            ->where('retry_count', '>=', $task->retry_count)
-            ->update(['status' => 'CANCELLED']);
 
         return new Response(null, Response::HTTP_NO_CONTENT);
     }
@@ -414,83 +350,6 @@ final class TaskController
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
-
-    private function findTask(int $id, int $userId): ?Task
-    {
-        return Task::where('id', $id)->where('user_id', $userId)->first();
-    }
-
-    private function taskResource(Task $task): array
-    {
-        $resource = [
-            'id'             => $task->id,
-            'agent_id'       => $task->agent_id,
-            'status'         => $task->status,
-            'user_prompt'    => $task->user_prompt,
-            'final_response' => $task->final_response,
-            'step_count'     => $task->step_count,
-            'max_steps'      => $task->max_steps,
-            'created_at'     => $task->created_at?->toIso8601String(),
-            'updated_at'     => $task->updated_at?->toIso8601String(),
-        ];
-
-        if ($task->parent_task_id !== null) {
-            $resource['parent_task_id'] = $task->parent_task_id;
-        }
-
-        if ($task->error_code !== null) {
-            $resource['error_code'] = $task->error_code;
-            $resource['error_message'] = $task->error_message;
-        }
-
-        if ($task->retry_of_task_id !== null) {
-            $resource['retry_of_task_id'] = $task->retry_of_task_id;
-            $resource['retry_count'] = $task->retry_count;
-        } else {
-            // Root task: include retry config from the agent
-            $agent = Agent::find($task->agent_id);
-            $resource['max_retries'] = $agent->max_retries ?? 0;
-            $resource['retry_after_minutes'] = $agent->retry_after_minutes ?? 0;
-        }
-
-        if ($task->retry_after !== null) {
-            $resource['retry_after'] = $task->retry_after->toIso8601String();
-        }
-
-        return $resource;
-    }
-
-    private function taskDetailResource(Task $task, ?int $sinceSequence = null): array
-    {
-        $resource               = $this->taskResource($task);
-        $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => [
-            'id'                 => $tc->id,
-            'tool_name'          => $tc->tool_name,
-            'tool_type'          => $tc->tool_type,
-            'status'             => $tc->status,
-            'proposed_arguments' => $tc->proposed_arguments,
-            'approved_arguments' => $tc->approved_arguments,
-            'human_description'  => $tc->human_description,
-            'result_content'     => $tc->result_content,
-            'executed_at'        => $tc->executed_at?->toIso8601String(),
-        ])->all();
-
-        $historyQuery = $task->taskHistory();
-        if ($sinceSequence !== null) {
-            $historyQuery->where('sequence', '>', $sinceSequence);
-        }
-
-        $resource['history'] = $historyQuery->get()->map(fn(TaskHistory $h) => [
-            'sequence'     => $h->sequence,
-            'role'         => $h->role,
-            'content'      => $h->content,
-            'reasoning'    => $h->reasoning,
-            'tool_call_id' => $h->tool_call_id,
-            'tool_name'    => $h->tool_name,
-        ])->all();
-
-        return $resource;
-    }
 
     private function decodeJson(Request $request): array
     {

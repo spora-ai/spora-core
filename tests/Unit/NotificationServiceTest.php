@@ -25,7 +25,8 @@ function makeNotificationService(?MercurePublisherInterface $mercure = null): No
 function makeNotificationController(): array
 {
     $authService = bootAuthLayer();
-    $controller = new NotificationController($authService);
+    $notificationService = makeNotificationService();
+    $controller = new NotificationController($authService, $notificationService);
 
     return [$controller, $authService];
 }
@@ -197,7 +198,7 @@ describe('NotificationController', function (): void {
         Notification::create(['user_id' => $userId, 'type' => 'task_completed', 'title' => 'Notif 1']);
         Notification::create(['user_id' => $userId, 'type' => 'task_failed', 'title' => 'Notif 2']);
 
-        $controller = new NotificationController($authService);
+        $controller = new NotificationController($authService, makeNotificationService());
         $request = jsonRequest('GET', '/api/v1/notifications');
         $response = $controller->index($request);
 
@@ -218,7 +219,7 @@ describe('NotificationController', function (): void {
             'user_id' => $userId, 'type' => 'task_completed', 'title' => 'Unread',
         ]);
 
-        $controller = new NotificationController(bootAuthLayer());
+        $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
         $request = jsonRequest('GET', '/api/v1/notifications?unread_only=true');
         $response = $controller->index($request);
 
@@ -235,7 +236,7 @@ describe('NotificationController', function (): void {
         ]);
         expect($notif->read_at)->toBeNull();
 
-        $controller = new NotificationController(bootAuthLayer());
+        $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
         $request = jsonRequest('POST', '/api/v1/notifications/' . $notif->id . '/read');
         $request->attributes->set('id', $notif->id);
         $response = $controller->markRead($request);
@@ -253,7 +254,7 @@ describe('NotificationController', function (): void {
             'user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Other',
         ]);
 
-        $controller = new NotificationController(bootAuthLayer());
+        $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
         $request = jsonRequest('POST', '/api/v1/notifications/' . $notif->id . '/read');
         $response = $controller->markRead($request);
 
@@ -266,7 +267,7 @@ describe('NotificationController', function (): void {
         Notification::create(['user_id' => $userId, 'type' => 'task_completed', 'title' => 'A']);
         Notification::create(['user_id' => $userId, 'type' => 'task_completed', 'title' => 'B']);
 
-        $controller = new NotificationController(bootAuthLayer());
+        $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
         $response = $controller->markAllRead();
 
         expect($response->getStatusCode())->toBe(200);
@@ -274,19 +275,20 @@ describe('NotificationController', function (): void {
         expect($unread)->toBe(0);
     });
 
-    it('destroy deletes a notification', function (): void {
+    it('destroy deletes a notification and returns 204 with no body', function (): void {
         [$userId] = seedUserAndAgentForNotification();
 
         $notif = Notification::create([
             'user_id' => $userId, 'type' => 'task_completed', 'title' => 'To Delete',
         ]);
 
-        $controller = new NotificationController(bootAuthLayer());
+        $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
         $request = jsonRequest('DELETE', '/api/v1/notifications/' . $notif->id);
         $request->attributes->set('id', $notif->id);
         $response = $controller->destroy($request);
 
         expect($response->getStatusCode())->toBe(204);
+        expect($response->getContent())->toBe('');
         expect(Notification::find($notif->id))->toBeNull();
     });
 
@@ -298,7 +300,7 @@ describe('NotificationController', function (): void {
             'user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Other',
         ]);
 
-        $controller = new NotificationController(bootAuthLayer());
+        $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
         $request = jsonRequest('DELETE', '/api/v1/notifications/' . $notif->id);
         $response = $controller->destroy($request);
 

@@ -12,6 +12,7 @@ import { useTaskStore } from '@/stores/tasks'
 import { ApiError } from '@/api/client'
 import SharedScheduleEditor from '@/components/shared/SharedScheduleEditor.vue'
 import PromptTemplateDialog from '@/components/PromptTemplateDialog.vue'
+import Icon from '@/components/ui/Icon.vue'
 
 const props = defineProps<{
   agentId: number
@@ -164,9 +165,7 @@ async function submitPrompt(): Promise<void> {
             class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
             title="Delete template"
           >
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
+            <Icon name="trash" class="h-3.5 w-3.5" />
           </button>
 
           <!-- Save as template -->
@@ -176,9 +175,7 @@ async function submitPrompt(): Promise<void> {
             class="inline-flex h-8 items-center gap-1.5 px-3 rounded-[8px] text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             title="Save prompt as template"
           >
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-            </svg>
+            <Icon name="star" class="h-3.5 w-3.5" />
             <span>Save</span>
           </button>
         </div>
@@ -189,9 +186,7 @@ async function submitPrompt(): Promise<void> {
           class="inline-flex h-8 items-center gap-1.5 px-3 rounded-[8px] border border-border text-xs font-medium bg-background text-muted-foreground hover:border-muted-foreground hover:text-foreground transition-colors shadow-sm"
           title="Schedule a run"
         >
-          <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+          <Icon name="clock" class="h-3 w-3" />
           Schedule
         </button>
       </div>
@@ -217,9 +212,7 @@ async function submitPrompt(): Promise<void> {
           :disabled="submitting || !promptText.trim() || disabled"
           class="shrink-0 h-9 w-9 rounded-full bg-primary text-primary-foreground shadow-md hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center z-10"
         >
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12h15m0 0l-6.75-6.75M19.5 12l-6.75 6.75" />
-          </svg>
+          <Icon name="arrow-right" />
         </button>
       </div>
     </div>
@@ -232,9 +225,7 @@ async function submitPrompt(): Promise<void> {
           class="flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer"
           title="Go to agent settings"
         >
-          <svg class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-          </svg>
+          <Icon name="computer" class="h-3 w-3 shrink-0" />
           <span v-if="agentStore.currentAgent.llm_driver_config_id">
             {{ configName }}
           </span>
@@ -248,9 +239,7 @@ async function submitPrompt(): Promise<void> {
           class="flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer"
           title="Go to agent tools"
         >
-          <svg class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-          </svg>
+          <Icon name="tools" class="h-3 w-3 shrink-0" />
           <span>{{ agentStore.currentAgent.tools.length }} tools</span>
         </button>
 
@@ -259,9 +248,7 @@ async function submitPrompt(): Promise<void> {
           class="flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer"
           title="Go to agent settings"
         >
-          <svg class="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
+          <Icon name="lightning" class="h-3 w-3 shrink-0" />
           <span>Max {{ agentStore.currentAgent.max_steps }} steps</span>
         </button>
       </div>

@@ -7,6 +7,8 @@ use Spora\Http\AgentController;
 use Spora\Http\AuthController;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
+use Spora\Http\MailConfigController;
+use Spora\Http\MailTemplateController;
 use Spora\Http\NotificationController;
 use Spora\Http\PromptTemplateController;
 use Spora\Http\RecipeController;
@@ -14,6 +16,7 @@ use Spora\Http\ScheduledRunController;
 use Spora\Http\SseController;
 use Spora\Http\TaskController;
 use Spora\Http\ToolController;
+use Spora\Http\UserController;
 use Spora\Http\UserProfileController;
 
 /**
@@ -63,6 +66,10 @@ return static function (RouteCollector $r): void {
     $r->addRoute('GET', '/api/v1/tools/{toolId}/settings', [ToolController::class, 'getSettings']);
     $r->addRoute('PUT', '/api/v1/tools/{toolId}/settings', [ToolController::class, 'putSettings']);
 
+    // Tool registry — per-user settings
+    $r->addRoute('GET', '/api/v1/tools/{toolId}/user-settings', [ToolController::class, 'getUserSettings']);
+    $r->addRoute('PUT', '/api/v1/tools/{toolId}/user-settings', [ToolController::class, 'putUserSettings']);
+
     // Tasks
     $r->addRoute('GET', '/api/v1/tasks', [TaskController::class, 'index']);
     $r->addRoute('POST', '/api/v1/tasks', [TaskController::class, 'store']);
@@ -79,6 +86,7 @@ return static function (RouteCollector $r): void {
 
     // LLM Driver Configurations
     $r->addRoute('GET', '/api/v1/llm-drivers', [LLMConfigController::class, 'drivers']);
+    $r->addRoute('GET', '/api/v1/llm-configs/global', [LLMConfigController::class, 'globalConfigs']);
     $r->addRoute('GET', '/api/v1/llm-configs', [LLMConfigController::class, 'index']);
     $r->addRoute('POST', '/api/v1/llm-configs', [LLMConfigController::class, 'store']);
     $r->addRoute('GET', '/api/v1/llm-configs/{id}', [LLMConfigController::class, 'show']);
@@ -99,6 +107,30 @@ return static function (RouteCollector $r): void {
     $r->addRoute('POST', '/api/v1/me/locations', [UserProfileController::class, 'postLocation']);
     $r->addRoute('PUT', '/api/v1/me/locations/{id}', [UserProfileController::class, 'putLocation']);
     $r->addRoute('DELETE', '/api/v1/me/locations/{id}', [UserProfileController::class, 'deleteLocation']);
+
+    // Users (admin-only)
+    $r->addRoute('GET', '/api/v1/users', [UserController::class, 'index']);
+    $r->addRoute('POST', '/api/v1/users', [UserController::class, 'store']);
+    $r->addRoute('GET', '/api/v1/users/{id}', [UserController::class, 'show']);
+    $r->addRoute('PUT', '/api/v1/users/{id}', [UserController::class, 'update']);
+    $r->addRoute('PATCH', '/api/v1/users/{id}', [UserController::class, 'update']);
+    $r->addRoute('DELETE', '/api/v1/users/{id}', [UserController::class, 'destroy']);
+    $r->addRoute('GET', '/api/v1/users/{id}/roles', [UserController::class, 'listRoles']);
+    $r->addRoute('POST', '/api/v1/users/{id}/roles', [UserController::class, 'grantRole']);
+    $r->addRoute('DELETE', '/api/v1/users/{id}/roles/{role}', [UserController::class, 'revokeRole']);
+
+    // Mail Config (admin-only)
+    $r->addRoute('GET', '/api/v1/mail-config', [MailConfigController::class, 'index']);
+    $r->addRoute('PUT', '/api/v1/mail-config', [MailConfigController::class, 'update']);
+    $r->addRoute('POST', '/api/v1/mail-config/test', [MailConfigController::class, 'test']);
+
+    // Mail Templates (admin-only)
+    $r->addRoute('GET', '/api/v1/mail-templates', [MailTemplateController::class, 'index']);
+    $r->addRoute('POST', '/api/v1/mail-templates', [MailTemplateController::class, 'store']);
+    $r->addRoute('GET', '/api/v1/mail-templates/{id}', [MailTemplateController::class, 'show']);
+    $r->addRoute('PUT', '/api/v1/mail-templates/{id}', [MailTemplateController::class, 'update']);
+    $r->addRoute('DELETE', '/api/v1/mail-templates/{id}', [MailTemplateController::class, 'destroy']);
+    $r->addRoute('GET', '/api/v1/mail-templates/preview/{name}', [MailTemplateController::class, 'preview']);
 
     // SSE
     $r->addRoute('GET', '/api/v1/sse/status', [SseController::class, 'status']);

@@ -79,33 +79,98 @@ test('getDrivers returns settings_schema for each driver', function (): void {
         ->and($keys)->toContain('model');
 });
 
-test('encryptSettings returns storage string', function (): void {
+test('encodeSettings encrypts only password fields and stores others as plain strings', function (): void {
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new Spora\Core\SecurityManager($key);
 
-    $service = new LLMConfigService($security, []);
+    $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
-    $result = $service->encryptSettings(['api_key' => 'sk-test']);
+    $result = $service->encodeSettings(OpenAICompatibleDriver::class, [
+        'api_key' => 'sk-test-key',
+        'base_url' => 'https://api.example.com',
+        'model' => 'gpt-4o',
+    ]);
 
-    expect($result)->toBeString()
-        ->and(strlen($result))->toBeGreaterThan(0);
-
-    // Verify round-trip
-    $decrypted = $service->decryptSettings($result);
-    expect($decrypted['api_key'])->toBe('sk-test');
+    // api_key should be encrypted (base64 string, not plain)
+    expect(is_string($result['api_key']))->toBe(true);
+    expect($result['api_key'])->not->toBe('sk-test-key');
+    // base_url and model should be plain strings
+    expect($result['base_url'])->toBe('https://api.example.com');
+    expect($result['model'])->toBe('gpt-4o');
 });
 
-test('decryptSettings returns array', function (): void {
+test('encodeSettings handles empty password field', function (): void {
+    $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new Spora\Core\SecurityManager($key);
+    $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+
+    $result = $service->encodeSettings(OpenAICompatibleDriver::class, [
+        'api_key' => '',
+        'base_url' => 'https://api.example.com',
+    ]);
+
+    // Empty password should not be encrypted
+    expect($result['api_key'])->toBe('');
+    expect($result['base_url'])->toBe('https://api.example.com');
+});
+
+test('decodeSettings decrypts per-field format correctly', function (): void {
+    $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new Spora\Core\SecurityManager($key);
+    $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+
+    $encoded = $service->encodeSettings(OpenAICompatibleDriver::class, [
+        'api_key' => 'sk-secret-key',
+        'base_url' => 'https://api.example.com',
+    ]);
+
+    $json = json_encode($encoded);
+    $decoded = $service->decodeSettings(OpenAICompatibleDriver::class, $json);
+
+    expect($decoded['api_key'])->toBe('sk-secret-key');
+    expect($decoded['base_url'])->toBe('https://api.example.com');
+});
+
+test('decodeSettings handles legacy wholesale-encrypted format', function (): void {
+    $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new Spora\Core\SecurityManager($key);
+    $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+
+    // Simulate legacy wholesale encryption
+    $legacyStorage = $security->encrypt(json_encode(['api_key' => 'sk-legacy']));
+    $legacyString = $legacyStorage->toStorageString();
+
+    $decoded = $service->decodeSettings(OpenAICompatibleDriver::class, $legacyString);
+
+    expect($decoded['api_key'])->toBe('sk-legacy');
+});
+
+test('decodeSettings returns empty array for null/empty input', function (): void {
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new Spora\Core\SecurityManager($key);
     $service = new LLMConfigService($security, []);
 
-    $encrypted = $security->encrypt('{"api_key":"sk-test"}');
-    $storageString = $encrypted->toStorageString();
+    expect($service->decodeSettings(OpenAICompatibleDriver::class, null))->toBe([]);
+    expect($service->decodeSettings(OpenAICompatibleDriver::class, ''))->toBe([]);
+});
 
-    $result = $service->decryptSettings($storageString);
+test('encodeSettings + decodeSettings is a lossless round-trip', function (): void {
+    $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new Spora\Core\SecurityManager($key);
+    $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
-    expect($result)->toBe(['api_key' => 'sk-test']);
+    $original = [
+        'api_key' => 'sk-round-trip-test',
+        'base_url' => 'https://example.com/v1',
+        'model' => 'gpt-4o-mini',
+        'max_tokens' => 2048,
+    ];
+
+    $encoded = $service->encodeSettings(OpenAICompatibleDriver::class, $original);
+    $json = json_encode($encoded);
+    $decoded = $service->decodeSettings(OpenAICompatibleDriver::class, $json);
+
+    expect($decoded)->toEqual($original);
 });
 
 test('maskForApi replaces password fields with ***', function (): void {

@@ -28,5 +28,7 @@ final class ToolSetting
         public readonly string $scope   = 'agent',
         /** @var array<array-key, string> key => label pairs. Only used when type === "select". */
         public readonly array  $options = [],
+        /** PCRE regex pattern for input validation, e.g. '/^[0-2](\.[0-9]+)?$/' for temperature. */
+        public readonly string $validation = '',
     ) {}
 }

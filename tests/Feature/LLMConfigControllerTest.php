@@ -107,6 +107,82 @@ test('store() creates a new config', function (): void {
     LLMDriverConfiguration::where('name', 'Test Config')->delete();
 });
 
+test('store() saves context_window and max_tokens_output columns', function (): void {
+    [$controller, $authService] = makeLLMConfigController();
+    $userId = bootAuth($authService, 'tokentest@example.com');
+
+    $body = [
+        'name' => 'Token Config Test',
+        'driver_class' => OpenAICompatibleDriver::class,
+        'settings' => [
+            'api_key' => 'sk-test',
+            'model' => 'gpt-4o',
+        ],
+        'context_window' => 128000,
+        'max_tokens_output' => 4096,
+    ];
+
+    $request = jsonRequest('POST', '/api/v1/llm-configs', $body);
+    $response = $controller->store($request);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_CREATED);
+
+    $result = json_decode($response->getContent(), true)['data']['config'];
+    expect($result['context_window'])->toBe(128000)
+        ->and($result['max_tokens_output'])->toBe(4096);
+
+    LLMDriverConfiguration::where('id', $result['id'])->delete();
+});
+
+test('update() can update context_window and max_tokens_output', function (): void {
+    [$controller, $authService] = makeLLMConfigController();
+    $userId = bootAuth($authService, 'updatetoken@example.com');
+
+    $config = createTestConfig('Update Token Test', OpenAICompatibleDriver::class, [
+        'api_key' => 'sk-test',
+        'model' => 'gpt-4o',
+    ], false, $userId);
+
+    $request = jsonRequest('PUT', "/api/v1/llm-configs/{$config->id}", [
+        'context_window' => 200000,
+        'max_tokens_output' => 8192,
+    ]);
+    $response = $controller->update($request, $config->id);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+
+    $result = json_decode($response->getContent(), true)['data']['config'];
+    expect($result['context_window'])->toBe(200000)
+        ->and($result['max_tokens_output'])->toBe(8192);
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});
+
+test('configResource() includes context_window and max_tokens_output', function (): void {
+    [$controller, $authService] = makeLLMConfigController();
+    $userId = bootAuth($authService, 'resourcetest@example.com');
+
+    $config = createTestConfig('Resource Test', AnthropicCompatibleDriver::class, [
+        'api_key' => 'sk-anthropic',
+        'model' => 'claude-3-5-sonnet',
+    ], false, $userId);
+
+    $config->context_window = 200000;
+    $config->max_tokens_output = 8192;
+    $config->save();
+
+    $request = new Symfony\Component\HttpFoundation\Request();
+    $response = $controller->show($request, $config->id);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+
+    $result = json_decode($response->getContent(), true)['data']['config'];
+    expect($result['context_window'])->toBe(200000)
+        ->and($result['max_tokens_output'])->toBe(8192);
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});
+
 test('store() returns 422 when name is empty', function (): void {
     [$controller, $authService] = makeLLMConfigController();
     bootAuth($authService);

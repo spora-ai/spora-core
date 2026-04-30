@@ -13,6 +13,7 @@ use InvalidArgumentException;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
+use Spora\Services\SystemMailer;
 
 /**
  * Thin wrapper around delight-im/Auth that exposes a typed, vendor-agnostic API.
@@ -21,7 +22,63 @@ use Spora\Auth\Exceptions\InvalidCredentialsException;
  */
 final class AuthService
 {
+    private ?SystemMailer $systemMailer = null;
+    private ?string $appUrl = null;
+
     public function __construct(private readonly Auth $auth) {}
+
+    public function setSystemMailer(SystemMailer $systemMailer): void
+    {
+        $this->systemMailer = $systemMailer;
+    }
+
+    public function setAppUrl(string $url): void
+    {
+        $this->appUrl = $url;
+    }
+
+    private function sendVerificationEmailViaCallback(int $userId, string $email): callable
+    {
+        return function (string $selector, string $token) use ($userId, $email) {
+            if ($this->systemMailer !== null) {
+                $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
+                $verifyUrl = "{$baseUrl}/api/v1/auth/verify/{$selector}?token=" . urlencode($token);
+                $this->systemMailer->sendVerificationEmail($userId, $email, $verifyUrl);
+            }
+        };
+    }
+
+    /**
+     * Grant a role to a user.
+     */
+    public function grantRole(int $userId, int $role): void
+    {
+        $this->auth->admin()->addRoleForUserById($userId, $role);
+    }
+
+    /**
+     * Revoke a role from a user.
+     */
+    public function revokeRole(int $userId, int $role): void
+    {
+        $this->auth->admin()->removeRoleForUserById($userId, $role);
+    }
+
+    /**
+     * Check if a user has a specific role.
+     */
+    public function userHasRole(int $userId, int $role): bool
+    {
+        return $this->auth->admin()->doesUserHaveRole($userId, $role);
+    }
+
+    /**
+     * Delete a user by ID.
+     */
+    public function deleteUser(int $userId): void
+    {
+        $this->auth->admin()->deleteUserById($userId);
+    }
 
     /**
      * Register a new user and return their new user ID.
@@ -32,7 +89,12 @@ final class AuthService
     public function register(string $email, string $password): int
     {
         try {
-            return (int) $this->auth->register($email, $password, null, null);
+            return (int) $this->auth->register(
+                $email,
+                $password,
+                null,
+                $this->systemMailer !== null ? $this->sendVerificationEmailViaCallback(0, $email) : null,
+            );
         } catch (UserAlreadyExistsException) {
             throw new EmailTakenException('A user with that email address already exists.');
         } catch (InvalidEmailException) {
@@ -96,6 +158,17 @@ final class AuthService
         return $this->auth->getEmail();
     }
 
+    public function isAdmin(): bool
+    {
+        $userId = $this->currentUserId();
+        if ($userId === null) {
+            return false;
+        }
+
+        $user = (new \Spora\Models\User())->find($userId);
+        return $user !== null && $user->isAdmin();
+    }
+
     /**
      * Change the password of the currently authenticated user.
      *
@@ -106,5 +179,36 @@ final class AuthService
     public function changePassword(string $oldPassword, string $newPassword): void
     {
         $this->auth->changePassword($oldPassword, $newPassword);
+    }
+
+    /**
+     * Confirm an email address using a selector/token pair.
+     * @return array<string> ['old_email', 'new_email']
+     */
+    public function confirmEmail(string $selector, string $token): array
+    {
+        return $this->auth->confirmEmail($selector, $token);
+    }
+
+    /**
+     * Initiate a password reset for the given email address.
+     */
+    public function forgotPassword(string $email): void
+    {
+        $this->auth->forgotPassword($email, function (string $selector, string $token) use ($email): void {
+            if ($this->systemMailer !== null) {
+                $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
+                $resetUrl = "{$baseUrl}/api/v1/auth/reset-password/{$selector}?token=" . urlencode($token);
+                $this->systemMailer->sendPasswordResetEmail($email, $resetUrl);
+            }
+        });
+    }
+
+    /**
+     * Reset the password using a selector/token pair.
+     */
+    public function resetPassword(string $selector, string $token, string $newPassword): void
+    {
+        $this->auth->resetPassword($selector, $token, $newPassword);
     }
 }

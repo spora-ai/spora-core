@@ -2,28 +2,25 @@
 
 declare(strict_types=1);
 
-use Spora\Agents\OrchestratorInterface;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Http\TaskController;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall;
-use Spora\Services\MercurePublisherInterface;
+use Spora\Services\TaskServiceInterface;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeTaskController(?OrchestratorInterface $orch = null): array
+function makeTaskController(?TaskServiceInterface $taskService = null): array
 {
     $authService = bootAuthLayer();
-    $orch      ??= Mockery::mock(OrchestratorInterface::class);
-    $mercure     = Mockery::mock(MercurePublisherInterface::class);
-    $mercure->allows('publish')->andReturn(true);
-    $controller  = new TaskController($authService, $orch, $mercure);
+    $taskService ??= Mockery::mock(TaskServiceInterface::class);
+    $controller  = new TaskController($authService, $taskService);
 
-    return [$controller, $authService, $orch];
+    return [$controller, $authService, $taskService];
 }
 
 function seedUserAndAgent(mixed $authService): array
@@ -76,21 +73,25 @@ it('store returns 422 when prompt is missing', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('store creates task via orchestrator and returns 201', function (): void {
-    $mockTask = new Task([
+    $taskResource = [
         'id'          => 1,
         'agent_id'    => 1,
-        'user_id'     => 1,
         'status'      => 'RUNNING',
         'user_prompt' => 'Hello',
+        'final_response' => null,
         'step_count'  => 0,
         'max_steps'   => 10,
-    ]);
-    $mockTask->id = 1;
+        'created_at'  => null,
+        'updated_at'  => null,
+    ];
 
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->expects('start')->once()->andReturn($mockTask);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('startTask')
+        ->once()
+        ->with(1, 1, 'Hello', null, null)
+        ->andReturn($taskResource);
 
-    [$controller, $authService] = makeTaskController($orch);
+    [$controller, $authService] = makeTaskController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
 
     $resp = $controller->store(jsonRequest('POST', '/api/v1/tasks', ['agent_id' => $agent->id, 'prompt' => 'Hello']));
@@ -101,7 +102,12 @@ it('store creates task via orchestrator and returns 201', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('store returns 404 when user has no agent', function (): void {
-    [$controller, $authService] = makeTaskController();
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('startTask')
+        ->once()
+        ->andThrow(new InvalidArgumentException('Agent not found.'));
+
+    [$controller, $authService] = makeTaskController($taskService);
     $userId = $authService->register('noagent@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'noagent@example.com');
 
@@ -114,17 +120,24 @@ it('store returns 404 when user has no agent', function (): void {
 // ---------------------------------------------------------------------------
 
 it('index returns list of tasks for the authenticated user', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTasksForUser')
+        ->once()
+        ->with(1, null)
+        ->andReturn([[
+            'id'          => 1,
+            'agent_id'    => 1,
+            'status'      => 'COMPLETED',
+            'user_prompt' => 'Test',
+            'final_response' => null,
+            'step_count'  => 1,
+            'max_steps'   => 10,
+            'created_at'  => null,
+            'updated_at'  => null,
+        ]]);
 
-    Task::create([
-        'agent_id'    => $agent->id,
-        'user_id'     => $userId,
-        'status'      => 'COMPLETED',
-        'user_prompt' => 'Test',
-        'step_count'  => 1,
-        'max_steps'   => 10,
-    ]);
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $resp = $controller->index(jsonRequest('GET', '/api/v1/tasks'));
     expect($resp->getStatusCode())->toBe(200);
@@ -139,7 +152,13 @@ it('index returns list of tasks for the authenticated user', function (): void {
 // ---------------------------------------------------------------------------
 
 it('show returns 404 for unknown task', function (): void {
-    [$controller, $authService] = makeTaskController();
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTaskWithHistory')
+        ->once()
+        ->with(999, 1, null)
+        ->andReturn(null);
+
+    [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);
 
     $req = jsonRequest('GET', '/api/v1/tasks/999');
@@ -150,20 +169,31 @@ it('show returns 404 for unknown task', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('show returns task detail with history and tool_calls', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
-
-    $task = Task::create([
-        'agent_id'    => $agent->id,
-        'user_id'     => $userId,
+    $taskDetail = [
+        'id'          => 1,
+        'agent_id'    => 1,
         'status'      => 'COMPLETED',
         'user_prompt' => 'Detail test',
+        'final_response' => null,
         'step_count'  => 0,
         'max_steps'   => 10,
-    ]);
+        'created_at'  => null,
+        'updated_at'  => null,
+        'tool_calls'  => [],
+        'history'     => [],
+    ];
 
-    $req = jsonRequest('GET', "/api/v1/tasks/{$task->id}");
-    $req->attributes->set('taskId', $task->id);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTaskWithHistory')
+        ->once()
+        ->with(1, 1, null)
+        ->andReturn($taskDetail);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
+
+    $req = jsonRequest('GET', '/api/v1/tasks/1');
+    $req->attributes->set('taskId', 1);
 
     $resp = $controller->show($req);
     expect($resp->getStatusCode())->toBe(200);
@@ -174,24 +204,33 @@ it('show returns task detail with history and tool_calls', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('show respects since_sequence to filter task history', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
-
-    $task = Task::create([
-        'agent_id'    => $agent->id,
-        'user_id'     => $userId,
+    $taskDetail = [
+        'id'          => 1,
+        'agent_id'    => 1,
         'status'      => 'COMPLETED',
         'user_prompt' => 'Sequence test',
+        'final_response' => null,
         'step_count'  => 0,
         'max_steps'   => 10,
-    ]);
+        'created_at'  => null,
+        'updated_at'  => null,
+        'tool_calls'  => [],
+        'history'     => [
+            ['sequence' => 2, 'role' => 'user', 'content' => 'Third', 'reasoning' => null, 'tool_call_id' => null, 'tool_name' => null],
+        ],
+    ];
 
-    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'First']);
-    TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'Second']);
-    TaskHistory::create(['task_id' => $task->id, 'sequence' => 2, 'role' => 'user', 'content' => 'Third']);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTaskWithHistory')
+        ->once()
+        ->with(1, 1, 1)
+        ->andReturn($taskDetail);
 
-    $req = jsonRequest('GET', "/api/v1/tasks/{$task->id}?since_sequence=1");
-    $req->attributes->set('taskId', $task->id);
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
+
+    $req = jsonRequest('GET', '/api/v1/tasks/1?since_sequence=1');
+    $req->attributes->set('taskId', 1);
 
     $resp = $controller->show($req);
     expect($resp->getStatusCode())->toBe(200);
@@ -208,8 +247,14 @@ it('show respects since_sequence to filter task history', function (): void {
 // ---------------------------------------------------------------------------
 
 it('approve returns 409 when task is not PENDING_APPROVAL', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('approveTask')
+        ->once()
+        ->with(Mockery::any(), Mockery::any(), Mockery::any())
+        ->andThrow(new InvalidArgumentException('Task is not pending approval.'));
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -220,7 +265,10 @@ it('approve returns 409 when task is not PENDING_APPROVAL', function (): void {
         'max_steps'   => 10,
     ]);
 
-    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve");
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve", [
+        'provider_call_id' => 'call_abc',
+        'arguments'        => ['key' => 'value'],
+    ]);
     $req->attributes->set('taskId', $task->id);
 
     $resp = $controller->approve($req);
@@ -228,12 +276,30 @@ it('approve returns 409 when task is not PENDING_APPROVAL', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('approve calls orchestrator resume and returns updated task', function (): void {
-    [$userId, $agent] = [null, null];
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->expects('resume')->once();
+    $taskResource = [
+        'id'          => 1,
+        'agent_id'    => 1,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'approve test',
+        'final_response' => null,
+        'step_count'  => 0,
+        'max_steps'   => 10,
+        'created_at'  => null,
+        'updated_at'  => null,
+    ];
 
-    [$controller, $authService] = makeTaskController($orch);
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('approveTask')
+        ->once()
+        ->withArgs(function (int $taskId, int $userId, array $approvals): bool {
+            return $taskId === 1 && $userId === 1
+                && $approvals[0]['provider_call_id'] === 'call_abc'
+                && $approvals[0]['arguments'] === ['key' => 'value'];
+        })
+        ->andReturn($taskResource);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -259,8 +325,14 @@ it('approve calls orchestrator resume and returns updated task', function (): vo
 // ---------------------------------------------------------------------------
 
 it('reject returns 409 when task is not PENDING_APPROVAL', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('rejectTask')
+        ->once()
+        ->with(1, 1, Mockery::any())
+        ->andThrow(new InvalidArgumentException('Task is not pending approval.'));
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -279,11 +351,26 @@ it('reject returns 409 when task is not PENDING_APPROVAL', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('reject calls orchestrator reject and returns 200', function (): void {
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->expects('reject')->once();
+    $taskResource = [
+        'id'          => 1,
+        'agent_id'    => 1,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'reject test',
+        'final_response' => null,
+        'step_count'  => 0,
+        'max_steps'   => 10,
+        'created_at'  => null,
+        'updated_at'  => null,
+    ];
 
-    [$controller, $authService] = makeTaskController($orch);
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('rejectTask')
+        ->once()
+        ->with(1, 1, 'Too risky')
+        ->andReturn($taskResource);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -306,8 +393,10 @@ it('reject calls orchestrator reject and returns 200', function (): void {
 // ---------------------------------------------------------------------------
 
 it('approve returns 422 when legacy format omits provider_call_id', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -330,8 +419,10 @@ it('approve returns 422 when legacy format omits provider_call_id', function ():
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('approve returns 422 when legacy format has empty string provider_call_id', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -353,13 +444,28 @@ it('approve returns 422 when legacy format has empty string provider_call_id', f
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('approve legacy format with valid provider_call_id still calls orchestrator resume', function (): void {
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->expects('resume')->once()->withArgs(function (int $taskId, array $batch): bool {
-        return $batch[0]['provider_call_id'] === 'call_valid';
-    });
+    $taskResource = [
+        'id'          => 1,
+        'agent_id'    => 1,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'test',
+        'final_response' => null,
+        'step_count'  => 0,
+        'max_steps'   => 10,
+        'created_at'  => null,
+        'updated_at'  => null,
+    ];
 
-    [$controller, $authService] = makeTaskController($orch);
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('approveTask')
+        ->once()
+        ->withArgs(function (int $taskId, int $userId, array $batch): bool {
+            return $batch[0]['provider_call_id'] === 'call_valid';
+        })
+        ->andReturn($taskResource);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -396,7 +502,13 @@ it('destroy throws UnauthenticatedException when not logged in', function (): vo
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('destroy returns 404 for unknown task', function (): void {
-    [$controller, $authService] = makeTaskController();
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('deleteTask')
+        ->once()
+        ->with(99999, 1)
+        ->andReturn(false);
+
+    [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);
 
     $req = jsonRequest('DELETE', '/api/v1/tasks/99999');
@@ -407,7 +519,13 @@ it('destroy returns 404 for unknown task', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('destroy returns 404 for task belonging to another user', function (): void {
-    [$controller, $authService] = makeTaskController();
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('deleteTask')
+        ->once()
+        ->with(Mockery::any(), Mockery::any())
+        ->andReturn(false);
+
+    [$controller, $authService] = makeTaskController($taskService);
     $userId = $authService->register('other@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'other@example.com');
 
@@ -429,7 +547,7 @@ it('destroy returns 404 for task belonging to another user', function (): void {
     ]);
 
     // Authenticated as a different user — the seeded user has no access
-    [$controller, $authService] = makeTaskController();
+    [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService); // logs in as 'task@example.com'
 
     $req = jsonRequest('DELETE', "/api/v1/tasks/{$otherTask->id}");
@@ -440,7 +558,13 @@ it('destroy returns 404 for task belonging to another user', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('destroy deletes task and returns 204', function (): void {
-    [$controller, $authService] = makeTaskController();
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('deleteTask')
+        ->once()
+        ->with(Mockery::any(), Mockery::any())
+        ->andReturn(true);
+
+    [$controller, $authService] = makeTaskController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
@@ -457,11 +581,15 @@ it('destroy deletes task and returns 204', function (): void {
 
     $resp = $controller->destroy($req);
     expect($resp->getStatusCode())->toBe(204);
-    expect(Task::find($task->id))->toBeNull();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('destroy cascade-deletes task_history rows', function (): void {
-    [$controller, $authService] = makeTaskController();
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('deleteTask')
+        ->once()
+        ->andReturn(true);
+
+    [$controller, $authService] = makeTaskController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
@@ -479,13 +607,18 @@ it('destroy cascade-deletes task_history rows', function (): void {
     $req = jsonRequest('DELETE', "/api/v1/tasks/{$task->id}");
     $req->attributes->set('taskId', $task->id);
 
-    $controller->destroy($req);
-
-    expect(TaskHistory::where('task_id', $task->id)->count())->toBe(0);
+    $resp = $controller->destroy($req);
+    expect($resp->getStatusCode())->toBe(204);
+    // Cascade delete is tested in TaskService integration tests
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('destroy cascade-deletes tool_calls rows', function (): void {
-    [$controller, $authService] = makeTaskController();
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('deleteTask')
+        ->once()
+        ->andReturn(true);
+
+    [$controller, $authService] = makeTaskController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
@@ -512,9 +645,9 @@ it('destroy cascade-deletes tool_calls rows', function (): void {
     $req = jsonRequest('DELETE', "/api/v1/tasks/{$task->id}");
     $req->attributes->set('taskId', $task->id);
 
-    $controller->destroy($req);
-
-    expect(ToolCall::where('task_id', $task->id)->count())->toBe(0);
+    $resp = $controller->destroy($req);
+    expect($resp->getStatusCode())->toBe(204);
+    // Cascade delete is tested in TaskService integration tests
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -522,7 +655,13 @@ it('destroy cascade-deletes tool_calls rows', function (): void {
 // ---------------------------------------------------------------------------
 
 it('retry returns 404 for unknown task', function (): void {
-    [$controller, $authService] = makeTaskController();
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('retryTask')
+        ->once()
+        ->with(99999, 1)
+        ->andThrow(new InvalidArgumentException('Task not found.'));
+
+    [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);
 
     $req = jsonRequest('POST', '/api/v1/tasks/99999/retry');
@@ -533,8 +672,14 @@ it('retry returns 404 for unknown task', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('retry returns 409 when task is not FAILED', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('retryTask')
+        ->once()
+        ->with(1, 1)
+        ->andThrow(new InvalidArgumentException('Only failed tasks can be retried.'));
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -553,29 +698,29 @@ it('retry returns 409 when task is not FAILED', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('retry calls orchestrator->start() with same agent_id and user_prompt', function (): void {
-    $agentIdCapture = null;
-    $promptCapture = '';
-
-    $mockNewTask = new Task([
+    $taskResource = [
         'id'          => 2,
         'agent_id'    => 1,
-        'user_id'     => 1,
         'status'      => 'RUNNING',
         'user_prompt' => 'Retry me',
+        'final_response' => null,
         'step_count'  => 0,
         'max_steps'   => 10,
-    ]);
-    $mockNewTask->id = 2;
+        'created_at'  => null,
+        'updated_at'  => null,
+    ];
 
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->expects('start')->once()->withArgs(function (int $agentId, string $prompt, int $maxSteps) use (&$agentIdCapture, &$promptCapture): bool {
-        $agentIdCapture = $agentId;
-        $promptCapture = $prompt;
-        return true;
-    })->andReturn($mockNewTask);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('retryTask')
+        ->once()
+        ->withArgs(function (int $taskId, int $userId) use (&$capturedTaskId): bool {
+            $capturedTaskId = $taskId;
+            return $taskId > 0 && $userId === 1;
+        })
+        ->andReturn($taskResource);
 
-    [$controller, $authService] = makeTaskController($orch);
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -593,28 +738,28 @@ it('retry calls orchestrator->start() with same agent_id and user_prompt', funct
 
     $resp = $controller->retry($req);
     expect($resp->getStatusCode())->toBe(201);
-
-    expect($agentIdCapture)->toBe($agent->id);
-    expect($promptCapture)->toBe('Retry me');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('retry returns 201 with the new task resource', function (): void {
-    $mockTask = new Task([
+    $taskResource = [
         'id'          => 2,
         'agent_id'    => 1,
-        'user_id'     => 1,
         'status'      => 'RUNNING',
         'user_prompt' => 'Retry me',
+        'final_response' => null,
         'step_count'  => 0,
         'max_steps'   => 10,
-    ]);
-    $mockTask->id = 2;
+        'created_at'  => null,
+        'updated_at'  => null,
+    ];
 
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->allows('start')->andReturn($mockTask);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('retryTask')
+        ->once()
+        ->andReturn($taskResource);
 
-    [$controller, $authService] = makeTaskController($orch);
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -641,22 +786,33 @@ it('retry returns 201 with the new task resource', function (): void {
 // ---------------------------------------------------------------------------
 
 it('show returns error_code and error_message when set on task', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
-
-    $task = Task::create([
-        'agent_id'    => $agent->id,
-        'user_id'     => $userId,
+    $taskDetail = [
+        'id'          => 1,
+        'agent_id'    => 1,
         'status'      => 'FAILED',
         'user_prompt' => 'Error test',
+        'final_response' => null,
         'step_count'  => 1,
         'max_steps'   => 10,
+        'created_at'  => null,
+        'updated_at'  => null,
         'error_code'  => 'SERVER_OVERLOADED',
         'error_message' => 'The AI service is under high load.',
-    ]);
+        'tool_calls'  => [],
+        'history'     => [],
+    ];
 
-    $req = jsonRequest('GET', "/api/v1/tasks/{$task->id}");
-    $req->attributes->set('taskId', $task->id);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTaskWithHistory')
+        ->once()
+        ->with(1, 1, null)
+        ->andReturn($taskDetail);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
+
+    $req = jsonRequest('GET', '/api/v1/tasks/1');
+    $req->attributes->set('taskId', 1);
 
     $resp = $controller->show($req);
     expect($resp->getStatusCode())->toBe(200);
@@ -671,17 +827,26 @@ it('show returns error_code and error_message when set on task', function (): vo
 // ---------------------------------------------------------------------------
 
 it('continue returns 200 and resets task for completed task', function (): void {
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->expects('continue')->once()->with(
-        Mockery::any(),
-        'continue prompt',
-        null,
-    )->andReturnUsing(function ($taskId) {
-        return Task::find($taskId);
-    });
+    $taskResource = [
+        'id'          => 1,
+        'agent_id'    => 1,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'original',
+        'final_response' => null,
+        'step_count'  => 0,
+        'max_steps'   => 10,
+        'created_at'  => null,
+        'updated_at'  => null,
+    ];
 
-    [$controller, $authService] = makeTaskController($orch);
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('continueTask')
+        ->once()
+        ->with(1, 1, 'continue prompt', null)
+        ->andReturn($taskResource);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -700,17 +865,26 @@ it('continue returns 200 and resets task for completed task', function (): void 
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('continue returns 200 and resets task for failed task', function (): void {
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->expects('continue')->once()->with(
-        Mockery::any(),
-        'retry prompt',
-        20,
-    )->andReturnUsing(function ($taskId) {
-        return Task::find($taskId);
-    });
+    $taskResource = [
+        'id'          => 1,
+        'agent_id'    => 1,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'original',
+        'final_response' => null,
+        'step_count'  => 0,
+        'max_steps'   => 10,
+        'created_at'  => null,
+        'updated_at'  => null,
+    ];
 
-    [$controller, $authService] = makeTaskController($orch);
-    [$userId, $agent]          = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('continueTask')
+        ->once()
+        ->with(1, 1, 'retry prompt', 20)
+        ->andReturn($taskResource);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -732,8 +906,10 @@ it('continue returns 200 and resets task for failed task', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('continue returns 422 when prompt is missing', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -752,8 +928,10 @@ it('continue returns 422 when prompt is missing', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('continue returns 422 when additional_steps is out of range', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -777,8 +955,14 @@ it('continue returns 422 when additional_steps is out of range', function (): vo
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('continue returns 409 when task is not completed or failed', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('continueTask')
+        ->once()
+        ->with(1, 1, 'test', null)
+        ->andThrow(new InvalidArgumentException('Can only continue completed or failed tasks.'));
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -797,7 +981,13 @@ it('continue returns 409 when task is not completed or failed', function (): voi
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('continue returns 404 for unknown task', function (): void {
-    [$controller, $authService] = makeTaskController();
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('continueTask')
+        ->once()
+        ->with(99999, 1, 'test', null)
+        ->andThrow(new InvalidArgumentException('Task not found.'));
+
+    [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);
 
     $req = jsonRequest('POST', '/api/v1/tasks/99999/continue', ['prompt' => 'test']);
@@ -812,7 +1002,13 @@ it('continue returns 404 for unknown task', function (): void {
 // ---------------------------------------------------------------------------
 
 it('cancelRetryChain returns 404 for unknown task', function (): void {
-    [$controller, $authService] = makeTaskController();
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('cancelRetryChain')
+        ->once()
+        ->with(99999, 1)
+        ->andThrow(new InvalidArgumentException('Task not found.'));
+
+    [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);
 
     $req = jsonRequest('DELETE', '/api/v1/tasks/99999/cancel-retry-chain');
@@ -823,8 +1019,14 @@ it('cancelRetryChain returns 404 for unknown task', function (): void {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('cancelRetryChain returns 409 when task is not in a retry chain', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('cancelRetryChain')
+        ->once()
+        ->with(1, 1)
+        ->andThrow(new InvalidArgumentException('This task is not part of a retry chain.'));
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
         'agent_id'    => $agent->id,
@@ -844,8 +1046,16 @@ it('cancelRetryChain returns 409 when task is not in a retry chain', function ()
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('cancelRetryChain returns 204 and cancels chain for valid retry task', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]           = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('cancelRetryChain')
+        ->once()
+        ->withArgs(function (int $taskId, int $userId): bool {
+            return $taskId > 0 && $userId === 1;
+        })
+        ->andReturn(true);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $root = Task::create([
         'agent_id'    => $agent->id,
@@ -884,15 +1094,19 @@ it('cancelRetryChain returns 204 and cancels chain for valid retry task', functi
     $resp = $controller->cancelRetryChain($req);
     expect($resp->getStatusCode())->toBe(204);
 
-    $retry1->refresh();
-    $retry2->refresh();
-    expect($retry1->status)->toBe('CANCELLED');
-    expect($retry2->status)->toBe('CANCELLED');
+    // Note: With TaskService, the actual cancellation happens in the service
+    // This test verifies the controller properly delegates to the service
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('cancelRetryChain returns 404 when trying to cancel another users retry chain', function (): void {
-    [$controller, $authService] = makeTaskController();
-    [$userId, $agent]            = seedUserAndAgent($authService);
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('cancelRetryChain')
+        ->once()
+        ->with(Mockery::any(), Mockery::any())
+        ->andThrow(new InvalidArgumentException('Task not found.'));
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
 
     $otherUserId = $authService->register('other@example.com', 'Password1!');
     $otherUser = Spora\Models\User::where('email', 'other@example.com')->first();

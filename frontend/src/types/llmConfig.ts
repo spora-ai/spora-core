@@ -27,7 +27,11 @@ export interface LLMConfigResource {
   driver_name: string
   driver_display_name: string
   settings: Record<string, string>
+  context_window: number | null
+  max_tokens_output: number | null
   is_default: boolean
+  is_global: boolean
+  user_id: number | null
   created_at: string
   updated_at: string
 }

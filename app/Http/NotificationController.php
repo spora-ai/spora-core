@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use Illuminate\Support\Carbon;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
-use Spora\Models\Notification;
+use Spora\Services\NotificationServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -19,6 +18,7 @@ final class NotificationController
 {
     public function __construct(
         private readonly AuthService $authService,
+        private readonly NotificationServiceInterface $notificationService,
     ) {}
 
     /**
@@ -37,25 +37,13 @@ final class NotificationController
             $perPage = 20;
         }
 
-        $query = Notification::where('user_id', $userId)->orderByDesc('created_at');
-
-        if ($request->query->get('unread_only') === 'true') {
-            $query->whereNull('read_at');
-        }
-
-        $paginator = $query->paginate($perPage);
-
-        $data = $paginator->getCollection()->map(fn(Notification $n) => $this->resource($n))->all();
+        $unreadOnly = $request->query->get('unread_only') === 'true';
+        $result = $this->notificationService->getNotifications($userId, $perPage, $unreadOnly);
 
         return new JsonResponse([
             'data' => [
-                'notifications' => $data,
-                'pagination'   => [
-                    'total'       => $paginator->total(),
-                    'per_page'    => $paginator->perPage(),
-                    'current_page' => $paginator->currentPage(),
-                    'last_page'   => $paginator->lastPage(),
-                ],
+                'notifications' => $result['data'],
+                'pagination'    => $result['pagination'],
             ],
         ]);
     }
@@ -69,7 +57,7 @@ final class NotificationController
         $userId         = AuthGuard::requireAuth($this->authService);
         $notificationId = (int) $request->attributes->get('id', 0);
 
-        $notification = Notification::where('id', $notificationId)->where('user_id', $userId)->first();
+        $notification = $this->notificationService->markAsRead($notificationId, $userId);
 
         if ($notification === null) {
             return new JsonResponse(
@@ -78,12 +66,7 @@ final class NotificationController
             );
         }
 
-        if ($notification->read_at === null) {
-            $notification->read_at = Carbon::now();
-            $notification->save();
-        }
-
-        return new JsonResponse(['data' => ['notification' => $this->resource($notification)]]);
+        return new JsonResponse(['data' => ['notification' => $notification]]);
     }
 
     /**
@@ -94,7 +77,7 @@ final class NotificationController
     {
         $userId = AuthGuard::requireAuth($this->authService);
 
-        Notification::where('user_id', $userId)->whereNull('read_at')->update(['read_at' => Carbon::now()]);
+        $this->notificationService->markAllAsRead($userId);
 
         return new JsonResponse(['data' => ['marked' => true]]);
     }
@@ -108,30 +91,18 @@ final class NotificationController
         $userId         = AuthGuard::requireAuth($this->authService);
         $notificationId = (int) $request->attributes->get('id', 0);
 
-        $notification = Notification::where('id', $notificationId)->where('user_id', $userId)->first();
+        $deleted = $this->notificationService->deleteNotification($notificationId, $userId);
 
-        if ($notification === null) {
+        if (!$deleted) {
             return new JsonResponse(
                 ['error' => ['code' => 'NOT_FOUND', 'message' => 'Notification not found.']],
                 Response::HTTP_NOT_FOUND,
             );
         }
 
-        $notification->delete();
+        $response = new JsonResponse(null, Response::HTTP_NO_CONTENT);
+        $response->setContent('');
 
-        return new Response(null, Response::HTTP_NO_CONTENT);
-    }
-
-    private function resource(Notification $notification): array
-    {
-        return [
-            'id'         => $notification->id,
-            'type'       => $notification->type,
-            'title'      => $notification->title,
-            'body'       => $notification->body,
-            'data'       => $notification->data,
-            'read_at'    => $notification->read_at?->toIso8601String(),
-            'created_at' => $notification->created_at?->toIso8601String(),
-        ];
+        return $response;
     }
 }

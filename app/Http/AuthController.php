@@ -11,8 +11,8 @@ use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
-use Spora\Models\User;
 use Spora\Services\RateLimiter;
+use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -24,6 +24,7 @@ final class AuthController
 
     public function __construct(
         private readonly AuthService $authService,
+        private readonly UserServiceInterface $userService,
         private readonly array $config = [],
     ) {}
 
@@ -95,15 +96,13 @@ final class AuthController
         }
 
         $userId = $this->authService->currentUserId();
-        $user   = User::find($userId);
+        $result = $this->userService->getUser($userId);
+
+        $userData = $result !== null ? $result['user'] : ['id' => $userId, 'email' => (string) $body['email'], 'username' => null];
 
         return $this->withRateLimitHeaders(
             new JsonResponse(
-                ['data' => ['user' => [
-                    'id'       => $userId,
-                    'email'    => $user !== null ? $user->email : (string) $body['email'],
-                    'username' => $user !== null ? $user->username : null,
-                ]]],
+                ['data' => ['user' => $userData]],
                 Response::HTTP_OK,
             ),
             $clientIp,
@@ -128,20 +127,23 @@ final class AuthController
             return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
         }
 
-        $user = User::find($userId);
+        $result = $this->userService->getUser($userId);
 
-        if ($user === null) {
+        if ($result === null) {
             return $this->error('NOT_FOUND', 'User not found.', Response::HTTP_NOT_FOUND);
         }
 
-        $registered = (new DateTime())->setTimestamp((int) $user->registered)->format(DateTime::ATOM);
+        $user = $result['user'];
+        $registeredTimestamp = $user['registered'] ?? time();
+        $registered = (new DateTime())->setTimestamp((int) $registeredTimestamp)->format(DateTime::ATOM);
 
         return new JsonResponse(
             ['data' => ['user' => [
-                'id'         => (int) $user->id,
-                'email'      => $user->email,
-                'username'   => $user->username,
+                'id'         => $user['id'],
+                'email'      => $user['email'],
+                'username'   => $user['username'],
                 'registered' => $registered,
+                'is_admin'   => in_array('ADMIN', $user['roles'] ?? [], true),
             ]]],
             Response::HTTP_OK,
         );
@@ -190,24 +192,79 @@ final class AuthController
             return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         }
 
-        $user = User::find($userId);
-        if ($user === null) {
+        $result = $this->userService->updateUser($userId, $body);
+        if ($result === null) {
             return $this->error('NOT_FOUND', 'User not found.', Response::HTTP_NOT_FOUND);
         }
 
-        if (isset($body['username'])) {
-            $user->username = (string) $body['username'];
-        }
-        $user->save();
-
         return new JsonResponse(
-            ['data' => ['user' => [
-                'id'       => (int) $user->id,
-                'email'    => $user->email,
-                'username' => $user->username,
-            ]]],
+            ['data' => $result],
             Response::HTTP_OK,
         );
+    }
+
+    public function verify(Request $request, array $vars = []): JsonResponse
+    {
+        $selector = $vars['selector'] ?? '';
+        $token = $request->query->get('token', '');
+
+        if ($selector === '' || $token === '') {
+            return $this->error('VALIDATION_ERROR', 'The selector and token are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $result = $this->authService->confirmEmail($selector, $token);
+
+        if ($result) {
+            return new JsonResponse(['message' => 'Email verified successfully.'], Response::HTTP_OK);
+        }
+
+        return $this->error('INVALID_TOKEN', 'The verification token is invalid or has expired.', Response::HTTP_BAD_REQUEST);
+    }
+
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+
+        if ($this->missingFields($body, ['email'])) {
+            return $this->error('VALIDATION_ERROR', 'The field "email" is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $this->authService->forgotPassword((string) $body['email']);
+
+        return new JsonResponse(['message' => 'If an account with that email exists, a password reset email has been sent.'], Response::HTTP_OK);
+    }
+
+    public function resetPassword(Request $request): JsonResponse
+    {
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+
+        if ($this->missingFields($body, ['selector', 'token', 'password'])) {
+            return $this->error('VALIDATION_ERROR', 'The fields "selector", "token", and "password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        try {
+            $this->authService->resetPassword((string) $body['selector'], (string) $body['token'], (string) $body['password']);
+        } catch (\Delight\Auth\InvalidSelectorTokenPairException) {
+            return $this->error('INVALID_TOKEN', 'The selector or token is invalid.', Response::HTTP_BAD_REQUEST);
+        } catch (\Delight\Auth\TokenExpiredException) {
+            return $this->error('INVALID_TOKEN', 'The token is invalid or has expired.', Response::HTTP_BAD_REQUEST);
+        } catch (\Delight\Auth\ResetDisabledException) {
+            return $this->error('RESET_DISABLED', 'Password reset is disabled.', Response::HTTP_FORBIDDEN);
+        } catch (\Delight\Auth\InvalidPasswordException $e) {
+            return $this->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Delight\Auth\AuthError) {
+            return $this->error('AUTH_ERROR', 'An authentication error occurred.', Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        return new JsonResponse(['message' => 'Password reset successfully.'], Response::HTTP_OK);
     }
 
     private function getClientIp(Request $request): string

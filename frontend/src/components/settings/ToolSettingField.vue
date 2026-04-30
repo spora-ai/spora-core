@@ -156,7 +156,7 @@ function onInput(e: Event): void {
       :value="String(modelValue ?? '')"
       @input="onInput"
       type="text"
-      :placeholder="field.description"
+      :placeholder="field.default != null ? String(field.default) : field.description"
       :required="field.required"
       :disabled="disabled"
       autocomplete="off"

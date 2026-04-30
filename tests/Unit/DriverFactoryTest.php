@@ -49,7 +49,7 @@ function createConfigForTest(
     $config->user_id = $userId;
     $config->name = $name;
     $config->driver_class = $driverClass;
-    $config->settings = $service->encryptSettings($settings);
+    $config->settings = json_encode($service->encodeSettings($driverClass, $settings));
     $config->is_default = $isDefault;
     $config->save();
 
@@ -247,8 +247,8 @@ test('makeDriverFromConfig uses global llmTimeout when config has no timeout', f
 // Decryption failure handling
 // ---------------------------------------------------------------------------
 
-test('makeFromAgent throws RuntimeException with config name when settings decryption fails', function (): void {
-    // Encrypt settings with key A
+test('makeFromAgent handles decryption failure gracefully — api_key null, other fields readable', function (): void {
+    // serviceA creates a config with per-field encrypted api_key + plain model/base_url
     $serviceA = makeSecureLLMConfigService();
     $config   = createConfigForTest(
         'Broken Config',
@@ -259,7 +259,8 @@ test('makeFromAgent throws RuntimeException with config name when settings decry
         userId: 1,
     );
 
-    // Factory uses a DIFFERENT key (service B) → decryption will fail
+    // Factory uses a DIFFERENT key (service B) → api_key decryption fails → becomes null
+    // Other fields (model, base_url) are plain JSON and readable.
     $serviceB = makeSecureLLMConfigService();
     $factory  = new DriverFactory(new NullLogger(), $serviceB);
 
@@ -267,13 +268,18 @@ test('makeFromAgent throws RuntimeException with config name when settings decry
     $agent->user_id           = 1;
     $agent->llm_driver_config_id = $config->id;
 
-    expect(fn() => $factory->makeFromAgent($agent))
-        ->toThrow(RuntimeException::class, 'Broken Config');
+    // Must NOT throw — decodeSettings catches the error and returns partial settings
+    $driver = $factory->makeFromAgent($agent);
+
+    expect($driver)->toBeInstanceOf(OpenAICompatibleDriver::class);
+    // api_key decryption failed → null → cast to empty string (no getApiKey method)
+    // model and base_url are plain JSON, readable by serviceB
+    expect($driver->getModelName())->toBe('gpt-4o');
 
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });
 
-test('makeFromAgent wraps decryption failure including config id in message', function (): void {
+test('makeFromAgent gracefully handles wrong key — partial settings returned, no exception thrown', function (): void {
     $serviceA = makeSecureLLMConfigService();
     $config   = createConfigForTest(
         'Config X',
@@ -291,15 +297,12 @@ test('makeFromAgent wraps decryption failure including config id in message', fu
     $agent->user_id           = 1;
     $agent->llm_driver_config_id = $config->id;
 
-    try {
-        $factory->makeFromAgent($agent);
-        $this->fail('Expected RuntimeException was not thrown');
-    } catch (RuntimeException $e) {
-        // Message must include config name and id for easy debugging
-        expect($e->getMessage())->toContain('Config X')
-            ->and($e->getMessage())->toContain((string) $config->id)
-            ->and($e->getPrevious())->not()->toBeNull();
-    }
+    // No exception — partial settings returned, api_key empty, model/base_url readable
+    $driver = $factory->makeFromAgent($agent);
+
+    expect($driver)->toBeInstanceOf(OpenAICompatibleDriver::class);
+    expect($driver->getModelName())->toBe('gpt-4o');
+    // api_key decryption failed → null → cast to empty string (no getApiKey method)
 
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });

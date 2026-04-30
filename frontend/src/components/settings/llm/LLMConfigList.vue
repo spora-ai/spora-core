@@ -37,7 +37,19 @@ const llmStore = useLlmConfigsStore()
           <div class="flex items-center gap-2">
             <span class="text-sm font-medium">{{ config.name }}</span>
             <span
-              v-if="config.is_default"
+              v-if="config.is_global && config.is_default"
+              class="text-xs rounded-full bg-accent/10 text-accent px-1.5 py-0.5 font-medium"
+            >
+              Global Default
+            </span>
+            <span
+              v-else-if="config.is_global"
+              class="text-xs rounded-full bg-muted text-muted-foreground px-1.5 py-0.5 font-medium"
+            >
+              Global
+            </span>
+            <span
+              v-else-if="config.is_default"
               class="text-xs rounded-full bg-primary/10 text-primary px-1.5 py-0.5 font-medium"
             >
               Default

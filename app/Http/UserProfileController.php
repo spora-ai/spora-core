@@ -4,12 +4,10 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use Illuminate\Support\Carbon;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
-use Spora\Models\User;
-use Spora\Models\UserLocation;
+use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -18,6 +16,7 @@ final class UserProfileController
 {
     public function __construct(
         private readonly AuthService $authService,
+        private readonly UserServiceInterface $userService,
     ) {}
 
     public function getProfile(Request $request): JsonResponse
@@ -25,19 +24,13 @@ final class UserProfileController
         AuthGuard::requireAuth($this->authService);
 
         $userId = $this->authService->currentUserId();
-        $user = User::find($userId);
+        $result = $this->userService->getProfile($userId);
 
-        if ($user === null) {
+        if ($result === null) {
             return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'User not found.']], 404);
         }
 
-        return new JsonResponse(['data' => [
-            'name'         => $user->name,
-            'date_of_birth' => $user->date_of_birth?->format('Y-m-d'),
-            'about_me'     => $user->about_me,
-            'height_cm'    => $user->height_cm,
-            'weight_kg'    => $user->weight_kg,
-        ]]);
+        return new JsonResponse(['data' => $result['profile']]);
     }
 
     public function putProfile(Request $request): JsonResponse
@@ -45,11 +38,6 @@ final class UserProfileController
         AuthGuard::requireAuth($this->authService);
 
         $userId = $this->authService->currentUserId();
-        $user = User::find($userId);
-
-        if ($user === null) {
-            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'User not found.']], 404);
-        }
 
         try {
             $body = $this->decodeJson($request);
@@ -60,31 +48,9 @@ final class UserProfileController
             );
         }
 
-        if (isset($body['name'])) {
-            $user->name = trim((string) $body['name']) ?: null;
-        }
-        if (isset($body['date_of_birth'])) {
-            $user->date_of_birth = $body['date_of_birth'] !== '' ? Carbon::parse($body['date_of_birth']) : null;
-        }
-        if (isset($body['about_me'])) {
-            $user->about_me = trim((string) $body['about_me']) ?: null;
-        }
-        if (isset($body['height_cm'])) {
-            $user->height_cm = $body['height_cm'] !== '' ? (float) $body['height_cm'] : null;
-        }
-        if (isset($body['weight_kg'])) {
-            $user->weight_kg = $body['weight_kg'] !== '' ? (float) $body['weight_kg'] : null;
-        }
+        $result = $this->userService->updateProfile($userId, $body);
 
-        $user->save();
-
-        return new JsonResponse(['data' => [
-            'name'         => $user->name,
-            'date_of_birth' => $user->date_of_birth?->format('Y-m-d'),
-            'about_me'     => $user->about_me,
-            'height_cm'    => $user->height_cm,
-            'weight_kg'    => $user->weight_kg,
-        ]]);
+        return new JsonResponse(['data' => $result['profile']]);
     }
 
     public function getLocations(Request $request): JsonResponse
@@ -92,21 +58,9 @@ final class UserProfileController
         AuthGuard::requireAuth($this->authService);
 
         $userId = $this->authService->currentUserId();
-        $user = User::find($userId);
+        $locations = $this->userService->getLocations($userId);
 
-        if ($user === null) {
-            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'User not found.']], 404);
-        }
-        $locations = $user->locations ?? collect();
-
-        $data = $locations->map(fn(UserLocation $loc) => [
-            'id'        => $loc->id,
-            'name'      => $loc->name,
-            'address'   => $loc->address,
-            'is_default' => $loc->is_default,
-        ])->values()->toArray();
-
-        return new JsonResponse(['data' => ['locations' => $data]]);
+        return new JsonResponse(['data' => ['locations' => $locations]]);
     }
 
     public function postLocation(Request $request): JsonResponse
@@ -114,9 +68,6 @@ final class UserProfileController
         AuthGuard::requireAuth($this->authService);
 
         $userId = $this->authService->currentUserId();
-        if (User::find($userId) === null) {
-            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'User not found.']], 404);
-        }
 
         try {
             $body = $this->decodeJson($request);
@@ -137,23 +88,9 @@ final class UserProfileController
             return new JsonResponse(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'address is required.']], 422);
         }
 
-        if (($body['is_default'] ?? false) === true) {
-            UserLocation::where('user_id', $userId)->update(['is_default' => false]);
-        }
+        $result = $this->userService->createLocation($userId, $body);
 
-        $location = UserLocation::create([
-            'user_id'    => $userId,
-            'name'       => $name,
-            'address'    => $address,
-            'is_default' => ($body['is_default'] ?? false) === true,
-        ]);
-
-        return new JsonResponse(['data' => [
-            'id'        => $location->id,
-            'name'      => $location->name,
-            'address'   => $location->address,
-            'is_default' => $location->is_default,
-        ]], 201);
+        return new JsonResponse(['data' => $result['location']], 201);
     }
 
     public function putLocation(Request $request, int $id): JsonResponse
@@ -161,11 +98,6 @@ final class UserProfileController
         AuthGuard::requireAuth($this->authService);
 
         $userId = $this->authService->currentUserId();
-        $location = UserLocation::where('id', $id)->where('user_id', $userId)->first();
-
-        if ($location === null) {
-            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Location not found.']], 404);
-        }
 
         try {
             $body = $this->decodeJson($request);
@@ -181,30 +113,22 @@ final class UserProfileController
             if ($name === '') {
                 return new JsonResponse(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'name is required and cannot be empty.']], 422);
             }
-            $location->name = $name;
         }
+
         if (isset($body['address'])) {
             $address = trim((string) $body['address']);
             if ($address === '') {
                 return new JsonResponse(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'address is required and cannot be empty.']], 422);
             }
-            $location->address = $address;
-        }
-        if (isset($body['is_default'])) {
-            if ($body['is_default'] === true) {
-                UserLocation::where('user_id', $userId)->where('id', '!=', $id)->update(['is_default' => false]);
-            }
-            $location->is_default = $body['is_default'] === true;
         }
 
-        $location->save();
+        $result = $this->userService->updateLocation($id, $userId, $body);
 
-        return new JsonResponse(['data' => [
-            'id'        => $location->id,
-            'name'      => $location->name,
-            'address'   => $location->address,
-            'is_default' => $location->is_default,
-        ]]);
+        if ($result === null) {
+            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Location not found.']], 404);
+        }
+
+        return new JsonResponse(['data' => $result['location']]);
     }
 
     public function deleteLocation(Request $request, int $id): JsonResponse
@@ -212,13 +136,11 @@ final class UserProfileController
         AuthGuard::requireAuth($this->authService);
 
         $userId = $this->authService->currentUserId();
-        $location = UserLocation::where('id', $id)->where('user_id', $userId)->first();
+        $deleted = $this->userService->deleteLocation($id, $userId);
 
-        if ($location === null) {
+        if (!$deleted) {
             return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Location not found.']], 404);
         }
-
-        $location->delete();
 
         return new JsonResponse(['data' => ['deleted' => true]]);
     }

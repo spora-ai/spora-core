@@ -12,6 +12,7 @@ use Spora\Core\SecurityManagerInterface;
 use Spora\Core\ValueObjects\EncryptedValue;
 use Spora\Models\AgentToolOverride;
 use Spora\Models\ToolConfiguration;
+use Spora\Models\ToolUserSetting;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolSetting;
 
@@ -69,12 +70,18 @@ class ToolConfigService
 
     /**
      * Persist global settings for a tool class.
-     * Password fields are encrypted; other fields stored as plain strings.
+     * Settings are wholesale-encrypted; omitted keys are merged from existing stored values.
      */
     public function putGlobalSettings(string $toolClass, array $settings): void
     {
-        $encoded  = $this->encodeSettings($toolClass, $settings);
         $toolName = $this->getToolName($toolClass);
+
+        // Merge with existing stored settings so omitted fields are preserved.
+        // Only fields present in $settings are overwritten; everything else carries over.
+        $existing = $this->getGlobalSettings($toolClass);
+        $merged   = array_merge($existing, $settings);
+
+        $encrypted = $this->encryptSettings($merged);
 
         $existing = ToolConfiguration::where('tool_class', $toolClass)->first();
 
@@ -83,18 +90,72 @@ class ToolConfigService
                 ->where('tool_class', $toolClass)
                 ->update([
                     'tool_name'  => $toolName,
-                    'settings'   => json_encode($encoded),
+                    'settings'   => $encrypted,
                     'updated_at' => date('Y-m-d H:i:s'),
                 ]);
         } else {
             Capsule::table('tool_configurations')->insert([
                 'tool_class'  => $toolClass,
                 'tool_name'   => $toolName,
-                'settings'    => json_encode($encoded),
+                'settings'    => $encrypted,
                 'created_at'  => date('Y-m-d H:i:s'),
                 'updated_at'  => date('Y-m-d H:i:s'),
             ]);
         }
+    }
+
+    /**
+     * Load user-specific settings for a tool class, decrypting password fields.
+     *
+     * @return array<string, mixed>
+     */
+    public function getUserSettings(string $toolClass, int $userId): array
+    {
+        $model = ToolUserSetting::where('user_id', $userId)
+            ->where('tool_class', $toolClass)
+            ->first();
+
+        if ($model === null) {
+            return [];
+        }
+
+        return $this->decodeSettings($toolClass, $model->getRawOriginal('settings'));
+    }
+
+    /**
+     * Persist user-specific settings for a tool class.
+     * Password fields are encrypted; other fields stored as plain strings.
+     *
+     * @return array<string, mixed> Decrypted settings (for immediate use)
+     */
+    public function putUserSettings(string $toolClass, int $userId, array $settings): array
+    {
+        $filtered  = $this->filterSettings($settings);
+        $encrypted = $this->encryptSettings($filtered);
+
+        $existing = ToolUserSetting::where('user_id', $userId)
+            ->where('tool_class', $toolClass)
+            ->first();
+
+        if ($existing !== null) {
+            Capsule::table('tool_user_settings')
+                ->where('user_id', $userId)
+                ->where('tool_class', $toolClass)
+                ->update([
+                    'settings'   => $encrypted,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+        } else {
+            Capsule::table('tool_user_settings')->insert([
+                'user_id'    => $userId,
+                'tool_class' => $toolClass,
+                'settings'   => $encrypted,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+        }
+
+        return $this->decryptSettings($encrypted);
     }
 
     /**
@@ -159,8 +220,8 @@ class ToolConfigService
      */
     public function putAgentOverride(string $toolClass, int $agentId, array $settings): void
     {
-        $scopeMap       = $this->getScopeMap($toolClass);
-        $agentSettings  = [];
+        $scopeMap      = $this->getScopeMap($toolClass);
+        $agentSettings = [];
 
         foreach ($settings as $key => $value) {
             if (($scopeMap[$key] ?? 'agent') === 'agent') {
@@ -168,17 +229,8 @@ class ToolConfigService
             }
         }
 
-        $passwordKeys = $this->getPasswordKeys($toolClass);
-        $encoded      = [];
-
-        foreach ($agentSettings as $key => $value) {
-            if (in_array($key, $passwordKeys, true) && $value !== null && $value !== '') {
-                $encrypted     = $this->security->encrypt((string) $value);
-                $encoded[$key] = $encrypted->toStorageString();
-            } else {
-                $encoded[$key] = $value;
-            }
-        }
+        $filtered  = $this->filterSettings($agentSettings);
+        $encrypted = $this->encryptSettings($filtered);
 
         $existing = AgentToolOverride::where('agent_id', $agentId)
             ->where('tool_class', $toolClass)
@@ -189,14 +241,14 @@ class ToolConfigService
                 ->where('agent_id', $agentId)
                 ->where('tool_class', $toolClass)
                 ->update([
-                    'settings'   => json_encode($encoded),
+                    'settings'   => $encrypted,
                     'updated_at' => date('Y-m-d H:i:s'),
                 ]);
         } else {
             Capsule::table('agent_tool_overrides')->insert([
                 'agent_id'   => $agentId,
                 'tool_class' => $toolClass,
-                'settings'   => json_encode($encoded),
+                'settings'   => $encrypted,
                 'created_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
@@ -230,8 +282,54 @@ class ToolConfigService
             return [];
         }
 
-        $data = json_decode($rawJson, true);
+        if ($this->isEncryptedBlob($rawJson)) {
+            return $this->decryptSettings($rawJson);
+        }
 
+        return $this->legacyDecodeSettings($toolClass, $rawJson);
+    }
+
+    /**
+     * Encrypt a settings array to a storage string (wholesale: entire JSON blob encrypted).
+     *
+     * @param array<string, mixed> $settings
+     */
+    public function encryptSettings(array $settings): string
+    {
+        $encrypted = $this->security->encrypt(json_encode($settings, JSON_THROW_ON_ERROR));
+        return $encrypted->toStorageString();
+    }
+
+    /**
+     * Decrypt a storage string back to a plain settings array.
+     *
+     * @return array<string, mixed>
+     */
+    public function decryptSettings(string $storageString): array
+    {
+        $encrypted = new EncryptedValue($storageString);
+        $json = $this->security->decrypt($encrypted);
+        /** @var array<string, mixed> $decoded */
+        $decoded = json_decode($json, true) ?? [];
+        return $decoded;
+    }
+
+    /**
+     * Detect whether a raw DB value is an encrypted blob (new format) or plain JSON (legacy).
+     */
+    private function isEncryptedBlob(string $raw): bool
+    {
+        return $this->security->looksEncrypted($raw);
+    }
+
+    /**
+     * Decode legacy plain-JSON stored settings (per-field password decryption).
+     *
+     * @return array<string, mixed>
+     */
+    private function legacyDecodeSettings(string $toolClass, string $rawJson): array
+    {
+        $data = json_decode($rawJson, true);
         if (!is_array($data)) {
             return [];
         }
@@ -256,26 +354,14 @@ class ToolConfigService
     }
 
     /**
-     * Encode settings for DB storage, encrypting password fields.
+     * Filter settings: remove fields set to the "***" sentinel (preserve-existing marker).
      *
      * @param  array<string, mixed> $settings
      * @return array<string, mixed>
      */
-    private function encodeSettings(string $toolClass, array $settings): array
+    private function filterSettings(array $settings): array
     {
-        $passwordKeys = $this->getPasswordKeys($toolClass);
-        $encoded      = [];
-
-        foreach ($settings as $key => $value) {
-            if (in_array($key, $passwordKeys, true) && $value !== null && $value !== '') {
-                $encrypted     = $this->security->encrypt((string) $value);
-                $encoded[$key] = $encrypted->toStorageString();
-            } else {
-                $encoded[$key] = $value;
-            }
-        }
-
-        return $encoded;
+        return array_filter($settings, fn($v) => $v !== '***');
     }
 
     /**

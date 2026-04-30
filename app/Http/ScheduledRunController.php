@@ -6,17 +6,11 @@ namespace Spora\Http;
 
 use Cron\CronExpression;
 use DateTimeImmutable;
-use DateTimeZone;
-use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
-use Spora\Agents\OrchestratorInterface;
+use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthGuard;
-use Spora\Models\Agent;
-use Spora\Models\AgentPromptTemplate;
-use Spora\Models\ScheduledRun;
-use Spora\Models\ScheduledRunNext;
-use Spora\Services\MercurePublisherInterface;
+use Spora\Services\ScheduledRunServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -26,8 +20,7 @@ final class ScheduledRunController
 {
     public function __construct(
         private readonly AuthService $authService,
-        private readonly OrchestratorInterface $orchestrator,
-        private readonly MercurePublisherInterface $mercure,
+        private readonly ScheduledRunServiceInterface $scheduledRunService,
     ) {}
 
     /**
@@ -36,19 +29,15 @@ final class ScheduledRunController
     public function index(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
+        $agentId = (int) $request->attributes->get('id', 0);
 
-        if ($agent === null) {
+        $runs = $this->scheduledRunService->getRunsForAgent($agentId, $userId);
+
+        if ($runs === null) {
             return $this->notFound();
         }
 
-        $runs = ScheduledRun::with('template')
-            ->where('agent_id', $agent->id)
-            ->orderByDesc('created_at')
-            ->get()
-            ->map(fn(ScheduledRun $r) => $this->resource($r));
-
-        return new JsonResponse(['data' => ['scheduled_runs' => $runs->all()]]);
+        return new JsonResponse(['data' => ['scheduled_runs' => $runs]]);
     }
 
     /**
@@ -57,11 +46,7 @@ final class ScheduledRunController
     public function store(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
-
-        if ($agent === null) {
-            return $this->notFound();
-        }
+        $agentId = (int) $request->attributes->get('id', 0);
 
         try {
             $body = $this->decodeJson($request);
@@ -74,46 +59,15 @@ final class ScheduledRunController
             return $validationError;
         }
 
-        $isRecurring = !empty($body['cron_expression']);
-        $nextRunAt = $isRecurring
-            ? $this->computeNextRunAt($body['cron_expression'], $body['timezone'] ?? 'UTC')
-            : $this->computeOneShotNextRunAt($body['run_at'], $body['timezone'] ?? 'UTC');
-
-        $id = Capsule::table('scheduled_runs')->insertGetId([
-            'agent_id'          => $agent->id,
-            'template_id'       => isset($body['template_id']) ? (int) $body['template_id'] : null,
-            'raw_prompt'        => isset($body['raw_prompt']) ? trim((string) $body['raw_prompt']) : null,
-            'cron_expression'   => $isRecurring ? trim((string) $body['cron_expression']) : null,
-            'run_at'            => !$isRecurring && isset($body['run_at'])
-                ? $this->normalizeRunAtToUtc($body['run_at'])
-                : null,
-            'timezone'          => trim((string) ($body['timezone'] ?? 'UTC')),
-            'max_steps_override' => isset($body['max_steps_override']) ? (int) $body['max_steps_override'] : null,
-            'is_active'         => isset($body['is_active']) ? ($body['is_active'] ? 1 : 0) : 1,
-            'last_run_at'       => null,
-            'next_run_at'       => $nextRunAt,
-            'user_id'           => $userId,
-            'created_at'        => date('Y-m-d H:i:s'),
-            'updated_at'        => date('Y-m-d H:i:s'),
-        ]);
-
-        // Insert first PENDING entry into scheduled_runs_next
-        if ($nextRunAt !== null) {
-            Capsule::table('scheduled_runs_next')->insert([
-                'scheduled_run_id' => $id,
-                'due_at'           => $nextRunAt,
-                'status'           => ScheduledRunNext::STATUS_PENDING,
-                'created_at'       => date('Y-m-d H:i:s'),
-                'updated_at'       => date('Y-m-d H:i:s'),
-            ]);
+        try {
+            $result = $this->scheduledRunService->createRun($agentId, $userId, $body);
+            return new JsonResponse(
+                ['data' => $result],
+                Response::HTTP_CREATED,
+            );
+        } catch (RuntimeException) {
+            return $this->notFound();
         }
-
-        $run = ScheduledRun::find($id);
-
-        return new JsonResponse(
-            ['data' => ['scheduled_run' => $this->resource($run)]],
-            Response::HTTP_CREATED,
-        );
     }
 
     /**
@@ -122,19 +76,16 @@ final class ScheduledRunController
     public function show(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
+        $agentId = (int) $request->attributes->get('id', 0);
+        $runId = (int) $request->attributes->get('runId', 0);
 
-        if ($agent === null) {
+        $result = $this->scheduledRunService->getRun($runId, $agentId, $userId);
+
+        if ($result === null) {
             return $this->notFound();
         }
 
-        $run = $this->findRun((int) $request->attributes->get('runId', 0), $agent->id);
-
-        if ($run === null) {
-            return $this->notFound();
-        }
-
-        return new JsonResponse(['data' => ['scheduled_run' => $this->resource($run)]]);
+        return new JsonResponse(['data' => $result]);
     }
 
     /**
@@ -143,17 +94,8 @@ final class ScheduledRunController
     public function update(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
-
-        if ($agent === null) {
-            return $this->notFound();
-        }
-
-        $run = $this->findRun((int) $request->attributes->get('runId', 0), $agent->id);
-
-        if ($run === null) {
-            return $this->notFound();
-        }
+        $agentId = (int) $request->attributes->get('id', 0);
+        $runId = (int) $request->attributes->get('runId', 0);
 
         try {
             $body = $this->decodeJson($request);
@@ -161,63 +103,13 @@ final class ScheduledRunController
             return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         }
 
-        $allowed = ['template_id', 'raw_prompt', 'cron_expression', 'run_at', 'timezone', 'max_steps_override', 'is_active'];
-        $data    = array_intersect_key($body, array_flip($allowed));
+        $result = $this->scheduledRunService->updateRun($runId, $agentId, $userId, $body);
 
-        if ($data !== []) {
-            // Normalise booleans and ints
-            if (isset($data['is_active'])) {
-                $data['is_active'] = $data['is_active'] ? 1 : 0;
-            }
-            if (array_key_exists('template_id', $data)) {
-                $data['template_id'] = $data['template_id'] !== null ? (int) $data['template_id'] : null;
-            }
-            if (array_key_exists('max_steps_override', $data)) {
-                $data['max_steps_override'] = $data['max_steps_override'] !== null ? (int) $data['max_steps_override'] : null;
-            }
-
-            // Recompute next_run_at if scheduling fields change
-            if (array_key_exists('cron_expression', $data) || array_key_exists('run_at', $data) || array_key_exists('timezone', $data)) {
-                $cron     = $data['cron_expression'] ?? $run->cron_expression;
-
-                if (array_key_exists('run_at', $data) && is_string($data['run_at'])) {
-                    $data['run_at'] = $this->normalizeRunAtToUtc($data['run_at']);
-                }
-
-                $runAt    = $data['run_at'] ?? $run->run_at?->toDateTimeString();
-                $timezone = $data['timezone'] ?? $run->timezone;
-                $isRecurring = !empty($cron);
-                $data['next_run_at'] = $isRecurring
-                    ? $this->computeNextRunAt($cron, $timezone)
-                    : $this->computeOneShotNextRunAt($runAt, $timezone);
-
-                if ($data['next_run_at'] !== null) {
-                    $now = date('Y-m-d H:i:s');
-                    Capsule::table('scheduled_runs_next')
-                        ->where('scheduled_run_id', $run->id)
-                        ->where('status', ScheduledRunNext::STATUS_PENDING)
-                        ->update([
-                            'status'       => ScheduledRunNext::STATUS_SKIPPED,
-                            'completed_at' => $now,
-                        ]);
-
-                    Capsule::table('scheduled_runs_next')->insert([
-                        'scheduled_run_id' => $run->id,
-                        'due_at'          => $data['next_run_at'],
-                        'status'          => ScheduledRunNext::STATUS_PENDING,
-                        'created_at'      => $now,
-                        'updated_at'      => $now,
-                    ]);
-                }
-            }
-
-            Capsule::table('scheduled_runs')
-                ->where('id', $run->id)
-                ->update(array_merge($data, ['updated_at' => date('Y-m-d H:i:s')]));
-            $run->refresh();
+        if ($result === null) {
+            return $this->notFound();
         }
 
-        return new JsonResponse(['data' => ['scheduled_run' => $this->resource($run)]]);
+        return new JsonResponse(['data' => $result]);
     }
 
     /**
@@ -226,19 +118,14 @@ final class ScheduledRunController
     public function destroy(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
+        $agentId = (int) $request->attributes->get('id', 0);
+        $runId = (int) $request->attributes->get('runId', 0);
 
-        if ($agent === null) {
+        $deleted = $this->scheduledRunService->deleteRun($runId, $agentId, $userId);
+
+        if (!$deleted) {
             return $this->notFound();
         }
-
-        $run = $this->findRun((int) $request->attributes->get('runId', 0), $agent->id);
-
-        if ($run === null) {
-            return $this->notFound();
-        }
-
-        Capsule::table('scheduled_runs')->where('id', $run->id)->delete();
 
         return new JsonResponse(null, Response::HTTP_NO_CONTENT);
     }
@@ -251,124 +138,22 @@ final class ScheduledRunController
     public function trigger(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
-        $agent  = $this->findAgent((int) $request->attributes->get('id', 0), $userId);
-
-        if ($agent === null) {
-            return $this->notFound();
-        }
-
-        $run = $this->findRun((int) $request->attributes->get('runId', 0), $agent->id);
-
-        if ($run === null) {
-            return $this->notFound();
-        }
-
-        $template = null;
-        if ($run->template_id !== null) {
-            $template = AgentPromptTemplate::find($run->template_id);
-            if ($template === null) {
-                return $this->error(
-                    'TEMPLATE_NOT_FOUND',
-                    'The prompt template assigned to this scheduled run no longer exists.',
-                    Response::HTTP_NOT_FOUND,
-                );
-            }
-        }
-
-        // Determine prompt
-        $prompt = '';
-        if ($template !== null) {
-            $variablesRaw = $template->getAttribute('variables');
-            $variables = is_array($variablesRaw) ? $variablesRaw : [];
-            $prompt = $this->substituteVariables($template->prompt_template ?? '', $variables, $agent);
-        } else {
-            $prompt = $run->raw_prompt ?? '';
-            $prompt = $this->substituteVariables($prompt, [], $agent);
-        }
-
-        // Determine max_steps
-        $maxSteps = $run->max_steps_override
-            ?? ($template !== null
-                ? ($template->max_steps ?? $agent->max_steps)
-                : $agent->max_steps);
+        $agentId = (int) $request->attributes->get('id', 0);
+        $runId = (int) $request->attributes->get('runId', 0);
 
         try {
-            $task = $this->orchestrator->start($agent->id, $prompt, (int) $maxSteps);
-        } catch (Throwable $e) {
+            $result = $this->scheduledRunService->triggerRun($runId, $agentId, $userId);
+            return new JsonResponse(['data' => $result]);
+        } catch (RuntimeException $e) {
+            if (str_contains($e->getMessage(), 'not found')) {
+                return $this->notFound();
+            }
             return $this->error(
                 'ORCHESTRATOR_ERROR',
                 'Failed to start task: ' . $e->getMessage(),
                 Response::HTTP_INTERNAL_SERVER_ERROR,
             );
         }
-
-        $lastRunAt = date('Y-m-d H:i:s');
-
-        // Mark the current PENDING entry as DONE
-        Capsule::table('scheduled_runs_next')
-            ->where('scheduled_run_id', $run->id)
-            ->where('status', ScheduledRunNext::STATUS_PENDING)
-            ->update([
-                'status'       => ScheduledRunNext::STATUS_DONE,
-                'claimed_at'   => $lastRunAt,
-                'completed_at' => $lastRunAt,
-            ]);
-
-        // Insert next PENDING entry for recurring schedules
-        if ($run->cron_expression !== null) {
-            // Compute next due_at from the actual last run time, NOT wall-clock now.
-            // This prevents drift when the worker is delayed (same fix as in WorkerRunCommand).
-            $lastRunAtRaw = $run->last_run_at;
-            $lastRunAtUtc = $lastRunAtRaw
-                ? new DateTimeImmutable($lastRunAtRaw->toDateTimeString(), new DateTimeZone('UTC'))
-                : new DateTimeImmutable($lastRunAt, new DateTimeZone('UTC'));
-            $lastRunAtInScheduleTz = $lastRunAtUtc->setTimezone(new DateTimeZone($run->timezone));
-
-            $nextDueAt = (new CronExpression($run->cron_expression))
-                ->getNextRunDate($lastRunAtInScheduleTz, 0, false, $run->timezone)
-                ->setTimezone(new DateTimeZone('UTC'))
-                ->format('Y-m-d H:i:s');
-
-            Capsule::table('scheduled_runs_next')->insert([
-                'scheduled_run_id' => $run->id,
-                'due_at'          => $nextDueAt,
-                'status'          => ScheduledRunNext::STATUS_PENDING,
-                'created_at'      => $lastRunAt,
-                'updated_at'      => $lastRunAt,
-            ]);
-
-            // Update cached next_run_at on scheduled_runs
-            Capsule::table('scheduled_runs')
-                ->where('id', $run->id)
-                ->update([
-                    'last_run_at' => $lastRunAt,
-                    'next_run_at' => $nextDueAt,
-                    'updated_at'  => $lastRunAt,
-                ]);
-        } else {
-            // One-shot: update last_run_at, clear next_run_at cache, deactivate
-            Capsule::table('scheduled_runs')
-                ->where('id', $run->id)
-                ->update([
-                    'last_run_at' => $lastRunAt,
-                    'next_run_at' => null,
-                    'is_active'   => 0,
-                    'updated_at'  => $lastRunAt,
-                ]);
-        }
-
-        // Publish Mercure update
-        $taskData = [
-            'id'          => $task->id,
-            'agent_id'    => $task->agent_id,
-            'status'      => $task->status,
-            'user_prompt' => $task->user_prompt,
-        ];
-        $this->mercure->publish($task->id, $taskData);
-
-        $run->refresh();
-
-        return new JsonResponse(['data' => ['scheduled_run' => $this->resource($run), 'task_id' => $task->id]]);
     }
 
     /**
@@ -432,38 +217,6 @@ final class ScheduledRunController
         return null;
     }
 
-    private function computeNextRunAt(string $cronExpression, string $timezone): string
-    {
-        $cron = new CronExpression($cronExpression);
-        $now  = new DateTimeImmutable('now', new DateTimeZone($timezone));
-
-        return $cron->getNextRunDate($now, 0, false, $timezone)->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
-    }
-
-    private function computeOneShotNextRunAt(?string $runAt, string $timezone): ?string
-    {
-        if ($runAt === null) {
-            return null;
-        }
-
-        $dt = $this->parseDateTime($runAt);
-        if ($dt === false) {
-            return null;
-        }
-
-        return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
-    }
-
-    private function normalizeRunAtToUtc(string $runAt): string
-    {
-        $dt = $this->parseDateTime($runAt);
-        if ($dt === false) {
-            return $runAt; // store as-is if unparseable
-        }
-        // Parse the offset (e.g. +02:00) and convert to UTC, then strip offset for storage
-        return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
-    }
-
     private function parseDateTime(string $value): DateTimeImmutable|false
     {
         try {
@@ -471,115 +224,6 @@ final class ScheduledRunController
         } catch (Throwable) {
             return false;
         }
-    }
-
-    /**
-     * Substitute {{variable}} placeholders in a template string.
-     */
-    private function substituteVariables(string $template, array $variables, ?Agent $agent = null): string
-    {
-        $defaults = [];
-        foreach ($variables as $v) {
-            if (isset($v['key'])) {
-                $defaults[$v['key']] = $v['default_value'] ?? null;
-            }
-        }
-
-        return preg_replace_callback('/\{\{(\w+)(?::([^}]*))?\}\}/', function (array $m) use ($defaults, $agent): string {
-            $key = $m[1];
-            $inlineDefault = $m[2] ?? null;
-
-            if ($key === 'current_date' || $key === 'date') {
-                return date('Y-m-d');
-            }
-            if ($key === 'current_time' || $key === 'time') {
-                return date('H:i');
-            }
-            if ($key === 'current_datetime' || $key === 'datetime') {
-                return date('Y-m-d\TH:i');
-            }
-            if ($key === 'agent_name' && $agent !== null) {
-                return $agent->name;
-            }
-            if ($key === 'user_name' && $agent !== null) {
-                $user = \Spora\Models\User::find($agent->user_id);
-                return $user instanceof \Spora\Models\User ? ($user->username ?? $key) : $key;
-            }
-            if ($key === 'day_of_week') {
-                return date('l');
-            }
-            if ($key === 'day_of_month') {
-                return date('j');
-            }
-            if ($key === 'month') {
-                return date('F');
-            }
-            if ($key === 'year') {
-                return date('Y');
-            }
-
-            if (isset($defaults[$key]) && $defaults[$key] !== '') {
-                return $defaults[$key];
-            }
-
-            return $inlineDefault ?? $m[0];
-        }, $template);
-    }
-
-    private function findAgent(int $id, int $userId): ?Agent
-    {
-        return Agent::where('id', $id)->where('user_id', $userId)->first();
-    }
-
-    private function findRun(int $id, int $agentId): ?ScheduledRun
-    {
-        return ScheduledRun::where('id', $id)->where('agent_id', $agentId)->first();
-    }
-
-    private function resource(ScheduledRun $run): array
-    {
-        $run->loadMissing('template');
-        /** @var AgentPromptTemplate|null */
-        $template = $run->getRelation('template');
-
-        // Get next_run_at from the next PENDING entry in scheduled_runs_next
-        $nextEntry = Capsule::table('scheduled_runs_next')
-            ->where('scheduled_run_id', $run->id)
-            ->where('status', ScheduledRunNext::STATUS_PENDING)
-            ->orderBy('due_at')
-            ->first();
-
-        $nextRunAt = null;
-        if ($nextEntry !== null) {
-            $nextRunAt = (new DateTimeImmutable($nextEntry->due_at, new DateTimeZone('UTC')))
-                ->setTimezone(new DateTimeZone($run->timezone))
-                ->format('Y-m-d\TH:i:sP');
-        } elseif ($run->next_run_at !== null) {
-            // Fall back to cached next_run_at when no PENDING entry exists
-            // (e.g. all entries are CLAIMED/DONE during worker processing)
-            $nextRunAt = (new DateTimeImmutable($run->next_run_at->toDateTimeString(), new DateTimeZone('UTC')))
-                ->setTimezone(new DateTimeZone($run->timezone))
-                ->format('Y-m-d\TH:i:sP');
-        }
-
-        return [
-            'id'                => (int) $run->id,
-            'agent_id'          => (int) $run->agent_id,
-            'template_id'       => $run->template_id,
-            'template_name'     => $template?->name,
-            'raw_prompt'        => $run->raw_prompt,
-            'cron_expression'   => $run->cron_expression,
-            'run_at'            => $run->run_at !== null
-                ? $run->run_at->setTimezone(new DateTimeZone($run->timezone))->toIso8601String()
-                : null,
-            'timezone'          => $run->timezone,
-            'max_steps_override' => $run->max_steps_override,
-            'is_active'         => (bool) $run->is_active,
-            'last_run_at'       => $run->last_run_at?->toIso8601String(),
-            'next_run_at'       => $nextRunAt,
-            'created_at'        => $run->created_at->toIso8601String(),
-            'updated_at'        => $run->updated_at->toIso8601String(),
-        ];
     }
 
     private function decodeJson(Request $request): array

@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
+import { useAuthStore } from '@/stores/auth'
 import { ApiError } from '@/api/client'
 import ToolSettingsForm from '@/components/settings/ToolSettingsForm.vue'
 import type { LLMConfigResource, LLMDriverInfo } from '@/types/llmConfig'
+
+const props = defineProps<{
+  /** When true, all created configs are forced global (admin context) */
+  requireGlobal?: boolean
+}>()
 
 const emit = defineEmits<{
   created: [config: LLMConfigResource]
@@ -11,13 +17,18 @@ const emit = defineEmits<{
 }>()
 
 const llmStore = useLlmConfigsStore()
+const authStore = useAuthStore()
 
 const formName = ref('')
 const formDriverClass = ref('')
 const formSettings = ref<Record<string, string>>({})
 const formSetAsDefault = ref(llmStore.configs.length === 0)
+const formIsGlobal = ref(props.requireGlobal ?? false)
+const formIsGlobalDefault = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
+
+const isAdmin = computed(() => authStore.user?.is_admin === true)
 
 const activeDriver = computed<LLMDriverInfo | null>(
   () => llmStore.driverByName(formDriverClass.value) ?? null,
@@ -47,7 +58,8 @@ async function submit(settings: Record<string, string>): Promise<void> {
       name: formName.value.trim(),
       driver_class: driver.driver_class,
       settings: { ...settings },
-      is_default: formSetAsDefault.value,
+      is_default: formSetAsDefault.value || formIsGlobalDefault.value,
+      is_global: formIsGlobal.value ? true : undefined,
     })
     emit('created', config)
   } catch (e) {
@@ -106,6 +118,44 @@ async function submit(settings: Record<string, string>): Promise<void> {
       </label>
       <p class="text-xs text-muted-foreground mt-1 ml-6">
         The default config is used by all agents that don't have a custom LLM config assigned.
+      </p>
+    </div>
+
+    <!-- Admin: Make global (only for non-requireGlobal context) -->
+    <div v-if="isAdmin && !props.requireGlobal" class="mb-5 space-y-3">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          v-model="formIsGlobal"
+          class="rounded border-border text-primary focus:ring-primary"
+        />
+        <span class="text-sm font-medium">Make this a global configuration</span>
+      </label>
+      <p class="text-xs text-muted-foreground mt-1 ml-6">
+        Global configurations are available to all users.
+      </p>
+      <label v-if="formIsGlobal" class="flex items-center gap-2 cursor-pointer ml-6">
+        <input
+          type="checkbox"
+          v-model="formIsGlobalDefault"
+          class="rounded border-border text-primary focus:ring-primary"
+        />
+        <span class="text-sm font-medium">Set as global default</span>
+      </label>
+    </div>
+
+    <!-- Admin (requireGlobal): global-only default toggle -->
+    <div v-if="props.requireGlobal" class="mb-5">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          v-model="formIsGlobalDefault"
+          class="rounded border-border text-primary focus:ring-primary"
+        />
+        <span class="text-sm font-medium">Set as global default</span>
+      </label>
+      <p class="text-xs text-muted-foreground mt-1 ml-6">
+        The default config is used by all agents without a custom LLM config.
       </p>
     </div>
 

@@ -56,7 +56,7 @@ const router = createRouter({
       path: '/settings',
       component: () => import('@/pages/settings/GlobalSettingsLayout.vue'),
       meta: { requiresAuth: true },
-      redirect: { name: 'settings-overview' },
+      redirect: '/settings/overview',
       children: [
         {
           path: 'overview',
@@ -72,6 +72,22 @@ const router = createRouter({
           path: 'llm',
           name: 'settings-llm',
           component: () => import('@/pages/settings/SettingsLLMPage.vue'),
+        },
+        // Admin-only children
+        {
+          path: 'admin/users',
+          name: 'settings-admin-users',
+          component: () => import('@/pages/admin/UsersPage.vue'),
+        },
+        {
+          path: 'admin/drivers',
+          name: 'settings-admin-drivers',
+          component: () => import('@/pages/admin/DriversSettingsPage.vue'),
+        },
+        {
+          path: 'admin/tools',
+          name: 'settings-admin-tools',
+          component: () => import('@/pages/admin/ToolsSettingsPage.vue'),
         },
       ],
     },

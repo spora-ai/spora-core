@@ -11,6 +11,7 @@ import { useLlmConfigsStore } from '@/stores/llmConfigs'
 import AgentLayout from '@/components/layout/AgentLayout.vue'
 import ComposerInput from '@/components/ComposerInput.vue'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
+import Icon from '@/components/ui/Icon.vue'
 
 const confirmDeleteTaskId = ref<number | null>(null)
 
@@ -155,9 +156,7 @@ onUnmounted(() => {
 
       <div v-if="agentStore.currentAgentTasks.length === 0" class="flex flex-col items-center justify-center py-16 px-6 text-center">
         <div class="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
-          <svg class="h-6 w-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
+          <Icon name="chat" class="h-6 w-6 text-muted-foreground" />
         </div>
         <p class="text-sm font-medium">No messages yet</p>
         <p class="text-xs text-muted-foreground mt-1">Start a conversation below</p>
@@ -219,18 +218,14 @@ onUnmounted(() => {
               class="shrink-0 h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
               title="Delete conversation"
             >
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
+              <Icon name="trash" class="h-4 w-4" />
             </button>
             <!-- Chevron -->
-            <svg
+            <Icon
               @click="router.push({ name: 'task', params: { id: task.id } })"
+              name="chevron-right"
               class="h-4 w-4 text-muted-foreground shrink-0 cursor-pointer"
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
+            />
           </template>
         </li>
       </ul>

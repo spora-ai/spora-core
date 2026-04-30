@@ -26,6 +26,7 @@ const props = defineProps<{
   initialSettings: Record<string, string>
   saving: boolean
   error: string | null
+  globalDefaults?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -35,6 +36,15 @@ const emit = defineEmits<{
 
 // Local form state: key → value
 const form = ref<Record<string, string>>({})
+
+function hasGlobalDefault(key: string): boolean {
+  const val = props.globalDefaults?.[key]
+  return val !== undefined && val !== ''
+}
+
+function globalDefaultValue(key: string): string {
+  return props.globalDefaults?.[key] ?? ''
+}
 
 // Sync form when initialSettings prop changes (e.g. after save completes)
 watch(
@@ -77,13 +87,16 @@ async function submit(): Promise<void> {
   <form @submit.prevent="submit" class="flex flex-col gap-5">
     <!-- Fields -->
     <div class="flex flex-col gap-4">
-      <ToolSettingField
-        v-for="field in tool.settings_schema"
-        :key="field.key"
-        :modelValue="form[field.key] ?? ''"
-        :field="field"
-        @update:modelValue="form[field.key] = String($event ?? '')"
-      />
+      <div v-for="field in tool.settings_schema" :key="field.key">
+        <p v-if="hasGlobalDefault(field.key)" class="text-xs text-muted-foreground mb-1">
+          Global default: <span class="font-mono">{{ globalDefaultValue(field.key) }}</span>
+        </p>
+        <ToolSettingField
+          :modelValue="form[field.key] ?? ''"
+          :field="field"
+          @update:modelValue="form[field.key] = String($event ?? '')"
+        />
+      </div>
     </div>
 
     <!-- Actions -->

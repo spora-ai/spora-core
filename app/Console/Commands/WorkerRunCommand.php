@@ -295,19 +295,19 @@ final class WorkerRunCommand extends Command
 
         $completedAt = date('Y-m-d H:i:s');
 
-        // Compute next_due_at BEFORE the transaction so it's known before we claim.
-        // Use last_run_at (the actual last scheduled time) to avoid drift when the
-        // worker is delayed. Fall back to completedAt if last_run_at is null.
+        // Compute next_due_at BEFORE the transaction.
+        // Use wall-clock now as cron reference to avoid the same-day skip: when
+        // last_run_at is just before the scheduled time (e.g. 06:58 UTC for a 07:10
+        // UTC schedule), getNextRunDate(last_run_at) returns the same day's 07:10
+        // which is already past. Using now as reference always yields the next future
+        // occurrence. last_run_at is still tracked separately for historical accuracy.
         $nextDueAt = null;
         if ($run->cron_expression !== null) {
-            $lastRunAtRaw = $run->last_run_at;
-            $lastRunAtUtc = $lastRunAtRaw
-                ? new DateTimeImmutable($lastRunAtRaw->toDateTimeString(), new DateTimeZone('UTC'))
-                : new DateTimeImmutable($completedAt, new DateTimeZone('UTC'));
-            $lastRunAtInScheduleTz = $lastRunAtUtc->setTimezone(new DateTimeZone($run->timezone));
+            $nowInScheduleTz = (new DateTimeImmutable('now', new DateTimeZone('UTC')))
+                ->setTimezone(new DateTimeZone($run->timezone));
 
             $nextDueAt = (new CronExpression($run->cron_expression))
-                ->getNextRunDate($lastRunAtInScheduleTz, 0, false, $run->timezone)
+                ->getNextRunDate($nowInScheduleTz, 0, false, $run->timezone)
                 ->setTimezone(new DateTimeZone('UTC'))
                 ->format('Y-m-d H:i:s');
         }
@@ -325,24 +325,21 @@ final class WorkerRunCommand extends Command
                 ]);
 
             if ($nextDueAt !== null) {
-                // Insert next PENDING entry for the recurring schedule.
-                // Skip any existing PENDING entry with the same due_at (race with trigger endpoint).
+                // Remove any stale PENDING/CLAIMED entry for the same due_at so the
+                // INSERT below does not conflict on the unique (scheduled_run_id, due_at) index.
                 Capsule::table('scheduled_runs_next')
                     ->where('scheduled_run_id', $run->id)
                     ->where('due_at', $nextDueAt)
-                    ->where('status', ScheduledRunNext::STATUS_PENDING)
-                    ->update([
-                        'status'       => ScheduledRunNext::STATUS_SKIPPED,
-                        'completed_at' => $completedAt,
-                    ]);
+                    ->whereIn('status', [ScheduledRunNext::STATUS_PENDING, ScheduledRunNext::STATUS_CLAIMED])
+                    ->delete();
 
-                Capsule::table('scheduled_runs_next')->insert([
-                    'scheduled_run_id' => $run->id,
-                    'due_at'          => $nextDueAt,
-                    'status'          => ScheduledRunNext::STATUS_PENDING,
-                    'created_at'      => $completedAt,
-                    'updated_at'      => $completedAt,
-                ]);
+                // Use INSERT OR IGNORE as a safety net: if the DELETE above didn't catch a
+                // stale entry (e.g. race with another worker), the unique constraint
+                // violation is silently ignored rather than crashing the whole run.
+                Capsule::connection()->statement(
+                    "INSERT OR IGNORE INTO scheduled_runs_next (scheduled_run_id, due_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                    [$run->id, $nextDueAt, ScheduledRunNext::STATUS_PENDING, $completedAt, $completedAt],
+                );
 
                 Capsule::table('scheduled_runs')
                     ->where('id', $run->id)

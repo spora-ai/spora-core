@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import GlobalNavbar from '@/components/GlobalNavbar.vue'
 import { ApiError, api } from '@/api/client'
+import Icon from '@/components/ui/Icon.vue'
 
 interface UserProfile {
   name: string | null
@@ -236,9 +237,7 @@ async function saveHealthData(): Promise<void> {
               @click="openAddLocation"
               class="inline-flex h-7 items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
             >
-              <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
+              <Icon name="plus" class="h-3.5 w-3.5" />
               Add location
             </button>
           </div>
@@ -265,17 +264,13 @@ async function saveHealthData(): Promise<void> {
                   @click="openEditLocation(loc)"
                   class="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 >
-                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                  </svg>
+                  <Icon name="pencil" class="h-3.5 w-3.5" />
                 </button>
                 <button
                   @click="deleteLocation(loc.id)"
                   class="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-muted transition-colors"
                 >
-                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
+                  <Icon name="trash" class="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>

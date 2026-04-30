@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Models;
 
+use Delight\Auth\Role;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -16,6 +17,10 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property int        $verified
  * @property int        $registered
  * @property string|null $password
+ * @property int|null   $resettable
+ * @property int        $roles_mask
+ * @property int        $force_logout
+ * @property int|null    $last_login
  * @property string|null $name
  * @property \Illuminate\Support\Carbon|null $date_of_birth
  * @property string|null $about_me
@@ -68,5 +73,15 @@ final class User extends Model
     public function locations(): HasMany
     {
         return $this->hasMany(UserLocation::class);
+    }
+
+    public function hasRole(int $role): bool
+    {
+        return (bool) ($this->roles_mask & $role);
+    }
+
+    public function isAdmin(): bool
+    {
+        return $this->hasRole(Role::ADMIN);
     }
 }

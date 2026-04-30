@@ -19,10 +19,13 @@ use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
+use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Plugins\PluginLoader;
+use Spora\Services\ContextWindowErrorParser;
+use Spora\Services\LLMConfigService;
 use Spora\Services\NotificationService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\ToolInterface;
@@ -52,6 +55,7 @@ final class Orchestrator implements OrchestratorInterface
      */
     public function __construct(
         private readonly DriverFactory              $driverFactory,
+        private readonly LLMConfigService|null    $llmConfigService = null,
         private readonly array                      $toolInstances = [],
         private readonly ?LoggerInterface           $logger         = null,
         private readonly WorkerMode                 $workerMode     = WorkerMode::Sync,
@@ -145,14 +149,24 @@ final class Orchestrator implements OrchestratorInterface
                 ? $agent->system_prompt
                 : 'You are a helpful AI assistant.';
 
+            $llmConfig = $this->resolveLlmConfig($agent);
+            $contextWindow = $llmConfig['context_window'];
+            $maxTokensOutput = $llmConfig['max_tokens_output'];
+            $temperature = $llmConfig['temperature'];
+
             $context = [
                 'task'           => $task,
                 'agent'          => $agent,
                 'enabledClasses' => $enabledClasses,
+                'contextWindow'  => $contextWindow,
+                'maxTokensOutput' => $maxTokensOutput,
                 'request'        => new LLMRequest(
                     systemPrompt: $systemPrompt,
                     messages: $this->buildMessages($taskId),
                     tools: $this->buildToolDefinitions($enabledClasses, $agent->id),
+                    contextWindow: $contextWindow,
+                    maxTokens: $maxTokensOutput,
+                    temperature: $temperature,
                 ),
             ];
         });
@@ -220,17 +234,24 @@ final class Orchestrator implements OrchestratorInterface
                 $this->notificationService?->notifyTaskCompleted($task);
             }
         } catch (Throwable $e) {
-            $this->logger?->error('tick() failed — task marked FAILED', [
+            $this->logger?->error('tick() failed', [
                 'task_id'         => $taskId,
                 'exception_class' => get_class($e),
                 'message'         => $e->getMessage(),
             ]);
 
-            $errorCode = $this->classifyError($e);
+            $task = $context['task'];
+            $agent = $context['agent'];
 
-            // Best-effort write: use a direct query so stale Eloquent model state cannot
-            // interfere. Guard with status='RUNNING' to avoid downgrading a COMPLETED task
-            // if a race somehow already advanced it.
+            // Check for context window error — try compaction + retry if possible
+            if ($this->isContextWindowError($e)) {
+                $this->tryCompactionAndRetry($task, $agent, $e);
+                return;
+            }
+
+            $errorCode = $this->classifyError($e);
+            $friendlyMsg = $this->friendlyMessageForError($e, $errorCode);
+
             try {
                 $updated = Task::where('id', $taskId)
                     ->where('status', 'RUNNING')
@@ -238,11 +259,9 @@ final class Orchestrator implements OrchestratorInterface
                         'status'         => 'FAILED',
                         'failure_reason' => $e->getMessage(),
                         'error_code'     => $errorCode,
-                        'error_message'  => $this->friendlyMessage($errorCode),
+                        'error_message' => $friendlyMsg,
                     ]);
 
-                // Only send notification if the row was actually updated (task was RUNNING).
-                // This avoids sending notifyTaskFailed with a stale COMPLETED task model.
                 if ($updated > 0) {
                     $failedTask = Task::where('id', $taskId)->first();
                     if ($failedTask !== null) {
@@ -265,6 +284,210 @@ final class Orchestrator implements OrchestratorInterface
 
             throw $e;
         }
+    }
+
+    /**
+     * Detect if a Throwable is a context window exceeded error.
+     */
+    private function isContextWindowError(Throwable $e): bool
+    {
+        if (!$e instanceof LLMProviderException) {
+            return false;
+        }
+
+        $rawBody = $e->getMessage();
+        // Extract JSON body from "Provider API error N: {...}" format
+        if (preg_match('/\{.*\}/s', $rawBody, $matches)) {
+            $parser = new ContextWindowErrorParser();
+            return $parser->isContextWindowError($matches[0]);
+        }
+
+        return false;
+    }
+
+    /**
+     * Attempt to compact history and retry once.
+     * Returns null on success (retry succeeded), rethrows on failure.
+     */
+    private function tryCompactionAndRetry(?Task $task, ?Agent $agent, Throwable $originalError): void
+    {
+        if ($task === null || $agent === null) {
+            throw $originalError;
+        }
+
+        $taskId = $task->id;
+
+        // Check if there's history to compact — if not, this is a first-turn error
+        $historyCount = TaskHistory::where('task_id', $taskId)->count();
+        if ($historyCount <= 1) {
+            // First turn — no history to compact, fail with specific message
+            $actualLimit = $this->extractActualContextWindow($originalError);
+            $msg = $actualLimit !== null
+                ? "Context window too small ({$actualLimit} tokens). The model cannot process this request even without any conversation history. Try a model with a larger context window (e.g., 128K+ tokens) or reduce the system prompt length."
+                : "Context window too small for the current prompt. The model cannot process this request even without any conversation history. Try a model with a larger context window (e.g., 128K+ tokens) or reduce the system prompt length.";
+
+            Task::where('id', $taskId)->where('status', 'RUNNING')->update([
+                'status'         => 'FAILED',
+                'failure_reason' => $originalError->getMessage(),
+                'error_code'     => 'CONTEXT_WINDOW_FIRST_TURN',
+                'error_message' => $msg,
+            ]);
+
+            $this->notificationService?->notifyTaskFailed(Task::find($taskId));
+            throw $originalError;
+        }
+
+        // Compact and retry
+        $llmConfig = $this->resolveLlmConfig($agent);
+        $maxTokensOutput = $llmConfig['max_tokens_output'];
+        $temperature = $llmConfig['temperature'];
+
+        $this->logger?->info('Context window error, compacting history and retrying', ['task_id' => $taskId]);
+
+        try {
+            $this->compactHistory($taskId, $maxTokensOutput, $temperature, $agent);
+        } catch (Throwable $e) {
+            $this->logger?->warning('Compaction failed', ['task_id' => $taskId, 'exception' => $e->getMessage()]);
+            throw $originalError;
+        }
+
+        // Retry the tick
+        try {
+            $this->tick($taskId);
+        } catch (Throwable) {
+            // Summarization also failed — fail with original error
+            throw $originalError;
+        }
+    }
+
+    /**
+     * Compact oldest task_history messages by summarizing them with the LLM.
+     * The summary row is inserted as role='summary' and replaces the summarized range.
+     */
+    private function compactHistory(int $taskId, int $maxTokensOutput, float $temperature, Agent $agent): void
+    {
+        // Fetch all history except last 5 turns (keep recent context)
+        $allRows = TaskHistory::where('task_id', $taskId)
+            ->orderBy('sequence')
+            ->get();
+
+        $keepCount = 5;
+        if ($allRows->count() <= $keepCount + 1) {
+            return; // Nothing worth compacting
+        }
+
+        $toSummarizeRows = $allRows->take($allRows->count() - $keepCount);
+
+        $firstRow = $toSummarizeRows->first();
+        $lastRow = $toSummarizeRows->last();
+        $firstSeq = $firstRow !== null ? $firstRow->sequence : 0;
+        $lastSeq = $lastRow !== null ? $lastRow->sequence : 0;
+
+        // Build messages for summarization (only content, no tool payloads)
+        $summaryMessages = [];
+        foreach ($toSummarizeRows as $row) {
+            $content = $row->content ?? '';
+            if ($row->role === 'tool') {
+                $content = "[{$row->tool_name}]: " . $content;
+            }
+            if ($content !== '') {
+                $summaryMessages[] = ['role' => $row->role, 'content' => $content];
+            }
+        }
+
+        if ($summaryMessages === []) {
+            // No text content to summarize — just delete the rows
+            TaskHistory::where('task_id', $taskId)
+                ->where('sequence', '>=', $firstSeq)
+                ->where('sequence', '<=', $lastSeq)
+                ->delete();
+            return;
+        }
+
+        // Call LLM to summarize
+        $systemPrompt = ($agent->system_prompt !== null && $agent->system_prompt !== '')
+            ? $agent->system_prompt
+            : 'You are a helpful AI assistant.';
+
+        $summaryInstruction = 'Summarize the conversation below concisely, preserving key facts, decisions, and any pending tasks. Output only the summary.';
+
+        $summaryRequest = new LLMRequest(
+            systemPrompt: $systemPrompt,
+            messages: array_merge($summaryMessages, [['role' => 'user', 'content' => $summaryInstruction]]),
+            tools: [],
+            maxTokens: min($maxTokensOutput, 1024),
+            temperature: $temperature,
+        );
+
+        $driver = $this->driverFactory->makeFromAgent($agent);
+        $response = $driver->complete($summaryRequest);
+
+        $summaryText = $response->content ?? 'Conversation summarized.';
+
+        // Delete the summarized rows and insert the summary
+        Capsule::connection()->transaction(function () use ($taskId, $firstSeq, $lastSeq, $summaryText) {
+            TaskHistory::where('task_id', $taskId)
+                ->where('sequence', '>=', $firstSeq)
+                ->where('sequence', '<=', $lastSeq)
+                ->delete();
+
+            // Insert summary row at the position of the first deleted row
+            TaskHistory::create([
+                'task_id' => $taskId,
+                'sequence' => $firstSeq,
+                'role' => 'summary',
+                'content' => $summaryText,
+                'summarized_sequence_range' => "{$firstSeq}-{$lastSeq}",
+            ]);
+
+            // Re-sequence remaining rows so there are no gaps
+            $remaining = TaskHistory::where('task_id', $taskId)
+                ->where('sequence', '>', $lastSeq)
+                ->orderBy('sequence')
+                ->get();
+
+            $nextSeq = $lastSeq + 1;
+            foreach ($remaining as $row) {
+                $row->sequence = $nextSeq;
+                $row->save();
+                $nextSeq++;
+            }
+        });
+    }
+
+    /**
+     * Extract actual context window from an error if available.
+     */
+    private function extractActualContextWindow(Throwable $e): ?int
+    {
+        if (!$e instanceof LLMProviderException) {
+            return null;
+        }
+
+        if (preg_match('/\{.*\}/s', $e->getMessage(), $matches)) {
+            $parser = new ContextWindowErrorParser();
+            $parsed = $parser->parse($matches[0]);
+            return $parsed['actual_context_window'];
+        }
+
+        return $e->getActualContextWindow();
+    }
+
+    /**
+     * Build friendly message for an error, with extra context for context window errors.
+     */
+    private function friendlyMessageForError(Throwable $e, string $errorCode): string
+    {
+        $base = $this->friendlyMessages()[$errorCode] ?? $this->friendlyMessages()['UNKNOWN'];
+
+        if ($this->isContextWindowError($e)) {
+            $actualLimit = $this->extractActualContextWindow($e);
+            if ($actualLimit !== null) {
+                return "Context window exceeded ({$actualLimit} tokens). Try reducing history depth, choosing a model with larger context, or adjusting max_tokens_output.";
+            }
+        }
+
+        return $base;
     }
 
     /**
@@ -738,42 +961,75 @@ final class Orchestrator implements OrchestratorInterface
             ->get();
 
         $messages = [];
+        $lastSummarySeqEnd = -1;
 
         foreach ($rows as $row) {
-            if ($row->role === 'tool') {
-                $messages[] = [
-                    'role'         => 'tool',
-                    'tool_call_id' => $row->tool_call_id,
-                    'name'         => $row->tool_name,
-                    'content'      => $row->content,
-                ];
-            } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
-                // tool_call_payload is a JSON array of tool call objects.
-                $toolCallsData = json_decode($row->tool_call_payload, true);
-                // Normalize arguments: some providers send "[]" (string) for no-params tools.
-                // OpenAI expects {} for empty object, not [] for empty array.
-                foreach ($toolCallsData as &$tc) {
-                    if (array_key_exists('arguments', $tc['function'])) {
-                        $args = $tc['function']['arguments'];
-                        $decodedArgs = is_string($args) ? (json_decode($args, true) ?? []) : (array) $args;
-                        if (empty($decodedArgs)) {
-                            $tc['function']['arguments'] = '{}';
-                        }
-                    }
+            // When we encounter a summary row, record the range it covers.
+            // All rows with sequence <= lastSummarySeqEnd have already been added
+            // as "recent" history — once we see a summary covering those rows,
+            // we must remove them since the summary replaces them.
+            if ($row->role === 'summary' && $row->summarized_sequence_range !== null) {
+                if (preg_match('/^(\d+)-(\d+)$/', $row->summarized_sequence_range, $m)) {
+                    $rangeEnd = (int) $m[2];
+                    // Remove any previously-added messages whose sequence is in this range
+                    // (but preserve other summaries — they have their own _seq)
+                    $messages = array_values(array_filter(
+                        $messages,
+                        static fn(array $msg): bool => ($msg['_seq'] ?? -1) > $rangeEnd || ($msg['role'] ?? '') === 'summary',
+                    ));
+                    $lastSummarySeqEnd = $rangeEnd;
                 }
-                unset($tc); // break the reference
                 $messages[] = [
-                    'role'       => 'assistant',
-                    'content'    => null,
-                    'tool_calls' => $toolCallsData,
-                ];
-            } else {
-                $messages[] = [
-                    'role'    => $row->role,
+                    'role'    => 'summary',
                     'content' => $row->content,
                 ];
+                $messages[count($messages) - 1]['_seq'] = $row->sequence;
+                continue;
+            }
+
+            // If this row is after the last summary's range, it's part of "recent" history — include it
+            if ($row->sequence > $lastSummarySeqEnd) {
+                if ($row->role === 'tool') {
+                    $messages[] = [
+                        'role'         => 'tool',
+                        'tool_call_id' => $row->tool_call_id,
+                        'name'         => $row->tool_name,
+                        'content'      => $row->content,
+                    ];
+                } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
+                    $toolCallsData = json_decode($row->tool_call_payload, true);
+                    foreach ($toolCallsData as &$tc) {
+                        if (array_key_exists('arguments', $tc['function'])) {
+                            $args = $tc['function']['arguments'];
+                            $decodedArgs = is_string($args) ? (json_decode($args, true) ?? []) : (array) $args;
+                            if (empty($decodedArgs)) {
+                                $tc['function']['arguments'] = '{}';
+                            }
+                        }
+                    }
+                    unset($tc);
+                    $messages[] = [
+                        'role'       => 'assistant',
+                        'content'    => null,
+                        'tool_calls' => $toolCallsData,
+                    ];
+                } else {
+                    $messages[] = [
+                        'role'    => $row->role,
+                        'content' => $row->content,
+                    ];
+                }
+                // Tag this message with its sequence so it can be filtered out later
+                // if a summary covering this position is encountered
+                $messages[count($messages) - 1]['_seq'] = $row->sequence;
             }
         }
+
+        // Strip internal _seq tags before returning
+        foreach ($messages as &$msg) {
+            unset($msg['_seq']);
+        }
+        unset($msg);
 
         return $messages;
     }
@@ -1082,9 +1338,71 @@ final class Orchestrator implements OrchestratorInterface
         ];
     }
 
-    private function friendlyMessage(string $errorCode): string
+    /**
+     * Resolve LLM configuration for an agent (context_window, max_tokens_output, temperature).
+     *
+     * @return array{context_window: int, max_tokens_output: int, temperature: float}
+     */
+    private function resolveLlmConfig(Agent $agent): array
     {
-        return $this->friendlyMessages()[$errorCode] ?? $this->friendlyMessages()['UNKNOWN'];
+        $defaults = [
+            'context_window' => 128000,
+            'max_tokens_output' => 4096,
+            'temperature' => 0.7,
+        ];
+
+        $configId = $agent->llm_driver_config_id;
+
+        if ($configId !== null) {
+            $config = LLMDriverConfiguration::find($configId);
+            if ($config !== null) {
+                return [
+                    'context_window' => $config->context_window ?? $defaults['context_window'],
+                    'max_tokens_output' => $config->max_tokens_output ?? $defaults['max_tokens_output'],
+                    'temperature' => $this->getTemperatureFromSettings($config, $defaults['temperature']),
+                ];
+            }
+        }
+
+        // Fall back to user default
+        $defaultConfig = LLMDriverConfiguration::where('user_id', $agent->user_id)
+            ->where('is_default', true)
+            ->first();
+
+        if ($defaultConfig !== null) {
+            return [
+                'context_window' => $defaultConfig->context_window ?? $defaults['context_window'],
+                'max_tokens_output' => $defaultConfig->max_tokens_output ?? $defaults['max_tokens_output'],
+                'temperature' => $this->getTemperatureFromSettings($defaultConfig, $defaults['temperature']),
+            ];
+        }
+
+        // Fall back to global default
+        $globalDefault = LLMDriverConfiguration::where('is_global', true)
+            ->where('is_default', true)
+            ->first();
+
+        if ($globalDefault !== null) {
+            return [
+                'context_window' => $globalDefault->context_window ?? $defaults['context_window'],
+                'max_tokens_output' => $globalDefault->max_tokens_output ?? $defaults['max_tokens_output'],
+                'temperature' => $this->getTemperatureFromSettings($globalDefault, $defaults['temperature']),
+            ];
+        }
+
+        return $defaults;
+    }
+
+    private function getTemperatureFromSettings(LLMDriverConfiguration $config, float $default): float
+    {
+        try {
+            $settings = $this->llmConfigService->decryptSettings($config->driver_class, $config->settings ?? '');
+            return isset($settings['temperature']) && $settings['temperature'] !== ''
+                ? (float) $settings['temperature']
+                : $default;
+        } catch (Throwable) {
+            return $default;
+        }
     }
 
     /**

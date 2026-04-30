@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useToolSettings } from '@/composables/useToolSettings'
 import { ApiError } from '@/api/client'
 import ToolSettingsForm from '@/components/settings/ToolSettingsForm.vue'
@@ -8,7 +8,9 @@ import type { ToolSchema } from '@/composables/useToolSettings'
 
 const props = defineProps<{
   tool: ToolSchema
-  initialSettings: Record<string, string>
+  initialSettings?: Record<string, string>
+  globalDefaults?: Record<string, string>
+  mode?: 'global' | 'user'
 }>()
 
 const emit = defineEmits<{
@@ -16,7 +18,9 @@ const emit = defineEmits<{
   back: []
 }>()
 
-const { putSettings } = useToolSettings()
+const { getGlobalSettings, getUserSettings, putUserSettings, putSettings } = useToolSettings()
+
+const mode = computed(() => props.mode ?? 'global')
 
 const serverSettings = ref<Record<string, string>>({ ...props.initialSettings })
 const saving = ref(false)
@@ -33,11 +37,41 @@ const settingsCount = computed(() =>
   Object.values(serverSettings.value).filter((v) => v !== '' && v !== null).length,
 )
 
+async function loadSettings(): Promise<void> {
+  const id = ++loadId
+  let result: Record<string, string>
+  if (mode.value === 'user') {
+    result = await getUserSettings(props.tool.tool_name)
+  } else {
+    result = await getGlobalSettings(props.tool.tool_name)
+  }
+  // Ignore if a newer request has already completed
+  if (id !== loadId) return
+  serverSettings.value = result
+}
+
+let loadId = 0
+onMounted(loadSettings)
+
+watch(() => props.tool.tool_name, loadSettings)
+
 async function onSave(settings: Record<string, string>): Promise<void> {
   saving.value = true
   error.value = null
   try {
-    serverSettings.value = await putSettings(props.tool.tool_name, settings, serverSettings.value)
+    if (mode.value === 'user') {
+      // Diff against global defaults: only send values that differ from global
+      const toSave: Record<string, string> = {}
+      for (const [key, value] of Object.entries(settings)) {
+        const globalVal = props.globalDefaults?.[key] ?? ''
+        if (value !== globalVal) {
+          toSave[key] = value
+        }
+      }
+      serverSettings.value = await putUserSettings(props.tool.tool_name, toSave)
+    } else {
+      serverSettings.value = await putSettings(props.tool.tool_name, settings, serverSettings.value)
+    }
     savedFlash.value = true
     if (flashTimer) clearTimeout(flashTimer)
     flashTimer = setTimeout(() => { savedFlash.value = false }, 2000)
@@ -76,9 +110,7 @@ function displayValue(key: string, value: string): string {
     <details class="rounded-lg border border-border bg-muted/30">
       <summary class="cursor-pointer px-4 py-2.5 text-sm font-medium text-muted-foreground select-none flex items-center justify-between">
         <span>Current Configuration ({{ settingsCount }} saved)</span>
-        <svg class="h-4 w-4 text-muted-foreground/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
+        <Icon name="chevron-down" class="h-4 w-4 text-muted-foreground/60" />
       </summary>
       <div class="px-4 pb-3 pt-2 space-y-2">
         <div

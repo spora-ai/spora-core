@@ -205,7 +205,34 @@ export function useToolSettings(agentId?: number) {
     }
   }
 
-  return {
+  // ── Per-user tool settings overrides ─────────────────────────────────────────
+
+async function getUserSettings(toolId: string): Promise<Record<string, string>> {
+  try {
+    const result = await api.get<{ settings: Record<string, string> }>(
+      `/tools/${encodeURIComponent(toolId)}/user-settings`,
+    )
+    return result.settings ?? {}
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      return {}
+    }
+    throw e
+  }
+}
+
+async function putUserSettings(
+  toolId: string,
+  settings: Record<string, string>,
+): Promise<Record<string, string>> {
+  const result = await api.put<{ settings: Record<string, string> }>(
+    `/tools/${encodeURIComponent(toolId)}/user-settings`,
+    { settings },
+  )
+  return result.settings ?? {}
+}
+
+return {
     getSettings,
     putSettings,
     getToolStatus,
@@ -213,5 +240,7 @@ export function useToolSettings(agentId?: number) {
     getRawOverride,
     getGlobalSettings,
     getSettingsWithSource,
+    getUserSettings,
+    putUserSettings,
   }
 }

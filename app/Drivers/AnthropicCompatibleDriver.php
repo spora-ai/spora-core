@@ -18,7 +18,10 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', description: 'API key for the Anthropic-compatible endpoint. Leave empty for local models.', required: false, scope: 'global')]
 #[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.anthropic.com).', required: false, scope: 'global', default: 'https://api.anthropic.com')]
 #[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Model identifier (e.g. claude-3-5-sonnet-20241022, claude-3-opus).', required: false, scope: 'global', default: 'claude-3-5-sonnet-20241022')]
-#[ToolSetting(key: 'thinking_budget', label: 'Thinking Budget (tokens)', type: 'text', description: 'Maximum tokens for extended thinking (Claude 3.7+).', required: false, scope: 'global')]
+#[ToolSetting(key: 'max_tokens_output', label: 'Max Output Tokens', type: 'text', description: 'Maximum number of tokens to generate (output buffer).', required: false, scope: 'global', default: '4096')]
+#[ToolSetting(key: 'temperature', label: 'Temperature', type: 'text', description: 'Sampling temperature (0.0–2.0). Lower is more deterministic.', required: false, scope: 'global', default: '0.7', validation: '/^[0-2](\.[0-9]+)?$/')]
+#[ToolSetting(key: 'context_window', label: 'Context Window', type: 'text', description: 'Total context window size for this model (input + output combined, e.g. 200000).', required: false, scope: 'global', default: '200000')]
+#[ToolSetting(key: 'thinking_budget', label: 'Thinking Budget (tokens)', type: 'text', description: 'Maximum tokens for extended thinking (Claude 3.7+).', required: false, scope: 'global', validation: '/^[1-9][0-9]*$/')]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, scope: 'global', default: '300')]
 final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface
 {
@@ -31,6 +34,8 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
         private readonly HttpClientInterface $httpClient,
         private readonly ?LoggerInterface    $logger = null,
         private readonly ?int                $timeout = null,
+        private readonly ?float             $temperature = null,
+        private readonly ?int                $thinkingBudget = null,
     ) {}
 
     public function getProviderName(): string
@@ -57,6 +62,17 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
 
         if ($tools !== []) {
             $body['tools'] = $tools;
+        }
+
+        if ($this->temperature !== null) {
+            $body['temperature'] = $this->temperature;
+        }
+
+        if ($this->thinkingBudget !== null) {
+            $body['thinking'] = [
+                'type'          => 'enabled',
+                'budget_tokens' => $this->thinkingBudget,
+            ];
         }
 
         $url = rtrim($this->baseUrl, '/') . '/v1/messages';
@@ -209,9 +225,15 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
 
                 foreach ($msg['tool_calls'] as $tc) {
                     $rawArguments = $tc['function']['arguments'] ?? '{}';
-                    $input        = is_string($rawArguments)
+                    $input = is_string($rawArguments)
                         ? (json_decode($rawArguments, true) ?? [])
                         : (array) $rawArguments;
+                    // Anthropic requires input to be a dict, not a bare list/array.
+                    // (object)[] becomes {} in JSON; array_is_list check handles
+                    // non-empty lists which also must not be sent as bare arrays.
+                    if (!is_array($input) || array_is_list($input)) {
+                        $input = (object) $input;
+                    }
 
                     $contentBlocks[] = [
                         'type'  => 'tool_use',

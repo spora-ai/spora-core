@@ -9,6 +9,7 @@ use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\ScheduledRunService;
 
 function makeScheduledRunController(): array
 {
@@ -27,9 +28,11 @@ function makeScheduledRunController(): array
     $mercure = Mockery::mock(MercurePublisherInterface::class);
     $mercure->allows('publish')->andReturn(true);
 
-    $controller = new ScheduledRunController($authService, $orchestrator, $mercure);
+    $scheduledRunService = new ScheduledRunService($orchestrator, $mercure);
 
-    return [$controller, $authService, $orchestrator, $mercure];
+    $controller = new ScheduledRunController($authService, $scheduledRunService);
+
+    return [$controller, $authService, $orchestrator, $mercure, $scheduledRunService];
 }
 
 function registerAndGetAgentForScheduledRun(): array

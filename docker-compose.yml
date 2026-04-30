@@ -32,6 +32,8 @@ services:
     image: mariadb:11
     container_name: spora-db
     restart: always
+    env_file:
+      - .env.local
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpassword}
       MYSQL_DATABASE: ${DB_NAME:-spora}
@@ -52,6 +54,8 @@ services:
     image: dunglas/mercure:v0.14
     container_name: spora-mercure
     restart: always
+    env_file:
+      - .env.local
     environment:
       # Allow public subscribers (for development; restrict in production)
       MERCURE_DEMO: "true"

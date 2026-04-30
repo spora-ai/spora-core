@@ -8,6 +8,7 @@ use DI\Container;
 use DI\ContainerBuilder;
 use Dotenv\Dotenv;
 use FastRoute\RouteCollector;
+use Spora\Http\Exceptions\ForbiddenException;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -83,6 +84,13 @@ final class Kernel
             return new JsonResponse(
                 ['error' => ['code' => 'UNAUTHENTICATED', 'message' => 'Authentication required.']],
                 Response::HTTP_UNAUTHORIZED,
+            );
+        }
+
+        if ($e instanceof ForbiddenException) {
+            return new JsonResponse(
+                ['error' => ['code' => 'FORBIDDEN', 'message' => $e->getMessage()]],
+                Response::HTTP_FORBIDDEN,
             );
         }
 

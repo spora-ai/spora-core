@@ -12,7 +12,10 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $name
  * @property string $driver_class
  * @property string|null $settings  (encrypted JSON)
+ * @property int|null $context_window
+ * @property int|null $max_tokens_output
  * @property bool $is_default
+ * @property bool $is_global
  * @property \Carbon\Carbon $created_at
  * @property \Carbon\Carbon $updated_at
  */
@@ -25,7 +28,10 @@ final class LLMDriverConfiguration extends Model
         'name',
         'driver_class',
         'settings',
+        'context_window',
+        'max_tokens_output',
         'is_default',
+        'is_global',
     ];
 
     public function user(): \Illuminate\Database\Eloquent\Relations\BelongsTo
@@ -35,6 +41,9 @@ final class LLMDriverConfiguration extends Model
 
     protected $casts = [
         'is_default' => 'boolean',
+        'is_global' => 'boolean',
+        'context_window' => 'integer',
+        'max_tokens_output' => 'integer',
     ];
 
     /**

@@ -33,7 +33,7 @@ onMounted(async () => {
     <GlobalNavbar />
     <div class="flex-1 flex">
       <SettingsSidebar :allTools="allTools" :loadingTools="loadingTools" />
-      <main class="flex-1 max-w-2xl mx-auto w-full px-4 py-8">
+      <main class="flex-1 w-full px-4 py-8">
         <RouterView />
       </main>
     </div>

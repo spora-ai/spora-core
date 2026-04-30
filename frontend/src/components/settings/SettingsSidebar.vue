@@ -7,6 +7,7 @@
  */
 import { useRoute, useRouter } from 'vue-router'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
+import { useAuthStore } from '@/stores/auth'
 import { ChevronRight } from 'lucide-vue-next'
 import type { ToolSchema } from '@/composables/useToolSettings'
 
@@ -18,10 +19,16 @@ const props = defineProps<{
 const route = useRoute()
 const router = useRouter()
 const llmStore = useLlmConfigsStore()
+const auth = useAuthStore()
 
 const isOverview = () => route.name === 'settings-overview'
 const isTools = () => route.name === 'settings-tools'
 const isLLM = () => route.name === 'settings-llm'
+const isAdminUsers = () => route.name === 'settings-admin-users'
+const isAdminDrivers = () => route.name === 'settings-admin-drivers'
+const isAdminTools = () => route.name === 'settings-admin-tools'
+
+const isAdmin = () => auth.user?.roles?.includes('ADMIN') ?? false
 
 const selectedToolId = () => route.query.tool as string | undefined
 
@@ -159,6 +166,56 @@ function startCreate(): void {
         </li>
 
       </ul>
+
+      <!-- Administration section (admin only) -->
+      <template v-if="isAdmin()">
+        <div class="mt-6 pt-4 border-t border-border">
+          <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+            Administration
+          </h2>
+          <ul class="flex flex-col gap-0.5">
+            <li>
+              <button
+                @click="router.push({ name: 'settings-admin-users' })"
+                class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
+                :class="
+                  isAdminUsers()
+                    ? 'bg-primary text-primary-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                "
+              >
+                Users
+              </button>
+            </li>
+            <li>
+              <button
+                @click="router.push({ name: 'settings-admin-drivers' })"
+                class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
+                :class="
+                  isAdminDrivers()
+                    ? 'bg-primary text-primary-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                "
+              >
+                LLM Drivers
+              </button>
+            </li>
+            <li>
+              <button
+                @click="router.push({ name: 'settings-admin-tools' })"
+                class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
+                :class="
+                  isAdminTools()
+                    ? 'bg-primary text-primary-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                "
+              >
+                Tool Defaults
+              </button>
+            </li>
+          </ul>
+        </div>
+      </template>
     </div>
   </aside>
 </template>

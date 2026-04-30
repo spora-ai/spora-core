@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Toggle from '@/components/ui/Toggle.vue'
+import Icon from '@/components/ui/Icon.vue'
 import type { ToolSchema } from '@/composables/useToolSettings'
 
 const props = defineProps<{
@@ -49,9 +50,7 @@ import { computed } from 'vue'
             class="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400"
             title="Missing required settings"
           >
-            <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
+            <Icon name="warning" class="h-3 w-3" />
             Missing config
           </span>
         </div>
@@ -128,13 +127,8 @@ import { computed } from 'vue'
                 : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'"
             >
               <!-- Eye for auto-approve, lock for requires approval -->
-              <svg v-if="(operationStates?.[op.name]?.requiresApproval ?? op.requiresApprovalByDefault) === false" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-              </svg>
-              <svg v-else class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
+              <Icon v-if="(operationStates?.[op.name]?.requiresApproval ?? op.requiresApprovalByDefault) === false" name="eye" class="h-3 w-3" />
+              <Icon v-else name="lock" class="h-3 w-3" />
               {{ (operationStates?.[op.name]?.requiresApproval ?? op.requiresApprovalByDefault) === false ? 'Auto-approve' : 'Requires approval' }}
             </span>
           </div>
