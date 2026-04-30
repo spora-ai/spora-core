@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use RuntimeException;
+use Spora\Mailer\LogTransport;
 use Spora\Models\MailTemplate;
-use Spora\Models\User;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mime\Address;
@@ -38,10 +38,16 @@ final class SystemMailer
         $dsn = match ($driver) {
             'smtp' => $this->buildSmtpDsn($config),
             'php_mail', 'sendmail' => 'sendmail://default',
+            'log' => 'log://default',
             default => throw new RuntimeException(
-                "Mail driver '{$driver}' is not supported. Use 'smtp', 'php_mail', or 'sendmail'.",
+                "Mail driver '{$driver}' is not supported. Use 'smtp', 'php_mail', 'sendmail', or 'log'.",
             ),
         };
+
+        if ($driver === 'log') {
+            $logger = new \Psr\Log\NullLogger();
+            return new Mailer(new LogTransport(null, $logger));
+        }
 
         return new Mailer(Transport::fromDsn($dsn));
     }
