@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Mailer;
 
-use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
 use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mailer\Transport\AbstractTransport;
 use Symfony\Component\Mime\Address;
@@ -27,16 +25,21 @@ final class LogTransport extends AbstractTransport
 
         $recipients = $envelope->getRecipients();
         $toAddresses = implode(', ', array_map(
-            static fn (Address $address): string => $address->getAddress(),
+            static fn(Address $address): string => $address->getAddress(),
             $recipients,
         ));
+
+        $originalMessage = $message->getOriginalMessage();
+        $subject = $originalMessage instanceof \Symfony\Component\Mime\Email
+            ? $originalMessage->getSubject()
+            : null;
 
         $this->getLogger()->info(
             '[Spora] Mail sent via log driver',
             [
                 'to'      => $toAddresses,
                 'from'    => $envelope->getSender()->getAddress(),
-                'subject' => $message->getOriginalMessage()->getSubject(),
+                'subject' => $subject,
             ],
         );
     }
