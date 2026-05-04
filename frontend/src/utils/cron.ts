@@ -190,5 +190,25 @@ export function getTimezoneOffsetMinutes(timezone: string, instant: Date): numbe
   const tzInstant = toDate(tzParts)
   const utcInstant = toDate(utcParts)
 
-  return Math.round((tzInstant.getTime() - utcInstant.getTime()) / 60000)
+  let offset = Math.round((tzInstant.getTime() - utcInstant.getTime()) / 60000)
+
+  // Some ICU/timezone implementations have edge-case bugs where the formatted
+  // day is off by one near midnight boundaries, causing offset to be wrong by
+  // ±24 hours. If the result is outside the valid timezone offset range,
+  // try adjusting by ±24 hours to find a valid offset.
+  if (Math.abs(offset) > 840) {
+    // Try adding 24 hours (for negative offsets that should be positive)
+    const adjustedPos = offset + 1440
+    if (Math.abs(adjustedPos) <= 840) {
+      offset = adjustedPos
+    } else {
+      // Try subtracting 24 hours (for positive offsets that should be negative)
+      const adjustedNeg = offset - 1440
+      if (Math.abs(adjustedNeg) <= 840) {
+        offset = adjustedNeg
+      }
+    }
+  }
+
+  return offset
 }
