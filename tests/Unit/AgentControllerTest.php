@@ -396,7 +396,9 @@ test('getOverride returns empty settings when no override set', function (): voi
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
-    expect($body['data']['settings'])->toBe([]);
+    // Schema default (max_results = '10') is seeded when no global/override exists
+    expect($body['data']['settings']['max_results']['value'])->toBe('10');
+    expect($body['data']['settings']['max_results']['source'])->toBe('default');
 });
 
 test('getOverride for llm_configuration falls back to the user default LLMDriverConfiguration', function (): void {
@@ -517,8 +519,10 @@ test('putOverride discards global-scoped keys', function (): void {
     $controller->putOverride($request);
 
     $effective = $toolConfig->getEffectiveSettings(TestTool::class, $agentId);
-    // max_results is global-scoped and was not stored as override
-    expect(array_key_exists('max_results', $effective))->toBeFalse();
+    // max_results is global-scoped — not stored as override, but schema default applies
+    expect($effective['max_results'])->toBe('10'); // from schema default, not override
+    // api_key was stored by override (scope: agent)
+    expect($effective['api_key'])->toBe('secret');
 });
 
 test('deleteOverride removes the override and returns 204', function (): void {
@@ -551,7 +555,9 @@ test('deleteOverride removes the override and returns 204', function (): void {
     $getReq->attributes->set('id', $agentId);
     $getReq->attributes->set('toolId', 'test_tool');
     $body = json_decode($controller->getOverride($getReq)->getContent(), true);
-    expect($body['data']['settings'])->toBe([]);
+    // Schema default (max_results = '10') still applies from getEffectiveSettingsWithSource
+    expect($body['data']['settings']['max_results']['value'])->toBe('10');
+    expect($body['data']['settings']['max_results']['source'])->toBe('default');
 });
 
 test('putOverride saves agent-scoped settings even when tool is not enabled', function (): void {

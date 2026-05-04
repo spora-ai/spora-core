@@ -10,10 +10,12 @@ import { useAgentStore } from '@/stores/agent'
 import type { ScheduledRunResource } from '@/types/scheduledRun'
 import AgentLayout from '@/components/layout/AgentLayout.vue'
 import SharedScheduleEditor from '@/components/shared/SharedScheduleEditor.vue'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import Toggle from '@/components/ui/Toggle.vue'
 import Icon from '@/components/ui/Icon.vue'
 
 const route = useRoute()
+const { confirm } = useConfirmDialog()
 
 const agentId = computed(() => Number(route.params.id))
 
@@ -103,7 +105,7 @@ async function toggleActive(run: ScheduledRunResource): Promise<void> {
 }
 
 async function deleteRun(run: ScheduledRunResource): Promise<void> {
-  if (!confirm(`Delete scheduled run "${scheduleName(run)}"?`)) return
+  if (!await confirm(`Delete scheduled run "${scheduleName(run)}"?`)) return
   try {
     await api.delete(`/agents/${agentId.value}/scheduled-runs/${run.id}`)
     runs.value = runs.value.filter((r) => r.id !== run.id)

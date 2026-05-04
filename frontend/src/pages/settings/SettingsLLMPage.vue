@@ -84,22 +84,6 @@ function cancel(): void {
 </script>
 
 <template>
-  <!-- Mobile nav -->
-  <div class="md:hidden mb-6 flex gap-2">
-    <button
-      @click="router.push({ name: 'settings-overview' })"
-      class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
-    >
-      ← Overview
-    </button>
-    <button
-      @click="router.push({ name: 'settings-tools' })"
-      class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
-    >
-      ← Tools
-    </button>
-  </div>
-
   <AlertBanner v-if="llmStore.error" type="error" :message="llmStore.error" class="mb-4" />
 
   <!-- List view -->

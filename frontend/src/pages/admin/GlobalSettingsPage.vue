@@ -8,6 +8,7 @@
  *   Tool Defaults — global default settings for core tools
  */
 import { ref, computed, onMounted } from 'vue'
+import Icon from '@/components/ui/Icon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useGlobalSettingsStore } from '@/stores/globalSettings'
 import GlobalNavbar from '@/components/GlobalNavbar.vue'

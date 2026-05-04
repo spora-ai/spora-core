@@ -26,6 +26,7 @@ use Illuminate\Support\Carbon;
  * @property int|null    $retry_of_task_id
  * @property int         $retry_count
  * @property Carbon|null $retry_after
+ * @property array|null  $data
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -50,6 +51,7 @@ final class Task extends Model
         'parent_task_id',
         'retry_of_task_id',
         'retry_count',
+        'data',
     ];
 
     /** @var array<string, string> */
@@ -58,6 +60,7 @@ final class Task extends Model
         'max_steps'        => 'integer',
         'retry_count'      => 'integer',
         'retry_of_task_id' => 'integer',
+        'data'             => 'array',
     ];
 
     public function agent(): BelongsTo

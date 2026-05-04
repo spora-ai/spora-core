@@ -18,12 +18,14 @@ final class SseController
         private readonly AuthService $authService,
         private readonly ?string $hubUrl = null,
         private readonly ?string $jwtKey = null,
+        private readonly ?string $publicUrl = null,
     ) {}
 
     /**
      * GET /api/v1/sse/status
      *
      * Returns whether SSE/Mercure is configured and active.
+     * Returns a relative path for hubUrl so the browser resolves it against window.location.origin.
      */
     public function status(): JsonResponse
     {
@@ -33,7 +35,7 @@ final class SseController
 
         return new JsonResponse([
             'active' => true,
-            'hubUrl' => $this->hubUrl,
+            'hubUrl' => $this->publicUrl ?? '/.well-known/mercure',
         ]);
     }
 
@@ -59,7 +61,7 @@ final class SseController
         $token = $this->generateSubscriberJwt($userId);
 
         return new JsonResponse([
-            'hubUrl' => $this->hubUrl,
+            'hubUrl' => $this->publicUrl ?? '/.well-known/mercure',
             'token'  => $token,
         ]);
     }

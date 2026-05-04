@@ -131,7 +131,7 @@ describe('AgentHeaderToolbar', () => {
     expect(hamburger).toBeDefined()
 
     await hamburger!.trigger('click')
-    expect(wrapper.emitted('open-sidebar')).toHaveLength(1)
+    expect(wrapper.emitted('openSidebar')).toHaveLength(1)
   })
 
   it('shows loading state when currentAgent is null', () => {

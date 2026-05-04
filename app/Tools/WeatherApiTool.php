@@ -73,15 +73,15 @@ final class WeatherApiTool implements ToolInterface
         private readonly ?LoggerInterface $logger = null,
     ) {}
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         $action = $this->getOperationName($arguments);
 
         return match ($action) {
-            'current'    => $this->current($arguments, $agentId),
-            'forecast'   => $this->forecast($arguments, $agentId),
-            'search'     => $this->search($arguments, $agentId),
-            'astronomy'  => $this->astronomy($arguments, $agentId),
+            'current'    => $this->current($arguments, $agentId, $userId),
+            'forecast'   => $this->forecast($arguments, $agentId, $userId),
+            'search'     => $this->search($arguments, $agentId, $userId),
+            'astronomy'  => $this->astronomy($arguments, $agentId, $userId),
             default      => new ToolResult(false, "Unknown action '{$action}'. Use one of: current, forecast, search, astronomy."),
         };
     }
@@ -134,14 +134,14 @@ final class WeatherApiTool implements ToolInterface
         ];
     }
 
-    private function current(array $arguments, int $agentId): ToolResult
+    private function current(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $location = trim((string) ($arguments['location'] ?? ''));
         if ($location === '') {
             return new ToolResult(false, 'Location is required for current weather.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.weatherapi.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'WeatherAPI.com key is not configured. Please add it in agent tool settings.');
@@ -222,14 +222,14 @@ final class WeatherApiTool implements ToolInterface
         }
     }
 
-    private function forecast(array $arguments, int $agentId): ToolResult
+    private function forecast(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $location = trim((string) ($arguments['location'] ?? ''));
         if ($location === '') {
             return new ToolResult(false, 'Location is required for forecast.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.weatherapi.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'WeatherAPI.com key is not configured. Please add it in agent tool settings.');
@@ -310,7 +310,7 @@ final class WeatherApiTool implements ToolInterface
         }
     }
 
-    private function search(array $arguments, int $agentId): ToolResult
+    private function search(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query = trim((string) ($arguments['query'] ?? ''));
         if ($query === '') {
@@ -320,7 +320,7 @@ final class WeatherApiTool implements ToolInterface
             return new ToolResult(false, 'Search query must be at least 2 characters.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.weatherapi.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'WeatherAPI.com key is not configured. Please add it in agent tool settings.');
@@ -392,14 +392,14 @@ final class WeatherApiTool implements ToolInterface
         }
     }
 
-    private function astronomy(array $arguments, int $agentId): ToolResult
+    private function astronomy(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $location = trim((string) ($arguments['location'] ?? ''));
         if ($location === '') {
             return new ToolResult(false, 'Location is required for astronomy data.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.weatherapi.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'WeatherAPI.com key is not configured. Please add it in agent tool settings.');

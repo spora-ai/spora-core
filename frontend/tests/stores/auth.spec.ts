@@ -72,7 +72,7 @@ describe('useAuthStore', () => {
 
   describe('login', () => {
     it('sets user on success', async () => {
-      mockApi.post.mockResolvedValueOnce({ id: 1, email: 'test@example.com' })
+      mockApi.post.mockResolvedValueOnce({ user: { id: 1, email: 'test@example.com' } })
 
       const store = useAuthStore()
       await store.login('test@example.com', 'password')
@@ -105,7 +105,7 @@ describe('useAuthStore', () => {
   describe('register', () => {
     it('sets user on success', async () => {
       const mockUser = { id: 2, email: 'new@example.com', roles: [] }
-      mockApi.post.mockResolvedValueOnce(mockUser)
+      mockApi.post.mockResolvedValueOnce({ user: { id: 2, email: 'new@example.com' } })
 
       const store = useAuthStore()
       await store.register('new@example.com', 'password123')

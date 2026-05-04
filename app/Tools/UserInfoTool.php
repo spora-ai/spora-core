@@ -38,7 +38,7 @@ final class UserInfoTool implements ToolInterface
         return $user;
     }
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         $operation = $this->getOperationName($arguments);
 

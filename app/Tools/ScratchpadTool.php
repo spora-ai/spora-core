@@ -23,7 +23,7 @@ final class ScratchpadTool implements ToolInterface
 {
     use HasOperations;
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         $operation = $this->getOperationName($arguments);
 

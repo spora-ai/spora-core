@@ -28,7 +28,7 @@ describe('SseController', function (): void {
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
-        expect($body['hubUrl'])->toBe('http://localhost:3000/.well-known/mercure');
+        expect($body['hubUrl'])->toBe('/.well-known/mercure');
         expect($body['token'])->not->toBeEmpty();
 
         // Verify the token is a valid JWT structure (header.payload.signature)

@@ -68,9 +68,9 @@ final class TavilySearchTool implements ToolInterface
         return $envTimeout > 0 ? $envTimeout : 30;
     }
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
-        return $this->search($arguments, $agentId);
+        return $this->search($arguments, $agentId, $userId);
     }
 
     public function describeAction(array $arguments): string
@@ -79,7 +79,7 @@ final class TavilySearchTool implements ToolInterface
         return "Search the web using Tavily AI for: '{$query}'";
     }
 
-    public function search(array $arguments, int $agentId): ToolResult
+    public function search(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query       = trim((string) ($arguments['query'] ?? ''));
         $searchDepth = trim((string) ($arguments['search_depth'] ?? 'basic'));
@@ -88,7 +88,7 @@ final class TavilySearchTool implements ToolInterface
             return new ToolResult(false, 'The search query cannot be empty.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.tavily.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'Tavily API key is not configured for this agent. Please edit the Tavily Search settings.');

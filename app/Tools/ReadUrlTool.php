@@ -60,9 +60,9 @@ final class ReadUrlTool implements ToolInterface
         return $envTimeout > 0 ? $envTimeout : 15;
     }
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
-        return $this->fetch($arguments, $agentId);
+        return $this->fetch($arguments, $agentId, $userId);
     }
 
     public function describeAction(array $arguments): string
@@ -71,7 +71,7 @@ final class ReadUrlTool implements ToolInterface
         return "Fetch content from URL: {$url}";
     }
 
-    public function fetch(array $arguments, int $agentId): ToolResult
+    public function fetch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $url = trim((string) ($arguments['url'] ?? ''));
 
@@ -86,7 +86,7 @@ final class ReadUrlTool implements ToolInterface
             return new ToolResult(false, 'Only http:// and https:// URLs are supported.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
 
         try {
             $this->logger?->debug('ReadUrlTool: HTTP request', [

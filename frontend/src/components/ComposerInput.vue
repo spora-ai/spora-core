@@ -12,6 +12,7 @@ import { useTaskStore } from '@/stores/tasks'
 import { ApiError } from '@/api/client'
 import SharedScheduleEditor from '@/components/shared/SharedScheduleEditor.vue'
 import PromptTemplateDialog from '@/components/PromptTemplateDialog.vue'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import Icon from '@/components/ui/Icon.vue'
 
 const props = defineProps<{
@@ -20,6 +21,7 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+const { confirm } = useConfirmDialog()
 const agentStore = useAgentStore()
 const llmConfigsStore = useLlmConfigsStore()
 const taskStore = useTaskStore()
@@ -85,7 +87,7 @@ function onTemplateChange(templateId: number | null): void {
 
 async function deleteSelectedTemplate(): Promise<void> {
   if (selectedTemplateId.value === null) return
-  if (!confirm('Are you sure you want to delete this template?')) return
+  if (!await confirm('Are you sure you want to delete this template?')) return
 
   try {
     await promptTemplatesStore.deleteTemplate(props.agentId, selectedTemplateId.value)

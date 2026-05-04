@@ -83,19 +83,19 @@ final class SerperSearchTool implements ToolInterface
         return $envTimeout > 0 ? $envTimeout : 30;
     }
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         $operation = $this->getOperationName($arguments);
         return match ($operation) {
-            'search'           => $this->search($arguments, $agentId),
-            'image_search'     => $this->imageSearch($arguments, $agentId),
-            'news_search'      => $this->newsSearch($arguments, $agentId),
-            'video_search'     => $this->videoSearch($arguments, $agentId),
-            'scholar_search'   => $this->scholarSearch($arguments, $agentId),
-            'shopping_search'  => $this->shoppingSearch($arguments, $agentId),
-            'patents_search'   => $this->patentsSearch($arguments, $agentId),
-            'maps_search'      => $this->mapsSearch($arguments, $agentId),
-            'places_search'    => $this->placesSearch($arguments, $agentId),
+            'search'           => $this->search($arguments, $agentId, $userId),
+            'image_search'     => $this->imageSearch($arguments, $agentId, $userId),
+            'news_search'      => $this->newsSearch($arguments, $agentId, $userId),
+            'video_search'     => $this->videoSearch($arguments, $agentId, $userId),
+            'scholar_search'   => $this->scholarSearch($arguments, $agentId, $userId),
+            'shopping_search'  => $this->shoppingSearch($arguments, $agentId, $userId),
+            'patents_search'   => $this->patentsSearch($arguments, $agentId, $userId),
+            'maps_search'      => $this->mapsSearch($arguments, $agentId, $userId),
+            'places_search'    => $this->placesSearch($arguments, $agentId, $userId),
             default            => new ToolResult(false, "Unknown operation: {$operation}"),
         };
     }
@@ -154,14 +154,14 @@ final class SerperSearchTool implements ToolInterface
         return $response->toArray(false);
     }
 
-    public function search(array $arguments, int $agentId): ToolResult
+    public function search(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query = trim((string) ($arguments['q'] ?? ''));
         if ($query === '') {
             return new ToolResult(false, 'The search query cannot be empty.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.serper.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'Serper API key is not configured for this agent. Please edit the Serper Search settings.');
@@ -200,14 +200,14 @@ final class SerperSearchTool implements ToolInterface
         }
     }
 
-    public function imageSearch(array $arguments, int $agentId): ToolResult
+    public function imageSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query = trim((string) ($arguments['q'] ?? ''));
         if ($query === '') {
             return new ToolResult(false, 'The search query cannot be empty.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.serper.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
@@ -245,14 +245,14 @@ final class SerperSearchTool implements ToolInterface
         }
     }
 
-    public function newsSearch(array $arguments, int $agentId): ToolResult
+    public function newsSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query = trim((string) ($arguments['q'] ?? ''));
         if ($query === '') {
             return new ToolResult(false, 'The search query cannot be empty.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.serper.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
@@ -290,14 +290,14 @@ final class SerperSearchTool implements ToolInterface
         }
     }
 
-    public function videoSearch(array $arguments, int $agentId): ToolResult
+    public function videoSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query = trim((string) ($arguments['q'] ?? ''));
         if ($query === '') {
             return new ToolResult(false, 'The search query cannot be empty.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.serper.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
@@ -337,14 +337,14 @@ final class SerperSearchTool implements ToolInterface
         }
     }
 
-    public function scholarSearch(array $arguments, int $agentId): ToolResult
+    public function scholarSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query = trim((string) ($arguments['q'] ?? ''));
         if ($query === '') {
             return new ToolResult(false, 'The search query cannot be empty.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.serper.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
@@ -381,14 +381,14 @@ final class SerperSearchTool implements ToolInterface
         }
     }
 
-    public function shoppingSearch(array $arguments, int $agentId): ToolResult
+    public function shoppingSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query = trim((string) ($arguments['q'] ?? ''));
         if ($query === '') {
             return new ToolResult(false, 'The search query cannot be empty.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.serper.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
@@ -428,14 +428,14 @@ final class SerperSearchTool implements ToolInterface
         }
     }
 
-    public function patentsSearch(array $arguments, int $agentId): ToolResult
+    public function patentsSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query = trim((string) ($arguments['q'] ?? ''));
         if ($query === '') {
             return new ToolResult(false, 'The search query cannot be empty.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.serper.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
@@ -475,14 +475,14 @@ final class SerperSearchTool implements ToolInterface
         }
     }
 
-    public function mapsSearch(array $arguments, int $agentId): ToolResult
+    public function mapsSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query = trim((string) ($arguments['q'] ?? ''));
         if ($query === '') {
             return new ToolResult(false, 'The search query cannot be empty.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.serper.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
@@ -527,14 +527,14 @@ final class SerperSearchTool implements ToolInterface
         }
     }
 
-    public function placesSearch(array $arguments, int $agentId): ToolResult
+    public function placesSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query = trim((string) ($arguments['q'] ?? ''));
         if ($query === '') {
             return new ToolResult(false, 'The search query cannot be empty.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.serper.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');

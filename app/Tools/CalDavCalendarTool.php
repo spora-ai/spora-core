@@ -64,9 +64,9 @@ final class CalDavCalendarTool implements ToolInterface
         return $envTimeout > 0 ? $envTimeout : 30;
     }
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
-        return $this->listEvents($arguments, $agentId);
+        return $this->listEvents($arguments, $agentId, $userId);
     }
 
     public function describeAction(array $arguments): string
@@ -76,7 +76,7 @@ final class CalDavCalendarTool implements ToolInterface
         return "Fetch CalDAV calendar events from {$start} to {$end}";
     }
 
-    public function listEvents(array $arguments, int $agentId): ToolResult
+    public function listEvents(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $startDateStr = $arguments['start_date'] ?? '';
         $endDateStr   = $arguments['end_date'] ?? '';
@@ -97,7 +97,7 @@ final class CalDavCalendarTool implements ToolInterface
             return new ToolResult(false, 'Invalid date format provided. Must be ISO-8601.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $url      = rtrim((string) ($settings['core.caldav.url'] ?? ''), '/');
         $username = $settings['core.caldav.username'] ?? '';
         $password = $settings['core.caldav.password'] ?? '';

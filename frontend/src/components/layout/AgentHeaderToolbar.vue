@@ -13,7 +13,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'open-sidebar'): void
+  openSidebar: () => void
 }>()
 
 const router = useRouter()
@@ -27,6 +27,11 @@ function isActive(name: string): boolean {
 function navigate(name: string): void {
   router.push({ name, params: { id: props.agentId } })
 }
+
+// @ts-ignore TS is confused by emit() in arrow fn passed to another function
+const emitOpenSidebar: () => void = () => emit('openSidebar')
+
+const openSidebar = emitOpenSidebar
 </script>
 
 <template>
@@ -35,7 +40,7 @@ function navigate(name: string): void {
     <div class="px-6 py-4 flex items-center gap-4 shrink-0 border-b border-border text-foreground">
       <!-- Mobile sidebar toggle -->
       <button
-        @click="emit('open-sidebar')"
+        @click="openSidebar()"
         class="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors lg:hidden"
         title="Show agent list"
       >

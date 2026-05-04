@@ -29,7 +29,7 @@ it('returns error on invalid date format', function () {
 
 it('returns error if caldav is not configured', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(CalDavCalendarTool::class, 1)->andReturn([]);
+    $config->allows('getEffectiveSettings')->with(CalDavCalendarTool::class, 1, null)->andReturn([]);
     $client = Mockery::mock(HttpClientInterface::class);
 
     $tool = new CalDavCalendarTool($config, $client);
@@ -41,7 +41,7 @@ it('returns error if caldav is not configured', function () {
 
 it('correctly unfolds RFC 5545 long lines before parsing', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(CalDavCalendarTool::class, 1)->andReturn([
+    $config->allows('getEffectiveSettings')->with(CalDavCalendarTool::class, 1, null)->andReturn([
         'core.caldav.url'      => 'https://cal.example.com/',
         'core.caldav.username' => 'u',
         'core.caldav.password' => 'p',
@@ -80,7 +80,7 @@ it('correctly unfolds RFC 5545 long lines before parsing', function () {
 
 it('makes correct http REPORT request and parses ics events', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(CalDavCalendarTool::class, 1)->andReturn([
+    $config->allows('getEffectiveSettings')->with(CalDavCalendarTool::class, 1, null)->andReturn([
         'core.caldav.url' => 'https://cal.example.com/',
         'core.caldav.username' => 'test_user',
         'core.caldav.password' => 'secret123',

@@ -32,4 +32,9 @@ interface NotificationServiceInterface
      * Delete a notification.
      */
     public function deleteNotification(int $notificationId, int $userId): bool;
+
+    /**
+     * Delete all notifications for a user.
+     */
+    public function deleteAllForUser(int $userId): void;
 }

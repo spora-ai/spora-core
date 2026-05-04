@@ -39,6 +39,11 @@ storage/*.lock
 # ── Composer ─────────────────────────────────────────────────────────────────
 /vendor/
 
+# ── Docker ───────────────────────────────────────────────────────────────────
+# Runtime env (contains secrets) and persistent storage
+docker/.env.local
+docker/storage/
+
 # ── Frontend (Vue / Vite) ────────────────────────────────────────────────────
 frontend/node_modules/
 frontend/dist/

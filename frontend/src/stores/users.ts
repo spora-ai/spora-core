@@ -16,17 +16,19 @@ export const useUsersStore = defineStore('users', () => {
     loading.value = true
     error.value = null
     try {
-      const result = await api.get<{
-        users: User[]
+      const raw = await api.get<{
+        data: User[]
         meta: { current_page: number; last_page: number; per_page: number; total: number }
       }>(`/users?page=${page}`)
-      users.value = result.users
+      const result = raw.data ?? raw
+      users.value = result as User[]
+      const meta = raw.meta ?? { current_page: 1, last_page: 1, per_page: 20, total: 0 }
       return {
-        users: result.users,
-        current_page: result.meta.current_page,
-        last_page: result.meta.last_page,
-        per_page: result.meta.per_page,
-        total: result.meta.total,
+        users: result as User[],
+        current_page: meta.current_page,
+        last_page: meta.last_page,
+        per_page: meta.per_page,
+        total: meta.total,
       }
     } catch (e) {
       error.value = e instanceof ApiError ? e.message : 'Failed to load users.'

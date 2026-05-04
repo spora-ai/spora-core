@@ -58,13 +58,13 @@ final class WorldNewsApiTool implements ToolInterface
         return $envTimeout > 0 ? $envTimeout : 30;
     }
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         $operation = $arguments['operation'] ?? 'search';
 
         return match ($operation) {
-            'top-news' => $this->topNews($arguments, $agentId),
-            default => $this->search($arguments, $agentId),
+            'top-news' => $this->topNews($arguments, $agentId, $userId),
+            default => $this->search($arguments, $agentId, $userId),
         };
     }
 
@@ -78,7 +78,7 @@ final class WorldNewsApiTool implements ToolInterface
         };
     }
 
-    public function search(array $arguments, int $agentId): ToolResult
+    public function search(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query = trim((string) ($arguments['q'] ?? ''));
 
@@ -86,7 +86,7 @@ final class WorldNewsApiTool implements ToolInterface
             return new ToolResult(false, 'The search query cannot be empty.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.worldnewsapi.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'WorldNewsAPI key is not configured for this agent.');
@@ -151,7 +151,7 @@ final class WorldNewsApiTool implements ToolInterface
         }
     }
 
-    public function topNews(array $arguments, int $agentId): ToolResult
+    public function topNews(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $country = trim((string) ($arguments['source-country'] ?? ''));
         $language = trim((string) ($arguments['language'] ?? ''));
@@ -164,7 +164,7 @@ final class WorldNewsApiTool implements ToolInterface
             return new ToolResult(false, 'language is required for top-news.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.worldnewsapi.api_key'] ?? '';
         if (empty($apiKey)) {
             return new ToolResult(false, 'WorldNewsAPI key is not configured for this agent.');

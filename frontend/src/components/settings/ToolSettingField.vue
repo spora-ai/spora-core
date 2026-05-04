@@ -9,6 +9,7 @@ const props = defineProps<{
   error?: string | null
   disabled?: boolean
   hideLabel?: boolean
+  customPlaceholder?: string
 }>()
 
 const emit = defineEmits<{
@@ -58,7 +59,7 @@ function onInput(e: Event): void {
       :id="field.key"
       :value="String(modelValue ?? '')"
       @input="onInput"
-      :placeholder="field.description"
+      :placeholder="customPlaceholder ?? (field.default != null ? String(field.default) : field.description)"
       :required="field.required"
       :disabled="disabled"
       rows="3"
@@ -130,7 +131,7 @@ function onInput(e: Event): void {
           :id="field.key"
           :value="String(modelValue ?? '')"
           @input="onInput"
-          :placeholder="field.description"
+          :placeholder="customPlaceholder ?? (field.default != null ? String(field.default) : field.description)"
           :required="field.required"
           :disabled="disabled"
           type="password"

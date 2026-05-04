@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import LogoSvg from '@/assets/logo.svg?asset'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -29,8 +30,8 @@ async function submit(): Promise<void> {
   <div class="min-h-screen flex items-center justify-center bg-background px-4">
     <div class="w-full max-w-sm space-y-8">
 
-      <div class="text-center space-y-1">
-        <h1 class="text-2xl font-semibold tracking-tight">Spora</h1>
+      <div class="text-center space-y-6">
+        <img :src="LogoSvg" alt="Spora" class="h-12 mx-auto dark:invert" />
         <p class="text-sm text-muted-foreground">Sign in to your account</p>
       </div>
 

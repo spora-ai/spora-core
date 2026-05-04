@@ -79,6 +79,20 @@ final class ToolController
         return new JsonResponse(['data' => ['settings' => $masked]]);
     }
 
+    public function deleteSettings(Request $request): Response
+    {
+        AuthGuard::requireAuth($this->authService);
+
+        $toolClass = $this->resolveToolClassFromRequest($request);
+        if ($toolClass === null) {
+            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Tool not found.']], 404);
+        }
+
+        $this->toolConfigService->deleteGlobalSettings($toolClass);
+
+        return new Response('', 204);
+    }
+
     public function getUserSettings(Request $request, string $toolId): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
@@ -118,6 +132,20 @@ final class ToolController
         $masked = $this->toolConfigService->maskForApi($saved, $toolClass);
 
         return new JsonResponse(['data' => ['settings' => $masked]]);
+    }
+
+    public function deleteUserSettings(Request $request, string $toolId): Response
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $toolClass = $this->toolConfigService->resolveToolClass($toolId);
+
+        if ($toolClass === null) {
+            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Tool not found.']], 404);
+        }
+
+        $this->toolConfigService->deleteUserSettings($toolClass, $userId);
+
+        return new Response('', 204);
     }
 
     // -----------------------------------------------------------------------

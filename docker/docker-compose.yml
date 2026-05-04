@@ -1,13 +1,13 @@
 services:
   spora:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: spora-app
     restart: always
     command: ["/usr/bin/supervisord", "-c", "/app/supervisord.conf"]
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - "8081:80"
     env_file:
       - .env.local
     environment:
@@ -22,7 +22,7 @@ services:
       retries: 3
       start_period: 10s
     volumes:
-      - ./storage:/app/storage
+      - spora_storage:/app/storage
       - caddy_data:/data
       - caddy_config:/config
     networks:
@@ -35,10 +35,10 @@ services:
     env_file:
       - .env.local
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: ${DB_NAME:-spora}
-      MYSQL_USER: ${DB_USER:-spora}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-sporapassword}
+      MYSQL_ROOT_PASSWORD: ${SPORA_DB_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${SPORA_DB_NAME:-spora}
+      MYSQL_USER: ${SPORA_DB_USER:-spora}
+      MYSQL_PASSWORD: ${SPORA_DB_PASSWORD:-sporapassword}
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
@@ -50,26 +50,8 @@ services:
     networks:
       - spora
 
-  mercure:
-    image: dunglas/mercure:v0.14
-    container_name: spora-mercure
-    restart: always
-    env_file:
-      - .env.local
-    environment:
-      # Allow public subscribers (for development; restrict in production)
-      MERCURE_DEMO: "true"
-      JWT_KEY: ${MERCURE_JWT_SECRET:-change-me-in-production}
-      CORS_ALLOWED_ORIGINS: "*"
-      PUBLISH_ALLOWED_ORIGINS: "*"
-      # Use the same jwt key as mercure for signing
-      MERCURE_JWT_KEY: ${MERCURE_JWT_SECRET:-change-me}
-    ports:
-      - "3000:3000"
-    networks:
-      - spora
-
 volumes:
+  spora_storage:
   mysql_data:
   caddy_data:
   caddy_config:

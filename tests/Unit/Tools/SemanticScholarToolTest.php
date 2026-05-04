@@ -70,7 +70,7 @@ it('returns error for unknown action', function () {
 
 it('paper_search makes correct HTTP request and parses response', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1)->andReturn([]);
+    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1, null)->andReturn([]);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
@@ -125,7 +125,7 @@ it('paper_search makes correct HTTP request and parses response', function () {
 
 it('paper_search returns empty message when no results', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1)->andReturn([]);
+    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1, null)->andReturn([]);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
@@ -144,7 +144,7 @@ it('paper_search returns empty message when no results', function () {
 
 it('get_paper fetches paper metadata by ID', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1)->andReturn([]);
+    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1, null)->andReturn([]);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
@@ -176,7 +176,7 @@ it('get_paper fetches paper metadata by ID', function () {
 
 it('get_citations returns citing papers with pagination', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1)->andReturn([]);
+    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1, null)->andReturn([]);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
@@ -213,7 +213,7 @@ it('get_citations returns citing papers with pagination', function () {
 
 it('get_references returns referenced papers', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1)->andReturn([]);
+    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1, null)->andReturn([]);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
@@ -247,7 +247,7 @@ it('get_references returns referenced papers', function () {
 
 it('get_recommendations returns recommended papers', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1)->andReturn([]);
+    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1, null)->andReturn([]);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
@@ -280,7 +280,7 @@ it('get_recommendations returns recommended papers', function () {
 
 it('handles HTTP error codes gracefully', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1)->andReturn([]);
+    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1, null)->andReturn([]);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
@@ -302,7 +302,7 @@ it('handles HTTP error codes gracefully', function () {
 
 it('handles HTTP timeout from settings', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1)->andReturn([
+    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1, null)->andReturn([
         'core.semantic_scholar.http_timeout' => '60',
     ]);
 
@@ -324,7 +324,7 @@ it('handles HTTP timeout from settings', function () {
 
 it('paper_search respects open_access_only and year filters', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1)->andReturn([]);
+    $config->allows('getEffectiveSettings')->with(SemanticScholarTool::class, 1, null)->andReturn([]);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);

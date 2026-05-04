@@ -54,16 +54,16 @@ final class SemanticScholarTool implements ToolInterface
         private readonly ?LoggerInterface $logger = null,
     ) {}
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         $action = $arguments['action'] ?? 'paper_search';
 
         return match ($action) {
-            'paper_search' => $this->paperSearch($arguments, $agentId),
-            'get_paper' => $this->getPaper($arguments, $agentId),
-            'get_citations' => $this->getCitations($arguments, $agentId),
-            'get_references' => $this->getReferences($arguments, $agentId),
-            'get_recommendations' => $this->getRecommendations($arguments, $agentId),
+            'paper_search' => $this->paperSearch($arguments, $agentId, $userId),
+            'get_paper' => $this->getPaper($arguments, $agentId, $userId),
+            'get_citations' => $this->getCitations($arguments, $agentId, $userId),
+            'get_references' => $this->getReferences($arguments, $agentId, $userId),
+            'get_recommendations' => $this->getRecommendations($arguments, $agentId, $userId),
             default => new ToolResult(false, "Unknown action '{$action}'. Valid actions: paper_search, get_paper, get_citations, get_references, get_recommendations."),
         };
     }
@@ -121,7 +121,7 @@ final class SemanticScholarTool implements ToolInterface
         ];
     }
 
-    public function paperSearch(array $arguments, int $agentId): ToolResult
+    public function paperSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $query = trim((string) ($arguments['query'] ?? ''));
         if ($query === '') {
@@ -132,7 +132,7 @@ final class SemanticScholarTool implements ToolInterface
         $year = trim((string) ($arguments['year'] ?? ''));
         $openAccessOnly = !empty($arguments['open_access_only']);
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $params = [
             'query' => $query,
             'limit' => $limit,
@@ -196,14 +196,14 @@ final class SemanticScholarTool implements ToolInterface
         }
     }
 
-    public function getPaper(array $arguments, int $agentId): ToolResult
+    public function getPaper(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $paperId = trim((string) ($arguments['paper_id'] ?? ''));
         if ($paperId === '') {
             return new ToolResult(false, 'The paper_id parameter is required.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
 
         try {
             $url = self::BASE_URL . '/graph/v1/paper/' . urlencode($paperId);
@@ -246,7 +246,7 @@ final class SemanticScholarTool implements ToolInterface
         }
     }
 
-    public function getCitations(array $arguments, int $agentId): ToolResult
+    public function getCitations(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $paperId = trim((string) ($arguments['paper_id'] ?? ''));
         if ($paperId === '') {
@@ -256,7 +256,7 @@ final class SemanticScholarTool implements ToolInterface
         $limit = min(100, max(1, (int) ($arguments['limit'] ?? 20)));
         $offset = max(0, (int) ($arguments['offset'] ?? 0));
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
 
         try {
             $url = self::BASE_URL . '/graph/v1/paper/' . urlencode($paperId) . '/citations';
@@ -322,7 +322,7 @@ final class SemanticScholarTool implements ToolInterface
         }
     }
 
-    public function getReferences(array $arguments, int $agentId): ToolResult
+    public function getReferences(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $paperId = trim((string) ($arguments['paper_id'] ?? ''));
         if ($paperId === '') {
@@ -332,7 +332,7 @@ final class SemanticScholarTool implements ToolInterface
         $limit = min(100, max(1, (int) ($arguments['limit'] ?? 20)));
         $offset = max(0, (int) ($arguments['offset'] ?? 0));
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
 
         try {
             $url = self::BASE_URL . '/graph/v1/paper/' . urlencode($paperId) . '/references';
@@ -398,7 +398,7 @@ final class SemanticScholarTool implements ToolInterface
         }
     }
 
-    public function getRecommendations(array $arguments, int $agentId): ToolResult
+    public function getRecommendations(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $paperId = trim((string) ($arguments['paper_id'] ?? ''));
         if ($paperId === '') {
@@ -407,7 +407,7 @@ final class SemanticScholarTool implements ToolInterface
 
         $limit = min(20, max(1, (int) ($arguments['limit'] ?? 10)));
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
 
         try {
             $url = self::BASE_URL . '/recommendations/v1/papers/forpaper/' . urlencode($paperId);

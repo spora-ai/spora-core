@@ -1,12 +1,31 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import Icon from '@/components/ui/Icon.vue'
+import { useAuthStore } from '@/stores/auth'
 import { useMailTemplatesStore } from '@/stores/mailTemplates'
 import { useToast } from '@/composables/useToast'
 
 const SYSTEM_TEMPLATES = ['email_verification', 'password_reset', 'welcome']
 
+const router = useRouter()
+const auth = useAuthStore()
 const mailTemplates = useMailTemplatesStore()
 const toast = useToast()
+
+// ── Admin guard ────────────────────────────────────────────────────────────
+
+onMounted(async () => {
+  if (!auth.user?.roles?.includes('ADMIN')) {
+    router.replace({ name: 'settings-overview' })
+    return
+  }
+  try {
+    await mailTemplates.fetchAll()
+  } catch {
+    toast.error('Failed to load mail templates.')
+  }
+})
 
 // ── UI State ────────────────────────────────────────────────────────────────
 
@@ -23,16 +42,6 @@ const previewLoading = ref(false)
 const isSystemTemplate = computed(() =>
   mailTemplates.currentTemplate ? SYSTEM_TEMPLATES.includes(mailTemplates.currentTemplate.name) : false,
 )
-
-// ── Load ────────────────────────────────────────────────────────────────────
-
-onMounted(async () => {
-  try {
-    await mailTemplates.fetchAll()
-  } catch {
-    toast.error('Failed to load mail templates.')
-  }
-})
 
 async function selectTemplate(template: { id: number }): Promise<void> {
   try {
@@ -129,6 +138,10 @@ async function runPreview(): Promise<void> {
 
 const PLACEHOLDERS = ['user_name', 'email', 'verification_link', 'reset_link', 'site_name']
 
+function formatPlaceholder(ph: string): string {
+  return `{{${ph}}}`
+}
+
 function insertPlaceholder(ph: string): void {
   editorForm.value.body_text += `{{${ph}}}`
   editorForm.value.body_html += `{{${ph}}}`
@@ -141,16 +154,6 @@ function insertPlaceholder(ph: string): void {
 
     <main class="flex-1 px-4 py-8">
       <div class="max-w-2xl mx-auto">
-
-        <!-- Mobile back -->
-        <div class="md:hidden mb-6">
-          <button
-            @click="$router.push({ name: 'settings-overview' })"
-            class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
-          >
-            ← Overview
-          </button>
-        </div>
 
         <!-- Header -->
         <div class="flex items-center justify-between mb-6">
@@ -211,7 +214,7 @@ function insertPlaceholder(ph: string): void {
 
             <div v-if="isSystemTemplate" class="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-700/50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
               <Icon name="warning" class="h-4 w-4 mt-0.5 shrink-0 text-amber-500" />
-              <span>This is a system template. Editing is allowed but changes may be overwritten on updates.</span>
+              <span>This is a system template and cannot be deleted.</span>
             </div>
           </div>
 
@@ -281,7 +284,7 @@ function insertPlaceholder(ph: string): void {
                   @click="insertPlaceholder(ph)"
                   class="rounded-full border border-border bg-muted px-3 py-1 text-xs font-mono text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
                 >
-                  {{ `{{${ph}}}` }}
+                  {{ formatPlaceholder(ph) }}
                 </button>
               </div>
               <p class="text-xs text-muted-foreground">Click a placeholder to insert it into both body fields.</p>
@@ -411,7 +414,7 @@ function insertPlaceholder(ph: string): void {
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
         @click.self="showPreview = false"
       >
-        <div class="w-full max-w-2xl mx-4 rounded-2xl border border-border bg-card shadow-xl flex flex-col max-h-[90vh]">
+        <div class="w-full max-w-2xl mx-4 rounded-2xl border border-border bg-background shadow-xl flex flex-col max-h-[90vh]">
           <div class="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
             <h2 class="text-base font-semibold">Preview Template</h2>
             <button
@@ -432,7 +435,7 @@ function insertPlaceholder(ph: string): void {
                   v-model="previewParams[key as keyof typeof previewParams]"
                   type="text"
                   class="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                  :placeholder="`{{${key}}}`"
+                  :placeholder="formatPlaceholder(key)"
                 />
               </div>
             </div>

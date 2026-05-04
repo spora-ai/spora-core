@@ -29,7 +29,7 @@ final class CalculatorTool implements ToolInterface
 {
     use HasOperations;
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         return $this->calculate($arguments, $agentId);
     }

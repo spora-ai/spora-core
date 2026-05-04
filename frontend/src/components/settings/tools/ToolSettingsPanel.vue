@@ -4,6 +4,7 @@ import { useToolSettings } from '@/composables/useToolSettings'
 import { ApiError } from '@/api/client'
 import ToolSettingsForm from '@/components/settings/ToolSettingsForm.vue'
 import AlertBanner from '@/components/ui/AlertBanner.vue'
+import Icon from '@/components/ui/Icon.vue'
 import type { ToolSchema } from '@/composables/useToolSettings'
 
 const props = defineProps<{
@@ -18,16 +19,19 @@ const emit = defineEmits<{
   back: []
 }>()
 
-const { getGlobalSettings, getUserSettings, putUserSettings, putSettings } = useToolSettings()
+const { getGlobalSettings, getUserSettings, putUserSettings, putSettings, deleteSettings, deleteUserSettings } = useToolSettings()
 
 const mode = computed(() => props.mode ?? 'global')
 
 const serverSettings = ref<Record<string, string>>({ ...props.initialSettings })
 const saving = ref(false)
+const clearing = ref(false)
 const error = ref<string | null>(null)
 const savedFlash = ref(false)
-let flashTimer: ReturnType<typeof setTimeout> | null = null
-onUnmounted(() => { if (flashTimer) clearTimeout(flashTimer) })
+const clearedFlash = ref(false)
+let savedTimer: ReturnType<typeof setTimeout> | null = null
+let clearedTimer: ReturnType<typeof setTimeout> | null = null
+onUnmounted(() => { if (savedTimer) clearTimeout(savedTimer); if (clearedTimer) clearTimeout(clearedTimer) })
 
 const hasExistingSettings = computed(() =>
   Object.values(serverSettings.value).some((v) => v !== '' && v !== null),
@@ -73,13 +77,35 @@ async function onSave(settings: Record<string, string>): Promise<void> {
       serverSettings.value = await putSettings(props.tool.tool_name, settings, serverSettings.value)
     }
     savedFlash.value = true
-    if (flashTimer) clearTimeout(flashTimer)
-    flashTimer = setTimeout(() => { savedFlash.value = false }, 2000)
+    if (savedTimer) clearTimeout(savedTimer)
+    savedTimer = setTimeout(() => { savedFlash.value = false }, 2000)
     emit('saved', serverSettings.value)
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Failed to save settings.'
   } finally {
     saving.value = false
+  }
+}
+
+async function onClearToGlobal(): Promise<void> {
+  clearing.value = true
+  error.value = null
+  try {
+    if (mode.value === 'user') {
+      await deleteUserSettings(props.tool.tool_name)
+      serverSettings.value = await getUserSettings(props.tool.tool_name)
+    } else {
+      await deleteSettings(props.tool.tool_name)
+      serverSettings.value = await getGlobalSettings(props.tool.tool_name)
+    }
+    clearedFlash.value = true
+    if (clearedTimer) clearTimeout(clearedTimer)
+    clearedTimer = setTimeout(() => { clearedFlash.value = false }, 2000)
+    emit('saved', serverSettings.value)
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Failed to reset settings.'
+  } finally {
+    clearing.value = false
   }
 }
 
@@ -104,6 +130,7 @@ function displayValue(key: string, value: string): string {
   </button>
 
   <AlertBanner v-if="savedFlash" type="success" message="Settings saved." class="mb-4" />
+  <AlertBanner v-else-if="clearedFlash" type="success" message="Settings deleted." class="mb-4" />
 
   <!-- Current configuration (collapsible) -->
   <div v-if="hasExistingSettings" class="mb-4">
@@ -134,9 +161,13 @@ function displayValue(key: string, value: string): string {
     <ToolSettingsForm
       :tool="tool"
       :initialSettings="serverSettings"
-      :saving="saving"
+      :globalDefaults="globalDefaults"
+      :canClearToGlobal="mode === 'user' || mode === 'global'"
+      :saving="saving || clearing"
       :error="error"
+      :mode="mode"
       @save="onSave"
+      @clear-to-global="onClearToGlobal"
     />
   </div>
 </template>

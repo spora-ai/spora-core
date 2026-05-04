@@ -3,20 +3,38 @@
  *
  * Auto-connects on creation and cleans up on component unmount.
  * When Mercure is configured it uses SSE; otherwise it falls back to polling.
+ *
+ * Uses a module-level singleton EventSource so the SSE connection persists
+ * across route changes (no reconnect churn on every navigation).
  */
-import { ref, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useNotificationStore } from '@/stores/notifications'
 import { useAuthStore } from '@/stores/auth'
 import { api } from '@/api/client'
+
+// ── Module-level singleton ────────────────────────────────────────────────────
+
+let globalEventSource: EventSource | null = null
+let globalConnected = ref(false)
+
+// ── Composable ────────────────────────────────────────────────────────────────
 
 export function useRealtime() {
   const taskStore = useTaskStore()
   const notificationStore = useNotificationStore()
   const authStore = useAuthStore()
 
-  const connected = ref(false)
-  let eventSource: EventSource | null = null
+  // Reuse existing SSE connection if already open
+  if (globalEventSource?.readyState === EventSource.OPEN) {
+    return { connected: globalConnected }
+  }
+
+  // Clean up any stale connection before creating a new one
+  if (globalEventSource) {
+    globalEventSource.close()
+    globalEventSource = null
+  }
 
   async function connect(): Promise<void> {
     try {
@@ -30,15 +48,22 @@ export function useRealtime() {
       // Fetch auth token and subscribe to user-specific notification topic
       const authResponse = await api.get<{ hubUrl: string; token: string }>('/sse/auth')
       const userId = authStore.user?.id
-      const url = new URL(authResponse.hubUrl)
-      url.searchParams.set('topic', 'task/*')
+
+      // Support both relative (/path) and absolute (http://host/path) hubUrl
+      const baseUrl = authResponse.hubUrl.startsWith('/')
+        ? authResponse.hubUrl
+        : authResponse.hubUrl
+      const url = new URL(baseUrl, window.location.origin)
+
+      // append() adds both topics (set() overwrites the first one)
+      url.searchParams.append('topic', 'task/*')
       if (userId !== undefined) {
-        url.searchParams.set('topic', `user/${userId}/notifications`)
+        url.searchParams.append('topic', `user/${userId}/notifications`)
       }
 
-      eventSource = new EventSource(url.toString())
+      globalEventSource = new EventSource(url.toString())
 
-      eventSource.onmessage = (event: MessageEvent) => {
+      globalEventSource.onmessage = (event: MessageEvent) => {
         const data = JSON.parse(event.data) as { topic: string; data: Record<string, unknown> }
 
         if (data.topic.startsWith('task/')) {
@@ -53,13 +78,13 @@ export function useRealtime() {
         }
       }
 
-      eventSource.onerror = () => {
+      globalEventSource.onerror = () => {
         // Network error or hub unreachable — tear down and fall back to polling
         disconnect()
         startPollingFallback()
       }
 
-      connected.value = true
+      globalConnected.value = true
     } catch {
       // Auth endpoint returned 404 or network error — Mercure not available; use polling
       startPollingFallback()
@@ -67,30 +92,33 @@ export function useRealtime() {
   }
 
   function startPollingFallback(): void {
-    connected.value = false
+    globalConnected.value = false
 
     // Stop any lingering SSE connection
-    if (eventSource) {
-      eventSource.close()
-      eventSource = null
+    if (globalEventSource) {
+      globalEventSource.close()
+      globalEventSource = null
     }
 
     // Start the adaptive polling loop managed entirely by the store.
-    // startListPolling() handles its own de-duplication and adaptive 3s/10s intervals.
     taskStore.startListPolling()
   }
 
   function disconnect(): void {
-    if (eventSource) {
-      eventSource.close()
-      eventSource = null
+    if (globalEventSource) {
+      globalEventSource.close()
+      globalEventSource = null
     }
-    connected.value = false
+    globalConnected.value = false
   }
 
   connect()
 
-  onUnmounted(() => disconnect())
+  onUnmounted(() => {
+    // Only disconnect if no other consumer is using the connection.
+    // Since we share the singleton, we don't auto-disconnect on unmount —
+    // the connection persists across route changes.
+  })
 
-  return { connected }
+  return { connected: computed(() => globalConnected) }
 }

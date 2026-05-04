@@ -205,7 +205,7 @@ function isOwnAccount(user: User): boolean {
     </div>
 
     <!-- Table -->
-    <div v-else class="rounded-xl border border-border">
+    <div v-else class="rounded-xl border border-border overflow-x-scroll">
       <table class="w-full text-sm">
         <thead class="bg-muted/40">
           <tr>

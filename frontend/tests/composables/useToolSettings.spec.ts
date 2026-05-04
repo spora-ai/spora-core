@@ -5,6 +5,7 @@ vi.mock('@/api/client', () => ({
   api: {
     get: vi.fn(),
     put: vi.fn(),
+    delete: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     constructor(
@@ -215,6 +216,46 @@ describe('useToolSettings', () => {
       await getSettings('tavily-search')
 
       expect(mockApi.get).toHaveBeenCalledWith('/agents/1/tools/tavily-search/override')
+    })
+  })
+
+  describe('deleteSettings', () => {
+    it('sends DELETE to global settings endpoint', async () => {
+      const { deleteSettings } = useToolSettings()
+      mockApi.delete.mockResolvedValueOnce(undefined)
+
+      await deleteSettings('llm_configuration')
+
+      expect(mockApi.delete).toHaveBeenCalledWith('/tools/llm_configuration/settings')
+    })
+
+    it('encodes toolId with special characters', async () => {
+      const { deleteSettings } = useToolSettings()
+      mockApi.delete.mockResolvedValueOnce(undefined)
+
+      await deleteSettings('tavily-search')
+
+      expect(mockApi.delete).toHaveBeenCalledWith('/tools/tavily-search/settings')
+    })
+  })
+
+  describe('deleteUserSettings', () => {
+    it('sends DELETE to user settings endpoint', async () => {
+      const { deleteUserSettings } = useToolSettings()
+      mockApi.delete.mockResolvedValueOnce(undefined)
+
+      await deleteUserSettings('llm_configuration')
+
+      expect(mockApi.delete).toHaveBeenCalledWith('/tools/llm_configuration/user-settings')
+    })
+
+    it('encodes toolId with special characters', async () => {
+      const { deleteUserSettings } = useToolSettings()
+      mockApi.delete.mockResolvedValueOnce(undefined)
+
+      await deleteUserSettings('tavily-search')
+
+      expect(mockApi.delete).toHaveBeenCalledWith('/tools/tavily-search/user-settings')
     })
   })
 })

@@ -18,7 +18,7 @@ interface ToastItem {
 
 defineProps<{
   toasts: ToastItem[]
-  onDismiss: (id: string) => void
+  onDismiss: (id: string) => void // eslint-disable-line no-unused-vars -- called via onDismiss(toast.id) in template
 }>()
 
 const isMobile = computed(() => typeof window !== 'undefined' && window.innerWidth < 640)

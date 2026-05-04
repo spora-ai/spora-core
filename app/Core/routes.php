@@ -65,10 +65,12 @@ return static function (RouteCollector $r): void {
     $r->addRoute('GET', '/api/v1/tools', [ToolController::class, 'index']);
     $r->addRoute('GET', '/api/v1/tools/{toolId}/settings', [ToolController::class, 'getSettings']);
     $r->addRoute('PUT', '/api/v1/tools/{toolId}/settings', [ToolController::class, 'putSettings']);
+    $r->addRoute('DELETE', '/api/v1/tools/{toolId}/settings', [ToolController::class, 'deleteSettings']);
 
     // Tool registry — per-user settings
     $r->addRoute('GET', '/api/v1/tools/{toolId}/user-settings', [ToolController::class, 'getUserSettings']);
     $r->addRoute('PUT', '/api/v1/tools/{toolId}/user-settings', [ToolController::class, 'putUserSettings']);
+    $r->addRoute('DELETE', '/api/v1/tools/{toolId}/user-settings', [ToolController::class, 'deleteUserSettings']);
 
     // Tasks
     $r->addRoute('GET', '/api/v1/tasks', [TaskController::class, 'index']);
@@ -98,6 +100,7 @@ return static function (RouteCollector $r): void {
     $r->addRoute('GET', '/api/v1/notifications', [NotificationController::class, 'index']);
     $r->addRoute('POST', '/api/v1/notifications/{id}/read', [NotificationController::class, 'markRead']);
     $r->addRoute('POST', '/api/v1/notifications/read-all', [NotificationController::class, 'markAllRead']);
+    $r->addRoute('DELETE', '/api/v1/notifications', [NotificationController::class, 'destroyAll']);
     $r->addRoute('DELETE', '/api/v1/notifications/{id}', [NotificationController::class, 'destroy']);
 
     // User Profile
@@ -127,10 +130,10 @@ return static function (RouteCollector $r): void {
     // Mail Templates (admin-only)
     $r->addRoute('GET', '/api/v1/mail-templates', [MailTemplateController::class, 'index']);
     $r->addRoute('POST', '/api/v1/mail-templates', [MailTemplateController::class, 'store']);
+    $r->addRoute('GET', '/api/v1/mail-templates/{name}/preview', [MailTemplateController::class, 'preview']);
     $r->addRoute('GET', '/api/v1/mail-templates/{id}', [MailTemplateController::class, 'show']);
     $r->addRoute('PUT', '/api/v1/mail-templates/{id}', [MailTemplateController::class, 'update']);
     $r->addRoute('DELETE', '/api/v1/mail-templates/{id}', [MailTemplateController::class, 'destroy']);
-    $r->addRoute('GET', '/api/v1/mail-templates/preview/{name}', [MailTemplateController::class, 'preview']);
 
     // SSE
     $r->addRoute('GET', '/api/v1/sse/status', [SseController::class, 'status']);

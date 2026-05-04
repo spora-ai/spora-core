@@ -27,8 +27,11 @@ interface ToolInterface
      * so the LLM can reason about failures.
      *
      * @param  array<string, mixed> $arguments  Key-value pairs matching #[ToolParameter] names.
+     * @param  int                  $agentId    The agent executing this tool.
+     * @param  int|null             $userId     The user context (from task->user_id). User settings
+     *                                          are merged before agent overrides when provided.
      */
-    public function execute(array $arguments, int $agentId): ToolResult;
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult;
 
     /**
      * Return a human-readable, markdown-safe description of what this tool WILL DO.

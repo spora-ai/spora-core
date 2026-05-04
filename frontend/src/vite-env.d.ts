@@ -6,6 +6,11 @@ declare module '*.vue' {
   export default component
 }
 
+declare module '*.svg?asset' {
+  const src: string
+  export default src
+}
+
 interface ImportMetaEnv {
   readonly VITE_API_URL?: string
 }

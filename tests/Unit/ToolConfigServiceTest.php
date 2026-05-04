@@ -57,7 +57,7 @@ function makeAgent(mixed $authService, string $suffix = ''): int
 // putGlobalSettings / getGlobalSettings
 // ---------------------------------------------------------------------------
 
-test('putGlobalSettings encrypts entire settings blob at rest and getGlobalSettings decrypts it', function (): void {
+test('putGlobalSettings encrypts password fields at rest and getGlobalSettings decrypts them', function (): void {
     [$service] = makeToolConfigService();
     $toolClass = TestTool::class;
 
@@ -66,13 +66,17 @@ test('putGlobalSettings encrypts entire settings blob at rest and getGlobalSetti
         'max_results' => '25',
     ]);
 
-    // Verify raw DB value is NOT valid JSON (it's an encrypted blob under wholesale encryption)
+    // Raw DB value is valid JSON (only passwords are encrypted per-field)
     $rawJson = Capsule::table('tool_configurations')
         ->where('tool_class', $toolClass)
         ->value('settings');
 
     $decoded = json_decode($rawJson, true);
-    expect($decoded)->toBeNull(); // encrypted blob is not valid JSON
+    expect($decoded)->not->toBeNull(); // plain JSON with per-field encrypted passwords
+    expect($decoded['max_results'])->toBe('25'); // non-password is plain JSON
+
+    // api_key (password) is encrypted — base64-like string, not plain JSON value
+    expect(strlen($decoded['api_key']))->toBeGreaterThan(40); // encrypted blob is long
 
     // Verify decryption round-trip returns the original value
     $settings = $service->getGlobalSettings($toolClass);
@@ -80,7 +84,7 @@ test('putGlobalSettings encrypts entire settings blob at rest and getGlobalSetti
     expect($settings['max_results'])->toBe('25');
 });
 
-test('non-password field is also encrypted at rest under wholesale encryption but returned correctly', function (): void {
+test('non-password fields are stored as plain JSON and returned unchanged', function (): void {
     [$service] = makeToolConfigService();
     $toolClass = TestTool::class;
 
@@ -88,15 +92,16 @@ test('non-password field is also encrypted at rest under wholesale encryption bu
         'max_results' => '50',
     ]);
 
-    // Under wholesale encryption, the entire blob is encrypted — raw DB value is NOT valid JSON
+    // Raw DB value is plain JSON (non-password fields are not encrypted)
     $rawJson = Capsule::table('tool_configurations')
         ->where('tool_class', $toolClass)
         ->value('settings');
 
     $decoded = json_decode($rawJson, true);
-    expect($decoded)->toBeNull(); // encrypted blob is not plain JSON
+    expect($decoded)->not->toBeNull(); // plain JSON
+    expect($decoded['max_results'])->toBe('50');
 
-    // Service still returns the correct decrypted value
+    // Service returns the correct value
     $settings = $service->getGlobalSettings($toolClass);
     expect($settings['max_results'])->toBe('50');
 });
@@ -378,4 +383,57 @@ test('getRawAgentOverride returns empty for non-existent tool class', function (
     $raw = $service->getRawAgentOverride('NonExistent\\Tool', $agentId);
 
     expect($raw)->toBe([]);
+})->afterEach(fn() => Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// deleteGlobalSettings
+// ---------------------------------------------------------------------------
+
+test('deleteGlobalSettings removes the row', function (): void {
+    [$service] = makeToolConfigService();
+
+    $service->putGlobalSettings(TestTool::class, ['max_results' => '50']);
+    expect(Capsule::table('tool_configurations')->where('tool_class', TestTool::class)->exists())->toBeTrue();
+
+    $service->deleteGlobalSettings(TestTool::class);
+    expect(Capsule::table('tool_configurations')->where('tool_class', TestTool::class)->exists())->toBeFalse();
+});
+
+test('deleteGlobalSettings is idempotent (no error if not exists)', function (): void {
+    [$service] = makeToolConfigService();
+
+    // Should not throw — just a no-op when no row exists
+    $service->deleteGlobalSettings(TestTool::class);
+    $service->deleteGlobalSettings(TestTool::class); // call twice to confirm no error
+    expect(true)->toBeTrue(); // reach here means no exception was thrown
+});
+
+// ---------------------------------------------------------------------------
+// deleteUserSettings
+// ---------------------------------------------------------------------------
+
+test('deleteUserSettings removes the row', function (): void {
+    [$service, , $authService] = makeToolConfigService();
+    $userId = $authService->register('delete-user@example.com', 'Password1!');
+
+    $service->putUserSettings(TestTool::class, $userId, ['max_results' => '30']);
+    expect(Capsule::table('tool_user_settings')->where('user_id', $userId)->exists())->toBeTrue();
+
+    $service->deleteUserSettings(TestTool::class, $userId);
+    expect(Capsule::table('tool_user_settings')->where('user_id', $userId)->exists())->toBeFalse();
+})->afterEach(fn() => Database::resetBootState());
+
+test('deleteUserSettings requires userId to target correct user', function (): void {
+    [$service, , $authService] = makeToolConfigService();
+    $user1 = $authService->register('delete-user1@example.com', 'Password1!');
+    $user2 = $authService->register('delete-user2@example.com', 'Password1!');
+
+    $service->putUserSettings(TestTool::class, $user1, ['max_results' => 'user1-value']);
+
+    // Delete for user2 should do nothing (no row for user2)
+    $service->deleteUserSettings(TestTool::class, $user2);
+
+    // user1's settings should still exist
+    $user1Settings = $service->getUserSettings(TestTool::class, $user1);
+    expect($user1Settings)->toBe(['max_results' => 'user1-value']);
 })->afterEach(fn() => Database::resetBootState());

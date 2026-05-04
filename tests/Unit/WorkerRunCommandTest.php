@@ -45,6 +45,7 @@ function makeWorkerRunCommand(): array
 
     $notificationService = Mockery::mock(NotificationService::class);
     $notificationService->allows('notifyScheduledRunCompleted')->andReturnNull();
+    $notificationService->allows('sendEmailForScheduledRun')->andReturnNull();
 
     $container = Mockery::mock(Psr\Container\ContainerInterface::class);
     $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);

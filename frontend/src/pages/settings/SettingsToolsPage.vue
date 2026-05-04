@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToolSettings } from '@/composables/useToolSettings'
 import ToolSettingsPanel from '@/components/settings/tools/ToolSettingsPanel.vue'
 import AlertBanner from '@/components/ui/AlertBanner.vue'
+import Icon from '@/components/ui/Icon.vue'
 import type { ToolSchema } from '@/composables/useToolSettings'
 import type { Ref } from 'vue'
 
@@ -86,22 +87,6 @@ onMounted(() => {
 </script>
 
 <template>
-  <!-- Mobile nav -->
-  <div class="md:hidden mb-6 flex gap-2">
-    <button
-      @click="router.push({ name: 'settings-overview' })"
-      class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
-    >
-      ← Overview
-    </button>
-    <button
-      @click="router.push({ name: 'settings-llm' })"
-      class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
-    >
-      LLM →
-    </button>
-  </div>
-
   <div v-if="loadingTools" class="text-sm text-muted-foreground">Loading…</div>
 
   <!-- Settings panel (tool selected) -->
@@ -113,35 +98,6 @@ onMounted(() => {
       mode="user"
       @back="goBack"
     />
-    <!-- Mobile: keep categorized list visible for switching tools -->
-    <div class="md:hidden mt-6">
-      <div class="rounded-xl border border-border bg-card divide-y divide-border">
-        <template v-for="cat in sortedCategories" :key="cat">
-          <div
-            class="px-4 py-2.5 flex items-center justify-between bg-muted/30 cursor-pointer select-none"
-            @click="collapsedCategories[cat] = !collapsedCategories[cat]"
-          >
-            <h3 class="text-xs font-medium">{{ toLabel(cat) }}</h3>
-            <Icon
-              name="chevron-down"
-              :class="`h-3.5 w-3.5 text-muted-foreground transition-transform ${collapsedCategories[cat] ? '-rotate-90' : ''}`"
-            />
-          </div>
-          <template v-if="!collapsedCategories[cat]">
-            <div
-              v-for="tool in toolsByCategory[cat].filter(t => t.settings_schema.length > 0)"
-              :key="tool.tool_class"
-              class="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-muted/20 transition-colors"
-              :class="{ 'text-primary font-medium': tool.tool_name === selectedToolId }"
-              @click="selectTool(tool.tool_name)"
-            >
-              <span class="text-sm">{{ tool.display_name ?? tool.tool_name }}</span>
-              <Icon name="check" class="h-4 w-4 text-primary" />
-            </div>
-          </template>
-        </template>
-      </div>
-    </div>
   </template>
 
   <!-- Tool list (default / overview) -->

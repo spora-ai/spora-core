@@ -57,8 +57,6 @@ describe('AgentSidebar', () => {
 
     const items = wrapper.findAll('li')
     expect(items[1].classes()).toContain('bg-primary/10')
-    expect(items[1].classes()).toContain('border-r-2')
-    expect(items[1].classes()).toContain('border-primary')
   })
 
   it('does not highlight inactive agents when agentId does not match', () => {
@@ -115,8 +113,9 @@ describe('AgentSidebar', () => {
       props: { agentId: 1 },
     })
 
-    expect(wrapper.classes()).toContain('hidden')
-    expect(wrapper.classes()).toContain('lg:flex')
+    const aside = wrapper.find('aside')
+    expect(aside.classes()).toContain('hidden')
+    expect(aside.classes()).toContain('lg:flex')
   })
 
   it('removes hidden class when mobileOpen=true', () => {

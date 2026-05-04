@@ -231,7 +231,11 @@ final class Orchestrator implements OrchestratorInterface
                 $task->final_response = $response->content;
                 $task->save();
 
-                $this->notificationService?->notifyTaskCompleted($task);
+                // Skip task_completed notification if this task was triggered by a scheduled run —
+                // notifyScheduledRunCompleted already fired in WorkerRunCommand.
+                if (! isset($task->data['run_id'])) {
+                    $this->notificationService?->notifyTaskCompleted($task);
+                }
             }
         } catch (Throwable $e) {
             $this->logger?->error('tick() failed', [
@@ -552,7 +556,7 @@ final class Orchestrator implements OrchestratorInterface
                 }
 
                 // Fix #5: Safe execution — community plugins may throw.
-                $result = $this->safeExecute($toolInstance, $approvedArgs, $state->agentId, $taskId);
+                $result = $this->safeExecute($toolInstance, $approvedArgs, $state->agentId, $taskId, $task->user_id);
 
                 ToolCallModel::where('task_id', $taskId)
                     ->where('provider_call_id', $pendingToolCall->providerCallId)
@@ -729,7 +733,7 @@ final class Orchestrator implements OrchestratorInterface
 
                 if (!$requiresApproval) {
                     // Execute immediately — tool is auto-approved.
-                    $result = $this->safeExecute($toolInstance, $toolCall->arguments, $agent->id, $task->id);
+                    $result = $this->safeExecute($toolInstance, $toolCall->arguments, $agent->id, $task->id, $task->user_id);
 
                     Capsule::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
                         $toolCallRecord->update([
@@ -814,6 +818,7 @@ final class Orchestrator implements OrchestratorInterface
         array $arguments,
         int $agentId,
         int $taskId,
+        ?int $userId = null,
     ): ToolResult {
         // Resolve the canonical tool name from the #[Tool] attribute for log context.
         $ref      = new ReflectionClass($toolInstance);
@@ -830,7 +835,7 @@ final class Orchestrator implements OrchestratorInterface
         ]);
 
         try {
-            $result = $toolInstance->execute($arguments, $agentId);
+            $result = $toolInstance->execute($arguments, $agentId, $userId);
 
             if (!$result->success) {
                 // ERROR: tool reported a logical failure (bad API key, empty result, etc.).

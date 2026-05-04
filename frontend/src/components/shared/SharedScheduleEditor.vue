@@ -72,7 +72,8 @@ const currentStep = ref(1)
 
 // ── Timezone list (all IANA zones via Intl, common ones sorted first) ─────────
 
-const allTimezones = (Intl as { supportedValuesOf?: (type: string) => string[] }).supportedValuesOf?.('timeZone') ?? ['UTC']
+// eslint-disable-next-line no-unused-vars -- Intl.supportedValuesOf type annotation, type parameter intentionally unused
+const allTimezones: string[] = (Intl as { supportedValuesOf?: (_t: string) => string[] }).supportedValuesOf?.('timeZone') ?? ['UTC']
 
 const commonZoneValues = new Set([
   'UTC',

@@ -21,22 +21,6 @@ function goToTool(toolName: string): void {
 </script>
 
 <template>
-  <!-- Mobile nav -->
-  <div class="md:hidden mb-6 flex gap-2">
-    <button
-      @click="router.push({ name: 'settings-tools' })"
-      class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
-    >
-      Tools →
-    </button>
-    <button
-      @click="router.push({ name: 'settings-llm' })"
-      class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
-    >
-      LLM →
-    </button>
-  </div>
-
   <div class="mb-6">
     <h1 class="text-lg font-semibold">Global Settings</h1>
     <p class="text-sm text-muted-foreground mt-0.5">Manage your tools and LLM provider configurations.</p>

@@ -62,16 +62,6 @@ async function testConnection(): Promise<void> {
     <main class="flex-1 px-4 py-8">
       <div class="max-w-2xl mx-auto">
 
-        <!-- Mobile back -->
-        <div class="md:hidden mb-6">
-          <button
-            @click="$router.push({ name: 'settings-overview' })"
-            class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium"
-          >
-            ← Overview
-          </button>
-        </div>
-
         <!-- Header -->
         <div class="mb-6">
           <h1 class="text-lg font-semibold">Mail Settings</h1>

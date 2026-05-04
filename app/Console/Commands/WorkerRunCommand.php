@@ -361,6 +361,13 @@ final class WorkerRunCommand extends Command
 
         $this->notificationService->notifyScheduledRunCompleted($run->id, $task);
 
+        // Store run_id on the task so Orchestrator can skip the redundant task_completed notification
+        $task->data = array_merge($task->data ?? [], ['run_id' => $run->id]);
+        $task->save();
+
+        // Send e-mail notification if enabled
+        $this->notificationService->sendEmailForScheduledRun($task);
+
         // Publish Mercure update
         $taskData = [
             'id'          => $task->id,

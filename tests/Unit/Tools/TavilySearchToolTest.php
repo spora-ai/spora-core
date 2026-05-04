@@ -10,7 +10,7 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 
 it('returns error if api key is missing', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(TavilySearchTool::class, 1)->andReturn([]);
+    $config->allows('getEffectiveSettings')->with(TavilySearchTool::class, 1, null)->andReturn([]);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $tool = new TavilySearchTool($config, $client);
@@ -32,7 +32,7 @@ it('returns error if query is empty', function () {
 
 it('makes correct http request and parses response', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(TavilySearchTool::class, 1)->andReturn(['core.tavily.api_key' => 'tav_123']);
+    $config->allows('getEffectiveSettings')->with(TavilySearchTool::class, 1, null)->andReturn(['core.tavily.api_key' => 'tav_123']);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
@@ -59,7 +59,7 @@ it('makes correct http request and parses response', function () {
 
 it('handles http error codes gracefully', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(TavilySearchTool::class, 1)->andReturn(['core.tavily.api_key' => 'tav_123']);
+    $config->allows('getEffectiveSettings')->with(TavilySearchTool::class, 1, null)->andReturn(['core.tavily.api_key' => 'tav_123']);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);

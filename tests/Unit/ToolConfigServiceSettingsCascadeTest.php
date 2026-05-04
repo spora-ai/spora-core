@@ -29,7 +29,10 @@ test('returns empty when no global or agent override exists', function () {
 
     $effective = $toolConfig->getEffectiveSettings(TestTool::class, $agentId);
 
-    expect($effective)->toBeEmpty();
+    // Schema defaults are seeded (max_results default = '10')
+    expect($effective['max_results'])->toBe('10');
+    // api_key has no schema default
+    expect($effective)->not->toHaveKey('api_key');
 });
 
 test('global config is returned when no agent override exists', function () {
@@ -150,7 +153,7 @@ test('password masking via maskForApi', function () {
     $masked = $toolConfig->maskForApi($effective, TestTool::class);
 
     expect($masked['api_key'])->toBe('***');
-    expect($masked)->not()->toHaveKey('max_results'); // not set, should not appear
+    expect($masked['max_results'])->toBe('10'); // schema default, not password, returned as-is
 });
 
 test('maskForApi handles empty and null password fields', function () {
@@ -197,12 +200,69 @@ test('getEffectiveSettingsWithSource returns default source when only schema def
     $toolConfig = makeToolConfigService();
     $agentId = createAgentForUser($userId);
 
-    // TestTool has no defaults set, so this tests the case where nothing is configured
+    // TestTool now has max_results default = '10' — it should appear with source 'default'
     $annotated = $toolConfig->getEffectiveSettingsWithSource(TestTool::class, $agentId);
 
-    // Since TestTool has no defaults, only the fields actually set should appear
-    // Both api_key (scope: agent) and max_results (scope: global) have no defaults
-    expect($annotated)->toBeEmpty();
+    expect($annotated['max_results']['value'])->toBe('10');
+    expect($annotated['max_results']['source'])->toBe('default');
+});
+
+test('effective settings falls back to global when user and agent layers are cleared', function () {
+    $authService = bootAuthLayer();
+    $userId = $authService->register('user-fallback@example.com', 'Password1!');
+
+    $toolConfig = makeToolConfigService();
+    $agentId = createAgentForUser($userId);
+
+    // Set global, user, and agent override
+    $toolConfig->putGlobalSettings(TestTool::class, [
+        'api_key' => 'global-key',
+        'max_results' => '20',
+    ]);
+    $toolConfig->putUserSettings(TestTool::class, $userId, [
+        'api_key' => 'user-key',
+    ]);
+    $toolConfig->putAgentOverride(TestTool::class, $agentId, [
+        'api_key' => 'agent-key',
+    ]);
+
+    // Clear user settings
+    $toolConfig->deleteUserSettings(TestTool::class, $userId);
+    // Clear agent override
+    $toolConfig->deleteAgentOverride(TestTool::class, $agentId);
+
+    // Effective settings should now come from global
+    $effective = $toolConfig->getEffectiveSettings(TestTool::class, $agentId);
+    expect($effective['api_key'])->toBe('global-key');
+    expect($effective['max_results'])->toBe('20');
+});
+
+test('schema defaults are used when all layers are empty', function () {
+    $authService = bootAuthLayer();
+    $userId = $authService->register('default-fallback@example.com', 'Password1!');
+
+    $toolConfig = makeToolConfigService();
+    $agentId = createAgentForUser($userId);
+
+    // Nothing set anywhere — only schema defaults apply
+    $effective = $toolConfig->getEffectiveSettings(TestTool::class, $agentId);
+
+    // TestTool has max_results default = '10'
+    expect($effective['max_results'])->toBe('10');
+    // api_key has no schema default, so should be empty string
+    expect(array_key_exists('api_key', $effective))->toBeFalse();
+});
+
+test('deleteAgentOverride is idempotent (no error if no override exists)', function () {
+    $authService = bootAuthLayer();
+    $userId = $authService->register('delete-no-override@example.com', 'Password1!');
+
+    $toolConfig = makeToolConfigService();
+    $agentId = createAgentForUser($userId);
+
+    $toolConfig->deleteAgentOverride(TestTool::class, $agentId); // should not throw
+    $toolConfig->deleteAgentOverride(TestTool::class, $agentId); // call twice = idempotent
+    expect(true)->toBeTrue();
 });
 
 // ---------------------------------------------------------------------------

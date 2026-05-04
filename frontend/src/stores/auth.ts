@@ -61,11 +61,13 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function login(email: string, password: string): Promise<void> {
-    user.value = normalizeUser(await api.post<User>('/auth/login', { email, password }))
+    user.value = normalizeUser((await api.post<MeResponse>('/auth/login', { email, password })).user)
+    initialized.value = true
   }
 
   async function register(email: string, password: string): Promise<void> {
-    user.value = normalizeUser(await api.post<User>('/auth/register', { email, password }))
+    user.value = normalizeUser((await api.post<MeResponse>('/auth/register', { email, password })).user)
+    initialized.value = true
   }
 
   async function logout(): Promise<void> {

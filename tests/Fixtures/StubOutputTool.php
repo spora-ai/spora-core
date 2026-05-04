@@ -20,7 +20,7 @@ final class StubOutputTool implements ToolInterface
         private readonly string $resultContent = 'output_result',
     ) {}
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         return $this->run($arguments, $agentId);
     }

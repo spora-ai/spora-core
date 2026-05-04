@@ -116,6 +116,27 @@ composer frontend:test  # Frontend unit (Vitest)
 
 ---
 
+## Docker Deployment
+
+Docker configuration is in the `docker/` subfolder:
+
+```
+docker/
+├── docker-compose.yml    # spora + mariadb (no separate Mercure)
+├── Dockerfile
+├── frankenphp.conf       # FrankenPHP config with native Mercure hub
+├── supervisord.conf
+└── .env.local.example    # Template — copy to .env.local and configure
+```
+
+Key differences from local dev:
+- `SPORA_DB_HOST=mariadb` (Docker service name, not `127.0.0.1`)
+- `SPORA_MERCURE_URL=http://localhost/.well-known/mercure` (FrankenPHP native)
+
+Start: `docker compose -f docker/docker-compose.yml up`
+
+---
+
 ## How to Add a Tool
 
 1. **Create the tool class** in `app/Tools/`:

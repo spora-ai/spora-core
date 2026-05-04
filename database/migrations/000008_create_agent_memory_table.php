@@ -12,7 +12,7 @@ return new class extends Migration
     {
         Capsule::schema()->create('agent_memory', function (Blueprint $table) {
             $table->id();
-            $table->unsignedInteger('agent_id');
+            $table->unsignedBigInteger('agent_id');
             $table->string('key');
             $table->text('value')->nullable();
             $table->timestamps();

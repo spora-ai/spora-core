@@ -43,6 +43,11 @@ export const useNotificationStore = defineStore('notifications', () => {
     notifications.value = notifications.value.filter(n => n.id !== id)
   }
 
+  async function deleteAll(): Promise<void> {
+    await api.delete('/notifications')
+    notifications.value = []
+  }
+
   /**
    * Called by useRealtime when a SSE notification event arrives.
    * Checks if the notification is already in the list (by id); if not, prepends and sorts.
@@ -53,5 +58,5 @@ export const useNotificationStore = defineStore('notifications', () => {
     notifications.value.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   }
 
-  return { notifications, unreadCount, fetchNotifications, markRead, markAllRead, deleteNotification, prependFromSSE }
+  return { notifications, unreadCount, fetchNotifications, markRead, markAllRead, deleteNotification, deleteAll, prependFromSSE }
 })

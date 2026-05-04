@@ -105,4 +105,20 @@ final class NotificationController
 
         return $response;
     }
+
+    /**
+     * DELETE /api/v1/notifications
+     * Delete all notifications for the authenticated user.
+     */
+    public function destroyAll(): Response
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+
+        $this->notificationService->deleteAllForUser($userId);
+
+        $response = new JsonResponse(null, Response::HTTP_NO_CONTENT);
+        $response->setContent('');
+
+        return $response;
+    }
 }

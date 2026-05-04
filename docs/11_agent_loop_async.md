@@ -112,9 +112,9 @@ When `SPORA_MERCURE_URL` and `SPORA_MERCURE_JWT_KEY` are set, the `TaskControlle
 
 When the env vars are not set, `MercurePublisher::publish()` is a no-op — polling remains the default for all deployments.
 
-**Env vars:**
+**Env vars (FrankenPHP native Mercure — no separate service needed):**
 ```
-SPORA_MERCURE_URL=https://example.com/.well-known/mercure
+SPORA_MERCURE_URL=http://localhost/.well-known/mercure
 SPORA_MERCURE_JWT_KEY=your-shared-secret
 ```
 

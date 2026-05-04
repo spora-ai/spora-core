@@ -9,7 +9,7 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 
 it('returns error if api key is missing', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(WorldNewsApiTool::class, 1)->andReturn([]);
+    $config->allows('getEffectiveSettings')->with(WorldNewsApiTool::class, 1, null)->andReturn([]);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $tool = new WorldNewsApiTool($config, $client);
@@ -21,7 +21,7 @@ it('returns error if api key is missing', function () {
 
 it('makes correct search request and parses articles', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(WorldNewsApiTool::class, 1)->andReturn(['core.worldnewsapi.api_key' => 'wn_123']);
+    $config->allows('getEffectiveSettings')->with(WorldNewsApiTool::class, 1, null)->andReturn(['core.worldnewsapi.api_key' => 'wn_123']);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
@@ -59,7 +59,7 @@ it('makes correct search request and parses articles', function () {
 
 it('makes correct top-news request and parses clustered results', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(WorldNewsApiTool::class, 1)->andReturn(['core.worldnewsapi.api_key' => 'wn_123']);
+    $config->allows('getEffectiveSettings')->with(WorldNewsApiTool::class, 1, null)->andReturn(['core.worldnewsapi.api_key' => 'wn_123']);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
@@ -94,7 +94,7 @@ it('makes correct top-news request and parses clustered results', function () {
 
 it('returns error when search query is empty', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(WorldNewsApiTool::class, 1)->andReturn(['core.worldnewsapi.api_key' => 'wn_123']);
+    $config->allows('getEffectiveSettings')->with(WorldNewsApiTool::class, 1, null)->andReturn(['core.worldnewsapi.api_key' => 'wn_123']);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $tool = new WorldNewsApiTool($config, $client);
@@ -106,7 +106,7 @@ it('returns error when search query is empty', function () {
 
 it('returns error when top-news missing source-country', function () {
     $config = Mockery::mock(ToolConfigService::class);
-    $config->allows('getEffectiveSettings')->with(WorldNewsApiTool::class, 1)->andReturn(['core.worldnewsapi.api_key' => 'wn_123']);
+    $config->allows('getEffectiveSettings')->with(WorldNewsApiTool::class, 1, null)->andReturn(['core.worldnewsapi.api_key' => 'wn_123']);
 
     $client = Mockery::mock(HttpClientInterface::class);
     $tool = new WorldNewsApiTool($config, $client);

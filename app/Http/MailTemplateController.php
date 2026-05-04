@@ -52,12 +52,11 @@ final class MailTemplateController
         ], Response::HTTP_CREATED);
     }
 
-    public function show(Request $request, array $vars = []): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
         AdminGuard::requireAdmin($this->authService);
 
-        $templateId = (int) ($vars['id'] ?? 0);
-        $result = $this->mailTemplateService->getTemplate($templateId);
+        $result = $this->mailTemplateService->getTemplate($id);
 
         if ($result === null) {
             return $this->error('NOT_FOUND', 'Mail template not found.', Response::HTTP_NOT_FOUND);
@@ -68,11 +67,9 @@ final class MailTemplateController
         ], Response::HTTP_OK);
     }
 
-    public function update(Request $request, array $vars = []): JsonResponse
+    public function update(Request $request, int $id): JsonResponse
     {
         AdminGuard::requireAdmin($this->authService);
-
-        $templateId = (int) ($vars['id'] ?? 0);
 
         try {
             $body = $this->decodeJson($request);
@@ -80,7 +77,7 @@ final class MailTemplateController
             return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         }
 
-        $result = $this->mailTemplateService->updateTemplate($templateId, $body);
+        $result = $this->mailTemplateService->updateTemplate($id, $body);
 
         if ($result === null) {
             return $this->error('NOT_FOUND', 'Mail template not found.', Response::HTTP_NOT_FOUND);
@@ -91,14 +88,12 @@ final class MailTemplateController
         ], Response::HTTP_OK);
     }
 
-    public function destroy(Request $request, array $vars = []): JsonResponse
+    public function destroy(Request $request, int $id): JsonResponse
     {
         AdminGuard::requireAdmin($this->authService);
 
-        $templateId = (int) ($vars['id'] ?? 0);
-
         // Check if it's a system template first
-        $template = \Spora\Models\MailTemplate::find($templateId);
+        $template = \Spora\Models\MailTemplate::find($id);
         if ($template !== null && in_array($template->name, ['email_verification', 'password_reset', 'welcome'], true)) {
             return $this->error(
                 'CANNOT_DELETE_SYSTEM_TEMPLATE',
@@ -107,7 +102,7 @@ final class MailTemplateController
             );
         }
 
-        $deleted = $this->mailTemplateService->deleteTemplate($templateId);
+        $deleted = $this->mailTemplateService->deleteTemplate($id);
 
         if (!$deleted) {
             return $this->error('NOT_FOUND', 'Mail template not found.', Response::HTTP_NOT_FOUND);
@@ -116,11 +111,9 @@ final class MailTemplateController
         return new JsonResponse(null, Response::HTTP_NO_CONTENT);
     }
 
-    public function preview(Request $request, array $vars = []): JsonResponse
+    public function preview(Request $request, string $name): JsonResponse
     {
         AdminGuard::requireAdmin($this->authService);
-
-        $name = $vars['name'] ?? '';
 
         // Collect variables from query parameters
         $variables = [];

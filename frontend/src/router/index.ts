@@ -89,6 +89,11 @@ const router = createRouter({
           name: 'settings-admin-tools',
           component: () => import('@/pages/admin/ToolsSettingsPage.vue'),
         },
+        {
+          path: 'admin/mail-templates',
+          name: 'settings-admin-mail-templates',
+          component: () => import('@/pages/admin/MailTemplatesPage.vue'),
+        },
       ],
     },
     {

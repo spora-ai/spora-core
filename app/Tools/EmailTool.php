@@ -74,16 +74,16 @@ final class EmailTool implements ToolInterface
         private readonly ?LoggerInterface $logger = null,
     ) {}
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         $operation = $this->getOperationName($arguments);
 
         return match ($operation) {
-            'read_inbox'    => $this->readInbox($arguments, $agentId),
-            'list_folders' => $this->listFolders($arguments, $agentId),
-            'read_folder'   => $this->readFolder($arguments, $agentId),
-            'create_draft' => $this->createDraft($arguments, $agentId),
-            'send_email'   => $this->sendEmail($arguments, $agentId),
+            'read_inbox'    => $this->readInbox($arguments, $agentId, $userId),
+            'list_folders' => $this->listFolders($arguments, $agentId, $userId),
+            'read_folder'   => $this->readFolder($arguments, $agentId, $userId),
+            'create_draft' => $this->createDraft($arguments, $agentId, $userId),
+            'send_email'   => $this->sendEmail($arguments, $agentId, $userId),
             default        => new ToolResult(false, "Unknown email operation: {$operation}"),
         };
     }
@@ -146,7 +146,7 @@ final class EmailTool implements ToolInterface
 
     // ── Operations ──────────────────────────────────────────────────────────────
 
-    public function readInbox(array $arguments, int $agentId): ToolResult
+    public function readInbox(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $limit      = (int) ($arguments['limit'] ?? 5);
         $markAsRead = (bool) ($arguments['mark_as_read'] ?? false);
@@ -155,7 +155,7 @@ final class EmailTool implements ToolInterface
             $limit = 5;
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $host     = $settings[self::KEY_IMAP_HOST] ?? '';
         $port     = $settings[self::KEY_IMAP_PORT] ?? '';
         $enc      = $settings[self::KEY_IMAP_ENCRYPTION] ?? 'ssl';
@@ -223,9 +223,9 @@ final class EmailTool implements ToolInterface
         }
     }
 
-    public function listFolders(array $arguments, int $agentId): ToolResult
+    public function listFolders(array $arguments, int $agentId, ?int $userId): ToolResult
     {
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $host     = $settings[self::KEY_IMAP_HOST] ?? '';
         $port     = $settings[self::KEY_IMAP_PORT] ?? '';
         $enc      = $settings[self::KEY_IMAP_ENCRYPTION] ?? 'ssl';
@@ -265,7 +265,7 @@ final class EmailTool implements ToolInterface
         }
     }
 
-    public function readFolder(array $arguments, int $agentId): ToolResult
+    public function readFolder(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $folderName = trim((string) ($arguments['folder'] ?? ''));
         $limit      = (int) ($arguments['limit'] ?? 5);
@@ -278,7 +278,7 @@ final class EmailTool implements ToolInterface
             $limit = 5;
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $host     = $settings[self::KEY_IMAP_HOST] ?? '';
         $port     = $settings[self::KEY_IMAP_PORT] ?? '';
         $enc      = $settings[self::KEY_IMAP_ENCRYPTION] ?? 'ssl';
@@ -342,7 +342,7 @@ final class EmailTool implements ToolInterface
         }
     }
 
-    public function createDraft(array $arguments, int $agentId): ToolResult
+    public function createDraft(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $to      = trim((string) ($arguments['to'] ?? ''));
         $subject = trim((string) ($arguments['subject'] ?? ''));
@@ -352,7 +352,7 @@ final class EmailTool implements ToolInterface
             return new ToolResult(false, 'Missing required parameters: to, subject, or body.');
         }
 
-        $settings  = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings  = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $from      = $settings[self::KEY_SMTP_FROM] ?? '';
 
         $draft  = "From: " . ($from ?: '[From address not configured]') . "\n";
@@ -363,7 +363,7 @@ final class EmailTool implements ToolInterface
         return new ToolResult(true, "Email draft prepared:\n\n{$draft}");
     }
 
-    public function sendEmail(array $arguments, int $agentId): ToolResult
+    public function sendEmail(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $to      = trim((string) ($arguments['to'] ?? ''));
         $subject = trim((string) ($arguments['subject'] ?? ''));
@@ -373,7 +373,7 @@ final class EmailTool implements ToolInterface
             return new ToolResult(false, 'Missing required parameters: to, subject, or body.');
         }
 
-        $settings    = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings    = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $host        = $settings[self::KEY_SMTP_HOST] ?? '';
         $port        = $settings[self::KEY_SMTP_PORT] ?? '587';
         $user        = $settings[self::KEY_EMAIL_USERNAME] ?? '';

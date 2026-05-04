@@ -290,6 +290,7 @@ final class UserService implements UserServiceInterface
             'username' => $user->username,
             'roles'    => $roles,
             'registered' => (int) $user->registered,
+            'is_admin' => in_array('ADMIN', $roles, true),
         ];
     }
 }

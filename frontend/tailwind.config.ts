@@ -7,7 +7,14 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', ...fontFamily.sans],
+        sans: ['Barlow', ...fontFamily.sans],
+      },
+      fontSize: {
+        'sm': ['0.875rem', { lineHeight: '1.4' }],
+        'base': ['1rem', { lineHeight: '1.5' }],
+        'lg': ['1.125rem', { lineHeight: '1.5' }],
+        'xl': ['1.25rem', { lineHeight: '1.4' }],
+        '2xl': ['1.5rem', { lineHeight: '1.3' }],
       },
       colors: {
         border: 'hsl(var(--border))',

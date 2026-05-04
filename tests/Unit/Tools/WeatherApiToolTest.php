@@ -12,7 +12,7 @@ describe('WeatherApiTool', function (): void {
 
     it('returns error if api key is missing', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn([]);
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn([]);
 
         $client = Mockery::mock(HttpClientInterface::class);
         $tool = new WeatherApiTool($config, $client);
@@ -24,7 +24,7 @@ describe('WeatherApiTool', function (): void {
 
     it('returns error if location is missing for current weather', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn(['core.weatherapi.api_key' => 'key123']);
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn(['core.weatherapi.api_key' => 'key123']);
 
         $client = Mockery::mock(HttpClientInterface::class);
         $tool = new WeatherApiTool($config, $client);
@@ -36,7 +36,7 @@ describe('WeatherApiTool', function (): void {
 
     it('returns error if query is missing for search', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn(['core.weatherapi.api_key' => 'key123']);
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn(['core.weatherapi.api_key' => 'key123']);
 
         $client = Mockery::mock(HttpClientInterface::class);
         $tool = new WeatherApiTool($config, $client);
@@ -48,7 +48,7 @@ describe('WeatherApiTool', function (): void {
 
     it('returns error if query is too short for search', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn(['core.weatherapi.api_key' => 'key123']);
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn(['core.weatherapi.api_key' => 'key123']);
 
         $client = Mockery::mock(HttpClientInterface::class);
         $tool = new WeatherApiTool($config, $client);
@@ -60,7 +60,7 @@ describe('WeatherApiTool', function (): void {
 
     it('returns error if location is missing for forecast', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn(['core.weatherapi.api_key' => 'key123']);
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn(['core.weatherapi.api_key' => 'key123']);
 
         $client = Mockery::mock(HttpClientInterface::class);
         $tool = new WeatherApiTool($config, $client);
@@ -72,7 +72,7 @@ describe('WeatherApiTool', function (): void {
 
     it('returns error if location is missing for astronomy', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn(['core.weatherapi.api_key' => 'key123']);
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn(['core.weatherapi.api_key' => 'key123']);
 
         $client = Mockery::mock(HttpClientInterface::class);
         $tool = new WeatherApiTool($config, $client);
@@ -84,7 +84,7 @@ describe('WeatherApiTool', function (): void {
 
     it('current operation makes correct HTTP request and parses response', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn([
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn([
             'core.weatherapi.api_key' => 'wapi_test_key',
         ]);
 
@@ -126,7 +126,7 @@ describe('WeatherApiTool', function (): void {
 
     it('forecast operation makes correct HTTP request and parses response', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn([
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn([
             'core.weatherapi.api_key' => 'wapi_test_key',
             'core.weatherapi.default_days' => '3',
         ]);
@@ -188,7 +188,7 @@ describe('WeatherApiTool', function (): void {
 
     it('search operation makes correct HTTP request and parses response', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn([
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn([
             'core.weatherapi.api_key' => 'wapi_test_key',
         ]);
 
@@ -232,7 +232,7 @@ describe('WeatherApiTool', function (): void {
 
     it('astronomy operation makes correct HTTP request and parses response', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn([
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn([
             'core.weatherapi.api_key' => 'wapi_test_key',
         ]);
 
@@ -272,7 +272,7 @@ describe('WeatherApiTool', function (): void {
 
     it('astronomy operation includes date parameter when provided', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn([
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn([
             'core.weatherapi.api_key' => 'wapi_test_key',
         ]);
 
@@ -306,7 +306,7 @@ describe('WeatherApiTool', function (): void {
 
     it('handles HTTP error codes gracefully', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn([
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn([
             'core.weatherapi.api_key' => 'wapi_test_key',
         ]);
 
@@ -340,7 +340,7 @@ describe('WeatherApiTool', function (): void {
 
     it('forecast clamps days to 1-3 range', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn([
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn([
             'core.weatherapi.api_key' => 'wapi_test_key',
             'core.weatherapi.default_days' => '3',
         ]);
@@ -365,7 +365,7 @@ describe('WeatherApiTool', function (): void {
 
     it('uses imperial units when configured', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
-        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1)->andReturn([
+        $config->allows('getEffectiveSettings')->with(WeatherApiTool::class, 1, null)->andReturn([
             'core.weatherapi.api_key' => 'wapi_test_key',
             'core.weatherapi.units' => 'imperial',
         ]);

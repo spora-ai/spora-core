@@ -20,7 +20,7 @@ final class StubFailingTool implements ToolInterface
         private readonly string $errorMessage = 'Stub tool failure',
     ) {}
 
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         return $this->run($arguments, $agentId);
     }

@@ -7,6 +7,7 @@ import { useNotificationStore } from '@/stores/notifications'
 import { useRealtime } from '@/composables/useRealtime'
 import NotificationCenter from './NotificationCenter.vue'
 import Icon from '@/components/ui/Icon.vue'
+import LogoSvg from '@/assets/logo.svg?asset'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -41,10 +42,7 @@ function closeUserMenu(): void {
       to="/"
       class="flex items-center gap-2 font-semibold tracking-tight text-foreground hover:opacity-80 transition-opacity"
     >
-      <div class="h-7 w-7 rounded-lg bg-primary flex items-center justify-center">
-        <span class="text-primary-foreground text-xs font-bold">S</span>
-      </div>
-      <span>Spora</span>
+      <img :src="LogoSvg" alt="Spora" class="h-8 w-auto dark:invert" />
     </RouterLink>
 
     <div class="flex-1" />

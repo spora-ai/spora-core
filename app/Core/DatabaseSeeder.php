@@ -99,10 +99,16 @@ final class DatabaseSeeder
                 'body_text' => "Hello {{user_name}},\n\nWelcome to Spora! Your account has been created with the email {{email}}.\n\nYou can now start using your AI agent.\n\nBest regards,\nThe Spora Team",
                 'body_html' => null,
             ],
+            [
+                'name' => 'scheduled_run_completed',
+                'subject' => 'Scheduled run completed: {{agent_name}}',
+                'body_text' => "Your scheduled run has completed.\n\nAgent: {{agent_name}}\nTask ID: {{task_id}}\nPrompt: {{user_prompt}}\n\nYou can view the full task history in Spora.",
+                'body_html' => null,
+            ],
         ];
 
         foreach ($mailTemplates as $template) {
-            MailTemplate::updateOrCreate(
+            MailTemplate::firstOrCreate(
                 ['name' => $template['name']],
                 $template,
             );

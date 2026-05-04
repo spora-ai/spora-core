@@ -8,6 +8,7 @@ use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Auth\AuthService;
 use Spora\Core\Database;
+use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Core\SecurityManager;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Drivers\DriverFactory;
@@ -121,6 +122,12 @@ return [
         }
         if (($v = $env('SPORA_MERCURE_JWT_KEY')) !== null) {
             $envOverrides['mercure_jwt_key'] = $v;
+        }
+        if (($v = $env('SPORA_MERCURE_PUBLISH_URL')) !== null) {
+            $envOverrides['mercure_publish_url'] = $v;
+        }
+        if (($v = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED')) !== null) {
+            $envOverrides['notifications'] = ['email_enabled' => filter_var($v, FILTER_VALIDATE_BOOLEAN)];
         }
         return array_merge($defaults, $fileConfig, $envOverrides);
     },
@@ -305,6 +312,14 @@ return [
         );
     },
 
+    Spora\Console\Commands\SetupCommand::class => static function (ContainerInterface $c): Spora\Console\Commands\SetupCommand {
+        return new Spora\Console\Commands\SetupCommand(
+            $c->get(Database::class),
+            $c->get(DatabaseSchemaInstaller::class),
+            $c->get(AuthService::class),
+        );
+    },
+
     Spora\Console\Commands\SeedCommand::class => static function (ContainerInterface $c): Spora\Console\Commands\SeedCommand {
         return new Spora\Console\Commands\SeedCommand(
             $c->get(Database::class),
@@ -346,7 +361,7 @@ return [
 
     MercurePublisherInterface::class => static function (ContainerInterface $c): MercurePublisherInterface {
         $config   = $c->get('config');
-        $hubUrl   = $config['mercure_url']   ?? null;
+        $hubUrl   = $config['mercure_publish_url'] ?? $config['mercure_url'] ?? null;
         $jwtKey   = $config['mercure_jwt_key'] ?? null;
         $client   = $c->get(Symfony\Contracts\HttpClient\HttpClientInterface::class);
 
@@ -394,6 +409,8 @@ return [
     NotificationService::class => static function (ContainerInterface $c): NotificationService {
         return new NotificationService(
             $c->get(MercurePublisherInterface::class),
+            $c->get(SystemMailer::class),
+            $c->get('config'),
         );
     },
 
@@ -441,8 +458,9 @@ return [
         $config = $c->get('config');
         return new Spora\Http\SseController(
             $c->get(AuthService::class),
-            $config['mercure_url'] ?? null,
+            $config['mercure_publish_url'] ?? null,
             $config['mercure_jwt_key'] ?? null,
+            '/.well-known/mercure',
         );
     },
 

@@ -81,7 +81,7 @@ class ToolConfigService
         $existing = $this->getGlobalSettings($toolClass);
         $merged   = array_merge($existing, $settings);
 
-        $encrypted = $this->encryptSettings($merged);
+        $encrypted = $this->encryptSettings($toolClass, $merged);
 
         $existing = ToolConfiguration::where('tool_class', $toolClass)->first();
 
@@ -130,14 +130,25 @@ class ToolConfigService
      */
     public function putUserSettings(string $toolClass, int $userId, array $settings): array
     {
-        $filtered  = $this->filterSettings($settings);
-        $encrypted = $this->encryptSettings($filtered);
+        // Merge with existing stored settings so omitted fields are preserved.
+        $existingSettings = $this->getUserSettings($toolClass, $userId);
 
-        $existing = ToolUserSetting::where('user_id', $userId)
+        // Replace '***' sentinel (masked password from client) with actual existing values.
+        // The sentinel only means "preserve" when the key already exists in $existing.
+        foreach ($settings as $key => $value) {
+            if ($value === '***' && array_key_exists($key, $existingSettings)) {
+                $settings[$key] = $existingSettings[$key];
+            }
+        }
+
+        $merged    = array_merge($existingSettings, $settings);
+        $encrypted = $this->encryptSettings($toolClass, $merged);
+
+        $record = ToolUserSetting::where('user_id', $userId)
             ->where('tool_class', $toolClass)
             ->first();
 
-        if ($existing !== null) {
+        if ($record !== null) {
             Capsule::table('tool_user_settings')
                 ->where('user_id', $userId)
                 ->where('tool_class', $toolClass)
@@ -155,38 +166,53 @@ class ToolConfigService
             ]);
         }
 
-        return $this->decryptSettings($encrypted);
+        return $this->decodeSettings($toolClass, $encrypted);
     }
 
     /**
-     * Return effective settings: global defaults merged with agent-specific overrides.
-     * Only `scope: 'agent'` keys from the override are applied.
+     * Return effective settings: global defaults merged with user settings and agent-specific overrides.
+     * Cascade: schema defaults → global settings → user settings → agent overrides.
+     * Only `scope: 'agent'` keys from agent overrides are applied.
      *
      * @return array<string, mixed>
      */
-    public function getEffectiveSettings(string $toolClass, int $agentId): array
+    public function getEffectiveSettings(string $toolClass, int $agentId, ?int $userId = null): array
     {
         $merged = $this->getGlobalSettings($toolClass);
+
+        // Merge user settings if userId is provided
+        if ($userId !== null) {
+            $userSettings = $this->getUserSettings($toolClass, $userId);
+            foreach ($userSettings as $key => $value) {
+                $merged[$key] = $value;
+            }
+        }
 
         $override = AgentToolOverride::where('agent_id', $agentId)
             ->where('tool_class', $toolClass)
             ->first();
 
-        if ($override === null) {
-            return $merged;
+        if ($override !== null) {
+            $overrideSettings = $this->decodeSettings(
+                $toolClass,
+                $override->getRawOriginal('settings'),
+            );
+
+            $scopeMap = $this->getScopeMap($toolClass);
+
+            foreach ($overrideSettings as $key => $value) {
+                // Only apply override for keys explicitly scoped to 'agent'
+                if (($scopeMap[$key] ?? 'agent') === 'agent') {
+                    $merged[$key] = $value;
+                }
+            }
         }
 
-        $overrideSettings = $this->decodeSettings(
-            $toolClass,
-            $override->getRawOriginal('settings'),
-        );
-
-        $scopeMap = $this->getScopeMap($toolClass);
-
-        foreach ($overrideSettings as $key => $value) {
-            // Only apply override for keys explicitly scoped to 'agent'
-            if (($scopeMap[$key] ?? 'agent') === 'agent') {
-                $merged[$key] = $value;
+        // Fill in schema defaults where nothing is set yet
+        $defaults = $this->getSchemaDefaults($toolClass);
+        foreach ($defaults as $key => $defaultValue) {
+            if (!isset($merged[$key])) {
+                $merged[$key] = $defaultValue;
             }
         }
 
@@ -230,7 +256,7 @@ class ToolConfigService
         }
 
         $filtered  = $this->filterSettings($agentSettings);
-        $encrypted = $this->encryptSettings($filtered);
+        $encrypted = $this->encryptSettings($toolClass, $filtered);
 
         $existing = AgentToolOverride::where('agent_id', $agentId)
             ->where('tool_class', $toolClass)
@@ -265,6 +291,24 @@ class ToolConfigService
             ->delete();
     }
 
+    /**
+     * Delete global settings for a tool class.
+     */
+    public function deleteGlobalSettings(string $toolClass): void
+    {
+        ToolConfiguration::where('tool_class', $toolClass)->delete();
+    }
+
+    /**
+     * Delete user-specific settings for a tool class.
+     */
+    public function deleteUserSettings(string $toolClass, int $userId): void
+    {
+        ToolUserSetting::where('user_id', $userId)
+            ->where('tool_class', $toolClass)
+            ->delete();
+    }
+
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
@@ -290,14 +334,23 @@ class ToolConfigService
     }
 
     /**
-     * Encrypt a settings array to a storage string (wholesale: entire JSON blob encrypted).
+     * Encrypt a settings array to a storage string.
+     * Only password fields are encrypted per-field; all other fields are stored as plain JSON.
      *
      * @param array<string, mixed> $settings
      */
-    public function encryptSettings(array $settings): string
+    public function encryptSettings(string $toolClass, array $settings): string
     {
-        $encrypted = $this->security->encrypt(json_encode($settings, JSON_THROW_ON_ERROR));
-        return $encrypted->toStorageString();
+        $passwordKeys = $this->getPasswordKeys($toolClass);
+        $result = [];
+        foreach ($settings as $key => $value) {
+            if (in_array($key, $passwordKeys, true) && $value !== null && $value !== '') {
+                $result[$key] = $this->security->encrypt((string) $value)->toStorageString();
+            } else {
+                $result[$key] = $value;
+            }
+        }
+        return json_encode($result, JSON_THROW_ON_ERROR);
     }
 
     /**

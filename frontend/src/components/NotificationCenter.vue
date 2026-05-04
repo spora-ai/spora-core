@@ -70,6 +70,10 @@ async function handleMarkAllRead() {
   await store.markAllRead()
 }
 
+async function handleClearAll() {
+  await store.deleteAll()
+}
+
 // Expose open method for parent to trigger
 defineExpose({ open: openPanel })
 </script>
@@ -97,13 +101,22 @@ defineExpose({ open: openPanel })
           <!-- Header -->
           <div class="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
             <h2 class="font-semibold text-foreground">Notifications</h2>
-            <button
-              v-if="store.unreadCount > 0"
-              @click="handleMarkAllRead"
-              class="text-xs text-primary hover:text-primary/80 font-medium"
-            >
-              Mark all read
-            </button>
+            <div class="flex items-center gap-3">
+              <button
+                v-if="store.unreadCount > 0"
+                @click="handleMarkAllRead"
+                class="text-xs text-primary hover:text-primary/80 font-medium"
+              >
+                Mark all read
+              </button>
+              <button
+                v-if="store.notifications.length > 0"
+                @click="handleClearAll"
+                class="text-xs text-muted-foreground hover:text-destructive font-medium"
+              >
+                Clear all
+              </button>
+            </div>
           </div>
 
           <!-- Notification list -->

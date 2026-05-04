@@ -63,9 +63,16 @@ const showRetryBanner = computed(() => {
   if (!task.value) return false
   if (task.value.status !== 'FAILED') return false
   if (errorBannerDismissed.value) return false
-  if (task.value.retry_after) return false  // countdown shown instead
   if (task.value.error_code === null) return false
   if (!RETRYABLE_ERROR_CODES.includes(task.value.error_code as typeof RETRYABLE_ERROR_CODES[number])) return false
+  // Show banner when no scheduled countdown is available yet (fallback until
+  // the backend provides retry_after). Once retry_after is set, the countdown
+  // section takes over.
+  if (!task.value.retry_after) {
+    return (task.value.max_retries ?? 0) === 0 || !autoRetryConfigured.value
+  }
+  // retry_after is set — countdown is responsible; hide banner during auto-retry.
+  if (canAutoRetry.value || retriesExhausted.value) return false
   // Auto-retry is disabled: still show banner so user can manually retry
   if ((task.value.max_retries ?? 0) === 0) return true
   return false
@@ -269,14 +276,12 @@ async function approveAll(): Promise<void> {
   approvingAll.value = true
   try {
     const approvals = (pending.value ?? []).map((tc) => {
-      let args: Record<string, unknown> = {}
       try {
-        args = JSON.parse(perToolArgs.value[tc.id] ?? '{}') as Record<string, unknown>
+        return { provider_call_id: String(tc.id), arguments: JSON.parse(perToolArgs.value[tc.id] ?? '{}') as Record<string, unknown> }
       } catch {
         toast.error(`Invalid JSON for tool "${tc.tool_name}".`)
         throw new Error(`Invalid JSON for tool "${tc.tool_name}".`)
       }
-      return { provider_call_id: String(tc.id), arguments: args }
     })
     await taskStore.approveTask(taskId.value, approvals)
     toast.success('All tools approved.')

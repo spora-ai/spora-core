@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Support\Carbon;
+use Spora\Models\Agent;
 use Spora\Models\Notification;
 use Spora\Models\Task;
+use Spora\Models\User;
 
 /**
  * Creates notification records and publishes real-time events via Mercure.
@@ -15,6 +17,8 @@ class NotificationService implements NotificationServiceInterface
 {
     public function __construct(
         private readonly MercurePublisherInterface $mercure,
+        private readonly ?SystemMailer $systemMailer = null,
+        private readonly array $config = [],
     ) {}
 
     public function notifyTaskCompleted(Task $task): void
@@ -144,6 +148,36 @@ class NotificationService implements NotificationServiceInterface
         );
     }
 
+    public function sendEmailForScheduledRun(Task $task): void
+    {
+        if (! ($this->config['notifications']['email_enabled'] ?? false)) {
+            return;
+        }
+
+        if ($this->systemMailer === null) {
+            return;
+        }
+
+        $user = $task->user;
+        if ($user === null) {
+            return;
+        }
+
+        /** @var User $user */
+        $agent = $task->agent;
+
+        $this->systemMailer->sendTemplatedEmail(
+            'scheduled_run_completed',
+            [
+                'task_id'     => $task->id,
+                'agent_name'  => $agent instanceof Agent ? $agent->name : null,
+                'user_prompt' => $task->user_prompt,
+                'site_name'   => $this->config['app_name'] ?? 'Spora',
+            ],
+            [$user->email],
+        );
+    }
+
     /**
      * @param array{user_id: int, type: string, title: string, body: string|null, data: array|null} $attributes
      */
@@ -233,5 +267,10 @@ class NotificationService implements NotificationServiceInterface
         $notification->delete();
 
         return true;
+    }
+
+    public function deleteAllForUser(int $userId): void
+    {
+        Notification::where('user_id', $userId)->delete();
     }
 }

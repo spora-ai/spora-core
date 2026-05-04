@@ -5,15 +5,23 @@
  * All navigation is driven by vue-router. Active state is derived from the
  * current route and query params — no props needed for selection state.
  */
+import { computed, useAttrs } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
 import { useAuthStore } from '@/stores/auth'
-import { ChevronRight } from 'lucide-vue-next'
+import { ChevronRight, X } from 'lucide-vue-next'
 import type { ToolSchema } from '@/composables/useToolSettings'
+
+const attrs = useAttrs()
 
 const props = defineProps<{
   allTools: ToolSchema[]
   loadingTools: boolean
+  mobileOpen?: boolean
+}>()
+
+const emit = defineEmits<{
+  close: () => void
 }>()
 
 const route = useRoute()
@@ -27,8 +35,9 @@ const isLLM = () => route.name === 'settings-llm'
 const isAdminUsers = () => route.name === 'settings-admin-users'
 const isAdminDrivers = () => route.name === 'settings-admin-drivers'
 const isAdminTools = () => route.name === 'settings-admin-tools'
+const isAdminMailTemplates = () => route.name === 'settings-admin-mail-templates'
 
-const isAdmin = () => auth.user?.roles?.includes('ADMIN') ?? false
+const isAdmin = computed(() => auth.user?.roles?.includes('ADMIN') ?? false)
 
 const selectedToolId = () => route.query.tool as string | undefined
 
@@ -38,29 +47,65 @@ function configurableTools(): ToolSchema[] {
 
 function selectTool(toolName: string): void {
   router.push({ name: 'settings-tools', query: { tool: toolName } })
+  closeSidebar()
 }
 
 function selectConfig(configId: number): void {
   router.push({ name: 'settings-llm', query: { config: String(configId) } })
+  closeSidebar()
 }
 
 function startCreate(): void {
   router.push({ name: 'settings-llm', query: { create: '1' } })
+  closeSidebar()
 }
+
+// @ts-ignore TS is confused by emit() in arrow fn passed to another function
+const emitCloseSidebar = () => emit('close')
+
+const closeSidebar = emitCloseSidebar
 </script>
 
 <template>
-  <aside class="w-64 border-r border-border shrink-0 overflow-y-auto hidden md:block">
-    <div class="p-4">
-      <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+  <!-- Mobile backdrop -->
+  <Transition name="fade">
+    <div
+      v-if="mobileOpen"
+      class="fixed inset-0 z-40 bg-black/50 md:hidden"
+      @click="closeSidebar()"
+    />
+  </Transition>
+
+  <!-- Sidebar -->
+  <aside
+    class="flex flex-col border-r border-border bg-background shrink-0 overflow-y-auto"
+    :class="[
+      mobileOpen
+        ? 'fixed inset-y-0 left-0 z-50 w-72 shadow-xl md:hidden'
+        : 'hidden md:flex w-64'
+    ]"
+    v-bind="attrs"
+  >
+    <div class="p-4 flex items-center justify-between">
+      <h2 class="text-sm font-semibold text-foreground uppercase tracking-wider">
         Settings
       </h2>
+      <button
+        v-if="mobileOpen"
+        @click="closeSidebar()"
+        class="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors md:hidden"
+        title="Close"
+      >
+        <X class="h-4 w-4" />
+      </button>
+    </div>
+    <div class="p-4 pt-0">
       <ul class="flex flex-col gap-0.5">
 
         <!-- Overview -->
         <li>
           <button
-            @click="router.push({ name: 'settings-overview' })"
+            @click="router.push({ name: 'settings-overview' }); closeSidebar()"
             class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
             :class="
               isOverview()
@@ -75,7 +120,7 @@ function startCreate(): void {
         <!-- Tools -->
         <li>
           <button
-            @click="router.push({ name: 'settings-tools' })"
+            @click="router.push({ name: 'settings-tools' }); closeSidebar()"
             class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between"
             :class="
               isTools()
@@ -119,7 +164,7 @@ function startCreate(): void {
         <!-- LLM -->
         <li>
           <button
-            @click="router.push({ name: 'settings-llm' })"
+            @click="router.push({ name: 'settings-llm' }); closeSidebar()"
             class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between"
             :class="
               isLLM()
@@ -168,7 +213,7 @@ function startCreate(): void {
       </ul>
 
       <!-- Administration section (admin only) -->
-      <template v-if="isAdmin()">
+      <template v-if="isAdmin">
         <div class="mt-6 pt-4 border-t border-border">
           <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
             Administration
@@ -176,7 +221,7 @@ function startCreate(): void {
           <ul class="flex flex-col gap-0.5">
             <li>
               <button
-                @click="router.push({ name: 'settings-admin-users' })"
+                @click="router.push({ name: 'settings-admin-users' }); closeSidebar()"
                 class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
                 :class="
                   isAdminUsers()
@@ -189,7 +234,7 @@ function startCreate(): void {
             </li>
             <li>
               <button
-                @click="router.push({ name: 'settings-admin-drivers' })"
+                @click="router.push({ name: 'settings-admin-drivers' }); closeSidebar()"
                 class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
                 :class="
                   isAdminDrivers()
@@ -202,7 +247,7 @@ function startCreate(): void {
             </li>
             <li>
               <button
-                @click="router.push({ name: 'settings-admin-tools' })"
+                @click="router.push({ name: 'settings-admin-tools' }); closeSidebar()"
                 class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
                 :class="
                   isAdminTools()
@@ -213,9 +258,33 @@ function startCreate(): void {
                 Tool Defaults
               </button>
             </li>
+            <li>
+              <button
+                @click="router.push({ name: 'settings-admin-mail-templates' }); closeSidebar()"
+                class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
+                :class="
+                  isAdminMailTemplates()
+                    ? 'bg-primary text-primary-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                "
+              >
+                Mail Templates
+              </button>
+            </li>
           </ul>
         </div>
       </template>
     </div>
   </aside>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

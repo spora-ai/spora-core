@@ -135,27 +135,17 @@ function getMaskedGlobalValue(key: string): string {
 
 async function onSave(): Promise<void> {
   // Validate required fields.
-  //
-  // Fields that are "disabled" (inherited from global, not overridden locally) are
-  // still validated — the global setting must actually carry a value for that key.
-  // Backend masks passwords as '***', so any non-empty string means it's configured.
+  // Error only shown when ALL layers (schema default, global, user, agent) are empty for this field.
   fieldErrors.value = {}
   if (!props.tool) return
   for (const field of props.tool.settings_schema) {
     if (!field.required) continue
-    const disabled = globalSettingsExist.value && !overwriteAll.value && !isOverridden(field.key)
-    if (disabled) {
-      // Field inherits from global — verify global actually has a value for it.
-      const globalVal = String(globalSettings.value[field.key] ?? '').trim()
-      if (globalVal === '') {
-        fieldErrors.value[field.key] = `${field.label} is required (not set in global configuration)`
-      }
-      continue
-    }
-    const value = form.value[field.key] ?? ''
-    if (value.trim() === '') {
-      fieldErrors.value[field.key] = `${field.label} is required`
-    }
+    const globalVal = String(globalSettings.value[field.key] ?? '').trim()
+    const agentVal = String(form.value[field.key] ?? '').trim()
+    const schemaDefault = field.default
+    if (globalVal !== '' || agentVal !== '' || schemaDefault != null) continue
+    // All layers empty — this field is missing a required value
+    fieldErrors.value[field.key] = `${field.label} is required (no value in any layer)`
   }
   if (Object.keys(fieldErrors.value).length > 0) return
 
@@ -191,6 +181,18 @@ async function onSave(): Promise<void> {
     error.value = e instanceof ApiError ? e.message : 'Failed to save settings.'
   } finally {
     saving.value = false
+  }
+}
+
+async function removeLocalOverride(): Promise<void> {
+  try {
+    await api.delete(
+      `/agents/${props.agentId}/tools/${encodeURIComponent(props.toolName!)}/override`,
+    )
+    emit('saved', props.toolName!)
+    emit('close')
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Failed to remove override.'
   }
 }
 
@@ -313,6 +315,17 @@ function goToGlobalSettings(): void {
 
       <!-- Error -->
       <p v-if="error" role="alert" class="text-xs text-destructive mt-4">{{ error }}</p>
+
+      <!-- Remove local override (only shown when there's an existing override) -->
+      <div v-if="Object.keys(rawOverride).length > 0" class="mt-4 pt-4 border-t border-border">
+        <button
+          type="button"
+          @click="removeLocalOverride"
+          class="text-xs text-muted-foreground hover:text-destructive transition-colors"
+        >
+          Remove local override and inherit global settings
+        </button>
+      </div>
 
       <!-- Actions -->
       <div class="flex justify-end gap-2 mt-6">

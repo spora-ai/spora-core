@@ -221,6 +221,14 @@ async function getUserSettings(toolId: string): Promise<Record<string, string>> 
   }
 }
 
+async function deleteUserSettings(toolId: string): Promise<void> {
+  await api.delete(`/tools/${encodeURIComponent(toolId)}/user-settings`)
+}
+
+async function deleteSettings(toolId: string): Promise<void> {
+  await api.delete(`/tools/${encodeURIComponent(toolId)}/settings`)
+}
+
 async function putUserSettings(
   toolId: string,
   settings: Record<string, string>,
@@ -242,5 +250,7 @@ return {
     getSettingsWithSource,
     getUserSettings,
     putUserSettings,
+    deleteSettings,
+    deleteUserSettings,
   }
 }

@@ -19,7 +19,10 @@
  */
 import { ref, computed, watch } from 'vue'
 import ToolSettingField from './ToolSettingField.vue'
+import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import type { ToolSchema } from '@/composables/useToolSettings'
+
+const { confirm } = useConfirmDialog()
 
 const props = defineProps<{
   tool: ToolSchema
@@ -27,11 +30,14 @@ const props = defineProps<{
   saving: boolean
   error: string | null
   globalDefaults?: Record<string, string>
+  canClearToGlobal?: boolean
+  mode?: 'global' | 'user'
 }>()
 
 const emit = defineEmits<{
   save: [settings: Record<string, string>]
   saved: []
+  'clear-to-global': []
 }>()
 
 // Local form state: key → value
@@ -44,6 +50,20 @@ function hasGlobalDefault(key: string): boolean {
 
 function globalDefaultValue(key: string): string {
   return props.globalDefaults?.[key] ?? ''
+}
+
+function isPasswordField(key: string): boolean {
+  return props.tool.settings_schema.find((f) => f.key === key)?.type === 'password' || false
+}
+
+// Returns the placeholder value for a field when it inherits from a parent layer.
+// Non-password: shows the parent value as hint.
+// Password: returns undefined (never show parent password value).
+function parentPlaceholder(key: string): string | undefined {
+  const parentVal = props.globalDefaults?.[key]
+  if (!parentVal) return undefined
+  if (isPasswordField(key)) return undefined
+  return `e.g. ${parentVal}`
 }
 
 // Sync form when initialSettings prop changes (e.g. after save completes)
@@ -78,6 +98,15 @@ function reset(): void {
   form.value = { ...props.initialSettings }
 }
 
+async function confirmClear(): Promise<void> {
+  const isGlobal = props.mode === 'global'
+  const message = isGlobal
+    ? 'This will delete the global default settings for all fields. Users will no longer have any defaults from this tool.'
+    : 'This will delete your overrides and restore the global default settings for all fields.'
+  const confirmed = await confirm(message, 'Delete settings?')
+  if (confirmed) emit('clear-to-global')
+}
+
 async function submit(): Promise<void> {
   emit('save', { ...form.value })
 }
@@ -88,14 +117,17 @@ async function submit(): Promise<void> {
     <!-- Fields -->
     <div class="flex flex-col gap-4">
       <div v-for="field in tool.settings_schema" :key="field.key">
-        <p v-if="hasGlobalDefault(field.key)" class="text-xs text-muted-foreground mb-1">
-          Global default: <span class="font-mono">{{ globalDefaultValue(field.key) }}</span>
-        </p>
         <ToolSettingField
           :modelValue="form[field.key] ?? ''"
           :field="field"
+          :customPlaceholder="parentPlaceholder(field.key)"
           @update:modelValue="form[field.key] = String($event ?? '')"
         />
+        <p v-if="hasGlobalDefault(field.key)" class="text-xs text-muted-foreground mt-1">
+          Global default:
+          <span v-if="isPasswordField(field.key)" class="font-mono tracking-widest">••••••••</span>
+          <span v-else class="font-mono">{{ globalDefaultValue(field.key) }}</span>
+        </p>
       </div>
     </div>
 
@@ -110,7 +142,16 @@ async function submit(): Promise<void> {
           :disabled="!isDirty || saving"
           class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50"
         >
-          Reset
+          Discard changes
+        </button>
+        <button
+          v-if="props.canClearToGlobal"
+          type="button"
+          @click="confirmClear"
+          :disabled="saving"
+          class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50"
+        >
+          Delete settings
         </button>
         <button
           type="submit"
