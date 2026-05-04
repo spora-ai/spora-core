@@ -271,7 +271,7 @@ function goToGlobalSettings(): void {
               <span class="text-muted-foreground">{{ field.label }}</span>
               <div class="flex items-center gap-2">
                 <span class="font-mono text-muted-foreground/80">
-                  {{ getMaskedValue(field.key, getSource(field.key)) }}
+                  {{ getMaskedValue(field.key) }}
                 </span>
                 <span
                   class="text-xs px-1.5 py-0.5 rounded"
