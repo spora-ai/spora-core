@@ -472,7 +472,11 @@ final class WeatherApiTool implements ToolInterface
 
     private function effectiveBaseUrl(array $settings): string
     {
-        return trim((string) ($settings['core.weatherapi.base_url'] ?? self::DEFAULT_BASE_URL));
+        $baseUrl = $settings['core.weatherapi.base_url'] ?? null;
+        if ($baseUrl === null || $baseUrl === '') {
+            return self::DEFAULT_BASE_URL;
+        }
+        return trim((string) $baseUrl);
     }
 
     private function effectiveTimeout(array $settings): int

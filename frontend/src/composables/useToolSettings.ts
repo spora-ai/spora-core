@@ -47,7 +47,7 @@ export interface ToolStatus {
 export interface SettingsWithSource {
   [key: string]: {
     value: string | boolean | null
-    source: 'global' | 'agent' | 'default'
+    source: 'global' | 'user' | 'agent' | 'default'
   }
 }
 

@@ -29,6 +29,8 @@ const settingsWithSource = ref<SettingsWithSource>({})
 const saving = ref(false)
 const error = ref<string | null>(null)
 const globalSettingsExist = ref(false)
+const userSettings = ref<Record<string, string>>({})
+const userSettingsExist = ref(false)
 const loadingSettings = ref(false)
 
 // Override state
@@ -36,26 +38,34 @@ const overwriteAll = ref(false)
 const overriddenFields = ref<Set<string>>(new Set())
 const fieldErrors = ref<Record<string, string>>({})
 
-// Local form state (effective values from global + local overrides)
+// Local form state (agent-specific override values)
 const form = ref<Record<string, string>>({})
 
 const hasSchema = computed(() => (props.tool?.settings_schema?.length ?? 0) > 0)
 const hasMultipleFields = computed(() => (props.tool?.settings_schema?.length ?? 0) > 1)
 
+const hasAnyEffectiveSettings = computed(() => {
+  return Object.values(settingsWithSource.value).some((item) => item.source !== 'default')
+})
+
+const agentOverridesExist = computed(() => Object.keys(rawOverride.value).length > 0)
+
 async function loadSettings(toolName: string): Promise<void> {
   loadingSettings.value = true
   error.value = null
   globalSettingsExist.value = false
+  userSettingsExist.value = false
   overwriteAll.value = false
   overriddenFields.value = new Set()
   form.value = {}
   fieldErrors.value = {}
 
-  // Fetch all in parallel: global settings, raw override, effective with source
-  const [globalResult, rawResult, sourceResult] = await Promise.allSettled([
+  // Fetch all in parallel: global settings, raw override, effective with source, user settings
+  const [globalResult, rawResult, sourceResult, userResult] = await Promise.allSettled([
     toolSettings.getGlobalSettings(toolName),
     toolSettings.getRawOverride(toolName),
     toolSettings.getSettingsWithSource(toolName),
+    toolSettings.getUserSettings(toolName),
   ])
 
   // Global settings
@@ -66,7 +76,7 @@ async function loadSettings(toolName: string): Promise<void> {
     globalSettings.value = {}
   }
 
-  // Raw override (what's actually stored locally)
+  // Raw override (what's actually stored locally for this agent)
   if (rawResult.status === 'fulfilled') {
     rawOverride.value = rawResult.value
   } else {
@@ -80,12 +90,22 @@ async function loadSettings(toolName: string): Promise<void> {
     settingsWithSource.value = {}
   }
 
-  // Initialize form with effective values and determine which fields are already overridden
-  const effectiveValues: Record<string, string> = {}
-  for (const [key, item] of Object.entries(settingsWithSource.value)) {
-    effectiveValues[key] = String(item.value ?? '')
+  // User settings
+  if (userResult.status === 'fulfilled') {
+    userSettings.value = userResult.value
+    userSettingsExist.value = Object.keys(userResult.value).length > 0
+  } else {
+    userSettings.value = {}
   }
-  form.value = effectiveValues
+
+  // Initialize form with agent-specific override values (only fields where source === 'agent')
+  const overrideValues: Record<string, string> = {}
+  for (const [key, item] of Object.entries(settingsWithSource.value)) {
+    if (item.source === 'agent') {
+      overrideValues[key] = String(item.value ?? '')
+    }
+  }
+  form.value = overrideValues
 
   // Pre-check fields that have a local override
   for (const [key, item] of Object.entries(settingsWithSource.value)) {
@@ -124,48 +144,56 @@ function getSource(key: string): string {
   return settingsWithSource.value[key]?.source ?? 'default'
 }
 
-function getMaskedGlobalValue(key: string): string {
-  const value = globalSettings.value[key]
-  if (value === undefined || value === null) return '—'
-  // Check if this field type is password
-  const field = props.tool?.settings_schema.find((f) => f.key === key)
-  if (field?.type === 'password') return '••••••••'
-  return value
+function getEffectiveValue(key: string): string {
+  const item = settingsWithSource.value[key]
+  if (!item || item.value === null || item.value === undefined) return '—'
+  if (typeof item.value === 'boolean') return item.value ? 'Yes' : 'No'
+  return String(item.value)
+}
+
+function isPasswordField(key: string): boolean {
+  return props.tool?.settings_schema.find((f) => f.key === key)?.type === 'password' || false
+}
+
+function getMaskedValue(key: string, source: string): string {
+  const item = settingsWithSource.value[key]
+  if (!item || item.value === null || item.value === undefined) return '—'
+  if (isPasswordField(key)) return '••••••••'
+  return String(item.value)
+}
+
+function getSourceBadgeClass(source: string): string {
+  switch (source) {
+    case 'agent': return 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+    case 'user': return 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300'
+    case 'global': return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+    default: return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+  }
+}
+
+function getSourceLabel(source: string): string {
+  switch (source) {
+    case 'agent': return 'Agent'
+    case 'user': return 'User'
+    case 'global': return 'Global'
+    default: return 'Default'
+  }
 }
 
 async function onSave(): Promise<void> {
-  // Validate required fields.
-  // Error only shown when ALL layers (schema default, global, user, agent) are empty for this field.
   fieldErrors.value = {}
   if (!props.tool) return
-  for (const field of props.tool.settings_schema) {
-    if (!field.required) continue
-    const globalVal = String(globalSettings.value[field.key] ?? '').trim()
-    const agentVal = String(form.value[field.key] ?? '').trim()
-    const schemaDefault = field.default
-    if (globalVal !== '' || agentVal !== '' || schemaDefault != null) continue
-    // All layers empty — this field is missing a required value
-    fieldErrors.value[field.key] = `${field.label} is required (no value in any layer)`
-  }
-  if (Object.keys(fieldErrors.value).length > 0) return
 
   saving.value = true
   error.value = null
   try {
-    // Build settings to save.
-    // When there is no global config to inherit from, every field belongs to the
-    // agent override — save them all (same as overwriteAll).
-    // When overwriteAll is explicitly checked, also save everything.
-    // Otherwise only save the individually-toggled fields.
-    const keysToSave = (!globalSettingsExist.value || overwriteAll.value)
+    const keysToSave = overwriteAll.value
       ? props.tool!.settings_schema.map((f) => f.key)
-      : [...overriddenFields.value]
+      : [...overriddenFields.value].filter((k) => form.value[k] !== undefined)
 
     const toSave: Record<string, string> = {}
     for (const key of keysToSave) {
       const value = form.value[key] ?? ''
-      // '***' is the server's mask sentinel for an existing password value.
-      // Skip it so we never overwrite a good stored value with the literal string '***'.
       if (value === '***') continue
       toSave[key] = value
     }
@@ -184,7 +212,7 @@ async function onSave(): Promise<void> {
   }
 }
 
-async function removeLocalOverride(): Promise<void> {
+async function removeAgentOverride(): Promise<void> {
   try {
     await api.delete(
       `/agents/${props.agentId}/tools/${encodeURIComponent(props.toolName!)}/override`,
@@ -192,7 +220,27 @@ async function removeLocalOverride(): Promise<void> {
     emit('saved', props.toolName!)
     emit('close')
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Failed to remove override.'
+    error.value = e instanceof ApiError ? e.message : 'Failed to remove agent override.'
+  }
+}
+
+async function deleteGlobalSettings(): Promise<void> {
+  try {
+    await api.delete(`/tools/${encodeURIComponent(props.toolName!)}/settings`)
+    emit('saved', props.toolName!)
+    emit('close')
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Failed to delete global settings.'
+  }
+}
+
+async function deleteUserSettings(): Promise<void> {
+  try {
+    await api.delete(`/tools/${encodeURIComponent(props.toolName!)}/user-settings`)
+    emit('saved', props.toolName!)
+    emit('close')
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Failed to delete user settings.'
   }
 }
 
@@ -216,115 +264,150 @@ function goToGlobalSettings(): void {
     </div>
 
     <template v-else-if="tool && hasSchema">
-      <!-- No global config warning -->
-      <div
-        v-if="!globalSettingsExist"
-        class="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950 px-4 py-3 text-sm text-amber-700 dark:text-amber-300 mb-4"
-      >
-        <p class="font-medium mb-1">No global configuration found</p>
-        <p class="text-xs opacity-80 mb-2">
-          This tool has no global credentials set. Configure it locally below,
-          or
-          <button @click="goToGlobalSettings" class="underline hover:no-underline">
-            set up global defaults first
-          </button>
-          for all agents.
-        </p>
-      </div>
-
-      <!-- Global Configuration Preview (if exists) -->
-      <div v-if="globalSettingsExist" class="mb-4">
+      <!-- ============================================ -->
+      <!-- SECTION 1: Currently Active Settings (Read-only info) -->
+      <!-- ============================================ -->
+      <div class="mb-6">
+        <h3 class="text-sm font-medium text-foreground mb-3">Currently Active Settings</h3>
         <div class="rounded-lg border border-border bg-muted/30">
-          <div class="flex items-center justify-between px-4 py-2 border-b border-border">
-            <span class="text-xs font-medium text-muted-foreground">Global Configuration (inherited)</span>
-            <span class="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-              <Icon name="check" class="h-3 w-3" />
-              Configured
-            </span>
-          </div>
           <div class="px-4 py-3 space-y-2">
             <div
               v-for="field in tool.settings_schema"
               :key="field.key"
-              class="flex items-center justify-between text-xs"
+              class="flex items-center justify-between text-sm"
             >
-              <span class="text-muted-foreground">{{ field.label }}:</span>
-              <span class="font-mono text-muted-foreground/80">
-                {{ getMaskedGlobalValue(field.key) }}
-              </span>
+              <span class="text-muted-foreground">{{ field.label }}</span>
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-muted-foreground/80">
+                  {{ getMaskedValue(field.key, getSource(field.key)) }}
+                </span>
+                <span
+                  class="text-xs px-1.5 py-0.5 rounded"
+                  :class="getSourceBadgeClass(getSource(field.key))"
+                >
+                  {{ getSourceLabel(getSource(field.key)) }}
+                </span>
+              </div>
             </div>
+          </div>
+          <div v-if="!hasAnyEffectiveSettings" class="px-4 py-3 text-xs text-muted-foreground">
+            Using defaults (no settings configured)
           </div>
         </div>
       </div>
 
-      <!-- Overwrite All Toggle (only for multi-field tools) -->
-      <div v-if="hasMultipleFields && globalSettingsExist" class="mb-4">
-        <label class="flex items-center gap-2 text-sm cursor-pointer">
-          <input
-            type="checkbox"
-            v-model="overwriteAll"
-            class="rounded border-border"
-          />
-          <span>Override all settings locally</span>
-        </label>
-        <p class="text-xs text-muted-foreground mt-1 ml-5">
-          Leave unchecked to inherit global values and only override specific fields.
+      <!-- ============================================ -->
+      <!-- SECTION 2: Agent-Level Overrides -->
+      <!-- ============================================ -->
+      <div class="mb-6">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-medium text-foreground">Agent-Level Overrides</h3>
+          <button
+            v-if="agentOverridesExist"
+            type="button"
+            @click="removeAgentOverride"
+            class="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors"
+          >
+            Remove all agent overrides
+          </button>
+        </div>
+
+        <p class="text-xs text-muted-foreground mb-4">
+          Override settings specifically for this agent. Leave empty to inherit from global/user settings.
         </p>
-      </div>
 
-      <!-- Per-Field Overrides -->
-      <div class="space-y-4">
-        <div v-for="field in tool.settings_schema" :key="field.key" class="flex flex-col gap-1.5">
-          <!-- Field header: label on the left, override toggle on the right -->
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-1.5">
-              <span class="text-sm font-medium">{{ field.label }}</span>
-              <span v-if="field.required" class="text-destructive text-xs">*</span>
-              <span
-                v-if="globalSettingsExist"
-                class="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+        <!-- Overwrite All Toggle (only for multi-field tools) -->
+        <div v-if="hasMultipleFields" class="mb-4">
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              v-model="overwriteAll"
+              class="rounded border-border"
+            />
+            <span>Override all fields</span>
+          </label>
+        </div>
+
+        <!-- Per-Field Override Form -->
+        <div class="space-y-4">
+          <div v-for="field in tool.settings_schema" :key="field.key" class="flex flex-col gap-1.5">
+            <!-- Field header: label + override toggle -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <span class="text-sm font-medium">{{ field.label }}</span>
+                <span v-if="field.required" class="text-destructive text-xs">*</span>
+                <span
+                  v-if="getSource(field.key) !== 'default'"
+                  class="text-xs px-1.5 py-0.5 rounded"
+                  :class="getSourceBadgeClass(getSource(field.key))"
+                >
+                  {{ getSourceLabel(getSource(field.key)) }}
+                </span>
+              </div>
+              <label
+                v-if="!overwriteAll"
+                class="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none"
               >
-                {{ getSource(field.key) === 'agent' ? 'local' : 'global' }}
-              </span>
+                <input
+                  type="checkbox"
+                  :checked="isOverridden(field.key)"
+                  @change="toggleField(field.key)"
+                  class="rounded border-border"
+                />
+                Override
+              </label>
             </div>
-            <!-- Per-field override toggle (hidden when overwriteAll covers all fields) -->
-            <label
-              v-if="globalSettingsExist && !overwriteAll"
-              class="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none"
-            >
-              <input
-                type="checkbox"
-                :checked="isOverridden(field.key)"
-                @change="toggleField(field.key)"
-                class="rounded border-border"
-              />
-              Override locally
-            </label>
-          </div>
 
-          <ToolSettingField
-            :modelValue="form[field.key] ?? ''"
-            :field="field"
-            :error="fieldErrors[field.key] ?? null"
-            :disabled="globalSettingsExist && !overwriteAll && !isOverridden(field.key)"
-            :hideLabel="true"
-            @update:modelValue="form[field.key] = String($event ?? '')"
-          />
+            <ToolSettingField
+              :modelValue="form[field.key] ?? ''"
+              :field="field"
+              :error="fieldErrors[field.key] ?? null"
+              :disabled="!overwriteAll && !isOverridden(field.key)"
+              :hideLabel="true"
+              @update:modelValue="form[field.key] = String($event ?? '')"
+            />
+          </div>
         </div>
       </div>
 
       <!-- Error -->
       <p v-if="error" role="alert" class="text-xs text-destructive mt-4">{{ error }}</p>
 
-      <!-- Remove local override (only shown when there's an existing override) -->
-      <div v-if="Object.keys(rawOverride).length > 0" class="mt-4 pt-4 border-t border-border">
-        <button
-          type="button"
-          @click="removeLocalOverride"
-          class="text-xs text-muted-foreground hover:text-destructive transition-colors"
-        >
-          Remove local override and inherit global settings
-        </button>
+      <!-- ============================================ -->
+      <!-- SECTION 3: Danger Zone -->
+      <!-- ============================================ -->
+      <div class="mt-6 pt-4 border-t border-border">
+        <p class="text-xs font-medium text-muted-foreground mb-3">Manage Other Settings</p>
+        <div class="flex flex-wrap gap-4">
+          <!-- Delete global settings -->
+          <button
+            v-if="globalSettingsExist"
+            type="button"
+            @click="deleteGlobalSettings"
+            class="text-xs text-muted-foreground hover:text-destructive transition-colors"
+          >
+            Delete global defaults
+          </button>
+
+          <!-- Delete user settings -->
+          <button
+            v-if="userSettingsExist"
+            type="button"
+            @click="deleteUserSettings"
+            class="text-xs text-muted-foreground hover:text-destructive transition-colors"
+          >
+            Delete my user overrides
+          </button>
+
+          <!-- Go to global settings -->
+          <button
+            type="button"
+            @click="goToGlobalSettings"
+            class="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Configure global settings →
+          </button>
+        </div>
       </div>
 
       <!-- Actions -->
@@ -342,7 +425,7 @@ function goToGlobalSettings(): void {
           :disabled="saving"
           class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
-          {{ saving ? 'Saving…' : 'Save Locally' }}
+          {{ saving ? 'Saving…' : 'Save Agent Overrides' }}
         </button>
       </div>
     </template>

@@ -60,6 +60,7 @@ describe('AgentToolConfigModal', () => {
       getGlobalSettings: vi.fn().mockReturnValue(Promise.resolve({})),
       getRawOverride: vi.fn().mockReturnValue(Promise.resolve({})),
       getSettingsWithSource: vi.fn().mockReturnValue(Promise.resolve({})),
+      getUserSettings: vi.fn().mockReturnValue(Promise.resolve({})),
     })
     mockApi.get = vi.fn().mockReturnValue(Promise.resolve({}))
   })
@@ -80,6 +81,7 @@ describe('AgentToolConfigModal', () => {
         getGlobalSettings: vi.fn().mockResolvedValue({}),
         getRawOverride: vi.fn().mockResolvedValue({}),
         getSettingsWithSource: vi.fn().mockResolvedValue({}),
+        getUserSettings: vi.fn().mockResolvedValue({}),
       })
       mockApi.get = vi.fn().mockResolvedValue({})
 
@@ -92,13 +94,14 @@ describe('AgentToolConfigModal', () => {
       expect(wrapper.find('.modal-stub').exists()).toBe(true)
     })
 
-    it('shows no global config warning when globalSettingsExist is false', async () => {
+    it('shows currently active settings with defaults when no settings configured', async () => {
       mockUseToolSettings.mockReturnValue({
         getSettings: vi.fn().mockResolvedValue({}),
         putSettings: vi.fn().mockResolvedValue({}),
         getGlobalSettings: vi.fn().mockRejectedValue(new Error('Not found')),
         getRawOverride: vi.fn().mockResolvedValue({}),
         getSettingsWithSource: vi.fn().mockResolvedValue({}),
+        getUserSettings: vi.fn().mockRejectedValue(new Error('Not found')),
       })
       mockApi.get = vi.fn().mockRejectedValue(new Error('Not found'))
 
@@ -108,7 +111,8 @@ describe('AgentToolConfigModal', () => {
       })
 
       await flushPromises()
-      expect(wrapper.text()).toContain('No global configuration found')
+      expect(wrapper.text()).toContain('Currently Active Settings')
+      expect(wrapper.text()).toContain('Using defaults')
     })
   })
 
@@ -119,6 +123,7 @@ describe('AgentToolConfigModal', () => {
       getGlobalSettings: vi.fn().mockResolvedValue({ 'api_key': 'sk-123' }),
       getRawOverride: vi.fn().mockResolvedValue({}),
       getSettingsWithSource: vi.fn().mockResolvedValue({}),
+      getUserSettings: vi.fn().mockResolvedValue({}),
     })
     mockApi.get = vi.fn().mockResolvedValue({})
 
@@ -131,7 +136,7 @@ describe('AgentToolConfigModal', () => {
     expect(wrapper.text()).not.toContain('No global configuration found')
   })
 
-  it('globalSettingsExist becomes false when global settings API fails with 404', async () => {
+  it('shows currently active settings when global settings API returns 404', async () => {
     const { ApiError } = await import('@/api/client')
     mockUseToolSettings.mockReturnValue({
       getSettings: vi.fn().mockResolvedValue({}),
@@ -139,6 +144,7 @@ describe('AgentToolConfigModal', () => {
       getGlobalSettings: vi.fn().mockRejectedValue(new ApiError('NOT_FOUND', 'Not found', 404)),
       getRawOverride: vi.fn().mockResolvedValue({}),
       getSettingsWithSource: vi.fn().mockResolvedValue({}),
+      getUserSettings: vi.fn().mockRejectedValue(new ApiError('NOT_FOUND', 'Not found', 404)),
     })
     mockApi.get = vi.fn().mockRejectedValue(new ApiError('NOT_FOUND', 'Not found', 404))
 
@@ -148,6 +154,6 @@ describe('AgentToolConfigModal', () => {
     })
 
     await flushPromises()
-    expect(wrapper.text()).toContain('No global configuration found')
+    expect(wrapper.text()).toContain('Currently Active Settings')
   })
 })

@@ -50,6 +50,19 @@ services:
     networks:
       - spora
 
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: spora-phpmyadmin
+    restart: always
+    ports:
+      - "8082:80"
+    environment:
+      PMA_HOST: mariadb
+      PMA_USER: ${SPORA_DB_USER:-spora}
+      PMA_PASSWORD: ${SPORA_DB_PASSWORD:-sporapassword}
+    networks:
+      - spora
+
 volumes:
   spora_storage:
   mysql_data:

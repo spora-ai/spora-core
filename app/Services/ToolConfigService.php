@@ -10,6 +10,7 @@ use ReflectionClass;
 use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Core\ValueObjects\EncryptedValue;
+use Spora\Models\Agent;
 use Spora\Models\AgentToolOverride;
 use Spora\Models\ToolConfiguration;
 use Spora\Models\ToolUserSetting;
@@ -579,7 +580,7 @@ class ToolConfigService
      * Return effective settings annotated with their source ('global', 'agent', or 'default').
      * Used by the frontend to show (global) / (local) badges per field.
      *
-     * @return array<string, array{value: mixed, source: 'global'|'agent'|'default'}>
+     * @return array<string, array{value: mixed, source: 'global'|'user'|'agent'|'default'}>
      */
     public function getEffectiveSettingsWithSource(string $toolClass, int $agentId): array
     {
@@ -589,6 +590,15 @@ class ToolConfigService
         // Seed from global defaults
         foreach ($global as $key => $value) {
             $result[$key] = ['value' => $value, 'source' => 'global'];
+        }
+
+        // Merge user-specific settings (per-user overrides)
+        $agent = Agent::find($agentId);
+        if ($agent !== null) {
+            $userSettings = $this->getUserSettings($toolClass, $agent->user_id);
+            foreach ($userSettings as $key => $value) {
+                $result[$key] = ['value' => $value, 'source' => 'user'];
+            }
         }
 
         $override = AgentToolOverride::where('agent_id', $agentId)
