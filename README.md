@@ -1,6 +1,6 @@
 # Spora
 
-**WordPress of AI Agents** — portable, zero-config agent orchestration in PHP 8.2+.
+**WordPress of AI Agents** — portable, zero-config agent orchestration in PHP 8.4+.
 
 ---
 
@@ -55,7 +55,7 @@ FrankenPHP provides the web server, PHP runtime, and — via its built-in Mercur
 
 ## Requirements
 
-- PHP 8.2+
+- PHP 8.4+
 - Composer
 - Node.js 20+
 - npm
