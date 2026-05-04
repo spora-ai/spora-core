@@ -7,7 +7,6 @@ parameters:
     paths:
         - app
         - public
-        - config.php
     level: 5
     excludePaths:
         - vendor

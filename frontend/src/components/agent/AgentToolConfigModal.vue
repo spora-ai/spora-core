@@ -147,7 +147,7 @@ function isPasswordField(key: string): boolean {
   return props.tool?.settings_schema.find((f) => f.key === key)?.type === 'password' || false
 }
 
-function getMaskedValue(key: string, _source: string): string {
+function getMaskedValue(key: string): string {
   const item = settingsWithSource.value[key]
   if (!item || item.value === null || item.value === undefined) return '—'
   if (isPasswordField(key)) return '••••••••'
