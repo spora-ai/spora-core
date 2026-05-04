@@ -3,10 +3,9 @@ name: CI
 on:
   push:
     branches: [main, 'feat/**']
+    tags: ['v*']
   pull_request:
     types: [opened, synchronize, reopened]
-  tags:
-    - 'v*'
 
 env:
   REGISTRY: ghcr.io

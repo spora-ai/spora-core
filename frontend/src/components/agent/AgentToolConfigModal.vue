@@ -5,7 +5,6 @@ import ToolSettingField from '@/components/settings/ToolSettingField.vue'
 import type { ToolSchema, SettingsWithSource } from '@/composables/useToolSettings'
 import { useToolSettings } from '@/composables/useToolSettings'
 import { ApiError, api } from '@/api/client'
-import Icon from '@/components/ui/Icon.vue'
 import { useRouter } from 'vue-router'
 
 const props = defineProps<{
@@ -144,18 +143,11 @@ function getSource(key: string): string {
   return settingsWithSource.value[key]?.source ?? 'default'
 }
 
-function getEffectiveValue(key: string): string {
-  const item = settingsWithSource.value[key]
-  if (!item || item.value === null || item.value === undefined) return '—'
-  if (typeof item.value === 'boolean') return item.value ? 'Yes' : 'No'
-  return String(item.value)
-}
-
 function isPasswordField(key: string): boolean {
   return props.tool?.settings_schema.find((f) => f.key === key)?.type === 'password' || false
 }
 
-function getMaskedValue(key: string, source: string): string {
+function getMaskedValue(key: string, _source: string): string {
   const item = settingsWithSource.value[key]
   if (!item || item.value === null || item.value === undefined) return '—'
   if (isPasswordField(key)) return '••••••••'
