@@ -108,7 +108,7 @@ final class MailTemplateController
             return $this->error('NOT_FOUND', 'Mail template not found.', Response::HTTP_NOT_FOUND);
         }
 
-        return new JsonResponse(null, Response::HTTP_NO_CONTENT);
+        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     public function preview(Request $request, string $name): JsonResponse

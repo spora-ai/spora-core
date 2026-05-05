@@ -21,6 +21,11 @@ function makeLLMConfigController(): array
     return [$controller, $authService, $llmConfigService, $key];
 }
 
+function makeAdmin(Spora\Auth\AuthService $authService, int $userId): void
+{
+    $authService->grantRole($userId, Delight\Auth\Role::ADMIN);
+}
+
 function createTestConfig(string $name, string $driverClass, array $settings, bool $isDefault = false, ?int $userId = null, ?Spora\Services\LLMConfigService $llmConfigService = null): LLMDriverConfiguration
 {
     if ($llmConfigService === null) {
@@ -276,7 +281,9 @@ test('destroy() deletes a config', function (): void {
     $request = new Symfony\Component\HttpFoundation\Request();
     $response = $controller->destroy($request, $config->id);
 
-    expect($response->getStatusCode())->toBe(Response::HTTP_NO_CONTENT);
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['deleted'])->toBe(true);
     expect(LLMDriverConfiguration::find($config->id))->toBeNull();
 });
 
@@ -508,4 +515,207 @@ test('store() creates a config owned by the current user', function (): void {
     expect($savedConfig->user_id)->toBe((int) $_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID]);
 
     LLMDriverConfiguration::where('id', $result['id'])->delete();
+});
+
+// ---------------------------------------------------------------------------
+// Global LLM Driver Configurations
+// ---------------------------------------------------------------------------
+
+test('admin can create a global config with is_global=true', function (): void {
+    [$controller, $authService] = makeLLMConfigController();
+    $userId = bootAuth($authService, 'admin@example.com');
+    makeAdmin($authService, $userId);
+
+    $body = [
+        'name' => 'Global Config',
+        'driver_class' => OpenAICompatibleDriver::class,
+        'settings' => [
+            'api_key' => 'sk-global',
+            'base_url' => 'https://api.openai.com/v1',
+            'model' => 'gpt-4o',
+        ],
+        'is_global' => true,
+    ];
+
+    $request = jsonRequest('POST', '/api/v1/llm-configs', $body);
+    $response = $controller->store($request);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_CREATED);
+
+    $result = json_decode($response->getContent(), true)['data']['config'];
+    expect($result['is_global'])->toBe(true);
+
+    $savedConfig = LLMDriverConfiguration::find($result['id']);
+    expect($savedConfig->user_id)->toBeNull();
+    expect($savedConfig->is_global)->toBe(true);
+
+    LLMDriverConfiguration::where('id', $result['id'])->delete();
+});
+
+test('non-admin cannot create a global config', function (): void {
+    [$controller, $authService] = makeLLMConfigController();
+    bootAuth($authService, 'regular@example.com');
+
+    $body = [
+        'name' => 'Forbidden Global',
+        'driver_class' => OpenAICompatibleDriver::class,
+        'settings' => ['api_key' => 'sk-test'],
+        'is_global' => true,
+    ];
+
+    $request = jsonRequest('POST', '/api/v1/llm-configs', $body);
+    $response = $controller->store($request);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+
+    LLMDriverConfiguration::where('name', 'Forbidden Global')->delete();
+});
+
+test('global configs are visible to all users via index()', function (): void {
+    [$controller, $authService] = makeLLMConfigController();
+
+    // User A (admin) creates a global config
+    $userA = bootAuth($authService, 'adminglobal@example.com');
+    makeAdmin($authService, $userA);
+
+    $globalBody = [
+        'name' => 'Company Wide Config',
+        'driver_class' => OpenAICompatibleDriver::class,
+        'settings' => ['api_key' => 'sk-company-wide', 'model' => 'gpt-4o'],
+        'is_global' => true,
+    ];
+
+    $request = jsonRequest('POST', '/api/v1/llm-configs', $globalBody);
+    $controller->store($request);
+
+    // User B (non-admin) logs in and should see the global config
+    $userB = bootAuth($authService, 'userseesglobal@example.com');
+
+    $request = new Symfony\Component\HttpFoundation\Request();
+    $response = $controller->index($request);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+
+    $body = json_decode($response->getContent(), true);
+    $names = array_column($body['data']['configs'], 'name');
+    expect($names)->toContain('Company Wide Config');
+
+    LLMDriverConfiguration::where('name', 'Company Wide Config')->delete();
+});
+
+test('global configs are not included in other user\'s personal configs', function (): void {
+    [$controller, $authService] = makeLLMConfigController();
+
+    // User A (admin) creates a global config
+    $userA = bootAuth($authService, 'adminglobal2@example.com');
+    makeAdmin($authService, $userA);
+
+    $globalBody = [
+        'name' => 'Global for All',
+        'driver_class' => OpenAICompatibleDriver::class,
+        'settings' => ['api_key' => 'sk-global-2', 'model' => 'gpt-4o'],
+        'is_global' => true,
+    ];
+
+    $request = jsonRequest('POST', '/api/v1/llm-configs', $globalBody);
+    $controller->store($request);
+
+    // User B logs in
+    bootAuth($authService, 'userseesglobal2@example.com');
+
+    // User B's index should include global configs but they should have is_global=true and user_id=null
+    $request = new Symfony\Component\HttpFoundation\Request();
+    $response = $controller->index($request);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+
+    $body = json_decode($response->getContent(), true);
+    $globalConfigs = array_filter($body['data']['configs'], static fn(array $c): bool => $c['is_global'] === true);
+    $nonGlobalConfigs = array_filter($body['data']['configs'], static fn(array $c): bool => $c['is_global'] !== true);
+
+    // Should have exactly 1 global config visible
+    expect(count($globalConfigs))->toBe(1);
+    // The global config should belong to no user (user_id is null)
+    $firstGlobal = array_values($globalConfigs)[0];
+    expect($firstGlobal['user_id'])->toBeNull();
+
+    // User B's personal configs should not include the global
+    $names = array_column($nonGlobalConfigs, 'name');
+    expect($names)->not()->toContain('Global for All');
+
+    LLMDriverConfiguration::where('name', 'Global for All')->delete();
+});
+
+test('getConfigurationsForUser returns both personal and global configs', function (): void {
+    [$controller, $authService] = makeLLMConfigController();
+    $userId = bootAuth($authService, 'personalandglobal@example.com');
+
+    // Personal config (non-admin user)
+    $personalBody = [
+        'name' => 'Personal Config',
+        'driver_class' => AnthropicCompatibleDriver::class,
+        'settings' => ['api_key' => 'sk-personal', 'model' => 'claude-3-5-sonnet'],
+    ];
+    $request = jsonRequest('POST', '/api/v1/llm-configs', $personalBody);
+    $controller->store($request);
+
+    // Global config (created by same user but as admin)
+    makeAdmin($authService, $userId);
+    $globalBody = [
+        'name' => 'Global Company',
+        'driver_class' => AnthropicCompatibleDriver::class,
+        'settings' => ['api_key' => 'sk-global', 'model' => 'claude-3-5-sonnet'],
+        'is_global' => true,
+    ];
+    $request = jsonRequest('POST', '/api/v1/llm-configs', $globalBody);
+    $controller->store($request);
+
+    $request = new Symfony\Component\HttpFoundation\Request();
+    $response = $controller->index($request);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+
+    $body = json_decode($response->getContent(), true);
+    $names = array_column($body['data']['configs'], 'name');
+    expect($names)->toContain('Personal Config')
+        ->and($names)->toContain('Global Company');
+
+    LLMDriverConfiguration::whereIn('name', ['Personal Config', 'Global Company'])->delete();
+});
+
+test('globalConfigs() endpoint returns only global configs', function (): void {
+    [$controller, $authService] = makeLLMConfigController();
+    $userId = bootAuth($authService, 'adminglobalconfigs@example.com');
+    makeAdmin($authService, $userId);
+
+    // Personal config
+    $personalBody = [
+        'name' => 'Personal Only',
+        'driver_class' => OpenAICompatibleDriver::class,
+        'settings' => ['api_key' => 'sk-personal', 'model' => 'gpt-4o'],
+    ];
+    $request = jsonRequest('POST', '/api/v1/llm-configs', $personalBody);
+    $controller->store($request);
+
+    // Global config
+    $globalBody = [
+        'name' => 'Global Only',
+        'driver_class' => OpenAICompatibleDriver::class,
+        'settings' => ['api_key' => 'sk-global', 'model' => 'gpt-4o'],
+        'is_global' => true,
+    ];
+    $request = jsonRequest('POST', '/api/v1/llm-configs', $globalBody);
+    $controller->store($request);
+
+    $request = new Symfony\Component\HttpFoundation\Request();
+    $response = $controller->globalConfigs($request);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+
+    $body = json_decode($response->getContent(), true);
+    $names = array_column($body['data']['configs'], 'name');
+    expect($names)->toContain('Global Only')
+        ->and($names)->not()->toContain('Personal Only');
+
+    LLMDriverConfiguration::whereIn('name', ['Personal Only', 'Global Only'])->delete();
 });

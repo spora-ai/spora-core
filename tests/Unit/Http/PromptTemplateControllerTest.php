@@ -235,7 +235,9 @@ describe('PromptTemplateController', function (): void {
         $request->attributes->set('templateId', $templateId);
         $response = $controller->destroy($request);
 
-        expect($response->getStatusCode())->toBe(204);
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['deleted'])->toBe(true);
         expect(AgentPromptTemplate::find($templateId))->toBeNull();
     });
 

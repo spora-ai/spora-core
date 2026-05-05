@@ -79,7 +79,7 @@ final class ToolController
         return new JsonResponse(['data' => ['settings' => $masked]]);
     }
 
-    public function deleteSettings(Request $request): Response
+    public function deleteSettings(Request $request): JsonResponse
     {
         AuthGuard::requireAuth($this->authService);
 
@@ -90,7 +90,7 @@ final class ToolController
 
         $this->toolConfigService->deleteGlobalSettings($toolClass);
 
-        return new Response('', 204);
+        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     public function getUserSettings(Request $request, string $toolId): JsonResponse
@@ -145,7 +145,7 @@ final class ToolController
 
         $this->toolConfigService->deleteUserSettings($toolClass, $userId);
 
-        return new Response('', 204);
+        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     // -----------------------------------------------------------------------

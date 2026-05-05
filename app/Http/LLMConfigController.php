@@ -227,8 +227,7 @@ final class LLMConfigController
             return $this->forbidden();
         }
 
-        $response = new JsonResponse('', Response::HTTP_NO_CONTENT);
-        return $response;
+        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     /**

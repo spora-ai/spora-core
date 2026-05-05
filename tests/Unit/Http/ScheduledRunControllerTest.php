@@ -287,7 +287,9 @@ describe('ScheduledRunController', function (): void {
         $request = makeJsonRequestWithAttrs('DELETE', "/api/v1/agents/{$agentId}/scheduled-runs/{$runId}", [], ['id' => $agentId, 'runId' => $runId]);
         $response = $controller->destroy($request);
 
-        expect($response->getStatusCode())->toBe(204);
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['deleted'])->toBe(true);
         expect(ScheduledRun::find($runId))->toBeNull();
     });
 

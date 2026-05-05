@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/* eslint-disable vue/no-v-html */
 /**
  * TaskChatPage — task detail / chat view.
  * Route: /tasks/:id
@@ -579,6 +580,7 @@ onUnmounted(() => {
                   AI
                 </div>
                 <div class="rounded-2xl rounded-tl-sm border border-border bg-card px-4 py-2.5 text-sm">
+                  <!-- eslint-disable-next-line vue/no-v-html -->
                   <div class="chat-bubble-content" v-html="renderMarkdown(msg.entry.content ?? '')" />
                 </div>
               </div>

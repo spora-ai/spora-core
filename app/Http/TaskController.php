@@ -217,7 +217,7 @@ final class TaskController
     /**
      * DELETE /api/v1/tasks/{taskId}
      */
-    public function destroy(Request $request): Response
+    public function destroy(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
         $taskId = (int) $request->attributes->get('taskId', 0);
@@ -229,7 +229,7 @@ final class TaskController
             );
         }
 
-        return new Response(null, Response::HTTP_NO_CONTENT);
+        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     /**
@@ -344,7 +344,7 @@ final class TaskController
             );
         }
 
-        return new Response(null, Response::HTTP_NO_CONTENT);
+        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     // -------------------------------------------------------------------------

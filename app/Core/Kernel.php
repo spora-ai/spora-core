@@ -8,6 +8,7 @@ use DI\Container;
 use DI\ContainerBuilder;
 use Dotenv\Dotenv;
 use FastRoute\RouteCollector;
+use Psr\Log\LoggerInterface;
 use Spora\Http\Exceptions\ForbiddenException;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -26,6 +27,8 @@ final class Kernel
         $builder = new ContainerBuilder();
         $builder->addDefinitions($this->loadContainerDefinitions());
         $this->container = $builder->build();
+
+        $this->configureErrorHandling($this->container->get('config')['app_env'] ?? 'production');
     }
 
     public function handle(Request $request): Response
@@ -127,5 +130,31 @@ final class Kernel
         }
 
         return new JsonResponse($body, Response::HTTP_INTERNAL_SERVER_ERROR);
+    }
+
+    private function configureErrorHandling(string $appEnv): void
+    {
+        // In production, suppress deprecations from output but log everything.
+        // In development, also log everything (don't display raw errors to JSON API).
+        if ($appEnv === 'production') {
+            error_reporting(E_ALL & ~E_DEPRECATED);
+        } else {
+            error_reporting(E_ALL);
+        }
+        ini_set('display_errors', '0');
+
+        set_error_handler(function (int $errno, string $errstr, string $errfile, int $errline): bool {
+            $logLevel = match ($errno) {
+                E_DEPRECATED, E_USER_DEPRECATED => 'warning',
+                E_WARNING, E_USER_WARNING => 'warning',
+                E_NOTICE, E_USER_NOTICE => 'info',
+                default => 'error',
+            };
+            $this->container->get(LoggerInterface::class)->$logLevel(
+                sprintf('PHP error %d: %s in %s:%d', $errno, $errstr, $errfile, $errline),
+            );
+
+            return true;
+        });
     }
 }

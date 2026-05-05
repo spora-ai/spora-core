@@ -250,7 +250,9 @@ test('destroy removes the agent and returns 204', function (): void {
         agentJsonRequest('DELETE', '/api/v1/agents/' . $agentId, [], $agentId),
     );
 
-    expect($response->getStatusCode())->toBe(204);
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['deleted'])->toBe(true);
     expect(Capsule::table('agents')->count())->toBe(0);
 });
 
@@ -310,8 +312,9 @@ test('disableTool removes the AgentTool row and returns 204', function (): void 
     $disableReq->attributes->set('toolId', 'test_tool');
     $response = $controller->disableTool($disableReq);
 
-    expect($response->getStatusCode())->toBe(204);
-    expect($response->getContent())->toBe('');
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['deleted'])->toBe(true);
     expect(Capsule::table('agent_tools')->count())->toBe(0);
 });
 
@@ -547,8 +550,9 @@ test('deleteOverride removes the override and returns 204', function (): void {
     $delReq->attributes->set('toolId', 'test_tool');
     $response = $controller->deleteOverride($delReq);
 
-    expect($response->getStatusCode())->toBe(204);
-    expect($response->getContent())->toBe('');
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['deleted'])->toBe(true);
 
     // Override row should be gone
     $getReq = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override');
@@ -595,8 +599,9 @@ test('deleteOverride succeeds even when tool is not enabled', function (): void 
     $delReq->attributes->set('toolId', 'test_tool');
     $response = $controller->deleteOverride($delReq);
 
-    expect($response->getStatusCode())->toBe(204);
-    expect($response->getContent())->toBe('');
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['deleted'])->toBe(true);
 });
 
 // ---------------------------------------------------------------------------

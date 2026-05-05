@@ -126,7 +126,7 @@ final class AgentController
             return $this->notFound();
         }
 
-        return new JsonResponse(null, Response::HTTP_NO_CONTENT);
+        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     /**
@@ -256,10 +256,7 @@ final class AgentController
 
         $this->agentService->disableTool($agentId, $userId, $toolClass);
 
-        $response = new JsonResponse(null, Response::HTTP_NO_CONTENT);
-        $response->setContent('');
-
-        return $response;
+        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     /**
@@ -326,10 +323,7 @@ final class AgentController
 
         $this->agentService->deleteOverride($agentId, $userId, $toolClass);
 
-        $response = new JsonResponse(null, Response::HTTP_NO_CONTENT);
-        $response->setContent('');
-
-        return $response;
+        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     /**

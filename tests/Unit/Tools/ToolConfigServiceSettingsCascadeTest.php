@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit;
+namespace Tests\Unit\Tools;
 
 use Monolog\Logger;
 use Spora\Core\SecurityManager;

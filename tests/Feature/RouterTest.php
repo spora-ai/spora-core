@@ -27,10 +27,10 @@ final class RouterTestController
         return new Response(json_encode(['id' => $id]), Response::HTTP_OK);
     }
 
-    public function deleteResource(Request $request, int $id): Response
+    public function deleteResource(Request $request, int $id): JsonResponse
     {
         $this->receivedId = $id;
-        return new Response('', Response::HTTP_NO_CONTENT);
+        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 }
 
@@ -89,7 +89,9 @@ test('Router passes {id} route variable as method argument to DELETE handler', f
     $request = Request::create('/test/7', 'DELETE');
     $response = $router->dispatch($request);
 
-    expect($response->getStatusCode())->toBe(Response::HTTP_NO_CONTENT);
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['deleted'])->toBe(true);
 
     $controller = $container->get(RouterTestController::class);
     expect($controller->receivedId)->toBe(7);
