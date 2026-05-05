@@ -180,8 +180,12 @@ return [
         $level = constant(Monolog\Level::class . '::' . $levelStr);
 
         $logger = new Monolog\Logger('spora');
-        $handler = new Monolog\Handler\StreamHandler($config['log_path'] ?? (BASE_PATH . '/storage/spora.log'), $level);
-        // Explicitly set permissions for shared hosting (e.g., 0664) - though StreamHandler respects umask natively.
+
+        // Docker: SPORA_LOG_PATH=stdout writes to stdout (supervisord → Docker log driver).
+        $logPath = $config['log_path'] ?? (BASE_PATH . '/storage/spora.log');
+        $stream = ($logPath === 'stdout') ? 'php://stdout' : $logPath;
+        $handler = new Monolog\Handler\StreamHandler($stream, $level);
+
         $logger->pushHandler($handler);
 
         return $logger;

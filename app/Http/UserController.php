@@ -118,7 +118,7 @@ final class UserController
             return $this->error('NOT_FOUND', 'User not found.', Response::HTTP_NOT_FOUND);
         }
 
-        return new JsonResponse(null, Response::HTTP_NO_CONTENT);
+        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     public function grantRole(Request $request, int $id): JsonResponse

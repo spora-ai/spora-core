@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Spora\Tests\Unit;
+namespace Tests\Unit\Utilities;
 
 use Spora\Services\ContextWindowErrorParser;
 

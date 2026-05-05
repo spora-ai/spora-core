@@ -117,7 +117,7 @@ final class PromptTemplateController
     /**
      * DELETE /api/v1/agents/{agentId}/templates/{templateId}
      */
-    public function destroy(Request $request): Response
+    public function destroy(Request $request): JsonResponse
     {
         $userId = AuthGuard::requireAuth($this->authService);
         $agentId = (int) $request->attributes->get('id', 0);
@@ -129,7 +129,7 @@ final class PromptTemplateController
             return $this->notFound();
         }
 
-        return new Response('', Response::HTTP_NO_CONTENT);
+        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     private function decodeJson(Request $request): array

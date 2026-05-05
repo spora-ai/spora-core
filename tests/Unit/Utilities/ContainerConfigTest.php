@@ -106,7 +106,8 @@ test('environmental variables override default config', function (): void {
 
 test('file config overrides default config', function (): void {
     $config = resolveConfig([
-        'SPORA_APP_ENV' => null,
+        'SPORA_APP_ENV'             => null,
+        'SPORA_ALLOW_REGISTRATION'  => null,
     ], [
         'db_driver'          => 'mysql',
         'app_env'            => 'local',

@@ -92,7 +92,6 @@ function runProcessScheduledRuns(WorkerRunCommand $command): int
 {
     $command->lastScheduledProcessed = 0;
     $ref = new ReflectionMethod($command, 'processScheduledRuns');
-    $ref->setAccessible(true);
     $ref->invoke($command, new NullOutput());
     return $command->lastScheduledProcessed;
 }

@@ -580,7 +580,9 @@ it('destroy deletes task and returns 204', function (): void {
     $req->attributes->set('taskId', $task->id);
 
     $resp = $controller->destroy($req);
-    expect($resp->getStatusCode())->toBe(204);
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['deleted'])->toBe(true);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('destroy cascade-deletes task_history rows', function (): void {
@@ -608,7 +610,9 @@ it('destroy cascade-deletes task_history rows', function (): void {
     $req->attributes->set('taskId', $task->id);
 
     $resp = $controller->destroy($req);
-    expect($resp->getStatusCode())->toBe(204);
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['deleted'])->toBe(true);
     // Cascade delete is tested in TaskService integration tests
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -646,7 +650,9 @@ it('destroy cascade-deletes tool_calls rows', function (): void {
     $req->attributes->set('taskId', $task->id);
 
     $resp = $controller->destroy($req);
-    expect($resp->getStatusCode())->toBe(204);
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['deleted'])->toBe(true);
     // Cascade delete is tested in TaskService integration tests
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -1092,7 +1098,9 @@ it('cancelRetryChain returns 204 and cancels chain for valid retry task', functi
     $req->attributes->set('taskId', $retry1->id);
 
     $resp = $controller->cancelRetryChain($req);
-    expect($resp->getStatusCode())->toBe(204);
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['deleted'])->toBe(true);
 
     // Note: With TaskService, the actual cancellation happens in the service
     // This test verifies the controller properly delegates to the service

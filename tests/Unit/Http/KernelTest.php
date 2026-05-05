@@ -269,3 +269,62 @@ test('500 response in development mode includes a debug block with exception det
     expect($body['debug'])->toHaveKey('line');
     expect($body['debug']['exception'])->toBeString()->not()->toBeEmpty();
 });
+
+// ---------------------------------------------------------------------------
+// Error handling — vendor deprecations captured by set_error_handler
+// ---------------------------------------------------------------------------
+
+test('deprecation warnings are logged to Monolog and not output to screen', function (): void {
+    $_ENV['SPORA_APP_ENV'] = 'production';
+    $_ENV['SPORA_LOG_LEVEL'] = 'debug';
+
+    // Use a temp file for the log so we can assert on it.
+    $tmpLog = sys_get_temp_dir() . '/spora_deprecation_test_' . uniqid();
+    $_ENV['SPORA_LOG_PATH'] = $tmpLog;
+
+    try {
+        $kernel = new Kernel();
+        $container = $kernel->getContainer();
+        $logger = $container->get(Psr\Log\LoggerInterface::class);
+
+        // Clear any existing handlers and add one that writes to our temp file.
+        $logger->setHandlers([
+            new Monolog\Handler\StreamHandler($tmpLog, Monolog\Level::Debug),
+        ]);
+
+        // Trigger a user deprecation — should be captured by the error handler.
+        trigger_error('Test deprecation message', E_USER_DEPRECATED);
+
+        // The deprecation should be in the log file.
+        $logContents = file_get_contents($tmpLog);
+
+        expect($logContents)->toContain('Test deprecation message');
+        // E_USER_DEPRECATED = 16384
+        expect($logContents)->toContain('16384');
+    } finally {
+        unset($_ENV['SPORA_APP_ENV'], $_ENV['SPORA_LOG_LEVEL'], $_ENV['SPORA_LOG_PATH']);
+        @unlink($tmpLog);
+    }
+});
+
+test('SPORA_LOG_PATH=stdout configures Monolog to write to php://stdout', function (): void {
+    $_ENV['SPORA_LOG_PATH'] = 'stdout';
+
+    try {
+        $kernel = new Kernel();
+        $container = $kernel->getContainer();
+        $logger = $container->get(Psr\Log\LoggerInterface::class);
+
+        $handlers = $logger->getHandlers();
+        expect($handlers)->not()->toBeEmpty();
+
+        $handler = $handlers[0];
+        expect($handler)->toBeInstanceOf(Monolog\Handler\StreamHandler::class);
+
+        // StreamHandler stores the stream URL in a private $url property.
+        $reflection = new ReflectionProperty($handler, 'url');
+        expect($reflection->getValue($handler))->toBe('php://stdout');
+    } finally {
+        unset($_ENV['SPORA_LOG_PATH']);
+    }
+});

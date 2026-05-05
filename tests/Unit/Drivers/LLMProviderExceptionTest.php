@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Spora\Tests\Unit;
+namespace Tests\Unit\Drivers;
 
 use Spora\Drivers\Exceptions\LLMProviderException;
 

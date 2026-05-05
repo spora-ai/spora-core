@@ -287,8 +287,9 @@ describe('NotificationController', function (): void {
         $request->attributes->set('id', $notif->id);
         $response = $controller->destroy($request);
 
-        expect($response->getStatusCode())->toBe(204);
-        expect($response->getContent())->toBe('');
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['deleted'])->toBe(true);
         expect(Notification::find($notif->id))->toBeNull();
     });
 
