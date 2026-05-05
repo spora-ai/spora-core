@@ -10,6 +10,7 @@
         "delight-im/auth": "^9.0",
         "dragonmantank/cron-expression": "^3.6",
         "illuminate/database": "^13.0",
+        "illuminate/filesystem": "^13.0",
         "league/html-to-markdown": "^5.1",
         "monolog/monolog": "^3.10",
         "nikic/fast-route": "^1.3",

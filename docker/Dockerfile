@@ -33,7 +33,7 @@ RUN docker-php-ext-install pdo_mysql
 COPY . .
 
 # Copy PHP deps from deps-builder
-COPY --from=deps-builder /app/vendor ./app/vendor
+COPY --from=deps-builder /app/vendor /app/vendor
 
 # Copy built frontend assets
 COPY --from=frontend-builder /public/dist ./public/dist

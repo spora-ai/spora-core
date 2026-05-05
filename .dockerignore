@@ -1,0 +1,28 @@
+# Vendor is built inside Docker (deps-builder stage) — don't send as context
+vendor/
+
+# Build artifacts
+frontend/node_modules/
+frontend/dist/
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+
+# Git
+.git/
+.github/
+
+# Docs & configs not needed in image
+*.md
+docs/
+phpstan.neon
+phpunit.xml
+ecosystem.config.js
+plugin.schema.json
+
+# Dev files
+.env
+.env.*
+!.env.example

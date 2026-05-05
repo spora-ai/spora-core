@@ -5,7 +5,6 @@ services:
       dockerfile: docker/Dockerfile
     container_name: spora-app
     restart: always
-    command: ["/usr/bin/supervisord", "-c", "/app/supervisord.conf"]
     ports:
       - "8081:80"
     env_file:
