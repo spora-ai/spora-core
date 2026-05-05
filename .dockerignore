@@ -22,6 +22,9 @@ phpunit.xml
 ecosystem.config.js
 plugin.schema.json
 
+# Runtime files (generated on boot)
+storage/
+
 # Dev files
 .env
 .env.*

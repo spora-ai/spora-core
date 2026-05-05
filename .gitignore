@@ -22,6 +22,7 @@ storage/secret.key
 storage/database.sqlite
 storage/database.sqlite-shm
 storage/database.sqlite-wal
+storage/database.sqlite-journal
 
 # Schema installer stamp — regenerated on every migration run, not source
 storage/.schema_stamp
