@@ -11,9 +11,10 @@ use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\MailTemplate;
 use Spora\Models\User;
+use Spora\Tools\AgentMemoryTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\CurrentTimeTool;
-use Spora\Tools\ScratchpadTool;
+use Spora\Tools\GlobalMemoryTool;
 
 /**
  * Seeds the database with a default Admin user and an integrated Agent.
@@ -63,7 +64,8 @@ final class DatabaseSeeder
         $toolsToEnable = [
             CurrentTimeTool::class,
             CalculatorTool::class,
-            ScratchpadTool::class,
+            AgentMemoryTool::class,
+            GlobalMemoryTool::class,
         ];
 
         foreach ($toolsToEnable as $toolClass) {

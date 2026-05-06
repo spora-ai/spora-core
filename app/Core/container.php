@@ -6,6 +6,7 @@ use Psr\Container\ContainerInterface;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
+use Spora\Apps\AppRegistry;
 use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
@@ -18,6 +19,8 @@ use Spora\Recipes\RecipeScanner;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\MailTemplateService;
 use Spora\Services\MailTemplateServiceInterface;
+use Spora\Services\MemoryService;
+use Spora\Services\MemoryServiceInterface;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\PromptTemplateService;
@@ -243,12 +246,26 @@ return [
         Spora\Drivers\AnthropicCompatibleDriver::class,
     ],
 
+    // Registered apps. Add to this list to make apps discoverable via GET /api/v1/apps.
+    'app_apps' => [
+        Spora\Apps\MemoriesApp::class,
+    ],
+
+    AppRegistry::class => static function (ContainerInterface $c): AppRegistry {
+        $registry = new AppRegistry();
+        foreach ($c->get('app_apps') as $appClass) {
+            $registry->register($appClass);
+        }
+        return $registry;
+    },
+
     // Registered tool classes. Add to this list to make tools discoverable via GET /api/v1/tools.
     // Settings (#[ToolSetting]) live directly on each tool class. See docs/06_tools.md.
     'tool_classes' => [
         Spora\Tools\CurrentTimeTool::class,
         Spora\Tools\CalculatorTool::class,
-        Spora\Tools\ScratchpadTool::class,
+        Spora\Tools\AgentMemoryTool::class,
+        Spora\Tools\GlobalMemoryTool::class,
         Spora\Tools\TavilySearchTool::class,
         Spora\Tools\SerperSearchTool::class,
         Spora\Tools\ReadUrlTool::class,
@@ -262,6 +279,13 @@ return [
 
     Spora\Http\LLMConfigController::class => static function (ContainerInterface $c): Spora\Http\LLMConfigController {
         return new Spora\Http\LLMConfigController(
+            $c->get(AuthService::class),
+            $c->get(Spora\Services\LLMConfigServiceInterface::class),
+        );
+    },
+
+    Spora\Http\UserPreferenceController::class => static function (ContainerInterface $c): Spora\Http\UserPreferenceController {
+        return new Spora\Http\UserPreferenceController(
             $c->get(AuthService::class),
             $c->get(Spora\Services\LLMConfigServiceInterface::class),
         );
@@ -287,6 +311,26 @@ return [
 
     UserServiceInterface::class => static function (): UserServiceInterface {
         return new UserService();
+    },
+
+    Spora\Http\AppsController::class => static function (ContainerInterface $c): Spora\Http\AppsController {
+        return new Spora\Http\AppsController(
+            $c->get(AppRegistry::class),
+        );
+    },
+
+    Spora\Http\MemoryController::class => static function (ContainerInterface $c): Spora\Http\MemoryController {
+        return new Spora\Http\MemoryController(
+            $c->get(AuthService::class),
+            $c->get(MemoryServiceInterface::class),
+        );
+    },
+
+    Spora\Http\AgentMemoryController::class => static function (ContainerInterface $c): Spora\Http\AgentMemoryController {
+        return new Spora\Http\AgentMemoryController(
+            $c->get(AuthService::class),
+            $c->get(MemoryServiceInterface::class),
+        );
     },
 
     Spora\Http\AgentController::class => static function (ContainerInterface $c): Spora\Http\AgentController {
@@ -431,6 +475,10 @@ return [
 
     PromptTemplateServiceInterface::class => static function (): PromptTemplateServiceInterface {
         return new PromptTemplateService();
+    },
+
+    MemoryServiceInterface::class => static function (): MemoryServiceInterface {
+        return new MemoryService();
     },
 
     MailTemplateServiceInterface::class => static function (): MailTemplateServiceInterface {

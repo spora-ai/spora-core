@@ -11,6 +11,7 @@ use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Models\Agent;
+use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
@@ -74,6 +75,18 @@ describe('TaskRunCommand — task claiming', function (): void {
         $this->container->allows('get')->with(NotificationService::class)->andReturn(
             Mockery::mock(NotificationService::class),
         );
+
+        // Create a global LLM config for tests (tests mock the DriverFactory, so credentials don't matter)
+        $this->llmConfig = LLMDriverConfiguration::create([
+            'user_id'       => null,
+            'name'          => 'Test Global Config',
+            'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
+            'settings'      => json_encode(['api_key' => 'test']),
+            'is_global'     => true,
+            'is_default'    => true,
+            'context_window' => 128000,
+            'max_tokens_output' => 4096,
+        ]);
     });
 
     it('transitions a QUEUED task to RUNNING when claimed', function (): void {
@@ -233,16 +246,27 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         $this->authService = bootAuthLayer();
         $this->userId = $this->authService->register('taskrun3@example.com', 'Password1!');
         simulateLoggedInSession($this->userId, 'taskrun3@example.com');
+
+        // Create a global LLM config for tests (tests mock the DriverFactory, so credentials don't matter)
+        $this->llmConfig = LLMDriverConfiguration::create([
+            'user_id'       => null,
+            'name'          => 'Test Global Config',
+            'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
+            'settings'      => json_encode(['api_key' => 'test']),
+            'is_global'     => true,
+            'is_default'    => true,
+            'context_window' => 128000,
+            'max_tokens_output' => 4096,
+        ]);
     });
 
     it('completes a task when the LLM returns a text response', function (): void {
         $agent = Agent::create([
-            'user_id'       => $this->userId,
-            'name'          => 'TestAgent3',
-            'llm_provider'  => 'mock',
-            'llm_model'     => 'mock-model',
-            'max_steps'     => 10,
-            'is_active'     => true,
+            'user_id'              => $this->userId,
+            'name'                 => 'TestAgent3',
+            'llm_driver_config_id' => $this->llmConfig->id,
+            'max_steps'            => 10,
+            'is_active'           => true,
         ]);
 
         $task = Task::create([
@@ -301,13 +325,24 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
     });
 
     it('marks a task FAILED when the LLM throws', function (): void {
+        // Create a global LLM config in the same DB the agent will use
+        $llmConfig = LLMDriverConfiguration::create([
+            'user_id'       => null,
+            'name'          => 'Test Global Config',
+            'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
+            'settings'      => json_encode(['api_key' => 'test']),
+            'is_global'     => true,
+            'is_default'    => true,
+            'context_window' => 128000,
+            'max_tokens_output' => 4096,
+        ]);
+
         $agent = Agent::create([
-            'user_id'       => $this->userId,
-            'name'          => 'TestAgent4',
-            'llm_provider'  => 'mock',
-            'llm_model'     => 'mock-model',
-            'max_steps'     => 10,
-            'is_active'     => true,
+            'user_id'              => $this->userId,
+            'name'                 => 'TestAgent4',
+            'llm_driver_config_id' => $llmConfig->id,
+            'max_steps'            => 10,
+            'is_active'            => true,
         ]);
 
         $task = Task::create([

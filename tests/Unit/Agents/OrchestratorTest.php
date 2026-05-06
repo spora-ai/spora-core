@@ -11,9 +11,11 @@ use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
+use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
+use Spora\Models\UserPreference;
 use Tests\Fixtures\SpyAgentIdInputTool;
 use Tests\Fixtures\StubAutoApproveOutputTool;
 use Tests\Fixtures\StubFailingTool;
@@ -71,13 +73,24 @@ function seedAgent(): array
     $authService = bootAuthLayer();
     $userId      = $authService->register('orch@example.com', 'Password1!');
 
+    // Create a global LLM config as default (tests mock the DriverFactory, so credentials don't matter)
+    $config = LLMDriverConfiguration::create([
+        'user_id'       => null,
+        'name'          => 'Test Global Config',
+        'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
+        'settings'      => json_encode(['api_key' => 'test']),
+        'is_global'     => true,
+        'is_default'    => true,
+        'context_window' => 128000,
+        'max_tokens_output' => 4096,
+    ]);
+
     $agent = Agent::create([
-        'user_id'      => $userId,
-        'name'         => 'Test Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock-model',
-        'max_steps'    => 10,
-        'is_active'    => true,
+        'user_id'              => $userId,
+        'name'                 => 'Test Agent',
+        'llm_driver_config_id' => $config->id,
+        'max_steps'            => 10,
+        'is_active'            => true,
     ]);
 
     return [$agent->id, $userId];
@@ -1065,4 +1078,154 @@ it('buildMessages skips multiple summary ranges and only includes post-summary r
     expect($capturedMessages[1]['content'])->toBe('Second summary');
     expect($capturedMessages[2]['role'])->toBe('user');
     expect($capturedMessages[2]['content'])->toBe('Recent');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// resolveLlmConfig() — config resolution chain
+// ---------------------------------------------------------------------------
+
+test('resolveLlmConfig throws when no config exists at any level', function (): void {
+    $authService = bootAuthLayer();
+    $userId = $authService->register('non-config@example.com', 'Password1!');
+
+    // Create agent WITHOUT any config AND without a global default existing
+    $agent = Agent::create([
+        'user_id'              => $userId,
+        'name'                 => 'Agent Without Config',
+        'llm_driver_config_id' => null,
+        'max_steps'            => 10,
+        'is_active'            => true,
+    ]);
+
+    $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
+    $orch = makeOrchestrator(mockDriverFactory($llm));
+
+    expect(fn() => $orch->start($agent->id, 'Hello', maxSteps: 5))
+        ->toThrow(RuntimeException::class, 'No LLM configuration set for this agent');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+test('resolveLlmConfig uses user preference when agent has no llm_driver_config_id', function (): void {
+    [$agentId, $userId] = seedAgent();
+
+    // Create a config and set it as user preference
+    $config = LLMDriverConfiguration::create([
+        'user_id' => $userId,
+        'name' => 'User Preferred Config',
+        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'settings' => json_encode(['api_key' => 'sk-test', 'model' => 'gpt-4o']),
+        'is_global' => false,
+    ]);
+    $config->context_window = 64000;
+    $config->max_tokens_output = 2048;
+    $config->save();
+
+    UserPreference::create([
+        'user_id' => $userId,
+        'preferred_llm_config_id' => $config->id,
+    ]);
+
+    $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
+    $orch = makeOrchestrator(mockDriverFactory($llm));
+
+    // Should not throw - uses user preference
+    $task = $orch->start($agentId, 'Hello', maxSteps: 5);
+    expect($task->status)->toBe('COMPLETED');
+
+    // Cleanup
+    UserPreference::where('user_id', $userId)->delete();
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+test('resolveLlmConfig prefers user preference over global default', function (): void {
+    [$agentId, $userId] = seedAgent();
+
+    // Create a global default config
+    $globalConfig = LLMDriverConfiguration::create([
+        'user_id' => null,
+        'name' => 'Global Default Config',
+        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'settings' => json_encode(['api_key' => 'sk-global', 'model' => 'gpt-4o']),
+        'is_global' => true,
+        'is_default' => true,
+    ]);
+    $globalConfig->context_window = 32000;
+    $globalConfig->max_tokens_output = 1024;
+    $globalConfig->save();
+
+    // Create a user preference config
+    $prefConfig = LLMDriverConfiguration::create([
+        'user_id' => $userId,
+        'name' => 'User Preferred Config',
+        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'settings' => json_encode(['api_key' => 'sk-pref', 'model' => 'gpt-4o']),
+        'is_global' => false,
+    ]);
+    $prefConfig->context_window = 64000;
+    $prefConfig->max_tokens_output = 2048;
+    $prefConfig->save();
+
+    UserPreference::create([
+        'user_id' => $userId,
+        'preferred_llm_config_id' => $prefConfig->id,
+    ]);
+
+    $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
+    $orch = makeOrchestrator(mockDriverFactory($llm));
+
+    // Should use user preference, not global default
+    $task = $orch->start($agentId, 'Hello', maxSteps: 5);
+    expect($task->status)->toBe('COMPLETED');
+
+    // Cleanup
+    UserPreference::where('user_id', $userId)->delete();
+    LLMDriverConfiguration::whereIn('id', [$globalConfig->id, $prefConfig->id])->delete();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+test('resolveLlmConfig uses agent-specific config when set', function (): void {
+    [$agentId, $userId] = seedAgent();
+
+    // Create user preference config
+    $prefConfig = LLMDriverConfiguration::create([
+        'user_id' => $userId,
+        'name' => 'User Preferred Config',
+        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'settings' => json_encode(['api_key' => 'sk-pref', 'model' => 'gpt-4o']),
+        'is_global' => false,
+    ]);
+    $prefConfig->context_window = 64000;
+    $prefConfig->max_tokens_output = 2048;
+    $prefConfig->save();
+
+    UserPreference::create([
+        'user_id' => $userId,
+        'preferred_llm_config_id' => $prefConfig->id,
+    ]);
+
+    // Create agent-specific config
+    $agentConfig = LLMDriverConfiguration::create([
+        'user_id' => $userId,
+        'name' => 'Agent Config',
+        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'settings' => json_encode(['api_key' => 'sk-agent', 'model' => 'gpt-4o']),
+        'is_global' => false,
+    ]);
+    $agentConfig->context_window = 128000;
+    $agentConfig->max_tokens_output = 4096;
+    $agentConfig->save();
+
+    // Set the agent to use the agent-specific config
+    $agent = Agent::find($agentId);
+    $agent->llm_driver_config_id = $agentConfig->id;
+    $agent->save();
+
+    $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
+    $orch = makeOrchestrator(mockDriverFactory($llm));
+
+    // Should use agent-specific config, not user preference
+    $task = $orch->start($agentId, 'Hello', maxSteps: 5);
+    expect($task->status)->toBe('COMPLETED');
+
+    // Cleanup
+    UserPreference::where('user_id', $userId)->delete();
+    LLMDriverConfiguration::whereIn('id', [$prefConfig->id, $agentConfig->id])->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());

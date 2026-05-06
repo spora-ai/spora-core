@@ -161,9 +161,27 @@ final class DatabaseSchemaInstaller
             return;
         }
 
-        $migrator->run($path);
+        // run() returns the list of migration names that were actually executed.
+        $ranMigrations = $migrator->run($path);
 
-        $this->upsertVersion($component, $codeVersion);
+        // For the core component, use the actual last ran migration to derive the
+        // version — the file-scan codeVersion can be wrong if a migration file was
+        // added but never executed (e.g. stamp was manually touched). For plugins,
+        // use codeVersion from the manifest (plugin authors control the version).
+        if ($component === 'core') {
+            // run() returns full file paths, so extract the migration name (basename without .php).
+            $lastMigrationFile = end($ranMigrations) ?: '';
+            $lastMigrationName = $lastMigrationFile !== '' ? str_replace('.php', '', basename($lastMigrationFile)) : '';
+            $actualVersion    = 0;
+
+            if ($lastMigrationName !== '' && preg_match('/^(\d+)/', $lastMigrationName, $matches)) {
+                $actualVersion = (int) $matches[1];
+            }
+
+            $this->upsertVersion($component, $actualVersion);
+        } else {
+            $this->upsertVersion($component, $codeVersion);
+        }
     }
 
     /**

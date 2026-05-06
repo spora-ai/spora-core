@@ -167,27 +167,6 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     }
   }
 
-  // ── Set as default ────────────────────────────────────────────────────────
-
-  async function setDefault(id: number): Promise<void> {
-    saving.value = true
-    error.value = null
-    try {
-      await api.post<{ config: LLMConfigResource }>(`/llm-configs/${id}/set-default`)
-      // Update is_default on all configs
-      configs.value = configs.value.map((c) => ({
-        ...c,
-        is_default: c.id === id,
-      }))
-    } catch (e) {
-      const msg = e instanceof ApiError ? e.message : 'Failed to set as default.'
-      error.value = msg
-      throw e
-    } finally {
-      saving.value = false
-    }
-  }
-
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   function driverForClass(driverClass: string): LLMDriverInfo | undefined {
@@ -219,7 +198,6 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     createConfig,
     updateConfig,
     deleteConfig,
-    setDefault,
     driverForClass,
     driverByName,
   }

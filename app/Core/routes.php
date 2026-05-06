@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 use FastRoute\RouteCollector;
 use Spora\Http\AgentController;
+use Spora\Http\AgentMemoryController;
+use Spora\Http\AppsController;
 use Spora\Http\AuthController;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
 use Spora\Http\MailTemplateController;
+use Spora\Http\MemoryController;
 use Spora\Http\NotificationController;
 use Spora\Http\PromptTemplateController;
 use Spora\Http\RecipeController;
@@ -17,6 +20,7 @@ use Spora\Http\SseController;
 use Spora\Http\TaskController;
 use Spora\Http\ToolController;
 use Spora\Http\UserController;
+use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
 
 /**
@@ -27,6 +31,8 @@ use Spora\Http\UserProfileController;
 return static function (RouteCollector $r): void {
     // Health check (no auth)
     $r->addRoute('GET', '/health', [HealthController::class, 'check']);
+    // Apps
+    $r->addRoute('GET', '/api/v1/apps', [AppsController::class, 'index']);
     // Auth
     $r->addRoute('POST', '/api/v1/auth/login', [AuthController::class, 'login']);
     $r->addRoute('POST', '/api/v1/auth/logout', [AuthController::class, 'logout']);
@@ -95,6 +101,24 @@ return static function (RouteCollector $r): void {
     $r->addRoute('PUT', '/api/v1/llm-configs/{id}', [LLMConfigController::class, 'update']);
     $r->addRoute('DELETE', '/api/v1/llm-configs/{id}', [LLMConfigController::class, 'destroy']);
     $r->addRoute('POST', '/api/v1/llm-configs/{id}/set-default', [LLMConfigController::class, 'setDefault']);
+
+    // User LLM Preferences
+    $r->addRoute('GET', '/api/v1/user-preferences/llm', [UserPreferenceController::class, 'show']);
+    $r->addRoute('PUT', '/api/v1/user-preferences/llm', [UserPreferenceController::class, 'update']);
+
+    // Global Memories
+    $r->addRoute('GET', '/api/v1/memories', [MemoryController::class, 'index']);
+    $r->addRoute('POST', '/api/v1/memories', [MemoryController::class, 'store']);
+    $r->addRoute('GET', '/api/v1/memories/{id}', [MemoryController::class, 'show']);
+    $r->addRoute('PUT', '/api/v1/memories/{id}', [MemoryController::class, 'update']);
+    $r->addRoute('DELETE', '/api/v1/memories/{id}', [MemoryController::class, 'destroy']);
+
+    // Agent Memories
+    $r->addRoute('GET', '/api/v1/agents/{agentId}/memories', [AgentMemoryController::class, 'index']);
+    $r->addRoute('POST', '/api/v1/agents/{agentId}/memories', [AgentMemoryController::class, 'store']);
+    $r->addRoute('GET', '/api/v1/agents/{agentId}/memories/{memoryId}', [AgentMemoryController::class, 'show']);
+    $r->addRoute('PUT', '/api/v1/agents/{agentId}/memories/{memoryId}', [AgentMemoryController::class, 'update']);
+    $r->addRoute('DELETE', '/api/v1/agents/{agentId}/memories/{memoryId}', [AgentMemoryController::class, 'destroy']);
 
     // Notifications
     $r->addRoute('GET', '/api/v1/notifications', [NotificationController::class, 'index']);

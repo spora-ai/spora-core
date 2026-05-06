@@ -39,6 +39,11 @@ final class LLMDriverConfiguration extends Model
         return $this->belongsTo(User::class);
     }
 
+    public function userPreference(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(UserPreference::class, 'preferred_llm_config_id');
+    }
+
     protected $casts = [
         'is_default' => 'boolean',
         'is_global' => 'boolean',

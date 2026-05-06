@@ -67,13 +67,16 @@ function startCreate(): void {
   router.replace({ name: 'settings-admin-drivers', query: { create: '1' } })
 }
 
-function onCreated(config: LLMConfigResource): void {
+async function onCreated(config: LLMConfigResource): Promise<void> {
+  // Refresh the admin global configs list so the new config appears immediately
+  await llmStore.loadGlobalAdminConfigs()
   selectedConfigId.value = config.id
   viewMode.value = 'edit'
   router.replace({ name: 'settings-admin-drivers', query: { config: String(config.id) } })
 }
 
-function onDeleted(): void {
+async function onDeleted(): Promise<void> {
+  await llmStore.loadGlobalAdminConfigs()
   selectedConfigId.value = null
   viewMode.value = 'list'
   router.replace({ name: 'settings-admin-drivers' })
@@ -156,7 +159,7 @@ function cancel(): void {
       v-else-if="viewMode === 'edit' && selectedConfig"
       :key="selectedConfig.id"
       :config="selectedConfig"
-      @saved="() => {}"
+      @saved="llmStore.loadGlobalAdminConfigs()"
       @deleted="onDeleted"
       @cancel="cancel"
     />

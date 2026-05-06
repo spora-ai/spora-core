@@ -7,6 +7,7 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
+import { useLlmPreferencesStore } from '@/stores/llmPreferencesStore'
 import { usePromptTemplatesStore } from '@/stores/promptTemplates'
 import { useTaskStore } from '@/stores/tasks'
 import { ApiError } from '@/api/client'
@@ -24,6 +25,7 @@ const router = useRouter()
 const { confirm } = useConfirmDialog()
 const agentStore = useAgentStore()
 const llmConfigsStore = useLlmConfigsStore()
+const preferenceStore = useLlmPreferencesStore()
 const taskStore = useTaskStore()
 const promptTemplatesStore = usePromptTemplatesStore()
 
@@ -231,8 +233,11 @@ async function submitPrompt(): Promise<void> {
           <span v-if="agentStore.currentAgent.llm_driver_config_id">
             {{ configName }}
           </span>
+          <span v-else-if="preferenceStore.preference">
+            {{ preferenceStore.preference.config.name }} (preferred)
+          </span>
           <span v-else>
-            {{ llmConfigsStore.configs.find(c => c.is_default)?.name ?? 'Global default' }}
+            Global default
           </span>
         </button>
 

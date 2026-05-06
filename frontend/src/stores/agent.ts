@@ -126,29 +126,24 @@ export const useAgentStore = defineStore('agent', () => {
     const result = await api.get<{
       operations: Array<{
         tool_class: string
+        tool_name: string
         operation: string
         effective_enabled: boolean
         effective_requires_approval: boolean
       }>
     }>(`/agents/${agentId}/tools/operations`)
 
-    const map: Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>> = {}
+    // Re-key by tool_name using the authoritative value from the server.
+    // patchOperationOverride uses tool_name as the URL identifier, so the map must use tool_name keys.
+    const byName: Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>> = {}
     for (const op of result.operations) {
-      if (!map[op.tool_class]) {
-        map[op.tool_class] = {}
+      if (!byName[op.tool_name]) {
+        byName[op.tool_name] = {}
       }
-      map[op.tool_class][op.operation] = {
+      byName[op.tool_name][op.operation] = {
         enabled: op.effective_enabled,
         requiresApproval: op.effective_requires_approval,
       }
-    }
-    // Re-key by tool_name using the short-name derivation (basename + snake_case).
-    // patchOperationOverride uses tool_name as the URL identifier, so the map must use tool_name keys.
-    const byName: Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>> = {}
-    for (const toolClass of Object.keys(map)) {
-      const toolName = toolClass.replace(/\\/g, '/').split('/').pop()!
-        .replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '')
-      byName[toolName] = map[toolClass]
     }
     return byName
   }

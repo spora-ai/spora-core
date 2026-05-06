@@ -57,14 +57,6 @@ async function onSave(settings: Record<string, string>): Promise<void> {
   }
 }
 
-async function setDefault(): Promise<void> {
-  try {
-    await llmStore.setDefault(props.config.id)
-  } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Failed to set as default.'
-  }
-}
-
 async function confirmDelete(): Promise<void> {
   deleting.value = true
   try {
@@ -140,24 +132,7 @@ function formatDate(iso: string): string {
     </div>
 
     <!-- Actions -->
-    <div v-if="!isReadOnly" class="flex items-center justify-between gap-4 pt-4 border-t border-border">
-      <div class="flex gap-2">
-        <button
-          v-if="!config.is_default"
-          type="button"
-          @click="setDefault"
-          :disabled="saving"
-          class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-3 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-        >
-          Set as default
-        </button>
-        <span
-          v-else
-          class="inline-flex h-9 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 px-3 text-sm font-medium text-primary"
-        >
-          Default
-        </span>
-      </div>
+    <div v-if="!isReadOnly" class="flex items-center justify-end gap-4 pt-4 border-t border-border">
       <button
         type="button"
         @click="showDeleteModal = true"

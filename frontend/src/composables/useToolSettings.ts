@@ -39,6 +39,7 @@ export interface ToolSchema {
 
 export interface ToolStatus {
   tool_class: string
+  tool_name: string
   is_enabled: boolean
   missing_required: string[]
   can_enable: boolean
@@ -152,7 +153,7 @@ export function useToolSettings(agentId?: number) {
       )
       const map: Record<string, ToolStatus> = {}
       for (const status of result.statuses) {
-        map[status.tool_class] = status
+        map[status.tool_name] = status
       }
       return map
     } catch {

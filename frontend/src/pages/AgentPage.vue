@@ -8,6 +8,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { usePromptTemplatesStore } from '@/stores/promptTemplates'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
+import { useLlmPreferencesStore } from '@/stores/llmPreferencesStore'
 import AgentLayout from '@/components/layout/AgentLayout.vue'
 import ComposerInput from '@/components/ComposerInput.vue'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
@@ -46,6 +47,7 @@ const router = useRouter()
 const agentStore = useAgentStore()
 const promptTemplatesStore = usePromptTemplatesStore()
 const llmConfigsStore = useLlmConfigsStore()
+const preferenceStore = useLlmPreferencesStore()
 
 const agentId = computed(() => Number(route.params.id))
 
@@ -118,6 +120,7 @@ watch(agentId, async (newId) => {
 
 onMounted(async () => {
   await llmConfigsStore.ensure()
+  await preferenceStore.loadPreference()
   agentStore.clearCurrentAgent()
   const id = agentId.value
   if (!Number.isFinite(id)) {

@@ -205,12 +205,14 @@ describe('useAgentStore', () => {
         operations: [
           {
             tool_class: 'TestTool',
+            tool_name: 'test_tool',
             operation: 'search',
             effective_enabled: true,
             effective_requires_approval: false,
           },
           {
             tool_class: 'TestTool',
+            tool_name: 'test_tool',
             operation: 'scrape',
             effective_enabled: false,
             effective_requires_approval: true,
