@@ -16,6 +16,25 @@ import { api } from '@/api/client'
 
 const mockApi = api as ReturnType<typeof vi.fn>
 
+// Plain object store used by our sessionStorage mock
+const sessionStorageStore: Record<string, string> = {}
+
+function createSessionStorageMock() {
+  return {
+    getItem: (key: string) => sessionStorageStore[key] ?? null,
+    setItem: (key: string, value: string) => { sessionStorageStore[key] = value },
+    removeItem: (key: string) => { delete sessionStorageStore[key] },
+    clear: () => { for (const k in sessionStorageStore) delete sessionStorageStore[k] },
+  }
+}
+
+const mockSessionStorage = createSessionStorageMock()
+Object.defineProperty(global, 'sessionStorage', { value: mockSessionStorage })
+
+function resetSessionStorage(): void {
+  for (const k in sessionStorageStore) delete sessionStorageStore[k]
+}
+
 const mockAgent = {
   id: 1,
   name: 'Test Agent',
@@ -32,7 +51,13 @@ const mockAgent = {
 
 describe('useAgentStore', () => {
   beforeEach(() => {
-    vi.resetAllMocks()
+    // Reset only API mocks individually — vi.resetAllMocks() kills sessionStorageSpy implementation
+    mockApi.get.mockReset()
+    mockApi.post.mockReset()
+    mockApi.patch.mockReset()
+    mockApi.put.mockReset()
+    mockApi.delete.mockReset()
+    resetSessionStorage()
     setActivePinia(createPinia())
   })
 
@@ -199,6 +224,67 @@ describe('useAgentStore', () => {
     })
   })
 
+  /**
+   * Simulates the tool status sync that AgentSettingsPage.vue performs in onMounted.
+   * When agent.tools contains a tool but toolStatusMap says is_enabled=false,
+   * enabledToolNames must NOT include it.
+   *
+   * Bug: agent.tools is the list of associated tools, not the enabled state.
+   * toolStatusMap from GET /agents/{id}/tools/status is the authoritative source.
+   */
+  describe('tool status sync (AgentSettingsPage onMounted simulation)', () => {
+    it('does not mark a tool as enabled when toolStatusMap.is_enabled is false', () => {
+      // Simulate agent.tools — the agent is associated with AgentMemoryTool
+      const agentTools = [
+        { tool_name: 'memory', tool_class: 'AgentMemoryTool' },
+        { tool_name: 'calculator', tool_class: 'CalculatorTool' },
+      ]
+
+      // Simulate toolStatusMap from GET /agents/{id}/tools/status
+      const toolStatusMap: Record<string, { is_enabled: boolean }> = {
+        memory: { is_enabled: false },
+        calculator: { is_enabled: true },
+      }
+
+      // This is the sync logic from AgentSettingsPage.vue onMounted:
+      const enabledToolNames = new Set<string>()
+      for (const tool of agentTools) {
+        const status = toolStatusMap[tool.tool_name]
+        if (status) {
+          if (status.is_enabled) {
+            enabledToolNames.add(tool.tool_name)
+          } else {
+            enabledToolNames.delete(tool.tool_name)
+          }
+        }
+      }
+
+      // AgentMemoryTool should NOT be enabled (is_enabled=false)
+      expect(enabledToolNames.has('memory')).toBe(false)
+      // Calculator should be enabled (is_enabled=true)
+      expect(enabledToolNames.has('calculator')).toBe(true)
+    })
+
+    it('adds a tool to enabledToolNames when is_enabled is true', () => {
+      const agentTools = [
+        { tool_name: 'global_memory', tool_class: 'GlobalMemoryTool' },
+      ]
+      const toolStatusMap: Record<string, { is_enabled: boolean }> = {
+        global_memory: { is_enabled: true },
+      }
+
+      const enabledToolNames = new Set<string>()
+      for (const tool of agentTools) {
+        const status = toolStatusMap[tool.tool_name]
+        if (status?.is_enabled) {
+          enabledToolNames.add(tool.tool_name)
+        }
+      }
+
+      expect(enabledToolNames.has('global_memory')).toBe(true)
+    })
+  })
+
   describe('getAllOperationOverrides', () => {
     it('calls GET /agents/{id}/tools/operations and returns nested map', async () => {
       const operationsResponse = {
@@ -240,6 +326,75 @@ describe('useAgentStore', () => {
       const result = await store.getAllOperationOverrides(42)
 
       expect(result).toEqual({})
+    })
+  })
+
+  describe('composerDrafts', () => {
+    it('getComposerDraft creates a new draft lazily for unknown agent', () => {
+      const store = useAgentStore()
+
+      const draft1 = store.getComposerDraft(1)
+      expect(draft1).toEqual({ promptText: '' })
+      expect(store.composerDrafts[1]).toEqual({ promptText: '' })
+    })
+
+    it('getComposerDraft returns same instance on multiple calls', () => {
+      const store = useAgentStore()
+
+      const draft1 = store.getComposerDraft(1)
+      const draft2 = store.getComposerDraft(1)
+      expect(draft1).toBe(draft2)
+    })
+
+    it('getComposerDraft returns independent drafts for different agents', () => {
+      const store = useAgentStore()
+
+      const draft1 = store.getComposerDraft(1)
+      const draft2 = store.getComposerDraft(2)
+      draft1.promptText = 'Hello'
+      draft2.promptText = 'World'
+
+      expect(store.composerDrafts[1].promptText).toBe('Hello')
+      expect(store.composerDrafts[2].promptText).toBe('World')
+    })
+
+    it('clearComposerDraft resets promptText to empty string', () => {
+      const store = useAgentStore()
+
+      const draft = store.getComposerDraft(1)
+      draft.promptText = 'Some draft text'
+      expect(draft.promptText).toBe('Some draft text')
+
+      store.clearComposerDraft(1)
+      expect(draft.promptText).toBe('')
+    })
+
+    it('clearComposerDraft does not throw for unknown agent', () => {
+      const store = useAgentStore()
+      expect(() => store.clearComposerDraft(999)).not.toThrow()
+    })
+
+    it('drafts are persisted to sessionStorage', async () => {
+      setActivePinia(createPinia())
+      const store = useAgentStore()
+
+      store.getComposerDraft(1).promptText = 'Test prompt'
+
+      // Wait a tick for the watch to flush
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      expect(sessionStorageStore['spora:composer-drafts']).toBe(
+        JSON.stringify({ 1: { promptText: 'Test prompt' } }),
+      )
+    })
+
+    it('drafts are loaded from sessionStorage on init', () => {
+      sessionStorageStore['spora:composer-drafts'] = JSON.stringify({ 5: { promptText: 'Loaded draft' } })
+
+      setActivePinia(createPinia())
+      const store = useAgentStore()
+
+      expect(store.composerDrafts[5]).toEqual({ promptText: 'Loaded draft' })
     })
   })
 })

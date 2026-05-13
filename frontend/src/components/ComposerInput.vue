@@ -34,9 +34,15 @@ const currentLlmConfig = computed(() =>
 )
 const configName = computed(() => currentLlmConfig.value?.name ?? 'Custom LLM config')
 
-// ── Local state ────────────────────────────────────────────────────────────────
+// ── Draft state (persisted per-agent) ─────────────────────────────────────────
 
-const promptText = ref('')
+const promptText = computed({
+  get: () => agentStore.getComposerDraft(props.agentId).promptText,
+  set: (value: string) => {
+    agentStore.getComposerDraft(props.agentId).promptText = value
+  },
+})
+
 const composerError = ref<string | null>(null)
 const submitting = ref(false)
 const selectedTemplateId = ref<number | null>(null)
@@ -131,7 +137,7 @@ async function submitPrompt(): Promise<void> {
   submitting.value = true
   try {
     const task = await taskStore.createTaskForAgent(props.agentId, text)
-    promptText.value = ''
+    agentStore.clearComposerDraft(props.agentId)
     adjustTextareaHeight()
     router.push({ name: 'task', params: { id: task.id } })
   } catch (e) {

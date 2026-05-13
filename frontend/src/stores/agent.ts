@@ -1,13 +1,51 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { api } from '@/api/client'
 import type { Agent, AgentTool, LLMConfigSettings } from '@/types/agent'
 import type { Task } from '@/types/task'
+
+const COMPOSER_DRAFTS_KEY = 'spora:composer-drafts'
+
+function loadComposerDrafts(): Record<number, { promptText: string }> {
+  try {
+    const stored = sessionStorage.getItem(COMPOSER_DRAFTS_KEY)
+    return stored ? JSON.parse(stored) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveComposerDrafts(drafts: Record<number, { promptText: string }>): void {
+  try {
+    sessionStorage.setItem(COMPOSER_DRAFTS_KEY, JSON.stringify(drafts))
+  } catch {
+    // sessionStorage may be unavailable (e.g., private browsing)
+  }
+}
 
 export const useAgentStore = defineStore('agent', () => {
   const agents = ref<Agent[]>([])
   const currentAgent = ref<Agent | null>(null)
   const currentAgentTasks = ref<Task[]>([])
+  const composerDrafts = reactive<Record<number, { promptText: string }>>(loadComposerDrafts())
+
+  // Auto-persist drafts to sessionStorage
+  watch(composerDrafts, (drafts) => {
+    saveComposerDrafts(drafts)
+  }, { deep: true })
+
+  function getComposerDraft(agentId: number): { promptText: string } {
+    if (!composerDrafts[agentId]) {
+      composerDrafts[agentId] = { promptText: '' }
+    }
+    return composerDrafts[agentId]
+  }
+
+  function clearComposerDraft(agentId: number): void {
+    if (composerDrafts[agentId]) {
+      composerDrafts[agentId].promptText = ''
+    }
+  }
 
   // ── List / CRUD ─────────────────────────────────────────────────────────────
 
@@ -194,6 +232,7 @@ export const useAgentStore = defineStore('agent', () => {
     agents,
     currentAgent,
     currentAgentTasks,
+    composerDrafts,
     fetchAgents,
     fetchAgent,
     createAgent,
@@ -210,5 +249,7 @@ export const useAgentStore = defineStore('agent', () => {
     getLLMConfig,
     putLLMConfig,
     clearCurrentAgent,
+    getComposerDraft,
+    clearComposerDraft,
   }
 })

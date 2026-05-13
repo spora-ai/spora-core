@@ -183,6 +183,20 @@ onMounted(async () => {
   const allStatuses = await toolSettings.getAllToolStatuses()
   toolStatusMap.value = allStatuses
 
+  // Sync enabledToolNames with the authoritative is_enabled status from the API.
+  // agent.tools is the list of associated tools, but toolStatusMap tells us which
+  // ones are actually enabled (e.g. AgentMemoryTool may be associated but is_enabled=false).
+  for (const tool of agent.tools) {
+    const status = allStatuses[tool.tool_name]
+    if (status) {
+      if (status.is_enabled) {
+        enabledToolNames.value.add(tool.tool_name)
+      } else {
+        enabledToolNames.value.delete(tool.tool_name)
+      }
+    }
+  }
+
   // Load operation overrides for all enabled tools that have operations
   await loadOperationOverrides()
 })

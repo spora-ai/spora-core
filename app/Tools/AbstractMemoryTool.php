@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Tools;
 
+use Spora\Models\Agent;
 use Spora\Models\Memory;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -19,11 +20,17 @@ abstract class AbstractMemoryTool implements ToolInterface
         $operation = $this->getOperationName($arguments);
         $scope = $this->getScope();
 
+        // Derive userId from agent if not provided (global memories need user context)
+        if ($userId === null) {
+            $agent = Agent::find($agentId);
+            $userId = $agent?->user_id;
+        }
+
         return match ($operation) {
-            'list'   => $this->list($scope, $agentId),
-            'get'    => $this->get($arguments, $scope, $agentId),
-            'save'   => $this->save($arguments, $scope, $agentId),
-            'delete' => $this->delete($arguments, $scope, $agentId),
+            'list'   => $this->list($scope, $agentId, $userId),
+            'get'    => $this->get($arguments, $scope, $agentId, $userId),
+            'save'   => $this->save($arguments, $scope, $agentId, $userId),
+            'delete' => $this->delete($arguments, $scope, $agentId, $userId),
             default  => new ToolResult(false, 'Invalid action. Must be list, get, save, or delete.'),
         };
     }
@@ -66,10 +73,14 @@ abstract class AbstractMemoryTool implements ToolInterface
         ];
     }
 
-    public function list(string $scope, int $agentId): ToolResult
+    public function list(string $scope, int $agentId, ?int $userId = null): ToolResult
     {
         if ($scope === 'global') {
-            $memories = Memory::global()->orderBy('order')->orderBy('name')->get();
+            $query = Memory::global();
+            if ($userId !== null) {
+                $query->where('user_id', $userId);
+            }
+            $memories = $query->orderBy('order')->orderBy('name')->get();
         } else {
             $memories = Memory::forAgent($agentId)->orderBy('order')->orderBy('name')->get();
         }
@@ -87,14 +98,14 @@ abstract class AbstractMemoryTool implements ToolInterface
         return new ToolResult(true, implode("\n", $lines));
     }
 
-    public function get(array $arguments, string $scope, int $agentId): ToolResult
+    public function get(array $arguments, string $scope, int $agentId, ?int $userId = null): ToolResult
     {
         $name = trim((string) ($arguments['name'] ?? ''));
         if ($name === '') {
             return new ToolResult(false, 'Error: name is required for get action.');
         }
 
-        $memory = $this->findMemory($name, $scope, $agentId);
+        $memory = $this->findMemory($name, $scope, $agentId, $userId);
         if ($memory === null) {
             return new ToolResult(false, "Memory [{$name}] not found in {$scope} scope.");
         }
@@ -108,7 +119,7 @@ abstract class AbstractMemoryTool implements ToolInterface
         return new ToolResult(true, $header . ($memory->content ?? ''));
     }
 
-    public function save(array $arguments, string $scope, int $agentId): ToolResult
+    public function save(array $arguments, string $scope, int $agentId, ?int $userId = null): ToolResult
     {
         $name = trim((string) ($arguments['name'] ?? ''));
         if ($name === '') {
@@ -119,13 +130,12 @@ abstract class AbstractMemoryTool implements ToolInterface
         $summary = isset($arguments['summary']) ? trim((string) $arguments['summary']) : null;
         $order = isset($arguments['order']) ? (int) $arguments['order'] : 0;
 
-        if ($summary === null && $content !== '') {
-            $summary = mb_substr(strip_tags($content), 0, 200);
-        }
-
         $query = Memory::where('name', $name);
         if ($scope === 'global') {
             $query->whereNull('agent_id');
+            if ($userId !== null) {
+                $query->where('user_id', $userId);
+            }
         } else {
             $query->where('agent_id', $agentId);
         }
@@ -134,24 +144,39 @@ abstract class AbstractMemoryTool implements ToolInterface
 
         if ($memory !== null) {
             $memory->content = $content;
-            $memory->summary = $summary;
+            if ($summary !== null) {
+                $memory->summary = $summary;
+            }
             $memory->order = $order;
             $memory->save();
             return new ToolResult(true, "Updated memory [{$name}] in {$scope} scope.");
         }
 
-        Memory::create([
+        // Auto-derive summary from content only when creating new memory
+        if ($summary === null && $content !== '') {
+            $summary = mb_substr(strip_tags($content), 0, 200);
+        }
+
+        $createData = [
             'agent_id' => $scope === 'agent' ? $agentId : null,
             'name'     => $name,
             'summary'  => $summary,
             'content'  => $content,
             'order'    => $order,
-        ]);
+        ];
+
+        if ($scope === 'global' && $userId !== null) {
+            $createData['user_id'] = $userId;
+        } elseif ($scope === 'agent') {
+            $createData['user_id'] = $userId;
+        }
+
+        Memory::create($createData);
 
         return new ToolResult(true, "Created memory [{$name}] in {$scope} scope.");
     }
 
-    public function delete(array $arguments, string $scope, int $agentId): ToolResult
+    public function delete(array $arguments, string $scope, int $agentId, ?int $userId = null): ToolResult
     {
         $name = trim((string) ($arguments['name'] ?? ''));
         if ($name === '') {
@@ -161,6 +186,9 @@ abstract class AbstractMemoryTool implements ToolInterface
         $query = Memory::where('name', $name);
         if ($scope === 'global') {
             $query->whereNull('agent_id');
+            if ($userId !== null) {
+                $query->where('user_id', $userId);
+            }
         } else {
             $query->where('agent_id', $agentId);
         }
@@ -173,11 +201,14 @@ abstract class AbstractMemoryTool implements ToolInterface
         return new ToolResult(false, "Memory [{$name}] not found in {$scope} scope.");
     }
 
-    private function findMemory(string $name, string $scope, int $agentId): ?Memory
+    private function findMemory(string $name, string $scope, int $agentId, ?int $userId = null): ?Memory
     {
         $query = Memory::where('name', $name);
         if ($scope === 'global') {
             $query->whereNull('agent_id');
+            if ($userId !== null) {
+                $query->where('user_id', $userId);
+            }
         } else {
             $query->where('agent_id', $agentId);
         }

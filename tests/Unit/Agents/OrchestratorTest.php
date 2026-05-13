@@ -16,6 +16,8 @@ use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Models\UserPreference;
+use Spora\Tools\AgentMemoryTool;
+use Spora\Tools\GlobalMemoryTool;
 use Tests\Fixtures\SpyAgentIdInputTool;
 use Tests\Fixtures\StubAutoApproveOutputTool;
 use Tests\Fixtures\StubFailingTool;
@@ -1228,4 +1230,57 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
     // Cleanup
     UserPreference::where('user_id', $userId)->delete();
     LLMDriverConfiguration::whereIn('id', [$prefConfig->id, $agentConfig->id])->delete();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// buildToolDefinitions — memory tool resolution
+// ---------------------------------------------------------------------------
+
+test('LLM can call both memory and global_memory tools in same session', function (): void {
+    [$agentId] = seedAgent();
+
+    $memoryTool = new AgentMemoryTool();
+    $globalMemoryTool = new GlobalMemoryTool();
+    enableToolsForAgent($agentId, [$memoryTool, $globalMemoryTool]);
+
+    $callLog = [];
+    $callCount = 0;
+
+    // First LLM call: returns tool calls for both memory tools
+    // Second LLM call: returns a final text response (after tools are auto-approved)
+    $llm = Mockery::mock(LLMDriverInterface::class);
+    $llm->allows('complete')->andReturnUsing(static function () use (&$callLog, &$callCount) {
+        $callLog[] = 'complete';
+        $callCount++;
+        if ($callCount === 1) {
+            return new LLMResponse(
+                content: '',
+                toolCalls: [
+                    new DriverToolCall('call_1', 'memory', ['action' => 'list']),
+                    new DriverToolCall('call_2', 'global_memory', ['action' => 'list']),
+                ],
+                inputTokens: 10,
+                outputTokens: 5,
+                completionId: 'cmp_1',
+            );
+        }
+        return new LLMResponse('Done listing memories.', [], 10, 5, 'cmp_2');
+    });
+    $llm->allows('getProviderName')->andReturn('mock');
+    $llm->allows('getModelName')->andReturn('mock-model');
+
+    $orch = makeOrchestrator(mockDriverFactory($llm), [$memoryTool, $globalMemoryTool]);
+
+    $task = $orch->start($agentId, 'What memories do I have?', maxSteps: 5);
+
+    $task->refresh();
+    expect($task->status)->toBe('COMPLETED')
+        ->and($task->step_count)->toBe(2);
+
+    $toolCalls = ToolCallModel::where('task_id', $task->id)->get();
+    expect($toolCalls)->toHaveCount(2);
+
+    $toolNames = $toolCalls->pluck('tool_name')->toArray();
+    expect($toolNames)->toContain('memory')
+        ->and($toolNames)->toContain('global_memory');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
