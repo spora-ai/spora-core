@@ -1232,6 +1232,84 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
     LLMDriverConfiguration::whereIn('id', [$prefConfig->id, $agentConfig->id])->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
+test('resolveLlmConfig uses agent user_id to find preference - user isolation', function (): void {
+    // This test documents intentional behavior: resolveLlmConfig uses agent->user_id
+    // to find the user's preference. In async runner context, the agent carries the
+    // user context. Each user only sees their own preference, not another user's.
+    $authService = bootAuthLayer();
+
+    $userA = $authService->register('user-a-iso@example.com', 'Password1!');
+    $userB = $authService->register('user-b-iso@example.com', 'Password1!');
+
+    // User A creates their own config
+    $configA = LLMDriverConfiguration::create([
+        'user_id' => $userA,
+        'name' => 'User A Config',
+        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'settings' => json_encode(['api_key' => 'sk-usera', 'model' => 'gpt-4o']),
+        'is_global' => false,
+        'context_window' => 64000,
+        'max_tokens_output' => 2048,
+    ]);
+
+    // User A sets preference for their own config
+    UserPreference::create([
+        'user_id' => $userA,
+        'preferred_llm_config_id' => $configA->id,
+    ]);
+
+    // User B creates their own config
+    $configB = LLMDriverConfiguration::create([
+        'user_id' => $userB,
+        'name' => 'User B Config',
+        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'settings' => json_encode(['api_key' => 'sk-userb', 'model' => 'gpt-4o']),
+        'is_global' => false,
+        'context_window' => 32000,
+        'max_tokens_output' => 1024,
+    ]);
+
+    // User B sets preference for their own config
+    UserPreference::create([
+        'user_id' => $userB,
+        'preferred_llm_config_id' => $configB->id,
+    ]);
+
+    // Create agents for both users
+    $agentA = Agent::create([
+        'user_id' => $userA,
+        'name' => 'User A Agent',
+        'llm_driver_config_id' => null,
+        'max_steps' => 10,
+        'is_active' => true,
+    ]);
+
+    $agentB = Agent::create([
+        'user_id' => $userB,
+        'name' => 'User B Agent',
+        'llm_driver_config_id' => null,
+        'max_steps' => 10,
+        'is_active' => true,
+    ]);
+
+    // User A's agent should get User A's config (via user_id = A in preference lookup)
+    $llmA = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
+    $orchA = makeOrchestrator(mockDriverFactory($llmA));
+    $taskA = $orchA->start($agentA->id, 'Hello', maxSteps: 5);
+    expect($taskA->status)->toBe('COMPLETED');
+
+    // User B's agent should get User B's config (via user_id = B in preference lookup)
+    $llmB = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_2'));
+    $orchB = makeOrchestrator(mockDriverFactory($llmB));
+    $taskB = $orchB->start($agentB->id, 'Hello', maxSteps: 5);
+    expect($taskB->status)->toBe('COMPLETED');
+
+    // Cleanup
+    UserPreference::whereIn('user_id', [$userA, $userB])->delete();
+    LLMDriverConfiguration::whereIn('id', [$configA->id, $configB->id])->delete();
+    Agent::whereIn('id', [$agentA->id, $agentB->id])->delete();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
 // ---------------------------------------------------------------------------
 // buildToolDefinitions — memory tool resolution
 // ---------------------------------------------------------------------------

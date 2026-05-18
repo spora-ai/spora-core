@@ -1369,7 +1369,7 @@ final class Orchestrator implements OrchestratorInterface
             }
         }
 
-        // Fall back to user preference
+        // Fall back to user preference — in async context, agent->user_id is the user context
         $preference = LLMDriverConfiguration::whereHas('userPreference', static fn($q) => $q->where('user_id', $agent->user_id))->first();
         if ($preference !== null) {
             return [
