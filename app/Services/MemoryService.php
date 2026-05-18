@@ -82,7 +82,7 @@ final class MemoryService implements MemoryServiceInterface
             'name'       => $data['name'],
             'summary'    => isset($data['summary']) ? trim((string) $data['summary']) : null,
             'content'    => isset($data['content']) ? trim((string) $data['content']) : null,
-            'order'      => isset($data['order']) ? (int) $data['order'] : 0,
+            'order'      => $this->getNextOrder(null, $userId),
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -107,7 +107,7 @@ final class MemoryService implements MemoryServiceInterface
             'name'       => $data['name'],
             'summary'    => isset($data['summary']) ? trim((string) $data['summary']) : null,
             'content'    => isset($data['content']) ? trim((string) $data['content']) : null,
-            'order'      => isset($data['order']) ? (int) $data['order'] : 0,
+            'order'      => $this->getNextOrder($agentId, $userId),
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -212,6 +212,45 @@ final class MemoryService implements MemoryServiceInterface
     private function findAgent(int $id, int $userId): ?Agent
     {
         return Agent::where('id', $id)->where('user_id', $userId)->first();
+    }
+
+    private function getNextOrder(?int $agentId, int $userId): int
+    {
+        $query = Memory::where('user_id', $userId);
+        if ($agentId !== null) {
+            $query->where('agent_id', $agentId);
+        } else {
+            $query->whereNull('agent_id');
+        }
+        $max = $query->max('order');
+
+        return $max !== null ? ((int) $max) + 1 : 1;
+    }
+
+    public function reorderGlobalMemories(int $userId, array $orderedIds): void
+    {
+        foreach ($orderedIds as $index => $memoryId) {
+            Capsule::table('memories')
+                ->where('id', $memoryId)
+                ->where('user_id', $userId)
+                ->whereNull('agent_id')
+                ->update(['order' => $index + 1, 'updated_at' => date('Y-m-d H:i:s')]);
+        }
+    }
+
+    public function reorderAgentMemories(int $agentId, int $userId, array $orderedIds): void
+    {
+        $agent = $this->findAgent($agentId, $userId);
+        if ($agent === null) {
+            throw new RuntimeException('Agent not found');
+        }
+
+        foreach ($orderedIds as $index => $memoryId) {
+            Capsule::table('memories')
+                ->where('id', $memoryId)
+                ->where('agent_id', $agentId)
+                ->update(['order' => $index + 1, 'updated_at' => date('Y-m-d H:i:s')]);
+        }
     }
 
     private function validate(array $data, bool $isCreation): void

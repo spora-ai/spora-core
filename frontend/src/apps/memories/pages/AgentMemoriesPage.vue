@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { VueDraggable } from 'vue-draggable-plus'
 import { useMemoriesStore } from '../stores/memories'
+import { useAgentStore } from '@/stores/agent'
 import MemoryListItem from '../components/MemoryListItem.vue'
 import MemoryEditor from '../components/MemoryEditor.vue'
 import AlertBanner from '@/components/ui/AlertBanner.vue'
@@ -11,8 +13,10 @@ import type { CreateMemoryDto, UpdateMemoryDto } from '../types/memory'
 const route = useRoute()
 const router = useRouter()
 const store = useMemoriesStore()
+const agentStore = useAgentStore()
 
 const agentId = computed(() => Number(route.params.id))
+const agentName = computed(() => agentStore.agents.find((a) => a.id === agentId.value)?.name)
 type ViewMode = 'list' | 'create' | 'edit'
 const viewMode = ref<ViewMode>('list')
 const selectedMemory = ref<MemoryResource | null>(null)
@@ -38,7 +42,11 @@ function applyQueryParams(): void {
 }
 
 onMounted(async () => {
-  await store.loadAgentMemories(agentId.value)
+  const validAgentId = Number.isNaN(agentId.value) ? null : agentId.value
+  await Promise.all([
+    agentStore.fetchAgents(),
+    validAgentId !== null ? store.loadAgentMemories(validAgentId) : Promise.resolve(),
+  ])
   applyQueryParams()
 })
 
@@ -68,6 +76,11 @@ function handleCancel() {
   viewMode.value = 'list'
   router.replace({ query: {} })
 }
+
+async function handleDragEnd() {
+  const orderedIds = store.agentMemories.map((m) => m.id)
+  await store.reorderAgentMemories(agentId.value, orderedIds)
+}
 </script>
 
 <template>
@@ -93,12 +106,19 @@ function handleCancel() {
         </button>
       </div>
       <div v-else class="rounded-xl border border-border bg-card divide-y divide-border">
-        <MemoryListItem
-          v-for="memory in store.agentMemories"
-          :key="memory.id"
-          :memory="memory"
-          @select="router.push({ query: { memory: String(memory.id) } })"
-        />
+        <VueDraggable
+          v-model="store.agentMemories"
+          item-key="id"
+          @end="handleDragEnd"
+        >
+          <MemoryListItem
+            v-for="memory in store.agentMemories"
+            :key="memory.id"
+            :memory="memory"
+            show-handle
+            @select="router.push({ query: { memory: String(memory.id) } })"
+          />
+        </VueDraggable>
       </div>
     </template>
 
@@ -107,6 +127,7 @@ function handleCancel() {
         :memory="selectedMemory"
         :saving="store.saving"
         scope="agent"
+        :agent-name="agentName"
         @save="handleSave"
         @delete="handleDelete"
         @cancel="handleCancel"

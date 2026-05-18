@@ -49,4 +49,14 @@ interface MemoryServiceInterface
     public function deleteGlobalMemory(int $memoryId, int $userId): bool;
 
     public function deleteAgentMemory(int $memoryId, int $agentId, int $userId): bool;
+
+    /**
+     * @param list<int> $orderedIds Memory IDs in desired display order
+     */
+    public function reorderGlobalMemories(int $userId, array $orderedIds): void;
+
+    /**
+     * @param list<int> $orderedIds Memory IDs in desired display order
+     */
+    public function reorderAgentMemories(int $agentId, int $userId, array $orderedIds): void;
 }

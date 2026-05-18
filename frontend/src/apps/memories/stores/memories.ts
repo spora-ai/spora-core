@@ -131,6 +131,34 @@ export const useMemoriesStore = defineStore('memories', () => {
     }
   }
 
+  async function reorderGlobalMemories(orderedIds: number[]): Promise<void> {
+    error.value = null
+    try {
+      await api.reorderGlobalMemories(orderedIds)
+      const ordered = orderedIds
+        .map((id) => globalMemories.value.find((m) => m.id === id))
+        .filter((m): m is MemoryResource => m !== undefined)
+      globalMemories.value = ordered
+    } catch (e) {
+      error.value = e instanceof ApiError ? e.message : 'Failed to reorder memories.'
+      throw e
+    }
+  }
+
+  async function reorderAgentMemories(agentId: number, orderedIds: number[]): Promise<void> {
+    error.value = null
+    try {
+      await api.reorderAgentMemories(agentId, orderedIds)
+      const ordered = orderedIds
+        .map((id) => agentMemories.value.find((m) => m.id === id))
+        .filter((m): m is MemoryResource => m !== undefined)
+      agentMemories.value = ordered
+    } catch (e) {
+      error.value = e instanceof ApiError ? e.message : 'Failed to reorder memories.'
+      throw e
+    }
+  }
+
   return {
     globalMemories,
     agentMemories,
@@ -142,9 +170,11 @@ export const useMemoriesStore = defineStore('memories', () => {
     createGlobalMemory,
     updateGlobalMemory,
     deleteGlobalMemory,
+    reorderGlobalMemories,
     loadAgentMemories,
     createAgentMemory,
     updateAgentMemory,
     deleteAgentMemory,
+    reorderAgentMemories,
   }
 })

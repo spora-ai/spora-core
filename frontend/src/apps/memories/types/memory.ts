@@ -14,12 +14,10 @@ export interface CreateMemoryDto {
   name: string
   summary?: string
   content?: string
-  order?: number
 }
 
 export interface UpdateMemoryDto {
   name?: string
   summary?: string | null
   content?: string | null
-  order?: number
 }

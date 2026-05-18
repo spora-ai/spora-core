@@ -115,6 +115,29 @@ final class MemoryController
         return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
+    /**
+     * PATCH /api/v1/memories/reorder
+     */
+    public function reorder(Request $request): JsonResponse
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+
+        $order = $body['order'] ?? [];
+        if (! is_array($order)) {
+            return $this->error('VALIDATION_ERROR', 'order must be an array of memory IDs.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $this->memoryService->reorderGlobalMemories($userId, array_values($order));
+
+        return new JsonResponse(['data' => ['success' => true]]);
+    }
+
     private function decodeJson(Request $request): array
     {
         $content = $request->getContent();

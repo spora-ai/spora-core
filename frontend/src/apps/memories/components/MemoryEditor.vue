@@ -7,6 +7,7 @@ const props = defineProps<{
   memory?: MemoryResource | null
   saving?: boolean
   scope?: 'global' | 'agent'
+  agentName?: string
 }>()
 
 const emit = defineEmits<{
@@ -18,7 +19,6 @@ const emit = defineEmits<{
 const name = ref('')
 const summary = ref('')
 const content = ref('')
-const order = ref(0)
 
 watch(
   () => props.memory,
@@ -26,7 +26,6 @@ watch(
     name.value = m?.name ?? ''
     summary.value = m?.summary ?? ''
     content.value = m?.content ?? ''
-    order.value = m?.order ?? 0
   },
   { immediate: true },
 )
@@ -38,7 +37,6 @@ async function handleSubmit() {
     name: name.value.trim(),
     summary: summary.value.trim() || undefined,
     content: content.value || undefined,
-    order: order.value,
   }
   emit('save', data)
 }
@@ -47,7 +45,7 @@ async function handleSubmit() {
 <template>
   <div class="max-w-2xl">
     <div class="flex items-center justify-between mb-6">
-      <h2 class="text-lg font-semibold">{{ isEditing ? 'Edit Memory' : 'New Memory' }}</h2>
+      <h2 class="text-lg font-semibold">{{ isEditing ? 'Edit Memory' : 'New Memory' }}{{ agentName ? ` for ${agentName}` : '' }}</h2>
       <button
         @click="$emit('cancel')"
         class="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -86,16 +84,6 @@ async function handleSubmit() {
           rows="12"
           placeholder="Memory content in Markdown format..."
           class="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring font-mono resize-y"
-        />
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium mb-1.5">Order</label>
-        <input
-          v-model.number="order"
-          type="number"
-          min="0"
-          class="w-32 h-9 rounded-lg border border-input bg-background px-3 text-sm shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring"
         />
       </div>
 

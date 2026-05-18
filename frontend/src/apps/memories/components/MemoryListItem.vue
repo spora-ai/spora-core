@@ -2,9 +2,12 @@
 import { Brain, ChevronRight, GripVertical } from 'lucide-vue-next'
 import type { MemoryResource } from '../types/memory'
 
-defineProps<{
+withDefaults(defineProps<{
   memory: MemoryResource
-}>()
+  showHandle?: boolean
+}>(), {
+  showHandle: false,
+})
 
 defineEmits<{
   select: [memory: MemoryResource]
@@ -17,7 +20,7 @@ defineEmits<{
     @click="$emit('select', memory)"
   >
     <div class="flex items-center gap-3 min-w-0">
-      <GripVertical class="w-4 h-4 text-muted-foreground flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+      <GripVertical v-if="showHandle" class="w-4 h-4 text-muted-foreground flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
       <Brain class="w-4 h-4 text-primary flex-shrink-0" />
       <div class="min-w-0">
         <div class="flex items-center gap-2">

@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Models\Memory;
 use Spora\Services\MemoryService;
@@ -173,7 +172,7 @@ describe('MemoryService', function (): void {
 
     describe('createGlobalMemory', function (): void {
 
-        it('creates a global memory with minimal data', function (): void {
+        it('creates a global memory with minimal data and auto-assigns order', function (): void {
             [$userId] = createUserWithAgent();
             $service = makeMemoryService();
 
@@ -184,10 +183,10 @@ describe('MemoryService', function (): void {
                 ->and($result['memory']['agent_id'])->toBeNull()
                 ->and($result['memory']['summary'])->toBeNull()
                 ->and($result['memory']['content'])->toBeNull()
-                ->and($result['memory']['order'])->toBe(0);
+                ->and($result['memory']['order'])->toBe(1);
         });
 
-        it('creates a global memory with full data', function (): void {
+        it('creates a global memory with full data and ignores explicit order (auto-assigns)', function (): void {
             [$userId] = createUserWithAgent();
             $service = makeMemoryService();
 
@@ -201,7 +200,7 @@ describe('MemoryService', function (): void {
             expect($result['memory']['name'])->toBe('full_memory')
                 ->and($result['memory']['summary'])->toBe('A summary')
                 ->and($result['memory']['content'])->toBe('The content')
-                ->and($result['memory']['order'])->toBe(42);
+                ->and($result['memory']['order'])->toBe(1);
         });
 
         it('trims whitespace from summary and content', function (): void {
@@ -249,7 +248,7 @@ describe('MemoryService', function (): void {
                 ->toThrow(RuntimeException::class, 'Agent not found');
         });
 
-        it('creates an agent-scoped memory', function (): void {
+        it('creates an agent-scoped memory and auto-assigns order', function (): void {
             [$userId, $agentId] = createUserWithAgent();
             $service = makeMemoryService();
 
@@ -260,7 +259,8 @@ describe('MemoryService', function (): void {
 
             expect($result['memory']['name'])->toBe('agent_memory')
                 ->and($result['memory']['agent_id'])->toBe($agentId)
-                ->and($result['memory']['user_id'])->toBe($userId);
+                ->and($result['memory']['user_id'])->toBe($userId)
+                ->and($result['memory']['order'])->toBe(1);
         });
     });
 
@@ -634,6 +634,131 @@ describe('MemoryService', function (): void {
     });
 
     // -------------------------------------------------------------------------
+    // Auto-assigned order on creation
+    // -------------------------------------------------------------------------
+
+    describe('createGlobalMemory auto-assigns order', function (): void {
+
+        it('assigns sequential order values to global memories', function (): void {
+            [$userId] = createUserWithAgent();
+            $service = makeMemoryService();
+
+            $m1 = $service->createGlobalMemory($userId, ['name' => 'first']);
+            $m2 = $service->createGlobalMemory($userId, ['name' => 'second']);
+            $m3 = $service->createGlobalMemory($userId, ['name' => 'third']);
+
+            expect($m1['memory']['order'])->toBe(1);
+            expect($m2['memory']['order'])->toBe(2);
+            expect($m3['memory']['order'])->toBe(3);
+        });
+
+        it('orders global memories independently from agent memories', function (): void {
+            [$userId, $agentId] = createUserWithAgent();
+            $service = makeMemoryService();
+
+            $g1 = $service->createGlobalMemory($userId, ['name' => 'global_first']);
+            $a1 = $service->createAgentMemory($agentId, $userId, ['name' => 'agent_first']);
+            $g2 = $service->createGlobalMemory($userId, ['name' => 'global_second']);
+            $a2 = $service->createAgentMemory($agentId, $userId, ['name' => 'agent_second']);
+
+            expect($g1['memory']['order'])->toBe(1);
+            expect($g2['memory']['order'])->toBe(2);
+            expect($a1['memory']['order'])->toBe(1);
+            expect($a2['memory']['order'])->toBe(2);
+        });
+
+        it('orders memories per-agent independently', function (): void {
+            [$userId, $agentId1] = createUserWithAgent('agent1@test.com');
+            $agentId2 = Agent::create([
+                'user_id' => $userId, 'name' => 'Agent 2', 'llm_provider' => 'mock',
+                'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true,
+            ])->id;
+            $service = makeMemoryService();
+
+            $a1 = $service->createAgentMemory($agentId1, $userId, ['name' => 'agent1_first']);
+            $a2 = $service->createAgentMemory($agentId2, $userId, ['name' => 'agent2_first']);
+            $a1b = $service->createAgentMemory($agentId1, $userId, ['name' => 'agent1_second']);
+
+            expect($a1['memory']['order'])->toBe(1);
+            expect($a2['memory']['order'])->toBe(1);
+            expect($a1b['memory']['order'])->toBe(2);
+        });
+    });
+
+    // -------------------------------------------------------------------------
+    // reorderGlobalMemories
+    // -------------------------------------------------------------------------
+
+    describe('reorderGlobalMemories', function (): void {
+
+        it('updates order values based on provided ID array', function (): void {
+            [$userId] = createUserWithAgent();
+            $service = makeMemoryService();
+
+            $m1 = $service->createGlobalMemory($userId, ['name' => 'first']);
+            $m2 = $service->createGlobalMemory($userId, ['name' => 'second']);
+            $m3 = $service->createGlobalMemory($userId, ['name' => 'third']);
+
+            $service->reorderGlobalMemories($userId, [$m3['memory']['id'], $m1['memory']['id'], $m2['memory']['id']]);
+
+            $result = $service->listGlobalMemories($userId);
+
+            expect(array_column($result, 'order'))->toBe([1, 2, 3]);
+            expect(array_column($result, 'id'))->toBe([$m3['memory']['id'], $m1['memory']['id'], $m2['memory']['id']]);
+        });
+
+        it('only updates memories belonging to the specified user', function (): void {
+            [$userId1] = createUserWithAgent('user1@test.com');
+            [$userId2] = createUserWithAgent('user2@test.com');
+            $service = makeMemoryService();
+
+            $u1m = $service->createGlobalMemory($userId1, ['name' => 'u1_memory']);
+
+            $service->reorderGlobalMemories($userId2, [$u1m['memory']['id']]);
+
+            $m = Memory::find($u1m['memory']['id']);
+            expect($m->order)->toBe(1);
+        });
+    });
+
+    // -------------------------------------------------------------------------
+    // reorderAgentMemories
+    // -------------------------------------------------------------------------
+
+    describe('reorderAgentMemories', function (): void {
+
+        it('updates order values for the specified agent only', function (): void {
+            [$userId, $agentId1] = createUserWithAgent('agent1@test.com');
+            $agentId2 = Agent::create([
+                'user_id' => $userId, 'name' => 'Agent 2', 'llm_provider' => 'mock',
+                'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true,
+            ])->id;
+            $service = makeMemoryService();
+
+            $a1 = $service->createAgentMemory($agentId1, $userId, ['name' => 'a1_first']);
+            $a2 = $service->createAgentMemory($agentId2, $userId, ['name' => 'a2_first']);
+            $a1b = $service->createAgentMemory($agentId1, $userId, ['name' => 'a1_second']);
+
+            $service->reorderAgentMemories($agentId1, $userId, [$a1b['memory']['id'], $a1['memory']['id']]);
+
+            $result = $service->listAgentMemories($agentId1, $userId);
+            expect(array_column($result, 'id'))->toBe([$a1b['memory']['id'], $a1['memory']['id']]);
+
+            $result2 = $service->listAgentMemories($agentId2, $userId);
+            expect($result2[0]['id'])->toBe($a2['memory']['id'])
+                ->and($result2[0]['order'])->toBe(1);
+        });
+
+        it('throws when agent does not exist', function (): void {
+            [$userId] = createUserWithAgent();
+            $service = makeMemoryService();
+
+            expect(fn() => $service->reorderAgentMemories(9999, $userId, []))
+                ->toThrow(RuntimeException::class, 'Agent not found');
+        });
+    });
+
+    // -------------------------------------------------------------------------
     // Resource transformation
     // -------------------------------------------------------------------------
 
@@ -658,7 +783,7 @@ describe('MemoryService', function (): void {
             expect($memory['id'])->toBeInt();
             expect($memory['user_id'])->toBe($userId);
             expect($memory['agent_id'])->toBe($agentId);
-            expect($memory['order'])->toBe(7);
+            expect($memory['order'])->toBe(1);
             expect($memory['created_at'])->not->toBeEmpty();
             expect($memory['updated_at'])->not->toBeEmpty();
         });

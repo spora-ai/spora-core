@@ -1,28 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { Brain, Globe, Bot, ChevronDown, X } from 'lucide-vue-next'
-import { api } from '@/api/client'
-import MemoryListItem from './MemoryListItem.vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Brain, Globe, Bot, ChevronDown, X, ChevronRight } from 'lucide-vue-next'
+import { useMemoriesStore } from '../stores/memories'
+import { useAgentStore } from '@/stores/agent'
 
-interface MemoryResource {
-  id: number
-  user_id: number | null
-  agent_id: number | null
-  name: string
-  summary: string | null
-  content: string | null
-  order: number
-  created_at: string
-  updated_at: string
-}
-
+const route = useRoute()
 const router = useRouter()
-
-const agents = ref<Array<{ id: number; name: string }>>([])
-const globalMemories = ref<MemoryResource[]>([])
-const agentMemories = ref<MemoryResource[]>([])
-const loading = ref(false)
+const memoriesStore = useMemoriesStore()
+const agentStore = useAgentStore()
 
 defineProps<{
   mobileOpen?: boolean
@@ -35,54 +21,41 @@ const emit = defineEmits<{
 const selectedAgentId = ref<number | null>(null)
 const showAgentDropdown = ref(false)
 
-async function loadAgents() {
-  try {
-    const result = await api.get<{ agents: Array<{ id: number; name: string }> }>('/agents')
-    agents.value = result.agents
-    if (agents.value.length > 0 && selectedAgentId.value === null) {
-      selectedAgentId.value = agents.value[0].id
-    }
-  } catch {
-    // non-fatal
-  }
-}
-
-async function loadAllMemories() {
-  loading.value = true
-  try {
-    const [globalResult, agentResult] = await Promise.all([
-      api.get<{ memories: MemoryResource[] }>('/memories'),
-      selectedAgentId.value !== null
-        ? api.get<{ memories: MemoryResource[] }>(`/agents/${selectedAgentId.value}/memories`)
-        : Promise.resolve({ memories: [] }),
-    ])
-    globalMemories.value = globalResult.memories
-    agentMemories.value = agentResult.memories
-  } catch {
-    globalMemories.value = []
-    agentMemories.value = []
-  } finally {
-    loading.value = false
-  }
-}
+const isGlobalRoute = computed(() => route.name === 'global-memories')
+const isAgentRoute = computed(() => route.name === 'agent-memories')
 
 function selectAgent(agentId: number) {
   selectedAgentId.value = agentId
   showAgentDropdown.value = false
-  loadAllMemories()
+  memoriesStore.loadAgentMemories(agentId)
+  router.push({ name: 'agent-memories', params: { id: String(agentId) } })
 }
-
-function agentName(agentId: number | null): string {
-  if (agentId === null) return 'Unknown'
-  return agents.value.find((a) => a.id === agentId)?.name ?? 'Unknown'
-}
-
-const selectedAgentName = computed(() => agentName(selectedAgentId.value))
 
 onMounted(async () => {
-  await loadAgents()
-  await loadAllMemories()
+  await agentStore.fetchAgents()
+  await memoriesStore.loadGlobalMemories()
+
+  // Initialize selectedAgentId from URL or default to first agent
+  const routeId = Number(route.params.id)
+  if (!Number.isNaN(routeId)) {
+    selectedAgentId.value = routeId
+  } else if (agentStore.agents.length > 0 && selectedAgentId.value === null) {
+    selectedAgentId.value = agentStore.agents[0].id
+  }
+
+  if (selectedAgentId.value !== null) {
+    await memoriesStore.loadAgentMemories(selectedAgentId.value)
+  }
 })
+
+const selectedAgentName = computed(() => {
+  if (selectedAgentId.value === null) return 'Select agent'
+  return agentStore.agents.find((a) => a.id === selectedAgentId.value)?.name ?? 'Unknown'
+})
+
+function navigateToMemory(memoryId: number) {
+  router.push({ name: 'agent-memories', params: { id: String(selectedAgentId) }, query: { memory: String(memoryId) } })
+}
 </script>
 
 <template>
@@ -102,93 +75,132 @@ onMounted(async () => {
       </button>
     </div>
 
-    <!-- Memory list -->
-    <div class="flex-1 overflow-y-auto px-3 py-3">
-      <div v-if="loading" class="text-sm text-muted-foreground text-center py-4">Loading…</div>
-      <template v-else>
-        <!-- Global memories section -->
-        <div class="mb-4">
-          <div class="flex items-center gap-1.5 px-1 mb-2">
-            <Globe class="w-3.5 h-3.5 text-muted-foreground" />
-            <span class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Global</span>
-          </div>
-          <div v-if="globalMemories.length === 0" class="text-xs text-muted-foreground px-1 py-2">
-            No global memories.
-          </div>
-          <div v-else class="space-y-1">
-            <MemoryListItem
-              v-for="memory in globalMemories"
-              :key="memory.id"
-              :memory="memory"
-              @select="router.push({ name: 'global-memories', query: { memory: String(memory.id) } })"
-            />
-          </div>
+    <!-- Scrollable content -->
+    <div class="flex-1 overflow-y-auto">
+
+      <!-- Global Memories -->
+      <div class="px-3 py-3">
+        <div class="flex items-center justify-between mb-2">
           <button
-            @click="router.push({ name: 'global-memories', query: { create: '1' } })"
-            class="w-full flex items-center gap-2 h-8 px-2 mt-2 rounded-lg border border-dashed border-border text-muted-foreground text-xs hover:bg-muted transition-colors"
+            class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+            :class="isGlobalRoute ? 'text-primary' : ''"
+            @click="router.push({ name: 'global-memories' })"
           >
-            <Globe class="w-3.5 h-3.5 shrink-0" />
-            New Global Memory
+            <Globe class="w-3.5 h-3.5" />
+            Global
+          </button>
+          <button
+            class="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            @click="router.push({ name: 'global-memories' })"
+          >
+            View all
+            <ChevronRight class="w-3 h-3" />
+          </button>
+        </div>
+
+        <div v-if="memoriesStore.globalMemories.length === 0" class="text-xs text-muted-foreground py-1">
+          No global memories.
+        </div>
+        <ul v-else class="space-y-0.5">
+          <li
+            v-for="memory in memoriesStore.globalMemories.slice(0, 5)"
+            :key="memory.id"
+            class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted/50 cursor-pointer transition-colors"
+            :class="route.query.memory === String(memory.id) ? 'bg-muted text-foreground font-medium' : 'text-muted-foreground'"
+            @click="router.push({ name: 'global-memories', query: { memory: String(memory.id) } })"
+          >
+            <span class="truncate flex-1 text-xs">{{ memory.name }}</span>
+          </li>
+        </ul>
+
+        <button
+          class="w-full flex items-center gap-2 h-7 px-2 mt-1 rounded-md border border-dashed border-border text-muted-foreground text-xs hover:bg-muted transition-colors"
+          @click="router.push({ name: 'global-memories', query: { create: '1' } })"
+        >
+          <span class="w-3 text-center">+</span>
+          <span class="truncate">New</span>
+        </button>
+      </div>
+
+      <div class="border-t border-border mx-3" />
+
+      <!-- Agent Memories -->
+      <div class="px-3 py-3">
+        <div class="flex items-center justify-between mb-2">
+          <button
+            class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+            :class="isAgentRoute ? 'text-primary' : ''"
+            @click="selectedAgentId !== null && router.push({ name: 'agent-memories', params: { id: String(selectedAgentId) } })"
+          >
+            <Bot class="w-3.5 h-3.5" />
+            Agent
+          </button>
+          <button
+            v-if="selectedAgentId !== null"
+            class="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            @click="router.push({ name: 'agent-memories', params: { id: String(selectedAgentId) } })"
+          >
+            View all
+            <ChevronRight class="w-3 h-3" />
           </button>
         </div>
 
         <!-- Agent selector -->
-        <div class="mb-4">
-          <div class="flex items-center gap-1.5 px-1 mb-2">
-            <Bot class="w-3.5 h-3.5 text-muted-foreground" />
-            <span class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Agent: {{ selectedAgentName }}</span>
-          </div>
-          <div class="relative">
+        <div class="relative mb-2">
+          <button
+            @click="showAgentDropdown = !showAgentDropdown"
+            class="w-full flex items-center justify-between h-8 px-2.5 rounded-lg border border-input bg-background text-xs hover:bg-muted transition-colors"
+          >
+            <span class="truncate flex items-center gap-1.5">
+              <Bot class="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+              <span class="truncate text-muted-foreground">{{ selectedAgentName }}</span>
+            </span>
+            <ChevronDown class="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+          </button>
+          <div
+            v-if="showAgentDropdown"
+            class="absolute top-full left-0 right-0 mt-1 rounded-lg border border-border bg-background shadow-md z-10"
+          >
             <button
-              @click="showAgentDropdown = !showAgentDropdown"
-              class="w-full flex items-center justify-between h-9 px-3 rounded-lg border border-input bg-background text-sm hover:bg-muted transition-colors"
+              v-for="agent in agentStore.agents"
+              :key="agent.id"
+              @click="selectAgent(agent.id)"
+              class="w-full flex items-center gap-2 px-2.5 py-2 text-xs hover:bg-muted transition-colors first:rounded-t-lg last:rounded-b-lg"
+              :class="agent.id === selectedAgentId ? 'bg-muted' : ''"
             >
-              <span class="truncate flex items-center gap-2">
-                <Bot class="w-4 h-4 text-muted-foreground shrink-0" />
-                <span class="truncate">{{ selectedAgentName }}</span>
-              </span>
-              <ChevronDown class="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              <Bot class="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+              {{ agent.name }}
             </button>
-            <div
-              v-if="showAgentDropdown"
-              class="absolute top-full left-0 right-0 mt-1 rounded-lg border border-border bg-background shadow-md z-10"
-            >
-              <button
-                v-for="agent in agents"
-                :key="agent.id"
-                @click="selectAgent(agent.id)"
-                class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors first:rounded-t-lg last:rounded-b-lg"
-                :class="agent.id === selectedAgentId ? 'bg-muted' : ''"
-              >
-                <Bot class="w-4 h-4 text-muted-foreground" />
-                {{ agent.name }}
-              </button>
-            </div>
           </div>
         </div>
 
-        <!-- Agent memories section -->
-        <div>
-          <div v-if="agentMemories.length === 0" class="text-xs text-muted-foreground px-1 py-2">
-            No memories for this agent.
-          </div>
-          <div v-else class="space-y-1">
-            <MemoryListItem
-              v-for="memory in agentMemories"
-              :key="memory.id"
-              :memory="memory"
-              @select="router.push({ name: 'agent-memories', params: { id: selectedAgentId ?? undefined }, query: { memory: String(memory.id) } })"
-            />
-          </div>
-          <button
-            @click="router.push({ name: 'agent-memories', params: { id: selectedAgentId ?? undefined }, query: { create: '1' } })"
-            class="w-full flex items-center gap-2 h-8 px-2 mt-2 rounded-lg border border-dashed border-border text-muted-foreground text-xs hover:bg-muted transition-colors"
-          >
-            <Bot class="w-3.5 h-3.5 shrink-0" />
-            New Agent Memory
-          </button>
+        <div v-if="selectedAgentId === null" class="text-xs text-muted-foreground py-1">
+          Select an agent.
         </div>
-      </template>
+        <div v-else-if="memoriesStore.agentMemories.length === 0" class="text-xs text-muted-foreground py-1">
+          No memories for this agent.
+        </div>
+        <ul v-else class="space-y-0.5">
+          <li
+            v-for="memory in memoriesStore.agentMemories.slice(0, 5)"
+            :key="memory.id"
+            class="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-muted/50 cursor-pointer transition-colors"
+            :class="route.query.memory === String(memory.id) ? 'bg-muted text-foreground font-medium' : 'text-muted-foreground'"
+            @click="navigateToMemory(memory.id)"
+          >
+            <span class="truncate flex-1 text-xs">{{ memory.name }}</span>
+          </li>
+        </ul>
+
+        <button
+          class="w-full flex items-center gap-2 h-7 px-2 mt-1 rounded-md border border-dashed border-border text-muted-foreground text-xs hover:bg-muted transition-colors"
+          @click="router.push({ name: 'agent-memories', params: { id: String(selectedAgentId ?? '') }, query: { create: '1' } })"
+        >
+          <span class="w-3 text-center">+</span>
+          <span class="truncate">New</span>
+        </button>
+      </div>
+
     </div>
   </aside>
 </template>

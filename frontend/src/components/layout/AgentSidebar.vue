@@ -3,7 +3,7 @@
  * AgentSidebar — left sidebar showing agent list.
  * Used inside AgentLayout on lg+ (desktop) and toggled on mobile.
  */
-import { computed, ref } from 'vue'
+import { computed, ref, useAttrs } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import CreateAgentModal from '@/components/agent/CreateAgentModal.vue'
@@ -18,10 +18,13 @@ const emit = defineEmits<{
   close: () => void
 }>()
 
+defineOptions({ inheritAttrs: false })
+
 const router = useRouter()
 const agentStore = useAgentStore()
 
 const showNewAgentModal = ref(false)
+const attrs = useAttrs()
 const activeAgentId = computed(() => props.agentId)
 
 function navigateToAgent(id: number): void {
@@ -47,6 +50,7 @@ const closeSidebar = emitCloseSidebar
 
   <!-- Sidebar -->
   <aside
+    v-bind="attrs"
     class="flex flex-col border-r border-border bg-background shrink-0 overflow-y-auto"
     :class="[
       mobileOpen

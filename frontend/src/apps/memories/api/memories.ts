@@ -48,3 +48,11 @@ export async function updateAgentMemory(agentId: number, memoryId: number, data:
 export async function deleteAgentMemory(agentId: number, memoryId: number): Promise<void> {
   await api.delete(`/agents/${agentId}/memories/${memoryId}`)
 }
+
+export async function reorderGlobalMemories(orderedIds: number[]): Promise<void> {
+  await api.patch('/memories/reorder', { order: orderedIds })
+}
+
+export async function reorderAgentMemories(agentId: number, orderedIds: number[]): Promise<void> {
+  await api.patch(`/agents/${agentId}/memories/reorder`, { order: orderedIds })
+}

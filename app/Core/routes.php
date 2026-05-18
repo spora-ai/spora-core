@@ -109,6 +109,7 @@ return static function (RouteCollector $r): void {
     // Global Memories
     $r->addRoute('GET', '/api/v1/memories', [MemoryController::class, 'index']);
     $r->addRoute('POST', '/api/v1/memories', [MemoryController::class, 'store']);
+    $r->addRoute('PATCH', '/api/v1/memories/reorder', [MemoryController::class, 'reorder']);
     $r->addRoute('GET', '/api/v1/memories/{id}', [MemoryController::class, 'show']);
     $r->addRoute('PUT', '/api/v1/memories/{id}', [MemoryController::class, 'update']);
     $r->addRoute('DELETE', '/api/v1/memories/{id}', [MemoryController::class, 'destroy']);
@@ -116,6 +117,7 @@ return static function (RouteCollector $r): void {
     // Agent Memories
     $r->addRoute('GET', '/api/v1/agents/{agentId}/memories', [AgentMemoryController::class, 'index']);
     $r->addRoute('POST', '/api/v1/agents/{agentId}/memories', [AgentMemoryController::class, 'store']);
+    $r->addRoute('PATCH', '/api/v1/agents/{agentId}/memories/reorder', [AgentMemoryController::class, 'reorder']);
     $r->addRoute('GET', '/api/v1/agents/{agentId}/memories/{memoryId}', [AgentMemoryController::class, 'show']);
     $r->addRoute('PUT', '/api/v1/agents/{agentId}/memories/{memoryId}', [AgentMemoryController::class, 'update']);
     $r->addRoute('DELETE', '/api/v1/agents/{agentId}/memories/{memoryId}', [AgentMemoryController::class, 'destroy']);

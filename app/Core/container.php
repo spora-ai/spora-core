@@ -93,6 +93,9 @@ return [
         if (($v = $env('SPORA_DB_PASSWORD'))         !== null) {
             $envOverrides['db_password']         = $v;
         }
+        if (($v = $env('SPORA_SQLITE_BUSY_TIMEOUT')) !== null) {
+            $envOverrides['sqlite_busy_timeout']  = (int) $v;
+        }
         if (($v = $env('SPORA_APP_ENV'))             !== null) {
             $envOverrides['app_env']             = $v;
         }

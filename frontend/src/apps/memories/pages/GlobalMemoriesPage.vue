@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { VueDraggable } from 'vue-draggable-plus'
 import { useMemoriesStore } from '../stores/memories'
 import MemoryListItem from '../components/MemoryListItem.vue'
 import MemoryEditor from '../components/MemoryEditor.vue'
@@ -67,6 +68,11 @@ function handleCancel() {
   viewMode.value = 'list'
   router.replace({ name: 'global-memories' })
 }
+
+async function handleDragEnd() {
+  const orderedIds = store.globalMemories.map((m) => m.id)
+  await store.reorderGlobalMemories(orderedIds)
+}
 </script>
 
 <template>
@@ -95,12 +101,19 @@ function handleCancel() {
         </button>
       </div>
       <div v-else class="rounded-xl border border-border bg-card divide-y divide-border">
-        <MemoryListItem
-          v-for="memory in store.globalMemories"
-          :key="memory.id"
-          :memory="memory"
-          @select="router.push({ name: 'global-memories', query: { memory: String(memory.id) } })"
-        />
+        <VueDraggable
+          v-model="store.globalMemories"
+          item-key="id"
+          @end="handleDragEnd"
+        >
+          <MemoryListItem
+            v-for="memory in store.globalMemories"
+            :key="memory.id"
+            :memory="memory"
+            show-handle
+            @select="router.push({ name: 'global-memories', query: { memory: String(memory.id) } })"
+          />
+        </VueDraggable>
       </div>
     </template>
 

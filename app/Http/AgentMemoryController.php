@@ -124,6 +124,34 @@ final class AgentMemoryController
         return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
+    /**
+     * PATCH /api/v1/agents/{agentId}/memories/reorder
+     */
+    public function reorder(Request $request): JsonResponse
+    {
+        $userId = AuthGuard::requireAuth($this->authService);
+        $agentId = (int) $request->attributes->get('agentId', 0);
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+
+        $order = $body['order'] ?? [];
+        if (! is_array($order)) {
+            return $this->error('VALIDATION_ERROR', 'order must be an array of memory IDs.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        try {
+            $this->memoryService->reorderAgentMemories($agentId, $userId, array_values($order));
+        } catch (RuntimeException) {
+            return $this->notFound();
+        }
+
+        return new JsonResponse(['data' => ['success' => true]]);
+    }
+
     private function decodeJson(Request $request): array
     {
         $content = $request->getContent();
