@@ -19,9 +19,7 @@ use Throwable;
 final class Kernel
 {
     private Container $container;
-
-    /** @var int Tracks how many set_error_handler calls were made to ensure matching restores */
-    private static int $errorHandlerDepth = 0;
+    private bool $errorHandlerInstalled = false;
 
     public function __construct()
     {
@@ -36,9 +34,8 @@ final class Kernel
 
     public function __destruct()
     {
-        while (self::$errorHandlerDepth > 0) {
+        if ($this->errorHandlerInstalled) {
             restore_error_handler();
-            self::$errorHandlerDepth--;
         }
     }
 
@@ -146,7 +143,6 @@ final class Kernel
     private function configureErrorHandling(string $appEnv): void
     {
         // In testing mode, don't install a custom error handler — Pest PHPUnit already has one.
-        // In production/development, suppress deprecations from output but log everything.
         if ($appEnv === 'testing') {
             return;
         }
@@ -171,6 +167,6 @@ final class Kernel
 
             return true;
         });
-        self::$errorHandlerDepth++;
+        $this->errorHandlerInstalled = true;
     }
 }
