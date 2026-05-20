@@ -163,24 +163,6 @@ describe('useLlmConfigsStore', () => {
     })
   })
 
-  describe('setDefault', () => {
-    it('sets is_default=true on target config, false on all others', async () => {
-      mockApi.post.mockResolvedValueOnce({ config: { ...mockConfig, id: 1, is_default: true } })
-
-      const store = useLlmConfigsStore()
-      store.configs = [
-        { ...mockConfig, id: 1, is_default: false },
-        { ...mockConfig, id: 2, is_default: false },
-      ]
-
-      await store.setDefault(1)
-
-      expect(mockApi.post).toHaveBeenCalledWith('/llm-configs/1/set-default')
-      expect(store.configs.find((c) => c.id === 1)?.is_default).toBe(true)
-      expect(store.configs.find((c) => c.id === 2)?.is_default).toBe(false)
-    })
-  })
-
   describe('ensure', () => {
     it('loads drivers and configs on first call', async () => {
       mockApi.get

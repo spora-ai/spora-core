@@ -709,6 +709,39 @@ test('getToolsStatus returns 404 for non-existent agent', function (): void {
     expect($response->getStatusCode())->toBe(404);
 });
 
+test('getToolsStatus is_enabled is keyed by tool_class, not tool_name — same tool_name with different tool_class gives independent enabled state', function (): void {
+    clearSession();
+    [$controller, $authService] = makeAgentController();
+    registerUser($authService);
+    $agentId = createAgent($controller);
+
+    // Directly insert two agent_tool records with the SAME tool_name but DIFFERENT tool_class.
+    // This simulates the orphaned MemoryTool scenario where a stale tool_class remains in the DB.
+    // Both have tool_name = 'test_tool' (matching TestTool's registered name).
+    Capsule::table('agent_tools')->insert([
+        'agent_id'   => $agentId,
+        'tool_class' => 'Tests\Fixtures\StubOutputTool',
+        'tool_name'  => 'test_tool', // same tool_name as TestTool
+        'auto_approve' => null,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/status');
+    $request->attributes->set('id', $agentId);
+
+    $response = $controller->getToolsStatus($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+
+    // TestTool should still be is_enabled=false (never enabled via enableTool)
+    // StubOutputTool has the same tool_name but a different tool_class — is_enabled depends on tool_class
+    $testToolStatus = collect($body['data']['statuses'])
+        ->first(fn($s) => $s['tool_class'] === TestTool::class);
+    expect($testToolStatus['is_enabled'])->toBe(false); // not explicitly enabled
+});
+
 // ---------------------------------------------------------------------------
 // enableTool enhanced response with missing_required
 // ---------------------------------------------------------------------------

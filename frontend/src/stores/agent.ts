@@ -1,13 +1,51 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { api } from '@/api/client'
 import type { Agent, AgentTool, LLMConfigSettings } from '@/types/agent'
 import type { Task } from '@/types/task'
+
+const COMPOSER_DRAFTS_KEY = 'spora:composer-drafts'
+
+function loadComposerDrafts(): Record<number, { promptText: string }> {
+  try {
+    const stored = sessionStorage.getItem(COMPOSER_DRAFTS_KEY)
+    return stored ? JSON.parse(stored) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveComposerDrafts(drafts: Record<number, { promptText: string }>): void {
+  try {
+    sessionStorage.setItem(COMPOSER_DRAFTS_KEY, JSON.stringify(drafts))
+  } catch {
+    // sessionStorage may be unavailable (e.g., private browsing)
+  }
+}
 
 export const useAgentStore = defineStore('agent', () => {
   const agents = ref<Agent[]>([])
   const currentAgent = ref<Agent | null>(null)
   const currentAgentTasks = ref<Task[]>([])
+  const composerDrafts = reactive<Record<number, { promptText: string }>>(loadComposerDrafts())
+
+  // Auto-persist drafts to sessionStorage
+  watch(composerDrafts, (drafts) => {
+    saveComposerDrafts(drafts)
+  }, { deep: true })
+
+  function getComposerDraft(agentId: number): { promptText: string } {
+    if (!composerDrafts[agentId]) {
+      composerDrafts[agentId] = { promptText: '' }
+    }
+    return composerDrafts[agentId]
+  }
+
+  function clearComposerDraft(agentId: number): void {
+    if (composerDrafts[agentId]) {
+      composerDrafts[agentId].promptText = ''
+    }
+  }
 
   // ── List / CRUD ─────────────────────────────────────────────────────────────
 
@@ -126,29 +164,24 @@ export const useAgentStore = defineStore('agent', () => {
     const result = await api.get<{
       operations: Array<{
         tool_class: string
+        tool_name: string
         operation: string
         effective_enabled: boolean
         effective_requires_approval: boolean
       }>
     }>(`/agents/${agentId}/tools/operations`)
 
-    const map: Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>> = {}
+    // Re-key by tool_name using the authoritative value from the server.
+    // patchOperationOverride uses tool_name as the URL identifier, so the map must use tool_name keys.
+    const byName: Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>> = {}
     for (const op of result.operations) {
-      if (!map[op.tool_class]) {
-        map[op.tool_class] = {}
+      if (!byName[op.tool_name]) {
+        byName[op.tool_name] = {}
       }
-      map[op.tool_class][op.operation] = {
+      byName[op.tool_name][op.operation] = {
         enabled: op.effective_enabled,
         requiresApproval: op.effective_requires_approval,
       }
-    }
-    // Re-key by tool_name using the short-name derivation (basename + snake_case).
-    // patchOperationOverride uses tool_name as the URL identifier, so the map must use tool_name keys.
-    const byName: Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>> = {}
-    for (const toolClass of Object.keys(map)) {
-      const toolName = toolClass.replace(/\\/g, '/').split('/').pop()!
-        .replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '')
-      byName[toolName] = map[toolClass]
     }
     return byName
   }
@@ -199,6 +232,7 @@ export const useAgentStore = defineStore('agent', () => {
     agents,
     currentAgent,
     currentAgentTasks,
+    composerDrafts,
     fetchAgents,
     fetchAgent,
     createAgent,
@@ -215,5 +249,7 @@ export const useAgentStore = defineStore('agent', () => {
     getLLMConfig,
     putLLMConfig,
     clearCurrentAgent,
+    getComposerDraft,
+    clearComposerDraft,
   }
 })

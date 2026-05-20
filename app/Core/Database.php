@@ -56,6 +56,7 @@ final class Database
                 'database' => $dbPath,
                 'prefix'   => '',
                 'foreign_key_constraints' => true,
+                'busy_timeout' => (int) ($this->config['sqlite_busy_timeout'] ?? 5000),
             ]);
         }
 

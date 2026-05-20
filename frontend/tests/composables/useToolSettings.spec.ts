@@ -177,14 +177,14 @@ describe('useToolSettings', () => {
     describe('getAllToolStatuses', () => {
       it('calls GET /agents/{id}/tools/status', async () => {
         const statuses = [
-          { tool_class: 'TestTool', is_enabled: true, missing_required: [], can_enable: true },
+          { tool_class: 'TestTool', tool_name: 'test_tool', is_enabled: true, missing_required: [], can_enable: true },
         ]
         mockApi.get.mockResolvedValueOnce({ statuses })
 
         const result = await getAllToolStatuses()
 
         expect(mockApi.get).toHaveBeenCalledWith('/agents/42/tools/status')
-        expect(result).toEqual({ TestTool: statuses[0] })
+        expect(result).toEqual({ test_tool: statuses[0] })
       })
 
       it('returns empty object on error', async () => {

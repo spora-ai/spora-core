@@ -11,6 +11,7 @@ use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\AgentToolOverride;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Traits\HasOperations;
 use Throwable;
 
@@ -199,11 +200,17 @@ final class AgentService implements AgentServiceInterface
             ->where('tool_class', $toolClass)
             ->exists();
 
-        $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId);
+        $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId, $userId);
         $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
+
+        // Get tool_name from #[Tool] attribute or fall back to short class name
+        $reflection = new ReflectionClass($toolClass);
+        $toolAttrs = $reflection->getAttributes(Tool::class);
+        $toolName = $toolAttrs !== [] ? $toolAttrs[0]->newInstance()->name : $reflection->getShortName();
 
         return [
             'tool_class'       => $toolClass,
+            'tool_name'        => $toolName,
             'is_enabled'      => $isEnabled,
             'missing_required' => $missing,
             'can_enable'      => $missing === [],
@@ -227,14 +234,20 @@ final class AgentService implements AgentServiceInterface
 
         foreach ($toolClasses as $toolClass) {
             $isEnabled = isset($enabledTools[$toolClass]);
-            $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId);
+            $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId, $userId);
             $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
+
+            // Get tool_name from #[Tool] attribute or fall back to short class name
+            $reflection = new ReflectionClass($toolClass);
+            $toolAttrs = $reflection->getAttributes(Tool::class);
+            $toolName = $toolAttrs !== [] ? $toolAttrs[0]->newInstance()->name : $reflection->getShortName();
 
             $statuses[] = [
                 'tool_class'       => $toolClass,
-                'is_enabled'      => $isEnabled,
+                'tool_name'        => $toolName,
+                'is_enabled'       => $isEnabled,
                 'missing_required' => $missing,
-                'can_enable'      => $missing === [],
+                'can_enable'       => $missing === [],
             ];
         }
 
@@ -334,6 +347,7 @@ final class AgentService implements AgentServiceInterface
 
                 $operations[] = [
                     'tool_class'                   => $tool->tool_class,
+                    'tool_name'                    => $tool->tool_name,
                     'operation'                    => $op->name,
                     'enabled'                      => $this->extractOverrideFlag($row, 'enabled'),
                     'default_requires_approval'    => $this->extractOverrideFlag($row, 'default_requires_approval'),
@@ -510,7 +524,7 @@ final class AgentService implements AgentServiceInterface
         }
 
         $reflection = new ReflectionClass($toolClass);
-        $attrs = $reflection->getAttributes(\Spora\Tools\Attributes\Tool::class);
+        $attrs = $reflection->getAttributes(Tool::class);
 
         if ($attrs !== []) {
             return $attrs[0]->newInstance()->name;

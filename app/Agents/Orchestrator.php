@@ -1369,16 +1369,13 @@ final class Orchestrator implements OrchestratorInterface
             }
         }
 
-        // Fall back to user default
-        $defaultConfig = LLMDriverConfiguration::where('user_id', $agent->user_id)
-            ->where('is_default', true)
-            ->first();
-
-        if ($defaultConfig !== null) {
+        // Fall back to user preference — in async context, agent->user_id is the user context
+        $preference = LLMDriverConfiguration::whereHas('userPreference', static fn($q) => $q->where('user_id', $agent->user_id))->first();
+        if ($preference !== null) {
             return [
-                'context_window' => $defaultConfig->context_window ?? $defaults['context_window'],
-                'max_tokens_output' => $defaultConfig->max_tokens_output ?? $defaults['max_tokens_output'],
-                'temperature' => $this->getTemperatureFromSettings($defaultConfig, $defaults['temperature']),
+                'context_window' => $preference->context_window ?? $defaults['context_window'],
+                'max_tokens_output' => $preference->max_tokens_output ?? $defaults['max_tokens_output'],
+                'temperature' => $this->getTemperatureFromSettings($preference, $defaults['temperature']),
             ];
         }
 
@@ -1395,7 +1392,7 @@ final class Orchestrator implements OrchestratorInterface
             ];
         }
 
-        return $defaults;
+        throw new RuntimeException('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
     }
 
     private function getTemperatureFromSettings(LLMDriverConfiguration $config, float $default): float

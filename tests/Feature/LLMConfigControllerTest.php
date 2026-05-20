@@ -287,13 +287,19 @@ test('destroy() deletes a config', function (): void {
     expect(LLMDriverConfiguration::find($config->id))->toBeNull();
 });
 
-test('setDefault() sets a config as global default', function (): void {
+test('setDefault() sets a global config as default when called by admin', function (): void {
     [$controller, $authService, $llmConfigService] = makeLLMConfigController();
-    bootAuth($authService);
+    $userId = bootAuth($authService);
+    makeAdmin($authService, $userId);
 
-    // Create two configs
-    $config1 = createTestConfig('Default 1', OpenAICompatibleDriver::class, ['api_key' => 'sk-1'], false, null, $llmConfigService);
-    $config2 = createTestConfig('Default 2', OpenAICompatibleDriver::class, ['api_key' => 'sk-2'], false, null, $llmConfigService);
+    // Create two global configs
+    $config1 = createTestConfig('Global Default 1', OpenAICompatibleDriver::class, ['api_key' => 'sk-1'], false, null, $llmConfigService);
+    $config1->is_global = true;
+    $config1->save();
+
+    $config2 = createTestConfig('Global Default 2', OpenAICompatibleDriver::class, ['api_key' => 'sk-2'], false, null, $llmConfigService);
+    $config2->is_global = true;
+    $config2->save();
 
     $request = new Symfony\Component\HttpFoundation\Request();
     $response = $controller->setDefault($request, $config2->id);
@@ -307,6 +313,38 @@ test('setDefault() sets a config as global default', function (): void {
     expect($config1Refresh->is_default)->toBe(false);
 
     LLMDriverConfiguration::whereIn('id', [$config1->id, $config2->id])->delete();
+});
+
+test('setDefault() returns 403 when called on personal config by non-admin', function (): void {
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    $userId = bootAuth($authService);
+
+    // Create a personal config (user_id = current user, is_global = false)
+    $config = createTestConfig('Personal Config Default', OpenAICompatibleDriver::class, ['api_key' => 'sk-personal'], false, $userId, $llmConfigService);
+
+    $request = new Symfony\Component\HttpFoundation\Request();
+    $response = $controller->setDefault($request, $config->id);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});
+
+test('setDefault() returns 403 when non-admin calls set-default on global config', function (): void {
+    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    bootAuth($authService);
+
+    // Create a global config
+    $globalConfig = createTestConfig('Global Config', OpenAICompatibleDriver::class, ['api_key' => 'sk-global'], false, null, $llmConfigService);
+    $globalConfig->is_global = true;
+    $globalConfig->save();
+
+    $request = new Symfony\Component\HttpFoundation\Request();
+    $response = $controller->setDefault($request, $globalConfig->id);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+
+    LLMDriverConfiguration::where('id', $globalConfig->id)->delete();
 });
 
 test('index() returns all configs', function (): void {

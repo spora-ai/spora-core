@@ -5,9 +5,18 @@ import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 import { useNotificationStore } from '@/stores/notifications'
 import { useRealtime } from '@/composables/useRealtime'
+import { api } from '@/api/client'
 import NotificationCenter from './NotificationCenter.vue'
 import Icon from '@/components/ui/Icon.vue'
 import LogoSvg from '@/assets/logo.svg?asset'
+
+interface AppInfo {
+  name: string
+  displayName: string
+  description: string
+  icon: string
+  route: string
+}
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -19,6 +28,8 @@ useRealtime()
 
 const notificationCenter = ref<InstanceType<typeof NotificationCenter> | null>(null)
 const userMenuOpen = ref(false)
+const appsDropdownOpen = ref(false)
+const apps = ref<AppInfo[]>([])
 
 async function logout(): Promise<void> {
   userMenuOpen.value = false
@@ -32,6 +43,31 @@ function openNotifications() {
 
 function closeUserMenu(): void {
   userMenuOpen.value = false
+}
+
+function toggleAppsDropdown(): void {
+  if (!appsDropdownOpen.value) {
+    loadApps()
+  }
+  appsDropdownOpen.value = !appsDropdownOpen.value
+}
+
+function closeAppsDropdown(): void {
+  appsDropdownOpen.value = false
+}
+
+async function loadApps(): Promise<void> {
+  try {
+    const result = await api.get<{ apps: AppInfo[] }>('/apps')
+    apps.value = result.apps
+  } catch {
+    apps.value = []
+  }
+}
+
+function navigateToApp(app: AppInfo): void {
+  appsDropdownOpen.value = false
+  router.push(app.route)
 }
 </script>
 
@@ -80,6 +116,49 @@ function closeUserMenu(): void {
       <Icon v-if="theme.isDark" name="sun" />
       <Icon v-else name="moon" />
     </button>
+
+    <!-- Apps dropdown -->
+    <div class="relative">
+      <button
+        @click="toggleAppsDropdown"
+        class="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        title="Apps"
+      >
+        <Icon name="grid" />
+      </button>
+
+      <!-- Apps dropdown panel -->
+      <Teleport to="body">
+        <div
+          v-if="appsDropdownOpen"
+          class="fixed inset-0 z-50"
+          @click="closeAppsDropdown"
+        >
+          <div
+            class="absolute right-4 top-14 w-56 rounded-lg border border-border bg-background shadow-md overflow-hidden"
+            @click.stop
+          >
+            <div class="px-3 py-2 border-b border-border">
+              <span class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Apps</span>
+            </div>
+            <nav class="py-1">
+              <button
+                v-for="app in apps"
+                :key="app.name"
+                @click="navigateToApp(app)"
+                class="w-full flex items-center gap-3 px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+              >
+                <Icon :name="app.icon" class="h-4 w-4 text-muted-foreground" />
+                <span class="flex-1 text-left">{{ app.displayName }}</span>
+              </button>
+              <div v-if="apps.length === 0" class="px-3 py-2 text-sm text-muted-foreground">
+                No apps installed
+              </div>
+            </nav>
+          </div>
+        </div>
+      </Teleport>
+    </div>
 
     <!-- User menu -->
     <button

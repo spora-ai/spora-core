@@ -9,6 +9,7 @@ use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Models\Agent;
+use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
 
 function mockLlmForMode(LLMResponse $response): LLMDriverInterface
@@ -32,13 +33,24 @@ describe('WorkerModeTest', function (): void {
         $this->authService = bootAuthLayer();
         $this->userId = $this->authService->register('modetest@example.com', 'Password1!');
 
+        // Create a global LLM config for tests (tests mock the DriverFactory, so credentials don't matter)
+        $config = LLMDriverConfiguration::create([
+            'user_id'       => null,
+            'name'          => 'Test Global Config',
+            'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
+            'settings'      => json_encode(['api_key' => 'test']),
+            'is_global'     => true,
+            'is_default'    => true,
+            'context_window' => 128000,
+            'max_tokens_output' => 4096,
+        ]);
+
         $this->agent = Agent::create([
-            'user_id' => $this->userId,
-            'name' => 'Mode Test Agent',
-            'llm_provider' => 'mock',
-            'llm_model' => 'mock-model',
-            'max_steps' => 10,
-            'is_active' => true,
+            'user_id'              => $this->userId,
+            'name'                 => 'Mode Test Agent',
+            'llm_driver_config_id' => $config->id,
+            'max_steps'            => 10,
+            'is_active'            => true,
         ]);
     });
 

@@ -19,6 +19,7 @@ use Throwable;
 final class Kernel
 {
     private Container $container;
+    private bool $errorHandlerInstalled = false;
 
     public function __construct()
     {
@@ -29,6 +30,13 @@ final class Kernel
         $this->container = $builder->build();
 
         $this->configureErrorHandling($this->container->get('config')['app_env'] ?? 'production');
+    }
+
+    public function __destruct()
+    {
+        if ($this->errorHandlerInstalled) {
+            restore_error_handler();
+        }
     }
 
     public function handle(Request $request): Response
@@ -134,8 +142,11 @@ final class Kernel
 
     private function configureErrorHandling(string $appEnv): void
     {
-        // In production, suppress deprecations from output but log everything.
-        // In development, also log everything (don't display raw errors to JSON API).
+        // In testing mode, don't install a custom error handler — Pest PHPUnit already has one.
+        if ($appEnv === 'testing') {
+            return;
+        }
+
         if ($appEnv === 'production') {
             error_reporting(E_ALL & ~E_DEPRECATED);
         } else {
@@ -156,5 +167,6 @@ final class Kernel
 
             return true;
         });
+        $this->errorHandlerInstalled = true;
     }
 }

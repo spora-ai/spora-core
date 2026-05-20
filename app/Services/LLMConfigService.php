@@ -11,6 +11,7 @@ use Spora\Core\ValueObjects\EncryptedValue;
 use Spora\Drivers\LLMDriverConfigInterface;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Models\UserPreference;
 use Spora\Tools\Attributes\ToolSetting;
 
 /**
@@ -325,15 +326,16 @@ final class LLMConfigService implements LLMConfigServiceInterface
             return null;
         }
 
-        if (!$isAdmin && $config->is_global) {
+        // Restrict to global configs only — personal default is now set via user preferences
+        if (!$config->is_global) {
             return null;
         }
 
-        if ($config->is_global) {
-            LLMDriverConfiguration::where('is_global', true)->where('is_default', true)->update(['is_default' => false]);
-        } else {
-            LLMDriverConfiguration::where('user_id', $userId)->where('is_default', true)->update(['is_default' => false]);
+        if (!$isAdmin) {
+            return null;
         }
+
+        LLMDriverConfiguration::where('is_global', true)->where('is_default', true)->update(['is_default' => false]);
 
         $config->is_default = true;
         $config->save();
@@ -347,6 +349,42 @@ final class LLMConfigService implements LLMConfigServiceInterface
     public function getDefaultConfiguration(int $userId): ?LLMDriverConfiguration
     {
         return LLMDriverConfiguration::where('user_id', $userId)->where('is_default', true)->first();
+    }
+
+    // ── User Preferences ─────────────────────────────────────────────────────
+
+    public function getUserPreferredConfig(int $userId): ?LLMDriverConfiguration
+    {
+        $preference = UserPreference::where('user_id', $userId)->first();
+        if ($preference === null || $preference->preferred_llm_config_id === null) {
+            return null;
+        }
+
+        return LLMDriverConfiguration::find($preference->preferred_llm_config_id);
+    }
+
+    public function setUserPreferredConfig(int $userId, int $configId): bool
+    {
+        $config = LLMDriverConfiguration::find($configId);
+        if ($config === null) {
+            return false;
+        }
+
+        // Config must belong to user OR be global
+        if (!$config->is_global && $config->user_id !== $userId) {
+            return false;
+        }
+
+        $preference = UserPreference::firstOrCreate(['user_id' => $userId]);
+        $preference->preferred_llm_config_id = $configId;
+        $preference->save();
+
+        return true;
+    }
+
+    public function unsetUserPreferredConfig(int $userId): void
+    {
+        UserPreference::where('user_id', $userId)->delete();
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

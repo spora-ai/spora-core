@@ -32,6 +32,12 @@ interface LLMConfigServiceInterface
 
     public function getDefaultConfiguration(int $userId): ?LLMDriverConfiguration;
 
+    public function getUserPreferredConfig(int $userId): ?LLMDriverConfiguration;
+
+    public function setUserPreferredConfig(int $userId, int $configId): bool;
+
+    public function unsetUserPreferredConfig(int $userId): void;
+
     /**
      * Find a configuration by ID (for authorization checks).
      */

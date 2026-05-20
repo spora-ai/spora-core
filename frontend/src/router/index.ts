@@ -102,6 +102,31 @@ const router = createRouter({
       component: () => import('@/pages/TaskChatPage.vue'),
       meta: { requiresAuth: true },
     },
+
+    // Apps
+    {
+      path: '/apps',
+      component: () => import('@/components/layout/AppsLayout.vue'),
+      meta: { requiresAuth: true },
+      redirect: '/apps/memories',
+      children: [
+        {
+          path: 'memories',
+          name: 'global-memories',
+          component: () => import('@/apps/memories/pages/GlobalMemoriesPage.vue'),
+        },
+        {
+          path: 'memories/agents/:id?',
+          name: 'agent-memories',
+          component: () => import('@/apps/memories/pages/AgentMemoriesPage.vue'),
+        },
+        {
+          path: 'memories/agents/:id/:memoryId',
+          name: 'agent-memory-edit',
+          component: () => import('@/apps/memories/pages/AgentMemoriesPage.vue'),
+        },
+      ],
+    },
     {
       path: '/:pathMatch(.*)*',
       redirect: '/',

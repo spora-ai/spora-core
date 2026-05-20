@@ -22,7 +22,6 @@ const authStore = useAuthStore()
 const formName = ref('')
 const formDriverClass = ref('')
 const formSettings = ref<Record<string, string>>({})
-const formSetAsDefault = ref(llmStore.configs.length === 0)
 const formIsGlobal = ref(props.requireGlobal ?? false)
 const formIsGlobalDefault = ref(false)
 const saving = ref(false)
@@ -58,7 +57,7 @@ async function submit(settings: Record<string, string>): Promise<void> {
       name: formName.value.trim(),
       driver_class: driver.driver_class,
       settings: { ...settings },
-      is_default: formSetAsDefault.value || formIsGlobalDefault.value,
+      is_default: formIsGlobalDefault.value,
       is_global: formIsGlobal.value ? true : undefined,
     })
     emit('created', config)
@@ -104,21 +103,6 @@ async function submit(settings: Record<string, string>): Promise<void> {
           {{ driver.display_name }} ({{ driver.name }})
         </option>
       </select>
-    </div>
-
-    <!-- Set as default -->
-    <div class="mb-5">
-      <label class="flex items-center gap-2 cursor-pointer">
-        <input
-          type="checkbox"
-          v-model="formSetAsDefault"
-          class="rounded border-border text-primary focus:ring-primary"
-        />
-        <span class="text-sm font-medium">Set as default</span>
-      </label>
-      <p class="text-xs text-muted-foreground mt-1 ml-6">
-        The default config is used by all agents that don't have a custom LLM config assigned.
-      </p>
     </div>
 
     <!-- Admin: Make global (only for non-requireGlobal context) -->

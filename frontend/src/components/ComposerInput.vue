@@ -7,6 +7,7 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
+import { useLlmPreferencesStore } from '@/stores/llmPreferencesStore'
 import { usePromptTemplatesStore } from '@/stores/promptTemplates'
 import { useTaskStore } from '@/stores/tasks'
 import { ApiError } from '@/api/client'
@@ -24,6 +25,7 @@ const router = useRouter()
 const { confirm } = useConfirmDialog()
 const agentStore = useAgentStore()
 const llmConfigsStore = useLlmConfigsStore()
+const preferenceStore = useLlmPreferencesStore()
 const taskStore = useTaskStore()
 const promptTemplatesStore = usePromptTemplatesStore()
 
@@ -32,9 +34,15 @@ const currentLlmConfig = computed(() =>
 )
 const configName = computed(() => currentLlmConfig.value?.name ?? 'Custom LLM config')
 
-// ── Local state ────────────────────────────────────────────────────────────────
+// ── Draft state (persisted per-agent) ─────────────────────────────────────────
 
-const promptText = ref('')
+const promptText = computed({
+  get: () => agentStore.getComposerDraft(props.agentId).promptText,
+  set: (value: string) => {
+    agentStore.getComposerDraft(props.agentId).promptText = value
+  },
+})
+
 const composerError = ref<string | null>(null)
 const submitting = ref(false)
 const selectedTemplateId = ref<number | null>(null)
@@ -129,7 +137,7 @@ async function submitPrompt(): Promise<void> {
   submitting.value = true
   try {
     const task = await taskStore.createTaskForAgent(props.agentId, text)
-    promptText.value = ''
+    agentStore.clearComposerDraft(props.agentId)
     adjustTextareaHeight()
     router.push({ name: 'task', params: { id: task.id } })
   } catch (e) {
@@ -231,8 +239,11 @@ async function submitPrompt(): Promise<void> {
           <span v-if="agentStore.currentAgent.llm_driver_config_id">
             {{ configName }}
           </span>
+          <span v-else-if="preferenceStore.preference">
+            {{ preferenceStore.preference.config.name }} (preferred)
+          </span>
           <span v-else>
-            {{ llmConfigsStore.configs.find(c => c.is_default)?.name ?? 'Global default' }}
+            Global default
           </span>
         </button>
 

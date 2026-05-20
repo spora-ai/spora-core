@@ -185,7 +185,7 @@ const closeSidebar = emitCloseSidebar
               <li v-if="llmStore.loadingConfigs">
                 <p class="px-3 py-2 text-xs text-muted-foreground">Loading…</p>
               </li>
-              <li v-for="config in llmStore.configs" :key="config.id">
+              <li v-for="config in llmStore.personalConfigs" :key="config.id">
                 <button
                   @click="selectConfig(config.id)"
                   class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors truncate"

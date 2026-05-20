@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { ChevronRight } from 'lucide-vue-next'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
+import { useLlmPreferencesStore } from '@/stores/llmPreferencesStore'
+import { useAuthStore } from '@/stores/auth'
 import type { LLMConfigResource } from '@/types/llmConfig'
 
 defineEmits<{
@@ -9,6 +12,9 @@ defineEmits<{
 }>()
 
 const llmStore = useLlmConfigsStore()
+const preferenceStore = useLlmPreferencesStore()
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.is_admin === true)
 </script>
 
 <template>
@@ -26,18 +32,24 @@ const llmStore = useLlmConfigsStore()
   <!-- List -->
   <template v-else>
     <div class="rounded-xl border border-border bg-card divide-y divide-border">
-      <button
-        v-for="config in llmStore.configs"
+      <div
+        v-for="config in llmStore.personalConfigs"
         :key="config.id"
-        type="button"
-        @click="$emit('select', config)"
-        class="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-muted/50 transition-colors"
+        class="flex items-center justify-between px-5 py-4"
+        :class="(!config.is_global || isAdmin) ? 'cursor-pointer hover:bg-muted/50 transition-colors' : 'cursor-default'"
+        @click="(!config.is_global || isAdmin) && $emit('select', config)"
       >
         <div>
           <div class="flex items-center gap-2">
             <span class="text-sm font-medium">{{ config.name }}</span>
             <span
-              v-if="config.is_global && config.is_default"
+              v-if="config.id === preferenceStore.preference?.config?.id"
+              class="text-xs rounded-full bg-primary/10 text-primary px-1.5 py-0.5 font-medium"
+            >
+              Preferred
+            </span>
+            <span
+              v-else-if="config.is_global && config.is_default"
               class="text-xs rounded-full bg-accent/10 text-accent px-1.5 py-0.5 font-medium"
             >
               Global Default
@@ -48,17 +60,12 @@ const llmStore = useLlmConfigsStore()
             >
               Global
             </span>
-            <span
-              v-else-if="config.is_default"
-              class="text-xs rounded-full bg-primary/10 text-primary px-1.5 py-0.5 font-medium"
-            >
-              Default
-            </span>
           </div>
           <p class="text-xs text-muted-foreground mt-0.5">{{ config.driver_display_name }}</p>
         </div>
-        <ChevronRight class="h-4 w-4 text-muted-foreground shrink-0" />
-      </button>
+        <ChevronRight v-if="!config.is_global || isAdmin" class="h-4 w-4 text-muted-foreground shrink-0" />
+        <span v-else class="text-xs text-muted-foreground">Admin only</span>
+      </div>
     </div>
     <div class="mt-4 flex justify-end">
       <button

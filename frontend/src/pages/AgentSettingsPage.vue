@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
+import { useLlmPreferencesStore } from '@/stores/llmPreferencesStore'
 import { useToolSettings } from '@/composables/useToolSettings'
 import AgentLayout from '@/components/layout/AgentLayout.vue'
 import type { ToolSchema, ToolStatus } from '@/composables/useToolSettings'
@@ -18,6 +19,7 @@ const route = useRoute()
 const router = useRouter()
 const agentStore = useAgentStore()
 const llmConfigsStore = useLlmConfigsStore()
+const preferenceStore = useLlmPreferencesStore()
 
 const agentId = computed(() => Number(route.params.id))
 
@@ -39,6 +41,7 @@ interface LLMConfigResource {
   driver_display_name: string
   driver_class: string
   is_default: boolean
+  is_global: boolean
 }
 
 const llmConfigs = ref<LLMConfigResource[]>([])
@@ -57,6 +60,10 @@ const showLlmCreate = ref(false)
 function onLlmCreated(config: LLMConfigResource): void {
   llmConfigs.value.push(config)
   llmSettingsForm.value.llm_driver_config_id = config.id
+}
+
+function configLabel(config: LLMConfigResource): string {
+  return config.is_global ? `${config.name} (${config.driver_display_name}) — Global` : `${config.name} (${config.driver_display_name})`
 }
 
 // ── Identity form ─────────────────────────────────────────────────────────────
@@ -80,10 +87,14 @@ const identitySaved = ref(false)
 const enabledToolNames = ref<Set<string>>(new Set())
 const autoApprovedMap = ref<Record<string, boolean>>({})
 
+// Per-operation saving states (separate keys so operations don't disable each other)
+const savingTool = ref<Record<string, boolean>>({})
+const savingAutoApprove = ref<Record<string, boolean>>({})
+const savingOperation = ref<Record<string, boolean>>({})
+
 // Per-operation effective states: Record<toolName, Record<operationName, { enabled, requiresApproval }>>
 const operationStates = ref<Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>>>({})
 
-const savingTools = ref<Record<string, boolean>>({})
 const toolsError = ref<string | null>(null)
 
 // Tool configuration modal
@@ -135,6 +146,7 @@ onMounted(async () => {
     agentStore.fetchAgents(),
     agentStore.fetchAgent(agentId.value),
     llmConfigsStore.ensure(),
+    preferenceStore.loadPreference(),
   ])
 
   const agent = agentStore.currentAgent!
@@ -170,6 +182,20 @@ onMounted(async () => {
   // Fetch tool status for all tools in a single batch request
   const allStatuses = await toolSettings.getAllToolStatuses()
   toolStatusMap.value = allStatuses
+
+  // Sync enabledToolNames with the authoritative is_enabled status from the API.
+  // agent.tools is the list of associated tools, but toolStatusMap tells us which
+  // ones are actually enabled (e.g. AgentMemoryTool may be associated but is_enabled=false).
+  for (const tool of agent.tools) {
+    const status = allStatuses[tool.tool_name]
+    if (status) {
+      if (status.is_enabled) {
+        enabledToolNames.value.add(tool.tool_name)
+      } else {
+        enabledToolNames.value.delete(tool.tool_name)
+      }
+    }
+  }
 
   // Load operation overrides for all enabled tools that have operations
   await loadOperationOverrides()
@@ -222,19 +248,19 @@ async function saveLlmSettings(): Promise<void> {
 // ── Tools ─────────────────────────────────────────────────────────────────────
 
 async function toggleTool(toolName: string): Promise<void> {
-  savingTools.value[toolName] = true
+  savingTool.value[toolName] = true
   toolsError.value = null
   try {
     if (enabledToolNames.value.has(toolName)) {
       await agentStore.disableTool(agentId.value, toolName)
       enabledToolNames.value.delete(toolName)
-      delete autoApprovedMap.value[toolName]
+      // Keep autoApprovedMap entry so state is preserved if tool is re-enabled
     } else {
       // Pre-check: if we already know it can't be enabled, show modal and block
       const status = toolStatusMap.value[toolName]
       if (status && !status.can_enable) {
         showEnableWarning(toolName)
-        savingTools.value[toolName] = false
+        savingTool.value[toolName] = false
         return
       }
       // Attempt enable — backend may still return warning if settings are incomplete
@@ -244,14 +270,14 @@ async function toggleTool(toolName: string): Promise<void> {
       if (newStatus === null) {
         // Couldn't verify status — show warning and do NOT mark as enabled
         showEnableWarning(toolName)
-        savingTools.value[toolName] = false
+        savingTool.value[toolName] = false
         return
       }
       if (!newStatus.can_enable) {
         // Tool is enabled but missing required settings — show warning, keep it disabled
         toolStatusMap.value[toolName] = newStatus
         showEnableWarning(toolName)
-        savingTools.value[toolName] = false
+        savingTool.value[toolName] = false
         return
       }
       // Tool is fully configured — mark as enabled
@@ -265,7 +291,7 @@ async function toggleTool(toolName: string): Promise<void> {
   } catch (e) {
     toolsError.value = e instanceof ApiError ? e.message : 'Failed to update tool.'
   } finally {
-    savingTools.value[toolName] = false
+    savingTool.value[toolName] = false
   }
 }
 
@@ -277,20 +303,21 @@ async function loadOperationOverrides(): Promise<void> {
 
 async function toggleAutoApprove(toolName: string): Promise<void> {
   if (!enabledToolNames.value.has(toolName)) return
-  savingTools.value[toolName] = true
+  savingAutoApprove.value[toolName] = true
   try {
-    const newValue = !autoApprovedMap.value[toolName]
-    await agentStore.patchTool(agentId.value, toolName, { auto_approve: newValue })
-    autoApprovedMap.value[toolName] = newValue
+    const currentValue = autoApprovedMap.value[toolName]
+    const newValue = currentValue ? false : true
+    const updated = await agentStore.patchTool(agentId.value, toolName, { auto_approve: newValue })
+    autoApprovedMap.value[toolName] = updated.auto_approve === true
   } catch (e) {
     toolsError.value = e instanceof ApiError ? e.message : 'Failed to update auto-approve.'
   } finally {
-    savingTools.value[toolName] = false
+    savingAutoApprove.value[toolName] = false
   }
 }
 
 async function toggleOperationEnabled(toolName: string, operationName: string): Promise<void> {
-  savingTools.value[toolName] = true
+  savingOperation.value[toolName] = true
   toolsError.value = null
   const prev = operationStates.value[toolName]?.[operationName]
   try {
@@ -311,12 +338,12 @@ async function toggleOperationEnabled(toolName: string, operationName: string): 
       operationStates.value[toolName][operationName] = prev
     )
   } finally {
-    savingTools.value[toolName] = false
+    savingOperation.value[toolName] = false
   }
 }
 
 async function toggleOperationAutoApprove(toolName: string, operationName: string): Promise<void> {
-  savingTools.value[toolName] = true
+  savingOperation.value[toolName] = true
   toolsError.value = null
   const prev = operationStates.value[toolName]?.[operationName]
   try {
@@ -340,7 +367,7 @@ async function toggleOperationAutoApprove(toolName: string, operationName: strin
       operationStates.value[toolName][operationName] = prev
     )
   } finally {
-    savingTools.value[toolName] = false
+    savingOperation.value[toolName] = false
   }
 }
 
@@ -502,13 +529,15 @@ async function deleteAgent(): Promise<void> {
               v-model="llmSettingsForm.llm_driver_config_id"
               class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
             >
-              <option :value="null">— Use global default —</option>
+              <option :value="null">
+                {{ preferenceStore.preference ? `— Use my preference: ${preferenceStore.preference.config.name} —` : '— Use global default —' }}
+              </option>
               <option v-for="config in llmConfigs" :key="config.id" :value="config.id">
-                {{ config.name }} ({{ config.driver_display_name }})
+                {{ configLabel(config) }}
               </option>
             </select>
             <p class="text-xs text-muted-foreground mt-1">
-              Choose a saved LLM configuration, or leave unset to use your global default.
+              Choose a saved LLM configuration, or leave unset to use your preferred config.
             </p>
           </div>
 
@@ -547,12 +576,12 @@ async function deleteAgent(): Promise<void> {
           <template v-if="!collapsedCategories[cat]">
             <AgentToolListItem
               v-for="tool in toolsByCategory[cat]"
-              :key="tool.tool_class"
+              :key="tool.tool_name"
               :tool="tool"
               :enabled="enabledToolNames.has(tool.tool_name)"
               :autoApproved="autoApprovedMap[tool.tool_name] ?? false"
-              :saving="savingTools[tool.tool_name] ?? false"
-              :missingRequired="toolStatusMap[tool.tool_class]?.missing_required ?? []"
+              :saving="savingTool[tool.tool_name] ?? false"
+              :missingRequired="toolStatusMap[tool.tool_name]?.missing_required ?? []"
               :operationStates="operationStates[tool.tool_name]"
               @toggle="toggleTool(tool.tool_name)"
               @toggleAutoApprove="toggleAutoApprove(tool.tool_name)"
