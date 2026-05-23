@@ -279,7 +279,7 @@ final class WorkerRunCommand extends Command
         $output->writeln(sprintf('<info>Triggering scheduled run %d for agent %d...</info>', $run->id, $run->agent_id));
 
         try {
-            $task = $this->orchestrator->start((int) $run->agent_id, $prompt, (int) $maxSteps);
+            $task = $this->orchestrator->start((int) $run->agent_id, $prompt, (int) $maxSteps, null, $run->id);
         } catch (Throwable $e) {
             $this->logger->error('Scheduled run failed', [
                 'run_id' => $run->id,
@@ -361,10 +361,6 @@ final class WorkerRunCommand extends Command
 
         $this->notificationService->notifyScheduledRunCompleted($run->id, $task);
 
-        // Store run_id on the task so Orchestrator can skip the redundant task_completed notification
-        $task->data = array_merge($task->data ?? [], ['run_id' => $run->id]);
-        $task->save();
-
         // Send e-mail notification if enabled
         $this->notificationService->sendEmailForScheduledRun($task);
 
@@ -375,7 +371,7 @@ final class WorkerRunCommand extends Command
             'status'      => $task->status,
             'user_prompt' => $task->user_prompt,
         ];
-        $this->mercure->publish($task->id, $taskData);
+        $this->mercure->publish($task->id, $task->user_id, $taskData);
 
         $processed++;
         $this->lastScheduledProcessed = 1;
@@ -568,10 +564,18 @@ final class WorkerRunCommand extends Command
         $this->logger->info('Processing task', ['task_id' => $task->id]);
         $output->writeln(sprintf('<info>Processing task %d...</info>', $task->id));
 
+        // Publish RUNNING state to Mercure so frontend sees the transition immediately
+        $this->mercure->publish($task->id, $task->user_id, [
+            'task_id'  => $task->id,
+            'status'   => 'RUNNING',
+        ]);
+
         try {
             $this->orchestrator->tick($task->id);
+            // Notification is sent by Orchestrator.tick() — do not duplicate here.
             $this->logger->info('Task completed', ['task_id' => $task->id]);
         } catch (Throwable $e) {
+            // Notification is sent by Orchestrator.tick() catch block — do not duplicate here.
             $this->logger->error('Task failed', [
                 'task_id' => $task->id,
                 'exception_class' => get_class($e),
@@ -613,6 +617,12 @@ final class WorkerRunCommand extends Command
             if ($task === null) {
                 break;
             }
+
+            // Publish RUNNING state to Mercure so the frontend sees the transition
+            $this->mercure->publish($task->id, $task->user_id, [
+                'task_id' => $task->id,
+                'status'  => 'RUNNING',
+            ]);
 
             $pid = $this->spawnChild($task->id);
             if ($pid === null) {
@@ -717,6 +727,12 @@ final class WorkerRunCommand extends Command
         $agentMaxRetries = collect($allAgents)->keyBy->id->map(fn(Agent $a) => $a->max_retries)->toArray();
 
         foreach ($allRetryTasks as $retryTask) {
+            // Publish RUNNING state to Mercure
+            $this->mercure->publish($retryTask->id, $retryTask->user_id, [
+                'task_id' => $retryTask->id,
+                'status'  => 'RUNNING',
+            ]);
+
             $retryCount = (int) $retryTask->retry_count;
             $maxRetries = $agentMaxRetries[$retryTask->agent_id] ?? 0;
 

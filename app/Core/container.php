@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Psr\Container\ContainerInterface;
+use Psr\Log\LoggerInterface;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
@@ -395,6 +396,8 @@ return [
         return new Spora\Console\Commands\TaskRunCommand(
             $c->get(Database::class),
             $c,
+            $c->get(NotificationService::class),
+            $c->get(MercurePublisherInterface::class),
         );
     },
 
@@ -407,6 +410,7 @@ return [
             workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,
             notificationService: $c->get(NotificationService::class),
             pluginLoader: $c->get(PluginLoader::class),
+            mercure: $c->get(MercurePublisherInterface::class),
         );
     },
 
@@ -416,7 +420,7 @@ return [
         $jwtKey   = $config['mercure_jwt_key'] ?? null;
         $client   = $c->get(Symfony\Contracts\HttpClient\HttpClientInterface::class);
 
-        return new Spora\Services\MercurePublisher($client, $hubUrl, $jwtKey);
+        return new Spora\Services\MercurePublisher($client, $hubUrl, $jwtKey, $c->get(LoggerInterface::class));
     },
 
     Spora\Http\TaskController::class => static function (ContainerInterface $c): Spora\Http\TaskController {

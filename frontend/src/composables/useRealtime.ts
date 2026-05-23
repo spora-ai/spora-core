@@ -11,6 +11,7 @@ import { ref, computed, onUnmounted } from 'vue'
 import { useTaskStore } from '@/stores/tasks'
 import { useNotificationStore } from '@/stores/notifications'
 import { useAuthStore } from '@/stores/auth'
+import { useAgentStore } from '@/stores/agent'
 import { api } from '@/api/client'
 
 // ── Module-level singleton ────────────────────────────────────────────────────
@@ -18,12 +19,15 @@ import { api } from '@/api/client'
 let globalEventSource: EventSource | null = null
 let globalConnected = ref(false)
 
+export { globalConnected }
+
 // ── Composable ────────────────────────────────────────────────────────────────
 
 export function useRealtime() {
   const taskStore = useTaskStore()
   const notificationStore = useNotificationStore()
   const authStore = useAuthStore()
+  const agentStore = useAgentStore()
 
   // Reuse existing SSE connection if already open
   if (globalEventSource?.readyState === EventSource.OPEN) {
@@ -38,6 +42,25 @@ export function useRealtime() {
 
   async function connect(): Promise<void> {
     try {
+      // Wait for auth to be initialized before connecting
+      if (!authStore.initialized) {
+        // Auth not ready yet — poll until it is, then connect
+        await new Promise<void>(resolve => {
+          const stop = setInterval(() => {
+            if (authStore.initialized) {
+              clearInterval(stop)
+              resolve()
+            }
+          }, 50)
+        })
+      }
+
+      // Not logged in — skip SSE entirely
+      if (authStore.user === null) {
+        startPollingFallback()
+        return
+      }
+
       // First check if SSE is configured and active
       const statusResponse = await api.get<{ active: boolean; hubUrl?: string }>('/sse/status')
       if (!statusResponse.active || !statusResponse.hubUrl) {
@@ -47,7 +70,7 @@ export function useRealtime() {
 
       // Fetch auth token and subscribe to user-specific notification topic
       const authResponse = await api.get<{ hubUrl: string; token: string }>('/sse/auth')
-      const userId = authStore.user?.id
+      const userId = authStore.user!.id
 
       // Support both relative (/path) and absolute (http://host/path) hubUrl
       const baseUrl = authResponse.hubUrl.startsWith('/')
@@ -56,24 +79,34 @@ export function useRealtime() {
       const url = new URL(baseUrl, window.location.origin)
 
       // append() adds both topics (set() overwrites the first one)
-      url.searchParams.append('topic', 'task/*')
-      if (userId !== undefined) {
-        url.searchParams.append('topic', `user/${userId}/notifications`)
-      }
+      url.searchParams.append('topic', `user/${userId}/tasks`)
+      url.searchParams.append('topic', `user/${userId}/notifications`)
 
       globalEventSource = new EventSource(url.toString())
 
       globalEventSource.onmessage = (event: MessageEvent) => {
         const data = JSON.parse(event.data) as { topic: string; data: Record<string, unknown> }
 
-        if (data.topic.startsWith('task/')) {
-          const taskId = parseInt(data.topic.split('/')[1], 10)
-          taskStore.applyTaskUpdate(taskId, data.data as Record<string, unknown>)
-        } else if (data.topic.startsWith('user/')) {
-          type MercurePayload = { notification: Parameters<typeof notificationStore.prependFromSSE>[0] }
-          const payload = data.data as unknown as MercurePayload
-          if (payload.notification) {
-            notificationStore.prependFromSSE(payload.notification)
+        if (data.topic.startsWith('user/')) {
+          // Topic format: user/{userId}/tasks or user/{userId}/notifications
+          // The task id is inside the payload — either `task_id` (explicit publish)
+          // or `id` (from taskResource()). Both are supported.
+          type MercureTaskPayload = { task_id?: number; id?: number }
+          const innerData = data.data as Record<string, unknown>
+          const taskId = (innerData as unknown as MercureTaskPayload).task_id
+            ?? (innerData as { id?: number }).id
+          if (taskId !== undefined) {
+            // Task event on user/{userId}/tasks — use targeted update
+            taskStore.applyTaskUpdate(taskId, innerData)
+            // Also update agentStore task list so AgentPage can skip polling
+            agentStore.applySseTaskEvent(innerData)
+          } else {
+            // Notification event on user/{userId}/notifications
+            type MercureNotificationPayload = { notification: Parameters<typeof notificationStore.prependFromSSE>[0] }
+            const payload = data.data as unknown as MercureNotificationPayload
+            if (payload.notification) {
+              notificationStore.prependFromSSE(payload.notification)
+            }
           }
         }
       }
@@ -85,6 +118,8 @@ export function useRealtime() {
       }
 
       globalConnected.value = true
+      // Fetch initial notifications now that SSE is connected
+      notificationStore.fetchNotifications()
     } catch {
       // Auth endpoint returned 404 or network error — Mercure not available; use polling
       startPollingFallback()
@@ -102,6 +137,10 @@ export function useRealtime() {
 
     // Start the adaptive polling loop managed entirely by the store.
     taskStore.startListPolling()
+    // Fetch initial notifications if the user is logged in
+    if (authStore.user !== null) {
+      notificationStore.fetchNotifications()
+    }
   }
 
   function disconnect(): void {

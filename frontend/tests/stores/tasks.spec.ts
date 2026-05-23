@@ -246,6 +246,103 @@ describe('useTaskStore', () => {
       store.applyTaskUpdate(999, { error_code: 'SERVER_ERROR' })
       expect(store.activeTask!.error_code).toBeUndefined()
     })
+
+    it('merges new history entries filtering by sequence', () => {
+      const store = useTaskStore()
+      store.activeTask = {
+        ...mockTaskDetail,
+        history: [{ sequence: 0, role: 'user', content: 'Hello', reasoning: null, tool_call_id: null, tool_name: null }],
+      }
+
+      // SSE sends a new entry with sequence 1
+      store.applyTaskUpdate(1, {
+        history: [
+          { sequence: 1, role: 'assistant', content: 'Hi there', reasoning: null, tool_call_id: null, tool_name: null },
+        ],
+      })
+
+      expect(store.activeTask!.history).toHaveLength(2)
+      expect(store.activeTask!.history[1].sequence).toBe(1)
+    })
+
+    it('does not duplicate history entries on duplicate sequence', () => {
+      const store = useTaskStore()
+      store.activeTask = {
+        ...mockTaskDetail,
+        history: [{ sequence: 0, role: 'user', content: 'Hello', reasoning: null, tool_call_id: null, tool_name: null }],
+      }
+
+      // Same sequence delivered twice via SSE
+      store.applyTaskUpdate(1, {
+        history: [{ sequence: 1, role: 'assistant', content: 'First', reasoning: null, tool_call_id: null, tool_name: null }],
+      })
+      store.applyTaskUpdate(1, {
+        history: [{ sequence: 1, role: 'assistant', content: 'Duplicate', reasoning: null, tool_call_id: null, tool_name: null }],
+      })
+
+      expect(store.activeTask!.history).toHaveLength(2)
+    })
+
+    it('replaces tool_calls entirely from SSE data', () => {
+      const store = useTaskStore()
+      store.activeTask = {
+        ...mockTaskDetail,
+        tool_calls: [
+          { id: 1, tool_name: 'WebSearch', tool_type: 'search', operation: null, operation_description: null, status: 'PENDING_APPROVAL', proposed_arguments: {}, approved_arguments: null, human_description: null, result_content: null, executed_at: null },
+        ],
+      }
+
+      const newCalls = [
+        { id: 1, tool_name: 'WebSearch', tool_type: 'search', operation: null, operation_description: null, status: 'EXECUTED', proposed_arguments: {}, approved_arguments: {}, human_description: null, result_content: 'Result', executed_at: '2026-01-01T00:00:02Z' },
+      ]
+
+      store.applyTaskUpdate(1, { tool_calls: newCalls })
+
+      expect(store.activeTask!.tool_calls).toEqual(newCalls)
+    })
+
+    it('updates retry fields from SSE data', () => {
+      const store = useTaskStore()
+      store.activeTask = { ...mockTaskDetail, retry_of_task_id: null, retry_count: undefined, retry_after: null }
+
+      store.applyTaskUpdate(1, {
+        retry_of_task_id: 5,
+        retry_count: 2,
+        retry_after: '2026-01-01T00:05:00Z',
+      })
+
+      expect(store.activeTask!.retry_of_task_id).toBe(5)
+      expect(store.activeTask!.retry_count).toBe(2)
+      expect(store.activeTask!.retry_after).toBe('2026-01-01T00:05:00Z')
+    })
+
+    it('handles lightweight SSE data without tool_calls or history keys (taskListResource shape)', () => {
+      // Data from taskListResource / publishIntermediateState has no tool_calls/history
+      const store = useTaskStore()
+      store.activeTask = {
+        ...mockTaskDetail,
+        status: 'RUNNING',
+        step_count: 1,
+        tool_calls: [{ id: 1, tool_name: 'WebSearch', tool_type: 'search', operation: null, operation_description: null, status: 'PENDING_APPROVAL', proposed_arguments: {}, approved_arguments: null, human_description: null, result_content: null, executed_at: null }],
+        history: [{ sequence: 0, role: 'user', content: 'Hello', reasoning: null, tool_call_id: null, tool_name: null }],
+      }
+
+      // Lightweight SSE update (no tool_calls/history keys)
+      store.applyTaskUpdate(1, {
+        id: 1,
+        status: 'COMPLETED',
+        step_count: 3,
+        final_response: 'Done',
+      })
+
+      // Scalar fields updated
+      expect(store.activeTask!.status).toBe('COMPLETED')
+      expect(store.activeTask!.step_count).toBe(3)
+      expect(store.activeTask!.final_response).toBe('Done')
+      // tool_calls and history preserved (not overwritten since keys are absent)
+      expect(store.activeTask!.tool_calls).toHaveLength(1)
+      expect(store.activeTask!.history).toHaveLength(1)
+    })
   })
 
   describe('lastTaskByAgent', () => {

@@ -27,13 +27,15 @@ final class TaskService implements TaskServiceInterface
      */
     public function getTasksForUser(int $userId, ?int $agentId = null): array
     {
-        $query = Task::where('user_id', $userId)->orderByDesc('created_at');
+        $query = Task::where('user_id', $userId)
+            ->orderByDesc('created_at')
+            ->with(['agent']);
 
         if ($agentId !== null) {
             $query->where('agent_id', $agentId);
         }
 
-        return $query->get()->map(fn(Task $t) => $this->taskResource($t))->all();
+        return $query->get()->map(fn(Task $t) => $this->taskListResource($t))->all();
     }
 
     /**
@@ -57,7 +59,7 @@ final class TaskService implements TaskServiceInterface
         $task = $this->orchestrator->start($agentId, $prompt, $steps, $parentTaskId);
 
         $resource = $this->taskResource($task);
-        $this->mercure->publish($task->id, $resource);
+        $this->mercure->publish($task->id, $userId, $resource);
 
         return $resource;
     }
@@ -104,7 +106,7 @@ final class TaskService implements TaskServiceInterface
         $fresh = $task->fresh();
 
         $resource = $this->taskResource($fresh);
-        $this->mercure->publish($fresh->id, $resource);
+        $this->mercure->publish($fresh->id, $fresh->user_id, $resource);
 
         return $resource;
     }
@@ -127,7 +129,7 @@ final class TaskService implements TaskServiceInterface
         $fresh = $task->fresh();
 
         $resource = $this->taskResource($fresh);
-        $this->mercure->publish($fresh->id, $resource);
+        $this->mercure->publish($fresh->id, $fresh->user_id, $resource);
 
         return $resource;
     }
@@ -149,7 +151,7 @@ final class TaskService implements TaskServiceInterface
         $newTask = $this->orchestrator->start($task->agent_id, $task->user_prompt, $task->max_steps);
 
         $resource = $this->taskResource($newTask);
-        $this->mercure->publish($newTask->id, $resource);
+        $this->mercure->publish($newTask->id, $newTask->user_id, $resource);
 
         return $resource;
     }
@@ -175,7 +177,7 @@ final class TaskService implements TaskServiceInterface
         $continuedTask = $this->orchestrator->continue($task->id, $prompt, $additionalSteps);
 
         $resource = $this->taskResource($continuedTask);
-        $this->mercure->publish($continuedTask->id, $resource);
+        $this->mercure->publish($continuedTask->id, $continuedTask->user_id, $resource);
 
         return $resource;
     }
@@ -280,6 +282,90 @@ final class TaskService implements TaskServiceInterface
             $agent = Agent::find($task->agent_id);
             $resource['max_retries'] = $agent->max_retries ?? 0;
             $resource['retry_after_minutes'] = $agent->retry_after_minutes ?? 0;
+        }
+
+        if ($task->retry_after !== null) {
+            $resource['retry_after'] = $task->retry_after->toIso8601String();
+        }
+
+        $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => [
+            'id'                 => $tc->id,
+            'tool_name'          => $tc->tool_name,
+            'tool_type'          => $tc->tool_type,
+            'status'             => $tc->status,
+            'proposed_arguments' => $tc->proposed_arguments,
+            'approved_arguments' => $tc->approved_arguments,
+            'human_description'  => $tc->human_description,
+            'result_content'     => $tc->result_content,
+            'executed_at'        => $tc->executed_at?->toIso8601String(),
+        ])->all();
+
+        $resource['history'] = $task->taskHistory()->get()->map(fn(TaskHistory $h) => [
+            'sequence'     => $h->sequence,
+            'role'         => $h->role,
+            'content'      => $h->content,
+            'reasoning'    => $h->reasoning,
+            'tool_call_id' => $h->tool_call_id,
+            'tool_name'    => $h->tool_name,
+        ])->all();
+
+        return $resource;
+    }
+
+    /**
+     * Lightweight task representation for list views.
+     * Excludes tool_calls and history to minimise payload size and avoid N+1 queries.
+     *
+     * @return array{
+     *     id: int,
+     *     agent_id: int,
+     *     status: string,
+     *     user_prompt: string,
+     *     final_response: string|null,
+     *     step_count: int,
+     *     max_steps: int,
+     *     created_at: string|null,
+     *     updated_at: string|null,
+     *     parent_task_id?: int,
+     *     error_code?: string,
+     *     error_message?: string,
+     *     retry_of_task_id?: int,
+     *     retry_count?: int,
+     *     max_retries?: int,
+     *     retry_after_minutes?: int,
+     *     retry_after?: string
+     * }
+     */
+    private function taskListResource(Task $task): array
+    {
+        $resource = [
+            'id'             => $task->id,
+            'agent_id'       => $task->agent_id,
+            'status'         => $task->status,
+            'user_prompt'    => $task->user_prompt,
+            'final_response' => $task->final_response,
+            'step_count'     => $task->step_count,
+            'max_steps'      => $task->max_steps,
+            'created_at'     => $task->created_at?->toIso8601String(),
+            'updated_at'     => $task->updated_at?->toIso8601String(),
+        ];
+
+        if ($task->parent_task_id !== null) {
+            $resource['parent_task_id'] = $task->parent_task_id;
+        }
+
+        if ($task->error_code !== null) {
+            $resource['error_code'] = $task->error_code;
+            $resource['error_message'] = $task->error_message;
+        }
+
+        if ($task->retry_of_task_id !== null) {
+            $resource['retry_of_task_id'] = $task->retry_of_task_id;
+            $resource['retry_count'] = $task->retry_count;
+        } else {
+            // Use eager-loaded agent relation to avoid a per-task query
+            $resource['max_retries'] = $task->agent?->max_retries ?? 0;
+            $resource['retry_after_minutes'] = $task->agent?->retry_after_minutes ?? 0;
         }
 
         if ($task->retry_after !== null) {

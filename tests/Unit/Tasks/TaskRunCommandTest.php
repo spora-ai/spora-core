@@ -121,6 +121,9 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container->allows('get')->with(NotificationService::class)->andReturn(
             Mockery::mock(NotificationService::class),
         );
+        $container->allows('get')->with(MercurePublisherInterface::class)->andReturn(
+            Mockery::mock(MercurePublisherInterface::class),
+        );
 
         // Use a null driver — we only care about the claim, not the LLM call.
         $nullDriver = Mockery::mock(LLMDriverInterface::class);
@@ -139,7 +142,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container->allows('get')->with(DriverFactory::class)->andReturn($nullFactory);
         $container->allows('get')->with('tool_instances')->andReturn([]);
 
-        $command = new TaskRunCommand($db, $container);
+        $command = new TaskRunCommand($db, $container, $container->get(NotificationService::class), $container->get(MercurePublisherInterface::class));
 
         // Simulate what execute() does at the task claim step.
         $taskId = $task->id;
@@ -212,8 +215,11 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container->allows('get')->with(NotificationService::class)->andReturn(
             Mockery::mock(NotificationService::class),
         );
+        $container->allows('get')->with(MercurePublisherInterface::class)->andReturn(
+            Mockery::mock(MercurePublisherInterface::class),
+        );
 
-        $command = new TaskRunCommand($db, $container);
+        $command = new TaskRunCommand($db, $container, $container->get(NotificationService::class), $container->get(MercurePublisherInterface::class));
 
         $taskId = $task->id;
         $claimedTask = Capsule::connection()->transaction(function () use ($taskId): ?Task {

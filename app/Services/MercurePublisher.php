@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Psr\Log\LoggerInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 
@@ -22,29 +23,48 @@ final class MercurePublisher implements MercurePublisherInterface
         private readonly HttpClientInterface $client,
         private readonly ?string $hubUrl = null,
         private readonly ?string $jwtKey = null,
+        private readonly ?LoggerInterface $logger = null,
     ) {}
 
     /**
      * Publish a task state change to the Mercure hub.
-     * Topics are namespaced per task so subscribers receive only relevant updates.
+     * Topic: task/{userId}/{taskId} — user-scoped so only the task owner receives updates.
      */
-    public function publish(int $taskId, array $taskData): bool
+    public function publish(int $taskId, int $userId, array $taskData): bool
     {
+        $this->logger?->debug('MercurePublisher: publish called', [
+            'task_id' => $taskId,
+            'user_id' => $userId,
+            'hub_url' => $this->hubUrl,
+            'has_jwt' => $this->jwtKey !== null,
+        ]);
+
         if ($this->hubUrl === null || $this->jwtKey === null) {
+            $this->logger?->warning('MercurePublisher: publish skipped - hubUrl or jwtKey is null');
             return false;
         }
 
+        $topic = "user/{$userId}/tasks";
         try {
-            $this->client->request('POST', $this->hubUrl, [
-                'auth_bearer' => $this->generateJwt(),
+            $response = $this->client->request('POST', $this->hubUrl, [
+                'auth_bearer' => $this->generateJwt($userId),
                 'body'        => [
-                    'topic' => "task/{$taskId}",
-                    'data'  => json_encode(['topic' => "task/{$taskId}", 'data' => $taskData], JSON_THROW_ON_ERROR),
+                    'topic' => $topic,
+                    'data'  => json_encode(['topic' => $topic, 'data' => $taskData], JSON_THROW_ON_ERROR),
                 ],
             ]);
-
+            $this->logger?->info('MercurePublisher: published task event', [
+                'task_id' => $taskId,
+                'user_id' => $userId,
+                'http_status' => $response->getStatusCode(),
+            ]);
             return true;
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            $this->logger?->error('MercurePublisher: publish failed', [
+                'task_id' => $taskId,
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+            ]);
             return false;
         }
     }
@@ -55,21 +75,35 @@ final class MercurePublisher implements MercurePublisherInterface
      */
     public function publishToUser(int $userId, array $data): bool
     {
+        $this->logger?->debug('MercurePublisher: publishToUser called', [
+            'user_id' => $userId,
+            'hub_url' => $this->hubUrl,
+            'has_jwt' => $this->jwtKey !== null,
+        ]);
+
         if ($this->hubUrl === null || $this->jwtKey === null) {
+            $this->logger?->warning('MercurePublisher: publishToUser skipped - hubUrl or jwtKey is null');
             return false;
         }
 
         try {
-            $this->client->request('POST', $this->hubUrl, [
-                'auth_bearer' => $this->generateJwt(),
+            $response = $this->client->request('POST', $this->hubUrl, [
+                'auth_bearer' => $this->generateJwt($userId),
                 'body'        => [
                     'topic' => "user/{$userId}/notifications",
                     'data'  => json_encode(['topic' => "user/{$userId}/notifications", 'data' => $data], JSON_THROW_ON_ERROR),
                 ],
             ]);
-
+            $this->logger?->info('MercurePublisher: published user notification', [
+                'user_id' => $userId,
+                'http_status' => $response->getStatusCode(),
+            ]);
             return true;
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            $this->logger?->error('MercurePublisher: publishToUser failed', [
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+            ]);
             return false;
         }
     }
@@ -78,14 +112,14 @@ final class MercurePublisher implements MercurePublisherInterface
      * Generate a minimal HS256 JWT for the Mercure publisher role.
      * Uses base64url encoding (RFC 7515) and a single timestamp to avoid clock-skew bugs.
      */
-    private function generateJwt(): string
+    private function generateJwt(int $userId): string
     {
         $now     = time();
         $header  = $this->base64url(json_encode(['alg' => 'HS256', 'typ' => 'JWT'], JSON_THROW_ON_ERROR));
         $payload = $this->base64url(json_encode([
             'iat'     => $now,
             'exp'     => $now + 60,
-            'mercure' => ['publish' => ['task/*', 'user/*/notifications']],
+            'mercure' => ['publish' => ["user/{$userId}/tasks", "user/{$userId}/notifications"]],
         ], JSON_THROW_ON_ERROR));
 
         $input = "{$header}.{$payload}";

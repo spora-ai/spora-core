@@ -44,7 +44,7 @@ final class SseController
      *
      * Returns the Mercure hub URL and a subscriber-scoped JWT token.
      * The token is scoped to:
-     *   - topic "task/*"
+     *   - topic "user/{userId}/tasks"
      *   - topic "user/{userId}/notifications"
      */
     public function auth(): JsonResponse
@@ -83,7 +83,7 @@ final class SseController
             'exp'     => $now + 3600, // 1-hour validity for SSE connections
             'mercure' => [
                 'subscribe' => [
-                    'task/*',
+                    "user/{$userId}/tasks",
                     "user/{$userId}/notifications",
                 ],
             ],

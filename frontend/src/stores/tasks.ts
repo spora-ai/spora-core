@@ -14,6 +14,8 @@ export const useTaskStore = defineStore('tasks', () => {
   let listPollGeneration = 0
   let detailPollTimer: ReturnType<typeof setTimeout> | null = null
   let lastSequence = 0
+  // Timestamp of the last SSE update processed by applyTaskUpdate (monotonic clock in ms)
+  let lastSseUpdateAt = 0
 
   // ── Task list ──────────────────────────────────────────────────────────────
 
@@ -48,9 +50,15 @@ export const useTaskStore = defineStore('tasks', () => {
     const incoming = result.task
 
     if (activeTask.value === null || activeTask.value.id !== taskId) {
-      // First load — replace entirely
+      // First load — replace entirely, then apply any pending SSE update for this task
       activeTask.value = incoming
       lastSequence = Math.max(...incoming.history.map((h) => h.sequence), 0)
+      // Apply pending SSE update if we have one for this task (handles race where SSE
+      // event arrived before fetchTaskDetail completed)
+      if (pendingSseUpdate !== null && pendingSseUpdate.taskId === taskId) {
+        applyTaskUpdate(taskId, pendingSseUpdate.data)
+        pendingSseUpdate = null
+      }
     } else {
       // Incremental update: merge new history entries and refresh scalar fields
       activeTask.value.status = incoming.status
@@ -141,6 +149,8 @@ export const useTaskStore = defineStore('tasks', () => {
   }
 
   function startDetailPolling(taskId: number): void {
+    // Skip polling if SSE provided data within the last 3 seconds — SSE will drive updates
+    if (Date.now() - lastSseUpdateAt < 3000) return
     stopDetailPolling()
     const tick = async () => {
       if (activeTask.value === null || activeTask.value.id !== taskId) return
@@ -168,11 +178,35 @@ export const useTaskStore = defineStore('tasks', () => {
   }
 
   /**
+   * Pending SSE update stored when activeTask is not yet loaded.
+   * Used to apply the first SSE event when fetchTaskDetail hasn't completed yet.
+   */
+  let pendingSseUpdate: { taskId: number; data: Record<string, unknown> } | null = null
+
+  /**
    * Merge a real-time task update from SSE into activeTask.
    * Used by useRealtime when Mercure pushes a task/* event.
+   *
+   * If activeTask is not yet loaded (null or different taskId), the update is stored
+   * as pending and applied once the correct task is loaded via fetchTaskDetail.
    */
   function applyTaskUpdate(taskId: number, data: Record<string, unknown>): void {
-    if (activeTask.value === null || activeTask.value.id !== taskId) return
+    // Ignore events for a task that has already reached a terminal state
+    if (activeTask.value?.id === taskId && TERMINAL_STATUSES.includes(activeTask.value.status)) return
+
+    if (activeTask.value === null) {
+      // Store as pending — will be applied by fetchTaskDetail once activeTask is set
+      pendingSseUpdate = { taskId, data }
+      return
+    }
+    if (activeTask.value.id !== taskId) return
+    // Apply pending update if this is the right task
+    if (pendingSseUpdate !== null && pendingSseUpdate.taskId === taskId) {
+      pendingSseUpdate = null
+    }
+    // SSE has provided fresh data — stop detail polling so SSE drives updates
+    stopDetailPolling()
+    lastSseUpdateAt = Date.now()
     // Apply scalar fields
     if (data.status !== undefined) activeTask.value.status = data.status as TaskStatus
     if (data.final_response !== undefined) activeTask.value.final_response = data.final_response as string | null

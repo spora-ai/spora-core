@@ -12,6 +12,7 @@ use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Core\Database;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Task;
+use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -30,8 +31,10 @@ use Throwable;
 final class TaskRunCommand extends Command
 {
     public function __construct(
-        private readonly Database            $database,
-        private readonly ContainerInterface  $container,
+        private readonly Database               $database,
+        private readonly ContainerInterface     $container,
+        private readonly NotificationService    $notificationService,
+        private readonly MercurePublisherInterface $mercure,
     ) {
         parent::__construct('task:run');
     }
@@ -89,12 +92,20 @@ final class TaskRunCommand extends Command
         $output->writeln(sprintf('<info>Processing task %d...</info>', $taskId));
 
         // Run the orchestrator loop until the task reaches a terminal state.
+        // NotificationService is called by Orchestrator.tick() — do not duplicate here.
         try {
             while (in_array($task->status, ['RUNNING', 'PENDING_APPROVAL'], true)) {
                 $orchestrator->tick($task->id);
                 $task->refresh();
             }
         } catch (Throwable $e) {
+            $task->refresh();
+            if ($task->status !== 'FAILED') {
+                $task->status = 'FAILED';
+                $task->failure_reason = $e->getMessage();
+                $task->save();
+            }
+            // Notification is sent by Orchestrator.tick() catch block — do not duplicate here.
             $output->writeln(sprintf(
                 '<error>Task %d failed with: %s</error>',
                 $task->id,
@@ -127,6 +138,7 @@ final class TaskRunCommand extends Command
             logger: $logger,
             workerMode: WorkerMode::Sync,
             notificationService: $this->container->get(NotificationService::class),
+            mercure: $this->mercure,
         );
     }
 }

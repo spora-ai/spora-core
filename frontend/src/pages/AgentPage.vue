@@ -9,6 +9,7 @@ import { useAgentStore } from '@/stores/agent'
 import { usePromptTemplatesStore } from '@/stores/promptTemplates'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
 import { useLlmPreferencesStore } from '@/stores/llmPreferencesStore'
+import { useRealtime, globalConnected } from '@/composables/useRealtime'
 import AgentLayout from '@/components/layout/AgentLayout.vue'
 import ComposerInput from '@/components/ComposerInput.vue'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
@@ -49,6 +50,9 @@ const promptTemplatesStore = usePromptTemplatesStore()
 const llmConfigsStore = useLlmConfigsStore()
 const preferenceStore = useLlmPreferencesStore()
 
+// Initialize realtime connection (singleton — reused across route changes)
+useRealtime()
+
 const agentId = computed(() => Number(route.params.id))
 
 // ── Relative time ───────────────────────────────────────────────────────────
@@ -68,6 +72,8 @@ function formatRelativeTime(iso: string): string {
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 
 function startPolling(): void {
+  // Skip polling if SSE is connected — SSE events keep currentAgentTasks in sync via agentStore.applySseTaskEvent
+  if (globalConnected.value) return
   stopPolling()
   const tick = async () => {
     const id = agentId.value
