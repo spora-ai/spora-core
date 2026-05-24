@@ -100,6 +100,7 @@ export function useRealtime() {
             taskStore.applyTaskUpdate(taskId, innerData)
             // Also update agentStore task list so AgentPage can skip polling
             agentStore.applySseTaskEvent(innerData)
+            taskStore.applySseEventToTasks(innerData)
           } else {
             // Notification event on user/{userId}/notifications
             type MercureNotificationPayload = { notification: Parameters<typeof notificationStore.prependFromSSE>[0] }
@@ -118,7 +119,8 @@ export function useRealtime() {
       }
 
       globalConnected.value = true
-      // Fetch initial notifications now that SSE is connected
+      taskStore.stopDashboardPolling()
+      notificationStore.stopNotificationPolling()
       notificationStore.fetchNotifications()
     } catch {
       // Auth endpoint returned 404 or network error — Mercure not available; use polling
@@ -136,11 +138,8 @@ export function useRealtime() {
     }
 
     // Start the adaptive polling loop managed entirely by the store.
-    taskStore.startListPolling()
-    // Fetch initial notifications if the user is logged in
-    if (authStore.user !== null) {
-      notificationStore.fetchNotifications()
-    }
+    taskStore.startDashboardPolling()
+    notificationStore.startNotificationPolling()
   }
 
   function disconnect(): void {

@@ -117,9 +117,22 @@ export const useAgentStore = defineStore('agent', () => {
    * Called by useRealtime when a SSE task event arrives.
    * Updates an existing task in currentAgentTasks or prepends a new one.
    */
+  /**
+   * Called by useRealtime when a SSE task event arrives.
+   * Also called during SSE fallback polling to keep currentAgentTasks in sync.
+   * Only applies updates for tasks belonging to the currentAgent.
+   */
   function applySseTaskEvent(data: Record<string, unknown>): void {
     const taskId = (data.id ?? data.task_id) as number | undefined
     if (taskId === undefined) return
+
+    const taskAgentId = (data as { agent_id?: number }).agent_id
+
+    // If we know which agent this task belongs to and it's not the current one, skip it
+    if (currentAgent.value !== null && taskAgentId !== undefined && taskAgentId !== currentAgent.value.id) {
+      return
+    }
+
     const idx = currentAgentTasks.value.findIndex(t => t.id === taskId)
     if (idx !== -1) {
       Object.assign(currentAgentTasks.value[idx], {
@@ -132,7 +145,7 @@ export const useAgentStore = defineStore('agent', () => {
       if (data.status !== undefined) {
         currentAgentTasks.value.unshift({
           id: taskId,
-          agent_id: (data as { agent_id?: number }).agent_id ?? currentAgent.value?.id ?? 0,
+          agent_id: taskAgentId ?? currentAgent.value?.id ?? 0,
           status: data.status as Task['status'],
           user_prompt: (data as { user_prompt?: string }).user_prompt ?? '',
           final_response: (data.final_response as string | null) ?? null,

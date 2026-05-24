@@ -15,19 +15,31 @@ import { describe, it, expect, vi } from 'vitest'
 
 const prependFromSSE = vi.fn()
 const applyTaskUpdate = vi.fn()
+const applySseEventToTasks = vi.fn()
 const applySseTaskEvent = vi.fn()
-const startListPolling = vi.fn()
+const startDashboardPolling = vi.fn()
+const stopDashboardPolling = vi.fn()
 
 vi.mock('@/api/client', () => ({
   api: { get: vi.fn() },
 }))
 
 vi.mock('@/stores/notifications', () => ({
-  useNotificationStore: () => ({ prependFromSSE, fetchNotifications: vi.fn() }),
+  useNotificationStore: () => ({
+    prependFromSSE,
+    fetchNotifications: vi.fn(),
+    startNotificationPolling: vi.fn(),
+    stopNotificationPolling: vi.fn(),
+  }),
 }))
 
 vi.mock('@/stores/tasks', () => ({
-  useTaskStore: () => ({ applyTaskUpdate, startListPolling }),
+  useTaskStore: () => ({
+    applyTaskUpdate,
+    applySseEventToTasks,
+    startDashboardPolling,
+    stopDashboardPolling,
+  }),
 }))
 
 vi.mock('@/stores/agent', () => ({
@@ -64,6 +76,6 @@ describe('useRealtime integration', () => {
     useRealtime()
     await new Promise(r => setTimeout(r, 0))
 
-    expect(startListPolling).not.toHaveBeenCalled()
+    expect(startDashboardPolling).not.toHaveBeenCalled()
   })
 })

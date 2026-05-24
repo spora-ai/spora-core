@@ -115,4 +115,96 @@ describe('TaskService — getTasksForUser', function (): void {
         expect($filtered)->toHaveCount(1);
         expect($filtered[0]['agent_id'])->toBe($agent1->id);
     });
+
+    it('filters by updated_at when since is provided', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('since@example.com', 'Password1!');
+        simulateLoggedInSession($userId, 'since@example.com');
+
+        $agent = Agent::create([
+            'user_id'      => $userId,
+            'name'         => 'SinceAgent',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+
+        $oldTask = Task::create([
+            'user_id'   => $userId,
+            'agent_id'  => $agent->id,
+            'status'    => 'COMPLETED',
+            'user_prompt' => 'Old task',
+            'max_steps' => 5,
+        ]);
+        // Manually set updated_at to a past time
+        Task::where('id', $oldTask->id)->update(['updated_at' => '2024-01-01 00:00:00']);
+
+        $newTask = Task::create([
+            'user_id'   => $userId,
+            'agent_id'  => $agent->id,
+            'status'    => 'RUNNING',
+            'user_prompt' => 'New task',
+            'max_steps' => 5,
+        ]);
+        // Manually set updated_at to a recent time
+        Task::where('id', $newTask->id)->update(['updated_at' => '2025-06-01 00:00:00']);
+
+        $service = makeTaskService();
+
+        // Without since, both tasks are returned
+        $all = $service->getTasksForUser($userId);
+        expect($all)->toHaveCount(2);
+
+        // With since after old task but before new task, only new task is returned
+        $since = '2024-06-01T00:00:00Z';
+        $filtered = $service->getTasksForUser($userId, null, $since);
+        expect($filtered)->toHaveCount(1);
+        expect($filtered[0]['id'])->toBe($newTask->id);
+    });
+
+    it('returns all tasks when since is not provided (backward compatible)', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('nocsince@example.com', 'Password1!');
+        simulateLoggedInSession($userId, 'nocsince@example.com');
+
+        $agent = Agent::create([
+            'user_id'      => $userId,
+            'name'         => 'NoSinceAgent',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+
+        Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task 1', 'max_steps' => 5]);
+        Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Task 2', 'max_steps' => 5]);
+
+        $service = makeTaskService();
+        $result = $service->getTasksForUser($userId);
+
+        expect($result)->toHaveCount(2);
+    });
+
+    it('returns empty array when since filter excludes all tasks (no crash)', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('futuresince@example.com', 'Password1!');
+        simulateLoggedInSession($userId, 'futuresince@example.com');
+
+        $agent = Agent::create([
+            'user_id'      => $userId,
+            'name'         => 'FutureSinceAgent',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+
+        Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task', 'max_steps' => 5]);
+
+        $service = makeTaskService();
+        $result = $service->getTasksForUser($userId, null, '2099-01-01T00:00:00Z');
+
+        expect($result)->toBeEmpty();
+    });
 });

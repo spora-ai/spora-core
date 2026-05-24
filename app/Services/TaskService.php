@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Carbon\Carbon;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
 use Spora\Agents\OrchestratorInterface;
@@ -25,7 +26,7 @@ final class TaskService implements TaskServiceInterface
     /**
      * @inheritDoc
      */
-    public function getTasksForUser(int $userId, ?int $agentId = null): array
+    public function getTasksForUser(int $userId, ?int $agentId = null, ?string $since = null): array
     {
         $query = Task::where('user_id', $userId)
             ->orderByDesc('created_at')
@@ -33,6 +34,10 @@ final class TaskService implements TaskServiceInterface
 
         if ($agentId !== null) {
             $query->where('agent_id', $agentId);
+        }
+
+        if ($since !== null) {
+            $query->where('updated_at', '>', Carbon::parse($since)->utc());
         }
 
         return $query->get()->map(fn(Task $t) => $this->taskListResource($t))->all();
