@@ -142,7 +142,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container->allows('get')->with(DriverFactory::class)->andReturn($nullFactory);
         $container->allows('get')->with('tool_instances')->andReturn([]);
 
-        $command = new TaskRunCommand($db, $container, $container->get(NotificationService::class), $container->get(MercurePublisherInterface::class));
+        $command = new TaskRunCommand($db, $container, $container->get(MercurePublisherInterface::class));
 
         // Simulate what execute() does at the task claim step.
         $taskId = $task->id;
@@ -219,7 +219,7 @@ describe('TaskRunCommand — task claiming', function (): void {
             Mockery::mock(MercurePublisherInterface::class),
         );
 
-        $command = new TaskRunCommand($db, $container, $container->get(NotificationService::class), $container->get(MercurePublisherInterface::class));
+        $command = new TaskRunCommand($db, $container, $container->get(MercurePublisherInterface::class));
 
         $taskId = $task->id;
         $claimedTask = Capsule::connection()->transaction(function () use ($taskId): ?Task {
