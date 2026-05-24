@@ -188,7 +188,7 @@ class NotificationService implements NotificationServiceInterface
             'scheduled_run_completed',
             [
                 'task_id'     => $task->id,
-                'agent_name'  => $agent instanceof Agent ? $agent->name : null,
+                'agent_name'  => $agent->name,
                 'user_prompt' => $task->user_prompt,
                 'site_name'   => $this->config['app_name'] ?? 'Spora',
             ],

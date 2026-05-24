@@ -396,7 +396,6 @@ return [
         return new Spora\Console\Commands\TaskRunCommand(
             $c->get(Database::class),
             $c,
-            $c->get(NotificationService::class),
             $c->get(MercurePublisherInterface::class),
         );
     },

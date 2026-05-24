@@ -13,6 +13,7 @@ use Illuminate\Support\Carbon;
  * @property int         $id
  * @property int         $agent_id
  * @property int         $user_id
+ * @property Agent       $agent
  * @property string      $status
  * @property string      $user_prompt
  * @property string|null $final_response

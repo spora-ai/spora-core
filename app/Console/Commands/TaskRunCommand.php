@@ -33,7 +33,6 @@ final class TaskRunCommand extends Command
     public function __construct(
         private readonly Database               $database,
         private readonly ContainerInterface     $container,
-        private readonly NotificationService    $notificationService,
         private readonly MercurePublisherInterface $mercure,
     ) {
         parent::__construct('task:run');

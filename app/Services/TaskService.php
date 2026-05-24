@@ -369,8 +369,8 @@ final class TaskService implements TaskServiceInterface
             $resource['retry_count'] = $task->retry_count;
         } else {
             // Use eager-loaded agent relation to avoid a per-task query
-            $resource['max_retries'] = $task->agent?->max_retries ?? 0;
-            $resource['retry_after_minutes'] = $task->agent?->retry_after_minutes ?? 0;
+            $resource['max_retries'] = $task->agent->max_retries ?? 0;
+            $resource['retry_after_minutes'] = $task->agent->retry_after_minutes ?? 0;
         }
 
         if ($task->retry_after !== null) {
