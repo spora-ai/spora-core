@@ -129,63 +129,68 @@ final class Orchestrator implements OrchestratorInterface
         // and read all data needed for the LLM call. Lock is released when the transaction commits,
         // before any network I/O, so the DB connection is not held idle during the LLM round-trip.
         $context = null;
-        Capsule::connection()->transaction(function () use ($taskId, &$context) {
-            $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
-            if ($task->status !== 'RUNNING') {
-                return;
-            }
+        try {
+            Capsule::connection()->transaction(function () use ($taskId, &$context): void {
+                $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
-            // Each tick() represents one full Agent lifecycle turn (Think → Act).
-            // Increment exactly once so N parallel tools in a single turn count as 1 step.
-            if ($task->step_count >= $task->max_steps) {
-                $task->status         = 'FAILED';
-                $task->failure_reason = 'Max steps reached.';
+                if ($task->status !== 'RUNNING') {
+                    return;
+                }
+
+                // Each tick() represents one full Agent lifecycle turn (Think → Act).
+                // Increment exactly once so N parallel tools in a single turn count as 1 step.
+                if ($task->step_count >= $task->max_steps) {
+                    $task->status         = 'FAILED';
+                    $task->failure_reason = 'Max steps reached.';
+                    $task->save();
+                    return;
+                }
+
+                $task->step_count++;
                 $task->save();
-                return;
-            }
 
-            $task->step_count++;
-            $task->save();
+                $agent          = Agent::findOrFail($task->agent_id);
+                $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->toArray();
 
-            $agent          = Agent::findOrFail($task->agent_id);
-            $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->toArray();
+                $systemPrompt = ($agent->system_prompt !== null && $agent->system_prompt !== '')
+                    ? $agent->system_prompt
+                    : 'You are a helpful AI assistant.';
 
-            $systemPrompt = ($agent->system_prompt !== null && $agent->system_prompt !== '')
-                ? $agent->system_prompt
-                : 'You are a helpful AI assistant.';
-
-            try {
                 $llmConfig = $this->resolveLlmConfig($agent);
-            } catch (RuntimeException $e) {
+                $contextWindow = $llmConfig['context_window'];
+                $maxTokensOutput = $llmConfig['max_tokens_output'];
+                $temperature = $llmConfig['temperature'];
+
+                $context = [
+                    'task'           => $task,
+                    'agent'          => $agent,
+                    'enabledClasses' => $enabledClasses,
+                    'contextWindow'  => $contextWindow,
+                    'maxTokensOutput' => $maxTokensOutput,
+                    'request'        => new LLMRequest(
+                        systemPrompt: $systemPrompt,
+                        messages: $this->buildMessages($taskId),
+                        tools: $this->buildToolDefinitions($enabledClasses, $agent->id),
+                        contextWindow: $contextWindow,
+                        maxTokens: $maxTokensOutput,
+                        temperature: $temperature,
+                    ),
+                ];
+            });
+        } catch (RuntimeException $e) {
+            // resolveLlmConfig() threw — the transaction rolled back but the exception
+            // propagated out. Mark the task FAILED so it never stays stuck in RUNNING.
+            if (str_contains($e->getMessage(), 'No LLM configuration')) {
                 Task::where('id', $taskId)->update([
                     'status'         => 'FAILED',
                     'failure_reason' => $e->getMessage(),
                     'error_code'     => 'NO_LLM_CONFIGURATION',
                     'error_message'  => 'No LLM configuration set. Please configure an LLM driver or set a global default.',
                 ]);
-                throw $e;
             }
-            $contextWindow = $llmConfig['context_window'];
-            $maxTokensOutput = $llmConfig['max_tokens_output'];
-            $temperature = $llmConfig['temperature'];
-
-            $context = [
-                'task'           => $task,
-                'agent'          => $agent,
-                'enabledClasses' => $enabledClasses,
-                'contextWindow'  => $contextWindow,
-                'maxTokensOutput' => $maxTokensOutput,
-                'request'        => new LLMRequest(
-                    systemPrompt: $systemPrompt,
-                    messages: $this->buildMessages($taskId),
-                    tools: $this->buildToolDefinitions($enabledClasses, $agent->id),
-                    contextWindow: $contextWindow,
-                    maxTokens: $maxTokensOutput,
-                    temperature: $temperature,
-                ),
-            ];
-        });
+            throw $e;
+        }
 
         if ($context === null) {
             return; // Task was not RUNNING (or hit max_steps) — nothing to do.
@@ -813,12 +818,11 @@ final class Orchestrator implements OrchestratorInterface
             ]);
 
             $this->notificationService?->notifyPendingApproval($task);
-        }
 
-        // Always publish intermediate state after handleToolCalls returns, whether
-        // tools were auto-approved or need human approval. This ensures the frontend
-        // sees tool execution results before the next tick begins.
-        $this->publishIntermediateState($task);
+            // Publish intermediate state when task is paused for approval so the frontend
+            // sees the pending tool calls and can display the approval UI.
+            $this->publishIntermediateState($task);
+        }
     }
 
     /**

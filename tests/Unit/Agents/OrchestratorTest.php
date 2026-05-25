@@ -16,6 +16,7 @@ use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Models\UserPreference;
+use Spora\Services\MercurePublisherInterface;
 use Spora\Tools\AgentMemoryTool;
 use Spora\Tools\GlobalMemoryTool;
 use Tests\Fixtures\SpyAgentIdInputTool;
@@ -1361,4 +1362,121 @@ test('LLM can call both memory and global_memory tools in same session', functio
     $toolNames = $toolCalls->pluck('tool_name')->toArray();
     expect($toolNames)->toContain('memory')
         ->and($toolNames)->toContain('global_memory');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// publishIntermediateState — Mercure duplicate fix
+// ---------------------------------------------------------------------------
+
+it('publishes intermediate state exactly once when tools are auto-approved', function (): void {
+    [$agentId] = seedAgent();
+
+    $publishCount = 0;
+    $mockMercure = Mockery::mock(MercurePublisherInterface::class);
+    $mockMercure->allows('publish')
+        ->andReturnUsing(static function () use (&$publishCount): bool {
+            $publishCount++;
+
+            return true;
+        });
+
+    $callCount = 0;
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+        $callCount++;
+        if ($callCount === 1) {
+            return new LLMResponse(null, [new DriverToolCall('call_1', 'stub_input', [])], 10, 5, 'cmp_1');
+        }
+        return new LLMResponse('Done.', [], 10, 5, 'cmp_2');
+    });
+
+    $tools = [new StubInputTool()];
+    enableToolsForAgent($agentId, $tools);
+
+    $orch = new Orchestrator(
+        driverFactory: mockDriverFactory($mock),
+        toolInstances: $tools,
+        mercure: $mockMercure,
+    );
+
+    $task = $orch->start($agentId, 'Auto approve test', maxSteps: 10);
+
+    $task->refresh();
+    expect($task->status)->toBe('COMPLETED')
+        ->and($task->step_count)->toBe(2);
+
+    // When all tools are auto-approved, publishIntermediateState should be called exactly once:
+    // - Line 787 publishes before the recursive tick
+    // - Line 821 should NOT publish again (that was the bug)
+    expect($publishCount)->toBe(1);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('publishes intermediate state when tools require approval', function (): void {
+    [$agentId] = seedAgent();
+
+    $publishCount = 0;
+    $mockMercure = Mockery::mock(MercurePublisherInterface::class);
+    $mockMercure->allows('publish')
+        ->andReturnUsing(static function () use (&$publishCount): bool {
+            $publishCount++;
+
+            return true;
+        });
+
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->once()->andReturn(
+        new LLMResponse(null, [new DriverToolCall('call_out', 'stub_output', ['key' => 'val'])], 10, 5, 'cmp_1'),
+    );
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+
+    $orch = new Orchestrator(
+        driverFactory: mockDriverFactory($mock),
+        toolInstances: $tools,
+        mercure: $mockMercure,
+    );
+
+    $task = $orch->start($agentId, 'Approval test', maxSteps: 10);
+
+    $task->refresh();
+    expect($task->status)->toBe('PENDING_APPROVAL');
+
+    // When approval is needed, publishIntermediateState is called exactly once (line 821)
+    expect($publishCount)->toBe(1);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// NO_LLM_CONFIGURATION error handling — task state persistence
+// ---------------------------------------------------------------------------
+
+test('tick sets NO_LLM_CONFIGURATION error code and message when resolveLlmConfig throws', function (): void {
+    $authService = bootAuthLayer();
+    $userId = $authService->register('no-config@example.com', 'Password1!');
+
+    // Agent with no LLM config and no global default — resolveLlmConfig() will throw.
+    $agent = Agent::create([
+        'user_id'              => $userId,
+        'name'                 => 'Agent Without Config',
+        'llm_driver_config_id' => null,
+        'max_steps'            => 10,
+        'is_active'            => true,
+    ]);
+
+    $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
+    $orch = makeOrchestrator(mockDriverFactory($llm));
+
+    // start() creates a RUNNING task then calls tick() which throws inside the transaction.
+    try {
+        $orch->start($agent->id, 'Hello', maxSteps: 5);
+        self::fail('Expected RuntimeException was not thrown');
+    } catch (RuntimeException $e) {
+        expect($e->getMessage())->toBe('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
+    }
+
+    // Refresh task from DB — the outer catch in tick() marks it FAILED.
+    $task = Task::where('agent_id', $agent->id)->first();
+    expect($task->status)->toBe('FAILED')
+        ->and($task->error_code)->toBe('NO_LLM_CONFIGURATION')
+        ->and($task->error_message)->toBe('No LLM configuration set. Please configure an LLM driver or set a global default.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());

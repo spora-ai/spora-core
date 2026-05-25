@@ -575,13 +575,23 @@ final class WorkerRunCommand extends Command
             // Notification is sent by Orchestrator.tick() — do not duplicate here.
             $this->logger->info('Task completed', ['task_id' => $task->id]);
         } catch (Throwable $e) {
-            // Notification is sent by Orchestrator.tick() catch block — do not duplicate here.
             $this->logger->error('Task failed', [
                 'task_id' => $task->id,
                 'exception_class' => get_class($e),
                 'message' => $e->getMessage(),
             ]);
             $output->writeln(sprintf('<error>Task %d failed: %s</error>', $task->id, $e->getMessage()));
+
+            // Ensure task is marked FAILED in case the Orchestrator's update was skipped
+            // (e.g., a race condition where status changed between claim and tick).
+            Task::where('id', $task->id)
+                ->where('status', 'RUNNING')
+                ->update([
+                    'status'         => 'FAILED',
+                    'failure_reason' => $e->getMessage(),
+                    'error_code'     => 'TICK_EXCEPTION',
+                    'error_message' => $e->getMessage(),
+                ]);
         }
 
         $processed++;

@@ -85,13 +85,13 @@ describe('MercurePublisher', function (): void {
                 expect($parsed['topic'])->toBe('user/123/notifications')
                     ->and($parsed['data'])->toBeArray()
                     ->and($parsed['data']['event'])->toBe('notification')
-                    ->and($parsed['data']['payload'])->toBe('test_value');
+                    ->and($parsed['data']['notification'])->toBe('test_value');
 
                 return true;
             }))
             ->andReturn(Mockery::mock(ResponseInterface::class));
 
-        $data = ['event' => 'notification', 'payload' => 'test_value'];
+        $data = ['event' => 'notification', 'notification' => 'test_value'];
         $result = $publisher->publishToUser(123, $data);
         expect($result)->toBeTrue();
     });
