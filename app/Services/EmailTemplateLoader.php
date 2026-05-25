@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -21,7 +22,7 @@ final class EmailTemplateLoader
     {
         $this->load();
 
-        return $this->templates;
+        return $this->templates ?? [];
     }
 
     public function get(string $name): ?array
@@ -45,9 +46,13 @@ final class EmailTemplateLoader
         }
 
         foreach ($files as $file) {
-            $data = Yaml::parseFile($file);
-            if (isset($data['name'])) {
-                $this->templates[$data['name']] = $data;
+            try {
+                $data = Yaml::parseFile($file);
+                if (is_array($data) && isset($data['name'])) {
+                    $this->templates[$data['name']] = $data;
+                }
+            } catch (ParseException $e) {
+                throw new \RuntimeException(sprintf('Failed to parse email template "%s": %s', $file, $e->getMessage()), 0, $e);
             }
         }
     }
