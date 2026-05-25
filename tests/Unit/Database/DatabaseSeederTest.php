@@ -6,10 +6,12 @@ use Spora\Core\DatabaseSeeder;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\User;
+use Spora\Services\EmailTemplateLoader;
 
 it('seeds the admin user and agent successfully', function () {
     $authService = bootAuthLayer();
-    $seeder = new DatabaseSeeder($authService);
+    $templateLoader = new EmailTemplateLoader();
+    $seeder = new DatabaseSeeder($authService, $templateLoader);
 
     // Initial state
     expect(User::count())->toBe(0)
@@ -39,7 +41,8 @@ it('seeds the admin user and agent successfully', function () {
 
 it('does not duplicate records if seeder is run twice', function () {
     $authService = bootAuthLayer();
-    $seeder = new DatabaseSeeder($authService);
+    $templateLoader = new EmailTemplateLoader();
+    $seeder = new DatabaseSeeder($authService, $templateLoader);
 
     // First run
     ob_start();

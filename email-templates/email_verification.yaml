@@ -1,0 +1,9 @@
+name: email_verification
+subject: "Verify your email address"
+body_text: |
+  Please click the link below to verify your email address:
+
+  {{verification_link}}
+
+  If you did not create an account, please ignore this email.
+body_html: null

@@ -11,6 +11,7 @@ use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\MailTemplate;
 use Spora\Models\User;
+use Spora\Services\EmailTemplateLoader;
 use Spora\Tools\AgentMemoryTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\CurrentTimeTool;
@@ -24,11 +25,23 @@ final class DatabaseSeeder
 {
     public function __construct(
         private readonly AuthService $authService,
+        private readonly EmailTemplateLoader $templateLoader,
     ) {}
 
     public function run(): void
     {
-        // 1. Create or ensure Admin user exists.
+        // 1. Seed default mail templates first (registration triggers verification emails that need them).
+        $mailTemplates = $this->templateLoader->getAll();
+
+        foreach ($mailTemplates as $template) {
+            MailTemplate::firstOrCreate(
+                ['name' => $template['name']],
+                $template,
+            );
+        }
+        echo "Seeded " . count($mailTemplates) . " Mail Templates.\n";
+
+        // 2. Create or ensure Admin user exists.
         $user = User::where('email', 'admin@spora.local')->first();
         if ($user === null) {
             $userId = $this->authService->register('admin@spora.local', 'password');
@@ -39,14 +52,14 @@ final class DatabaseSeeder
             $userId = $user->id;
         }
 
-        // 1b. Grant ADMIN role to the user and mark as verified (seeder admin bypasses email verification).
+        // 2b. Grant ADMIN role to the user and mark as verified (seeder admin bypasses email verification).
         User::where('id', $userId)->update([
             'roles_mask' => Role::ADMIN,
             'verified' => 1,
             'status' => 1,
         ]);
 
-        // 2. Create or ensure default Agent exists.
+        // 3. Create or ensure default Agent exists.
         $agent = Agent::where('user_id', $userId)->where('name', 'Spora Core Agent')->first();
         if ($agent === null) {
             $agent = Agent::create([
@@ -60,7 +73,7 @@ final class DatabaseSeeder
             echo "Default Agent already exists.\n";
         }
 
-        // 3. Define the base tools every functional agent needs.
+        // 4. Define the base tools every functional agent needs.
         $toolsToEnable = [
             CurrentTimeTool::class,
             CalculatorTool::class,
@@ -80,42 +93,6 @@ final class DatabaseSeeder
         }
 
         echo "Enabled " . count($toolsToEnable) . " Base Tools for the Agent.\n";
-
-        // 4. Seed default mail templates.
-        $mailTemplates = [
-            [
-                'name' => 'email_verification',
-                'subject' => 'Verify your email address',
-                'body_text' => "Please click the link below to verify your email address:\n\n{{verification_link}}\n\nIf you did not create an account, please ignore this email.",
-                'body_html' => null,
-            ],
-            [
-                'name' => 'password_reset',
-                'subject' => 'Reset your password',
-                'body_text' => "Please click the link below to reset your password:\n\n{{reset_link}}\n\nIf you did not request a password reset, please ignore this email.",
-                'body_html' => null,
-            ],
-            [
-                'name' => 'welcome',
-                'subject' => 'Welcome to Spora',
-                'body_text' => "Hello {{user_name}},\n\nWelcome to Spora! Your account has been created with the email {{email}}.\n\nYou can now start using your AI agent.\n\nBest regards,\nThe Spora Team",
-                'body_html' => null,
-            ],
-            [
-                'name' => 'scheduled_run_completed',
-                'subject' => 'Scheduled run completed: {{agent_name}}',
-                'body_text' => "Your scheduled run has completed.\n\nAgent: {{agent_name}}\nTask ID: {{task_id}}\nPrompt: {{user_prompt}}\n\nYou can view the full task history in Spora.",
-                'body_html' => null,
-            ],
-        ];
-
-        foreach ($mailTemplates as $template) {
-            MailTemplate::firstOrCreate(
-                ['name' => $template['name']],
-                $template,
-            );
-        }
-        echo "Seeded " . count($mailTemplates) . " Mail Templates.\n";
 
         echo "Database Seeding Complete!\n";
     }
