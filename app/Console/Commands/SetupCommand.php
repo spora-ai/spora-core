@@ -10,6 +10,7 @@ use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Core\DatabaseSeeder;
 use Spora\Models\Agent;
 use Spora\Models\User;
+use Spora\Services\EmailTemplateLoader;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -26,6 +27,7 @@ final class SetupCommand extends Command
         private readonly Database $database,
         private readonly DatabaseSchemaInstaller $installer,
         private readonly AuthService $authService,
+        private readonly EmailTemplateLoader $templateLoader,
     ) {
         parent::__construct();
     }
@@ -45,7 +47,7 @@ final class SetupCommand extends Command
 
             if ($userCount === 0 && $agentCount === 0) {
                 $output->writeln('<info>Fresh installation — running seeder...</info>');
-                $seeder = new DatabaseSeeder($this->authService);
+                $seeder = new DatabaseSeeder($this->authService, $this->templateLoader);
                 $seeder->run();
             } else {
                 $output->writeln('<info>Existing installation detected. Skipping seeding.</info>');

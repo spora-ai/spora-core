@@ -369,6 +369,7 @@ return [
             $c->get(Database::class),
             $c->get(DatabaseSchemaInstaller::class),
             $c->get(AuthService::class),
+            $c->get(Spora\Services\EmailTemplateLoader::class),
         );
     },
 
@@ -378,6 +379,7 @@ return [
             // Closure defers AuthService (and Delight\Auth\Auth → PDO) construction until after
             // bootDatabaseConnectionOnly() has been called inside execute().
             static fn(): AuthService => $c->get(AuthService::class),
+            $c->get(Spora\Services\EmailTemplateLoader::class),
         );
     },
 
@@ -489,6 +491,10 @@ return [
 
     MailTemplateServiceInterface::class => static function (): MailTemplateServiceInterface {
         return new MailTemplateService();
+    },
+
+    Spora\Services\EmailTemplateLoader::class => static function (): Spora\Services\EmailTemplateLoader {
+        return new Spora\Services\EmailTemplateLoader();
     },
 
     Spora\Http\PromptTemplateController::class => static function (ContainerInterface $c): Spora\Http\PromptTemplateController {

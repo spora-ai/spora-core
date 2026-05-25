@@ -8,6 +8,7 @@ use Closure;
 use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSeeder;
+use Spora\Services\EmailTemplateLoader;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -25,6 +26,7 @@ final class SeedCommand extends Command
     public function __construct(
         private readonly Database $database,
         private readonly Closure $authServiceFactory,
+        private readonly EmailTemplateLoader $templateLoader,
     ) {
         parent::__construct('db:seed');
     }
@@ -44,7 +46,7 @@ final class SeedCommand extends Command
 
             /** @var AuthService $authService */
             $authService = ($this->authServiceFactory)();
-            $seeder = new DatabaseSeeder($authService);
+            $seeder = new DatabaseSeeder($authService, $this->templateLoader);
             $seeder->run();
 
             $output->writeln('<info>Seeding finished successfully.</info>');
