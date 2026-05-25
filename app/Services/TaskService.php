@@ -37,7 +37,11 @@ final class TaskService implements TaskServiceInterface
         }
 
         if ($since !== null) {
-            $query->where('updated_at', '>', Carbon::parse($since)->utc());
+            try {
+                $query->where('updated_at', '>', Carbon::parse($since)->utc());
+            } catch (\Throwable) {
+                // Ignore invalid date format
+            }
         }
 
         return $query->get()->map(fn(Task $t) => $this->taskListResource($t))->all();
@@ -294,18 +298,20 @@ final class TaskService implements TaskServiceInterface
         }
 
         $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => [
-            'id'                 => $tc->id,
-            'tool_name'          => $tc->tool_name,
-            'tool_type'          => $tc->tool_type,
-            'status'             => $tc->status,
-            'proposed_arguments' => $tc->proposed_arguments,
-            'approved_arguments' => $tc->approved_arguments,
-            'human_description'  => $tc->human_description,
-            'result_content'     => $tc->result_content,
-            'executed_at'        => $tc->executed_at?->toIso8601String(),
+            'id'                    => $tc->id,
+            'tool_name'             => $tc->tool_name,
+            'tool_type'             => $tc->tool_type,
+            'status'                => $tc->status,
+            'proposed_arguments'    => $tc->proposed_arguments,
+            'approved_arguments'    => $tc->approved_arguments,
+            'human_description'     => $tc->human_description,
+            'operation'             => $tc->operation,
+            'operation_description' => $tc->operation_description,
+            'result_content'        => $tc->result_content,
+            'executed_at'           => $tc->executed_at?->toIso8601String(),
         ])->all();
 
-        $resource['history'] = $task->taskHistory()->get()->map(fn(TaskHistory $h) => [
+        $resource['history'] = $task->taskHistory()->orderBy('sequence')->get()->map(fn(TaskHistory $h) => [
             'sequence'     => $h->sequence,
             'role'         => $h->role,
             'content'      => $h->content,
@@ -436,7 +442,7 @@ final class TaskService implements TaskServiceInterface
             'executed_at'        => $tc->executed_at?->toIso8601String(),
         ])->all();
 
-        $historyQuery = $task->taskHistory();
+        $historyQuery = $task->taskHistory()->orderBy('sequence');
         if ($sinceSequence !== null) {
             $historyQuery->where('sequence', '>', $sinceSequence);
         }

@@ -12,9 +12,8 @@ export interface Notification {
   created_at: string
 }
 
-let pollTimer: ReturnType<typeof setTimeout> | null = null
-
 export const useNotificationStore = defineStore('notifications', () => {
+  let pollTimer: ReturnType<typeof setTimeout> | null = null
   const notifications = ref<Notification[]>([])
   const unreadCount = computed(() => notifications.value.filter(n => n.read_at === null).length)
 

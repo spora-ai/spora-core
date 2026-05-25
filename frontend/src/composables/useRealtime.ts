@@ -46,8 +46,10 @@ export function useRealtime() {
       if (!authStore.initialized) {
         // Auth not ready yet — poll until it is, then connect
         await new Promise<void>(resolve => {
+          let attempts = 0
           const stop = setInterval(() => {
-            if (authStore.initialized) {
+            attempts++
+            if (authStore.initialized || attempts > 100) { // 5s timeout
               clearInterval(stop)
               resolve()
             }

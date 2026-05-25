@@ -589,7 +589,7 @@ final class WorkerRunCommand extends Command
                 ->update([
                     'status'         => 'FAILED',
                     'failure_reason' => $e->getMessage(),
-                    'error_code'     => 'TICK_EXCEPTION',
+                    'error_code'     => 'UNKNOWN',
                     'error_message' => $e->getMessage(),
                 ]);
         }

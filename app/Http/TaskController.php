@@ -31,13 +31,16 @@ final class TaskController
         $agentId = $request->query->has('agent_id') ? (int) $request->query->get('agent_id') : null;
         $since = $request->query->has('since') ? $request->query->get('since') : null;
 
+        // Compute server_time before querying to avoid gaps on next poll
+        $serverTime = Carbon::now()->toIso8601String();
+
         // Agent ownership validation is done inside the service
         $tasks = $this->taskService->getTasksForUser($userId, $agentId, $since);
 
         return new JsonResponse([
             'data' => [
-                'tasks' => $tasks,
-                'server_time' => Carbon::now()->toIso8601String(),
+                'tasks'       => $tasks,
+                'server_time' => $serverTime,
             ],
         ]);
     }

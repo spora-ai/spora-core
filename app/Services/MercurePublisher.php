@@ -28,7 +28,7 @@ final class MercurePublisher implements MercurePublisherInterface
 
     /**
      * Publish a task state change to the Mercure hub.
-     * Topic: task/{userId}/{taskId} — user-scoped so only the task owner receives updates.
+     * Topic: user/{userId}/tasks — user-scoped so only the task owner receives updates.
      */
     public function publish(int $taskId, int $userId, array $taskData): bool
     {
