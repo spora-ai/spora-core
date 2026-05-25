@@ -123,7 +123,7 @@ it('index returns list of tasks for the authenticated user', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('getTasksForUser')
         ->once()
-        ->with(1, null)
+        ->withArgs(fn(int $userId, $agentId, $since) => $userId === 1 && $agentId === null && $since === null)
         ->andReturn([[
             'id'          => 1,
             'agent_id'    => 1,
@@ -145,6 +145,42 @@ it('index returns list of tasks for the authenticated user', function (): void {
     $body = json_decode($resp->getContent(), true);
     expect($body['data']['tasks'])->toHaveCount(1)
         ->and($body['data']['tasks'][0]['status'])->toBe('COMPLETED');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('index returns server_time in response envelope', function (): void {
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTasksForUser')
+        ->once()
+        ->withArgs(fn(int $userId, $agentId, $since) => $userId === 1 && $agentId === null && $since === null)
+        ->andReturn([]);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    seedUserAndAgent($authService);
+
+    $resp = $controller->index(jsonRequest('GET', '/api/v1/tasks'));
+    expect($resp->getStatusCode())->toBe(200);
+
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data'])->toHaveKey('server_time');
+    expect($body['data']['server_time'])->toBeString();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('index with since param passes since to service and returns empty tasks on future timestamp', function (): void {
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTasksForUser')
+        ->once()
+        ->withArgs(fn(int $userId, $agentId, $since) => $userId === 1 && $agentId === null && $since === '2099-01-01T00:00:00Z')
+        ->andReturn([]);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    seedUserAndAgent($authService);
+
+    $resp = $controller->index(jsonRequest('GET', '/api/v1/tasks?since=2099-01-01T00:00:00Z'));
+    expect($resp->getStatusCode())->toBe(200);
+
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['tasks'])->toBeEmpty();
+    expect($body['data']['server_time'])->toBeString();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------

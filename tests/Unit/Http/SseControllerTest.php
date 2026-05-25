@@ -53,7 +53,7 @@ describe('SseController', function (): void {
         $payloadJson = base64_decode(strtr($parts[1] ?? '', '-_', '+/'));
         $payload = json_decode($payloadJson, true);
 
-        expect($payload['mercure']['subscribe'])->toContain('task/*');
+        expect($payload['mercure']['subscribe'])->toContain("user/{$userId}/tasks");
         expect($payload['mercure']['subscribe'])->toContain("user/{$userId}/notifications");
     });
 

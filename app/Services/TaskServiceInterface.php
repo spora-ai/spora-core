@@ -27,7 +27,7 @@ interface TaskServiceInterface
      *     retry_after?: string
      * }>
      */
-    public function getTasksForUser(int $userId, ?int $agentId = null): array;
+    public function getTasksForUser(int $userId, ?int $agentId = null, ?string $since = null): array;
 
     /**
      * @return array{

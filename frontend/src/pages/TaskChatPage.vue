@@ -58,7 +58,7 @@ const expandedTools = ref<Record<number, boolean>>({})
 
 const errorBannerDismissed = ref(false)
 
-const RETRYABLE_ERROR_CODES = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'SERVER_ERROR', 'GATEWAY_ERROR', 'LLM_TIMEOUT', 'ORPHANED'] as const
+const RETRYABLE_ERROR_CODES = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'SERVER_ERROR', 'GATEWAY_ERROR', 'AUTH_ERROR', 'LLM_TIMEOUT', 'ORPHANED'] as const
 
 const showRetryBanner = computed(() => {
   if (!task.value) return false
@@ -77,6 +77,30 @@ const showRetryBanner = computed(() => {
   // Auto-retry is disabled: still show banner so user can manually retry
   if ((task.value.max_retries ?? 0) === 0) return true
   return false
+})
+
+const NON_RETRYABLE_ERROR_CODES = ['NO_LLM_CONFIGURATION', 'UNKNOWN'] as const
+
+// Shows error banner for non-retryable errors (NO_LLM_CONFIGURATION, etc.)
+const showNonRetryableErrorBanner = computed(() => {
+  if (!task.value) return false
+  if (task.value.status !== 'FAILED') return false
+  if (errorBannerDismissed.value) return false
+  if (task.value.error_code === null) return false
+  // Only show for errors that are NOT retryable
+  if (RETRYABLE_ERROR_CODES.includes(task.value.error_code as typeof RETRYABLE_ERROR_CODES[number])) return false
+  // Also exclude errors not in our known lists (safety check)
+  if (!NON_RETRYABLE_ERROR_CODES.includes(task.value.error_code as typeof NON_RETRYABLE_ERROR_CODES[number])) return false
+  return true
+})
+
+// For UNKNOWN errors, show raw failure_reason since error_message is generic
+const nonRetryableErrorMessage = computed(() => {
+  if (!task.value) return null
+  if (task.value.error_code === 'UNKNOWN') {
+    return task.value.failure_reason || task.value.error_message
+  }
+  return task.value.error_message
 })
 
 // Countdown for auto-retry (retry_after set but not yet elapsed)
@@ -463,6 +487,33 @@ onUnmounted(() => {
         </button>
         <button
           data-testid="dismiss-retry-banner-button"
+          @click="errorBannerDismissed = true"
+          class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg border border-red-300 dark:border-red-800 text-red-700 dark:text-red-300 text-xs px-2 hover:bg-red-100 dark:hover:bg-red-950/50 transition-colors"
+        >
+          Dismiss
+        </button>
+      </div>
+
+      <!-- Non-retryable error banner (NO_LLM_CONFIGURATION, UNKNOWN, etc.) -->
+      <div
+        v-if="showNonRetryableErrorBanner"
+        data-testid="non-retryable-error-banner"
+        class="mx-4 mt-4 max-w-2xl mx-auto flex items-start gap-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm"
+      >
+        <Icon name="warning" class="h-5 w-5 shrink-0 text-red-600 dark:text-red-400 mt-0.5" />
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold text-red-900 dark:text-red-100">Task failed: {{ task.error_code?.replace('_', ' ').toLowerCase() }}</p>
+          <p v-if="nonRetryableErrorMessage" class="text-red-700 dark:text-red-300 mt-0.5">{{ nonRetryableErrorMessage }}</p>
+        </div>
+        <button
+          data-testid="retry-button-non-retryable"
+          @click="retryNow"
+          class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium shadow transition-colors px-3"
+        >
+          Retry Now
+        </button>
+        <button
+          data-testid="dismiss-non-retryable-banner-button"
           @click="errorBannerDismissed = true"
           class="shrink-0 inline-flex h-8 items-center justify-center rounded-lg border border-red-300 dark:border-red-800 text-red-700 dark:text-red-300 text-xs px-2 hover:bg-red-100 dark:hover:bg-red-950/50 transition-colors"
         >

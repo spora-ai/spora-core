@@ -11,9 +11,9 @@ interface MercurePublisherInterface
 {
     /**
      * Publish a task state change to the Mercure hub.
-     * Topic: task/{taskId}
+     * Topic: user/{userId}/tasks
      */
-    public function publish(int $taskId, array $taskData): bool;
+    public function publish(int $taskId, int $userId, array $taskData): bool;
 
     /**
      * Publish a user-scoped notification to the Mercure hub.

@@ -113,6 +113,51 @@ export const useAgentStore = defineStore('agent', () => {
     currentAgentTasks.value = currentAgentTasks.value.filter(t => t.id !== taskId)
   }
 
+  /**
+   * Called by useRealtime when a SSE task event arrives.
+   * Updates an existing task in currentAgentTasks or prepends a new one.
+   */
+  /**
+   * Called by useRealtime when a SSE task event arrives.
+   * Also called during SSE fallback polling to keep currentAgentTasks in sync.
+   * Only applies updates for tasks belonging to the currentAgent.
+   */
+  function applySseTaskEvent(data: Record<string, unknown>): void {
+    const taskId = (data.id ?? data.task_id) as number | undefined
+    if (taskId === undefined) return
+
+    const taskAgentId = (data as { agent_id?: number }).agent_id
+
+    // If we know which agent this task belongs to and it's not the current one, skip it
+    if (currentAgent.value !== null && taskAgentId !== undefined && taskAgentId !== currentAgent.value.id) {
+      return
+    }
+
+    const idx = currentAgentTasks.value.findIndex(t => t.id === taskId)
+    if (idx !== -1) {
+      Object.assign(currentAgentTasks.value[idx], {
+        status: (data.status as Task['status']) ?? currentAgentTasks.value[idx].status,
+        step_count: (data.step_count as number) ?? currentAgentTasks.value[idx].step_count,
+        final_response: (data.final_response as string | null) ?? currentAgentTasks.value[idx].final_response,
+        updated_at: (data.updated_at as string) ?? currentAgentTasks.value[idx].updated_at,
+      })
+    } else {
+      if (data.status !== undefined) {
+        currentAgentTasks.value.unshift({
+          id: taskId,
+          agent_id: taskAgentId ?? currentAgent.value?.id ?? 0,
+          status: data.status as Task['status'],
+          user_prompt: (data as { user_prompt?: string }).user_prompt ?? '',
+          final_response: (data.final_response as string | null) ?? null,
+          step_count: (data.step_count as number) ?? 0,
+          max_steps: null,
+          updated_at: (data.updated_at as string) ?? new Date().toISOString(),
+          created_at: (data.created_at as string) ?? new Date().toISOString(),
+        })
+      }
+    }
+  }
+
   // ── Tools ───────────────────────────────────────────────────────────────────
 
   async function enableTool(agentId: number, toolName: string): Promise<AgentTool> {
@@ -240,6 +285,7 @@ export const useAgentStore = defineStore('agent', () => {
     deleteAgent,
     fetchAgentTasks,
     deleteTask,
+    applySseTaskEvent,
     enableTool,
     disableTool,
     patchTool,

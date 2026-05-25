@@ -145,6 +145,68 @@ describe('useAgentStore', () => {
     })
   })
 
+  describe('applySseTaskEvent', () => {
+    it('updates existing task scalar fields when id matches', () => {
+      const store = useAgentStore()
+      store.currentAgentTasks = [
+        { id: 5, agent_id: 1, status: 'RUNNING', user_prompt: 'Hello', final_response: null, step_count: 1, max_steps: 10, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+      ]
+
+      store.applySseTaskEvent({ id: 5, status: 'COMPLETED', step_count: 3, final_response: 'Done', updated_at: '2024-01-01T00:01:00Z' })
+
+      expect(store.currentAgentTasks[0].status).toBe('COMPLETED')
+      expect(store.currentAgentTasks[0].step_count).toBe(3)
+      expect(store.currentAgentTasks[0].final_response).toBe('Done')
+      expect(store.currentAgentTasks[0].updated_at).toBe('2024-01-01T00:01:00Z')
+    })
+
+    it('prepends new task when id has no match', () => {
+      const store = useAgentStore()
+      store.currentAgentTasks = [
+        { id: 5, agent_id: 1, status: 'COMPLETED', user_prompt: 'Existing', final_response: null, step_count: 2, max_steps: 10, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+      ]
+
+      store.applySseTaskEvent({ id: 99, agent_id: 1, status: 'PENDING_APPROVAL', user_prompt: 'New task', step_count: 0 })
+
+      expect(store.currentAgentTasks.length).toBe(2)
+      expect(store.currentAgentTasks[0].id).toBe(99)
+      expect(store.currentAgentTasks[0].status).toBe('PENDING_APPROVAL')
+      expect(store.currentAgentTasks[0].user_prompt).toBe('New task')
+    })
+
+    it('does not prepend when status is undefined (no-op for non-task events)', () => {
+      const store = useAgentStore()
+      store.currentAgentTasks = [
+        { id: 5, agent_id: 1, status: 'RUNNING', user_prompt: 'Hello', final_response: null, step_count: 1, max_steps: 10, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+      ]
+
+      store.applySseTaskEvent({ id: 99 }) // no status field
+
+      expect(store.currentAgentTasks.length).toBe(1)
+      expect(store.currentAgentTasks[0].id).toBe(5)
+    })
+
+    it('handles task_id as the identifier (explicit publish path)', () => {
+      const store = useAgentStore()
+      store.currentAgentTasks = [
+        { id: 7, agent_id: 1, status: 'RUNNING', user_prompt: 'Hello', final_response: null, step_count: 1, max_steps: 10, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+      ]
+
+      store.applySseTaskEvent({ task_id: 7, status: 'FAILED', error_code: 'TOOL_ERROR' })
+
+      expect(store.currentAgentTasks[0].status).toBe('FAILED')
+    })
+
+    it('does not crash when currentAgentTasks is empty', () => {
+      const store = useAgentStore()
+      store.currentAgentTasks = []
+
+      expect(() => store.applySseTaskEvent({ id: 1, status: 'COMPLETED' })).not.toThrow()
+      expect(store.currentAgentTasks.length).toBe(1)
+      expect(store.currentAgentTasks[0].id).toBe(1)
+    })
+  })
+
   describe('enableTool / disableTool', () => {
     it('enableTool calls POST and returns tool', async () => {
       const tool = { tool_class: 'TestTool', tool_name: 'TestTool', auto_approve: null }

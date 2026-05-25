@@ -34,6 +34,7 @@ const mockTaskDetail = {
 describe('useTaskStore', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    mockApi.get.mockReset()
     setActivePinia(createPinia())
   })
 
@@ -246,6 +247,103 @@ describe('useTaskStore', () => {
       store.applyTaskUpdate(999, { error_code: 'SERVER_ERROR' })
       expect(store.activeTask!.error_code).toBeUndefined()
     })
+
+    it('merges new history entries filtering by sequence', () => {
+      const store = useTaskStore()
+      store.activeTask = {
+        ...mockTaskDetail,
+        history: [{ sequence: 0, role: 'user', content: 'Hello', reasoning: null, tool_call_id: null, tool_name: null }],
+      }
+
+      // SSE sends a new entry with sequence 1
+      store.applyTaskUpdate(1, {
+        history: [
+          { sequence: 1, role: 'assistant', content: 'Hi there', reasoning: null, tool_call_id: null, tool_name: null },
+        ],
+      })
+
+      expect(store.activeTask!.history).toHaveLength(2)
+      expect(store.activeTask!.history[1].sequence).toBe(1)
+    })
+
+    it('does not duplicate history entries on duplicate sequence', () => {
+      const store = useTaskStore()
+      store.activeTask = {
+        ...mockTaskDetail,
+        history: [{ sequence: 0, role: 'user', content: 'Hello', reasoning: null, tool_call_id: null, tool_name: null }],
+      }
+
+      // Same sequence delivered twice via SSE
+      store.applyTaskUpdate(1, {
+        history: [{ sequence: 1, role: 'assistant', content: 'First', reasoning: null, tool_call_id: null, tool_name: null }],
+      })
+      store.applyTaskUpdate(1, {
+        history: [{ sequence: 1, role: 'assistant', content: 'Duplicate', reasoning: null, tool_call_id: null, tool_name: null }],
+      })
+
+      expect(store.activeTask!.history).toHaveLength(2)
+    })
+
+    it('replaces tool_calls entirely from SSE data', () => {
+      const store = useTaskStore()
+      store.activeTask = {
+        ...mockTaskDetail,
+        tool_calls: [
+          { id: 1, tool_name: 'WebSearch', tool_type: 'search', operation: null, operation_description: null, status: 'PENDING_APPROVAL', proposed_arguments: {}, approved_arguments: null, human_description: null, result_content: null, executed_at: null },
+        ],
+      }
+
+      const newCalls = [
+        { id: 1, tool_name: 'WebSearch', tool_type: 'search', operation: null, operation_description: null, status: 'EXECUTED', proposed_arguments: {}, approved_arguments: {}, human_description: null, result_content: 'Result', executed_at: '2026-01-01T00:00:02Z' },
+      ]
+
+      store.applyTaskUpdate(1, { tool_calls: newCalls })
+
+      expect(store.activeTask!.tool_calls).toEqual(newCalls)
+    })
+
+    it('updates retry fields from SSE data', () => {
+      const store = useTaskStore()
+      store.activeTask = { ...mockTaskDetail, retry_of_task_id: null, retry_count: undefined, retry_after: null }
+
+      store.applyTaskUpdate(1, {
+        retry_of_task_id: 5,
+        retry_count: 2,
+        retry_after: '2026-01-01T00:05:00Z',
+      })
+
+      expect(store.activeTask!.retry_of_task_id).toBe(5)
+      expect(store.activeTask!.retry_count).toBe(2)
+      expect(store.activeTask!.retry_after).toBe('2026-01-01T00:05:00Z')
+    })
+
+    it('handles lightweight SSE data without tool_calls or history keys (taskListResource shape)', () => {
+      // Data from taskListResource / publishIntermediateState has no tool_calls/history
+      const store = useTaskStore()
+      store.activeTask = {
+        ...mockTaskDetail,
+        status: 'RUNNING',
+        step_count: 1,
+        tool_calls: [{ id: 1, tool_name: 'WebSearch', tool_type: 'search', operation: null, operation_description: null, status: 'PENDING_APPROVAL', proposed_arguments: {}, approved_arguments: null, human_description: null, result_content: null, executed_at: null }],
+        history: [{ sequence: 0, role: 'user', content: 'Hello', reasoning: null, tool_call_id: null, tool_name: null }],
+      }
+
+      // Lightweight SSE update (no tool_calls/history keys)
+      store.applyTaskUpdate(1, {
+        id: 1,
+        status: 'COMPLETED',
+        step_count: 3,
+        final_response: 'Done',
+      })
+
+      // Scalar fields updated
+      expect(store.activeTask!.status).toBe('COMPLETED')
+      expect(store.activeTask!.step_count).toBe(3)
+      expect(store.activeTask!.final_response).toBe('Done')
+      // tool_calls and history preserved (not overwritten since keys are absent)
+      expect(store.activeTask!.tool_calls).toHaveLength(1)
+      expect(store.activeTask!.history).toHaveLength(1)
+    })
   })
 
   describe('lastTaskByAgent', () => {
@@ -260,6 +358,115 @@ describe('useTaskStore', () => {
       const last = store.lastTaskByAgent
       expect(last.get(1)?.id).toBe(2) // newer
       expect(last.get(2)?.id).toBe(3)
+    })
+  })
+
+  describe('applySseEventToTasks', () => {
+    it('updates existing task in tasks array', () => {
+      const store = useTaskStore()
+      store.tasks = [{ ...mockTask }]
+
+      store.applySseEventToTasks({
+        id: 1,
+        status: 'COMPLETED',
+        step_count: 5,
+        final_response: 'Done',
+        updated_at: '2026-01-01T00:00:10Z',
+      })
+
+      expect(store.tasks[0].status).toBe('COMPLETED')
+      expect(store.tasks[0].step_count).toBe(5)
+      expect(store.tasks[0].final_response).toBe('Done')
+    })
+
+    it('prepends new task when not found in tasks array', () => {
+      const store = useTaskStore()
+      store.tasks = [{ ...mockTask, id: 1 }]
+
+      store.applySseEventToTasks({
+        id: 2,
+        agent_id: 2,
+        status: 'RUNNING',
+        user_prompt: 'New task',
+        step_count: 0,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:01Z',
+      })
+
+      expect(store.tasks.length).toBe(2)
+      expect(store.tasks[0].id).toBe(2)
+      expect(store.tasks[0].status).toBe('RUNNING')
+    })
+
+    it('ignores event with no taskId and no status', () => {
+      const store = useTaskStore()
+      store.tasks = [{ ...mockTask }]
+
+      store.applySseEventToTasks({ step_count: 5 })
+
+      expect(store.tasks.length).toBe(1)
+      expect(store.tasks[0].step_count).toBe(1)
+    })
+  })
+
+  describe('startDashboardPolling', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('initial call fetches without since query param', async () => {
+      mockApi.get.mockResolvedValueOnce({
+        tasks: [],
+        server_time: '2026-01-01T00:01:00Z',
+      })
+
+      const store = useTaskStore()
+      store.startDashboardPolling()
+
+      // Allow the initial setTimeout to fire and pending promises to resolve
+      await vi.advanceTimersByTimeAsync(30_000)
+
+      expect(mockApi.get).toHaveBeenCalledWith('/tasks')
+    })
+
+    it('subsequent calls use server_time as since param', async () => {
+      mockApi.get.mockResolvedValue({
+        tasks: [],
+        server_time: '2026-01-01T00:01:00Z',
+      })
+
+      const store = useTaskStore()
+      store.startDashboardPolling()
+      await vi.advanceTimersByTimeAsync(30_000)
+
+      store.startDashboardPolling()
+      await vi.advanceTimersByTimeAsync(30_000)
+
+      // First call: no since param (initial fetch)
+      // Second call: since=lastDashboardPollAt (set from first response)
+      expect(mockApi.get).toHaveBeenNthCalledWith(1, '/tasks')
+      expect(mockApi.get).toHaveBeenNthCalledWith(2, '/tasks?since=2026-01-01T00%3A01%3A00Z')
+    })
+
+    it('stops previous polling when called again', async () => {
+      mockApi.get.mockResolvedValue({
+        tasks: [],
+        server_time: '2026-01-01T00:01:00Z',
+      })
+
+      const store = useTaskStore()
+      store.startDashboardPolling()
+      await vi.advanceTimersByTimeAsync(30_000)
+
+      store.startDashboardPolling()
+      await vi.advanceTimersByTimeAsync(30_000)
+
+      // Only one fetch should have occurred from the second polling session
+      expect(mockApi.get).toHaveBeenCalledTimes(2)
     })
   })
 })

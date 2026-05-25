@@ -60,6 +60,10 @@ describe('NotificationService', function (): void {
             ->once()
             ->with($userId, Mockery::type('array'))
             ->andReturn(true);
+        $mercure->shouldReceive('publish')
+            ->once()
+            ->with(Mockery::type('int'), Mockery::type('int'), Mockery::type('array'))
+            ->andReturn(true);
 
         $service = new NotificationService($mercure);
 
@@ -88,6 +92,7 @@ describe('NotificationService', function (): void {
 
         $mercure = Mockery::mock(MercurePublisherInterface::class);
         $mercure->allows('publishToUser')->andReturn(true);
+        $mercure->allows('publish')->andReturn(true);
 
         $service = new NotificationService($mercure);
 
@@ -118,7 +123,7 @@ describe('NotificationService', function (): void {
             ->andReturn(true);
         $mercure->shouldReceive('publish')
             ->once()
-            ->with(Mockery::type('int'), Mockery::type('array'))
+            ->with(Mockery::type('int'), Mockery::type('int'), Mockery::type('array'))
             ->andReturn(true);
 
         $service = new NotificationService($mercure);

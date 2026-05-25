@@ -3,12 +3,13 @@
  * AgentPage — agent detail page with composer and task history.
  * Route: /agents/:id
  */
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { usePromptTemplatesStore } from '@/stores/promptTemplates'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
 import { useLlmPreferencesStore } from '@/stores/llmPreferencesStore'
+import { useRealtime } from '@/composables/useRealtime'
 import AgentLayout from '@/components/layout/AgentLayout.vue'
 import ComposerInput from '@/components/ComposerInput.vue'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
@@ -49,6 +50,9 @@ const promptTemplatesStore = usePromptTemplatesStore()
 const llmConfigsStore = useLlmConfigsStore()
 const preferenceStore = useLlmPreferencesStore()
 
+// Initialize realtime connection (singleton — reused across route changes)
+useRealtime()
+
 const agentId = computed(() => Number(route.params.id))
 
 // ── Relative time ───────────────────────────────────────────────────────────
@@ -63,34 +67,6 @@ function formatRelativeTime(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
-// ── Polling ─────────────────────────────────────────────────────────────────
-
-let pollTimer: ReturnType<typeof setTimeout> | null = null
-
-function startPolling(): void {
-  stopPolling()
-  const tick = async () => {
-    const id = agentId.value
-    if (!Number.isFinite(id)) return
-    try {
-      await agentStore.fetchAgentTasks(id)
-    } finally {
-      const hasActive = agentStore.currentAgentTasks.some(
-        (t) => !['COMPLETED', 'FAILED'].includes(t.status),
-      )
-      pollTimer = setTimeout(tick, hasActive ? 3000 : 10000)
-    }
-  }
-  pollTimer = setTimeout(tick, 3000)
-}
-
-function stopPolling(): void {
-  if (pollTimer !== null) {
-    clearTimeout(pollTimer)
-    pollTimer = null
-  }
-}
-
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 
 // Refetch when navigating between agents (browser back/forward)
@@ -99,7 +75,6 @@ watch(agentId, async (newId) => {
     router.push({ name: 'dashboard' })
     return
   }
-  stopPolling()
   agentStore.clearCurrentAgent()
   llmCheckDone.value = false
   await agentStore.fetchAgents()
@@ -115,7 +90,6 @@ watch(agentId, async (newId) => {
   }
 
   await promptTemplatesStore.fetchTemplates(newId)
-  startPolling()
 })
 
 onMounted(async () => {
@@ -140,11 +114,6 @@ onMounted(async () => {
   }
 
   await promptTemplatesStore.fetchTemplates(id)
-  startPolling()
-})
-
-onUnmounted(() => {
-  stopPolling()
 })
 </script>
 

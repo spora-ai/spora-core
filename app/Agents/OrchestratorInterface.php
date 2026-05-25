@@ -13,9 +13,10 @@ interface OrchestratorInterface
      * @param  string  $userPrompt   The user's initial instruction.
      * @param  int     $maxSteps     Hard iteration cap. Copied to Task at creation.
      * @param  int|null $parentTaskId Optional parent task for follow-up chaining.
+     * @param  int|null $runId       Optional scheduled run ID for tracking.
      * @return Task                  The newly created Task (status: RUNNING).
      */
-    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null): Task;
+    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null): Task;
 
     /**
      * One iteration of the loop. Called by the Symfony Messenger handler.

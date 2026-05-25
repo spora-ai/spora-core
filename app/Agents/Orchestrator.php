@@ -26,6 +26,7 @@ use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\ContextWindowErrorParser;
 use Spora\Services\LLMConfigService;
+use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\ToolInterface;
@@ -52,6 +53,7 @@ final class Orchestrator implements OrchestratorInterface
      * @param  ?LoggerInterface     $logger             Optional PSR-3 logger. When null, all log calls
      *                                                    are silently skipped — no behaviour change.
      * @param  ?NotificationService $notificationService Optional notification service for task events.
+     * @param  ?MercurePublisherInterface $mercure       Optional Mercure publisher for real-time SSE updates.
      */
     public function __construct(
         private readonly DriverFactory              $driverFactory,
@@ -61,15 +63,18 @@ final class Orchestrator implements OrchestratorInterface
         private readonly WorkerMode                 $workerMode     = WorkerMode::Sync,
         private readonly ?NotificationService      $notificationService = null,
         private readonly ?PluginLoader              $pluginLoader   = null,
+        private readonly ?MercurePublisherInterface $mercure       = null,
     ) {}
 
     // -------------------------------------------------------------------------
     // Public API
     // -------------------------------------------------------------------------
 
-    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null): Task
+    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null): Task
     {
         $agent = Agent::findOrFail($agentId);
+
+        $taskData = $runId !== null ? ['run_id' => $runId] : [];
 
         $task = Task::create([
             'agent_id'      => $agentId,
@@ -79,6 +84,7 @@ final class Orchestrator implements OrchestratorInterface
             'step_count'    => 0,
             'max_steps'     => $maxSteps,
             'parent_task_id' => $parentTaskId,
+            'data'          => $taskData,
         ]);
 
         // Seed the conversation with the user's prompt as the first history row.
@@ -123,53 +129,68 @@ final class Orchestrator implements OrchestratorInterface
         // and read all data needed for the LLM call. Lock is released when the transaction commits,
         // before any network I/O, so the DB connection is not held idle during the LLM round-trip.
         $context = null;
-        Capsule::connection()->transaction(function () use ($taskId, &$context) {
-            $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
-            if ($task->status !== 'RUNNING') {
-                return;
-            }
+        try {
+            Capsule::connection()->transaction(function () use ($taskId, &$context): void {
+                $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
-            // Each tick() represents one full Agent lifecycle turn (Think → Act).
-            // Increment exactly once so N parallel tools in a single turn count as 1 step.
-            if ($task->step_count >= $task->max_steps) {
-                $task->status         = 'FAILED';
-                $task->failure_reason = 'Max steps reached.';
+                if ($task->status !== 'RUNNING') {
+                    return;
+                }
+
+                // Each tick() represents one full Agent lifecycle turn (Think → Act).
+                // Increment exactly once so N parallel tools in a single turn count as 1 step.
+                if ($task->step_count >= $task->max_steps) {
+                    $task->status         = 'FAILED';
+                    $task->failure_reason = 'Max steps reached.';
+                    $task->save();
+                    return;
+                }
+
+                $task->step_count++;
                 $task->save();
-                return;
+
+                $agent          = Agent::findOrFail($task->agent_id);
+                $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->toArray();
+
+                $systemPrompt = ($agent->system_prompt !== null && $agent->system_prompt !== '')
+                    ? $agent->system_prompt
+                    : 'You are a helpful AI assistant.';
+
+                $llmConfig = $this->resolveLlmConfig($agent);
+                $contextWindow = $llmConfig['context_window'];
+                $maxTokensOutput = $llmConfig['max_tokens_output'];
+                $temperature = $llmConfig['temperature'];
+
+                $context = [
+                    'task'           => $task,
+                    'agent'          => $agent,
+                    'enabledClasses' => $enabledClasses,
+                    'contextWindow'  => $contextWindow,
+                    'maxTokensOutput' => $maxTokensOutput,
+                    'request'        => new LLMRequest(
+                        systemPrompt: $systemPrompt,
+                        messages: $this->buildMessages($taskId),
+                        tools: $this->buildToolDefinitions($enabledClasses, $agent->id),
+                        contextWindow: $contextWindow,
+                        maxTokens: $maxTokensOutput,
+                        temperature: $temperature,
+                    ),
+                ];
+            });
+        } catch (RuntimeException $e) {
+            // resolveLlmConfig() threw — the transaction rolled back but the exception
+            // propagated out. Mark the task FAILED so it never stays stuck in RUNNING.
+            if (str_contains($e->getMessage(), 'No LLM configuration')) {
+                Task::where('id', $taskId)->update([
+                    'status'         => 'FAILED',
+                    'failure_reason' => $e->getMessage(),
+                    'error_code'     => 'NO_LLM_CONFIGURATION',
+                    'error_message'  => 'No LLM configuration set. Please configure an LLM driver or set a global default.',
+                ]);
             }
-
-            $task->step_count++;
-            $task->save();
-
-            $agent          = Agent::findOrFail($task->agent_id);
-            $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->toArray();
-
-            $systemPrompt = ($agent->system_prompt !== null && $agent->system_prompt !== '')
-                ? $agent->system_prompt
-                : 'You are a helpful AI assistant.';
-
-            $llmConfig = $this->resolveLlmConfig($agent);
-            $contextWindow = $llmConfig['context_window'];
-            $maxTokensOutput = $llmConfig['max_tokens_output'];
-            $temperature = $llmConfig['temperature'];
-
-            $context = [
-                'task'           => $task,
-                'agent'          => $agent,
-                'enabledClasses' => $enabledClasses,
-                'contextWindow'  => $contextWindow,
-                'maxTokensOutput' => $maxTokensOutput,
-                'request'        => new LLMRequest(
-                    systemPrompt: $systemPrompt,
-                    messages: $this->buildMessages($taskId),
-                    tools: $this->buildToolDefinitions($enabledClasses, $agent->id),
-                    contextWindow: $contextWindow,
-                    maxTokens: $maxTokensOutput,
-                    temperature: $temperature,
-                ),
-            ];
-        });
+            throw $e;
+        }
 
         if ($context === null) {
             return; // Task was not RUNNING (or hit max_steps) — nothing to do.
@@ -766,8 +787,9 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         if ($pendingApproval === []) {
-            // All tools in this batch were executed immediately — continue the loop.
-            $task->save();
+            // All tools in this batch were executed immediately — publish intermediate state
+            // to Mercure so the frontend sees tool execution results in real time, then continue.
+            $this->publishIntermediateState($task);
             $this->tick($task->id);
         } else {
             // At least one tool needs approval — pause the task.
@@ -796,7 +818,51 @@ final class Orchestrator implements OrchestratorInterface
             ]);
 
             $this->notificationService?->notifyPendingApproval($task);
+
+            // Publish intermediate state when task is paused for approval so the frontend
+            // sees the pending tool calls and can display the approval UI.
+            $this->publishIntermediateState($task);
         }
+    }
+
+    /**
+     * Publish the current task state to Mercure for real-time SSE delivery.
+     * Includes tool_calls and history so the frontend sees intermediate execution results.
+     */
+    private function publishIntermediateState(Task $task): void
+    {
+        if ($this->mercure === null) {
+            return;
+        }
+
+        $taskData = [
+            'id'         => $task->id,
+            'status'     => $task->status,
+            'step_count' => $task->step_count,
+            'tool_calls' => $task->toolCalls->map(fn(ToolCallModel $tc) => [
+                'id'                    => $tc->id,
+                'tool_name'             => $tc->tool_name,
+                'tool_type'             => $tc->tool_type,
+                'operation'             => $tc->operation,
+                'operation_description' => $tc->operation_description,
+                'human_description'     => $tc->human_description,
+                'status'                => $tc->status,
+                'proposed_arguments'    => $tc->proposed_arguments,
+                'approved_arguments'    => $tc->approved_arguments,
+                'result_content'        => $tc->result_content,
+                'executed_at'           => $tc->executed_at?->toIso8601String(),
+            ])->all(),
+            'history' => $task->taskHistory()->orderBy('sequence')->get()->map(fn(TaskHistory $h) => [
+                'sequence'     => $h->sequence,
+                'role'         => $h->role,
+                'content'      => $h->content,
+                'reasoning'    => $h->reasoning,
+                'tool_call_id' => $h->tool_call_id,
+                'tool_name'    => $h->tool_name,
+            ])->all(),
+        ];
+
+        $this->mercure->publish($task->id, $task->user_id, $taskData);
     }
 
     /**
@@ -1337,8 +1403,9 @@ final class Orchestrator implements OrchestratorInterface
             'GATEWAY_ERROR'     => 'The AI service is temporarily unavailable. Try again shortly.',
             'AUTH_ERROR'        => 'API authentication failed. Please check your API key.',
             'LLM_TIMEOUT'       => 'The AI request timed out. Check your model or increase the timeout setting.',
-            'BAD_REQUEST'       => 'Invalid request. Please check your agent configuration.',
-            'TOOL_ERROR'        => 'A tool encountered an error. Check the task history for details.',
+            'BAD_REQUEST'           => 'Invalid request. Please check your agent configuration.',
+            'NO_LLM_CONFIGURATION'  => 'No LLM configuration set. Please configure an LLM driver or set a global default.',
+            'TOOL_ERROR'           => 'A tool encountered an error. Check the task history for details.',
             'UNKNOWN'           => 'An unexpected error occurred. Please try again.',
         ];
     }

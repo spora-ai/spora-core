@@ -13,6 +13,7 @@ export interface Notification {
 }
 
 export const useNotificationStore = defineStore('notifications', () => {
+  let pollTimer: ReturnType<typeof setTimeout> | null = null
   const notifications = ref<Notification[]>([])
   const unreadCount = computed(() => notifications.value.filter(n => n.read_at === null).length)
 
@@ -58,5 +59,37 @@ export const useNotificationStore = defineStore('notifications', () => {
     notifications.value.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   }
 
-  return { notifications, unreadCount, fetchNotifications, markRead, markAllRead, deleteNotification, deleteAll, prependFromSSE }
+  function startNotificationPolling(): void {
+    stopNotificationPolling()
+    const tick = async () => {
+      try {
+        await fetchNotifications()
+      } catch {
+        // Network or API error — keep polling, don't crash
+      } finally {
+        pollTimer = setTimeout(tick, 60_000) // every 60s
+      }
+    }
+    pollTimer = setTimeout(tick, 60_000)
+  }
+
+  function stopNotificationPolling(): void {
+    if (pollTimer !== null) {
+      clearTimeout(pollTimer)
+      pollTimer = null
+    }
+  }
+
+  return {
+    notifications,
+    unreadCount,
+    fetchNotifications,
+    markRead,
+    markAllRead,
+    deleteNotification,
+    deleteAll,
+    prependFromSSE,
+    startNotificationPolling,
+    stopNotificationPolling,
+  }
 })

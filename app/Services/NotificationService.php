@@ -35,6 +35,14 @@ class NotificationService implements NotificationServiceInterface
             $task->user_id,
             ['event' => 'notification', 'type' => 'task_completed', 'notification' => $this->toResource($notification)],
         );
+
+        // Also publish to the task channel so the UI updates the task status
+        $this->mercure->publish($task->id, $task->user_id, [
+            'id'             => $task->id,
+            'status'         => 'COMPLETED',
+            'final_response' => $task->final_response,
+            'step_count'     => $task->step_count,
+        ]);
     }
 
     public function notifyTaskFailed(Task $task): void
@@ -51,6 +59,16 @@ class NotificationService implements NotificationServiceInterface
             $task->user_id,
             ['event' => 'notification', 'type' => 'task_failed', 'notification' => $this->toResource($notification)],
         );
+
+        // Also publish to the task channel so the UI updates the task status
+        $this->mercure->publish($task->id, $task->user_id, [
+            'id'             => $task->id,
+            'status'         => 'FAILED',
+            'error_code'     => $task->error_code,
+            'error_message'  => $task->error_message,
+            'failure_reason' => $task->failure_reason,
+            'step_count'     => $task->step_count,
+        ]);
     }
 
     public function notifyPendingApproval(Task $task): void
@@ -70,7 +88,7 @@ class NotificationService implements NotificationServiceInterface
         );
 
         // Publish to task channel so the UI can update task status in real-time
-        $this->mercure->publish($task->id, ['event' => 'pending_approval', 'task_id' => $task->id]);
+        $this->mercure->publish($task->id, $task->user_id, ['event' => 'pending_approval', 'task_id' => $task->id]);
     }
 
     public function notifyScheduledRunCompleted(int $runId, Task $task): void
@@ -170,7 +188,7 @@ class NotificationService implements NotificationServiceInterface
             'scheduled_run_completed',
             [
                 'task_id'     => $task->id,
-                'agent_name'  => $agent instanceof Agent ? $agent->name : null,
+                'agent_name'  => $agent->name,
                 'user_prompt' => $task->user_prompt,
                 'site_name'   => $this->config['app_name'] ?? 'Spora',
             ],

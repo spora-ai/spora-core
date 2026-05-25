@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api, ApiError } from '@/api/client'
+import { useAgentStore } from '@/stores/agent'
 import type { Task, TaskDetail, TaskStatus, HistoryEntry, TaskErrorCode } from '@/types/task'
 
 const TERMINAL_STATUSES: TaskStatus[] = ['COMPLETED', 'FAILED', 'CANCELLED']
@@ -14,6 +15,12 @@ export const useTaskStore = defineStore('tasks', () => {
   let listPollGeneration = 0
   let detailPollTimer: ReturnType<typeof setTimeout> | null = null
   let lastSequence = 0
+  // Timestamp of the last SSE update processed by applyTaskUpdate (monotonic clock in ms)
+  let lastSseUpdateAt = 0
+  // Dashboard polling handles
+  let dashboardPollTimer: ReturnType<typeof setTimeout> | null = null
+  let dashboardPollGen = 0
+  let lastDashboardPollAt: string | null = null
 
   // ── Task list ──────────────────────────────────────────────────────────────
 
@@ -48,9 +55,15 @@ export const useTaskStore = defineStore('tasks', () => {
     const incoming = result.task
 
     if (activeTask.value === null || activeTask.value.id !== taskId) {
-      // First load — replace entirely
+      // First load — replace entirely, then apply any pending SSE update for this task
       activeTask.value = incoming
       lastSequence = Math.max(...incoming.history.map((h) => h.sequence), 0)
+      // Apply pending SSE update if we have one for this task (handles race where SSE
+      // event arrived before fetchTaskDetail completed)
+      if (pendingSseUpdate !== null && pendingSseUpdate.taskId === taskId) {
+        applyTaskUpdate(taskId, pendingSseUpdate.data)
+        pendingSseUpdate = null
+      }
     } else {
       // Incremental update: merge new history entries and refresh scalar fields
       activeTask.value.status = incoming.status
@@ -141,6 +154,8 @@ export const useTaskStore = defineStore('tasks', () => {
   }
 
   function startDetailPolling(taskId: number): void {
+    // Skip polling if SSE provided data within the last 3 seconds — SSE will drive updates
+    if (Date.now() - lastSseUpdateAt < 3000) return
     stopDetailPolling()
     const tick = async () => {
       if (activeTask.value === null || activeTask.value.id !== taskId) return
@@ -161,6 +176,88 @@ export const useTaskStore = defineStore('tasks', () => {
     }
   }
 
+  // ── Dashboard SSE ─────────────────────────────────────────────────────────
+
+  /**
+   * Merge a real-time task update from SSE into the tasks[] array (Dashboard).
+   * Mirrors applyTaskUpdate but operates on tasks.value instead of activeTask.
+   */
+  function applySseEventToTasks(data: Record<string, unknown>): void {
+    const taskId = (data.id ?? data.task_id) as number | undefined
+    if (taskId === undefined) return
+    const idx = tasks.value.findIndex((t) => t.id === taskId)
+    if (idx !== -1) {
+      Object.assign(tasks.value[idx], {
+        status: (data.status as Task['status']) ?? tasks.value[idx].status,
+        step_count: (data.step_count as number) ?? tasks.value[idx].step_count,
+        final_response: (data.final_response as string | null) ?? tasks.value[idx].final_response,
+        updated_at: (data.updated_at as string) ?? tasks.value[idx].updated_at,
+      })
+    } else {
+      if (data.status !== undefined) {
+        tasks.value.unshift({
+          id: taskId,
+          agent_id: (data as { agent_id?: number }).agent_id ?? 0,
+          status: data.status as Task['status'],
+          user_prompt: (data as { user_prompt?: string }).user_prompt ?? '',
+          final_response: (data.final_response as string | null) ?? null,
+          step_count: (data.step_count as number) ?? 0,
+          max_steps: null,
+          created_at: (data.created_at as string) ?? new Date().toISOString(),
+          updated_at: (data.updated_at as string) ?? new Date().toISOString(),
+        })
+      }
+    }
+  }
+
+  function startDashboardPolling(): void {
+    const gen = ++dashboardPollGen
+    if (dashboardPollTimer !== null) {
+      clearTimeout(dashboardPollTimer)
+      dashboardPollTimer = null
+    }
+    const tick = async () => {
+      if (dashboardPollGen !== gen) return
+      try {
+        const query = lastDashboardPollAt ? `?since=${encodeURIComponent(lastDashboardPollAt)}` : ''
+        const result = await api.get<{ tasks: Task[]; server_time: string }>(`/tasks${query}`)
+        if (!result || !Array.isArray(result.tasks)) return
+        // Merge: update existing tasks, prepend new ones
+        for (const t of result.tasks) {
+          const idx = tasks.value.findIndex((x) => x.id === t.id)
+          if (idx !== -1) {
+            tasks.value[idx] = t
+          } else {
+            tasks.value.unshift(t)
+          }
+        }
+        if (result.server_time) {
+          lastDashboardPollAt = result.server_time
+        }
+        // Also sync with agentStore.currentAgentTasks so AgentPage picks up new tasks
+        const agentStore = useAgentStore()
+        for (const t of result.tasks) {
+          agentStore.applySseTaskEvent(t as unknown as Record<string, unknown>)
+        }
+      } catch {
+        // Network or API error — keep polling, don't crash
+      } finally {
+        if (dashboardPollGen === gen) {
+          dashboardPollTimer = setTimeout(tick, 30_000) // every 30s
+        }
+      }
+    }
+    dashboardPollTimer = setTimeout(tick, 30_000)
+  }
+
+  function stopDashboardPolling(): void {
+    dashboardPollGen++
+    if (dashboardPollTimer !== null) {
+      clearTimeout(dashboardPollTimer)
+      dashboardPollTimer = null
+    }
+  }
+
   function clearActiveTask(): void {
     stopDetailPolling()
     activeTask.value = null
@@ -168,11 +265,35 @@ export const useTaskStore = defineStore('tasks', () => {
   }
 
   /**
+   * Pending SSE update stored when activeTask is not yet loaded.
+   * Used to apply the first SSE event when fetchTaskDetail hasn't completed yet.
+   */
+  let pendingSseUpdate: { taskId: number; data: Record<string, unknown> } | null = null
+
+  /**
    * Merge a real-time task update from SSE into activeTask.
    * Used by useRealtime when Mercure pushes a task/* event.
+   *
+   * If activeTask is not yet loaded (null or different taskId), the update is stored
+   * as pending and applied once the correct task is loaded via fetchTaskDetail.
    */
   function applyTaskUpdate(taskId: number, data: Record<string, unknown>): void {
-    if (activeTask.value === null || activeTask.value.id !== taskId) return
+    // Ignore events for a task that has already reached a terminal state
+    if (activeTask.value?.id === taskId && TERMINAL_STATUSES.includes(activeTask.value.status)) return
+
+    if (activeTask.value === null) {
+      // Store as pending — will be applied by fetchTaskDetail once activeTask is set
+      pendingSseUpdate = { taskId, data }
+      return
+    }
+    if (activeTask.value.id !== taskId) return
+    // Apply pending update if this is the right task
+    if (pendingSseUpdate !== null && pendingSseUpdate.taskId === taskId) {
+      pendingSseUpdate = null
+    }
+    // SSE has provided fresh data — stop detail polling so SSE drives updates
+    stopDetailPolling()
+    lastSseUpdateAt = Date.now()
     // Apply scalar fields
     if (data.status !== undefined) activeTask.value.status = data.status as TaskStatus
     if (data.final_response !== undefined) activeTask.value.final_response = data.final_response as string | null
@@ -256,5 +377,8 @@ export const useTaskStore = defineStore('tasks', () => {
     stopDetailPolling,
     clearActiveTask,
     applyTaskUpdate,
+    applySseEventToTasks,
+    startDashboardPolling,
+    stopDashboardPolling,
   }
 })

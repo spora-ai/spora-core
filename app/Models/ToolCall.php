@@ -16,6 +16,8 @@ use Illuminate\Support\Carbon;
  * @property string           $tool_name
  * @property string           $tool_class
  * @property string           $tool_type
+ * @property string           $operation
+ * @property string           $operation_description
  * @property string           $status
  * @property array<string,mixed>      $proposed_arguments
  * @property string|null      $human_description

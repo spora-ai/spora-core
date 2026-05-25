@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use Carbon\Carbon;
 use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
@@ -28,11 +29,20 @@ final class TaskController
     {
         $userId  = AuthGuard::requireAuth($this->authService);
         $agentId = $request->query->has('agent_id') ? (int) $request->query->get('agent_id') : null;
+        $since = $request->query->has('since') ? $request->query->get('since') : null;
+
+        // Compute server_time before querying to avoid gaps on next poll
+        $serverTime = Carbon::now()->toIso8601String();
 
         // Agent ownership validation is done inside the service
-        $tasks = $this->taskService->getTasksForUser($userId, $agentId);
+        $tasks = $this->taskService->getTasksForUser($userId, $agentId, $since);
 
-        return new JsonResponse(['data' => ['tasks' => $tasks]]);
+        return new JsonResponse([
+            'data' => [
+                'tasks'       => $tasks,
+                'server_time' => $serverTime,
+            ],
+        ]);
     }
 
     /**

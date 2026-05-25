@@ -11,6 +11,7 @@ use Spora\Core\Database;
 use Spora\Models\Agent;
 use Spora\Models\ScheduledRun;
 use Spora\Models\ScheduledRunNext;
+use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Symfony\Component\Console\Output\NullOutput;
@@ -444,5 +445,79 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             ->where('status', ScheduledRunNext::STATUS_PENDING)
             ->count();
         expect($pendingCount)->toBe(1);
+    });
+});
+
+describe('WorkerRunCommand processQueuedTaskSync', function (): void {
+    it('marks task FAILED when orchestrator->tick() throws an exception', function (): void {
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+        $db->boot();
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Spora\Models\Task {
+            return Spora\Models\Task::create([
+                'agent_id'    => $agentId,
+                'user_id'     => 1,
+                'status'      => 'RUNNING',
+                'user_prompt' => $prompt,
+                'max_steps'   => $maxSteps,
+                'step_count'  => 0,
+            ]);
+        });
+        // Make tick() throw an exception — simulating an LLM failure
+        $orchestrator->allows('tick')->andThrow(new RuntimeException('LLM connection failed'));
+
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+
+        $notificationService = Mockery::mock(NotificationService::class);
+        $notificationService->allows('notifyTaskFailed')->andReturnNull();
+        $notificationService->allows('notifyScheduledRunCompleted')->andReturnNull();
+        $notificationService->allows('sendEmailForScheduledRun')->andReturnNull();
+
+        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+
+        $command = new WorkerRunCommand(
+            $db,
+            $orchestrator,
+            new NullLogger(),
+            $container,
+            $mercure,
+            $notificationService,
+        );
+
+        // Create agent and task
+        $authService = bootAuthLayer();
+        $userId = $authService->register('worker-test@example.com', 'Password1!');
+
+        $agent = Agent::create([
+            'user_id'   => $userId,
+            'name'      => 'WorkerTestAgent',
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
+
+        $task = Spora\Models\Task::create([
+            'agent_id'    => $agent->id,
+            'user_id'     => $userId,
+            'status'      => 'QUEUED',
+            'user_prompt' => 'Test prompt',
+            'max_steps'   => 10,
+            'step_count'  => 0,
+        ]);
+
+        $output = new NullOutput();
+        $processed = 0;
+
+        // Invoke processQueuedTaskSync via reflection (must use invokeArgs with array to preserve reference)
+        $ref = new ReflectionMethod($command, 'processQueuedTaskSync');
+        $ref->invokeArgs($command, [$output, 1000, &$processed]);
+
+        // Task must be FAILED, not RUNNING
+        $task->refresh();
+        expect($task->status)->toBe('FAILED');
+        expect($processed)->toBe(1);
     });
 });
