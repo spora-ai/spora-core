@@ -15,6 +15,13 @@ export class ApiError extends Error {
   }
 }
 
+type SessionExpiredHandler = () => void
+let _sessionExpiredHandler: SessionExpiredHandler | null = null
+
+export function setupSessionHandler(handler: SessionExpiredHandler): void {
+  _sessionExpiredHandler = handler
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = {
     'Content-Type': 'application/json',
@@ -36,6 +43,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const err = body?.error as Record<string, string> | undefined
     const code = err?.code ?? 'UNKNOWN_ERROR'
     const message = err?.message ?? `HTTP ${response.status}`
+
+    if (response.status === 401 && code === 'UNAUTHENTICATED') {
+      const auth = await import('@/stores/auth').then(m => m.useAuthStore())
+      if (auth.initialized && auth.user) {
+        _sessionExpiredHandler?.()
+      }
+    }
+
     throw new ApiError(code, message, response.status)
   }
 
