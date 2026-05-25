@@ -62,15 +62,29 @@ describe('useToolSettings', () => {
     })
 
     describe('putSettings', () => {
-      it('omits unchanged password fields (serverValue=***, same empty value)', async () => {
+      it('sends empty string for password fields to clear them (serverValue=***, value empty)', async () => {
         const serverSettings = { 'core.openai.api_key': '***' }
-        const callerSettings = { 'core.openai.api_key': '' } // was masked, user left empty → preserve existing
+        const callerSettings = { 'core.openai.api_key': '' } // was masked, user cleared it → send empty string
 
         mockApi.put.mockResolvedValueOnce({ settings: {} })
 
         await putSettings('llm_configuration', callerSettings, serverSettings)
 
-        // Empty value with serverValue=*** means "preserve unchanged" → omit from payload
+        expect(mockApi.put).toHaveBeenCalledWith(
+          '/tools/llm_configuration/settings',
+          { settings: { 'core.openai.api_key': '' } },
+        )
+      })
+
+      it('omits unchanged password fields (serverValue=***, value ***)', async () => {
+        const serverSettings = { 'core.openai.api_key': '***' }
+        const callerSettings = { 'core.openai.api_key': '***' }
+
+        mockApi.put.mockResolvedValueOnce({ settings: {} })
+
+        await putSettings('llm_configuration', callerSettings, serverSettings)
+
+        // *** with serverValue=*** means "preserve unchanged" → omit from payload
         expect(mockApi.put).toHaveBeenCalledWith(
           '/tools/llm_configuration/settings',
           { settings: {} },

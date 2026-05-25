@@ -89,8 +89,8 @@ class ToolConfigService
         }
 
         $merged   = array_merge($existing, $settings);
-        // Filter out any remaining '***' sentinels before saving
-        $merged   = $this->filterSettings($merged);
+        // Filter out any remaining '***' sentinels before saving (only for password fields)
+        $merged   = $this->filterSettings($toolClass, $merged);
 
         $encrypted = $this->encryptSettings($toolClass, $merged);
 
@@ -153,6 +153,8 @@ class ToolConfigService
         }
 
         $merged    = array_merge($existingSettings, $settings);
+        // Filter out any remaining '***' sentinels before saving (only for password fields)
+        $merged    = $this->filterSettings($toolClass, $merged);
         $encrypted = $this->encryptSettings($toolClass, $merged);
 
         $record = ToolUserSetting::where('user_id', $userId)
@@ -274,8 +276,8 @@ class ToolConfigService
         // Merge with existing stored settings so omitted fields are preserved.
         $merged = array_merge($existing, $agentSettings);
 
-        // Filter: remove '***' sentinel, null, and empty strings (they mean "use parent")
-        $filtered = $this->filterSettings($merged);
+        // Filter: remove '***' sentinel (only for password fields), null, and empty strings (they mean "use parent")
+        $filtered = $this->filterSettings($toolClass, $merged);
         $filtered = array_filter($filtered, fn($v) => $v !== null && $v !== '');
 
         $encrypted = $this->encryptSettings($toolClass, $filtered);
@@ -434,9 +436,14 @@ class ToolConfigService
      * @param  array<string, mixed> $settings
      * @return array<string, mixed>
      */
-    private function filterSettings(array $settings): array
+    private function filterSettings(string $toolClass, array $settings): array
     {
-        return array_filter($settings, fn($v) => $v !== '***');
+        $passwordKeys = $this->getPasswordKeys($toolClass);
+        return array_filter(
+            $settings,
+            fn($v, $k) => !($v === '***' && in_array($k, $passwordKeys, true)),
+            ARRAY_FILTER_USE_BOTH
+        );
     }
 
     /**

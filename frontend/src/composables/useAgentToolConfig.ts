@@ -9,7 +9,7 @@ import type { ToolSchema } from '@/composables/useToolSettings'
  */
 export function buildAgentOverridePayload(
   tool: ToolSchema,
-  form: Record<string, string>,
+  form: Record<string, string | null | undefined>,
 ): Record<string, string | null> {
   const payload: Record<string, string | null> = {}
 

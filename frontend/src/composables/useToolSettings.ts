@@ -105,14 +105,17 @@ export function useToolSettings(agentId?: number) {
       const serverValue = current[key]
 
       // Password field: "***" from server means "masked / unchanged"
-        if (serverValue === '***') {
-          if (value !== '' && value !== '***') {
-            // User typed a new password value → send it
-            toSave[key] = value
-          }
-          // '***' value means preserve existing → skip (don't send)
-          continue
+      if (serverValue === '***') {
+        if (value === '') {
+          // User cleared the masked password field → send empty string to clear it on server
+          toSave[key] = ''
+        } else if (value !== '***') {
+          // User typed a new password value → send it
+          toSave[key] = value
         }
+        // '***' value means preserve existing → skip (don't send)
+        continue
+      }
 
         // Non-password or non-masked value changed → send it
       if (value !== serverValue) {
