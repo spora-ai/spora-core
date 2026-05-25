@@ -14,6 +14,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[Tool(name: 'test_tool', description: 'A test tool')]
 #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', scope: 'agent', default: null)]
 #[ToolSetting(key: 'max_results', label: 'Max Results', type: 'text', scope: 'global', default: '10')]
+#[ToolSetting(key: 'custom_field', label: 'Custom Field', type: 'text', scope: 'agent', default: null)]
 #[ToolOperation(name: 'default', description: 'Run the test tool', enabledByDefault: true, requiresApprovalByDefault: false)]
 final class TestTool implements ToolInterface
 {

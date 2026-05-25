@@ -80,13 +80,23 @@ class ToolConfigService
         // Merge with existing stored settings so omitted fields are preserved.
         // Only fields present in $settings are overwritten; everything else carries over.
         $existing = $this->getGlobalSettings($toolClass);
+
+        // Replace '***' sentinel (masked password from client) with actual existing values.
+        foreach ($settings as $key => $value) {
+            if ($value === '***' && array_key_exists($key, $existing)) {
+                $settings[$key] = $existing[$key];
+            }
+        }
+
         $merged   = array_merge($existing, $settings);
+        // Filter out any remaining '***' sentinels before saving
+        $merged   = $this->filterSettings($merged);
 
         $encrypted = $this->encryptSettings($toolClass, $merged);
 
-        $existing = ToolConfiguration::where('tool_class', $toolClass)->first();
+        $existingRecord = ToolConfiguration::where('tool_class', $toolClass)->first();
 
-        if ($existing !== null) {
+        if ($existingRecord !== null) {
             Capsule::table('tool_configurations')
                 ->where('tool_class', $toolClass)
                 ->update([
@@ -244,26 +254,37 @@ class ToolConfigService
     /**
      * Persist agent-specific overrides.
      * Only `scope: 'agent'` keys are stored; global-scoped keys are silently discarded.
+     * Settings are merged with existing stored values; null/empty values break inheritance.
      */
     public function putAgentOverride(string $toolClass, int $agentId, array $settings): void
     {
-        $scopeMap      = $this->getScopeMap($toolClass);
+        $scopeMap = $this->getScopeMap($toolClass);
+        $existing = $this->getRawAgentOverride($toolClass, $agentId);
         $agentSettings = [];
 
         foreach ($settings as $key => $value) {
             if (($scopeMap[$key] ?? 'agent') === 'agent') {
+                if ($value === '***' && array_key_exists($key, $existing)) {
+                    $value = $existing[$key];
+                }
                 $agentSettings[$key] = $value;
             }
         }
 
-        $filtered  = $this->filterSettings($agentSettings);
+        // Merge with existing stored settings so omitted fields are preserved.
+        $merged = array_merge($existing, $agentSettings);
+
+        // Filter: remove '***' sentinel, null, and empty strings (they mean "use parent")
+        $filtered = $this->filterSettings($merged);
+        $filtered = array_filter($filtered, fn($v) => $v !== null && $v !== '');
+
         $encrypted = $this->encryptSettings($toolClass, $filtered);
 
-        $existing = AgentToolOverride::where('agent_id', $agentId)
+        $existingRecord = AgentToolOverride::where('agent_id', $agentId)
             ->where('tool_class', $toolClass)
             ->first();
 
-        if ($existing !== null) {
+        if ($existingRecord !== null) {
             Capsule::table('agent_tool_overrides')
                 ->where('agent_id', $agentId)
                 ->where('tool_class', $toolClass)
