@@ -103,18 +103,58 @@ describe('useAuthStore', () => {
   })
 
   describe('register', () => {
-    it('sets user on success', async () => {
-      const mockUser = { id: 2, email: 'new@example.com', roles: [] }
-      mockApi.post.mockResolvedValueOnce({ user: { id: 2, email: 'new@example.com' } })
+    it('calls POST /auth/register and returns user info without setting user (pending verification)', async () => {
+      const mockUser = { id: 2, email: 'new@example.com' }
+      mockApi.post.mockResolvedValueOnce({ user: mockUser })
 
       const store = useAuthStore()
-      await store.register('new@example.com', 'password123')
+      const result = await store.register('new@example.com', 'password123')
 
       expect(mockApi.post).toHaveBeenCalledWith('/auth/register', {
         email: 'new@example.com',
         password: 'password123',
       })
-      expect(store.user).toEqual(mockUser)
+      expect(result).toEqual(mockUser)
+      expect(store.user).toBeNull() // User is NOT logged in — must verify email first
+    })
+  })
+
+  describe('resendVerification', () => {
+    it('calls POST /auth/verification/resend with email', async () => {
+      mockApi.post.mockResolvedValueOnce(undefined)
+
+      const store = useAuthStore()
+      await store.resendVerification('new@example.com')
+
+      expect(mockApi.post).toHaveBeenCalledWith('/auth/verification/resend', {
+        email: 'new@example.com',
+      })
+    })
+  })
+
+  describe('forgotPassword', () => {
+    it('calls POST /auth/forgot-password with email', async () => {
+      mockApi.post.mockResolvedValueOnce(undefined)
+
+      const store = useAuthStore()
+      await store.forgotPassword('test@example.com')
+
+      expect(mockApi.post).toHaveBeenCalledWith('/auth/forgot-password', {
+        email: 'test@example.com',
+      })
+    })
+  })
+
+  describe('changeEmail', () => {
+    it('calls POST /auth/email/change-request with email', async () => {
+      mockApi.post.mockResolvedValueOnce(undefined)
+
+      const store = useAuthStore()
+      await store.changeEmail('newemail@example.com')
+
+      expect(mockApi.post).toHaveBeenCalledWith('/auth/email/change-request', {
+        email: 'newemail@example.com',
+      })
     })
   })
 

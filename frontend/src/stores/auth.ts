@@ -1,21 +1,15 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api, ApiError } from '@/api/client'
+import type { User } from '@/types/user'
 
-export interface User {
-  id: number
-  email: string
-  username?: string
-  is_admin?: boolean
-  roles?: string[]
-}
+export { type User }
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const initialized = ref(false)
   const initError = ref<Error | null>(null)
 
-  // Normalize is_admin from the backend into roles so existing checks work.
   function normalizeUser(raw: User | null): User | null {
     if (raw === null) return null
     const roles: string[] = []
@@ -23,13 +17,7 @@ export const useAuthStore = defineStore('auth', () => {
     return { ...raw, roles }
   }
 
-  // In-flight promise guard: if two navigations fire before the first init() resolves,
-  // both await the same promise instead of issuing duplicate /auth/me requests.
   let initPromise: Promise<void> | null = null
-
-  interface MeResponse {
-  user: User
-}
 
   /** Called once on app boot to restore session from the server cookie. */
   function init(): Promise<void> {
@@ -38,19 +26,16 @@ export const useAuthStore = defineStore('auth', () => {
     initPromise = (async () => {
       try {
         initError.value = null
-        const res = await api.get<MeResponse>('/auth/me')
+        const res = await api.get<{ user: User }>('/auth/me')
         user.value = normalizeUser(res.user)
       } catch (e) {
         user.value = null
-        // 401 means the user is simply not logged in — expected, not an error.
-        // Any other failure (network down, 5xx) is surfaced so the UI can show a retry.
         const isUnauthenticated = e instanceof ApiError && e.status === 401
         if (!isUnauthenticated) {
           initError.value = e instanceof Error ? e : new Error(String(e))
         }
       } finally {
         initialized.value = true
-        // Clear the promise for non-auth errors so the next navigation can retry.
         if (initError.value !== null) {
           initPromise = null
         }
@@ -61,19 +46,20 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function login(email: string, password: string): Promise<void> {
-    user.value = normalizeUser((await api.post<MeResponse>('/auth/login', { email, password })).user)
+    user.value = normalizeUser((await api.post<{ user: User }>('/auth/login', { email, password })).user)
     initialized.value = true
   }
 
-  async function register(email: string, password: string): Promise<void> {
-    user.value = normalizeUser((await api.post<MeResponse>('/auth/register', { email, password })).user)
-    initialized.value = true
+  /**
+   * Register a new user account.
+   * Does NOT log the user in — caller must handle the "verify email" state.
+   */
+  async function register(email: string, password: string): Promise<{ user_id: number; email: string }> {
+    const res = await api.post<{ user: { id: number; email: string } }>('/auth/register', { email, password })
+    return res.user
   }
 
   async function logout(): Promise<void> {
-    // Clear state optimistically so the router guard redirects to /login even if
-    // the API call fails (e.g. network error). The server session may still be live
-    // in that case, but the user is safely locked out of the UI.
     user.value = null
     initPromise = null
     initialized.value = false
@@ -89,5 +75,31 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = normalizeUser(updated.user)
   }
 
-  return { user, initialized, initError, init, login, register, logout, changePassword, updateAccount }
+  async function resendVerification(email: string): Promise<void> {
+    await api.post('/auth/verification/resend', { email })
+  }
+
+  async function forgotPassword(email: string): Promise<void> {
+    await api.post('/auth/forgot-password', { email })
+  }
+
+  async function changeEmail(newEmail: string): Promise<void> {
+    await api.post('/auth/email/change-request', { email: newEmail })
+  }
+
+  return {
+    user,
+    initialized,
+    initError,
+    init,
+    login,
+    register,
+    logout,
+    changePassword,
+    updateAccount,
+    resendVerification,
+    forgotPassword,
+    changeEmail,
+  }
 })
+

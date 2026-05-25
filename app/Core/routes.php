@@ -7,6 +7,7 @@ use Spora\Http\AgentController;
 use Spora\Http\AgentMemoryController;
 use Spora\Http\AppsController;
 use Spora\Http\AuthController;
+use Spora\Http\ConfigController;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -31,6 +32,8 @@ use Spora\Http\UserProfileController;
 return static function (RouteCollector $r): void {
     // Health check (no auth)
     $r->addRoute('GET', '/health', [HealthController::class, 'check']);
+    // Public config (no auth)
+    $r->addRoute('GET', '/api/v1/config', [ConfigController::class, 'index']);
     // Apps
     $r->addRoute('GET', '/api/v1/apps', [AppsController::class, 'index']);
     // Auth
@@ -40,6 +43,12 @@ return static function (RouteCollector $r): void {
     $r->addRoute('POST', '/api/v1/auth/register', [AuthController::class, 'register']);
     $r->addRoute('PATCH', '/api/v1/auth/password', [AuthController::class, 'password']);
     $r->addRoute('PATCH', '/api/v1/auth/account', [AuthController::class, 'account']);
+    $r->addRoute('GET', '/api/v1/auth/verify/{selector}', [AuthController::class, 'verify']);
+    $r->addRoute('POST', '/api/v1/auth/verification/resend', [AuthController::class, 'resendVerification']);
+    $r->addRoute('POST', '/api/v1/auth/forgot-password', [AuthController::class, 'forgotPassword']);
+    $r->addRoute('POST', '/api/v1/auth/reset-password', [AuthController::class, 'resetPassword']);
+    $r->addRoute('POST', '/api/v1/auth/email/change-request', [AuthController::class, 'requestEmailChange']);
+    $r->addRoute('POST', '/api/v1/auth/email/confirm', [AuthController::class, 'confirmEmailChange']);
 
     // Agents — CRUD
     $r->addRoute('GET', '/api/v1/agents', [AgentController::class, 'index']);

@@ -67,3 +67,45 @@ test('currentUserEmail() returns the email of the logged-in user', function (): 
 
     expect($service->currentUserEmail())->toBe($email);
 });
+
+// ---------------------------------------------------------------------------
+// confirmEmail() — throws on invalid selector/token (delight-im/auth throws, does not return false)
+// ---------------------------------------------------------------------------
+
+test('confirmEmail() throws InvalidSelectorTokenPairException for unknown selector', function (): void {
+    $service = bootAuthLayer();
+
+    expect(fn() => $service->confirmEmail('invalid-selector', 'invalid-token'))
+        ->toThrow(\Delight\Auth\InvalidSelectorTokenPairException::class);
+});
+
+// ---------------------------------------------------------------------------
+// resendVerificationEmail() — no-op when no mailer is set (even with valid email)
+// ---------------------------------------------------------------------------
+
+test('resendVerificationEmail() without system mailer does not throw', function (): void {
+    $service = bootAuthLayer();
+
+    // Without a system mailer, the method is a no-op and returns without throwing.
+    // Exceptions from delight-im are caught internally.
+    $threw = false;
+    try {
+        $service->resendVerificationEmail('any@example.com');
+    } catch (Throwable) {
+        $threw = true;
+    }
+
+    expect($threw)->toBeFalse();
+});
+
+// ---------------------------------------------------------------------------
+// changeEmail() — throws NotLoggedInException without authenticated session
+// ---------------------------------------------------------------------------
+
+test('changeEmail() throws NotLoggedInException when not logged in', function (): void {
+    clearSession();
+    $service = bootAuthLayer();
+
+    expect(fn() => $service->changeEmail('new@example.com'))
+        ->toThrow(\Delight\Auth\NotLoggedInException::class);
+});

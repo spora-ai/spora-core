@@ -12,6 +12,7 @@ use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
 use Spora\Services\RateLimiter;
+use Spora\Services\SystemMailer;
 use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -25,6 +26,7 @@ final class AuthController
     public function __construct(
         private readonly AuthService $authService,
         private readonly UserServiceInterface $userService,
+        private readonly ?SystemMailer $systemMailer = null,
         private readonly array $config = [],
     ) {}
 
@@ -265,6 +267,89 @@ final class AuthController
         }
 
         return new JsonResponse(['message' => 'Password reset successfully.'], Response::HTTP_OK);
+    }
+
+    public function resendVerification(Request $request): JsonResponse
+    {
+        $clientIp = $this->getClientIp($request);
+
+        if ($this->isRateLimited($clientIp)) {
+            return $this->rateLimitedResponse($clientIp);
+        }
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+
+        if ($this->missingFields($body, ['email'])) {
+            return $this->error('VALIDATION_ERROR', 'The field "email" is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        try {
+            $this->authService->resendVerificationEmail((string) $body['email']);
+            RateLimiter::clear($clientIp);
+        } catch (\Delight\Auth\EmailNotVerifiedException) {
+            // Silently succeed — we don't reveal whether the email is verified
+        } catch (\Delight\Auth\InvalidEmailException) {
+            // Silently succeed
+        }
+
+        // Always return success to prevent email enumeration
+        return new JsonResponse(['message' => 'If an account with that email exists and is unverified, a verification email has been sent.'], Response::HTTP_OK);
+    }
+
+    public function requestEmailChange(Request $request): JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+        }
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+
+        if ($this->missingFields($body, ['email'])) {
+            return $this->error('VALIDATION_ERROR', 'The field "email" is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        try {
+            $this->authService->changeEmail((string) $body['email']);
+        } catch (\Delight\Auth\InvalidEmailException) {
+            return $this->error('VALIDATION_ERROR', 'The provided email address is invalid.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Delight\Auth\UserAlreadyExistsException) {
+            return $this->error('EMAIL_TAKEN', 'A user with that email address already exists.', Response::HTTP_CONFLICT);
+        } catch (\Delight\Auth\EmailNotVerifiedException) {
+            return $this->error('EMAIL_NOT_VERIFIED', 'You must verify your current email address before changing it.', Response::HTTP_FORBIDDEN);
+        } catch (\Delight\Auth\NotLoggedInException) {
+            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+        } catch (\Delight\Auth\AuthError) {
+            return $this->error('AUTH_ERROR', 'An authentication error occurred.', Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        return new JsonResponse(['message' => 'A confirmation email has been sent to your new email address.'], Response::HTTP_OK);
+    }
+
+    public function confirmEmailChange(Request $request): JsonResponse
+    {
+        $selector = $request->query->get('selector', '');
+        $token = $request->query->get('token', '');
+
+        if ($selector === '' || $token === '') {
+            return $this->error('VALIDATION_ERROR', 'The selector and token are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $result = $this->authService->confirmEmail($selector, $token);
+
+        if ($result) {
+            return new JsonResponse(['message' => 'Email changed successfully.'], Response::HTTP_OK);
+        }
+
+        return $this->error('INVALID_TOKEN', 'The verification token is invalid or has expired.', Response::HTTP_BAD_REQUEST);
     }
 
     private function getClientIp(Request $request): string

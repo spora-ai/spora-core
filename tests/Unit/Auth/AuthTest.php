@@ -19,7 +19,7 @@ function makeAuthController(array $configOverrides = [], ?callable $userServiceS
     if ($userServiceSetup !== null) {
         $userServiceSetup($userService);
     }
-    $controller = new AuthController($service, $userService, $config);
+    $controller = new AuthController($service, $userService, null, $config);
 
     return [$controller, $service, $userService];
 }

@@ -71,6 +71,12 @@ async function submit(): Promise<void> {
         >
           {{ loading ? 'Signing in…' : 'Sign in' }}
         </button>
+
+        <p class="text-center text-sm">
+          <RouterLink to="/forgot-password" class="font-medium text-foreground underline-offset-4 hover:underline">
+            Forgot your password?
+          </RouterLink>
+        </p>
       </form>
 
       <p class="text-center text-sm text-muted-foreground">

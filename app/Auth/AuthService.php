@@ -13,6 +13,7 @@ use InvalidArgumentException;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
+use Spora\Models\User;
 use Spora\Services\SystemMailer;
 
 /**
@@ -183,11 +184,48 @@ final class AuthService
 
     /**
      * Confirm an email address using a selector/token pair.
-     * @return array<string> ['old_email', 'new_email']
+     * After successful confirmation, sends the welcome email if SPORA_SEND_WELCOME_EMAIL is enabled.
+     *
+     * @return array{0: string, 1: string} [old_email, new_email]
      */
     public function confirmEmail(string $selector, string $token): array
     {
-        return $this->auth->confirmEmail($selector, $token);
+        $emails = $this->auth->confirmEmail($selector, $token);
+        $newEmail = $emails[1] ?? '';
+
+        $sendWelcomeEmail = (bool) ($_ENV['SPORA_SEND_WELCOME_EMAIL'] ?? false);
+        if ($sendWelcomeEmail && $this->systemMailer !== null && $newEmail !== '') {
+            $user = User::where('email', $newEmail)->first();
+            if ($user !== null) {
+                $this->systemMailer->sendWelcomeEmail((int) $user->id, $newEmail);
+            }
+        }
+
+        return $emails;
+    }
+
+    /**
+     * Request an email address change for the currently authenticated user.
+     * Sends a confirmation email to the NEW address via the provided callback.
+     *
+     * @throws \Delight\Auth\InvalidEmailException if the new email is invalid
+     * @throws \Delight\Auth\UserAlreadyExistsException if the new email is already taken
+     * @throws \Delight\Auth\NotLoggedInException if no user is logged in
+     * @throws \Delight\Auth\EmailNotVerifiedException if the current email is not verified
+     */
+    public function changeEmail(string $newEmail): void
+    {
+        if ($this->systemMailer === null) {
+            $this->auth->changeEmail($newEmail, static function (): void {});
+            return;
+        }
+
+        $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
+
+        $this->auth->changeEmail($newEmail, function (string $selector, string $token) use ($newEmail, $baseUrl): void {
+            $confirmUrl = "{$baseUrl}/api/v1/auth/verify/{$selector}?token=" . urlencode($token);
+            $this->systemMailer->sendVerificationEmail(0, $newEmail, $confirmUrl);
+        });
     }
 
     /**
@@ -210,5 +248,29 @@ final class AuthService
     public function resetPassword(string $selector, string $token, string $newPassword): void
     {
         $this->auth->resetPassword($selector, $token, $newPassword);
+    }
+
+    /**
+     * Resend the email verification email for an unverified user.
+     * Silently returns if there is no pending confirmation request for the email.
+     */
+    public function resendVerificationEmail(string $email): void
+    {
+        if ($this->systemMailer === null) {
+            return;
+        }
+
+        $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
+
+        try {
+            $this->auth->resendConfirmationForEmail($email, function (string $selector, string $token) use ($email, $baseUrl): void {
+                $verifyUrl = "{$baseUrl}/api/v1/auth/verify/{$selector}?token=" . urlencode($token);
+                $this->systemMailer->sendVerificationEmail(0, $email, $verifyUrl);
+            });
+        } catch (\Delight\Auth\ConfirmationRequestNotFound) {
+            // No pending confirmation — nothing to resend; silently return
+        } catch (\Delight\Auth\InvalidEmailException) {
+            // Invalid email — silently return
+        }
     }
 }

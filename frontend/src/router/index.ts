@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { isRegistrationEnabled } from '@/utils/auth'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -14,6 +15,17 @@ const router = createRouter({
       path: '/register',
       name: 'register',
       component: () => import('@/pages/RegisterPage.vue'),
+      meta: { requiresGuest: true },
+      beforeEnter: async () => {
+        if (!(await isRegistrationEnabled())) {
+          return { name: 'login' }
+        }
+      },
+    },
+    {
+      path: '/forgot-password',
+      name: 'forgot-password',
+      component: () => import('@/pages/ForgotPasswordPage.vue'),
       meta: { requiresGuest: true },
     },
     {

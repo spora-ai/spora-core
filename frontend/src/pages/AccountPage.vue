@@ -29,6 +29,32 @@ async function saveUsername(): Promise<void> {
   }
 }
 
+// ── Email change form ─────────────────────────────────────────────────────────
+
+const newEmail = ref('')
+const emailPasswordConfirm = ref('')
+const emailSaving = ref(false)
+const emailError = ref<string | null>(null)
+const emailSuccess = ref(false)
+
+async function saveEmail(): Promise<void> {
+  if (!newEmail.value || !emailPasswordConfirm.value) return
+  emailSaving.value = true
+  emailError.value = null
+  emailSuccess.value = false
+  try {
+    await auth.changeEmail(newEmail.value)
+    emailSuccess.value = true
+    newEmail.value = ''
+    emailPasswordConfirm.value = ''
+    setTimeout(() => { emailSuccess.value = false }, 5000)
+  } catch (e: any) {
+    emailError.value = e?.name === 'ApiError' ? e.message : 'Failed to request email change.'
+  } finally {
+    emailSaving.value = false
+  }
+}
+
 // ── Password form ───────────────────────────────────────────────────────────
 
 const currentPassword = ref('')
@@ -99,6 +125,49 @@ async function savePassword(): Promise<void> {
           </div>
           <p v-if="usernameError" role="alert" class="text-xs text-destructive">{{ usernameError }}</p>
           <p v-if="usernameSuccess" role="status" class="text-xs text-green-600">Display name updated.</p>
+        </section>
+
+        <!-- Change email -->
+        <section class="space-y-4">
+          <h2 class="text-sm font-semibold text-foreground">Change Email Address</h2>
+          <p class="text-xs text-muted-foreground">
+            We'll send a confirmation link to your new email address.
+          </p>
+          <form @submit.prevent="saveEmail" class="space-y-3">
+            <div class="space-y-2">
+              <label for="new-email" class="text-sm font-medium">New Email Address</label>
+              <input
+                id="new-email"
+                v-model="newEmail"
+                type="email"
+                autocomplete="email"
+                placeholder="new@example.com"
+                class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+            <div class="space-y-2">
+              <label for="email-password" class="text-sm font-medium">Confirm with Password</label>
+              <input
+                id="email-password"
+                v-model="emailPasswordConfirm"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Enter your current password"
+                class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+            <p v-if="emailError" role="alert" class="text-xs text-destructive">{{ emailError }}</p>
+            <p v-if="emailSuccess" role="status" class="text-xs text-green-600">
+              Confirmation email sent. Please check your new email inbox.
+            </p>
+            <button
+              type="submit"
+              :disabled="emailSaving || !newEmail || !emailPasswordConfirm"
+              class="inline-flex h-9 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+            >
+              {{ emailSaving ? 'Sending…' : 'Send Confirmation Email' }}
+            </button>
+          </form>
         </section>
 
         <!-- Change password -->

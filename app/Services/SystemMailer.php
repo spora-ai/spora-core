@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Psr\Log\LoggerInterface;
 use RuntimeException;
 use Spora\Mailer\LogTransport;
 use Spora\Models\MailTemplate;
@@ -22,6 +23,7 @@ final class SystemMailer
 {
     public function __construct(
         private readonly array $config,
+        private readonly ?LoggerInterface $logger = null,
     ) {}
 
     /**
@@ -45,8 +47,7 @@ final class SystemMailer
         };
 
         if ($driver === 'log') {
-            $logger = new \Psr\Log\NullLogger();
-            return new Mailer(new LogTransport(null, $logger));
+            return new Mailer(new LogTransport(null, $this->logger ?? new \Psr\Log\NullLogger()));
         }
 
         return new Mailer(Transport::fromDsn($dsn));

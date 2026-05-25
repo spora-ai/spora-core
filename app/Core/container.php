@@ -223,6 +223,7 @@ return [
         return new Spora\Http\AuthController(
             $c->get(AuthService::class),
             $c->get(UserServiceInterface::class),
+            $c->get(SystemMailer::class),
             $c->get('config'),
         );
     },
@@ -346,6 +347,12 @@ return [
     },
 
     Spora\Http\HealthController::class => static fn(): Spora\Http\HealthController => new Spora\Http\HealthController(),
+
+    Spora\Http\ConfigController::class => static function (ContainerInterface $c): Spora\Http\ConfigController {
+        return new Spora\Http\ConfigController(
+            $c->get('config'),
+        );
+    },
 
     Spora\Http\ToolController::class => static function (ContainerInterface $c): Spora\Http\ToolController {
         return new Spora\Http\ToolController(
@@ -566,6 +573,7 @@ return [
     SystemMailer::class => static function (ContainerInterface $c): SystemMailer {
         return new SystemMailer(
             $c->get('config'),
+            $c->get(LoggerInterface::class),
         );
     },
 
