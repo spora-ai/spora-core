@@ -9,7 +9,7 @@ use Spora\Services\TaskService;
 
 function makeTaskService(): TaskService
 {
-    $orchestrator = Mockery::mock(\Spora\Agents\OrchestratorInterface::class);
+    $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
     $mercure = Mockery::mock(MercurePublisherInterface::class);
     $mercure->allows('publish')->andReturn(true);
     $mercure->allows('publishToUser')->andReturn(true);

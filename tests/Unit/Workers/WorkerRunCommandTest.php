@@ -30,8 +30,8 @@ function makeWorkerRunCommand(): array
     $db->boot();
 
     $orchestrator = Mockery::mock(OrchestratorInterface::class);
-    $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Spora\Models\Task {
-        return Spora\Models\Task::create([
+    $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
+        return Task::create([
             'agent_id'    => $agentId,
             'user_id'     => 1,
             'status'      => 'RUNNING',
@@ -455,8 +455,8 @@ describe('WorkerRunCommand processQueuedTaskSync', function (): void {
         $db->boot();
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Spora\Models\Task {
-            return Spora\Models\Task::create([
+        $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
+            return Task::create([
                 'agent_id'    => $agentId,
                 'user_id'     => 1,
                 'status'      => 'RUNNING',
@@ -499,7 +499,7 @@ describe('WorkerRunCommand processQueuedTaskSync', function (): void {
             'is_active' => true,
         ]);
 
-        $task = Spora\Models\Task::create([
+        $task = Task::create([
             'agent_id'    => $agent->id,
             'user_id'     => $userId,
             'status'      => 'QUEUED',

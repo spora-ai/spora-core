@@ -1472,7 +1472,7 @@ test('tick sets NO_LLM_CONFIGURATION error code and message when resolveLlmConfi
     // start() creates a RUNNING task then calls tick() which throws inside the transaction.
     try {
         $orch->start($agent->id, 'Hello', maxSteps: 5);
-        \PHPUnit\Framework\Assert::fail('Expected RuntimeException was not thrown');
+        PHPUnit\Framework\Assert::fail('Expected RuntimeException was not thrown');
     } catch (RuntimeException $e) {
         expect($e->getMessage())->toBe('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
     }

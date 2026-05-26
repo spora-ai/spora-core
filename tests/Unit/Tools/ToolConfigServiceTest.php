@@ -18,7 +18,7 @@ use Tests\Fixtures\TestTool;
  * Boot a fresh in-memory SQLite database and return a ready-to-use
  * ToolConfigService with a freshly generated 32-byte master key.
  *
- * @return array{0: ToolConfigService, 1: SecurityManager, 2: \Spora\Auth\AuthService}
+ * @return array{0: ToolConfigService, 1: SecurityManager, 2: Spora\Auth\AuthService}
  */
 function makeToolConfigService(): array
 {

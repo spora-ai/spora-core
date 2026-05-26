@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Support\Carbon;
-use Spora\Models\Agent;
 use Spora\Models\Notification;
 use Spora\Models\Task;
 use Spora\Models\User;

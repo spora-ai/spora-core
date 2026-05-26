@@ -12,6 +12,7 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall;
+use Throwable;
 
 /**
  * Handles task CRUD operations, lifecycle state transitions, and real-time notifications.
@@ -39,7 +40,7 @@ final class TaskService implements TaskServiceInterface
         if ($since !== null) {
             try {
                 $query->where('updated_at', '>', Carbon::parse($since)->utc());
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 // Ignore invalid date format
             }
         }

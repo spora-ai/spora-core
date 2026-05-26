@@ -55,7 +55,7 @@ test('getProfile returns null fields as null', function (): void {
     simulateLoggedInSession($userId, 'profile2@example.com');
 
     // Ensure user has no profile data set by bootAuth
-    $user = Spora\Models\User::find($userId);
+    $user = User::find($userId);
     $user->name = null;
     $user->save();
 

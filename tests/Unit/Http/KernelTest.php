@@ -147,9 +147,9 @@ test('uncaught controller exception returns 500 JSON', function (): void {
     $response = withoutSecretKey(static function (): mixed {
         $kernel = new Kernel();
         $res = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
-            $kernel->__destruct();
-            return $res;
-        });
+        $kernel->__destruct();
+        return $res;
+    });
 
     expect($response->getStatusCode())->toBe(500);
 
@@ -191,9 +191,9 @@ test('500 response has Content-Type application/json', function (): void {
     $response = withoutSecretKey(static function (): mixed {
         $kernel = new Kernel();
         $res = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
-            $kernel->__destruct();
-            return $res;
-        });
+        $kernel->__destruct();
+        return $res;
+    });
 
     expect($response->headers->get('Content-Type'))->toContain('application/json');
 });

@@ -174,7 +174,7 @@ final class AuthService
             return false;
         }
 
-        $user = (new \Spora\Models\User())->find($userId);
+        $user = (new User())->find($userId);
         return $user !== null && $user->isAdmin();
     }
 
@@ -216,10 +216,10 @@ final class AuthService
      * Request an email address change for the currently authenticated user.
      * Sends a confirmation email to the NEW address via the provided callback.
      *
-     * @throws \Delight\Auth\InvalidEmailException if the new email is invalid
-     * @throws \Delight\Auth\UserAlreadyExistsException if the new email is already taken
+     * @throws InvalidEmailException if the new email is invalid
+     * @throws UserAlreadyExistsException if the new email is already taken
      * @throws \Delight\Auth\NotLoggedInException if no user is logged in
-     * @throws \Delight\Auth\EmailNotVerifiedException if the current email is not verified
+     * @throws EmailNotVerifiedException if the current email is not verified
      */
     public function changeEmail(string $newEmail): void
     {

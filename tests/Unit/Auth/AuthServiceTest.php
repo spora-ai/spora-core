@@ -76,7 +76,7 @@ test('confirmEmail() throws InvalidSelectorTokenPairException for unknown select
     $service = bootAuthLayer();
 
     expect(fn() => $service->confirmEmail('invalid-selector', 'invalid-token'))
-        ->toThrow(\Delight\Auth\InvalidSelectorTokenPairException::class);
+        ->toThrow(Delight\Auth\InvalidSelectorTokenPairException::class);
 });
 
 // ---------------------------------------------------------------------------
@@ -107,5 +107,5 @@ test('changeEmail() throws NotLoggedInException when not logged in', function ()
     $service = bootAuthLayer();
 
     expect(fn() => $service->changeEmail('new@example.com'))
-        ->toThrow(\Delight\Auth\NotLoggedInException::class);
+        ->toThrow(Delight\Auth\NotLoggedInException::class);
 });

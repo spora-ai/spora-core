@@ -20,7 +20,7 @@ use Tests\Fixtures\TestTool;
  */
 test('agent override merges with existing settings', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('merge-test@example.com', 'Password1!');
+    $userId = $authService->register('merge-test@example.com', 'Password1!', 'Merge Test');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -43,7 +43,7 @@ test('agent override merges with existing settings', function () {
 
 test('partial update preserves existing fields', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('partial-test@example.com', 'Password1!');
+    $userId = $authService->register('partial-test@example.com', 'Password1!', 'Partial Test');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -67,7 +67,7 @@ test('partial update preserves existing fields', function () {
 
 test('update overwrites same field', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('overwrite-test@example.com', 'Password1!');
+    $userId = $authService->register('overwrite-test@example.com', 'Password1!', 'Overwrite Test');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -88,7 +88,7 @@ test('update overwrites same field', function () {
 
 test('clearing a field removes it from stored override', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('clear-test@example.com', 'Password1!');
+    $userId = $authService->register('clear-test@example.com', 'Password1!', 'Clear Test');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -110,7 +110,7 @@ test('clearing a field removes it from stored override', function () {
 
 test('sending null breaks inheritance to parent', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('null-inherit@example.com', 'Password1!');
+    $userId = $authService->register('null-inherit@example.com', 'Password1!', 'Null Inherit');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -136,7 +136,7 @@ test('sending null breaks inheritance to parent', function () {
 
 test('empty string is treated as null for inheritance', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('empty-string@example.com', 'Password1!');
+    $userId = $authService->register('empty-string@example.com', 'Password1!', 'Empty String');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -162,7 +162,7 @@ test('empty string is treated as null for inheritance', function () {
 
 test('agent override takes precedence over user settings', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('agent-v-user@example.com', 'Password1!');
+    $userId = $authService->register('agent-v-user@example.com', 'Password1!', 'Agent V User');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -181,7 +181,7 @@ test('agent override takes precedence over user settings', function () {
 
 test('agent override takes precedence over global settings', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('agent-v-global@example.com', 'Password1!');
+    $userId = $authService->register('agent-v-global@example.com', 'Password1!', 'Agent V Global');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -200,7 +200,7 @@ test('agent override takes precedence over global settings', function () {
 
 test('user settings take precedence over global settings', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('user-v-global@example.com', 'Password1!');
+    $userId = $authService->register('user-v-global@example.com', 'Password1!', 'User V Global');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -219,7 +219,7 @@ test('user settings take precedence over global settings', function () {
 
 test('agent override falls back to user then global then default', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('fallback-chain@example.com', 'Password1!');
+    $userId = $authService->register('fallback-chain@example.com', 'Password1!', 'Fallback Chain');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -231,7 +231,7 @@ test('agent override falls back to user then global then default', function () {
 
 test('agent override falls back to user when global not set', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('fallback-user@example.com', 'Password1!');
+    $userId = $authService->register('fallback-user@example.com', 'Password1!', 'Fallback User');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -247,7 +247,7 @@ test('agent override falls back to user when global not set', function () {
 
 test('agent override falls back to global when user not set', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('fallback-global@example.com', 'Password1!');
+    $userId = $authService->register('fallback-global@example.com', 'Password1!', 'Fallback Global');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -263,7 +263,7 @@ test('agent override falls back to global when user not set', function () {
 
 test('scope global keys in agent override are discarded', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('scope-global@example.com', 'Password1!');
+    $userId = $authService->register('scope-global@example.com', 'Password1!', 'Scope Global');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
@@ -284,7 +284,7 @@ test('scope global keys in agent override are discarded', function () {
 
 test('scope agent keys can be overridden at agent level', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('scope-agent@example.com', 'Password1!');
+    $userId = $authService->register('scope-agent@example.com', 'Password1!', 'Scope Agent');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);

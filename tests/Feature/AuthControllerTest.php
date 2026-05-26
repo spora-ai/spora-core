@@ -259,11 +259,11 @@ test('resetPassword resets password with valid selector and token', function ():
     $authService->register($email, $oldPassword, 'Reset User');
 
     // Capture the reset URL by using the real mailer but intercepting via a proxy
-    $captured = new \ArrayObject(['url' => null]);
-    $proxyMailer = new class($captured) implements Spora\Services\MailerInterface {
+    $captured = new ArrayObject(['url' => null]);
+    $proxyMailer = new class ($captured) implements Spora\Services\MailerInterface {
         private Spora\Services\SystemMailer $inner;
-        private \ArrayObject $captured;
-        public function __construct(\ArrayObject $captured)
+        private ArrayObject $captured;
+        public function __construct(ArrayObject $captured)
         {
             $this->inner = new Spora\Services\SystemMailer(['mail_driver' => 'log']);
             $this->captured = $captured;
