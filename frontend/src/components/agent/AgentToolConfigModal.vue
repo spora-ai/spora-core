@@ -4,6 +4,7 @@ import Modal from '@/components/Modal.vue'
 import ToolSettingField from '@/components/settings/ToolSettingField.vue'
 import type { ToolSchema, SettingsWithSource } from '@/composables/useToolSettings'
 import { useToolSettings } from '@/composables/useToolSettings'
+import { buildAgentOverridePayload, initFormFromSettingsWithSource } from '@/composables/useAgentToolConfig'
 import { ApiError, api } from '@/api/client'
 import { useRouter } from 'vue-router'
 
@@ -33,15 +34,12 @@ const userSettingsExist = ref(false)
 const loadingSettings = ref(false)
 
 // Override state
-const overwriteAll = ref(false)
-const overriddenFields = ref<Set<string>>(new Set())
 const fieldErrors = ref<Record<string, string>>({})
 
 // Local form state (agent-specific override values)
 const form = ref<Record<string, string>>({})
 
 const hasSchema = computed(() => (props.tool?.settings_schema?.length ?? 0) > 0)
-const hasMultipleFields = computed(() => (props.tool?.settings_schema?.length ?? 0) > 1)
 
 const hasAnyEffectiveSettings = computed(() => {
   return Object.values(settingsWithSource.value).some((item) => item.source !== 'default')
@@ -54,8 +52,6 @@ async function loadSettings(toolName: string): Promise<void> {
   error.value = null
   globalSettingsExist.value = false
   userSettingsExist.value = false
-  overwriteAll.value = false
-  overriddenFields.value = new Set()
   form.value = {}
   fieldErrors.value = {}
 
@@ -98,20 +94,7 @@ async function loadSettings(toolName: string): Promise<void> {
   }
 
   // Initialize form with agent-specific override values (only fields where source === 'agent')
-  const overrideValues: Record<string, string> = {}
-  for (const [key, item] of Object.entries(settingsWithSource.value)) {
-    if (item.source === 'agent') {
-      overrideValues[key] = String(item.value ?? '')
-    }
-  }
-  form.value = overrideValues
-
-  // Pre-check fields that have a local override
-  for (const [key, item] of Object.entries(settingsWithSource.value)) {
-    if (item.source === 'agent') {
-      overriddenFields.value.add(key)
-    }
-  }
+  form.value = initFormFromSettingsWithSource(settingsWithSource.value)
 
   loadingSettings.value = false
 }
@@ -123,21 +106,6 @@ watch(
   },
   { immediate: true },
 )
-
-function isOverridden(key: string): boolean {
-  if (overwriteAll.value) return true
-  return overriddenFields.value.has(key)
-}
-
-function toggleField(key: string): void {
-  if (overwriteAll.value) return
-  if (overriddenFields.value.has(key)) {
-    overriddenFields.value.delete(key)
-  } else {
-    overriddenFields.value.add(key)
-  }
-  overriddenFields.value = new Set(overriddenFields.value)
-}
 
 function getSource(key: string): string {
   return settingsWithSource.value[key]?.source ?? 'default'
@@ -179,16 +147,7 @@ async function onSave(): Promise<void> {
   saving.value = true
   error.value = null
   try {
-    const keysToSave = overwriteAll.value
-      ? props.tool!.settings_schema.map((f) => f.key)
-      : [...overriddenFields.value].filter((k) => form.value[k] !== undefined)
-
-    const toSave: Record<string, string> = {}
-    for (const key of keysToSave) {
-      const value = form.value[key] ?? ''
-      if (value === '***') continue
-      toSave[key] = value
-    }
+    const toSave = buildAgentOverridePayload(props.tool!, form.value)
 
     await api.put(
       `/agents/${props.agentId}/tools/${encodeURIComponent(props.toolName!)}/override`,
@@ -308,22 +267,10 @@ function goToGlobalSettings(): void {
           Override settings specifically for this agent. Leave empty to inherit from global/user settings.
         </p>
 
-        <!-- Overwrite All Toggle (only for multi-field tools) -->
-        <div v-if="hasMultipleFields" class="mb-4">
-          <label class="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              v-model="overwriteAll"
-              class="rounded border-border"
-            />
-            <span>Override all fields</span>
-          </label>
-        </div>
-
         <!-- Per-Field Override Form -->
         <div class="space-y-4">
           <div v-for="field in tool.settings_schema" :key="field.key" class="flex flex-col gap-1.5">
-            <!-- Field header: label + override toggle -->
+            <!-- Field header: label -->
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-1.5">
                 <span class="text-sm font-medium">{{ field.label }}</span>
@@ -336,25 +283,12 @@ function goToGlobalSettings(): void {
                   {{ getSourceLabel(getSource(field.key)) }}
                 </span>
               </div>
-              <label
-                v-if="!overwriteAll"
-                class="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none"
-              >
-                <input
-                  type="checkbox"
-                  :checked="isOverridden(field.key)"
-                  @change="toggleField(field.key)"
-                  class="rounded border-border"
-                />
-                Override
-              </label>
             </div>
 
             <ToolSettingField
               :modelValue="form[field.key] ?? ''"
               :field="field"
               :error="fieldErrors[field.key] ?? null"
-              :disabled="!overwriteAll && !isOverridden(field.key)"
               :hideLabel="true"
               @update:modelValue="form[field.key] = String($event ?? '')"
             />

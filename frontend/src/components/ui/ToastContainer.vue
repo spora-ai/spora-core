@@ -17,7 +17,7 @@ interface ToastItem {
 }
 
 defineProps<{
-  toasts: ToastItem[]
+  toasts: readonly ToastItem[]
   onDismiss: (id: string) => void // eslint-disable-line no-unused-vars -- called via onDismiss(toast.id) in template
 }>()
 
