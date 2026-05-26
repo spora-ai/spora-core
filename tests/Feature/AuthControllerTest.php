@@ -47,11 +47,9 @@ function makeAuthControllerWithUserService(): array
 test('login returns 429 after exceeding rate limit', function (): void {
     [$controller] = makeAuthControllerWithMocks();
 
-    // Register a user so login can be attempted
     $authService = bootAuthLayer();
     $authService->register('slowuser@example.com', 'Password1!', 'Slow User');
 
-    // Exhaust the rate limit (5 attempts)
     for ($i = 0; $i < 5; $i++) {
         $req = jsonRequest('POST', '/api/v1/auth/login', [
             'email' => 'slowuser@example.com',
@@ -60,7 +58,6 @@ test('login returns 429 after exceeding rate limit', function (): void {
         $controller->login($req);
     }
 
-    // 6th attempt should be rate-limited
     $req = jsonRequest('POST', '/api/v1/auth/login', [
         'email' => 'slowuser@example.com',
         'password' => 'wrongpassword',
@@ -93,7 +90,6 @@ test('login includes Retry-After header when rate limited', function (): void {
     $authService = bootAuthLayer();
     $authService->register('retryuser@example.com', 'Password1!', 'Retry User');
 
-    // Exhaust the rate limit
     for ($i = 0; $i < 5; $i++) {
         $req = jsonRequest('POST', '/api/v1/auth/login', [
             'email' => 'retryuser@example.com',
@@ -115,7 +111,6 @@ test('login includes Retry-After header when rate limited', function (): void {
 test('register returns 429 after exceeding rate limit', function (): void {
     [$controller] = makeAuthControllerWithMocks();
 
-    // Exhaust the rate limit (5 attempts)
     for ($i = 0; $i < 5; $i++) {
         $req = jsonRequest('POST', '/api/v1/auth/register', [
             'email' => "ratelimit{$i}@example.com",
@@ -125,7 +120,6 @@ test('register returns 429 after exceeding rate limit', function (): void {
         $controller->register($req);
     }
 
-    // 6th attempt should be rate-limited
     $req = jsonRequest('POST', '/api/v1/auth/register', [
         'email' => 'ratelimit6@example.com',
         'password' => 'Password1!',
@@ -142,7 +136,6 @@ test('successful login clears rate limit bucket', function (): void {
     [$controller, $authService] = makeAuthControllerWithMocks();
     $userId = $authService->register('clearuser@example.com', 'Password1!', 'Clear User');
 
-    // Make 3 failed attempts
     for ($i = 0; $i < 3; $i++) {
         $req = jsonRequest('POST', '/api/v1/auth/login', [
             'email' => 'clearuser@example.com',
@@ -151,7 +144,6 @@ test('successful login clears rate limit bucket', function (): void {
         $controller->login($req);
     }
 
-    // Successful login should clear the bucket
     $req = jsonRequest('POST', '/api/v1/auth/login', [
         'email' => 'clearuser@example.com',
         'password' => 'Password1!',
@@ -159,7 +151,6 @@ test('successful login clears rate limit bucket', function (): void {
     $response = $controller->login($req);
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
-    // Another 3 failed attempts should not trigger rate limit
     for ($i = 0; $i < 3; $i++) {
         $req = jsonRequest('POST', '/api/v1/auth/login', [
             'email' => 'clearuser@example.com',
@@ -174,14 +165,12 @@ test('password endpoint changes password', function (): void {
     [$controller, $authService] = makeAuthControllerWithMocks();
     $authService->register('pwuser@example.com', 'OldPassword1!', 'Pw User');
 
-    // Login first
     $req = jsonRequest('POST', '/api/v1/auth/login', [
         'email' => 'pwuser@example.com',
         'password' => 'OldPassword1!',
     ]);
     $controller->login($req);
 
-    // Change password
     $req = jsonRequest('PATCH', '/api/v1/auth/password', [
         'current_password' => 'OldPassword1!',
         'new_password' => 'NewPassword1!',
@@ -191,7 +180,6 @@ test('password endpoint changes password', function (): void {
     $body = json_decode($response->getContent(), true);
     expect($body['message'])->toBe('Password updated');
 
-    // Login with new password should work
     $req = jsonRequest('POST', '/api/v1/auth/login', [
         'email' => 'pwuser@example.com',
         'password' => 'NewPassword1!',

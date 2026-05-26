@@ -17,7 +17,7 @@ test('Kernel instantiates without throwing', function (): void {
 });
 
 test('getContainer() returns a DI Container instance', function (): void {
-    echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
+    $kernel = new Kernel();
 
     expect($kernel->getContainer())->toBeInstanceOf(Container::class);
 });
@@ -115,8 +115,6 @@ test('dispatched stub controller returns JSON with error envelope', function ():
     expect($body['error'])->toHaveKey('code');
 });
 
-// Helper: force SecurityManager to throw (simulating a missing secret key).
-// Injects an invalid base64 key to trigger a 500 RuntimeException safely.
 function withoutSecretKey(callable $fn): mixed
 {
     $savedKey     = $_ENV['SPORA_SECRET_KEY'] ?? null;
@@ -146,12 +144,12 @@ function withoutSecretKey(callable $fn): mixed
 }
 
 test('uncaught controller exception returns 500 JSON', function (): void {
-    // GET /api/v1/agent resolves AgentController -> ToolConfigService -> SecurityManagerInterface.
-    // Without any secret key configured, SecurityManager throws -> Kernel catches -> 500.
     $response = withoutSecretKey(static function (): mixed {
-        echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
-        return $kernel->handle(Request::create('/api/v1/agents', 'GET'));
-    });
+        $kernel = new Kernel();
+        $res = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
+            $kernel->__destruct();
+            return $res;
+        });
 
     expect($response->getStatusCode())->toBe(500);
 
@@ -163,15 +161,16 @@ test('uncaught controller exception returns 500 JSON', function (): void {
 });
 
 test('500 response in production mode does not expose exception details', function (): void {
-    // Pin app_env to production regardless of local .env so the debug block assertion is stable.
     $savedEnv = $_ENV['SPORA_APP_ENV'] ?? null;
     $_ENV['SPORA_APP_ENV'] = 'production';
     putenv('SPORA_APP_ENV=production');
 
     try {
         $response = withoutSecretKey(static function (): mixed {
-            echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
-            return $kernel->handle(Request::create('/api/v1/agents', 'GET'));
+            $kernel = new Kernel();
+            $res = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
+            $kernel->__destruct();
+            return $res;
         });
     } finally {
         if ($savedEnv !== null) {
@@ -190,9 +189,11 @@ test('500 response in production mode does not expose exception details', functi
 
 test('500 response has Content-Type application/json', function (): void {
     $response = withoutSecretKey(static function (): mixed {
-        echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
-        return $kernel->handle(Request::create('/api/v1/agents', 'GET'));
-    });
+        $kernel = new Kernel();
+        $res = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
+            $kernel->__destruct();
+            return $res;
+        });
 
     expect($response->headers->get('Content-Type'))->toContain('application/json');
 });
@@ -204,7 +205,6 @@ test('500 response has Content-Type application/json', function (): void {
 test('UnauthenticatedException from a protected route returns 401 UNAUTHENTICATED', function (): void {
     clearSession();
 
-    // Provide a temporary key so SecurityManager (needed by AgentController) resolves.
     $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
 
     try {
@@ -243,10 +243,11 @@ test('500 response in development mode includes a debug block with exception det
     $_ENV['SPORA_APP_ENV'] = 'development';
 
     try {
-        // Clear secret key so SecurityManager throws -> 500, then verify debug block appears.
         $response = withoutSecretKey(static function (): mixed {
-            echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
-            return $kernel->handle(Request::create('/api/v1/agents', 'GET'));
+            $kernel = new Kernel();
+            $res = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
+            $kernel->__destruct();
+            return $res;
         });
     } finally {
         unset($_ENV['SPORA_APP_ENV']);
@@ -277,7 +278,7 @@ test('deprecation warnings are logged to Monolog and not output to screen', func
     $_ENV['SPORA_LOG_PATH'] = $tmpLog;
 
     try {
-        echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
+        $kernel = new Kernel();
         $container = $kernel->getContainer();
         $logger = $container->get(Psr\Log\LoggerInterface::class);
 
@@ -306,7 +307,7 @@ test('log stdout configures Monolog to write to stdout', function (): void {
     $_ENV['SPORA_LOG_PATH'] = 'stdout';
 
     try {
-        echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
+        $kernel = new Kernel();
         $container = $kernel->getContainer();
         $logger = $container->get(Psr\Log\LoggerInterface::class);
 

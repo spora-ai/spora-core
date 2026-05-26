@@ -36,6 +36,7 @@ final class Kernel
     {
         if ($this->errorHandlerInstalled) {
             restore_error_handler();
+            $this->errorHandlerInstalled = false;
         }
     }
 

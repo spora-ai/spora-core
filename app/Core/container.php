@@ -39,28 +39,6 @@ use Spora\Services\UserServiceInterface;
  * Wire up core services and resolve the SecurityManager from three possible key sources.
  */
 
-/**
- * Detect the current request origin from $_SERVER globals.
- * Falls back to http://localhost when running in a CLI context (e.g. worker, console).
- */
-function detectRequestOrigin(): string
-{
-    if (PHP_SAPI === 'cli' || !isset($_SERVER['HTTP_HOST'])) {
-        return 'http://localhost';
-    }
-
-    $scheme = $_SERVER['REQUEST_SCHEME'] ?? 'http';
-    $host = $_SERVER['HTTP_HOST'];
-    $port = $_SERVER['SERVER_PORT'] ?? 80;
-
-    // Include non-standard port only when not the default for the scheme
-    if (($scheme === 'http' && $port !== 80) || ($scheme === 'https' && $port !== 443)) {
-        return "{$scheme}://{$host}:{$port}";
-    }
-
-    return "{$scheme}://{$host}";
-}
-
 return [
     'config' => static function (): array {
         // Layer 1 — built-in defaults (always present)
@@ -87,7 +65,7 @@ return [
             'tool_http_timeout'   => 30,
             'mercure_url'         => null,
             'mercure_jwt_key'     => null,
-            'app_url'            => detectRequestOrigin(),
+            'app_url'            => \Spora\Core\RequestOrigin::detect(),
         ];
 
         // Layer 2 — config.php (installer-generated, gitignored, optional)
