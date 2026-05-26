@@ -13,9 +13,10 @@ use Spora\Services\NotificationService;
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeNotificationService(?MercurePublisherInterface $mercure = null): NotificationService
+function makeNotificationService(?MercurePublisherInterface $mercureOverride = null): NotificationService
 {
-    $mercure ??= Mockery::mock(MercurePublisherInterface::class);
+    /** @var \Mockery\MockInterface&MercurePublisherInterface $mercure */
+    $mercure = $mercureOverride ?? Mockery::mock(MercurePublisherInterface::class);
     $mercure->allows('publish')->andReturn(true);
     $mercure->allows('publishToUser')->andReturn(true);
 

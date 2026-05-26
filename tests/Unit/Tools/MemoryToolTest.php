@@ -17,7 +17,7 @@ describe('Memory Tools', function (): void {
     /**
      * Create a user and agent, return [userId, agentId].
      */
-    function createMemoryTestUser(string $email = 'memory@example.com'): array
+    function createMemoryToolTestUser(string $email = 'memory@example.com'): array
     {
         static $seq = 0;
         $seq++;
@@ -66,7 +66,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('list returns empty message when no memories exist', function (): void {
-            [, $agentId] = createMemoryTestUser();
+            [, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute(['action' => 'list'], $agentId);
@@ -77,7 +77,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('list returns memories for this agent only', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             Memory::create([
@@ -112,7 +112,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('save creates a new memory', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute([
@@ -136,7 +136,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('save updates an existing memory', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             Memory::create([
@@ -162,7 +162,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('save auto-derives summary from content when not provided', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $longContent = '<p>This is a <strong>long</strong> content that should have a summary auto-derived from it.</p>';
@@ -179,7 +179,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('save returns error when name is missing', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute([
@@ -192,7 +192,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('get retrieves a memory by name', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             Memory::create([
@@ -215,7 +215,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('get returns error when name is missing', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute(['action' => 'get'], $agentId);
@@ -225,7 +225,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('get returns error when memory not found', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute([
@@ -238,7 +238,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('delete removes a memory by name', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             Memory::create([
@@ -260,7 +260,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('delete returns error when name is missing', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute(['action' => 'delete'], $agentId);
@@ -270,7 +270,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('delete returns error when memory not found', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute([
@@ -283,7 +283,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('returns error for invalid action', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute(['action' => 'invalid_action'], $agentId);
@@ -315,7 +315,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('list returns empty message when no global memories exist', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new GlobalMemoryTool();
 
             $result = $tool->execute(['action' => 'list'], $agentId);
@@ -326,7 +326,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('list returns global memories only (not agent-scoped)', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new GlobalMemoryTool();
 
             Memory::create([
@@ -351,7 +351,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('save creates a new global memory', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new GlobalMemoryTool();
 
             $result = $tool->execute([
@@ -372,7 +372,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('save updates an existing global memory', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new GlobalMemoryTool();
 
             Memory::create([
@@ -396,7 +396,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('get retrieves a global memory by name', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new GlobalMemoryTool();
 
             Memory::create([
@@ -419,7 +419,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('get does not find agent-scoped memory', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new GlobalMemoryTool();
 
             Memory::create([
@@ -439,7 +439,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('delete removes a global memory by name', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new GlobalMemoryTool();
 
             Memory::create([
@@ -461,7 +461,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('delete does not delete agent-scoped memory with same name', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new GlobalMemoryTool();
 
             Memory::create([
@@ -484,7 +484,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('returns error for invalid action', function (): void {
-            [$userId, $agentId] = createMemoryTestUser();
+            [$userId, $agentId] = createMemoryToolTestUser();
             $tool = new GlobalMemoryTool();
 
             $result = $tool->execute(['action' => 'hack'], $agentId);

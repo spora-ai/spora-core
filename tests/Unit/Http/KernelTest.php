@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+/* namespace removed */
+
 use DI\Container;
 use Spora\Core\Kernel;
 use Symfony\Component\HttpFoundation\Request;
@@ -15,7 +17,7 @@ test('Kernel instantiates without throwing', function (): void {
 });
 
 test('getContainer() returns a DI Container instance', function (): void {
-    $kernel = new Kernel();
+    echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
 
     expect($kernel->getContainer())->toBeInstanceOf(Container::class);
 });
@@ -97,7 +99,7 @@ test('valid route with correct method dispatches to controller and returns a res
     $request  = Request::create('/api/v1/auth/login', 'POST');
     $response = $kernel->handle($request);
 
-    // Must not be a routing error — controller was reached
+    // Must not be a routing error - controller was reached
     expect($response->getStatusCode())->not()->toBe(404);
     expect($response->getStatusCode())->not()->toBe(405);
 });
@@ -113,16 +115,8 @@ test('dispatched stub controller returns JSON with error envelope', function ():
     expect($body['error'])->toHaveKey('code');
 });
 
-// ---------------------------------------------------------------------------
-// Exception handling (500)
-// ---------------------------------------------------------------------------
-
-// Helper: force SecurityManager to throw regardless of whether a .env file is present.
-// Dotenv::createImmutable (used by Kernel::loadDotEnv) will NOT override a variable that is
-// already defined in the environment, so injecting an invalid key before constructing the
-// Kernel is safe — the .env value is skipped and the container always sees our bad value.
-// '!invalid!' contains '!' which is not in the base64 alphabet, so strict base64_decode
-// returns false → RuntimeException in the SecurityManagerInterface factory → 500.
+// Helper: force SecurityManager to throw (simulating a missing secret key).
+// Injects an invalid base64 key to trigger a 500 RuntimeException safely.
 function withoutSecretKey(callable $fn): mixed
 {
     $savedKey     = $_ENV['SPORA_SECRET_KEY'] ?? null;
@@ -152,10 +146,10 @@ function withoutSecretKey(callable $fn): mixed
 }
 
 test('uncaught controller exception returns 500 JSON', function (): void {
-    // GET /api/v1/agent resolves AgentController → ToolConfigService → SecurityManagerInterface.
-    // Without any secret key configured, SecurityManager throws → Kernel catches → 500.
+    // GET /api/v1/agent resolves AgentController -> ToolConfigService -> SecurityManagerInterface.
+    // Without any secret key configured, SecurityManager throws -> Kernel catches -> 500.
     $response = withoutSecretKey(static function (): mixed {
-        $kernel = new Kernel();
+        echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
         return $kernel->handle(Request::create('/api/v1/agents', 'GET'));
     });
 
@@ -176,7 +170,7 @@ test('500 response in production mode does not expose exception details', functi
 
     try {
         $response = withoutSecretKey(static function (): mixed {
-            $kernel = new Kernel();
+            echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
             return $kernel->handle(Request::create('/api/v1/agents', 'GET'));
         });
     } finally {
@@ -196,7 +190,7 @@ test('500 response in production mode does not expose exception details', functi
 
 test('500 response has Content-Type application/json', function (): void {
     $response = withoutSecretKey(static function (): mixed {
-        $kernel = new Kernel();
+        echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
         return $kernel->handle(Request::create('/api/v1/agents', 'GET'));
     });
 
@@ -204,7 +198,7 @@ test('500 response has Content-Type application/json', function (): void {
 });
 
 // ---------------------------------------------------------------------------
-// 401 Unauthenticated (UnauthenticatedException → Kernel → 401)
+// 401 Unauthenticated (UnauthenticatedException -> Kernel -> 401)
 // ---------------------------------------------------------------------------
 
 test('UnauthenticatedException from a protected route returns 401 UNAUTHENTICATED', function (): void {
@@ -242,16 +236,16 @@ test('401 response has Content-Type application/json', function (): void {
 });
 
 // ---------------------------------------------------------------------------
-// 500 debug mode — exposes exception details when app_env=development
+// 500 debug mode - exposes exception details when app_env=development
 // ---------------------------------------------------------------------------
 
 test('500 response in development mode includes a debug block with exception details', function (): void {
     $_ENV['SPORA_APP_ENV'] = 'development';
 
     try {
-        // Clear secret key so SecurityManager throws → 500, then verify debug block appears.
+        // Clear secret key so SecurityManager throws -> 500, then verify debug block appears.
         $response = withoutSecretKey(static function (): mixed {
-            $kernel = new Kernel();
+            echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
             return $kernel->handle(Request::create('/api/v1/agents', 'GET'));
         });
     } finally {
@@ -271,7 +265,7 @@ test('500 response in development mode includes a debug block with exception det
 });
 
 // ---------------------------------------------------------------------------
-// Error handling — vendor deprecations captured by set_error_handler
+// Error handling - vendor deprecations captured by set_error_handler
 // ---------------------------------------------------------------------------
 
 test('deprecation warnings are logged to Monolog and not output to screen', function (): void {
@@ -283,7 +277,7 @@ test('deprecation warnings are logged to Monolog and not output to screen', func
     $_ENV['SPORA_LOG_PATH'] = $tmpLog;
 
     try {
-        $kernel = new Kernel();
+        echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
         $container = $kernel->getContainer();
         $logger = $container->get(Psr\Log\LoggerInterface::class);
 
@@ -292,7 +286,7 @@ test('deprecation warnings are logged to Monolog and not output to screen', func
             new Monolog\Handler\StreamHandler($tmpLog, Monolog\Level::Debug),
         ]);
 
-        // Trigger a user deprecation — should be captured by the error handler.
+        // Trigger a user deprecation - should be captured by the error handler.
         trigger_error('Test deprecation message', E_USER_DEPRECATED);
 
         // The deprecation should be in the log file.
@@ -301,17 +295,18 @@ test('deprecation warnings are logged to Monolog and not output to screen', func
         expect($logContents)->toContain('Test deprecation message');
         // E_USER_DEPRECATED = 16384
         expect($logContents)->toContain('16384');
+        unset($kernel);
     } finally {
         unset($_ENV['SPORA_APP_ENV'], $_ENV['SPORA_LOG_LEVEL'], $_ENV['SPORA_LOG_PATH']);
         @unlink($tmpLog);
     }
 });
 
-test('SPORA_LOG_PATH=stdout configures Monolog to write to php://stdout', function (): void {
+test('log stdout configures Monolog to write to stdout', function (): void {
     $_ENV['SPORA_LOG_PATH'] = 'stdout';
 
     try {
-        $kernel = new Kernel();
+        echo "Create K2\n"; $kernel = new Kernel(); echo "Done K2\n";
         $container = $kernel->getContainer();
         $logger = $container->get(Psr\Log\LoggerInterface::class);
 

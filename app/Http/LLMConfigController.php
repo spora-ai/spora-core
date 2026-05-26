@@ -168,8 +168,16 @@ final class LLMConfigController
         if ($config === null) {
             // Check if it might be a global config (admins can access it)
             $existingConfig = $this->llmConfigService->findConfiguration($id);
-            if ($existingConfig === null || (!$isAdmin && $existingConfig->is_global)) {
+            if ($existingConfig === null) {
+                return $this->notFound();
+            }
+            // Config exists but belongs to another user (not global) - deny access
+            if (!$isAdmin && $existingConfig->is_global) {
                 return $this->forbidden();
+            }
+            // Config belongs to another user - return not found to avoid enumeration
+            if ($existingConfig->user_id !== null && $existingConfig->user_id !== $userId) {
+                return $this->notFound();
             }
             // Admin trying to update global config - reload as admin access
             $config = $existingConfig;
@@ -221,6 +229,12 @@ final class LLMConfigController
     {
         $userId = AuthGuard::requireAuth($this->authService);
         $isAdmin = $this->authService->isAdmin();
+
+        // Check if config exists and belongs to another user (return 404 to avoid enumeration)
+        $existingConfig = $this->llmConfigService->findConfiguration($id);
+        if ($existingConfig !== null && !$isAdmin && !$existingConfig->is_global && $existingConfig->user_id !== $userId) {
+            return $this->notFound();
+        }
 
         $deleted = $this->llmConfigService->deleteConfiguration($id, $userId, $isAdmin);
         if (!$deleted) {

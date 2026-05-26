@@ -298,6 +298,7 @@ describe('MemoryController::update', function (): void {
             'name'    => 'updated',
             'summary' => 'new summary',
         ]);
+        $request->attributes->set('id', $memory->id);
         $response = $controller->update($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);

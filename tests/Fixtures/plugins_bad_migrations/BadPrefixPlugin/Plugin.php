@@ -34,7 +34,7 @@ final class Plugin implements PluginInterface
         return 1;
     }
 
-    public function migrationsPath(): ?string
+    public function migrationsPath(): string
     {
         return __DIR__ . '/migrations';
     }

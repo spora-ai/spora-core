@@ -20,7 +20,7 @@ use Symfony\Component\Mime\Email;
  * Reads mail configuration from container config (merged config.php + .env via SPORA_MAIL_* vars).
  * Uses MailTemplate records for templated emails (verification, password reset, welcome, etc.).
  */
-final class SystemMailer
+final class SystemMailer implements MailerInterface
 {
     public function __construct(
         private readonly array $config,

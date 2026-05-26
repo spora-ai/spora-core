@@ -311,8 +311,16 @@ final class LLMConfigService implements LLMConfigServiceInterface
             return false;
         }
 
+        // Check if config belongs to another user (only applies to non-global configs)
+        if (!$isAdmin && !$config->is_global && $config->user_id !== $userId) {
+            return false;
+        }
+
         // Unset any agents using this config
         Agent::where('llm_driver_config_id', $configId)->update(['llm_driver_config_id' => null]);
+
+        // Delete any user preferences referencing this config (cascade delete)
+        UserPreference::where('preferred_llm_config_id', $configId)->delete();
 
         $config->delete();
 

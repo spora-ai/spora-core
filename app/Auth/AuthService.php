@@ -14,7 +14,7 @@ use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
 use Spora\Models\User;
-use Spora\Services\SystemMailer;
+use Spora\Services\MailerInterface;
 
 /**
  * Thin wrapper around delight-im/Auth that exposes a typed, vendor-agnostic API.
@@ -23,12 +23,12 @@ use Spora\Services\SystemMailer;
  */
 final class AuthService
 {
-    private ?SystemMailer $systemMailer = null;
+    private ?MailerInterface $systemMailer = null;
     private ?string $appUrl = null;
 
     public function __construct(private readonly Auth $auth) {}
 
-    public function setSystemMailer(SystemMailer $systemMailer): void
+    public function setSystemMailer(MailerInterface $systemMailer): void
     {
         $this->systemMailer = $systemMailer;
     }

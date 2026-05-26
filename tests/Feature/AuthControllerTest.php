@@ -270,19 +270,42 @@ test('resetPassword resets password with valid selector and token', function ():
     $newPassword = 'NewPassword1!';
     $authService->register($email, $oldPassword, 'Reset User');
 
+    // Capture the reset URL by using the real mailer but intercepting via a proxy
+    $captured = new \ArrayObject(['url' => null]);
+    $proxyMailer = new class($captured) implements Spora\Services\MailerInterface {
+        private Spora\Services\SystemMailer $inner;
+        private \ArrayObject $captured;
+        public function __construct(\ArrayObject $captured)
+        {
+            $this->inner = new Spora\Services\SystemMailer(['mail_driver' => 'log']);
+            $this->captured = $captured;
+        }
+        public function sendPasswordResetEmail(string $email, string $resetUrl): bool
+        {
+            $this->captured['url'] = $resetUrl;
+            return true;
+        }
+        public function sendVerificationEmail(int $userId, string $email, string $verificationUrl): bool
+        {
+            return $this->inner->sendVerificationEmail($userId, $email, $verificationUrl);
+        }
+        public function sendWelcomeEmail(int $userId, string $email): bool
+        {
+            return $this->inner->sendWelcomeEmail($userId, $email);
+        }
+    };
+    $authService->setSystemMailer($proxyMailer);
+
     // Initiate password reset to generate selector/token
     $authService->forgotPassword($email);
 
-    // Get the selector and token from the database
-    $pdo = Illuminate\Database\Capsule\Manager::connection()->getPdo();
-    $stmt = $pdo->prepare("SELECT reset_selector, reset_token FROM users WHERE email = ?");
-    $stmt->execute([$email]);
-    $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+    // Parse selector and token from the captured URL
+    $capturedUrl = (string) $captured['url'];
+    preg_match('#/auth/reset-password/([^?]+)\?token=(.+)#', $capturedUrl, $matches);
+    $selector = $matches[1];
+    $token = urldecode($matches[2]);
 
-    $selector = $row['reset_selector'];
-    $token = $row['reset_token'];
-
-    // Reset the password
+    // Reset the password using captured selector and token
     $req = jsonRequest('POST', '/api/v1/auth/reset-password', [
         'selector' => $selector,
         'token' => $token,

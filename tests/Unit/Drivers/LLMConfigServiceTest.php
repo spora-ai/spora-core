@@ -36,10 +36,12 @@ test('getDrivers returns empty array when no drivers registered', function (): v
 
 test('getDrivers excludes non-existent classes', function (): void {
     $security = Mockery::mock(SecurityManagerInterface::class);
-    $service = new LLMConfigService($security, [
+    /** @var list<class-string<Spora\Drivers\LLMDriverConfigInterface>> $driverClasses */
+    $driverClasses = [
         OpenAICompatibleDriver::class,
         'Spora\Drivers\NonExistentDriver',
-    ]);
+    ];
+    $service = new LLMConfigService($security, $driverClasses);
 
     $drivers = $service->getDrivers();
 

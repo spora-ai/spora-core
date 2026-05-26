@@ -48,7 +48,9 @@ describe('TaskService — getTasksForUser', function (): void {
 
         expect($result)->toHaveCount(1);
         $taskData = $result[0];
+        // @phpstan-ignore-next-line
         expect(array_key_exists('tool_calls', $taskData))->toBe(false);
+        // @phpstan-ignore-next-line
         expect(array_key_exists('history', $taskData))->toBe(false);
         expect($taskData['id'])->toBe($task->id);
         expect($taskData['status'])->toBe('COMPLETED');

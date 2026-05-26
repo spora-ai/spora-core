@@ -13,7 +13,12 @@ describe('UserInfoTool', function (): void {
         $userId = bootAuth($authService, 'userinfo@example.com', 'Password1!');
         simulateLoggedInSession($userId, 'userinfo@example.com');
 
-        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        // Ensure user has no name set for this test
+        $user = Spora\Models\User::find($userId);
+        $user->name = null;
+        $user->save();
+
+        $tool = new UserInfoTool();
 
         $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
         $result = $tool->execute(['action' => 'get_base_data'], agentId: $agentId);
@@ -35,7 +40,7 @@ describe('UserInfoTool', function (): void {
         $user->about_me = 'Hello world';
         $user->save();
 
-        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        $tool = new UserInfoTool();
         $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
         $result = $tool->execute(['action' => 'get_base_data'], agentId: $agentId);
 
@@ -46,7 +51,7 @@ describe('UserInfoTool', function (): void {
     });
 
     it('returns error when user not found', function (): void {
-        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        $tool = new UserInfoTool();
         // Use an agent ID that doesn't exist
         $result = $tool->execute(['action' => 'get_base_data'], agentId: 9999);
 
@@ -55,7 +60,7 @@ describe('UserInfoTool', function (): void {
     });
 
     it('get_locations returns error when agent does not exist', function (): void {
-        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        $tool = new UserInfoTool();
         // Use an agent ID that doesn't exist
         $result = $tool->execute(['action' => 'get_locations'], agentId: 9999);
 
@@ -68,7 +73,7 @@ describe('UserInfoTool', function (): void {
         $userId = bootAuth($authService, 'userinfo3@example.com', 'Password1!');
         simulateLoggedInSession($userId, 'userinfo3@example.com');
 
-        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        $tool = new UserInfoTool();
         $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
         $result = $tool->execute(['action' => 'get_locations'], agentId: $agentId);
 
@@ -88,7 +93,7 @@ describe('UserInfoTool', function (): void {
             'is_default' => true,
         ]);
 
-        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        $tool = new UserInfoTool();
         $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
         $result = $tool->execute(['action' => 'get_locations'], agentId: $agentId);
 
@@ -108,7 +113,7 @@ describe('UserInfoTool', function (): void {
         $user->weight_kg = 70.5;
         $user->save();
 
-        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        $tool = new UserInfoTool();
         $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
         $result = $tool->execute(['action' => 'get_health_data'], agentId: $agentId);
 
@@ -119,7 +124,7 @@ describe('UserInfoTool', function (): void {
 
     it('describeAction returns correct descriptions', function (): void {
         $authService = bootAuthLayer();
-        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        $tool = new UserInfoTool();
 
         expect($tool->describeAction(['action' => 'get_base_data']))->toContain('base profile data');
         expect($tool->describeAction(['action' => 'get_locations']))->toContain('saved locations');
@@ -129,7 +134,7 @@ describe('UserInfoTool', function (): void {
 
     it('getParametersSchema returns valid schema', function (): void {
         $authService = bootAuthLayer();
-        $tool = new UserInfoTool(makeUserInfoToolConfigService());
+        $tool = new UserInfoTool();
         $schema = $tool->getParametersSchema();
 
         expect($schema['type'])->toBe('object');

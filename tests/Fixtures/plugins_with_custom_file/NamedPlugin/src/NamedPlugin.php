@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Fixtures\Plugins\NamedPlugin;
 
 use DI\ContainerBuilder;
+use Spora\Drivers\LLMDriverInterface;
 use Spora\Plugins\PluginInterface;
 
 final class NamedPlugin implements PluginInterface
@@ -24,9 +25,12 @@ final class NamedPlugin implements PluginInterface
         return [];
     }
 
+    /**
+     * @return array<string, class-string<LLMDriverInterface>>
+     */
     public function drivers(): array
     {
-        return ['named_driver' => self::class];
+        return ['named_driver' => NamedDriver::class];
     }
 
     public function recipePaths(): array
@@ -39,6 +43,7 @@ final class NamedPlugin implements PluginInterface
         return 0;
     }
 
+    /** @phpstan-return ?string */
     public function migrationsPath(): ?string
     {
         return null;

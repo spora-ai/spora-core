@@ -20,7 +20,7 @@ describe('UserLocation', function (): void {
             'address' => '123 Main St',
         ]);
 
-        expect($loc->user->id)->toBe($this->userId);
+        expect($loc->user->id)->toBe($this->userId); // @phpstan-ignore property.notFound
     });
 
     it('can create multiple locations for same user', function (): void {

@@ -112,7 +112,7 @@ test('POST /api/v1/auth/email/change-request without auth returns 401', function
 test('POST /api/v1/auth/email/change-request without email returns 422 when authenticated', function (): void {
     $service = bootAuthLayer();
     $email   = 'change-email-test@example.com';
-    $userId  = $service->register($email, 'Password1!');
+    $userId  = $service->register($email, 'Password1!', 'Change Email User');
     simulateLoggedInSession($userId, $email);
 
     $kernel   = new Kernel();

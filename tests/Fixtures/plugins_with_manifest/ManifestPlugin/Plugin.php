@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Fixtures\Plugins\ManifestPlugin;
 
 use DI\ContainerBuilder;
+use Spora\Drivers\LLMDriverInterface;
 use Spora\Plugins\PluginInterface;
 
 final class Plugin implements PluginInterface
@@ -24,9 +25,12 @@ final class Plugin implements PluginInterface
         return [];
     }
 
+    /**
+     * @return array<string, class-string<LLMDriverInterface>>
+     */
     public function drivers(): array
     {
-        return ['manifest_driver' => self::class];
+        return ['manifest_driver' => ManifestDriver::class];
     }
 
     public function recipePaths(): array
@@ -39,6 +43,7 @@ final class Plugin implements PluginInterface
         return 0;
     }
 
+    /** @phpstan-return ?string */
     public function migrationsPath(): ?string
     {
         return null;
