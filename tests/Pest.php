@@ -93,9 +93,9 @@ function clearSession(): void
  * Register a new user and simulate their session.
  * Returns the user ID.
  */
-function bootAuth(Spora\Auth\AuthService $authService, string $email = 'test@example.com', string $password = 'Password1!'): int
+function bootAuth(Spora\Auth\AuthService $authService, string $email = 'test@example.com', string $password = 'Password1!', string $displayName = 'Test User'): int
 {
-    $userId = $authService->register($email, $password);
+    $userId = $authService->register($email, $password, $displayName);
     simulateLoggedInSession($userId, $email);
 
     return $userId;

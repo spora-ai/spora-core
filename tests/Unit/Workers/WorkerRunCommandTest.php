@@ -74,7 +74,7 @@ function registerAgentInWorkerDb($db = null): array
     // second in-memory database with a different connection, causing the worker
     // and test assertions to query different databases.
     $authService = bootAuthLayer();
-    $userId = $authService->register('worker-test@example.com', 'Password1!');
+    $userId = $authService->register('worker-test@example.com', 'Password1!', 'Workertest');
 
     $agent = Agent::create([
         'user_id'   => $userId,
@@ -490,7 +490,7 @@ describe('WorkerRunCommand processQueuedTaskSync', function (): void {
 
         // Create agent and task
         $authService = bootAuthLayer();
-        $userId = $authService->register('worker-test@example.com', 'Password1!');
+        $userId = $authService->register('worker-test@example.com', 'Password1!', 'Workertest');
 
         $agent = Agent::create([
             'user_id'   => $userId,

@@ -54,9 +54,9 @@ export const useAuthStore = defineStore('auth', () => {
    * Register a new user account.
    * Does NOT log the user in — caller must handle the "verify email" state.
    */
-  async function register(email: string, password: string): Promise<{ user_id: number; email: string }> {
-    const res = await api.post<{ user: { id: number; email: string } }>('/auth/register', { email, password })
-    return res.user
+  async function register(email: string, password: string, confirmPassword: string, displayName: string): Promise<{ user_id: number; email: string }> {
+    const res = await api.post<{ user: { id: number; email: string } }>('/auth/register', { email, password, confirm_password: confirmPassword, display_name: displayName })
+    return { user_id: res.user.id, email: res.user.email }
   }
 
   async function logout(): Promise<void> {
@@ -70,8 +70,8 @@ export const useAuthStore = defineStore('auth', () => {
     await api.patch('/auth/password', { current_password: current, new_password: next })
   }
 
-  async function updateAccount(username: string): Promise<void> {
-    const updated = await api.patch<{ user: User }>('/auth/account', { username })
+  async function updateAccount(name: string): Promise<void> {
+    const updated = await api.patch<{ user: User }>('/auth/account', { name })
     user.value = normalizeUser(updated.user)
   }
 
@@ -81,6 +81,10 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function forgotPassword(email: string): Promise<void> {
     await api.post('/auth/forgot-password', { email })
+  }
+
+  async function resetPassword(selector: string, token: string, password: string): Promise<void> {
+    await api.post('/auth/reset-password', { selector, token, password })
   }
 
   async function changeEmail(newEmail: string): Promise<void> {
@@ -99,6 +103,7 @@ export const useAuthStore = defineStore('auth', () => {
     updateAccount,
     resendVerification,
     forgotPassword,
+    resetPassword,
     changeEmail,
   }
 })

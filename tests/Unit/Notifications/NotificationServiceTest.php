@@ -34,7 +34,7 @@ function makeNotificationController(): array
 function seedUserAndAgentForNotification(): array
 {
     $authService = bootAuthLayer();
-    $userId = $authService->register('notify@example.com', 'Password1!');
+    $userId = $authService->register('notify@example.com', 'Password1!', 'Notify');
     simulateLoggedInSession($userId, 'notify@example.com');
 
     $agent = Agent::create([
@@ -253,7 +253,7 @@ describe('NotificationController', function (): void {
 
     it('markRead returns 404 for notification belonging to another user', function (): void {
         [$userId] = seedUserAndAgentForNotification();
-        $otherUserId = bootAuthLayer()->register('other@example.com', 'Password1!');
+        $otherUserId = bootAuthLayer()->register('other@example.com', 'Password1!', 'Other');
 
         $notif = Notification::create([
             'user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Other',
@@ -300,7 +300,7 @@ describe('NotificationController', function (): void {
 
     it('destroy returns 404 for notification belonging to another user', function (): void {
         [$userId] = seedUserAndAgentForNotification();
-        $otherUserId = bootAuthLayer()->register('other@example.com', 'Password1!');
+        $otherUserId = bootAuthLayer()->register('other@example.com', 'Password1!', 'Other');
 
         $notif = Notification::create([
             'user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Other',

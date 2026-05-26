@@ -22,7 +22,7 @@ use Tests\Fixtures\TestTool;
  */
 test('returns empty when no global or agent override exists', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('cascade-test@example.com', 'Password1!');
+    $userId = $authService->register('cascade-test@example.com', 'Password1!', 'Cascadetest');
 
     $toolConfig = makeToolConfigService();
     $agentId = createAgentForUser($userId);
@@ -37,7 +37,7 @@ test('returns empty when no global or agent override exists', function () {
 
 test('global config is returned when no agent override exists', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('global-cascade@example.com', 'Password1!');
+    $userId = $authService->register('global-cascade@example.com', 'Password1!', 'Globalcascade');
 
     $toolConfig = makeToolConfigService();
     $agentId = createAgentForUser($userId);
@@ -56,7 +56,7 @@ test('global config is returned when no agent override exists', function () {
 
 test('agent override overrides global config', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('agent-override@example.com', 'Password1!');
+    $userId = $authService->register('agent-override@example.com', 'Password1!', 'Agentoverride');
 
     $toolConfig = makeToolConfigService();
     $agentId = createAgentForUser($userId);
@@ -82,7 +82,7 @@ test('agent override overrides global config', function () {
 
 test('scope global keys in agent override are discarded', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('global-scope@example.com', 'Password1!');
+    $userId = $authService->register('global-scope@example.com', 'Password1!', 'Globalscope');
 
     $toolConfig = makeToolConfigService();
     $agentId = createAgentForUser($userId);
@@ -105,7 +105,7 @@ test('scope global keys in agent override are discarded', function () {
 
 test('getEffectiveSettingsWithSource annotates correctly', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('source-annotate@example.com', 'Password1!');
+    $userId = $authService->register('source-annotate@example.com', 'Password1!', 'Sourceannotate');
 
     $toolConfig = makeToolConfigService();
     $agentId = createAgentForUser($userId);
@@ -134,7 +134,7 @@ test('getEffectiveSettingsWithSource annotates correctly', function () {
 
 test('password masking via maskForApi', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('mask-test@example.com', 'Password1!');
+    $userId = $authService->register('mask-test@example.com', 'Password1!', 'Masktest');
 
     $toolConfig = makeToolConfigService();
     $agentId = createAgentForUser($userId);
@@ -172,7 +172,7 @@ test('maskForApi handles empty and null password fields', function () {
 
 test('deleteAgentOverride removes the override', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('delete-override@example.com', 'Password1!');
+    $userId = $authService->register('delete-override@example.com', 'Password1!', 'Deleteoverride');
 
     $toolConfig = makeToolConfigService();
     $agentId = createAgentForUser($userId);
@@ -195,7 +195,7 @@ test('deleteAgentOverride removes the override', function () {
 
 test('getEffectiveSettingsWithSource returns default source when only schema default exists', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('schema-default@example.com', 'Password1!');
+    $userId = $authService->register('schema-default@example.com', 'Password1!', 'Schemadefault');
 
     $toolConfig = makeToolConfigService();
     $agentId = createAgentForUser($userId);
@@ -209,7 +209,7 @@ test('getEffectiveSettingsWithSource returns default source when only schema def
 
 test('effective settings falls back to global when user and agent layers are cleared', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('user-fallback@example.com', 'Password1!');
+    $userId = $authService->register('user-fallback@example.com', 'Password1!', 'Userfallback');
 
     $toolConfig = makeToolConfigService();
     $agentId = createAgentForUser($userId);
@@ -239,7 +239,7 @@ test('effective settings falls back to global when user and agent layers are cle
 
 test('schema defaults are used when all layers are empty', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('default-fallback@example.com', 'Password1!');
+    $userId = $authService->register('default-fallback@example.com', 'Password1!', 'Defaultfallback');
 
     $toolConfig = makeToolConfigService();
     $agentId = createAgentForUser($userId);
@@ -255,7 +255,7 @@ test('schema defaults are used when all layers are empty', function () {
 
 test('deleteAgentOverride is idempotent (no error if no override exists)', function () {
     $authService = bootAuthLayer();
-    $userId = $authService->register('delete-no-override@example.com', 'Password1!');
+    $userId = $authService->register('delete-no-override@example.com', 'Password1!', 'Deletenooverride');
 
     $toolConfig = makeToolConfigService();
     $agentId = createAgentForUser($userId);

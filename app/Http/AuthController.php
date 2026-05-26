@@ -26,7 +26,6 @@ final class AuthController
     public function __construct(
         private readonly AuthService $authService,
         private readonly UserServiceInterface $userService,
-        private readonly ?SystemMailer $systemMailer = null,
         private readonly array $config = [],
     ) {}
 
@@ -48,14 +47,19 @@ final class AuthController
             return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         }
 
-        if ($this->missingFields($body, ['email', 'password'])) {
-            return $this->error('VALIDATION_ERROR', 'The fields "email" and "password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        if ($this->missingFields($body, ['email', 'password', 'display_name', 'confirm_password'])) {
+            return $this->error('VALIDATION_ERROR', 'The fields "email", "password", "display_name", and "confirm_password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        if ($body['password'] !== $body['confirm_password']) {
+            return $this->error('VALIDATION_ERROR', 'Passwords do not match.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         try {
-            $userId = $this->authService->register((string) $body['email'], (string) $body['password']);
-            RateLimiter::clear($clientIp);
+            $userId = $this->authService->register((string) $body['email'], (string) $body['password'], (string) $body['display_name']);
         } catch (EmailTakenException) {
+            RateLimiter::clear($clientIp);
+
             return $this->error('EMAIL_TAKEN', 'A user with that email address already exists.', Response::HTTP_CONFLICT);
         } catch (InvalidArgumentException $e) {
             return $this->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
@@ -143,7 +147,7 @@ final class AuthController
             ['data' => ['user' => [
                 'id'         => $user['id'],
                 'email'      => $user['email'],
-                'username'   => $user['username'],
+                'name'       => $user['name'],
                 'registered' => $registered,
                 'is_admin'   => in_array('ADMIN', $user['roles'] ?? [], true),
             ]]],
@@ -205,22 +209,17 @@ final class AuthController
         );
     }
 
-    public function verify(Request $request, array $vars = []): JsonResponse
+    public function verify(Request $request, string $selector, array $vars = []): JsonResponse
     {
-        $selector = $vars['selector'] ?? '';
         $token = $request->query->get('token', '');
 
         if ($selector === '' || $token === '') {
             return $this->error('VALIDATION_ERROR', 'The selector and token are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $result = $this->authService->confirmEmail($selector, $token);
+        $this->authService->confirmEmail($selector, $token);
 
-        if ($result) {
-            return new JsonResponse(['message' => 'Email verified successfully.'], Response::HTTP_OK);
-        }
-
-        return $this->error('INVALID_TOKEN', 'The verification token is invalid or has expired.', Response::HTTP_BAD_REQUEST);
+        return new JsonResponse(['message' => 'Email verified successfully.'], Response::HTTP_OK);
     }
 
     public function forgotPassword(Request $request): JsonResponse
@@ -343,13 +342,9 @@ final class AuthController
             return $this->error('VALIDATION_ERROR', 'The selector and token are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $result = $this->authService->confirmEmail($selector, $token);
+        $this->authService->confirmEmail($selector, $token);
 
-        if ($result) {
-            return new JsonResponse(['message' => 'Email changed successfully.'], Response::HTTP_OK);
-        }
-
-        return $this->error('INVALID_TOKEN', 'The verification token is invalid or has expired.', Response::HTTP_BAD_REQUEST);
+        return new JsonResponse(['message' => 'Email changed successfully.'], Response::HTTP_OK);
     }
 
     private function getClientIp(Request $request): string

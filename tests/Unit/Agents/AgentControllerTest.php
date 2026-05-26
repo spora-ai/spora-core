@@ -41,9 +41,9 @@ function makeAgentController(): array
 /**
  * Register a user and simulate their session. Returns the user ID.
  */
-function registerUser(AuthService $authService, string $email = 'user@example.com', string $password = 'Password1!'): int
+function registerUser(AuthService $authService, string $email = 'user@example.com', string $password = 'Password1!', string $displayName = 'Test User'): int
 {
-    $userId = $authService->register($email, $password);
+    $userId = $authService->register($email, $password, $displayName);
     simulateLoggedInSession($userId, $email);
 
     return $userId;

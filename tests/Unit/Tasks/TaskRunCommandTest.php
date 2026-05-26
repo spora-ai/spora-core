@@ -59,7 +59,7 @@ function makeThrowingDriver(Throwable $e): LLMDriverInterface
 describe('TaskRunCommand — task claiming', function (): void {
     beforeEach(function (): void {
         $this->authService = bootAuthLayer();
-        $this->userId = $this->authService->register('taskrun@example.com', 'Password1!');
+        $this->userId = $this->authService->register('taskrun@example.com', 'Password1!', 'Taskrun');
         simulateLoggedInSession($this->userId, 'taskrun@example.com');
 
         $this->container = Mockery::mock(Psr\Container\ContainerInterface::class);
@@ -250,7 +250,7 @@ describe('TaskRunCommand — task claiming', function (): void {
 describe('TaskRunCommand — orchestrator integration', function (): void {
     beforeEach(function (): void {
         $this->authService = bootAuthLayer();
-        $this->userId = $this->authService->register('taskrun3@example.com', 'Password1!');
+        $this->userId = $this->authService->register('taskrun3@example.com', 'Password1!', 'Taskrun3');
         simulateLoggedInSession($this->userId, 'taskrun3@example.com');
 
         // Create a global LLM config for tests (tests mock the DriverFactory, so credentials don't matter)

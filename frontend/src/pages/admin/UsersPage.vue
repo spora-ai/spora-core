@@ -98,7 +98,7 @@ async function createUser(): Promise<void> {
 // ── Edit modal ─────────────────────────────────────────────────────────────
 
 const editingUser = ref<User | null>(null)
-const editForm = ref({ username: '', isAdmin: false, suspended: false })
+const editForm = ref({ name: '', isAdmin: false, suspended: false })
 const savingEdit = ref(false)
 const editError = ref<string | null>(null)
 
@@ -110,7 +110,7 @@ const isEditingOpen = computed({
 function openEdit(user: User): void {
   editingUser.value = user
   editForm.value = {
-    username: user.username ?? '',
+    name: user.name ?? '',
     isAdmin: user.roles.includes('ADMIN'),
     suspended: user.roles.includes('SUSPENDED'),
   }
@@ -129,9 +129,9 @@ async function saveEdit(): Promise<void> {
     const wasAdmin = editingUser.value.roles.includes('ADMIN')
     const isAdmin = editForm.value.isAdmin
 
-    // Update username and suspended status
+    // Update name and suspended status
     await usersStore.updateUser(editingUser.value.id, {
-      username: editForm.value.username || undefined,
+      name: editForm.value.name || undefined,
       suspended: editForm.value.suspended,
     })
 
@@ -222,7 +222,7 @@ function isOwnAccount(user: User): boolean {
           <tr v-for="user in usersStore.users" :key="user.id" class="hover:bg-muted/20 transition-colors">
             <td class="px-4 py-3 text-muted-foreground font-mono">{{ user.id }}</td>
             <td class="px-4 py-3">{{ user.email }}</td>
-            <td class="px-4 py-3">{{ user.username || '—' }}</td>
+            <td class="px-4 py-3">{{ user.name || '—' }}</td>
             <td class="px-4 py-3">
               <div class="flex items-center gap-1.5 flex-wrap">
                 <span
@@ -358,10 +358,10 @@ function isOwnAccount(user: User): boolean {
   <Modal v-model="isEditingOpen" :title="`Edit ${editingUser?.email}`" size="sm" @close="closeEdit">
     <form @submit.prevent="saveEdit" class="flex flex-col gap-4">
       <div class="flex flex-col gap-1.5">
-        <label for="edit-username" class="text-sm font-medium">Username</label>
+        <label for="edit-name" class="text-sm font-medium">Display Name</label>
         <input
-          id="edit-username"
-          v-model="editForm.username"
+          id="edit-name"
+          v-model="editForm.name"
           type="text"
           placeholder="Display name (optional)"
           class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"

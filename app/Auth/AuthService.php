@@ -43,7 +43,7 @@ final class AuthService
         return function (string $selector, string $token) use ($userId, $email) {
             if ($this->systemMailer !== null) {
                 $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-                $verifyUrl = "{$baseUrl}/api/v1/auth/verify/{$selector}?token=" . urlencode($token);
+                $verifyUrl = "{$baseUrl}/auth/verify/{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendVerificationEmail($userId, $email, $verifyUrl);
             }
         };
@@ -87,15 +87,23 @@ final class AuthService
      * @throws InvalidArgumentException if the email or password is invalid
      * @throws EmailTakenException       if a user with that email already exists
      */
-    public function register(string $email, string $password): int
+    public function register(string $email, string $password, string $displayName): int
     {
         try {
-            return (int) $this->auth->register(
+            $userId = (int) $this->auth->register(
                 $email,
                 $password,
                 null,
                 $this->systemMailer !== null ? $this->sendVerificationEmailViaCallback(0, $email) : null,
             );
+
+            $user = User::where('email', $email)->first();
+            if ($user !== null) {
+                $user->name = $displayName;
+                $user->save();
+            }
+
+            return $userId;
         } catch (UserAlreadyExistsException) {
             throw new EmailTakenException('A user with that email address already exists.');
         } catch (InvalidEmailException) {
@@ -223,7 +231,7 @@ final class AuthService
         $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
 
         $this->auth->changeEmail($newEmail, function (string $selector, string $token) use ($newEmail, $baseUrl): void {
-            $confirmUrl = "{$baseUrl}/api/v1/auth/verify/{$selector}?token=" . urlencode($token);
+            $confirmUrl = "{$baseUrl}/auth/verify/{$selector}?token=" . urlencode($token);
             $this->systemMailer->sendVerificationEmail(0, $newEmail, $confirmUrl);
         });
     }
@@ -236,7 +244,7 @@ final class AuthService
         $this->auth->forgotPassword($email, function (string $selector, string $token) use ($email): void {
             if ($this->systemMailer !== null) {
                 $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-                $resetUrl = "{$baseUrl}/api/v1/auth/reset-password/{$selector}?token=" . urlencode($token);
+                $resetUrl = "{$baseUrl}/auth/reset-password/{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendPasswordResetEmail($email, $resetUrl);
             }
         });
@@ -264,13 +272,11 @@ final class AuthService
 
         try {
             $this->auth->resendConfirmationForEmail($email, function (string $selector, string $token) use ($email, $baseUrl): void {
-                $verifyUrl = "{$baseUrl}/api/v1/auth/verify/{$selector}?token=" . urlencode($token);
+                $verifyUrl = "{$baseUrl}/auth/verify/{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendVerificationEmail(0, $email, $verifyUrl);
             });
         } catch (\Delight\Auth\ConfirmationRequestNotFound) {
             // No pending confirmation — nothing to resend; silently return
-        } catch (\Delight\Auth\InvalidEmailException) {
-            // Invalid email — silently return
         }
     }
 }

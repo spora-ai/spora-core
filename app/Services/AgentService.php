@@ -263,7 +263,8 @@ final class AgentService implements AgentServiceInterface
 
         // llm_configuration is a special case — no registered tool class
         if ($toolClass === 'llm_configuration') {
-            return $this->getLlmConfigurationSettings($userId);
+            $config = $this->llmConfig->getEffectiveConfigForAgent($agent);
+            return $config !== null ? $this->maskLlmConfig($config) : [];
         }
 
         if ($rawOnly) {
@@ -554,13 +555,13 @@ final class AgentService implements AgentServiceInterface
         return $keys;
     }
 
-    private function getLlmConfigurationSettings(int $userId): array
+    private function maskLlmConfig(LLMDriverConfiguration $config): array
     {
-        $config = LLMDriverConfiguration::where('user_id', $userId)->where('is_default', true)->first();
         try {
-            $settings = $config !== null
-                ? $this->llmConfig->decodeSettings($config->driver_class, $config->getRawOriginal('settings'))
-                : [];
+            $settings = $this->llmConfig->decodeSettings(
+                $config->driver_class,
+                $config->getRawOriginal('settings'),
+            );
         } catch (Throwable) {
             $settings = [];
         }
@@ -568,7 +569,7 @@ final class AgentService implements AgentServiceInterface
         $drivers = $this->llmConfig->getDrivers();
         $schema = null;
         foreach ($drivers as $driver) {
-            if ($config !== null && $driver['driver_class'] === $config->driver_class) {
+            if ($driver['driver_class'] === $config->driver_class) {
                 $schema = $driver['settings_schema'];
                 break;
             }

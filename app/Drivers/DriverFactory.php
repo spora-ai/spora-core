@@ -29,28 +29,10 @@ class DriverFactory
 
     public function makeFromAgent(Agent $agent): LLMDriverInterface
     {
-        // Try agent-specific config first
-        $configId = $agent->llm_driver_config_id;
+        $config = $this->llmConfigService->getEffectiveConfigForAgent($agent);
 
-        if ($configId !== null) {
-            $config = LLMDriverConfiguration::find($configId);
-            if ($config !== null) {
-                return $this->makeDriverFromConfig($config);
-            }
-        }
-
-        // Fall back to global default for this user
-        $defaultConfig = LLMDriverConfiguration::where('user_id', $agent->user_id)->where('is_default', true)->first();
-        if ($defaultConfig !== null) {
-            return $this->makeDriverFromConfig($defaultConfig);
-        }
-
-        // Fall back to global default (is_global=true AND is_default=true)
-        $globalDefault = LLMDriverConfiguration::where('is_global', true)
-            ->where('is_default', true)
-            ->first();
-        if ($globalDefault !== null) {
-            return $this->makeDriverFromConfig($globalDefault);
+        if ($config !== null) {
+            return $this->makeDriverFromConfig($config);
         }
 
         // Ultimate fallback: OpenAICompatibleDriver with empty settings

@@ -5,27 +5,27 @@ import GlobalNavbar from '@/components/GlobalNavbar.vue'
 
 const auth = useAuthStore()
 
-// ── Username form ────────────────────────────────────────────────────────────
+// ── Display name form ─────────────────────────────────────────────────────────
 
-const username = ref(auth.user?.username ?? '')
-const usernameSaving = ref(false)
-const usernameError = ref<string | null>(null)
-const usernameSuccess = ref(false)
+const displayName = ref(auth.user?.name ?? '')
+const displayNameSaving = ref(false)
+const displayNameError = ref<string | null>(null)
+const displayNameSuccess = ref(false)
 
-async function saveUsername(): Promise<void> {
-  const val = username.value.trim()
+async function saveDisplayName(): Promise<void> {
+  const val = displayName.value.trim()
   if (!val) return
-  usernameSaving.value = true
-  usernameError.value = null
-  usernameSuccess.value = false
+  displayNameSaving.value = true
+  displayNameError.value = null
+  displayNameSuccess.value = false
   try {
     await auth.updateAccount(val)
-    usernameSuccess.value = true
-    setTimeout(() => { usernameSuccess.value = false }, 3000)
+    displayNameSuccess.value = true
+    setTimeout(() => { displayNameSuccess.value = false }, 3000)
   } catch (e: any) {
-    usernameError.value = e?.name === 'ApiError' ? e.message : 'Failed to update display name.'
+    displayNameError.value = e?.name === 'ApiError' ? e.message : 'Failed to update display name.'
   } finally {
-    usernameSaving.value = false
+    displayNameSaving.value = false
   }
 }
 
@@ -62,6 +62,7 @@ const newPassword = ref('')
 const confirmPassword = ref('')
 const passwordSaving = ref(false)
 const passwordError = ref<string | null>(null)
+const passwordSuccess = ref(false)
 
 const passwordsMatch = computed(() => newPassword.value === confirmPassword.value)
 
@@ -79,6 +80,8 @@ async function savePassword(): Promise<void> {
   passwordError.value = null
   try {
     await auth.changePassword(currentPassword.value, newPassword.value)
+    passwordSuccess.value = true
+    setTimeout(() => { passwordSuccess.value = false }, 3000)
     currentPassword.value = ''
     newPassword.value = ''
     confirmPassword.value = ''
@@ -108,7 +111,7 @@ async function savePassword(): Promise<void> {
           <div class="flex gap-2">
             <div class="flex-1 space-y-1">
               <input
-                v-model="username"
+                v-model="displayName"
                 type="text"
                 placeholder="Your display name"
                 class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -116,15 +119,15 @@ async function savePassword(): Promise<void> {
               <p class="text-xs text-muted-foreground">{{ auth.user?.email }}</p>
             </div>
             <button
-              @click="saveUsername"
-              :disabled="usernameSaving || !username.trim()"
+              @click="saveDisplayName"
+              :disabled="displayNameSaving || !displayName.trim()"
               class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
             >
-              {{ usernameSaving ? 'Saving…' : 'Save' }}
+              {{ displayNameSaving ? 'Saving…' : 'Save' }}
             </button>
           </div>
-          <p v-if="usernameError" role="alert" class="text-xs text-destructive">{{ usernameError }}</p>
-          <p v-if="usernameSuccess" role="status" class="text-xs text-green-600">Display name updated.</p>
+          <p v-if="displayNameError" role="alert" class="text-xs text-destructive">{{ displayNameError }}</p>
+          <p v-if="displayNameSuccess" role="status" class="text-xs text-green-600">Display name updated.</p>
         </section>
 
         <!-- Change email -->
@@ -205,6 +208,7 @@ async function savePassword(): Promise<void> {
               />
             </div>
             <p v-if="passwordError" role="alert" class="text-xs text-destructive">{{ passwordError }}</p>
+            <p v-if="passwordSuccess" role="status" class="text-xs text-green-600">Password updated successfully.</p>
             <button
               type="submit"
               :disabled="passwordSaving || !currentPassword || !newPassword || !confirmPassword"

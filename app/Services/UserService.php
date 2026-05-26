@@ -293,7 +293,7 @@ final class UserService implements UserServiceInterface
         return [
             'id'       => (int) $user->id,
             'email'    => $user->email,
-            'username' => $user->username,
+            'name'     => $user->name,
             'roles'    => $roles,
             'registered' => (int) $user->registered,
             'is_admin' => in_array('ADMIN', $roles, true),

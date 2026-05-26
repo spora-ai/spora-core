@@ -1,7 +1,7 @@
 export interface User {
   id: number
   email: string
-  username: string | null
+  name: string | null
   is_admin: boolean
   roles: string[]
   created_at?: string
@@ -23,7 +23,7 @@ export interface CreateUserPayload {
 }
 
 export interface UpdateUserPayload {
-  username?: string
+  name?: string
   is_admin?: boolean
   suspended?: boolean
 }

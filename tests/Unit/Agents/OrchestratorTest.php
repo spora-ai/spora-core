@@ -74,7 +74,7 @@ function mockDriverFactory(LLMDriverInterface $driver): DriverFactory
 function seedAgent(): array
 {
     $authService = bootAuthLayer();
-    $userId      = $authService->register('orch@example.com', 'Password1!');
+    $userId      = $authService->register('orch@example.com', 'Password1!', 'Orch');
 
     // Create a global LLM config as default (tests mock the DriverFactory, so credentials don't matter)
     $config = LLMDriverConfiguration::create([
@@ -1089,7 +1089,7 @@ it('buildMessages skips multiple summary ranges and only includes post-summary r
 
 test('resolveLlmConfig throws when no config exists at any level', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('non-config@example.com', 'Password1!');
+    $userId = $authService->register('non-config@example.com', 'Password1!', 'Nonconfig');
 
     // Create agent WITHOUT any config AND without a global default existing
     $agent = Agent::create([
@@ -1239,8 +1239,8 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     // user context. Each user only sees their own preference, not another user's.
     $authService = bootAuthLayer();
 
-    $userA = $authService->register('user-a-iso@example.com', 'Password1!');
-    $userB = $authService->register('user-b-iso@example.com', 'Password1!');
+    $userA = $authService->register('user-a-iso@example.com', 'Password1!', 'UseraIso');
+    $userB = $authService->register('user-b-iso@example.com', 'Password1!', 'UserbIso');
 
     // User A creates their own config
     $configA = LLMDriverConfiguration::create([
@@ -1452,7 +1452,7 @@ it('publishes intermediate state when tools require approval', function (): void
 
 test('tick sets NO_LLM_CONFIGURATION error code and message when resolveLlmConfig throws', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('no-config@example.com', 'Password1!');
+    $userId = $authService->register('no-config@example.com', 'Password1!', 'Noconfig');
 
     // Agent with no LLM config and no global default — resolveLlmConfig() will throw.
     $agent = Agent::create([

@@ -6,8 +6,8 @@ const BASE_URL = import.meta.env.VITE_API_URL ?? ''
 
 export class ApiError extends Error {
   constructor(
-    public readonly code: string,
     message: string,
+    public readonly code: string,
     public readonly status: number,
   ) {
     super(message)
@@ -36,7 +36,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const err = body?.error as Record<string, string> | undefined
     const code = err?.code ?? 'UNKNOWN_ERROR'
     const message = err?.message ?? `HTTP ${response.status}`
-    throw new ApiError(code, message, response.status)
+    throw new ApiError(message, code, response.status)
   }
 
   // body.data is the standard envelope; fall back to the whole body for bare responses.

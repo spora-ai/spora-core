@@ -41,7 +41,8 @@ function makeAgent(mixed $authService, string $suffix = ''): int
     static $seq = 0;
     $seq++;
     $email  = "toolconfig{$seq}{$suffix}@example.com";
-    $userId = $authService->register($email, 'Password1!');
+    $displayName = ucfirst(explode('@', $email)[0]);
+    $userId = $authService->register($email, 'Password1!', $displayName);
 
     return Agent::create([
         'user_id'      => $userId,
@@ -414,7 +415,7 @@ test('deleteGlobalSettings is idempotent (no error if not exists)', function ():
 
 test('deleteUserSettings removes the row', function (): void {
     [$service, , $authService] = makeToolConfigService();
-    $userId = $authService->register('delete-user@example.com', 'Password1!');
+    $userId = $authService->register('delete-user@example.com', 'Password1!', 'Deleteuser');
 
     $service->putUserSettings(TestTool::class, $userId, ['max_results' => '30']);
     expect(Capsule::table('tool_user_settings')->where('user_id', $userId)->exists())->toBeTrue();
@@ -425,8 +426,8 @@ test('deleteUserSettings removes the row', function (): void {
 
 test('deleteUserSettings requires userId to target correct user', function (): void {
     [$service, , $authService] = makeToolConfigService();
-    $user1 = $authService->register('delete-user1@example.com', 'Password1!');
-    $user2 = $authService->register('delete-user2@example.com', 'Password1!');
+    $user1 = $authService->register('delete-user1@example.com', 'Password1!', 'Deleteuser1');
+    $user2 = $authService->register('delete-user2@example.com', 'Password1!', 'Deleteuser2');
 
     $service->putUserSettings(TestTool::class, $user1, ['max_results' => 'user1-value']);
 

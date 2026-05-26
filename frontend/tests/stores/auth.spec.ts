@@ -104,8 +104,8 @@ describe('useAuthStore', () => {
 
   describe('register', () => {
     it('calls POST /auth/register and returns user info without setting user (pending verification)', async () => {
-      const mockUser = { id: 2, email: 'new@example.com' }
-      mockApi.post.mockResolvedValueOnce({ user: mockUser })
+      const mockUser = { user_id: 2, email: 'new@example.com' }
+      mockApi.post.mockResolvedValueOnce({ user: { id: 2, email: 'new@example.com' } })
 
       const store = useAuthStore()
       const result = await store.register('new@example.com', 'password123')
@@ -181,7 +181,7 @@ describe('useAuthStore', () => {
       const store = useAuthStore()
       await store.updateAccount('newname')
 
-      expect(mockApi.patch).toHaveBeenCalledWith('/auth/account', { username: 'newname' })
+      expect(mockApi.patch).toHaveBeenCalledWith('/auth/account', { name: 'newname' })
       expect(store.user).toEqual({ id: 1, email: 'test@example.com', username: 'newname', roles: [] })
     })
   })

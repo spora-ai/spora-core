@@ -29,6 +29,18 @@ const router = createRouter({
       meta: { requiresGuest: true },
     },
     {
+      path: '/auth/verify/:selector',
+      name: 'verify-email',
+      component: () => import('@/pages/VerifyEmailPage.vue'),
+      meta: { requiresGuest: true },
+    },
+    {
+      path: '/auth/reset-password/:selector',
+      name: 'reset-password',
+      component: () => import('@/pages/ResetPasswordPage.vue'),
+      meta: { requiresGuest: true },
+    },
+    {
       path: '/',
       name: 'dashboard',
       component: () => import('@/pages/DashboardPage.vue'),

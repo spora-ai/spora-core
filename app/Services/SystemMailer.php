@@ -8,6 +8,7 @@ use Psr\Log\LoggerInterface;
 use RuntimeException;
 use Spora\Mailer\LogTransport;
 use Spora\Models\MailTemplate;
+use Spora\Models\User;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mime\Address;
@@ -103,9 +104,9 @@ final class SystemMailer
     public function sendVerificationEmail(int $userId, string $email, string $verificationUrl): bool
     {
         return $this->sendTemplatedEmail('email_verification', [
-            'user_id'          => $userId,
-            'email'            => $email,
-            'verification_url' => $verificationUrl,
+            'user_id'            => $userId,
+            'email'              => $email,
+            'verification_link'  => $verificationUrl,
         ], [$email]);
     }
 
@@ -120,7 +121,7 @@ final class SystemMailer
     {
         return $this->sendTemplatedEmail('password_reset', [
             'email'     => $email,
-            'reset_url' => $resetUrl,
+            'reset_link' => $resetUrl,
         ], [$email]);
     }
 
@@ -133,9 +134,12 @@ final class SystemMailer
      */
     public function sendWelcomeEmail(int $userId, string $email): bool
     {
+        $user = User::find($userId);
+        $userName = $user->username ?? $email;
+
         return $this->sendTemplatedEmail('welcome', [
-            'user_id' => $userId,
-            'email'   => $email,
+            'user_name' => $userName,
+            'email'     => $email,
         ], [$email]);
     }
 

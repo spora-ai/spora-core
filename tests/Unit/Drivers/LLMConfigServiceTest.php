@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Models\Agent;
+use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\LLMConfigService;
 
 test('getDrivers returns all registered drivers', function (): void {
@@ -211,4 +214,133 @@ test('maskForApi leaves empty password fields unchanged', function (): void {
     $masked = $service->maskForApi($settings, $schema);
 
     expect($masked['api_key'])->toBe('');
+});
+
+// ── getEffectiveConfigForAgent ─────────────────────────────────────────────────
+
+test('getEffectiveConfigForAgent returns tier-1 agent-specific config', function (): void {
+    $security = Mockery::mock(SecurityManagerInterface::class);
+    $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+
+    $userId = Capsule::table('users')->insertGetId([
+        'email'    => 'agent-test@example.com',
+        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'registered' => time(),
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $agentConfig = new LLMDriverConfiguration();
+    $agentConfig->user_id = $userId;
+    $agentConfig->name = 'Agent Config';
+    $agentConfig->driver_class = OpenAICompatibleDriver::class;
+    $agentConfig->settings = json_encode([]);
+    $agentConfig->is_default = false;
+    $agentConfig->save();
+
+    $userDefault = new LLMDriverConfiguration();
+    $userDefault->user_id = $userId;
+    $userDefault->name = 'User Default';
+    $userDefault->driver_class = OpenAICompatibleDriver::class;
+    $userDefault->settings = json_encode([]);
+    $userDefault->is_default = true;
+    $userDefault->save();
+
+    $agent = new Agent();
+    $agent->id = 999;
+    $agent->user_id = $userId;
+    $agent->llm_driver_config_id = $agentConfig->id;
+
+    $result = $service->getEffectiveConfigForAgent($agent);
+
+    expect($result)->not->toBeNull()
+        ->and($result->id)->toBe($agentConfig->id)
+        ->and($result->name)->toBe('Agent Config');
+});
+
+test('getEffectiveConfigForAgent falls back to tier-2 user default when no agent config', function (): void {
+    $security = Mockery::mock(SecurityManagerInterface::class);
+    $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+
+    $userId = Capsule::table('users')->insertGetId([
+        'email'    => 'user-default-test@example.com',
+        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'registered' => time(),
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $userDefault = new LLMDriverConfiguration();
+    $userDefault->user_id = $userId;
+    $userDefault->name = 'User Default';
+    $userDefault->driver_class = OpenAICompatibleDriver::class;
+    $userDefault->settings = json_encode([]);
+    $userDefault->is_default = true;
+    $userDefault->save();
+
+    $agent = new Agent();
+    $agent->id = 998;
+    $agent->user_id = $userId;
+    $agent->llm_driver_config_id = null;
+
+    $result = $service->getEffectiveConfigForAgent($agent);
+
+    expect($result)->not->toBeNull()
+        ->and($result->id)->toBe($userDefault->id)
+        ->and($result->name)->toBe('User Default');
+});
+
+test('getEffectiveConfigForAgent falls back to tier-3 global default when no user default', function (): void {
+    $security = Mockery::mock(SecurityManagerInterface::class);
+    $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+
+    $userId = Capsule::table('users')->insertGetId([
+        'email'    => 'global-default-test@example.com',
+        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'registered' => time(),
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $globalDefault = new LLMDriverConfiguration();
+    $globalDefault->user_id = null;
+    $globalDefault->name = 'Global Default';
+    $globalDefault->driver_class = OpenAICompatibleDriver::class;
+    $globalDefault->settings = json_encode([]);
+    $globalDefault->is_global = true;
+    $globalDefault->is_default = true;
+    $globalDefault->save();
+
+    $agent = new Agent();
+    $agent->id = 997;
+    $agent->user_id = $userId;
+    $agent->llm_driver_config_id = null;
+
+    $result = $service->getEffectiveConfigForAgent($agent);
+
+    expect($result)->not->toBeNull()
+        ->and($result->id)->toBe($globalDefault->id)
+        ->and($result->name)->toBe('Global Default');
+});
+
+test('getEffectiveConfigForAgent returns null when no config at any tier', function (): void {
+    $security = Mockery::mock(SecurityManagerInterface::class);
+    $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+
+    $userId = Capsule::table('users')->insertGetId([
+        'email'    => 'no-config-test@example.com',
+        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'registered' => time(),
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $agent = new Agent();
+    $agent->id = 996;
+    $agent->user_id = $userId;
+    $agent->llm_driver_config_id = null;
+
+    $result = $service->getEffectiveConfigForAgent($agent);
+
+    expect($result)->toBeNull();
 });

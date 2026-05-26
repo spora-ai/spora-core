@@ -17,7 +17,7 @@ use Spora\Models\User;
 test('grantRole adds role to roles_mask', function () {
     $authService = bootAuthLayer();
 
-    $userId = $authService->register('role-test@example.com', 'Password1!');
+    $userId = $authService->register('role-test@example.com', 'Password1!', 'Role Test');
     $user = User::find($userId);
 
     // User should not have ADMIN role initially
@@ -34,7 +34,7 @@ test('grantRole adds role to roles_mask', function () {
 test('revokeRole removes role from roles_mask', function () {
     $authService = bootAuthLayer();
 
-    $userId = $authService->register('revoke-test@example.com', 'Password1!');
+    $userId = $authService->register('revoke-test@example.com', 'Password1!', 'Revoke Test');
     $user = User::find($userId);
 
     // Grant ADMIN role
@@ -55,7 +55,7 @@ test('revokeRole removes role from roles_mask', function () {
 test('userHasRole returns correct boolean', function () {
     $authService = bootAuthLayer();
 
-    $userId = $authService->register('hasrole-test@example.com', 'Password1!');
+    $userId = $authService->register('hasrole-test@example.com', 'Password1!', 'Has Role');
 
     // Initially no roles
     expect($authService->userHasRole($userId, Role::ADMIN))->toBeFalse();
@@ -80,7 +80,7 @@ test('userHasRole returns correct boolean', function () {
 test('multiple roles can be held simultaneously', function () {
     $authService = bootAuthLayer();
 
-    $userId = $authService->register('multi-role@example.com', 'Password1!');
+    $userId = $authService->register('multi-role@example.com', 'Password1!', 'Multi Role');
 
     // Grant multiple roles
     $authService->grantRole($userId, Role::ADMIN);

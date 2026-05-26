@@ -155,6 +155,10 @@ final class Kernel
         ini_set('display_errors', '0');
 
         set_error_handler(function (int $errno, string $errstr, string $errfile, int $errline): bool {
+            if (!(error_reporting() & $errno)) {
+                return true;
+            }
+
             $logLevel = match ($errno) {
                 E_DEPRECATED, E_USER_DEPRECATED => 'warning',
                 E_WARNING, E_USER_WARNING => 'warning',

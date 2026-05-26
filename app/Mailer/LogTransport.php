@@ -34,12 +34,22 @@ final class LogTransport extends AbstractTransport
             ? $originalMessage->getSubject()
             : null;
 
+        $textBody = $originalMessage instanceof \Symfony\Component\Mime\Email
+            ? $originalMessage->getTextBody()
+            : null;
+
+        $htmlBody = $originalMessage instanceof \Symfony\Component\Mime\Email
+            ? $originalMessage->getHtmlBody()
+            : null;
+
         $this->getLogger()->info(
             '[Spora] Mail sent via log driver',
             [
-                'to'      => $toAddresses,
-                'from'    => $envelope->getSender()->getAddress(),
-                'subject' => $subject,
+                'to'       => $toAddresses,
+                'from'     => $envelope->getSender()->getAddress(),
+                'subject'  => $subject,
+                'text_body' => $textBody,
+                'html_body' => $htmlBody,
             ],
         );
     }

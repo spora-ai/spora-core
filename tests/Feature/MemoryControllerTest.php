@@ -22,7 +22,8 @@ function createMemoryTestUser(AuthService $authService, string $email = 'control
 {
     static $seq = 0;
     $seq++;
-    $userId = $authService->register("{$seq}{$email}", 'Password1!');
+    $displayName = ucfirst(explode('@', "{$seq}{$email}")[0]);
+    $userId = $authService->register("{$seq}{$email}", 'Password1!', $displayName);
     simulateLoggedInSession($userId, "{$seq}{$email}");
 
     $agentId = Agent::create([

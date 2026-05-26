@@ -31,7 +31,7 @@ function mockDriverFactoryForMode(LLMDriverInterface $driver): DriverFactory
 describe('WorkerModeTest', function (): void {
     beforeEach(function (): void {
         $this->authService = bootAuthLayer();
-        $this->userId = $this->authService->register('modetest@example.com', 'Password1!');
+        $this->userId = $this->authService->register('modetest@example.com', 'Password1!', 'Modetest');
 
         // Create a global LLM config for tests (tests mock the DriverFactory, so credentials don't matter)
         $config = LLMDriverConfiguration::create([

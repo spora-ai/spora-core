@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { ApiError } from '@/api/client'
 
 const auth = useAuthStore()
-const router = useRouter()
 
 const email = ref('')
 const password = ref('')
+const confirmPassword = ref('')
+const displayName = ref('')
 const error = ref<string | null>(null)
 const loading = ref(false)
 
@@ -19,10 +19,14 @@ const resendError = ref<string | null>(null)
 const resendSuccess = ref(false)
 
 async function submit(): Promise<void> {
+  if (password.value !== confirmPassword.value) {
+    error.value = 'Passwords do not match.'
+    return
+  }
   error.value = null
   loading.value = true
   try {
-    await auth.register(email.value, password.value)
+    await auth.register(email.value, password.value, confirmPassword.value, displayName.value)
     pending.value = true
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'An unexpected error occurred.'
@@ -71,10 +75,36 @@ async function resendVerification(): Promise<void> {
           </div>
 
           <div class="space-y-2">
+            <label for="displayName" class="text-sm font-medium leading-none">Display Name</label>
+            <input
+              id="displayName"
+              v-model="displayName"
+              type="text"
+              autocomplete="name"
+              required
+              placeholder="Jane Doe"
+              class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          </div>
+
+          <div class="space-y-2">
             <label for="password" class="text-sm font-medium leading-none">Password</label>
             <input
               id="password"
               v-model="password"
+              type="password"
+              autocomplete="new-password"
+              required
+              placeholder="••••••••"
+              class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          </div>
+
+          <div class="space-y-2">
+            <label for="confirmPassword" class="text-sm font-medium leading-none">Confirm Password</label>
+            <input
+              id="confirmPassword"
+              v-model="confirmPassword"
               type="password"
               autocomplete="new-password"
               required

@@ -25,13 +25,13 @@ function markAccountUnverified(string $email): void
 test('register() with an invalid email format throws InvalidArgumentException', function (): void {
     $service = bootAuthLayer();
 
-    expect(fn() => $service->register('not-an-email', 'ValidPass1!'))->toThrow(InvalidArgumentException::class);
+    expect(fn() => $service->register('not-an-email', 'ValidPass1!', 'Not An Email'))->toThrow(InvalidArgumentException::class);
 });
 
 test('register() with a blank password throws InvalidArgumentException', function (): void {
     $service = bootAuthLayer();
 
-    expect(fn() => $service->register('user@example.com', ''))->toThrow(InvalidArgumentException::class);
+    expect(fn() => $service->register('user@example.com', '', 'User'))->toThrow(InvalidArgumentException::class);
 });
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ test('register() with a blank password throws InvalidArgumentException', functio
 test('login() throws AccountUnverifiedException when account is not verified', function (): void {
     $service = bootAuthLayer();
     $email   = 'unverified@example.com';
-    $service->register($email, 'ValidPass1!');
+    $service->register($email, 'ValidPass1!', 'Unverified');
 
     markAccountUnverified($email);
 
@@ -62,7 +62,7 @@ test('currentUserEmail() returns null when not logged in', function (): void {
 test('currentUserEmail() returns the email of the logged-in user', function (): void {
     $service = bootAuthLayer();
     $email   = 'logged-in@example.com';
-    $service->register($email, 'ValidPass1!');
+    $service->register($email, 'ValidPass1!', 'Logged In');
     $service->login($email, 'ValidPass1!');
 
     expect($service->currentUserEmail())->toBe($email);
