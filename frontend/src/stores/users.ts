@@ -115,5 +115,21 @@ export const useUsersStore = defineStore('users', () => {
     }
   }
 
-  return { users, loading, saving, error, fetchUsers, createUser, updateUser, deleteUser, grantRole, revokeRole }
+  async function setVerified(id: number, verified: boolean): Promise<User> {
+    saving.value = true
+    error.value = null
+    try {
+      const result = await api.patch<{ user: User }>(`/users/${id}`, { verified })
+      const idx = users.value.findIndex((u) => u.id === id)
+      if (idx !== -1) users.value[idx] = result.user
+      return result.user
+    } catch (e) {
+      error.value = e instanceof ApiError ? e.message : 'Failed to update verification status.'
+      throw e
+    } finally {
+      saving.value = false
+    }
+  }
+
+  return { users, loading, saving, error, fetchUsers, createUser, updateUser, deleteUser, grantRole, revokeRole, setVerified }
 })

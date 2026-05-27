@@ -11,6 +11,8 @@ import { ApiError } from '@/api/client'
 import { useToast } from '@/composables/useToast'
 import Icon from '@/components/ui/Icon.vue'
 import Modal from '@/components/Modal.vue'
+import DeleteUserModal from '@/components/admin/DeleteUserModal.vue'
+import EditUserModal from '@/components/admin/EditUserModal.vue'
 
 const auth = useAuthStore()
 const usersStore = useUsersStore()
@@ -19,8 +21,6 @@ const toast = useToast()
 // ── Pagination ─────────────────────────────────────────────────────────────
 
 const deletingUser = ref<User | null>(null)
-const deleting = ref(false)
-const deleteError = ref<string | null>(null)
 
 const isDeleteOpen = computed({
   get: () => deletingUser.value !== null,
@@ -29,30 +29,6 @@ const isDeleteOpen = computed({
 
 function openDelete(user: User): void {
   deletingUser.value = user
-  deleteError.value = null
-}
-
-function closeDelete(): void {
-  deletingUser.value = null
-}
-
-async function confirmDelete(): Promise<void> {
-  if (!deletingUser.value) return
-  deleting.value = true
-  deleteError.value = null
-  try {
-    await usersStore.deleteUser(deletingUser.value.id)
-    toast.success('User deleted.')
-    deletingUser.value = null
-  } catch (e) {
-    if (e instanceof ApiError && e.code === 'CANNOT_DELETE_SELF') {
-      deleteError.value = 'You cannot delete your own account.'
-    } else {
-      deleteError.value = e instanceof ApiError ? e.message : 'Failed to delete user.'
-    }
-  } finally {
-    deleting.value = false
-  }
 }
 
 const currentPage = ref(1)
@@ -98,9 +74,6 @@ async function createUser(): Promise<void> {
 // ── Edit modal ─────────────────────────────────────────────────────────────
 
 const editingUser = ref<User | null>(null)
-const editForm = ref({ name: '', isAdmin: false, suspended: false })
-const savingEdit = ref(false)
-const editError = ref<string | null>(null)
 
 const isEditingOpen = computed({
   get: () => editingUser.value !== null,
@@ -109,45 +82,6 @@ const isEditingOpen = computed({
 
 function openEdit(user: User): void {
   editingUser.value = user
-  editForm.value = {
-    name: user.name ?? '',
-    isAdmin: user.roles.includes('ADMIN'),
-    suspended: user.roles.includes('SUSPENDED'),
-  }
-  editError.value = null
-}
-
-function closeEdit(): void {
-  editingUser.value = null
-}
-
-async function saveEdit(): Promise<void> {
-  if (!editingUser.value) return
-  savingEdit.value = true
-  editError.value = null
-  try {
-    const wasAdmin = editingUser.value.roles.includes('ADMIN')
-    const isAdmin = editForm.value.isAdmin
-
-    // Update name and suspended status
-    await usersStore.updateUser(editingUser.value.id, {
-      name: editForm.value.name || undefined,
-      suspended: editForm.value.suspended,
-    })
-
-    // Sync admin role
-    if (wasAdmin && !isAdmin) {
-      await usersStore.revokeRole(editingUser.value.id, 'ADMIN')
-    } else if (!wasAdmin && isAdmin) {
-      await usersStore.grantRole(editingUser.value.id, 'ADMIN')
-    }
-    toast.success('User updated.')
-    editingUser.value = null
-  } catch (e) {
-    editError.value = e instanceof ApiError ? e.message : 'Failed to update user.'
-  } finally {
-    savingEdit.value = false
-  }
 }
 
 // ── Role toggling (admin only) ──────────────────────────────────────────────
@@ -167,6 +101,22 @@ async function toggleAdminRole(user: User): Promise<void> {
     toast.error(e instanceof ApiError ? e.message : 'Failed to update role.')
   } finally {
     togglingRole.value = null
+  }
+}
+
+// ── Verified toggling ────────────────────────────────────────────────────────
+
+const togglingVerified = ref<number | null>(null)
+
+async function toggleVerified(user: User): Promise<void> {
+  togglingVerified.value = user.id
+  try {
+    await usersStore.setVerified(user.id, !user.verified)
+    toast.success(!user.verified ? 'User marked as unverified.' : 'User marked as verified.')
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : 'Failed to update verification status.')
+  } finally {
+    togglingVerified.value = null
   }
 }
 
@@ -211,10 +161,10 @@ function isOwnAccount(user: User): boolean {
           <tr>
             <th class="text-left px-4 py-3 font-medium text-muted-foreground">ID</th>
             <th class="text-left px-4 py-3 font-medium text-muted-foreground">Email</th>
-            <th class="text-left px-4 py-3 font-medium text-muted-foreground">Username</th>
+            <th class="text-left px-4 py-3 font-medium text-muted-foreground">Name</th>
             <th class="text-left px-4 py-3 font-medium text-muted-foreground">Roles</th>
             <th class="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
-            <th class="text-left px-4 py-3 font-medium text-muted-foreground">Registered</th>
+            <th class="text-left px-4 py-3 font-medium text-muted-foreground">Verified</th>
             <th class="px-4 py-3" />
           </tr>
         </thead>
@@ -244,7 +194,17 @@ function isOwnAccount(user: User): boolean {
               <span v-if="user.roles.includes('SUSPENDED')" class="text-xs text-destructive">Suspended</span>
               <span v-else class="text-xs text-green-600 dark:text-green-400">Active</span>
             </td>
-            <td class="px-4 py-3 text-muted-foreground">—</td>
+            <td class="px-4 py-3">
+              <button
+                @click="toggleVerified(user)"
+                :disabled="togglingVerified === user.id"
+                :title="user.verified ? 'Mark as unverified' : 'Mark as verified'"
+                class="flex items-center justify-center h-7 w-7 rounded-lg transition-colors disabled:opacity-50"
+                :class="user.verified ? 'text-green-600 hover:bg-green-600/10' : 'text-muted-foreground hover:bg-muted'"
+              >
+                <Icon :name="user.verified ? 'check-circle' : 'x'" class="h-4 w-4" />
+              </button>
+            </td>
             <td class="px-4 py-3">
               <div class="flex items-center gap-1 justify-end">
                 <!-- Toggle Admin role -->
@@ -280,7 +240,7 @@ function isOwnAccount(user: User): boolean {
             </td>
           </tr>
           <tr v-if="usersStore.users.length === 0">
-            <td colspan="7" class="px-4 py-8 text-center text-muted-foreground">No users found.</td>
+            <td colspan="8" class="px-4 py-8 text-center text-muted-foreground">No users found.</td>
           </tr>
         </tbody>
       </table>
@@ -355,89 +315,8 @@ function isOwnAccount(user: User): boolean {
   </Modal>
 
   <!-- ── Edit User Modal ─────────────────────────────────────────────── -->
-  <Modal v-model="isEditingOpen" :title="`Edit ${editingUser?.email}`" size="sm" @close="closeEdit">
-    <form @submit.prevent="saveEdit" class="flex flex-col gap-4">
-      <div class="flex flex-col gap-1.5">
-        <label for="edit-name" class="text-sm font-medium">Display Name</label>
-        <input
-          id="edit-name"
-          v-model="editForm.name"
-          type="text"
-          placeholder="Display name (optional)"
-          class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-        />
-      </div>
-      <div class="flex items-start gap-3">
-        <input
-          id="edit-admin"
-          v-model="editForm.isAdmin"
-          type="checkbox"
-          class="mt-0.5 h-4 w-4 rounded border-border bg-background text-primary focus:ring-1 focus:ring-ring"
-        />
-        <div class="flex flex-col gap-1">
-          <label for="edit-admin" class="text-sm font-medium">Admin</label>
-          <p class="text-xs text-muted-foreground">Full administrative access.</p>
-        </div>
-      </div>
-      <div class="flex items-start gap-3">
-        <input
-          id="edit-suspended"
-          v-model="editForm.suspended"
-          type="checkbox"
-          class="mt-0.5 h-4 w-4 rounded border-border bg-background text-primary focus:ring-1 focus:ring-ring"
-        />
-        <div class="flex flex-col gap-1">
-          <label for="edit-suspended" class="text-sm font-medium">Suspended</label>
-          <p class="text-xs text-muted-foreground">Suspended users cannot log in.</p>
-        </div>
-      </div>
-      <p v-if="editError" role="alert" class="text-xs text-destructive">{{ editError }}</p>
-    </form>
-    <template #footer>
-      <div class="flex justify-end gap-2">
-        <button
-          @click="isEditingOpen = false"
-          class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          Cancel
-        </button>
-        <button
-          @click="saveEdit"
-          :disabled="savingEdit"
-          class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-        >
-          {{ savingEdit ? 'Saving…' : 'Save Changes' }}
-        </button>
-      </div>
-    </template>
-  </Modal>
+  <EditUserModal v-model="isEditingOpen" :user="editingUser" />
 
   <!-- ── Delete Confirmation Modal ────────────────────────────────────── -->
-  <Modal v-model="isDeleteOpen" title="Delete User" size="sm" @close="closeDelete">
-    <div class="flex flex-col gap-3">
-      <p class="text-sm text-muted-foreground">
-        This will permanently delete the account
-        <strong class="text-foreground">{{ deletingUser?.email }}</strong>.
-        This action cannot be undone.
-      </p>
-      <p v-if="deleteError" role="alert" class="text-xs text-destructive">{{ deleteError }}</p>
-    </div>
-    <template #footer>
-      <div class="flex justify-end gap-2">
-        <button
-          @click="deletingUser = null"
-          class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          Cancel
-        </button>
-        <button
-          @click="confirmDelete"
-          :disabled="deleting"
-          class="inline-flex h-9 items-center justify-center rounded-lg bg-destructive px-4 text-sm font-medium text-destructive-foreground shadow transition-colors hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-50"
-        >
-          {{ deleting ? 'Deleting…' : 'Delete User' }}
-        </button>
-      </div>
-    </template>
-  </Modal>
+  <DeleteUserModal v-model="isDeleteOpen" :user="deletingUser" />
 </template>
