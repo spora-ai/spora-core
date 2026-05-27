@@ -64,7 +64,7 @@ test('putUserSettings preserves password field when sentinel *** is sent', funct
 test('putAgentOverride preserves password field when sentinel *** is sent', function () {
     [$service, $authService] = makeServiceForSentinel();
     $userId = $authService->register('sentinel-agent@example.com', 'Password1!', 'Sentinel Agent');
-    
+
     $agent = new Agent();
     $agent->user_id = $userId;
     $agent->name = 'Sentinel Agent';

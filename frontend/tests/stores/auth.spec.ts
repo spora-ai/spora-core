@@ -113,8 +113,8 @@ describe('useAuthStore', () => {
       expect(mockApi.post).toHaveBeenCalledWith('/auth/register', {
         email: 'new@example.com',
         password: 'password123',
-        password_confirmation: 'password123',
-        name: 'New User'
+        confirm_password: 'password123',
+        display_name: 'New User'
       })
       expect(result).toEqual(mockUser)
       expect(store.user).toBeNull() // User is NOT logged in — must verify email first
