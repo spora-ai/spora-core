@@ -20,6 +20,9 @@ test('getContainer() returns a DI Container instance', function (): void {
     $kernel = new Kernel();
 
     expect($kernel->getContainer())->toBeInstanceOf(Container::class);
+
+    unset($kernel);
+    gc_collect_cycles();
 });
 
 // ---------------------------------------------------------------------------
@@ -39,6 +42,9 @@ test('GET to unknown route returns 404 JSON with correct envelope shape', functi
     expect($body['error'])->toHaveKey('code');
     expect($body['error'])->toHaveKey('message');
     expect($body['error']['code'])->toBe('NOT_FOUND');
+
+    unset($kernel);
+    gc_collect_cycles();
 });
 
 test('POST to unknown route returns 404 JSON', function (): void {
@@ -47,6 +53,9 @@ test('POST to unknown route returns 404 JSON', function (): void {
     $response = $kernel->handle($request);
 
     expect($response->getStatusCode())->toBe(404);
+
+    unset($kernel);
+    gc_collect_cycles();
 });
 
 test('404 response has Content-Type application/json', function (): void {
@@ -54,6 +63,9 @@ test('404 response has Content-Type application/json', function (): void {
     $response = $kernel->handle(Request::create('/nope', 'GET'));
 
     expect($response->headers->get('Content-Type'))->toContain('application/json');
+
+    unset($kernel);
+    gc_collect_cycles();
 });
 
 // ---------------------------------------------------------------------------
@@ -71,6 +83,9 @@ test('wrong HTTP method on known route returns 405 JSON with METHOD_NOT_ALLOWED 
     $body = json_decode($response->getContent(), true);
 
     expect($body['error']['code'])->toBe('METHOD_NOT_ALLOWED');
+
+    unset($kernel);
+    gc_collect_cycles();
 });
 
 test('405 response body contains a message string', function (): void {
@@ -80,6 +95,9 @@ test('405 response body contains a message string', function (): void {
 
     expect($body['error'])->toHaveKey('message');
     expect($body['error']['message'])->toBeString()->not()->toBeEmpty();
+
+    unset($kernel);
+    gc_collect_cycles();
 });
 
 test('405 response has Content-Type application/json', function (): void {
@@ -87,6 +105,9 @@ test('405 response has Content-Type application/json', function (): void {
     $response = $kernel->handle(Request::create('/api/v1/auth/login', 'DELETE'));
 
     expect($response->headers->get('Content-Type'))->toContain('application/json');
+
+    unset($kernel);
+    gc_collect_cycles();
 });
 
 // ---------------------------------------------------------------------------
@@ -102,6 +123,9 @@ test('valid route with correct method dispatches to controller and returns a res
     // Must not be a routing error - controller was reached
     expect($response->getStatusCode())->not()->toBe(404);
     expect($response->getStatusCode())->not()->toBe(405);
+
+    unset($kernel);
+    gc_collect_cycles();
 });
 
 test('dispatched stub controller returns JSON with error envelope', function (): void {
@@ -113,6 +137,9 @@ test('dispatched stub controller returns JSON with error envelope', function ():
 
     expect($body)->toHaveKey('error');
     expect($body['error'])->toHaveKey('code');
+
+    unset($kernel);
+    gc_collect_cycles();
 });
 
 function withoutSecretKey(callable $fn): mixed
@@ -277,8 +304,8 @@ test('deprecation warnings are logged to Monolog and not output to screen', func
     $tmpLog = sys_get_temp_dir() . '/spora_deprecation_test_' . uniqid();
     $_ENV['SPORA_LOG_PATH'] = $tmpLog;
 
+    $kernel = new Kernel();
     try {
-        $kernel = new Kernel();
         $container = $kernel->getContainer();
         $logger = $container->get(Psr\Log\LoggerInterface::class);
 
@@ -296,8 +323,8 @@ test('deprecation warnings are logged to Monolog and not output to screen', func
         expect($logContents)->toContain('Test deprecation message');
         // E_USER_DEPRECATED = 16384
         expect($logContents)->toContain('16384');
-        unset($kernel);
     } finally {
+        $kernel->__destruct();
         unset($_ENV['SPORA_APP_ENV'], $_ENV['SPORA_LOG_LEVEL'], $_ENV['SPORA_LOG_PATH']);
         @unlink($tmpLog);
     }
@@ -306,8 +333,8 @@ test('deprecation warnings are logged to Monolog and not output to screen', func
 test('log stdout configures Monolog to write to stdout', function (): void {
     $_ENV['SPORA_LOG_PATH'] = 'stdout';
 
+    $kernel = new Kernel();
     try {
-        $kernel = new Kernel();
         $container = $kernel->getContainer();
         $logger = $container->get(Psr\Log\LoggerInterface::class);
 
@@ -321,6 +348,7 @@ test('log stdout configures Monolog to write to stdout', function (): void {
         $reflection = new ReflectionProperty($handler, 'url');
         expect($reflection->getValue($handler))->toBe('php://stdout');
     } finally {
+        $kernel->__destruct();
         unset($_ENV['SPORA_LOG_PATH']);
     }
 });
