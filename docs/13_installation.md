@@ -16,7 +16,7 @@
 
 ```bash
 # Create env file
-cp docker/.env.local.example .env.local
+cp docker/.env.local.example docker/.env.local
 
 # Set SPORA_DB_PASSWORD and SPORA_MERCURE_JWT_KEY in .env.local
 # Generate a Mercure key: php -r "echo bin2hex(random_bytes(32));"
