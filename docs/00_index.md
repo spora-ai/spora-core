@@ -22,4 +22,20 @@
 |---|---|
 | [04_api.md](04_api.md) | REST API reference — endpoints, request/response envelopes, auth |
 | [08_logging.md](08_logging.md) | Log levels, PII policy, what gets logged and where, best practices |
-| [11_agent_loop_async.md](11_agent_loop_async.md) | Worker modes (`sync`/`cron`/`worker`), tick structure, Mercure SSE, deployment setup |
+| [10_error_handling.md](10_error_handling.md) | Error codes, exception handling, toast notification system |
+| [11_agent_loop_async.md](11_agent_loop_async.md) | Worker modes (`sync`/`cron`/`worker`), tick structure, Mercure SSE |
+| [12_worker_deployment.md](12_worker_deployment.md) | Deployment guide for cron and daemon modes, environment variables |
+
+## Frontend & UI
+
+| Doc | Description |
+|---|---|
+| [09_frontend.md](09_frontend.md) | Frontend stack, pages, stores, API design, dark mode, realtime updates |
+
+---
+
+## Appendix
+
+| Doc | Description |
+|---|---|
+| [backlog.md](backlog.md) | Feature backlog (prioritized) |
