@@ -1,5 +1,6 @@
 includes:
     - vendor/larastan/larastan/extension.neon
+    - vendor/phpstan/phpstan-mockery/extension.neon
 
 
 
@@ -7,9 +8,15 @@ parameters:
     paths:
         - app
         - public
+        - tests
     level: 5
     excludePaths:
         - vendor
     bootstrapFiles:
         - phpstan-bootstrap.php
+    ignoreErrors:
+        # Pest dynamic __call methods (afterEach, beforeEach, etc. on TestCall via __call)
+        - '#Call to an undefined method Pest\\PendingCalls\\TestCall::#'
+        # Pest dynamic property access on TestCall (e.g. $userId, $agentId set by test)
+        - '#Access to an undefined property Pest\\PendingCalls\\TestCall::#'
 

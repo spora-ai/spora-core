@@ -123,8 +123,7 @@ test('install() skips a component whose stored version is already at code versio
         ->update(['version' => 9999]);
 
     // Would throw duplicate-table error if migrations re-ran.
-    $installer->install();
-
+    $installer->install(); // Should not throw
     expect(true)->toBeTrue();
 })->afterEach(fn() => Database::resetBootState());
 
@@ -157,8 +156,7 @@ test('install() is a zero-query no-op when stamp matches current hash', function
 
     // Second install() must return immediately (stamp matches) — no DB queries,
     // therefore no "table does not exist" error.
-    $installer->install();
-
+    $installer->install(); // Should not throw
     expect(true)->toBeTrue();
 })->afterEach(function (): void {
     Database::resetBootState();

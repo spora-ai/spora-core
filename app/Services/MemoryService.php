@@ -245,11 +245,16 @@ final class MemoryService implements MemoryServiceInterface
             throw new RuntimeException('Agent not found');
         }
 
-        foreach ($orderedIds as $index => $memoryId) {
-            Capsule::table('memories')
+        // Process only IDs that actually belong to this agent, preserving input order
+        $order = 1;
+        foreach ($orderedIds as $memoryId) {
+            $updated = Capsule::table('memories')
                 ->where('id', $memoryId)
                 ->where('agent_id', $agentId)
-                ->update(['order' => $index + 1, 'updated_at' => date('Y-m-d H:i:s')]);
+                ->update(['order' => $order, 'updated_at' => date('Y-m-d H:i:s')]);
+            if ($updated > 0) {
+                $order++;
+            }
         }
     }
 

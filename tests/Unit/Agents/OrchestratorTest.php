@@ -74,7 +74,7 @@ function mockDriverFactory(LLMDriverInterface $driver): DriverFactory
 function seedAgent(): array
 {
     $authService = bootAuthLayer();
-    $userId      = $authService->register('orch@example.com', 'Password1!');
+    $userId      = $authService->register('orch@example.com', 'Password1!', 'Orch');
 
     // Create a global LLM config as default (tests mock the DriverFactory, so credentials don't matter)
     $config = LLMDriverConfiguration::create([
@@ -957,7 +957,8 @@ it('buildMessages normalizes empty array arguments "[]" to empty object "{}" bef
     ]);
 
     // Capture what buildMessages produces
-    $capturedMessages = null;
+    /** @var list<array<string,mixed>> $capturedMessages */
+    $capturedMessages = [];
 
     $mock = Mockery::mock(LLMDriverInterface::class);
     $mock->allows('complete')->once()->andReturnUsing(function ($request) use (&$capturedMessages) {
@@ -1011,7 +1012,8 @@ it('buildMessages skips rows covered by a summary and includes the summary row i
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 4, 'role' => 'user', 'content' => 'Thanks']);
 
     // Capture what buildMessages produces
-    $capturedMessages = null;
+    /** @var list<array<string,mixed>> $capturedMessages */
+    $capturedMessages = [];
 
     $mock = Mockery::mock(LLMDriverInterface::class);
     $mock->allows('complete')->once()->andReturnUsing(function ($request) use (&$capturedMessages) {
@@ -1057,7 +1059,8 @@ it('buildMessages skips multiple summary ranges and only includes post-summary r
     // Recent history
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 4, 'role' => 'user', 'content' => 'Recent']);
 
-    $capturedMessages = null;
+    /** @var list<array<string,mixed>> $capturedMessages */
+    $capturedMessages = [];
 
     $mock = Mockery::mock(LLMDriverInterface::class);
     $mock->allows('complete')->once()->andReturnUsing(function ($request) use (&$capturedMessages) {
@@ -1089,7 +1092,7 @@ it('buildMessages skips multiple summary ranges and only includes post-summary r
 
 test('resolveLlmConfig throws when no config exists at any level', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('non-config@example.com', 'Password1!');
+    $userId = $authService->register('non-config@example.com', 'Password1!', 'Nonconfig');
 
     // Create agent WITHOUT any config AND without a global default existing
     $agent = Agent::create([
@@ -1239,8 +1242,8 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     // user context. Each user only sees their own preference, not another user's.
     $authService = bootAuthLayer();
 
-    $userA = $authService->register('user-a-iso@example.com', 'Password1!');
-    $userB = $authService->register('user-b-iso@example.com', 'Password1!');
+    $userA = $authService->register('user-a-iso@example.com', 'Password1!', 'UseraIso');
+    $userB = $authService->register('user-b-iso@example.com', 'Password1!', 'UserbIso');
 
     // User A creates their own config
     $configA = LLMDriverConfiguration::create([
@@ -1452,7 +1455,7 @@ it('publishes intermediate state when tools require approval', function (): void
 
 test('tick sets NO_LLM_CONFIGURATION error code and message when resolveLlmConfig throws', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('no-config@example.com', 'Password1!');
+    $userId = $authService->register('no-config@example.com', 'Password1!', 'Noconfig');
 
     // Agent with no LLM config and no global default — resolveLlmConfig() will throw.
     $agent = Agent::create([
@@ -1469,7 +1472,7 @@ test('tick sets NO_LLM_CONFIGURATION error code and message when resolveLlmConfi
     // start() creates a RUNNING task then calls tick() which throws inside the transaction.
     try {
         $orch->start($agent->id, 'Hello', maxSteps: 5);
-        self::fail('Expected RuntimeException was not thrown');
+        PHPUnit\Framework\Assert::fail('Expected RuntimeException was not thrown');
     } catch (RuntimeException $e) {
         expect($e->getMessage())->toBe('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
     }

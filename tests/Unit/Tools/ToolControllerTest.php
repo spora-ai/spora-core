@@ -49,7 +49,7 @@ test('unauthenticated request throws UnauthenticatedException', function (): voi
 test('index returns schema for registered tool classes', function (): void {
     clearSession();
     [$controller, $authService] = makeToolController([TestTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!');
+    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
     $response = $controller->index(jsonRequest('GET', '/api/v1/tools'));
@@ -67,7 +67,7 @@ test('index returns schema for registered tool classes', function (): void {
 test('index returns correct schema field structure', function (): void {
     clearSession();
     [$controller, $authService] = makeToolController([TestTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!');
+    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
     $response = $controller->index(jsonRequest('GET', '/api/v1/tools'));
@@ -87,7 +87,7 @@ test('index returns correct schema field structure', function (): void {
 test('index returns empty tools list when no classes registered', function (): void {
     clearSession();
     [$controller, $authService] = makeToolController([]);
-    $userId = $authService->register('user@example.com', 'Password1!');
+    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
     $response = $controller->index(jsonRequest('GET', '/api/v1/tools'));
@@ -103,7 +103,7 @@ test('index returns empty tools list when no classes registered', function (): v
 test('getSettings returns empty array when no settings saved yet', function (): void {
     clearSession();
     [$controller, $authService] = makeToolController([TestTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!');
+    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
     $request = jsonRequest('GET', '/api/v1/tools/test_tool/settings');
@@ -118,7 +118,7 @@ test('getSettings returns empty array when no settings saved yet', function (): 
 test('getSettings returns masked password after putSettings', function (): void {
     clearSession();
     [$controller, $authService] = makeToolController([TestTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!');
+    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
     $putRequest = jsonRequest('PUT', '/api/v1/tools/test_tool/settings', ['api_key' => 'my-secret']);
@@ -140,7 +140,7 @@ test('getSettings returns masked password after putSettings', function (): void 
 test('putSettings saves settings and returns masked result', function (): void {
     clearSession();
     [$controller, $authService, $toolConfig] = makeToolController([TestTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!');
+    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
     $request = jsonRequest('PUT', '/api/v1/tools/test_tool/settings', [
@@ -166,7 +166,7 @@ test('putSettings saves settings and returns masked result', function (): void {
 test('putSettings accepts settings nested under a settings key', function (): void {
     clearSession();
     [$controller, $authService] = makeToolController([TestTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!');
+    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
     $request = jsonRequest('PUT', '/api/v1/tools/test_tool/settings', [
@@ -183,7 +183,7 @@ test('putSettings accepts settings nested under a settings key', function (): vo
 test('getSettings resolves tool by name for real tool classes', function (): void {
     clearSession();
     [$controller, $authService] = makeToolController([Spora\Tools\ReadUrlTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!');
+    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
     $request = jsonRequest('GET', '/api/v1/tools/read_url/settings');
@@ -198,7 +198,7 @@ test('getSettings resolves tool by name for real tool classes', function (): voi
 test('getSettings returns 404 for unknown tool name', function (): void {
     clearSession();
     [$controller, $authService] = makeToolController([Spora\Tools\ReadUrlTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!');
+    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
     $request = jsonRequest('GET', '/api/v1/tools/nonexistent_tool/settings');

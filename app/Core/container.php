@@ -38,6 +38,7 @@ use Spora\Services\UserServiceInterface;
  * PHP-DI definitions array.
  * Wire up core services and resolve the SecurityManager from three possible key sources.
  */
+
 return [
     'config' => static function (): array {
         // Layer 1 — built-in defaults (always present)
@@ -64,6 +65,7 @@ return [
             'tool_http_timeout'   => 30,
             'mercure_url'         => null,
             'mercure_jwt_key'     => null,
+            'app_url'            => Spora\Core\RequestOrigin::detect(),
         ];
 
         // Layer 2 — config.php (installer-generated, gitignored, optional)
@@ -136,6 +138,9 @@ return [
         if (($v = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED')) !== null) {
             $envOverrides['notifications'] = ['email_enabled' => filter_var($v, FILTER_VALIDATE_BOOLEAN)];
         }
+        if (($v = $env('SPORA_APP_URL')) !== null) {
+            $envOverrides['app_url'] = $v;
+        }
         return array_merge($defaults, $fileConfig, $envOverrides);
     },
 
@@ -181,7 +186,7 @@ return [
         return $db;
     },
 
-    Psr\Log\LoggerInterface::class => static function (ContainerInterface $c): Psr\Log\LoggerInterface {
+    LoggerInterface::class => static function (ContainerInterface $c): LoggerInterface {
         $config = $c->get('config');
         $levelStr = ucfirst(strtolower($config['log_level'] ?? 'warning'));
         $level = constant(Monolog\Level::class . '::' . $levelStr);
@@ -230,14 +235,14 @@ return [
     ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
         return new ToolConfigService(
             $c->get(SecurityManagerInterface::class),
-            $c->get(Psr\Log\LoggerInterface::class),
+            $c->get(LoggerInterface::class),
             $c->get('tool_classes'),
         );
     },
 
     DriverFactory::class => static function (ContainerInterface $c): DriverFactory {
         return new DriverFactory(
-            $c->get(Psr\Log\LoggerInterface::class),
+            $c->get(LoggerInterface::class),
             $c->get(Spora\Services\LLMConfigServiceInterface::class),
             (int) ($c->get('config')['llm_timeout'] ?? 300),
         );
@@ -347,6 +352,12 @@ return [
 
     Spora\Http\HealthController::class => static fn(): Spora\Http\HealthController => new Spora\Http\HealthController(),
 
+    Spora\Http\ConfigController::class => static function (ContainerInterface $c): Spora\Http\ConfigController {
+        return new Spora\Http\ConfigController(
+            $c->get('config'),
+        );
+    },
+
     Spora\Http\ToolController::class => static function (ContainerInterface $c): Spora\Http\ToolController {
         return new Spora\Http\ToolController(
             $c->get(AuthService::class),
@@ -387,7 +398,7 @@ return [
         return new Spora\Console\Commands\WorkerRunCommand(
             $c->get(Database::class),
             $c->get(OrchestratorInterface::class),
-            $c->get(Psr\Log\LoggerInterface::class),
+            $c->get(LoggerInterface::class),
             $c,
             $c->get(MercurePublisherInterface::class),
             $c->get(NotificationService::class),
@@ -407,7 +418,7 @@ return [
             driverFactory: $c->get(DriverFactory::class),
             llmConfigService: $c->get(Spora\Services\LLMConfigService::class),
             toolInstances: $c->get('tool_instances'),
-            logger: $c->get(Psr\Log\LoggerInterface::class),
+            logger: $c->get(LoggerInterface::class),
             workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,
             notificationService: $c->get(NotificationService::class),
             pluginLoader: $c->get(PluginLoader::class),
@@ -566,6 +577,7 @@ return [
     SystemMailer::class => static function (ContainerInterface $c): SystemMailer {
         return new SystemMailer(
             $c->get('config'),
+            $c->get(LoggerInterface::class),
         );
     },
 

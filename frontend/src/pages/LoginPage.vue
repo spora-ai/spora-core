@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { isRegistrationEnabled } from '@/utils/auth'
 import LogoSvg from '@/assets/logo.svg?asset'
 
 const auth = useAuthStore()
@@ -11,6 +12,11 @@ const email = ref('')
 const password = ref('')
 const error = ref<string | null>(null)
 const loading = ref(false)
+const registrationEnabled = ref(true)
+
+onMounted(async () => {
+  registrationEnabled.value = await isRegistrationEnabled()
+})
 
 async function submit(): Promise<void> {
   error.value = null
@@ -71,9 +77,15 @@ async function submit(): Promise<void> {
         >
           {{ loading ? 'Signing in…' : 'Sign in' }}
         </button>
+
+        <p class="text-center text-sm">
+          <RouterLink to="/forgot-password" class="font-medium text-foreground underline-offset-4 hover:underline">
+            Forgot your password?
+          </RouterLink>
+        </p>
       </form>
 
-      <p class="text-center text-sm text-muted-foreground">
+      <p v-if="registrationEnabled" class="text-center text-sm text-muted-foreground">
         Don't have an account?
         <RouterLink to="/register" class="font-medium text-foreground underline-offset-4 hover:underline">
           Register

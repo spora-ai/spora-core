@@ -22,7 +22,8 @@ function createMemoryTestUserWithAgents(AuthService $authService, string $email 
 {
     static $seq = 0;
     $seq++;
-    $userId = $authService->register("{$seq}{$email}", 'Password1!');
+    $displayName = ucfirst(explode('@', "{$seq}{$email}")[0]);
+    $userId = $authService->register("{$seq}{$email}", 'Password1!', $displayName);
     simulateLoggedInSession($userId, "{$seq}{$email}");
 
     $agentId1 = Agent::create([
@@ -57,9 +58,8 @@ describe('AgentMemoryController::reorder', function (): void {
         clearSession();
 
         $request = jsonRequest('PATCH', '/api/v1/agents/1/memories/reorder', ['order' => []]);
-        $response = $controller->reorder($request);
-
-        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+        expect(fn() => $controller->reorder($request))
+            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
     });
 
     test('reorder() returns 400 for invalid JSON', function (): void {
@@ -110,6 +110,7 @@ describe('AgentMemoryController::reorder', function (): void {
         [$userId, $agentId] = createMemoryTestUserWithAgents($authService);
 
         $request = jsonRequest('PATCH', "/api/v1/agents/{$agentId}/memories/reorder", ['order' => []]);
+        $request->attributes->set('agentId', $agentId);
         $response = $controller->reorder($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
@@ -128,6 +129,7 @@ describe('AgentMemoryController::reorder', function (): void {
         $request = jsonRequest('PATCH', "/api/v1/agents/{$agentId}/memories/reorder", [
             'order' => [$m3->id, $m1->id, $m2->id],
         ]);
+        $request->attributes->set('agentId', $agentId);
         $response = $controller->reorder($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
@@ -152,6 +154,7 @@ describe('AgentMemoryController::reorder', function (): void {
         $request = jsonRequest('PATCH', "/api/v1/agents/{$agentId1}/memories/reorder", [
             'order' => [$a1m2->id, $a1m1->id],
         ]);
+        $request->attributes->set('agentId', $agentId1);
         $response = $controller->reorder($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
@@ -178,6 +181,7 @@ describe('AgentMemoryController::reorder', function (): void {
         $request = jsonRequest('PATCH', "/api/v1/agents/{$agentId1}/memories/reorder", [
             'order' => [$a2m->id, $a1m->id],
         ]);
+        $request->attributes->set('agentId', $agentId1);
         $response = $controller->reorder($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
@@ -204,9 +208,8 @@ describe('AgentMemoryController::index', function (): void {
 
         $request = new Symfony\Component\HttpFoundation\Request();
         $request->attributes->set('agentId', 1);
-        $response = $controller->index($request);
-
-        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+        expect(fn() => $controller->index($request))
+            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
     });
 
     test('index() returns 404 when agent does not exist', function (): void {
@@ -248,9 +251,9 @@ describe('AgentMemoryController::store', function (): void {
         clearSession();
 
         $request = jsonRequest('POST', '/api/v1/agents/1/memories', ['name' => 'test']);
-        $response = $controller->store($request);
-
-        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+        $request->attributes->set('agentId', 1);
+        expect(fn() => $controller->store($request))
+            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
     });
 
     test('store() returns 404 when agent does not exist', function (): void {
@@ -258,6 +261,7 @@ describe('AgentMemoryController::store', function (): void {
         bootAuth($authService);
 
         $request = jsonRequest('POST', '/api/v1/agents/99999/memories', ['name' => 'test']);
+        $request->attributes->set('agentId', 99999);
         $response = $controller->store($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
@@ -271,6 +275,7 @@ describe('AgentMemoryController::store', function (): void {
             'name'    => 'New Agent Memory',
             'content' => 'Agent-specific content',
         ]);
+        $request->attributes->set('agentId', $agentId);
         $response = $controller->store($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_CREATED);
@@ -285,6 +290,7 @@ describe('AgentMemoryController::store', function (): void {
         [$userId, $agentId] = createMemoryTestUserWithAgents($authService);
 
         $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/memories", ['name' => '']);
+        $request->attributes->set('agentId', $agentId);
         $response = $controller->store($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
@@ -304,9 +310,8 @@ describe('AgentMemoryController::show', function (): void {
         $request = new Symfony\Component\HttpFoundation\Request();
         $request->attributes->set('agentId', 1);
         $request->attributes->set('memoryId', 1);
-        $response = $controller->show($request);
-
-        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+        expect(fn() => $controller->show($request))
+            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
     });
 
     test('show() returns 404 when agent does not exist', function (): void {
@@ -333,9 +338,10 @@ describe('AgentMemoryController::update', function (): void {
         clearSession();
 
         $request = jsonRequest('PUT', '/api/v1/agents/1/memories/1', ['name' => 'updated']);
-        $response = $controller->update($request);
-
-        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+        $request->attributes->set('agentId', 1);
+        $request->attributes->set('memoryId', 1);
+        expect(fn() => $controller->update($request))
+            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
     });
 
     test('update() modifies an existing agent memory', function (): void {
@@ -353,6 +359,8 @@ describe('AgentMemoryController::update', function (): void {
             'name'    => 'updated',
             'content' => 'new content',
         ]);
+        $request->attributes->set('agentId', $agentId);
+        $request->attributes->set('memoryId', $memory->id);
         $response = $controller->update($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
@@ -375,9 +383,8 @@ describe('AgentMemoryController::destroy', function (): void {
         $request = new Symfony\Component\HttpFoundation\Request();
         $request->attributes->set('agentId', 1);
         $request->attributes->set('memoryId', 1);
-        $response = $controller->destroy($request);
-
-        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+        expect(fn() => $controller->destroy($request))
+            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
     });
 
     test('destroy() deletes an existing agent memory', function (): void {

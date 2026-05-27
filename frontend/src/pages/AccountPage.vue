@@ -5,27 +5,50 @@ import GlobalNavbar from '@/components/GlobalNavbar.vue'
 
 const auth = useAuthStore()
 
-// ── Username form ────────────────────────────────────────────────────────────
+// ── Display name form ─────────────────────────────────────────────────────────
 
-const username = ref(auth.user?.username ?? '')
-const usernameSaving = ref(false)
-const usernameError = ref<string | null>(null)
-const usernameSuccess = ref(false)
+const displayName = ref(auth.user?.name ?? '')
+const displayNameSaving = ref(false)
+const displayNameError = ref<string | null>(null)
+const displayNameSuccess = ref(false)
 
-async function saveUsername(): Promise<void> {
-  const val = username.value.trim()
+async function saveDisplayName(): Promise<void> {
+  const val = displayName.value.trim()
   if (!val) return
-  usernameSaving.value = true
-  usernameError.value = null
-  usernameSuccess.value = false
+  displayNameSaving.value = true
+  displayNameError.value = null
+  displayNameSuccess.value = false
   try {
     await auth.updateAccount(val)
-    usernameSuccess.value = true
-    setTimeout(() => { usernameSuccess.value = false }, 3000)
+    displayNameSuccess.value = true
+    setTimeout(() => { displayNameSuccess.value = false }, 3000)
   } catch (e: any) {
-    usernameError.value = e?.name === 'ApiError' ? e.message : 'Failed to update display name.'
+    displayNameError.value = e?.name === 'ApiError' ? e.message : 'Failed to update display name.'
   } finally {
-    usernameSaving.value = false
+    displayNameSaving.value = false
+  }
+}
+
+// ── Email change form ─────────────────────────────────────────────────────────
+
+const newEmail = ref('')
+const emailSaving = ref(false)
+const emailError = ref<string | null>(null)
+const emailSuccess = ref(false)
+
+async function saveEmail(): Promise<void> {
+  emailSaving.value = true
+  emailError.value = null
+  emailSuccess.value = false
+  try {
+    await auth.changeEmail(newEmail.value)
+    emailSuccess.value = true
+    newEmail.value = ''
+    setTimeout(() => { emailSuccess.value = false }, 5000)
+  } catch (e: any) {
+    emailError.value = e?.name === 'ApiError' ? e.message : 'Failed to request email change.'
+  } finally {
+    emailSaving.value = false
   }
 }
 
@@ -36,6 +59,7 @@ const newPassword = ref('')
 const confirmPassword = ref('')
 const passwordSaving = ref(false)
 const passwordError = ref<string | null>(null)
+const passwordSuccess = ref(false)
 
 const passwordsMatch = computed(() => newPassword.value === confirmPassword.value)
 
@@ -53,6 +77,8 @@ async function savePassword(): Promise<void> {
   passwordError.value = null
   try {
     await auth.changePassword(currentPassword.value, newPassword.value)
+    passwordSuccess.value = true
+    setTimeout(() => { passwordSuccess.value = false }, 3000)
     currentPassword.value = ''
     newPassword.value = ''
     confirmPassword.value = ''
@@ -82,7 +108,7 @@ async function savePassword(): Promise<void> {
           <div class="flex gap-2">
             <div class="flex-1 space-y-1">
               <input
-                v-model="username"
+                v-model="displayName"
                 type="text"
                 placeholder="Your display name"
                 class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -90,15 +116,47 @@ async function savePassword(): Promise<void> {
               <p class="text-xs text-muted-foreground">{{ auth.user?.email }}</p>
             </div>
             <button
-              @click="saveUsername"
-              :disabled="usernameSaving || !username.trim()"
+              @click="saveDisplayName"
+              :disabled="displayNameSaving || !displayName.trim()"
               class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
             >
-              {{ usernameSaving ? 'Saving…' : 'Save' }}
+              {{ displayNameSaving ? 'Saving…' : 'Save' }}
             </button>
           </div>
-          <p v-if="usernameError" role="alert" class="text-xs text-destructive">{{ usernameError }}</p>
-          <p v-if="usernameSuccess" role="status" class="text-xs text-green-600">Display name updated.</p>
+          <p v-if="displayNameError" role="alert" class="text-xs text-destructive">{{ displayNameError }}</p>
+          <p v-if="displayNameSuccess" role="status" class="text-xs text-green-600">Display name updated.</p>
+        </section>
+
+        <!-- Change email -->
+        <section class="space-y-4">
+          <h2 class="text-sm font-semibold text-foreground">Change Email Address</h2>
+          <p class="text-xs text-muted-foreground">
+            We'll send a confirmation link to your new email address.
+          </p>
+          <form @submit.prevent="saveEmail" class="space-y-3">
+            <div class="space-y-2">
+              <label for="new-email" class="text-sm font-medium">New Email Address</label>
+              <input
+                id="new-email"
+                v-model="newEmail"
+                type="email"
+                autocomplete="email"
+                placeholder="new@example.com"
+                class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+            <p v-if="emailError" role="alert" class="text-xs text-destructive">{{ emailError }}</p>
+            <p v-if="emailSuccess" role="status" class="text-xs text-green-600">
+              Confirmation email sent. Please check your new email inbox.
+            </p>
+            <button
+              type="submit"
+              :disabled="emailSaving || !newEmail"
+              class="inline-flex h-9 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+            >
+              {{ emailSaving ? 'Sending…' : 'Send Confirmation Email' }}
+            </button>
+          </form>
         </section>
 
         <!-- Change password -->
@@ -136,6 +194,7 @@ async function savePassword(): Promise<void> {
               />
             </div>
             <p v-if="passwordError" role="alert" class="text-xs text-destructive">{{ passwordError }}</p>
+            <p v-if="passwordSuccess" role="status" class="text-xs text-green-600">Password updated successfully.</p>
             <button
               type="submit"
               :disabled="passwordSaving || !currentPassword || !newPassword || !confirmPassword"

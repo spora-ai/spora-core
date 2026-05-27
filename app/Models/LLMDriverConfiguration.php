@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * @property int $id
- * @property int $user_id
+ * @property int|null $user_id
  * @property string $name
  * @property string $driver_class
  * @property string|null $settings  (encrypted JSON)

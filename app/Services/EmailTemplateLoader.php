@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use RuntimeException;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
@@ -52,7 +53,7 @@ final class EmailTemplateLoader
                     $this->templates[$data['name']] = $data;
                 }
             } catch (ParseException $e) {
-                throw new \RuntimeException(sprintf('Failed to parse email template "%s": %s', $file, $e->getMessage()), 0, $e);
+                throw new RuntimeException(sprintf('Failed to parse email template "%s": %s', $file, $e->getMessage()), 0, $e);
             }
         }
     }

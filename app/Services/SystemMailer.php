@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Psr\Log\LoggerInterface;
 use RuntimeException;
 use Spora\Mailer\LogTransport;
 use Spora\Models\MailTemplate;
+use Spora\Models\User;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mime\Address;
@@ -18,10 +20,11 @@ use Symfony\Component\Mime\Email;
  * Reads mail configuration from container config (merged config.php + .env via SPORA_MAIL_* vars).
  * Uses MailTemplate records for templated emails (verification, password reset, welcome, etc.).
  */
-final class SystemMailer
+final class SystemMailer implements MailerInterface
 {
     public function __construct(
         private readonly array $config,
+        private readonly ?LoggerInterface $logger = null,
     ) {}
 
     /**
@@ -45,8 +48,7 @@ final class SystemMailer
         };
 
         if ($driver === 'log') {
-            $logger = new \Psr\Log\NullLogger();
-            return new Mailer(new LogTransport(null, $logger));
+            return new Mailer(new LogTransport(null, $this->logger ?? new \Psr\Log\NullLogger()));
         }
 
         return new Mailer(Transport::fromDsn($dsn));
@@ -102,9 +104,9 @@ final class SystemMailer
     public function sendVerificationEmail(int $userId, string $email, string $verificationUrl): bool
     {
         return $this->sendTemplatedEmail('email_verification', [
-            'user_id'          => $userId,
-            'email'            => $email,
-            'verification_url' => $verificationUrl,
+            'user_id'            => $userId,
+            'email'              => $email,
+            'verification_link'  => $verificationUrl,
         ], [$email]);
     }
 
@@ -119,7 +121,7 @@ final class SystemMailer
     {
         return $this->sendTemplatedEmail('password_reset', [
             'email'     => $email,
-            'reset_url' => $resetUrl,
+            'reset_link' => $resetUrl,
         ], [$email]);
     }
 
@@ -132,9 +134,12 @@ final class SystemMailer
      */
     public function sendWelcomeEmail(int $userId, string $email): bool
     {
+        $user = User::find($userId);
+        $userName = $user !== null ? ($user->name ?? $email) : $email;
+
         return $this->sendTemplatedEmail('welcome', [
-            'user_id' => $userId,
-            'email'   => $email,
+            'user_name' => $userName,
+            'email'     => $email,
         ], [$email]);
     }
 

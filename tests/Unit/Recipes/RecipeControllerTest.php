@@ -31,7 +31,7 @@ test('index returns 401 when not authenticated', function (): void {
 
 test('index returns 200 with recipes array when authenticated', function (): void {
     $service = bootAuthLayer();
-    $service->register('chef@example.com', 'ValidPass1!');
+    $service->register('chef@example.com', 'ValidPass1!', 'Chef');
     $service->login('chef@example.com', 'ValidPass1!');
 
     $scanner    = new RecipeScanner([BASE_PATH . '/tests/Fixtures/recipes']);
@@ -48,7 +48,7 @@ test('index returns 200 with recipes array when authenticated', function (): voi
 
 test('index returns only valid recipes', function (): void {
     $service = bootAuthLayer();
-    $service->register('chef2@example.com', 'ValidPass1!');
+    $service->register('chef2@example.com', 'ValidPass1!', 'Chef2');
     $service->login('chef2@example.com', 'ValidPass1!');
 
     $scanner    = new RecipeScanner([BASE_PATH . '/tests/Fixtures/recipes']);
@@ -65,7 +65,7 @@ test('index returns only valid recipes', function (): void {
 
 test('index returns empty recipes array when scanner has no directories', function (): void {
     $service = bootAuthLayer();
-    $service->register('chef3@example.com', 'ValidPass1!');
+    $service->register('chef3@example.com', 'ValidPass1!', 'Chef3');
     $service->login('chef3@example.com', 'ValidPass1!');
 
     $controller = new RecipeController($service, new RecipeScanner([]));
@@ -77,7 +77,7 @@ test('index returns empty recipes array when scanner has no directories', functi
 
 test('each recipe has the required shape', function (): void {
     $service = bootAuthLayer();
-    $service->register('chef4@example.com', 'ValidPass1!');
+    $service->register('chef4@example.com', 'ValidPass1!', 'Chef4');
     $service->login('chef4@example.com', 'ValidPass1!');
 
     $scanner    = new RecipeScanner([BASE_PATH . '/tests/Fixtures/recipes']);

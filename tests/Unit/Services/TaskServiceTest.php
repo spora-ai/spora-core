@@ -9,7 +9,7 @@ use Spora\Services\TaskService;
 
 function makeTaskService(): TaskService
 {
-    $orchestrator = Mockery::mock(\Spora\Agents\OrchestratorInterface::class);
+    $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
     $mercure = Mockery::mock(MercurePublisherInterface::class);
     $mercure->allows('publish')->andReturn(true);
     $mercure->allows('publishToUser')->andReturn(true);
@@ -21,7 +21,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
     it('returns tasks without tool_calls and history keys', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('list@example.com', 'Password1!');
+        $userId = $authService->register('list@example.com', 'Password1!', 'List');
         simulateLoggedInSession($userId, 'list@example.com');
 
         $agent = Agent::create([
@@ -48,7 +48,9 @@ describe('TaskService — getTasksForUser', function (): void {
 
         expect($result)->toHaveCount(1);
         $taskData = $result[0];
+        // @phpstan-ignore-next-line
         expect(array_key_exists('tool_calls', $taskData))->toBe(false);
+        // @phpstan-ignore-next-line
         expect(array_key_exists('history', $taskData))->toBe(false);
         expect($taskData['id'])->toBe($task->id);
         expect($taskData['status'])->toBe('COMPLETED');
@@ -57,7 +59,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
     it('returns max_retries and retry_after_minutes from eager-loaded agent', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('agentrel@example.com', 'Password1!');
+        $userId = $authService->register('agentrel@example.com', 'Password1!', 'Agentrel');
         simulateLoggedInSession($userId, 'agentrel@example.com');
 
         $agent = Agent::create([
@@ -89,7 +91,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
     it('filters by agent_id when provided', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('filter@example.com', 'Password1!');
+        $userId = $authService->register('filter@example.com', 'Password1!', 'Filter');
         simulateLoggedInSession($userId, 'filter@example.com');
 
         $agent1 = Agent::create([
@@ -118,7 +120,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
     it('filters by updated_at when since is provided', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('since@example.com', 'Password1!');
+        $userId = $authService->register('since@example.com', 'Password1!', 'Since');
         simulateLoggedInSession($userId, 'since@example.com');
 
         $agent = Agent::create([
@@ -165,7 +167,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
     it('returns all tasks when since is not provided (backward compatible)', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('nocsince@example.com', 'Password1!');
+        $userId = $authService->register('nocsince@example.com', 'Password1!', 'Nocsince');
         simulateLoggedInSession($userId, 'nocsince@example.com');
 
         $agent = Agent::create([
@@ -188,7 +190,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
     it('returns empty array when since filter excludes all tasks (no crash)', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('futuresince@example.com', 'Password1!');
+        $userId = $authService->register('futuresince@example.com', 'Password1!', 'Futuresince');
         simulateLoggedInSession($userId, 'futuresince@example.com');
 
         $agent = Agent::create([

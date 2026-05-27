@@ -57,7 +57,7 @@ function createConfigForService(LLMConfigService $service, string $name, int $us
 test('setUserPreferredConfig creates preference row', function (): void {
     [$service, $security] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('pref1@example.com', 'Password1!');
+    $userId = $authService->register('pref1@example.com', 'Password1!', 'Pref1');
 
     $config = createConfigForService($service, 'User Config', $userId);
 
@@ -73,7 +73,7 @@ test('setUserPreferredConfig creates preference row', function (): void {
 test('setUserPreferredConfig updates existing preference', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('pref2@example.com', 'Password1!');
+    $userId = $authService->register('pref2@example.com', 'Password1!', 'Pref2');
 
     $config1 = createConfigForService($service, 'First Config', $userId);
     $config2 = createConfigForService($service, 'Second Config', $userId);
@@ -97,8 +97,8 @@ test('setUserPreferredConfig updates existing preference', function (): void {
 test('setUserPreferredConfig rejects config belonging to another user', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userA = $authService->register('pref3a@example.com', 'Password1!');
-    $userB = $authService->register('pref3b@example.com', 'Password1!');
+    $userA = $authService->register('pref3a@example.com', 'Password1!', 'Pref3a');
+    $userB = $authService->register('pref3b@example.com', 'Password1!', 'Pref3b');
 
     $configA = createConfigForService($service, 'User A Config', $userA);
 
@@ -115,7 +115,7 @@ test('setUserPreferredConfig rejects config belonging to another user', function
 test('setUserPreferredConfig allows global config', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('pref4@example.com', 'Password1!');
+    $userId = $authService->register('pref4@example.com', 'Password1!', 'Pref4');
 
     // Create a global config
     $globalConfig = createConfigForService($service, 'Global Config', $userId, isGlobal: true);
@@ -135,7 +135,7 @@ test('setUserPreferredConfig allows global config', function (): void {
 test('getUserPreferredConfig returns null when no preference', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('getpref1@example.com', 'Password1!');
+    $userId = $authService->register('getpref1@example.com', 'Password1!', 'Getpref1');
 
     $result = $service->getUserPreferredConfig($userId);
 
@@ -145,7 +145,7 @@ test('getUserPreferredConfig returns null when no preference', function (): void
 test('getUserPreferredConfig returns the preferred config', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('getpref2@example.com', 'Password1!');
+    $userId = $authService->register('getpref2@example.com', 'Password1!', 'Getpref2');
 
     $config = createConfigForService($service, 'My Preferred Config', $userId);
     UserPreference::create([
@@ -163,8 +163,8 @@ test('getUserPreferredConfig returns the preferred config', function (): void {
 test('getUserPreferredConfig respects user isolation', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userA = $authService->register('getpref3a@example.com', 'Password1!');
-    $userB = $authService->register('getpref3b@example.com', 'Password1!');
+    $userA = $authService->register('getpref3a@example.com', 'Password1!', 'Getpref3a');
+    $userB = $authService->register('getpref3b@example.com', 'Password1!', 'Getpref3b');
 
     $configA = createConfigForService($service, 'User A Config', $userA);
     UserPreference::create([
@@ -185,7 +185,7 @@ test('getUserPreferredConfig respects user isolation', function (): void {
 test('unsetUserPreferredConfig deletes the row', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('unsetpref1@example.com', 'Password1!');
+    $userId = $authService->register('unsetpref1@example.com', 'Password1!', 'Unsetpref1');
 
     $config = createConfigForService($service, 'To Remove', $userId);
     UserPreference::create([
@@ -202,7 +202,7 @@ test('unsetUserPreferredConfig deletes the row', function (): void {
 test('unsetUserPreferredConfig does nothing when no preference exists', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('unsetpref2@example.com', 'Password1!');
+    $userId = $authService->register('unsetpref2@example.com', 'Password1!', 'Unsetpref2');
 
     // Should not throw
     $service->unsetUserPreferredConfig($userId);

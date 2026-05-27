@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use DI\ContainerBuilder;
 use Spora\Core\Router;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 

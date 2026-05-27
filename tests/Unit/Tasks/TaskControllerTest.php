@@ -25,7 +25,7 @@ function makeTaskController(?TaskServiceInterface $taskService = null): array
 
 function seedUserAndAgent(mixed $authService): array
 {
-    $userId = $authService->register('task@example.com', 'Password1!');
+    $userId = $authService->register('task@example.com', 'Password1!', 'Task');
     simulateLoggedInSession($userId, 'task@example.com');
 
     $agent = Agent::create([
@@ -108,7 +108,7 @@ it('store returns 404 when user has no agent', function (): void {
         ->andThrow(new InvalidArgumentException('Agent not found.'));
 
     [$controller, $authService] = makeTaskController($taskService);
-    $userId = $authService->register('noagent@example.com', 'Password1!');
+    $userId = $authService->register('noagent@example.com', 'Password1!', 'Noagent');
     simulateLoggedInSession($userId, 'noagent@example.com');
 
     $resp = $controller->store(jsonRequest('POST', '/api/v1/tasks', ['agent_id' => 99999, 'prompt' => 'hello']));
@@ -562,7 +562,7 @@ it('destroy returns 404 for task belonging to another user', function (): void {
         ->andReturn(false);
 
     [$controller, $authService] = makeTaskController($taskService);
-    $userId = $authService->register('other@example.com', 'Password1!');
+    $userId = $authService->register('other@example.com', 'Password1!', 'Other');
     simulateLoggedInSession($userId, 'other@example.com');
 
     $otherAgent = Agent::create([
@@ -1152,7 +1152,7 @@ it('cancelRetryChain returns 404 when trying to cancel another users retry chain
     [$controller, $authService] = makeTaskController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
 
-    $otherUserId = $authService->register('other@example.com', 'Password1!');
+    $otherUserId = $authService->register('other@example.com', 'Password1!', 'Other');
     $otherUser = Spora\Models\User::where('email', 'other@example.com')->first();
 
     $root = Task::create([

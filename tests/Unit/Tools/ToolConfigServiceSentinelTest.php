@@ -44,7 +44,7 @@ test('putGlobalSettings preserves password field when sentinel *** is sent', fun
 
 test('putUserSettings preserves password field when sentinel *** is sent', function () {
     [$service, $authService] = makeServiceForSentinel();
-    $userId = $authService->register('sentinel-user@example.com', 'Password1!');
+    $userId = $authService->register('sentinel-user@example.com', 'Password1!', 'Sentinel User');
 
     // Initial save with real password
     $service->putUserSettings(TestTool::class, $userId, [
@@ -63,8 +63,8 @@ test('putUserSettings preserves password field when sentinel *** is sent', funct
 
 test('putAgentOverride preserves password field when sentinel *** is sent', function () {
     [$service, $authService] = makeServiceForSentinel();
-    $userId = $authService->register('sentinel-agent@example.com', 'Password1!');
-    
+    $userId = $authService->register('sentinel-agent@example.com', 'Password1!', 'Sentinel Agent');
+
     $agent = new Agent();
     $agent->user_id = $userId;
     $agent->name = 'Sentinel Agent';

@@ -7,7 +7,7 @@ use Spora\Http\SseController;
 describe('SseController', function (): void {
     it('auth returns 404 when mercure is not configured', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('sse@example.com', 'Password1!');
+        $userId = $authService->register('sse@example.com', 'Password1!', 'Sse');
         simulateLoggedInSession($userId, 'sse@example.com');
 
         $controller = new SseController($authService, null, null);
@@ -20,7 +20,7 @@ describe('SseController', function (): void {
 
     it('auth returns hubUrl and token when mercure is configured', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('sse@example.com', 'Password1!');
+        $userId = $authService->register('sse@example.com', 'Password1!', 'Sse');
         simulateLoggedInSession($userId, 'sse@example.com');
 
         $controller = new SseController($authService, 'http://localhost:3000/.well-known/mercure', 'test-secret-key-for-jwt-signing-32ch');
@@ -38,7 +38,7 @@ describe('SseController', function (): void {
 
     it('auth token has correct mercure subscription topics', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('sse@example.com', 'Password1!');
+        $userId = $authService->register('sse@example.com', 'Password1!', 'Sse');
         simulateLoggedInSession($userId, 'sse@example.com');
         $secret = 'test-secret-key-for-jwt-signing-32ch';
 
@@ -59,7 +59,7 @@ describe('SseController', function (): void {
 
     it('auth token expires in 1 hour', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('sse@example.com', 'Password1!');
+        $userId = $authService->register('sse@example.com', 'Password1!', 'Sse');
         simulateLoggedInSession($userId, 'sse@example.com');
 
         $controller = new SseController($authService, 'http://localhost:3000/.well-known/mercure', 'test-secret-key-for-jwt-signing-32ch');

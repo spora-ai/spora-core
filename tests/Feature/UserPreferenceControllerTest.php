@@ -24,6 +24,9 @@ function makeUserPreferenceController(): array
     return [$controller, $authService, $llmConfigService, $key];
 }
 
+// Note: makeAdmin() and createTestConfig() are defined in LLMConfigControllerTest.php
+// and shared globally across all Feature tests
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -82,9 +85,8 @@ test('get returns 401 for unauthenticated request', function (): void {
     clearSession();
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->show($request);
-
-    expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+    expect(fn() => $controller->show($request))
+        ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
 
 test('user cannot access another user preference (returns null for other user)', function (): void {
@@ -260,9 +262,8 @@ test('put returns 401 for unauthenticated request', function (): void {
     $request = jsonRequest('PUT', '/api/v1/user-preferences/llm', [
         'config_id' => 1,
     ]);
-    $response = $controller->update($request);
-
-    expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+    expect(fn() => $controller->update($request))
+        ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
 
 test('preference is deleted when the referenced config is deleted (cascade)', function (): void {
@@ -280,8 +281,8 @@ test('preference is deleted when the referenced config is deleted (cascade)', fu
         'preferred_llm_config_id' => $config->id,
     ]);
 
-    // Delete the config
-    $config->delete();
+    // Delete the config via the service (which handles cascade)
+    $llmConfigService->deleteConfiguration($config->id, $userId, false);
 
     // Verify preference is gone
     $pref = UserPreference::where('user_id', $userId)->first();

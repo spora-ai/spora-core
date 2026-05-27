@@ -13,7 +13,8 @@ use InvalidArgumentException;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
-use Spora\Services\SystemMailer;
+use Spora\Models\User;
+use Spora\Services\MailerInterface;
 
 /**
  * Thin wrapper around delight-im/Auth that exposes a typed, vendor-agnostic API.
@@ -22,12 +23,12 @@ use Spora\Services\SystemMailer;
  */
 final class AuthService
 {
-    private ?SystemMailer $systemMailer = null;
+    private ?MailerInterface $systemMailer = null;
     private ?string $appUrl = null;
 
     public function __construct(private readonly Auth $auth) {}
 
-    public function setSystemMailer(SystemMailer $systemMailer): void
+    public function setSystemMailer(MailerInterface $systemMailer): void
     {
         $this->systemMailer = $systemMailer;
     }
@@ -37,12 +38,15 @@ final class AuthService
         $this->appUrl = $url;
     }
 
-    private function sendVerificationEmailViaCallback(int $userId, string $email): callable
+    private function sendVerificationEmailViaCallback(string $email, ?string $customVerifyPath = '/auth/verify/'): callable
     {
-        return function (string $selector, string $token) use ($userId, $email) {
+        return function (string $selector, string $token) use ($email, $customVerifyPath) {
             if ($this->systemMailer !== null) {
+                $user = User::where('email', $email)->first();
+                $userId = $user !== null ? (int) $user->id : 0;
+
                 $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-                $verifyUrl = "{$baseUrl}/api/v1/auth/verify/{$selector}?token=" . urlencode($token);
+                $verifyUrl = "{$baseUrl}{$customVerifyPath}{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendVerificationEmail($userId, $email, $verifyUrl);
             }
         };
@@ -86,15 +90,23 @@ final class AuthService
      * @throws InvalidArgumentException if the email or password is invalid
      * @throws EmailTakenException       if a user with that email already exists
      */
-    public function register(string $email, string $password): int
+    public function register(string $email, string $password, string $displayName): int
     {
         try {
-            return (int) $this->auth->register(
+            $userId = (int) $this->auth->register(
                 $email,
                 $password,
                 null,
-                $this->systemMailer !== null ? $this->sendVerificationEmailViaCallback(0, $email) : null,
+                $this->systemMailer !== null ? $this->sendVerificationEmailViaCallback($email) : null,
             );
+
+            $user = User::where('email', $email)->first();
+            if ($user !== null) {
+                $user->name = $displayName;
+                $user->save();
+            }
+
+            return $userId;
         } catch (UserAlreadyExistsException) {
             throw new EmailTakenException('A user with that email address already exists.');
         } catch (InvalidEmailException) {
@@ -165,7 +177,7 @@ final class AuthService
             return false;
         }
 
-        $user = (new \Spora\Models\User())->find($userId);
+        $user = (new User())->find($userId);
         return $user !== null && $user->isAdmin();
     }
 
@@ -183,11 +195,45 @@ final class AuthService
 
     /**
      * Confirm an email address using a selector/token pair.
-     * @return array<string> ['old_email', 'new_email']
+     * After successful confirmation, sends the welcome email if SPORA_SEND_WELCOME_EMAIL is enabled.
+     *
+     * @return array{0: string, 1: string} [old_email, new_email]
      */
     public function confirmEmail(string $selector, string $token): array
     {
-        return $this->auth->confirmEmail($selector, $token);
+        $emails = $this->auth->confirmEmail($selector, $token);
+        $oldEmail = $emails[0] ?? '';
+        $newEmail = $emails[1] ?? '';
+
+        $sendWelcomeEmail = (bool) ($_ENV['SPORA_SEND_WELCOME_EMAIL'] ?? false);
+        // Only send welcome email for initial verification (where old email equals new email)
+        if ($sendWelcomeEmail && $this->systemMailer !== null && $newEmail !== '' && $oldEmail === $newEmail) {
+            $user = User::where('email', $newEmail)->first();
+            if ($user !== null) {
+                $this->systemMailer->sendWelcomeEmail((int) $user->id, $newEmail);
+            }
+        }
+
+        return $emails;
+    }
+
+    /**
+     * Request an email address change for the currently authenticated user.
+     * Sends a confirmation email to the NEW address via the provided callback.
+     *
+     * @throws InvalidEmailException if the new email is invalid
+     * @throws UserAlreadyExistsException if the new email is already taken
+     * @throws \Delight\Auth\NotLoggedInException if no user is logged in
+     * @throws EmailNotVerifiedException if the current email is not verified
+     */
+    public function changeEmail(string $newEmail): void
+    {
+        if ($this->systemMailer === null) {
+            $this->auth->changeEmail($newEmail, static function (): void {});
+            return;
+        }
+
+        $this->auth->changeEmail($newEmail, $this->sendVerificationEmailViaCallback($newEmail));
     }
 
     /**
@@ -198,7 +244,7 @@ final class AuthService
         $this->auth->forgotPassword($email, function (string $selector, string $token) use ($email): void {
             if ($this->systemMailer !== null) {
                 $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-                $resetUrl = "{$baseUrl}/api/v1/auth/reset-password/{$selector}?token=" . urlencode($token);
+                $resetUrl = "{$baseUrl}/auth/reset-password/{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendPasswordResetEmail($email, $resetUrl);
             }
         });
@@ -210,5 +256,22 @@ final class AuthService
     public function resetPassword(string $selector, string $token, string $newPassword): void
     {
         $this->auth->resetPassword($selector, $token, $newPassword);
+    }
+
+    /**
+     * Resend the email verification email for an unverified user.
+     * Silently returns if there is no pending confirmation request for the email.
+     */
+    public function resendVerificationEmail(string $email): void
+    {
+        if ($this->systemMailer === null) {
+            return;
+        }
+
+        try {
+            $this->auth->resendConfirmationForEmail($email, $this->sendVerificationEmailViaCallback($email));
+        } catch (\Delight\Auth\ConfirmationRequestNotFound) {
+            // No pending confirmation — nothing to resend; silently return
+        }
     }
 }

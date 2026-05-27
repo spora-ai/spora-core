@@ -17,7 +17,7 @@ test('requireAuth returns the user ID when logged in', function (): void {
     clearSession();
     $authService = bootAuthLayer();
 
-    $userId = $authService->register('guard@example.com', 'Password1!');
+    $userId = $authService->register('guard@example.com', 'Password1!', 'Guard');
     simulateLoggedInSession($userId, 'guard@example.com');
 
     expect(AuthGuard::requireAuth($authService))->toBe($userId);

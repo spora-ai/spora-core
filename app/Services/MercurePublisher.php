@@ -32,17 +32,16 @@ final class MercurePublisher implements MercurePublisherInterface
      */
     public function publish(int $taskId, int $userId, array $taskData): bool
     {
+        if ($this->hubUrl === null || $this->jwtKey === null) {
+            $this->logger?->debug('MercurePublisher: publish skipped - Mercure not configured');
+            return false;
+        }
+
         $this->logger?->debug('MercurePublisher: publish called', [
             'task_id' => $taskId,
             'user_id' => $userId,
             'hub_url' => $this->hubUrl,
-            'has_jwt' => $this->jwtKey !== null,
         ]);
-
-        if ($this->hubUrl === null || $this->jwtKey === null) {
-            $this->logger?->warning('MercurePublisher: publish skipped - hubUrl or jwtKey is null');
-            return false;
-        }
 
         $topic = "user/{$userId}/tasks";
         try {
@@ -75,16 +74,15 @@ final class MercurePublisher implements MercurePublisherInterface
      */
     public function publishToUser(int $userId, array $data): bool
     {
+        if ($this->hubUrl === null || $this->jwtKey === null) {
+            $this->logger?->debug('MercurePublisher: publishToUser skipped - Mercure not configured');
+            return false;
+        }
+
         $this->logger?->debug('MercurePublisher: publishToUser called', [
             'user_id' => $userId,
             'hub_url' => $this->hubUrl,
-            'has_jwt' => $this->jwtKey !== null,
         ]);
-
-        if ($this->hubUrl === null || $this->jwtKey === null) {
-            $this->logger?->warning('MercurePublisher: publishToUser skipped - hubUrl or jwtKey is null');
-            return false;
-        }
 
         try {
             $response = $this->client->request('POST', $this->hubUrl, [

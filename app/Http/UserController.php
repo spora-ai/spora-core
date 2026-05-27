@@ -70,7 +70,7 @@ final class UserController
         }
 
         try {
-            $userId = $this->authService->register((string) $body['email'], (string) $body['password']);
+            $userId = $this->authService->register((string) $body['email'], (string) $body['password'], (string) $body['email']);
         } catch (EmailTakenException) {
             return $this->error('EMAIL_TAKEN', 'A user with that email address already exists.', Response::HTTP_CONFLICT);
         } catch (InvalidArgumentException $e) {

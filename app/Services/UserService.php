@@ -53,6 +53,12 @@ final class UserService implements UserServiceInterface
         return ['user' => $this->serializeUser($user)];
     }
 
+    public function getUserIdByEmail(string $email): ?int
+    {
+        $user = User::where('email', $email)->first();
+        return $user !== null ? (int) $user->id : null;
+    }
+
     public function updateUser(int $userId, array $data): ?array
     {
         $user = User::find($userId);

@@ -38,7 +38,7 @@ function makeScheduledRunController(): array
 function registerAndGetAgentForScheduledRun(): array
 {
     $authService = bootAuthLayer();
-    $userId = $authService->register('scheduled@example.com', 'Password1!');
+    $userId = $authService->register('scheduled@example.com', 'Password1!', 'Scheduled');
     simulateLoggedInSession($userId, 'scheduled@example.com');
 
     $agent = Agent::create([
@@ -99,8 +99,8 @@ describe('ScheduledRunController', function (): void {
 
     it('index returns 404 for agent belonging to another user', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('owner@example.com', 'Password1!');
-        $otherUserId = $authService->register('other@example.com', 'Password1!');
+        $userId = $authService->register('owner@example.com', 'Password1!', 'Owner');
+        $otherUserId = $authService->register('other@example.com', 'Password1!', 'Other');
         simulateLoggedInSession($otherUserId, 'other@example.com');
 
         $agent = Agent::create([

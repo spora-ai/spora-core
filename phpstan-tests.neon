@@ -1,0 +1,28 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    paths:
+        - tests
+    level: 5
+    excludePaths:
+        - vendor
+        - tests/Fixtures
+    bootstrapFiles:
+        - phpstan-bootstrap.php
+    treatPhpDocTypesAsCertain: false
+    reportUnmatchedIgnoredErrors: false
+    ignoreErrors:
+        - '#Call to an undefined method#'
+        - '#Parameter .* expects .*, Mockery\\MockInterface given#'
+        - '#Method .* should return .* but returns Mockery\\MockInterface#'
+        - '#Property .* not found#'
+        - '#Call to an undefined function#'
+        - '#Function .* not found#'
+        - '#Class .* not found#'
+        - '#Interface .* not found#'
+        - '#Constant .* not found#'
+        - '#Argument #'
+        - '#Method .* is not defined on class#'
+        - '#Variable .* might not be defined#'
+        - '#Offset .* does not exist on#'

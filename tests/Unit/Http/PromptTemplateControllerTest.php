@@ -19,7 +19,7 @@ function makePromptTemplateController(): array
 
 function registerAndGetAgentId(AuthService $authService): array
 {
-    $userId = $authService->register('template@example.com', 'Password1!');
+    $userId = $authService->register('template@example.com', 'Password1!', 'Template');
     simulateLoggedInSession($userId, 'template@example.com');
 
     $agent = Agent::create([
@@ -78,8 +78,8 @@ describe('PromptTemplateController', function (): void {
 
     it('index returns 404 for agent belonging to another user', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('owner@example.com', 'Password1!');
-        $otherUserId = bootAuthLayer()->register('other@example.com', 'Password1!');
+        $userId = $authService->register('owner@example.com', 'Password1!', 'Owner');
+        $otherUserId = bootAuthLayer()->register('other@example.com', 'Password1!', 'Other');
         simulateLoggedInSession($otherUserId, 'other@example.com');
 
         $agent = Agent::create([

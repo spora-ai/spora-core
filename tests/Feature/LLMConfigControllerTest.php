@@ -41,7 +41,7 @@ function createTestConfig(string $name, string $driverClass, array $settings, bo
     $config->user_id = $userId ?? ($_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID] ?? 1);
     $config->name = $name;
     $config->driver_class = $driverClass;
-    $config->settings = $llmConfigService->encryptSettings($settings);
+    $config->settings = json_encode($llmConfigService->encodeSettings($driverClass, $settings));
     $config->is_default = $isDefault;
     $config->save();
 
@@ -105,7 +105,7 @@ test('store() creates a new config', function (): void {
     $result = json_decode($response->getContent(), true)['data']['config'];
     expect($result['name'])->toBe('Test Config')
         ->and($result['driver_class'])->toBe(OpenAICompatibleDriver::class)
-        ->and($result['settings']['api_key'])->toBe('sk-test')  // decrypted from encrypted storage
+        ->and($result['settings']['api_key'])->toBe('***')  // masked for API response
         ->and($result['is_default'])->toBe(false);
 
     // Cleanup
@@ -236,7 +236,7 @@ test('show() returns a config by id', function (): void {
 
     $result = json_decode($response->getContent(), true)['data']['config'];
     expect($result['name'])->toBe('Show Test')
-        ->and($result['settings']['api_key'])->toBe('sk-show-test');
+        ->and($result['settings']['api_key'])->toBe('***');
 
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });
@@ -415,7 +415,7 @@ test('update() returns 404 when updating another user\'s config', function (): v
     [$controller, $authService, $llmConfigService] = makeLLMConfigController();
     $userA = bootAuth($authService, 'usera@example.com');
 
-    $configA = createTestConfig('UserA Update', OpenAICompatibleDriver::class, ['api_key' => 'sk-update'], false, null, $llmConfigService);
+    $configA = createTestConfig('UserA Update', OpenAICompatibleDriver::class, ['api_key' => 'sk-update'], false, $userA, $llmConfigService);
 
     // Log in as a different user
     bootAuth($authService, 'userb@example.com');
@@ -432,7 +432,7 @@ test('destroy() returns 404 when deleting another user\'s config', function (): 
     [$controller, $authService, $llmConfigService] = makeLLMConfigController();
     $userA = bootAuth($authService, 'usera@example.com');
 
-    $configA = createTestConfig('UserA Delete', OpenAICompatibleDriver::class, ['api_key' => 'sk-delete'], false, null, $llmConfigService);
+    $configA = createTestConfig('UserA Delete', OpenAICompatibleDriver::class, ['api_key' => 'sk-delete'], false, $userA, $llmConfigService);
 
     // Log in as a different user
     bootAuth($authService, 'userb@example.com');
@@ -494,7 +494,7 @@ test('update() does not corrupt settings when client sends a JSON array instead 
 
     // Original settings must be unchanged
     $config->refresh();
-    $decrypted = $llmConfigService->decryptSettings($config->getRawOriginal('settings'));
+    $decrypted = $llmConfigService->decryptSettings($config->driver_class, $config->getRawOriginal('settings'));
     expect($decrypted['api_key'])->toBe('sk-original');
 
     LLMDriverConfiguration::where('id', $config->id)->delete();
@@ -521,7 +521,7 @@ test('update() applies settings normally when value is a proper JSON object', fu
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
     $config->refresh();
-    $decrypted = $llmConfigService->decryptSettings($config->getRawOriginal('settings'));
+    $decrypted = $llmConfigService->decryptSettings($config->driver_class, $config->getRawOriginal('settings'));
     // model updated, api_key preserved via merge
     expect($decrypted['model'])->toBe('gpt-4-turbo')
         ->and($decrypted['api_key'])->toBe('sk-old');
