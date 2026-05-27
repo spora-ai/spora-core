@@ -15,6 +15,7 @@ Follow these steps strictly to ensure code quality and adherence to Spora's arch
 Execute the following commands in the terminal. Wait for each command to finish successfully before proceeding to the next:
 1. **PHP Linting**: `composer analyse`
 2. **PHP Tests**: `composer test`
+3. **PHP Code Style Fix**: `composer format`
 3. **Frontend Linting**: `cd frontend && npm run lint`
 4. **Frontend Tests**: `cd frontend && npm run test`
 5. **Frontend Build**: `cd frontend && npm run build`
