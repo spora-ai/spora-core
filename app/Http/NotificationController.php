@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\NotificationServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -30,7 +29,7 @@ final class NotificationController
      */
     public function index(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         $perPage = min((int) ($request->query->get('per_page', 20)), 100);
         if ($perPage < 1) {
@@ -54,7 +53,7 @@ final class NotificationController
      */
     public function markRead(Request $request): JsonResponse
     {
-        $userId         = AuthGuard::requireAuth($this->authService);
+        $userId         = $this->authService->currentUserId();
         $notificationId = (int) $request->attributes->get('id', 0);
 
         $notification = $this->notificationService->markAsRead($notificationId, $userId);
@@ -75,7 +74,7 @@ final class NotificationController
      */
     public function markAllRead(): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         $this->notificationService->markAllAsRead($userId);
 
@@ -88,7 +87,7 @@ final class NotificationController
      */
     public function destroy(Request $request): Response
     {
-        $userId         = AuthGuard::requireAuth($this->authService);
+        $userId         = $this->authService->currentUserId();
         $notificationId = (int) $request->attributes->get('id', 0);
 
         $deleted = $this->notificationService->deleteNotification($notificationId, $userId);
@@ -109,7 +108,7 @@ final class NotificationController
      */
     public function destroyAll(): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         $this->notificationService->deleteAllForUser($userId);
 

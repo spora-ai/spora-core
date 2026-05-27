@@ -8,7 +8,6 @@ use Carbon\Carbon;
 use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\TaskServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -27,7 +26,7 @@ final class TaskController
      */
     public function index(Request $request): JsonResponse
     {
-        $userId  = AuthGuard::requireAuth($this->authService);
+        $userId  = $this->authService->currentUserId();
         $agentId = $request->query->has('agent_id') ? (int) $request->query->get('agent_id') : null;
         $since = $request->query->has('since') ? $request->query->get('since') : null;
 
@@ -50,7 +49,7 @@ final class TaskController
      */
     public function store(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         try {
             $body = $this->decodeJson($request);
@@ -102,7 +101,7 @@ final class TaskController
      */
     public function show(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $taskId = (int) $request->attributes->get('taskId', 0);
 
         $sinceSequence = null;
@@ -130,7 +129,7 @@ final class TaskController
      */
     public function approve(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $taskId = (int) $request->attributes->get('taskId', 0);
 
         try {
@@ -192,7 +191,7 @@ final class TaskController
      */
     public function reject(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $taskId = (int) $request->attributes->get('taskId', 0);
 
         try {
@@ -229,7 +228,7 @@ final class TaskController
      */
     public function destroy(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $taskId = (int) $request->attributes->get('taskId', 0);
 
         if (!$this->taskService->deleteTask($taskId, $userId)) {
@@ -250,7 +249,7 @@ final class TaskController
      */
     public function retry(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $taskId = (int) $request->attributes->get('taskId', 0);
 
         try {
@@ -282,7 +281,7 @@ final class TaskController
      */
     public function continue(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $taskId = (int) $request->attributes->get('taskId', 0);
 
         $body = json_decode($request->getContent(), true) ?? [];
@@ -336,7 +335,7 @@ final class TaskController
      */
     public function cancelRetryChain(Request $request): Response
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $taskId = (int) $request->attributes->get('taskId', 0);
 
         try {

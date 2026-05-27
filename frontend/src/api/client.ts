@@ -1,6 +1,6 @@
-// CSRF strategy: session cookies are scoped SameSite=Lax by PHP's default session config,
-// which prevents cross-origin form/navigation requests from carrying the session cookie.
-// A separate XSRF-TOKEN double-submit pattern is not implemented.
+// CSRF strategy: session cookies are scoped SameSite=Lax by PHP's default session config.
+// A CSRF token (X-CSRF-Token header) is required on all state-changing requests (POST/PUT/PATCH/DELETE).
+// The token is obtained from the auth store after login/register/me and sent as a header.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? ''
 
@@ -22,11 +22,23 @@ export function setupSessionHandler(handler: SessionExpiredHandler): void {
   _sessionExpiredHandler = handler
 }
 
+// State-changing HTTP methods that require a CSRF token
+const STATE_CHANGING_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
     ...(init.headers ? Object.fromEntries(new Headers(init.headers)) : {}),
+  }
+
+  // Inject CSRF token from auth store for state-changing requests
+  const method = (init.method ?? 'GET').toUpperCase()
+  if (STATE_CHANGING_METHODS.includes(method)) {
+    const auth = await import('@/stores/auth').then(m => m.useAuthStore())
+    if (auth.csrfToken) {
+      headers['X-CSRF-Token'] = auth.csrfToken
+    }
   }
 
   const response = await fetch(`${BASE_URL}/api/v1${path}`, {

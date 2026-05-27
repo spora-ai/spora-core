@@ -11,6 +11,7 @@ use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
+use Spora\Security\CsrfTokenService;
 use Spora\Services\RateLimiter;
 use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -25,6 +26,7 @@ final class AuthController
     public function __construct(
         private readonly AuthService $authService,
         private readonly UserServiceInterface $userService,
+        private readonly CsrfTokenService $csrfService,
         private readonly array $config = [],
     ) {}
 
@@ -66,7 +68,10 @@ final class AuthController
 
         return $this->withRateLimitHeaders(
             new JsonResponse(
-                ['data' => ['user' => ['id' => $userId, 'email' => $body['email']]]],
+                ['data' => [
+                    'user' => ['id' => $userId, 'email' => $body['email']],
+                    'csrf_token' => $this->csrfService->regenerate(),
+                ]],
                 Response::HTTP_CREATED,
             ),
             $clientIp,
@@ -107,7 +112,10 @@ final class AuthController
 
         return $this->withRateLimitHeaders(
             new JsonResponse(
-                ['data' => ['user' => $userData]],
+                ['data' => [
+                    'user' => $userData,
+                    'csrf_token' => $this->csrfService->regenerate(),
+                ]],
                 Response::HTTP_OK,
             ),
             $clientIp,
@@ -116,6 +124,7 @@ final class AuthController
 
     public function logout(Request $request, array $vars = []): JsonResponse
     {
+        $this->csrfService->invalidate();
         $this->authService->logout();
 
         $response = new JsonResponse(null, Response::HTTP_NO_CONTENT);
@@ -150,7 +159,7 @@ final class AuthController
                 'roles'      => $user['roles'] ?? [],
                 'registered' => $registered,
                 'is_admin'   => in_array('ADMIN', $user['roles'] ?? [], true),
-            ]]],
+            ], 'csrf_token' => $this->csrfService->getToken()]],
             Response::HTTP_OK,
         );
     }

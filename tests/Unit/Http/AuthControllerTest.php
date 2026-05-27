@@ -58,9 +58,13 @@ test('POST /api/v1/auth/forgot-password without email returns 422', function ():
 // ---------------------------------------------------------------------------
 
 test('POST /api/v1/auth/verification/resend without email returns 422', function (): void {
+    $csrfToken = bin2hex(random_bytes(32));
+    $_SESSION['csrf_token'] = $csrfToken;
+
     $kernel   = new Kernel();
     $request  = Request::create('/api/v1/auth/verification/resend', 'POST', [], [], [], [
         'CONTENT_TYPE' => 'application/json',
+        'HTTP_X_CSRF_TOKEN' => $csrfToken,
     ], json_encode([]));
     $response = $kernel->handle($request);
 
@@ -93,9 +97,15 @@ test('POST /api/v1/auth/reset-password without required fields returns 422', fun
 
 test('POST /api/v1/auth/email/change-request without auth returns 401', function (): void {
     clearSession();
+
+    // Provide a valid CSRF token so CsrfMiddleware passes and AuthMiddleware runs
+    $csrfToken = bin2hex(random_bytes(32));
+    $_SESSION['csrf_token'] = $csrfToken;
+
     $kernel   = new Kernel();
     $request  = Request::create('/api/v1/auth/email/change-request', 'POST', [], [], [], [
         'CONTENT_TYPE' => 'application/json',
+        'HTTP_X_CSRF_TOKEN' => $csrfToken,
     ], json_encode(['email' => 'new@example.com']));
     $response = $kernel->handle($request);
 
@@ -115,9 +125,13 @@ test('POST /api/v1/auth/email/change-request without email returns 422 when auth
     $userId  = $service->register($email, 'Password1!', 'Change Email User');
     simulateLoggedInSession($userId, $email);
 
+    $csrfToken = bin2hex(random_bytes(32));
+    $_SESSION['csrf_token'] = $csrfToken;
+
     $kernel   = new Kernel();
     $request  = Request::create('/api/v1/auth/email/change-request', 'POST', [], [], [], [
         'CONTENT_TYPE' => 'application/json',
+        'HTTP_X_CSRF_TOKEN' => $csrfToken,
     ], json_encode([]));
     $response = $kernel->handle($request);
 

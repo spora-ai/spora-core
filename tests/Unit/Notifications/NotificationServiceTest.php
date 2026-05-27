@@ -2,10 +2,13 @@
 
 declare(strict_types=1);
 
+use Spora\Http\Middleware\AuthMiddleware;
+use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\NotificationController;
 use Spora\Models\Agent;
 use Spora\Models\Notification;
 use Spora\Models\Task;
+use Spora\Security\CsrfTokenService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 
@@ -28,8 +31,11 @@ function makeNotificationController(): array
     $authService = bootAuthLayer();
     $notificationService = makeNotificationService();
     $controller = new NotificationController($authService, $notificationService);
+    $authMiddleware = new AuthMiddleware($authService);
+    $csrfService = new CsrfTokenService();
+    $csrfMiddleware = new CsrfMiddleware($csrfService);
 
-    return [$controller, $authService];
+    return [$controller, $authService, $authMiddleware, $csrfMiddleware];
 }
 
 function seedUserAndAgentForNotification(): array

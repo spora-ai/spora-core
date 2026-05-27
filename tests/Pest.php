@@ -101,6 +101,66 @@ function bootAuth(Spora\Auth\AuthService $authService, string $email = 'test@exa
     return $userId;
 }
 
+/**
+ * Invoke a controller method through the middleware pipeline (for testing).
+ * This mimics what Router::handleFound() does at runtime.
+ *
+ * @param object $controller The controller instance
+ * @param string $method The method name to call
+ * @param Symfony\Component\HttpFoundation\Request $request The request
+ * @param array<int, object> $middleware List of middleware instances to apply (in order)
+ * @return Symfony\Component\HttpFoundation\Response
+ */
+function callController(object $controller, string $method, Symfony\Component\HttpFoundation\Request $request, array $middleware = []): Symfony\Component\HttpFoundation\Response
+{
+    $vars = [];
+    if (preg_match_all('/\{([^}]+)\}/', $request->getPathInfo(), $matches)) {
+        foreach ($matches[1] as $name) {
+            $vars[$name] = $request->attributes->get($name);
+        }
+    }
+    // Also include attributes that were set directly (e.g., in tests)
+    foreach ($request->attributes->all() as $name => $value) {
+        if (!isset($vars[$name])) {
+            $vars[$name] = $value;
+        }
+    }
+
+    $next = function () use ($controller, $method, $vars, $request): Symfony\Component\HttpFoundation\Response {
+        $params = (new ReflectionMethod($controller, $method))->getParameters();
+        $args = [$request];
+        foreach ($params as $i => $param) {
+            if ($i === 0) {
+                continue;
+            }
+            $name = $param->getName();
+            if (isset($vars[$name])) {
+                $value = $vars[$name];
+                $type = $param->getType();
+                if ($type instanceof ReflectionNamedType && $type->getName() === 'int') {
+                    $value = (int) $value;
+                }
+                $args[] = $value;
+            }
+        }
+        return $controller->$method(...$args);
+    };
+
+    // Auto-attach CSRF token from session if present (mirrors production behavior)
+    if (isset($_SESSION['csrf_token']) && is_string($_SESSION['csrf_token'])) {
+        $request->headers->set('X-CSRF-Token', $_SESSION['csrf_token']);
+    }
+
+    foreach (array_reverse($middleware) as $mw) {
+        $currentNext = $next;
+        $next = function () use ($mw, $request, $currentNext): Symfony\Component\HttpFoundation\Response {
+            return $mw->handle($request, $currentNext);
+        };
+    }
+
+    return $next();
+}
+
 uses()
     ->beforeEach(function () {
         Spora\Core\Database::resetBootState();

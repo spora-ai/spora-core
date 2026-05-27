@@ -9,7 +9,6 @@ use DateTimeImmutable;
 use JsonException;
 use RuntimeException;
 use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\ScheduledRunServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -28,7 +27,7 @@ final class ScheduledRunController
      */
     public function index(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
         $runs = $this->scheduledRunService->getRunsForAgent($agentId, $userId);
@@ -45,7 +44,7 @@ final class ScheduledRunController
      */
     public function store(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
         try {
@@ -75,7 +74,7 @@ final class ScheduledRunController
      */
     public function show(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
         $runId = (int) $request->attributes->get('runId', 0);
 
@@ -93,7 +92,7 @@ final class ScheduledRunController
      */
     public function update(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
         $runId = (int) $request->attributes->get('runId', 0);
 
@@ -117,7 +116,7 @@ final class ScheduledRunController
      */
     public function destroy(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
         $runId = (int) $request->attributes->get('runId', 0);
 
@@ -137,7 +136,7 @@ final class ScheduledRunController
      */
     public function trigger(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
         $runId = (int) $request->attributes->get('runId', 0);
 

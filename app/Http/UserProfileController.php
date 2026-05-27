@@ -6,7 +6,6 @@ namespace Spora\Http;
 
 use JsonException;
 use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -21,7 +20,7 @@ final class UserProfileController
 
     public function getProfile(Request $request): JsonResponse
     {
-        AuthGuard::requireAuth($this->authService);
+        $this->authService->currentUserId();
 
         $userId = $this->authService->currentUserId();
         $result = $this->userService->getProfile($userId);
@@ -35,7 +34,7 @@ final class UserProfileController
 
     public function putProfile(Request $request): JsonResponse
     {
-        AuthGuard::requireAuth($this->authService);
+        $this->authService->currentUserId();
 
         $userId = $this->authService->currentUserId();
 
@@ -55,7 +54,7 @@ final class UserProfileController
 
     public function getLocations(Request $request): JsonResponse
     {
-        AuthGuard::requireAuth($this->authService);
+        $this->authService->currentUserId();
 
         $userId = $this->authService->currentUserId();
         $locations = $this->userService->getLocations($userId);
@@ -65,7 +64,7 @@ final class UserProfileController
 
     public function postLocation(Request $request): JsonResponse
     {
-        AuthGuard::requireAuth($this->authService);
+        $this->authService->currentUserId();
 
         $userId = $this->authService->currentUserId();
 
@@ -95,7 +94,7 @@ final class UserProfileController
 
     public function putLocation(Request $request, int $id): JsonResponse
     {
-        AuthGuard::requireAuth($this->authService);
+        $this->authService->currentUserId();
 
         $userId = $this->authService->currentUserId();
 
@@ -133,7 +132,7 @@ final class UserProfileController
 
     public function deleteLocation(Request $request, int $id): JsonResponse
     {
-        AuthGuard::requireAuth($this->authService);
+        $this->authService->currentUserId();
 
         $userId = $this->authService->currentUserId();
         $deleted = $this->userService->deleteLocation($id, $userId);

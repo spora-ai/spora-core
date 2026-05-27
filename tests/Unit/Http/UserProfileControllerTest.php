@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
+use Spora\Http\Middleware\AuthMiddleware;
+use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\UserProfileController;
 use Spora\Models\User;
 use Spora\Models\UserLocation;
+use Spora\Security\CsrfTokenService;
 use Spora\Services\UserService;
 
 // ---------------------------------------------------------------------------
@@ -16,8 +19,11 @@ function makeUserProfileController(): array
     $authService = bootAuthLayer();
     $userService = new UserService();
     $controller = new UserProfileController($authService, $userService);
+    $authMiddleware = new AuthMiddleware($authService);
+    $csrfService = new CsrfTokenService();
+    $csrfMiddleware = new CsrfMiddleware($csrfService);
 
-    return [$controller, $authService, $userService];
+    return [$controller, $authService, $userService, $authMiddleware, $csrfMiddleware];
 }
 
 // ---------------------------------------------------------------------------
@@ -25,7 +31,7 @@ function makeUserProfileController(): array
 // ---------------------------------------------------------------------------
 
 test('getProfile returns user profile data', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile1@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile1@example.com');
 
@@ -38,7 +44,7 @@ test('getProfile returns user profile data', function (): void {
     ]);
 
     $request = jsonRequest('GET', '/me/profile');
-    $response = $controller->getProfile($request);
+    $response = callController($controller, 'getProfile', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $data = json_decode($response->getContent(), true)['data'];
@@ -50,7 +56,7 @@ test('getProfile returns user profile data', function (): void {
 });
 
 test('getProfile returns null fields as null', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile2@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile2@example.com');
 
@@ -60,7 +66,7 @@ test('getProfile returns null fields as null', function (): void {
     $user->save();
 
     $request = jsonRequest('GET', '/me/profile');
-    $response = $controller->getProfile($request);
+    $response = callController($controller, 'getProfile', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $data = json_decode($response->getContent(), true)['data'];
@@ -72,12 +78,12 @@ test('getProfile returns null fields as null', function (): void {
 });
 
 test('getProfile rejects unauthenticated requests', function (): void {
-    [$controller] = makeUserProfileController();
+    [$controller, , , $authMiddleware] = makeUserProfileController();
     clearSession();
 
     $request = jsonRequest('GET', '/me/profile');
 
-    expect(fn() => $controller->getProfile($request))
+    expect(fn() => callController($controller, 'getProfile', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
 
@@ -86,7 +92,7 @@ test('getProfile rejects unauthenticated requests', function (): void {
 // ---------------------------------------------------------------------------
 
 test('putProfile updates profile fields', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile3@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile3@example.com');
 
@@ -97,7 +103,7 @@ test('putProfile updates profile fields', function (): void {
         'height_cm'    => 180.0,
         'weight_kg'    => 75.5,
     ]);
-    $response = $controller->putProfile($request);
+    $response = callController($controller, 'putProfile', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $data = json_decode($response->getContent(), true)['data'];
@@ -109,13 +115,13 @@ test('putProfile updates profile fields', function (): void {
 });
 
 test('putProfile clears fields when empty string sent', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile4@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile4@example.com');
     User::where('id', $userId)->update(['name' => 'Alice']);
 
     $request = jsonRequest('PUT', '/me/profile', ['name' => '']);
-    $response = $controller->putProfile($request);
+    $response = callController($controller, 'putProfile', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $data = json_decode($response->getContent(), true)['data'];
@@ -123,12 +129,12 @@ test('putProfile clears fields when empty string sent', function (): void {
 });
 
 test('putProfile rejects unauthenticated requests', function (): void {
-    [$controller] = makeUserProfileController();
+    [$controller, , , $authMiddleware] = makeUserProfileController();
     clearSession();
 
     $request = jsonRequest('PUT', '/me/profile', ['name' => 'Bob']);
 
-    expect(fn() => $controller->putProfile($request))
+    expect(fn() => callController($controller, 'putProfile', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
 
@@ -137,12 +143,12 @@ test('putProfile rejects unauthenticated requests', function (): void {
 // ---------------------------------------------------------------------------
 
 test('getLocations returns empty list when no locations', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile5@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile5@example.com');
 
     $request = jsonRequest('GET', '/me/locations');
-    $response = $controller->getLocations($request);
+    $response = callController($controller, 'getLocations', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $data = json_decode($response->getContent(), true)['data']['locations'];
@@ -150,7 +156,7 @@ test('getLocations returns empty list when no locations', function (): void {
 });
 
 test('getLocations returns user locations', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile6@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile6@example.com');
 
@@ -168,7 +174,7 @@ test('getLocations returns user locations', function (): void {
     ]);
 
     $request = jsonRequest('GET', '/me/locations');
-    $response = $controller->getLocations($request);
+    $response = callController($controller, 'getLocations', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $data = json_decode($response->getContent(), true)['data']['locations'];
@@ -177,12 +183,12 @@ test('getLocations returns user locations', function (): void {
 });
 
 test('getLocations rejects unauthenticated requests', function (): void {
-    [$controller] = makeUserProfileController();
+    [$controller, , , $authMiddleware] = makeUserProfileController();
     clearSession();
 
     $request = jsonRequest('GET', '/me/locations');
 
-    expect(fn() => $controller->getLocations($request))
+    expect(fn() => callController($controller, 'getLocations', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
 
@@ -191,7 +197,7 @@ test('getLocations rejects unauthenticated requests', function (): void {
 // ---------------------------------------------------------------------------
 
 test('postLocation creates a new location', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile7@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile7@example.com');
 
@@ -200,7 +206,7 @@ test('postLocation creates a new location', function (): void {
         'address'    => '100 Ocean Drive',
         'is_default' => false,
     ]);
-    $response = $controller->postLocation($request);
+    $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(201);
     $data = json_decode($response->getContent(), true)['data'];
@@ -210,31 +216,31 @@ test('postLocation creates a new location', function (): void {
 });
 
 test('postLocation validates name is required', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile8@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile8@example.com');
 
     $request = jsonRequest('POST', '/me/locations', ['address' => '123 Main St']);
-    $response = $controller->postLocation($request);
+    $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(422);
     expect($response->getContent())->toContain('name is required');
 });
 
 test('postLocation validates address is required', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile9@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile9@example.com');
 
     $request = jsonRequest('POST', '/me/locations', ['name' => 'Home']);
-    $response = $controller->postLocation($request);
+    $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(422);
     expect($response->getContent())->toContain('address is required');
 });
 
 test('postLocation sets is_default and unsets other defaults', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile10@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile10@example.com');
 
@@ -250,7 +256,7 @@ test('postLocation sets is_default and unsets other defaults', function (): void
         'address'    => '456 Office Blvd',
         'is_default' => true,
     ]);
-    $response = $controller->postLocation($request);
+    $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(201);
     $locations = UserLocation::where('user_id', $userId)->get();
@@ -259,12 +265,12 @@ test('postLocation sets is_default and unsets other defaults', function (): void
 });
 
 test('postLocation rejects unauthenticated requests', function (): void {
-    [$controller] = makeUserProfileController();
+    [$controller, , , $authMiddleware] = makeUserProfileController();
     clearSession();
 
     $request = jsonRequest('POST', '/me/locations', ['name' => 'Home', 'address' => '123 Main St']);
 
-    expect(fn() => $controller->postLocation($request))
+    expect(fn() => callController($controller, 'postLocation', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
 
@@ -273,7 +279,7 @@ test('postLocation rejects unauthenticated requests', function (): void {
 // ---------------------------------------------------------------------------
 
 test('putLocation updates own location', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile11@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile11@example.com');
 
@@ -288,7 +294,8 @@ test('putLocation updates own location', function (): void {
         'name' => 'New Name',
         'address' => '456 Office Blvd',
     ]);
-    $response = $controller->putLocation($request, $loc->id);
+    $request->attributes->set('id', $loc->id);
+    $response = callController($controller, 'putLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $data = json_decode($response->getContent(), true)['data'];
@@ -297,7 +304,7 @@ test('putLocation updates own location', function (): void {
 });
 
 test('putLocation returns 404 for another users location', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile12@example.com', 'Password1!');
     $otherUserId = bootAuth($authService, 'other12@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile12@example.com');
@@ -309,18 +316,20 @@ test('putLocation returns 404 for another users location', function (): void {
     ]);
 
     $request = jsonRequest('PUT', "/me/locations/{$loc->id}", ['name' => 'Hacked']);
-    $response = $controller->putLocation($request, $loc->id);
+    $request->attributes->set('id', $loc->id);
+    $response = callController($controller, 'putLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(404);
 });
 
 test('putLocation rejects unauthenticated requests', function (): void {
-    [$controller] = makeUserProfileController();
+    [$controller, , , $authMiddleware] = makeUserProfileController();
     clearSession();
 
     $request = jsonRequest('PUT', '/me/locations/1', ['name' => 'Home']);
+    $request->attributes->set('id', 1);
 
-    expect(fn() => $controller->putLocation($request, 1))
+    expect(fn() => callController($controller, 'putLocation', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
 
@@ -329,7 +338,7 @@ test('putLocation rejects unauthenticated requests', function (): void {
 // ---------------------------------------------------------------------------
 
 test('deleteLocation deletes own location', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile13@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile13@example.com');
 
@@ -340,14 +349,15 @@ test('deleteLocation deletes own location', function (): void {
     ]);
 
     $request = jsonRequest('DELETE', "/me/locations/{$loc->id}");
-    $response = $controller->deleteLocation($request, $loc->id);
+    $request->attributes->set('id', $loc->id);
+    $response = callController($controller, 'deleteLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     expect(UserLocation::find($loc->id))->toBeNull();
 });
 
 test('deleteLocation returns 404 for another users location', function (): void {
-    [$controller, $authService] = makeUserProfileController();
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile14@example.com', 'Password1!');
     $otherUserId = bootAuth($authService, 'other14@example.com', 'Password1!');
     simulateLoggedInSession($userId, 'profile14@example.com');
@@ -359,18 +369,20 @@ test('deleteLocation returns 404 for another users location', function (): void 
     ]);
 
     $request = jsonRequest('DELETE', "/me/locations/{$loc->id}");
-    $response = $controller->deleteLocation($request, $loc->id);
+    $request->attributes->set('id', $loc->id);
+    $response = callController($controller, 'deleteLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(404);
     expect(UserLocation::find($loc->id))->not()->toBeNull();
 });
 
 test('deleteLocation rejects unauthenticated requests', function (): void {
-    [$controller] = makeUserProfileController();
+    [$controller, , , $authMiddleware] = makeUserProfileController();
     clearSession();
 
     $request = jsonRequest('DELETE', '/me/locations/1');
+    $request->attributes->set('id', 1);
 
-    expect(fn() => $controller->deleteLocation($request, 1))
+    expect(fn() => callController($controller, 'deleteLocation', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });

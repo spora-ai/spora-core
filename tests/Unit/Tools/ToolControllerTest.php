@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 use Spora\Core\SecurityManager;
 use Spora\Http\Exceptions\UnauthenticatedException;
+use Spora\Http\Middleware\AuthMiddleware;
+use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\ToolController;
+use Spora\Security\CsrfTokenService;
 use Spora\Services\ToolConfigService;
 use Tests\Fixtures\TestTool;
 
@@ -26,8 +29,11 @@ function makeToolController(array $toolClasses = []): array
     $logger     = new Monolog\Logger('test');
     $toolConfig = new ToolConfigService($security, $logger, $toolClasses);
     $controller = new ToolController($authService, $toolConfig, $toolClasses);
+    $authMiddleware = new AuthMiddleware($authService);
+    $csrfService = new CsrfTokenService();
+    $csrfMiddleware = new CsrfMiddleware($csrfService);
 
-    return [$controller, $authService, $toolConfig];
+    return [$controller, $authService, $toolConfig, $authMiddleware, $csrfMiddleware, $csrfService];
 }
 
 // ---------------------------------------------------------------------------
@@ -36,9 +42,9 @@ function makeToolController(array $toolClasses = []): array
 
 test('unauthenticated request throws UnauthenticatedException', function (): void {
     clearSession();
-    [$controller] = makeToolController([TestTool::class]);
+    [$controller, , , $authMiddleware, $csrfMiddleware] = makeToolController([TestTool::class]);
 
-    expect(fn() => $controller->index(jsonRequest('GET', '/api/v1/tools')))
+    expect(fn() => callController($controller, 'index', jsonRequest('GET', '/api/v1/tools'), [$authMiddleware, $csrfMiddleware]))
         ->toThrow(UnauthenticatedException::class);
 });
 
@@ -48,11 +54,11 @@ test('unauthenticated request throws UnauthenticatedException', function (): voi
 
 test('index returns schema for registered tool classes', function (): void {
     clearSession();
-    [$controller, $authService] = makeToolController([TestTool::class]);
+    [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([TestTool::class]);
     $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
-    $response = $controller->index(jsonRequest('GET', '/api/v1/tools'));
+    $response = callController($controller, 'index', jsonRequest('GET', '/api/v1/tools'), [$authMiddleware, $csrfMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
@@ -66,11 +72,11 @@ test('index returns schema for registered tool classes', function (): void {
 
 test('index returns correct schema field structure', function (): void {
     clearSession();
-    [$controller, $authService] = makeToolController([TestTool::class]);
+    [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([TestTool::class]);
     $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
-    $response = $controller->index(jsonRequest('GET', '/api/v1/tools'));
+    $response = callController($controller, 'index', jsonRequest('GET', '/api/v1/tools'), [$authMiddleware, $csrfMiddleware]);
     $body     = json_decode($response->getContent(), true);
     $schema   = $body['data']['tools'][0]['settings_schema'];
 
@@ -86,11 +92,11 @@ test('index returns correct schema field structure', function (): void {
 
 test('index returns empty tools list when no classes registered', function (): void {
     clearSession();
-    [$controller, $authService] = makeToolController([]);
+    [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([]);
     $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
-    $response = $controller->index(jsonRequest('GET', '/api/v1/tools'));
+    $response = callController($controller, 'index', jsonRequest('GET', '/api/v1/tools'), [$authMiddleware, $csrfMiddleware]);
     $body     = json_decode($response->getContent(), true);
 
     expect($body['data']['tools'])->toBe([]);
@@ -102,13 +108,13 @@ test('index returns empty tools list when no classes registered', function (): v
 
 test('getSettings returns empty array when no settings saved yet', function (): void {
     clearSession();
-    [$controller, $authService] = makeToolController([TestTool::class]);
+    [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([TestTool::class]);
     $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
     $request = jsonRequest('GET', '/api/v1/tools/test_tool/settings');
     $request->attributes->set('toolId', 'test_tool');
-    $response = $controller->getSettings($request);
+    $response = callController($controller, 'getSettings', $request, [$authMiddleware, $csrfMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
@@ -117,17 +123,18 @@ test('getSettings returns empty array when no settings saved yet', function (): 
 
 test('getSettings returns masked password after putSettings', function (): void {
     clearSession();
-    [$controller, $authService] = makeToolController([TestTool::class]);
+    [$controller, $authService, , $authMiddleware, $csrfMiddleware, $csrfService] = makeToolController([TestTool::class]);
     $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
+    $csrfService->regenerate();
 
     $putRequest = jsonRequest('PUT', '/api/v1/tools/test_tool/settings', ['api_key' => 'my-secret']);
     $putRequest->attributes->set('toolId', 'test_tool');
-    $controller->putSettings($putRequest);
+    callController($controller, 'putSettings', $putRequest, [$authMiddleware, $csrfMiddleware]);
 
     $getRequest = jsonRequest('GET', '/api/v1/tools/test_tool/settings');
     $getRequest->attributes->set('toolId', 'test_tool');
-    $response = $controller->getSettings($getRequest);
+    $response = callController($controller, 'getSettings', $getRequest, [$authMiddleware, $csrfMiddleware]);
 
     $body = json_decode($response->getContent(), true);
     expect($body['data']['settings']['api_key'])->toBe('***');
@@ -139,16 +146,17 @@ test('getSettings returns masked password after putSettings', function (): void 
 
 test('putSettings saves settings and returns masked result', function (): void {
     clearSession();
-    [$controller, $authService, $toolConfig] = makeToolController([TestTool::class]);
+    [$controller, $authService, $toolConfig, $authMiddleware, $csrfMiddleware, $csrfService] = makeToolController([TestTool::class]);
     $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
+    $csrfService->regenerate();
 
     $request = jsonRequest('PUT', '/api/v1/tools/test_tool/settings', [
         'api_key'     => 'secret-value',
         'max_results' => '25',
     ]);
     $request->attributes->set('toolId', 'test_tool');
-    $response = $controller->putSettings($request);
+    $response = callController($controller, 'putSettings', $request, [$authMiddleware, $csrfMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
@@ -165,15 +173,16 @@ test('putSettings saves settings and returns masked result', function (): void {
 
 test('putSettings accepts settings nested under a settings key', function (): void {
     clearSession();
-    [$controller, $authService] = makeToolController([TestTool::class]);
+    [$controller, $authService, , $authMiddleware, $csrfMiddleware, $csrfService] = makeToolController([TestTool::class]);
     $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
+    $csrfService->regenerate();
 
     $request = jsonRequest('PUT', '/api/v1/tools/test_tool/settings', [
         'settings' => ['max_results' => '5'],
     ]);
     $request->attributes->set('toolId', 'test_tool');
-    $response = $controller->putSettings($request);
+    $response = callController($controller, 'putSettings', $request, [$authMiddleware, $csrfMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
@@ -182,13 +191,13 @@ test('putSettings accepts settings nested under a settings key', function (): vo
 
 test('getSettings resolves tool by name for real tool classes', function (): void {
     clearSession();
-    [$controller, $authService] = makeToolController([Spora\Tools\ReadUrlTool::class]);
+    [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([Spora\Tools\ReadUrlTool::class]);
     $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
     $request = jsonRequest('GET', '/api/v1/tools/read_url/settings');
     $request->attributes->set('toolId', 'read_url');
-    $response = $controller->getSettings($request);
+    $response = callController($controller, 'getSettings', $request, [$authMiddleware, $csrfMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
@@ -197,13 +206,13 @@ test('getSettings resolves tool by name for real tool classes', function (): voi
 
 test('getSettings returns 404 for unknown tool name', function (): void {
     clearSession();
-    [$controller, $authService] = makeToolController([Spora\Tools\ReadUrlTool::class]);
+    [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([Spora\Tools\ReadUrlTool::class]);
     $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
     simulateLoggedInSession($userId, 'user@example.com');
 
     $request = jsonRequest('GET', '/api/v1/tools/nonexistent_tool/settings');
     $request->attributes->set('toolId', 'nonexistent_tool');
-    $response = $controller->getSettings($request);
+    $response = callController($controller, 'getSettings', $request, [$authMiddleware, $csrfMiddleware]);
 
     expect($response->getStatusCode())->toBe(404);
     $body = json_decode($response->getContent(), true);

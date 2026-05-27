@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use DI\Container;
 use Spora\Core\Kernel;
+use Spora\Services\AgentServiceInterface;
 use Symfony\Component\HttpFoundation\Request;
 
 // ---------------------------------------------------------------------------
@@ -171,12 +172,25 @@ function withoutSecretKey(callable $fn): mixed
 }
 
 test('uncaught controller exception returns 500 JSON', function (): void {
-    $response = withoutSecretKey(static function (): mixed {
-        $kernel = new Kernel();
-        $res = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
-        $kernel->__destruct();
-        return $res;
-    });
+    $authService = bootAuthLayer();
+    $userId = $authService->register('kernel500@example.com', 'Password1!', 'Kernel Test');
+    $authService->login('kernel500@example.com', 'Password1!');
+
+    $csrfToken = bin2hex(random_bytes(32));
+    $_SESSION['csrf_token'] = $csrfToken;
+
+    $kernel = new Kernel();
+    $container = $kernel->getContainer();
+
+    $mockAgentService = Mockery::mock(AgentServiceInterface::class);
+    $mockAgentService->shouldReceive('getAgentsForUser')->andThrow(new RuntimeException('Controller error'));
+    $container->set(AgentServiceInterface::class, $mockAgentService);
+
+    $request = Request::create('/api/v1/agents', 'GET', [], [], [], [
+        'HTTP_X_CSRF_TOKEN' => $csrfToken,
+    ]);
+    $response = $kernel->handle($request);
+    $kernel->__destruct();
 
     expect($response->getStatusCode())->toBe(500);
 
@@ -188,25 +202,32 @@ test('uncaught controller exception returns 500 JSON', function (): void {
 });
 
 test('500 response in production mode does not expose exception details', function (): void {
-    $savedEnv = $_ENV['SPORA_APP_ENV'] ?? null;
     $_ENV['SPORA_APP_ENV'] = 'production';
     putenv('SPORA_APP_ENV=production');
 
+    $authService = bootAuthLayer();
+    $userId = $authService->register('kernel500prod@example.com', 'Password1!', 'Kernel Test');
+    $authService->login('kernel500prod@example.com', 'Password1!');
+
+    $csrfToken = bin2hex(random_bytes(32));
+    $_SESSION['csrf_token'] = $csrfToken;
+
     try {
-        $response = withoutSecretKey(static function (): mixed {
-            $kernel = new Kernel();
-            $res = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
-            $kernel->__destruct();
-            return $res;
-        });
+        $kernel = new Kernel();
+        $container = $kernel->getContainer();
+
+        $mockAgentService = Mockery::mock(AgentServiceInterface::class);
+        $mockAgentService->shouldReceive('getAgentsForUser')->andThrow(new RuntimeException('Controller error'));
+        $container->set(AgentServiceInterface::class, $mockAgentService);
+
+        $request = Request::create('/api/v1/agents', 'GET', [], [], [], [
+            'HTTP_X_CSRF_TOKEN' => $csrfToken,
+        ]);
+        $response = $kernel->handle($request);
+        $kernel->__destruct();
     } finally {
-        if ($savedEnv !== null) {
-            $_ENV['SPORA_APP_ENV'] = $savedEnv;
-            putenv("SPORA_APP_ENV={$savedEnv}");
-        } else {
-            unset($_ENV['SPORA_APP_ENV']);
-            putenv('SPORA_APP_ENV');
-        }
+        unset($_ENV['SPORA_APP_ENV']);
+        putenv('SPORA_APP_ENV');
     }
 
     $body = json_decode($response->getContent(), true);
@@ -215,12 +236,25 @@ test('500 response in production mode does not expose exception details', functi
 });
 
 test('500 response has Content-Type application/json', function (): void {
-    $response = withoutSecretKey(static function (): mixed {
-        $kernel = new Kernel();
-        $res = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
-        $kernel->__destruct();
-        return $res;
-    });
+    $authService = bootAuthLayer();
+    $userId = $authService->register('kernel500ct@example.com', 'Password1!', 'Kernel Test');
+    $authService->login('kernel500ct@example.com', 'Password1!');
+
+    $csrfToken = bin2hex(random_bytes(32));
+    $_SESSION['csrf_token'] = $csrfToken;
+
+    $kernel = new Kernel();
+    $container = $kernel->getContainer();
+
+    $mockAgentService = Mockery::mock(AgentServiceInterface::class);
+    $mockAgentService->shouldReceive('getAgentsForUser')->andThrow(new RuntimeException('Controller error'));
+    $container->set(AgentServiceInterface::class, $mockAgentService);
+
+    $request = Request::create('/api/v1/agents', 'GET', [], [], [], [
+        'HTTP_X_CSRF_TOKEN' => $csrfToken,
+    ]);
+    $response = $kernel->handle($request);
+    $kernel->__destruct();
 
     expect($response->headers->get('Content-Type'))->toContain('application/json');
 });
@@ -269,13 +303,26 @@ test('401 response has Content-Type application/json', function (): void {
 test('500 response in development mode includes a debug block with exception details', function (): void {
     $_ENV['SPORA_APP_ENV'] = 'development';
 
+    $authService = bootAuthLayer();
+    $userId = $authService->register('kernel500dev@example.com', 'Password1!', 'Kernel Test');
+    $authService->login('kernel500dev@example.com', 'Password1!');
+
+    $csrfToken = bin2hex(random_bytes(32));
+    $_SESSION['csrf_token'] = $csrfToken;
+
     try {
-        $response = withoutSecretKey(static function (): mixed {
-            $kernel = new Kernel();
-            $res = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
-            $kernel->__destruct();
-            return $res;
-        });
+        $kernel = new Kernel();
+        $container = $kernel->getContainer();
+
+        $mockAgentService = Mockery::mock(AgentServiceInterface::class);
+        $mockAgentService->shouldReceive('getAgentsForUser')->andThrow(new RuntimeException('Controller error'));
+        $container->set(AgentServiceInterface::class, $mockAgentService);
+
+        $request = Request::create('/api/v1/agents', 'GET', [], [], [], [
+            'HTTP_X_CSRF_TOKEN' => $csrfToken,
+        ]);
+        $response = $kernel->handle($request);
+        $kernel->__destruct();
     } finally {
         unset($_ENV['SPORA_APP_ENV']);
     }
@@ -350,5 +397,173 @@ test('log stdout configures Monolog to write to stdout', function (): void {
     } finally {
         $kernel->__destruct();
         unset($_ENV['SPORA_LOG_PATH']);
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Middleware — verifies AuthMiddleware and CsrfMiddleware are actually applied
+// ---------------------------------------------------------------------------
+
+test('public route with no middleware works without session or CSRF', function (): void {
+    $kernel = new Kernel();
+
+    // /api/v1/config has no middleware — should succeed even without auth
+    $request = Request::create('/api/v1/config', 'GET');
+    $response = $kernel->handle($request);
+
+    expect($response->getStatusCode())->toBe(200);
+
+    $body = json_decode($response->getContent(), true);
+    expect($body)->toHaveKey('allow_registration');
+
+    unset($kernel);
+    gc_collect_cycles();
+});
+
+test('protected route without session returns 401 UNAUTHENTICATED', function (): void {
+    clearSession();
+
+    $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
+
+    try {
+        $kernel = new Kernel();
+        $request = Request::create('/api/v1/agents', 'GET');
+        $response = $kernel->handle($request);
+
+        expect($response->getStatusCode())->toBe(401);
+
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('UNAUTHENTICATED');
+        expect($body['error']['message'])->toBe('Authentication required.');
+    } finally {
+        unset($_ENV['SPORA_SECRET_KEY']);
+    }
+});
+
+test('protected route with valid session but no CSRF token returns 403 CSRF_TOKEN_MISSING', function (): void {
+    $authService = bootAuthLayer();
+    $userId = $authService->register('mw_nocsrf@example.com', 'Password1!', 'MW Test');
+    $authService->login('mw_nocsrf@example.com', 'Password1!');
+
+    // No CSRF token in session
+    unset($_SESSION['csrf_token']);
+
+    $kernel = new Kernel();
+    // POST /api/v1/agents requires CSRF token (POST is not a safe method)
+    $request = Request::create('/api/v1/agents', 'POST', [], [], [], [
+        'CONTENT_TYPE' => 'application/json',
+        // No X-CSRF-Token header
+    ]);
+    $response = $kernel->handle($request);
+    $kernel->__destruct();
+
+    // AuthMiddleware passes (session is valid), CsrfMiddleware blocks (no token) → 403
+    expect($response->getStatusCode())->toBe(403);
+
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('CSRF_TOKEN_MISSING');
+});
+
+test('protected route with valid session and valid CSRF token succeeds', function (): void {
+    $authService = bootAuthLayer();
+    $userId = $authService->register('mw_success@example.com', 'Password1!', 'MW Test');
+    $authService->login('mw_success@example.com', 'Password1!');
+
+    $csrfToken = bin2hex(random_bytes(32));
+    $_SESSION['csrf_token'] = $csrfToken;
+
+    $kernel = new Kernel();
+    $container = $kernel->getContainer();
+
+    // Mock AgentService so the controller returns predictable data
+    $mockAgentService = Mockery::mock(AgentServiceInterface::class);
+    $mockAgentService->shouldReceive('getAgentsForUser')->andReturn([]);
+    $container->set(AgentServiceInterface::class, $mockAgentService);
+
+    $request = Request::create('/api/v1/agents', 'GET', [], [], [], [
+        'HTTP_X_CSRF_TOKEN' => $csrfToken,
+    ]);
+    $response = $kernel->handle($request);
+    $kernel->__destruct();
+
+    // Both middleware pass, controller is reached → 200
+    expect($response->getStatusCode())->toBe(200);
+
+    $body = json_decode($response->getContent(), true);
+    expect($body)->toHaveKey('data');
+    expect($body['data'])->toHaveKey('agents');
+    expect($body['data']['agents'])->toBeArray();
+});
+
+test('csrf-only route without CSRF token returns 403 CSRF_TOKEN_MISSING', function (): void {
+    // /api/v1/auth/logout has CsrfMiddleware only (no AuthMiddleware)
+    // The session does not need to be valid for CsrfMiddleware to run
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+
+    $kernel = new Kernel();
+    $request = Request::create('/api/v1/auth/logout', 'POST', [], [], [], [
+        'CONTENT_TYPE' => 'application/json',
+        // No X-CSRF-Token header
+    ]);
+    $response = $kernel->handle($request);
+    $kernel->__destruct();
+
+    expect($response->getStatusCode())->toBe(403);
+
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('CSRF_TOKEN_MISSING');
+});
+
+test('csrf-only route with valid CSRF token passes through to controller', function (): void {
+    $csrfToken = bin2hex(random_bytes(32));
+    $_SESSION['csrf_token'] = $csrfToken;
+
+    $kernel = new Kernel();
+    $request = Request::create('/api/v1/auth/logout', 'POST', [], [], [], [
+        'CONTENT_TYPE' => 'application/json',
+        'HTTP_X_CSRF_TOKEN' => $csrfToken,
+    ]);
+    $response = $kernel->handle($request);
+    $kernel->__destruct();
+
+    // CsrfMiddleware passes, controller is reached (returns its own response)
+    expect($response->getStatusCode())->not()->toBe(403);
+    expect($response->getStatusCode())->not()->toBe(401);
+});
+
+test('protected route with wrong HTTP method returns 401 when not authenticated', function (): void {
+    clearSession();
+
+    $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
+
+    try {
+        $kernel = new Kernel();
+        // POST to a GET-only route — but AuthMiddleware blocks first (no session) → 401
+        $request = Request::create('/api/v1/agents', 'POST');
+        $response = $kernel->handle($request);
+
+        // Middleware runs before HTTP method check, so auth is checked first
+        expect($response->getStatusCode())->toBe(401);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('UNAUTHENTICATED');
+    } finally {
+        unset($_ENV['SPORA_SECRET_KEY']);
+    }
+});
+
+test('unknown route returns 404 even when unauthenticated', function (): void {
+    clearSession();
+
+    $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
+
+    try {
+        $kernel = new Kernel();
+        $request = Request::create('/api/v1/nonexistent-route', 'GET');
+        $response = $kernel->handle($request);
+
+        // Not a 401 because the route doesn't exist — 404 takes priority
+        expect($response->getStatusCode())->toBe(404);
+    } finally {
+        unset($_ENV['SPORA_SECRET_KEY']);
     }
 });

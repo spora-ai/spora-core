@@ -7,7 +7,6 @@ namespace Spora\Http;
 use JsonException;
 use RuntimeException;
 use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\MemoryServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -25,7 +24,7 @@ final class MemoryController
      */
     public function index(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         $memories = $this->memoryService->listGlobalMemories($userId);
 
@@ -37,7 +36,7 @@ final class MemoryController
      */
     public function store(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         try {
             $body = $this->decodeJson($request);
@@ -63,7 +62,7 @@ final class MemoryController
      */
     public function show(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $memoryId = (int) $request->attributes->get('id', 0);
 
         $result = $this->memoryService->getGlobalMemory($memoryId, $userId);
@@ -80,7 +79,7 @@ final class MemoryController
      */
     public function update(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $memoryId = (int) $request->attributes->get('id', 0);
 
         try {
@@ -103,7 +102,7 @@ final class MemoryController
      */
     public function destroy(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $memoryId = (int) $request->attributes->get('id', 0);
 
         $deleted = $this->memoryService->deleteGlobalMemory($memoryId, $userId);
@@ -120,7 +119,7 @@ final class MemoryController
      */
     public function reorder(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         try {
             $body = $this->decodeJson($request);

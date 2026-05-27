@@ -6,7 +6,6 @@ namespace Spora\Http;
 
 use RuntimeException;
 use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AuthGuard;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 /**
@@ -49,7 +48,7 @@ final class SseController
      */
     public function auth(): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         if ($this->hubUrl === null || $this->jwtKey === null) {
             return new JsonResponse(

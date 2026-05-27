@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Http\Middleware\AuthMiddleware;
+use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\ScheduledRunController;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
+use Spora\Security\CsrfTokenService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\ScheduledRunService;
 
@@ -31,8 +34,11 @@ function makeScheduledRunController(): array
     $scheduledRunService = new ScheduledRunService($orchestrator, $mercure);
 
     $controller = new ScheduledRunController($authService, $scheduledRunService);
+    $authMiddleware = new AuthMiddleware($authService);
+    $csrfService = new CsrfTokenService();
+    $csrfMiddleware = new CsrfMiddleware($csrfService);
 
-    return [$controller, $authService, $orchestrator, $mercure, $scheduledRunService];
+    return [$controller, $authService, $orchestrator, $mercure, $scheduledRunService, $authMiddleware, $csrfMiddleware];
 }
 
 function registerAndGetAgentForScheduledRun(): array
@@ -75,9 +81,9 @@ describe('ScheduledRunController', function (): void {
             'next_run_at' => date('Y-m-d H:i:s', strtotime('+1 day')),
         ]);
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs", [], ['id' => $agentId]);
-        $response = $controller->index($request);
+        $response = callController($controller, 'index', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -88,9 +94,9 @@ describe('ScheduledRunController', function (): void {
     it('index returns empty array when no scheduled runs', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs", [], ['id' => $agentId]);
-        $response = $controller->index($request);
+        $response = callController($controller, 'index', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -110,9 +116,9 @@ describe('ScheduledRunController', function (): void {
             'is_active' => true,
         ]);
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agent->id}/scheduled-runs", [], ['agentId' => $agent->id]);
-        $response = $controller->index($request);
+        $response = callController($controller, 'index', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(404);
     });
@@ -120,14 +126,14 @@ describe('ScheduledRunController', function (): void {
     it('store creates a recurring scheduled run with cron_expression', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt'      => 'Daily briefing',
             'cron_expression' => '0 9 * * *',
             'timezone'        => 'UTC',
             'is_active'       => true,
         ], ['id' => $agentId]);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(201);
         $body = json_decode($response->getContent(), true);
@@ -139,14 +145,14 @@ describe('ScheduledRunController', function (): void {
     it('store creates a one-shot scheduled run with run_at', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt' => 'One-time task',
             'run_at'     => date('c', strtotime('+1 hour')),
             'timezone'   => 'UTC',
             'is_active'  => true,
         ], ['id' => $agentId]);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(201);
         $body = json_decode($response->getContent(), true);
@@ -157,11 +163,11 @@ describe('ScheduledRunController', function (): void {
     it('store returns 422 when neither template_id nor raw_prompt is provided', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'cron_expression' => '0 9 * * *',
         ], ['id' => $agentId]);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(422);
         $body = json_decode($response->getContent(), true);
@@ -171,13 +177,13 @@ describe('ScheduledRunController', function (): void {
     it('store returns 422 when both cron_expression and run_at are provided', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt'      => 'Conflicting',
             'cron_expression' => '0 9 * * *',
             'run_at'          => date('c', strtotime('+1 hour')),
         ], ['id' => $agentId]);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(422);
     });
@@ -185,12 +191,12 @@ describe('ScheduledRunController', function (): void {
     it('store returns 422 when cron_expression is invalid', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt'      => 'Invalid cron',
             'cron_expression' => 'not-a-cron',
         ], ['id' => $agentId]);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(422);
     });
@@ -208,9 +214,9 @@ describe('ScheduledRunController', function (): void {
             'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 day')),
         ]);
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}", [], ['id' => $agentId, 'runId' => $run->id]);
-        $response = $controller->show($request);
+        $response = callController($controller, 'show', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -236,9 +242,9 @@ describe('ScheduledRunController', function (): void {
             'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 day')),
         ]);
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}", [], ['id' => $agentId, 'runId' => $run->id]);
-        $response = $controller->show($request);
+        $response = callController($controller, 'show', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(404);
     });
@@ -256,12 +262,12 @@ describe('ScheduledRunController', function (): void {
             'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 day')),
         ]);
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('PUT', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}", [
             'raw_prompt' => 'Updated prompt',
             'is_active'  => false,
         ], ['id' => $agentId, 'runId' => $run->id]);
-        $response = $controller->update($request);
+        $response = callController($controller, 'update', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -283,9 +289,9 @@ describe('ScheduledRunController', function (): void {
         ]);
         $runId = $run->id;
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('DELETE', "/api/v1/agents/{$agentId}/scheduled-runs/{$runId}", [], ['id' => $agentId, 'runId' => $runId]);
-        $response = $controller->destroy($request);
+        $response = callController($controller, 'destroy', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -316,9 +322,9 @@ describe('ScheduledRunController', function (): void {
             'updated_at'      => date('Y-m-d H:i:s'),
         ]);
 
-        [$controller, $authService, $orchestrator] = makeScheduledRunController();
+        [$controller, $authService, $orchestrator, , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['id' => $agentId, 'runId' => $run->id]);
-        $response = $controller->trigger($request);
+        $response = callController($controller, 'trigger', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -353,9 +359,9 @@ describe('ScheduledRunController', function (): void {
             'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 hour')),
         ]);
 
-        [$controller, $authService, $orchestrator] = makeScheduledRunController();
+        [$controller, $authService, $orchestrator, , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['id' => $agentId, 'runId' => $run->id]);
-        $response = $controller->trigger($request);
+        $response = callController($controller, 'trigger', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -365,7 +371,7 @@ describe('ScheduledRunController', function (): void {
     it('store computes next_run_at correctly in Europe/Berlin timezone for one-shot', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         // User selects 10:00 in Europe/Berlin (CEST, UTC+02:00) → 08:00 UTC
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt' => 'Berlin test',
@@ -373,7 +379,7 @@ describe('ScheduledRunController', function (): void {
             'timezone'   => 'Europe/Berlin',
             'is_active'  => true,
         ], ['id' => $agentId]);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(201);
         $body = json_decode($response->getContent(), true);
@@ -392,7 +398,7 @@ describe('ScheduledRunController', function (): void {
     it('store computes next_run_at correctly in Europe/Berlin timezone for recurring', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         // Daily at 09:00 Berlin
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt'      => 'Berlin daily',
@@ -400,7 +406,7 @@ describe('ScheduledRunController', function (): void {
             'timezone'        => 'Europe/Berlin',
             'is_active'       => true,
         ], ['id' => $agentId]);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(201);
         $body = json_decode($response->getContent(), true);
@@ -416,7 +422,7 @@ describe('ScheduledRunController', function (): void {
     it('store normalizes run_at from ISO 8601 offset to UTC Y-m-d H:i:s', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         // Frontend sends: 10:00 in Europe/Berlin (CEST, +02:00) → UTC is 08:00
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt' => 'Normalize test',
@@ -424,7 +430,7 @@ describe('ScheduledRunController', function (): void {
             'timezone'   => 'Europe/Berlin',
             'is_active'  => true,
         ], ['id' => $agentId]);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(201);
         $body = json_decode($response->getContent(), true);
@@ -439,14 +445,14 @@ describe('ScheduledRunController', function (): void {
     it('store creates a PENDING scheduled_runs_next entry for recurring runs', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt'      => 'Daily check',
             'cron_expression' => '0 9 * * *',
             'timezone'        => 'UTC',
             'is_active'       => true,
         ], ['id' => $agentId]);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(201);
         $body = json_decode($response->getContent(), true);
@@ -462,14 +468,14 @@ describe('ScheduledRunController', function (): void {
     it('store creates a PENDING scheduled_runs_next entry for one-shot runs', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt' => 'One-time task',
             'run_at'     => date('c', strtotime('+1 hour')),
             'timezone'   => 'UTC',
             'is_active'  => true,
         ], ['id' => $agentId]);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(201);
         $body = json_decode($response->getContent(), true);
@@ -505,9 +511,9 @@ describe('ScheduledRunController', function (): void {
             'updated_at'      => date('Y-m-d H:i:s'),
         ]);
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['id' => $agentId, 'runId' => $run->id]);
-        $response = $controller->trigger($request);
+        $response = callController($controller, 'trigger', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
 
@@ -549,9 +555,9 @@ describe('ScheduledRunController', function (): void {
             'updated_at'      => date('Y-m-d H:i:s'),
         ]);
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['id' => $agentId, 'runId' => $run->id]);
-        $response = $controller->trigger($request);
+        $response = callController($controller, 'trigger', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
 
@@ -593,9 +599,9 @@ describe('ScheduledRunController', function (): void {
             'updated_at'      => date('Y-m-d H:i:s'),
         ]);
 
-        [$controller] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}", [], ['id' => $agentId, 'runId' => $run->id]);
-        $response = $controller->show($request);
+        $response = callController($controller, 'show', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);

@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Spora\Core;
 
+use FastRoute\DataGenerator\GroupCountBased;
 use FastRoute\Dispatcher;
-
-use function FastRoute\simpleDispatcher;
-
+use FastRoute\Dispatcher\GroupCountBased as DispatcherImpl;
+use FastRoute\RouteParser\Std;
 use LogicException;
 use Psr\Container\ContainerInterface;
 use ReflectionMethod;
@@ -20,11 +20,17 @@ final class Router
 {
     private Dispatcher $dispatcher;
 
+    /** @var array<string, array<int, class-string>> Pattern => middleware list */
+    private array $middlewareByPattern = [];
+
     public function __construct(
         private readonly ContainerInterface $container,
         callable $routeDefinitions,
     ) {
-        $this->dispatcher = simpleDispatcher($routeDefinitions);
+        $collector = new MiddlewareRouteCollector(new Std(), new GroupCountBased());
+        $routeDefinitions($collector);
+        $this->middlewareByPattern = MiddlewareRouteCollector::getRouteMiddleware();
+        $this->dispatcher = new DispatcherImpl($collector->getData());
     }
 
     public function dispatch(Request $request): Response
@@ -37,7 +43,11 @@ final class Router
         return match ($routeInfo[0]) {
             Dispatcher::NOT_FOUND          => $this->notFound(),
             Dispatcher::METHOD_NOT_ALLOWED => $this->methodNotAllowed($routeInfo[1]),
-            Dispatcher::FOUND              => $this->handleFound($request, $routeInfo[1], $routeInfo[2]),
+            Dispatcher::FOUND              => $this->handleFound(
+                $request,
+                $routeInfo[1],
+                $routeInfo[2],
+            ),
             default                        => $this->notFound(),
         };
     }
@@ -63,6 +73,33 @@ final class Router
 
         $request->attributes->add($vars);
 
+        // Look up middleware for this route path
+        $path = '/' . ltrim($request->getPathInfo(), '/');
+        $middleware = $this->middlewareByPattern[$path] ?? [];
+
+        // Build the final controller invocation as a closure
+        $next = function () use ($controllerClass, $method, $vars, $request): Response {
+            return $this->invokeController($controllerClass, $method, $vars, $request);
+        };
+
+        // Wrap middleware around the controller call (LIFO — last middleware wraps innermost)
+        foreach (array_reverse($middleware) as $middlewareClass) {
+            /** @var \Spora\Http\Middleware\MiddlewareInterface $mw */
+            $mw = $this->container->get($middlewareClass);
+            $currentNext = $next;
+            $next = function () use ($mw, $request, $currentNext): Response {
+                return $mw->handle($request, $currentNext);
+            };
+        }
+
+        return $next();
+    }
+
+    /**
+     * Invoke a controller method with reflected parameters.
+     */
+    private function invokeController(string $controllerClass, string $method, array $vars, Request $request): Response
+    {
         $controller = $this->container->get($controllerClass);
 
         // Resolve method parameters using reflection so scalars are coerced to their

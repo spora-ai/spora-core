@@ -7,7 +7,6 @@ namespace Spora\Http;
 use JsonException;
 use ReflectionClass;
 use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolSetting;
@@ -29,7 +28,7 @@ final class ToolController
 
     public function index(Request $request): JsonResponse
     {
-        AuthGuard::requireAuth($this->authService);
+        $this->authService->currentUserId();
 
         $tools = array_map(fn(string $class) => $this->toolSchemaResource($class), $this->toolClasses);
 
@@ -38,7 +37,7 @@ final class ToolController
 
     public function getSettings(Request $request): JsonResponse
     {
-        AuthGuard::requireAuth($this->authService);
+        $this->authService->currentUserId();
 
         $toolClass = $this->resolveToolClassFromRequest($request);
         if ($toolClass === null) {
@@ -53,7 +52,7 @@ final class ToolController
 
     public function putSettings(Request $request): JsonResponse
     {
-        AuthGuard::requireAuth($this->authService);
+        $this->authService->currentUserId();
 
         $toolClass = $this->resolveToolClassFromRequest($request);
         if ($toolClass === null) {
@@ -81,7 +80,7 @@ final class ToolController
 
     public function deleteSettings(Request $request): JsonResponse
     {
-        AuthGuard::requireAuth($this->authService);
+        $this->authService->currentUserId();
 
         $toolClass = $this->resolveToolClassFromRequest($request);
         if ($toolClass === null) {
@@ -95,7 +94,7 @@ final class ToolController
 
     public function getUserSettings(Request $request, string $toolId): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $toolClass = $this->toolConfigService->resolveToolClass($toolId);
 
         if ($toolClass === null) {
@@ -110,7 +109,7 @@ final class ToolController
 
     public function putUserSettings(Request $request, string $toolId): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $toolClass = $this->toolConfigService->resolveToolClass($toolId);
 
         if ($toolClass === null) {
@@ -136,7 +135,7 @@ final class ToolController
 
     public function deleteUserSettings(Request $request, string $toolId): Response
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $toolClass = $this->toolConfigService->resolveToolClass($toolId);
 
         if ($toolClass === null) {

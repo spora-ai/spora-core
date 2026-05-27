@@ -7,6 +7,7 @@ export { type User }
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
+  const csrfToken = ref<string | null>(null)
   const initialized = ref(false)
   const initError = ref<Error | null>(null)
 
@@ -19,6 +20,11 @@ export const useAuthStore = defineStore('auth', () => {
 
   let initPromise: Promise<void> | null = null
 
+  interface MeResponse {
+    user: User
+    csrf_token?: string
+  }
+
   /** Called once on app boot to restore session from the server cookie. */
   function init(): Promise<void> {
     if (initPromise !== null) return initPromise
@@ -26,10 +32,14 @@ export const useAuthStore = defineStore('auth', () => {
     initPromise = (async () => {
       try {
         initError.value = null
-        const res = await api.get<{ user: User }>('/auth/me')
+        const res = await api.get<MeResponse>('/auth/me')
         user.value = normalizeUser(res.user)
+        csrfToken.value = res.csrf_token ?? null
       } catch (e) {
         user.value = null
+        csrfToken.value = null
+        // 401 means the user is simply not logged in — expected, not an error.
+        // Any other failure (network down, 5xx) is surfaced so the UI can show a retry.
         const isUnauthenticated = e instanceof ApiError && e.status === 401
         if (!isUnauthenticated) {
           initError.value = e instanceof Error ? e : new Error(String(e))
@@ -46,7 +56,9 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function login(email: string, password: string): Promise<void> {
-    user.value = normalizeUser((await api.post<{ user: User }>('/auth/login', { email, password })).user)
+    const res = (await api.post<MeResponse>('/auth/login', { email, password }))
+    user.value = normalizeUser(res.user)
+    csrfToken.value = res.csrf_token ?? null
     initialized.value = true
   }
 
@@ -61,6 +73,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout(): Promise<void> {
     user.value = null
+    csrfToken.value = null
     initPromise = null
     initialized.value = false
     await api.post('/auth/logout').catch(() => {})
@@ -93,6 +106,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     user,
+    csrfToken,
     initialized,
     initError,
     init,
@@ -107,4 +121,3 @@ export const useAuthStore = defineStore('auth', () => {
     changeEmail,
   }
 })
-

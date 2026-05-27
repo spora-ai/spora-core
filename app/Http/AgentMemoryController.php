@@ -7,7 +7,6 @@ namespace Spora\Http;
 use JsonException;
 use RuntimeException;
 use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\MemoryServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -25,7 +24,7 @@ final class AgentMemoryController
      */
     public function index(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('agentId', 0);
 
         $memories = $this->memoryService->listAgentMemories($agentId, $userId);
@@ -42,7 +41,7 @@ final class AgentMemoryController
      */
     public function store(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('agentId', 0);
 
         try {
@@ -69,7 +68,7 @@ final class AgentMemoryController
      */
     public function show(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('agentId', 0);
         $memoryId = (int) $request->attributes->get('memoryId', 0);
 
@@ -87,7 +86,7 @@ final class AgentMemoryController
      */
     public function update(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('agentId', 0);
         $memoryId = (int) $request->attributes->get('memoryId', 0);
 
@@ -111,7 +110,7 @@ final class AgentMemoryController
      */
     public function destroy(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('agentId', 0);
         $memoryId = (int) $request->attributes->get('memoryId', 0);
 
@@ -129,7 +128,7 @@ final class AgentMemoryController
      */
     public function reorder(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('agentId', 0);
 
         try {

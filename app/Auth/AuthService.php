@@ -159,6 +159,14 @@ final class AuthService
     }
 
     /**
+     * Return true if a user is currently logged in.
+     */
+    public function isLoggedIn(): bool
+    {
+        return $this->auth->isLoggedIn();
+    }
+
+    /**
      * Return the email address of the currently authenticated user, or null if not logged in.
      */
     public function currentUserEmail(): ?string

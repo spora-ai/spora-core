@@ -7,7 +7,6 @@ namespace Spora\Http;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Core\DotenvWriter;
-use Spora\Http\Middleware\AdminGuard;
 use Spora\Services\SystemMailer;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -35,7 +34,6 @@ final class MailConfigController
 
     public function index(Request $request, array $vars = []): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
 
         $mailConfig = [
             'driver'       => $this->config['mail_driver']     ?? 'php_mail',
@@ -60,7 +58,6 @@ final class MailConfigController
 
     public function update(Request $request, array $vars = []): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
 
         try {
             $body = $this->decodeJson($request);
@@ -108,7 +105,6 @@ final class MailConfigController
 
     public function test(Request $request, array $vars = []): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
 
         $currentUserEmail = $this->authService->currentUserEmail();
 
