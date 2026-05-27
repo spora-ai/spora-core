@@ -58,7 +58,7 @@ public/dist/
 .phpunit.cache/
 
 # ── Claude Code ───────────────────────────────────────────────────────────────
-.claude/
+.claude/settings.local.json
 
 # ── VS Code ───────────────────────────────────────────────────────────────────
 .vscode/

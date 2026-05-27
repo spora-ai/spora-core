@@ -60,12 +60,20 @@ final class UserService implements UserServiceInterface
             return null;
         }
 
-        if (isset($data['username'])) {
-            $user->username = (string) $data['username'];
+        if (array_key_exists('username', $data)) {
+            $user->username = $data['username'] !== '' ? (string) $data['username'] : null;
         }
 
-        if (isset($data['suspended'])) {
+        if (array_key_exists('name', $data)) {
+            $user->name = $data['name'] !== '' ? (string) $data['name'] : null;
+        }
+
+        if (array_key_exists('suspended', $data)) {
             $user->force_logout = $data['suspended'] ? 1 : 0;
+        }
+
+        if (array_key_exists('verified', $data)) {
+            $user->verified = $data['verified'] ? 1 : 0;
         }
 
         $user->save();
@@ -288,7 +296,9 @@ final class UserService implements UserServiceInterface
             'id'       => (int) $user->id,
             'email'    => $user->email,
             'username' => $user->username,
+            'name'     => $user->name,
             'roles'    => $roles,
+            'verified' => (bool) $user->verified,
             'registered' => (int) $user->registered,
             'is_admin' => in_array('ADMIN', $roles, true),
         ];
