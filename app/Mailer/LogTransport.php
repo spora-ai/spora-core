@@ -48,6 +48,7 @@ final class LogTransport extends AbstractTransport
                 'to'       => $toAddresses,
                 'from'     => $envelope->getSender()->getAddress(),
                 'subject'  => $subject,
+                // Log driver is for testing and debugging, so it's useful to have the full body in logs. In production, use a real mail driver and avoid logging sensitive data.
                 'text_body' => $textBody,
                 'html_body' => $htmlBody,
             ],

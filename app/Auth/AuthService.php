@@ -38,12 +38,15 @@ final class AuthService
         $this->appUrl = $url;
     }
 
-    private function sendVerificationEmailViaCallback(int $userId, string $email): callable
+    private function sendVerificationEmailViaCallback(string $email, ?string $customVerifyPath = '/auth/verify/'): callable
     {
-        return function (string $selector, string $token) use ($userId, $email) {
+        return function (string $selector, string $token) use ($email, $customVerifyPath) {
             if ($this->systemMailer !== null) {
+                $user = User::where('email', $email)->first();
+                $userId = $user !== null ? (int) $user->id : 0;
+
                 $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-                $verifyUrl = "{$baseUrl}/auth/verify/{$selector}?token=" . urlencode($token);
+                $verifyUrl = "{$baseUrl}{$customVerifyPath}{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendVerificationEmail($userId, $email, $verifyUrl);
             }
         };
@@ -94,7 +97,7 @@ final class AuthService
                 $email,
                 $password,
                 null,
-                $this->systemMailer !== null ? $this->sendVerificationEmailViaCallback(0, $email) : null,
+                $this->systemMailer !== null ? $this->sendVerificationEmailViaCallback($email) : null,
             );
 
             $user = User::where('email', $email)->first();
@@ -199,10 +202,12 @@ final class AuthService
     public function confirmEmail(string $selector, string $token): array
     {
         $emails = $this->auth->confirmEmail($selector, $token);
+        $oldEmail = $emails[0] ?? '';
         $newEmail = $emails[1] ?? '';
 
         $sendWelcomeEmail = (bool) ($_ENV['SPORA_SEND_WELCOME_EMAIL'] ?? false);
-        if ($sendWelcomeEmail && $this->systemMailer !== null && $newEmail !== '') {
+        // Only send welcome email for initial verification (where old email equals new email)
+        if ($sendWelcomeEmail && $this->systemMailer !== null && $newEmail !== '' && $oldEmail === $newEmail) {
             $user = User::where('email', $newEmail)->first();
             if ($user !== null) {
                 $this->systemMailer->sendWelcomeEmail((int) $user->id, $newEmail);
@@ -228,12 +233,7 @@ final class AuthService
             return;
         }
 
-        $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-
-        $this->auth->changeEmail($newEmail, function (string $selector, string $token) use ($newEmail, $baseUrl): void {
-            $confirmUrl = "{$baseUrl}/auth/verify/{$selector}?token=" . urlencode($token);
-            $this->systemMailer->sendVerificationEmail(0, $newEmail, $confirmUrl);
-        });
+        $this->auth->changeEmail($newEmail, $this->sendVerificationEmailViaCallback($newEmail));
     }
 
     /**
@@ -268,13 +268,8 @@ final class AuthService
             return;
         }
 
-        $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-
         try {
-            $this->auth->resendConfirmationForEmail($email, function (string $selector, string $token) use ($email, $baseUrl): void {
-                $verifyUrl = "{$baseUrl}/auth/verify/{$selector}?token=" . urlencode($token);
-                $this->systemMailer->sendVerificationEmail(0, $email, $verifyUrl);
-            });
+            $this->auth->resendConfirmationForEmail($email, $this->sendVerificationEmailViaCallback($email));
         } catch (\Delight\Auth\ConfirmationRequestNotFound) {
             // No pending confirmation — nothing to resend; silently return
         }

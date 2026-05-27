@@ -32,13 +32,11 @@ async function saveDisplayName(): Promise<void> {
 // ── Email change form ─────────────────────────────────────────────────────────
 
 const newEmail = ref('')
-const emailPasswordConfirm = ref('')
 const emailSaving = ref(false)
 const emailError = ref<string | null>(null)
 const emailSuccess = ref(false)
 
 async function saveEmail(): Promise<void> {
-  if (!newEmail.value || !emailPasswordConfirm.value) return
   emailSaving.value = true
   emailError.value = null
   emailSuccess.value = false
@@ -46,7 +44,6 @@ async function saveEmail(): Promise<void> {
     await auth.changeEmail(newEmail.value)
     emailSuccess.value = true
     newEmail.value = ''
-    emailPasswordConfirm.value = ''
     setTimeout(() => { emailSuccess.value = false }, 5000)
   } catch (e: any) {
     emailError.value = e?.name === 'ApiError' ? e.message : 'Failed to request email change.'
@@ -148,24 +145,13 @@ async function savePassword(): Promise<void> {
                 class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
-            <div class="space-y-2">
-              <label for="email-password" class="text-sm font-medium">Confirm with Password</label>
-              <input
-                id="email-password"
-                v-model="emailPasswordConfirm"
-                type="password"
-                autocomplete="current-password"
-                placeholder="Enter your current password"
-                class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              />
-            </div>
             <p v-if="emailError" role="alert" class="text-xs text-destructive">{{ emailError }}</p>
             <p v-if="emailSuccess" role="status" class="text-xs text-green-600">
               Confirmation email sent. Please check your new email inbox.
             </p>
             <button
               type="submit"
-              :disabled="emailSaving || !newEmail || !emailPasswordConfirm"
+              :disabled="emailSaving || !newEmail"
               class="inline-flex h-9 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
             >
               {{ emailSaving ? 'Sending…' : 'Send Confirmation Email' }}

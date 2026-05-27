@@ -171,7 +171,7 @@ final class LLMConfigController
             if ($existingConfig === null) {
                 return $this->notFound();
             }
-            // Config exists but belongs to another user (not global) - deny access
+            // Config exists but relates to a global config that the user is not an admin for - deny access
             if (!$isAdmin && $existingConfig->is_global) {
                 return $this->forbidden();
             }

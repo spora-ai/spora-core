@@ -44,8 +44,9 @@ export async function isRegistrationEnabled(): Promise<boolean> {
 }
 
 /**
- * Get the redirect target for an unauthenticated user trying to access a guest-only route.
+ * Get the redirect target for a user trying to access a guest-only route.
+ * Redirects authenticated users to the dashboard. Allows unauthenticated users (guests) to stay.
  */
 export function getGuestRedirect(authenticated: boolean): string | null {
-  return authenticated ? '/dashboard' : '/login'
+  return authenticated ? '/dashboard' : null
 }

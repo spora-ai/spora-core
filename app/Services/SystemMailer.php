@@ -135,7 +135,7 @@ final class SystemMailer implements MailerInterface
     public function sendWelcomeEmail(int $userId, string $email): bool
     {
         $user = User::find($userId);
-        $userName = $user->username ?? $email;
+        $userName = $user !== null ? ($user->name ?? $email) : $email;
 
         return $this->sendTemplatedEmail('welcome', [
             'user_name' => $userName,

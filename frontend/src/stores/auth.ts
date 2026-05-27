@@ -12,8 +12,8 @@ export const useAuthStore = defineStore('auth', () => {
 
   function normalizeUser(raw: User | null): User | null {
     if (raw === null) return null
-    const roles: string[] = []
-    if (raw.is_admin) roles.push('ADMIN')
+    const roles: string[] = raw.roles ? [...raw.roles] : []
+    if (raw.is_admin && !roles.includes('ADMIN')) roles.push('ADMIN')
     return { ...raw, roles }
   }
 
@@ -54,9 +54,9 @@ export const useAuthStore = defineStore('auth', () => {
    * Register a new user account.
    * Does NOT log the user in — caller must handle the "verify email" state.
    */
-  async function register(email: string, password: string, confirmPassword: string, displayName: string): Promise<{ user_id: number; email: string }> {
+  async function register(email: string, password: string, confirmPassword: string, displayName: string): Promise<{ id: number; email: string }> {
     const res = await api.post<{ user: { id: number; email: string } }>('/auth/register', { email, password, confirm_password: confirmPassword, display_name: displayName })
-    return { user_id: res.user.id, email: res.user.email }
+    return { id: res.user.id, email: res.user.email }
   }
 
   async function logout(): Promise<void> {

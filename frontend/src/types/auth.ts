@@ -7,6 +7,8 @@ export interface LoginCredentials {
 export interface RegisterPayload {
   email: string
   password: string
+  password_confirmation: string
+  name: string
 }
 
 export interface PasswordChangePayload {
