@@ -44,7 +44,7 @@ final class AuthService
             if ($this->systemMailer !== null) {
                 $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
                 $verifyUrl = "{$baseUrl}{$customVerifyPath}{$selector}?token=" . urlencode($token);
-                $this->systemMailer->sendVerificationEmail(0, $email, $verifyUrl);
+                $this->systemMailer->sendVerificationEmail($email, $verifyUrl);
             }
         };
     }
@@ -97,7 +97,7 @@ final class AuthService
                         $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
                         $verifyUrl = "{$baseUrl}/auth/verify/{$selector}?token=" . urlencode($token);
                         // Note: userId will be 0 here since we don't have it yet from delight-im callback
-                        $this->systemMailer->sendVerificationEmail(0, $email, $verifyUrl);
+                        $this->systemMailer->sendVerificationEmail($email, $verifyUrl);
                     }
                 }
             : null;

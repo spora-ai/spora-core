@@ -18,8 +18,3 @@ parameters:
         - '#Call to an undefined method Pest\\PendingCalls\\TestCall::#'
         # Pest dynamic property access on TestCall (e.g. $userId, $agentId set by test)
         - '#Access to an undefined property Pest\\PendingCalls\\TestCall::#'
-        # FastRoute addRoute() accepts an optional 4th middleware array argument
-        -
-            identifier: arguments.count
-            path: app/Core/routes.php
-    reportUnmatchedIgnoredErrors: false

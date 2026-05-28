@@ -96,15 +96,13 @@ final class SystemMailer implements MailerInterface
     /**
      * Send an account verification email.
      *
-     * @param int $userId The user ID (unused in default template, reserved for future token lookup)
      * @param string $email Recipient email address
      * @param string $verificationUrl Full URL the user clicks to verify their account
      * @return bool True on success
      */
-    public function sendVerificationEmail(int $userId, string $email, string $verificationUrl): bool
+    public function sendVerificationEmail(string $email, string $verificationUrl): bool
     {
         return $this->sendTemplatedEmail('email_verification', [
-            'user_id'            => $userId,
             'email'              => $email,
             'verification_link'  => $verificationUrl,
         ], [$email]);

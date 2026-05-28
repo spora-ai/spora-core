@@ -275,9 +275,9 @@ test('resetPassword resets password with valid selector and token', function ():
             $this->captured['url'] = $resetUrl;
             return true;
         }
-        public function sendVerificationEmail(int $userId, string $email, string $verificationUrl): bool
+        public function sendVerificationEmail(string $email, string $verificationUrl): bool
         {
-            return $this->inner->sendVerificationEmail($userId, $email, $verificationUrl);
+            return $this->inner->sendVerificationEmail($email, $verificationUrl);
         }
         public function sendWelcomeEmail(int $userId, string $email): bool
         {
