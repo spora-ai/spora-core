@@ -20,16 +20,12 @@ final class Router
 {
     private Dispatcher $dispatcher;
 
-    /** @var array<string, array<int, class-string>> Pattern => middleware list */
-    private array $middlewareByPattern = [];
-
     public function __construct(
         private readonly ContainerInterface $container,
         callable $routeDefinitions,
     ) {
         $collector = new MiddlewareRouteCollector(new Std(), new GroupCountBased());
         $routeDefinitions($collector);
-        $this->middlewareByPattern = MiddlewareRouteCollector::getRouteMiddleware();
         $this->dispatcher = new DispatcherImpl($collector->getData());
     }
 
@@ -73,9 +69,10 @@ final class Router
 
         $request->attributes->add($vars);
 
-        // Look up middleware for this route path
+        // Look up middleware for this route using method + path pattern matching
+        $httpMethod = $request->getMethod();
         $path = '/' . ltrim($request->getPathInfo(), '/');
-        $middleware = $this->middlewareByPattern[$path] ?? [];
+        $middleware = MiddlewareRouteCollector::findMiddleware($httpMethod, $path);
 
         // Build the final controller invocation as a closure
         $next = function () use ($controllerClass, $method, $vars, $request): Response {

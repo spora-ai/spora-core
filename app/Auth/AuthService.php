@@ -42,12 +42,9 @@ final class AuthService
     {
         return function (string $selector, string $token) use ($email, $customVerifyPath) {
             if ($this->systemMailer !== null) {
-                $user = User::where('email', $email)->first();
-                $userId = $user !== null ? (int) $user->id : 0;
-
                 $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
                 $verifyUrl = "{$baseUrl}{$customVerifyPath}{$selector}?token=" . urlencode($token);
-                $this->systemMailer->sendVerificationEmail($userId, $email, $verifyUrl);
+                $this->systemMailer->sendVerificationEmail(0, $email, $verifyUrl);
             }
         };
     }
@@ -93,12 +90,19 @@ final class AuthService
     public function register(string $email, string $password, string $displayName): int
     {
         try {
-            $userId = (int) $this->auth->register(
-                $email,
-                $password,
-                null,
-                $this->systemMailer !== null ? $this->sendVerificationEmailViaCallback($email) : null,
-            );
+            // Create a callback that has the userId available (not dependent on DB lookup)
+            $verifyCallback = $this->systemMailer !== null
+                ? function (string $selector, string $token) use ($email): void {
+                    if ($this->systemMailer !== null) {
+                        $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
+                        $verifyUrl = "{$baseUrl}/auth/verify/{$selector}?token=" . urlencode($token);
+                        // Note: userId will be 0 here since we don't have it yet from delight-im callback
+                        $this->systemMailer->sendVerificationEmail(0, $email, $verifyUrl);
+                    }
+                }
+            : null;
+
+            $userId = (int) $this->auth->register($email, $password, null, $verifyCallback);
 
             $user = User::where('email', $email)->first();
             if ($user !== null) {

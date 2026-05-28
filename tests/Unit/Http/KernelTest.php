@@ -10,6 +10,15 @@ use Spora\Services\AgentServiceInterface;
 use Symfony\Component\HttpFoundation\Request;
 
 // ---------------------------------------------------------------------------
+// Cleanup hook — reset superglobals modified by tests
+// ---------------------------------------------------------------------------
+
+afterEach(function (): void {
+    unset($_ENV['SPORA_SECRET_KEY']);
+    $_SESSION = [];
+});
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -280,6 +289,8 @@ test('UnauthenticatedException from a protected route returns 401 UNAUTHENTICATE
     $body = json_decode($response->getContent(), true);
     expect($body['error']['code'])->toBe('UNAUTHENTICATED');
     expect($body['error']['message'])->toBe('Authentication required.');
+
+    $kernel->__destruct();
 });
 
 test('401 response has Content-Type application/json', function (): void {
@@ -294,6 +305,8 @@ test('401 response has Content-Type application/json', function (): void {
     }
 
     expect($response->headers->get('Content-Type'))->toContain('application/json');
+
+    $kernel->__destruct();
 });
 
 // ---------------------------------------------------------------------------
@@ -416,8 +429,7 @@ test('public route with no middleware works without session or CSRF', function (
     $body = json_decode($response->getContent(), true);
     expect($body)->toHaveKey('allow_registration');
 
-    unset($kernel);
-    gc_collect_cycles();
+    $kernel->__destruct();
 });
 
 test('protected route without session returns 401 UNAUTHENTICATED', function (): void {
@@ -425,19 +437,17 @@ test('protected route without session returns 401 UNAUTHENTICATED', function ():
 
     $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
 
-    try {
-        $kernel = new Kernel();
-        $request = Request::create('/api/v1/agents', 'GET');
-        $response = $kernel->handle($request);
+    $kernel = new Kernel();
+    $request = Request::create('/api/v1/agents', 'GET');
+    $response = $kernel->handle($request);
 
-        expect($response->getStatusCode())->toBe(401);
+    expect($response->getStatusCode())->toBe(401);
 
-        $body = json_decode($response->getContent(), true);
-        expect($body['error']['code'])->toBe('UNAUTHENTICATED');
-        expect($body['error']['message'])->toBe('Authentication required.');
-    } finally {
-        unset($_ENV['SPORA_SECRET_KEY']);
-    }
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('UNAUTHENTICATED');
+    expect($body['error']['message'])->toBe('Authentication required.');
+
+    $kernel->__destruct();
 });
 
 test('protected route with valid session but no CSRF token returns 403 CSRF_TOKEN_MISSING', function (): void {
@@ -536,19 +546,133 @@ test('protected route with wrong HTTP method returns 401 when not authenticated'
 
     $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
 
-    try {
-        $kernel = new Kernel();
-        // POST to a GET-only route — but AuthMiddleware blocks first (no session) → 401
-        $request = Request::create('/api/v1/agents', 'POST');
-        $response = $kernel->handle($request);
+    $kernel = new Kernel();
+    // POST to a GET-only route — but AuthMiddleware blocks first (no session) → 401
+    $request = Request::create('/api/v1/agents', 'POST');
+    $response = $kernel->handle($request);
 
-        // Middleware runs before HTTP method check, so auth is checked first
-        expect($response->getStatusCode())->toBe(401);
-        $body = json_decode($response->getContent(), true);
-        expect($body['error']['code'])->toBe('UNAUTHENTICATED');
-    } finally {
-        unset($_ENV['SPORA_SECRET_KEY']);
-    }
+    // Middleware runs before HTTP method check, so auth is checked first
+    expect($response->getStatusCode())->toBe(401);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('UNAUTHENTICATED');
+
+    $kernel->__destruct();
+});
+
+test('parameterized protected route GET /api/v1/agents/{id} without session returns 401', function (): void {
+    clearSession();
+
+    $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
+
+    $kernel = new Kernel();
+    // Request to /api/v1/agents/123 (route has {id} parameter)
+    $request = Request::create('/api/v1/agents/123', 'GET');
+    $response = $kernel->handle($request);
+
+    expect($response->getStatusCode())->toBe(401);
+
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('UNAUTHENTICATED');
+    $kernel->__destruct();
+});
+
+test('parameterized protected route DELETE /api/v1/agents/{id} without session returns 401', function (): void {
+    clearSession();
+
+    $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
+
+    $kernel = new Kernel();
+    // Request to /api/v1/agents/456 (route has {id} parameter)
+    $request = Request::create('/api/v1/agents/456', 'DELETE');
+    $response = $kernel->handle($request);
+
+    expect($response->getStatusCode())->toBe(401);
+
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('UNAUTHENTICATED');
+
+    $kernel->__destruct();
+});
+
+test('parameterized protected route PATCH /api/v1/agents/{id} with valid auth but no CSRF returns 403', function (): void {
+    $authService = bootAuthLayer();
+    $userId = $authService->register('param_nocsrf@example.com', 'Password1!', 'Param Test');
+    $authService->login('param_nocsrf@example.com', 'Password1!');
+
+    // No CSRF token in session
+    unset($_SESSION['csrf_token']);
+
+    $kernel = new Kernel();
+
+    // Request to /api/v1/agents/123 (route has {id} parameter) using PATCH (not safe)
+    $request = Request::create('/api/v1/agents/123', 'PATCH', [], [], [], [
+        'CONTENT_TYPE' => 'application/json',
+        // No X-CSRF-Token header
+    ]);
+    $response = $kernel->handle($request);
+    $kernel->__destruct();
+
+    // AuthMiddleware passes (session is valid), CsrfMiddleware blocks (no token) → 403
+    expect($response->getStatusCode())->toBe(403);
+
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('CSRF_TOKEN_MISSING');
+});
+
+test('parameterized protected route GET /api/v1/agents/{id} with valid auth and CSRF passes through middleware', function (): void {
+    $authService = bootAuthLayer();
+    $userId = $authService->register('param_success@example.com', 'Password1!', 'Param Success');
+    $authService->login('param_success@example.com', 'Password1!');
+
+    $csrfToken = bin2hex(random_bytes(32));
+    $_SESSION['csrf_token'] = $csrfToken;
+
+    $kernel = new Kernel();
+    $container = $kernel->getContainer();
+
+    // Mock AgentService so the controller doesn't throw when checking for null
+    $mockAgentService = Mockery::mock(AgentServiceInterface::class);
+    $mockAgentService->shouldReceive('getAgent')->andReturn(null);
+    $container->set(AgentServiceInterface::class, $mockAgentService);
+
+    // Request to /api/v1/agents/123 (route has {id} parameter)
+    $request = Request::create('/api/v1/agents/123', 'GET', [], [], [], [
+        'HTTP_X_CSRF_TOKEN' => $csrfToken,
+    ]);
+    $response = $kernel->handle($request);
+    $kernel->__destruct();
+
+    // Both middleware pass, controller is reached (returns 404 because agent doesn't exist, not 401/403)
+    expect($response->getStatusCode())->not()->toBe(401);
+    expect($response->getStatusCode())->not()->toBe(403);
+});
+
+test('parameterized protected route DELETE /api/v1/agents/{id} with valid auth and CSRF passes through middleware', function (): void {
+    $authService = bootAuthLayer();
+    $userId = $authService->register('param_delete@example.com', 'Password1!', 'Param Delete');
+    $authService->login('param_delete@example.com', 'Password1!');
+
+    $csrfToken = bin2hex(random_bytes(32));
+    $_SESSION['csrf_token'] = $csrfToken;
+
+    $kernel = new Kernel();
+    $container = $kernel->getContainer();
+
+    // Mock AgentService
+    $mockAgentService = Mockery::mock(AgentServiceInterface::class);
+    $mockAgentService->shouldReceive('deleteAgent')->andReturn(true);
+    $container->set(AgentServiceInterface::class, $mockAgentService);
+
+    // Request to /api/v1/agents/789 (route has {id} parameter)
+    $request = Request::create('/api/v1/agents/789', 'DELETE', [], [], [], [
+        'HTTP_X_CSRF_TOKEN' => $csrfToken,
+    ]);
+    $response = $kernel->handle($request);
+    $kernel->__destruct();
+
+    // Both middleware pass, controller is reached (not blocked by 401 or 403)
+    expect($response->getStatusCode())->not()->toBe(401);
+    expect($response->getStatusCode())->not()->toBe(403);
 });
 
 test('unknown route returns 404 even when unauthenticated', function (): void {
@@ -556,14 +680,12 @@ test('unknown route returns 404 even when unauthenticated', function (): void {
 
     $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
 
-    try {
-        $kernel = new Kernel();
-        $request = Request::create('/api/v1/nonexistent-route', 'GET');
-        $response = $kernel->handle($request);
+    $kernel = new Kernel();
+    $request = Request::create('/api/v1/nonexistent-route', 'GET');
+    $response = $kernel->handle($request);
 
-        // Not a 401 because the route doesn't exist — 404 takes priority
-        expect($response->getStatusCode())->toBe(404);
-    } finally {
-        unset($_ENV['SPORA_SECRET_KEY']);
-    }
+    // Not a 401 because the route doesn't exist — 404 takes priority
+    expect($response->getStatusCode())->toBe(404);
+
+    $kernel->__destruct();
 });
