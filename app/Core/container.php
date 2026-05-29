@@ -220,7 +220,11 @@ return [
         return $authService;
     },
 
-    Spora\Security\CsrfTokenService::class => static fn(): Spora\Security\CsrfTokenService => new Spora\Security\CsrfTokenService(),
+    Spora\Security\CsrfTokenService::class => static function (ContainerInterface $c): Spora\Security\CsrfTokenService {
+        return new Spora\Security\CsrfTokenService(
+            $c->get(LoggerInterface::class),
+        );
+    },
 
     Spora\Http\Middleware\AuthMiddleware::class => static function (ContainerInterface $c): Spora\Http\Middleware\AuthMiddleware {
         return new Spora\Http\Middleware\AuthMiddleware(
@@ -231,6 +235,7 @@ return [
     Spora\Http\Middleware\CsrfMiddleware::class => static function (ContainerInterface $c): Spora\Http\Middleware\CsrfMiddleware {
         return new Spora\Http\Middleware\CsrfMiddleware(
             $c->get(Spora\Security\CsrfTokenService::class),
+            $c->get(LoggerInterface::class),
         );
     },
 

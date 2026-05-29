@@ -159,7 +159,7 @@ final class AuthController
                 'roles'      => $user['roles'] ?? [],
                 'registered' => $registered,
                 'is_admin'   => in_array('ADMIN', $user['roles'] ?? [], true),
-            ], 'csrf_token' => $this->csrfService->getToken()]],
+            ], 'csrf_token' => $this->csrfService->getOrCreateToken()]],
             Response::HTTP_OK,
         );
     }
