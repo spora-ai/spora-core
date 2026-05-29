@@ -7,8 +7,6 @@ namespace Spora\Http;
 use JsonException;
 use ReflectionClass;
 use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AdminGuard;
-use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -59,7 +57,7 @@ final class LLMConfigController
      */
     public function index(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         $configs = $this->llmConfigService->getConfigurationsForUser($userId);
 
@@ -73,7 +71,6 @@ final class LLMConfigController
      */
     public function globalConfigs(Request $request): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
 
         $configs = $this->llmConfigService->getGlobalConfigurations();
 
@@ -85,7 +82,7 @@ final class LLMConfigController
      */
     public function show(Request $request, int $id): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         $config = $this->llmConfigService->getConfiguration($id, $userId);
         if ($config === null) {
@@ -100,7 +97,7 @@ final class LLMConfigController
      */
     public function store(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $isAdmin = $this->authService->isAdmin();
 
         try {
@@ -160,7 +157,7 @@ final class LLMConfigController
      */
     public function update(Request $request, int $id): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $isAdmin = $this->authService->isAdmin();
 
         // Check if config exists and is accessible
@@ -227,7 +224,7 @@ final class LLMConfigController
      */
     public function destroy(Request $request, int $id): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $isAdmin = $this->authService->isAdmin();
 
         // Check if config exists and belongs to another user (return 404 to avoid enumeration)
@@ -249,7 +246,7 @@ final class LLMConfigController
      */
     public function setDefault(Request $request, int $id): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $isAdmin = $this->authService->isAdmin();
 
         $config = $this->llmConfigService->setDefaultConfiguration($id, $userId, $isAdmin);

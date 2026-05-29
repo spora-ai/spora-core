@@ -3,9 +3,12 @@
 declare(strict_types=1);
 
 use Spora\Auth\AuthService;
+use Spora\Http\Middleware\AuthMiddleware;
+use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\PromptTemplateController;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
+use Spora\Security\CsrfTokenService;
 use Spora\Services\PromptTemplateService;
 
 function makePromptTemplateController(): array
@@ -13,8 +16,11 @@ function makePromptTemplateController(): array
     $authService = bootAuthLayer();
     $promptTemplateService = new PromptTemplateService();
     $controller = new PromptTemplateController($authService, $promptTemplateService);
+    $authMiddleware = new AuthMiddleware($authService);
+    $csrfService = new CsrfTokenService();
+    $csrfMiddleware = new CsrfMiddleware($csrfService);
 
-    return [$controller, $authService, $promptTemplateService];
+    return [$controller, $authService, $promptTemplateService, $authMiddleware, $csrfMiddleware];
 }
 
 function registerAndGetAgentId(AuthService $authService): array
@@ -53,10 +59,10 @@ describe('PromptTemplateController', function (): void {
             'is_active' => true,
         ]);
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('GET', "/api/v1/agents/{$agentId}/templates");
         $request->attributes->set('id', $agentId);
-        $response = $controller->index($request);
+        $response = callController($controller, 'index', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -66,10 +72,10 @@ describe('PromptTemplateController', function (): void {
     it('index returns empty array when agent has no templates', function (): void {
         [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('GET', "/api/v1/agents/{$agentId}/templates");
         $request->attributes->set('id', $agentId);
-        $response = $controller->index($request);
+        $response = callController($controller, 'index', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -89,10 +95,10 @@ describe('PromptTemplateController', function (): void {
             'is_active' => true,
         ]);
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('GET', "/api/v1/agents/{$agent->id}/templates");
         $request->attributes->set('agentId', $agent->id);
-        $response = $controller->index($request);
+        $response = callController($controller, 'index', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(404);
     });
@@ -100,7 +106,7 @@ describe('PromptTemplateController', function (): void {
     it('store creates a new template', function (): void {
         [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/templates", [
             'name'             => 'My Template',
             'prompt_template' => 'Hello {{name}}, today is {{date}}',
@@ -110,7 +116,7 @@ describe('PromptTemplateController', function (): void {
             'is_active'        => true,
         ]);
         $request->attributes->set('id', $agentId);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(201);
         $body = json_decode($response->getContent(), true);
@@ -123,12 +129,12 @@ describe('PromptTemplateController', function (): void {
     it('store returns 422 when name is missing', function (): void {
         [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/templates", [
             'prompt_template' => 'Hello',
         ]);
         $request->attributes->set('id', $agentId);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(422);
     });
@@ -136,12 +142,12 @@ describe('PromptTemplateController', function (): void {
     it('store returns 422 when prompt_template is missing', function (): void {
         [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/templates", [
             'name' => 'No Prompt Template',
         ]);
         $request->attributes->set('id', $agentId);
-        $response = $controller->store($request);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(422);
     });
@@ -156,11 +162,11 @@ describe('PromptTemplateController', function (): void {
             'is_active' => true,
         ]);
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('GET', "/api/v1/agents/{$agentId}/templates/{$template->id}");
         $request->attributes->set('id', $agentId);
         $request->attributes->set('templateId', $template->id);
-        $response = $controller->show($request);
+        $response = callController($controller, 'show', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -183,11 +189,11 @@ describe('PromptTemplateController', function (): void {
             'is_active' => true,
         ]);
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('GET', "/api/v1/agents/{$agentId}/templates/{$template->id}");
         $request->attributes->set('id', $agentId);
         $request->attributes->set('templateId', $template->id);
-        $response = $controller->show($request);
+        $response = callController($controller, 'show', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(404);
     });
@@ -202,7 +208,7 @@ describe('PromptTemplateController', function (): void {
             'is_active' => true,
         ]);
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('PUT', "/api/v1/agents/{$agentId}/templates/{$template->id}", [
             'name' => 'Updated Name',
             'prompt_template' => 'Updated prompt',
@@ -210,7 +216,7 @@ describe('PromptTemplateController', function (): void {
         ]);
         $request->attributes->set('id', $agentId);
         $request->attributes->set('templateId', $template->id);
-        $response = $controller->update($request);
+        $response = callController($controller, 'update', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -229,11 +235,11 @@ describe('PromptTemplateController', function (): void {
         ]);
         $templateId = $template->id;
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('DELETE', "/api/v1/agents/{$agentId}/templates/{$templateId}");
         $request->attributes->set('id', $agentId);
         $request->attributes->set('templateId', $templateId);
-        $response = $controller->destroy($request);
+        $response = callController($controller, 'destroy', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -257,11 +263,11 @@ describe('PromptTemplateController', function (): void {
             'is_active' => true,
         ]);
 
-        $controller = new PromptTemplateController(bootAuthLayer(), new PromptTemplateService());
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('DELETE', "/api/v1/agents/{$agentId}/templates/{$template->id}");
         $request->attributes->set('id', $agentId);
         $request->attributes->set('templateId', $template->id);
-        $response = $controller->destroy($request);
+        $response = callController($controller, 'destroy', $request, [$authMiddleware]);
 
         expect($response->getStatusCode())->toBe(404);
         expect(AgentPromptTemplate::find($template->id))->not->toBeNull();

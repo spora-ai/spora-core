@@ -9,7 +9,6 @@ use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\EmailTakenException;
-use Spora\Http\Middleware\AdminGuard;
 use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -32,7 +31,6 @@ final class UserController
 
     public function index(Request $request, array $vars = []): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
         $perPage = min((int) ($request->query->get('per_page', 20)), 100);
         $page    = max((int) ($request->query->get('page', 1)), 1);
 
@@ -46,7 +44,6 @@ final class UserController
 
     public function show(Request $request, int $id): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
         $result = $this->userService->getUser($id);
 
         if ($result === null) {
@@ -58,7 +55,6 @@ final class UserController
 
     public function store(Request $request): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
@@ -87,7 +83,6 @@ final class UserController
 
     public function update(Request $request, int $id): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
@@ -105,7 +100,6 @@ final class UserController
 
     public function destroy(Request $request, int $id): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
         $currentUserId = $this->authService->currentUserId();
 
         if ($currentUserId !== null && (int) $id === $currentUserId) {
@@ -123,7 +117,6 @@ final class UserController
 
     public function grantRole(Request $request, int $id): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
@@ -151,7 +144,6 @@ final class UserController
 
     public function revokeRole(Request $request, int $id, string $role): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
         $roleName = $role;
 
         $roleValue = self::ROLE_MAP[strtoupper($roleName)] ?? null;
@@ -171,7 +163,6 @@ final class UserController
 
     public function listRoles(Request $request, int $id): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
         $user = \Spora\Models\User::find($id);
 
         if ($user === null) {

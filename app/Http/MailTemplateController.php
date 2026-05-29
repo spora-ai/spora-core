@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use JsonException;
-use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AdminGuard;
 use Spora\Services\MailTemplateServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -16,13 +14,11 @@ use Throwable;
 final class MailTemplateController
 {
     public function __construct(
-        private readonly AuthService $authService,
         private readonly MailTemplateServiceInterface $mailTemplateService,
     ) {}
 
     public function index(Request $request, array $vars = []): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
 
         $templates = $this->mailTemplateService->getAllTemplates();
 
@@ -33,7 +29,6 @@ final class MailTemplateController
 
     public function store(Request $request, array $vars = []): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
 
         try {
             $body = $this->decodeJson($request);
@@ -54,7 +49,6 @@ final class MailTemplateController
 
     public function show(Request $request, int $id): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
 
         $result = $this->mailTemplateService->getTemplate($id);
 
@@ -69,7 +63,6 @@ final class MailTemplateController
 
     public function update(Request $request, int $id): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
 
         try {
             $body = $this->decodeJson($request);
@@ -90,7 +83,6 @@ final class MailTemplateController
 
     public function destroy(Request $request, int $id): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
 
         // Check if it's a system template first
         $template = \Spora\Models\MailTemplate::find($id);
@@ -113,7 +105,6 @@ final class MailTemplateController
 
     public function preview(Request $request, string $name): JsonResponse
     {
-        AdminGuard::requireAdmin($this->authService);
 
         // Collect variables from query parameters
         $variables = [];

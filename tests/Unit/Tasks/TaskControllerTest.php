@@ -19,8 +19,11 @@ function makeTaskController(?TaskServiceInterface $taskService = null): array
     $authService = bootAuthLayer();
     $taskService ??= Mockery::mock(TaskServiceInterface::class);
     $controller  = new TaskController($authService, $taskService);
+    $authMiddleware = new Spora\Http\Middleware\AuthMiddleware($authService);
+    $csrfService = new Spora\Security\CsrfTokenService();
+    $csrfMiddleware = new Spora\Http\Middleware\CsrfMiddleware($csrfService);
 
-    return [$controller, $authService, $taskService];
+    return [$controller, $authService, $taskService, $authMiddleware, $csrfMiddleware];
 }
 
 function seedUserAndAgent(mixed $authService): array
@@ -45,18 +48,18 @@ function seedUserAndAgent(mixed $authService): array
 // ---------------------------------------------------------------------------
 
 it('unauthenticated index throws UnauthenticatedException', function (): void {
-    [$controller] = makeTaskController();
+    [$controller, , , $authMiddleware] = makeTaskController();
     clearSession();
 
-    expect(fn() => $controller->index(jsonRequest('GET', '/api/v1/tasks')))
+    expect(fn() => callController($controller, 'index', jsonRequest('GET', '/api/v1/tasks'), [$authMiddleware]))
         ->toThrow(UnauthenticatedException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('unauthenticated store throws UnauthenticatedException', function (): void {
-    [$controller] = makeTaskController();
+    [$controller, , , $authMiddleware] = makeTaskController();
     clearSession();
 
-    expect(fn() => $controller->store(jsonRequest('POST', '/api/v1/tasks', ['prompt' => 'hi'])))
+    expect(fn() => callController($controller, 'store', jsonRequest('POST', '/api/v1/tasks', ['prompt' => 'hi']), [$authMiddleware]))
         ->toThrow(UnauthenticatedException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -527,13 +530,13 @@ it('approve legacy format with valid provider_call_id still calls orchestrator r
 // ---------------------------------------------------------------------------
 
 it('destroy throws UnauthenticatedException when not logged in', function (): void {
-    [$controller] = makeTaskController();
+    [$controller, , , $authMiddleware] = makeTaskController();
     clearSession();
 
     $req = jsonRequest('DELETE', '/api/v1/tasks/1');
     $req->attributes->set('taskId', 1);
 
-    expect(fn() => $controller->destroy($req))
+    expect(fn() => callController($controller, 'destroy', $req, [$authMiddleware]))
         ->toThrow(UnauthenticatedException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 

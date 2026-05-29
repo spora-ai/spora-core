@@ -6,7 +6,6 @@ namespace Spora\Http;
 
 use JsonException;
 use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\LLMConfigServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -26,7 +25,7 @@ final class UserPreferenceController
      */
     public function show(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         $config = $this->llmConfigService->getUserPreferredConfig($userId);
 
@@ -45,7 +44,7 @@ final class UserPreferenceController
      */
     public function update(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         try {
             $body = $this->decodeJson($request);

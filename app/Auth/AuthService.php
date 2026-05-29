@@ -42,12 +42,9 @@ final class AuthService
     {
         return function (string $selector, string $token) use ($email, $customVerifyPath) {
             if ($this->systemMailer !== null) {
-                $user = User::where('email', $email)->first();
-                $userId = $user !== null ? (int) $user->id : 0;
-
                 $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
                 $verifyUrl = "{$baseUrl}{$customVerifyPath}{$selector}?token=" . urlencode($token);
-                $this->systemMailer->sendVerificationEmail($userId, $email, $verifyUrl);
+                $this->systemMailer->sendVerificationEmail($email, $verifyUrl);
             }
         };
     }
@@ -93,12 +90,11 @@ final class AuthService
     public function register(string $email, string $password, string $displayName): int
     {
         try {
-            $userId = (int) $this->auth->register(
-                $email,
-                $password,
-                null,
-                $this->systemMailer !== null ? $this->sendVerificationEmailViaCallback($email) : null,
-            );
+            $verifyCallback = $this->systemMailer !== null
+                ? $this->sendVerificationEmailViaCallback($email)
+                : null;
+
+            $userId = (int) $this->auth->register($email, $password, null, $verifyCallback);
 
             $user = User::where('email', $email)->first();
             if ($user !== null) {
@@ -156,6 +152,14 @@ final class AuthService
         }
 
         return (int) $this->auth->getUserId();
+    }
+
+    /**
+     * Return true if a user is currently logged in.
+     */
+    public function isLoggedIn(): bool
+    {
+        return $this->auth->isLoggedIn();
     }
 
     /**

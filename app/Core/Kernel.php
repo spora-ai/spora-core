@@ -10,6 +10,7 @@ use Dotenv\Dotenv;
 use FastRoute\RouteCollector;
 use Psr\Log\LoggerInterface;
 use Spora\Http\Exceptions\ForbiddenException;
+use Spora\Http\Exceptions\InvalidCsrfTokenException;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -102,6 +103,13 @@ final class Kernel
         if ($e instanceof ForbiddenException) {
             return new JsonResponse(
                 ['error' => ['code' => 'FORBIDDEN', 'message' => $e->getMessage()]],
+                Response::HTTP_FORBIDDEN,
+            );
+        }
+
+        if ($e instanceof InvalidCsrfTokenException) {
+            return new JsonResponse(
+                ['error' => ['code' => 'CSRF_INVALID', 'message' => $e->getMessage()]],
                 Response::HTTP_FORBIDDEN,
             );
         }

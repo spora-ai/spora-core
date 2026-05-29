@@ -11,7 +11,7 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-final class AdminMiddleware
+final class AdminMiddleware implements MiddlewareInterface
 {
     public function __construct(
         private readonly AuthService $authService,

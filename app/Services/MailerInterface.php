@@ -11,6 +11,6 @@ namespace Spora\Services;
 interface MailerInterface
 {
     public function sendPasswordResetEmail(string $email, string $resetUrl): bool;
-    public function sendVerificationEmail(int $userId, string $email, string $verificationUrl): bool;
+    public function sendVerificationEmail(string $email, string $verificationUrl): bool;
     public function sendWelcomeEmail(int $userId, string $email): bool;
 }

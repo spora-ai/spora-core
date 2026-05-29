@@ -220,6 +220,25 @@ return [
         return $authService;
     },
 
+    Spora\Security\CsrfTokenService::class => static function (ContainerInterface $c): Spora\Security\CsrfTokenService {
+        return new Spora\Security\CsrfTokenService(
+            $c->get(LoggerInterface::class),
+        );
+    },
+
+    Spora\Http\Middleware\AuthMiddleware::class => static function (ContainerInterface $c): Spora\Http\Middleware\AuthMiddleware {
+        return new Spora\Http\Middleware\AuthMiddleware(
+            $c->get(AuthService::class),
+        );
+    },
+
+    Spora\Http\Middleware\CsrfMiddleware::class => static function (ContainerInterface $c): Spora\Http\Middleware\CsrfMiddleware {
+        return new Spora\Http\Middleware\CsrfMiddleware(
+            $c->get(Spora\Security\CsrfTokenService::class),
+            $c->get(LoggerInterface::class),
+        );
+    },
+
     Symfony\Contracts\HttpClient\HttpClientInterface::class => static function (): Symfony\Contracts\HttpClient\HttpClientInterface {
         return Symfony\Component\HttpClient\HttpClient::create();
     },
@@ -228,6 +247,7 @@ return [
         return new Spora\Http\AuthController(
             $c->get(AuthService::class),
             $c->get(UserServiceInterface::class),
+            $c->get(Spora\Security\CsrfTokenService::class),
             $c->get('config'),
         );
     },
@@ -569,7 +589,6 @@ return [
 
     Spora\Http\MailTemplateController::class => static function (ContainerInterface $c): Spora\Http\MailTemplateController {
         return new Spora\Http\MailTemplateController(
-            $c->get(AuthService::class),
             $c->get(MailTemplateServiceInterface::class),
         );
     },

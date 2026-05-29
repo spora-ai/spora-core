@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Http\Middleware\AuthMiddleware;
+use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Security\CsrfTokenService;
 use Symfony\Component\HttpFoundation\Response;
 
 function makeLLMConfigController(): array
@@ -17,8 +20,11 @@ function makeLLMConfigController(): array
         AnthropicCompatibleDriver::class,
     ]);
     $controller = new Spora\Http\LLMConfigController($authService, $llmConfigService);
+    $authMiddleware = new AuthMiddleware($authService);
+    $csrfService = new CsrfTokenService();
+    $csrfMiddleware = new CsrfMiddleware($csrfService);
 
-    return [$controller, $authService, $llmConfigService, $key];
+    return [$controller, $authService, $llmConfigService, $key, $authMiddleware, $csrfMiddleware];
 }
 
 function makeAdmin(Spora\Auth\AuthService $authService, int $userId): void
@@ -59,10 +65,10 @@ function createTestConfig(string $name, string $driverClass, array $settings, bo
 // ---------------------------------------------------------------------------
 
 test('drivers() returns all registered drivers with schemas', function (): void {
-    [$controller] = makeLLMConfigController();
+    [$controller, , , , $authMiddleware] = makeLLMConfigController();
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->drivers($request);
+    $response = callController($controller, 'drivers', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
@@ -84,7 +90,7 @@ test('drivers() returns all registered drivers with schemas', function (): void 
 });
 
 test('store() creates a new config', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
     bootAuth($authService);
 
     $body = [
@@ -98,7 +104,7 @@ test('store() creates a new config', function (): void {
     ];
 
     $request = jsonRequest('POST', '/api/v1/llm-configs', $body);
-    $response = $controller->store($request);
+    $response = callController($controller, 'store', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_CREATED);
 
@@ -113,7 +119,7 @@ test('store() creates a new config', function (): void {
 });
 
 test('store() saves context_window and max_tokens_output columns', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
     $userId = bootAuth($authService, 'tokentest@example.com');
 
     $body = [
@@ -128,7 +134,7 @@ test('store() saves context_window and max_tokens_output columns', function (): 
     ];
 
     $request = jsonRequest('POST', '/api/v1/llm-configs', $body);
-    $response = $controller->store($request);
+    $response = callController($controller, 'store', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_CREATED);
 
@@ -140,7 +146,7 @@ test('store() saves context_window and max_tokens_output columns', function (): 
 });
 
 test('update() can update context_window and max_tokens_output', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
     $userId = bootAuth($authService, 'updatetoken@example.com');
 
     $config = createTestConfig('Update Token Test', OpenAICompatibleDriver::class, [
@@ -152,7 +158,8 @@ test('update() can update context_window and max_tokens_output', function (): vo
         'context_window' => 200000,
         'max_tokens_output' => 8192,
     ]);
-    $response = $controller->update($request, $config->id);
+    $request->attributes->set('id', $config->id);
+    $response = callController($controller, 'update', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
@@ -164,7 +171,7 @@ test('update() can update context_window and max_tokens_output', function (): vo
 });
 
 test('configResource() includes context_window and max_tokens_output', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
     $userId = bootAuth($authService, 'resourcetest@example.com');
 
     $config = createTestConfig('Resource Test', AnthropicCompatibleDriver::class, [
@@ -189,7 +196,7 @@ test('configResource() includes context_window and max_tokens_output', function 
 });
 
 test('store() returns 422 when name is empty', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
     bootAuth($authService);
 
     $body = [
@@ -199,13 +206,13 @@ test('store() returns 422 when name is empty', function (): void {
     ];
 
     $request = jsonRequest('POST', '/api/v1/llm-configs', $body);
-    $response = $controller->store($request);
+    $response = callController($controller, 'store', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
 });
 
 test('store() returns 422 for invalid driver_class', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
     bootAuth($authService);
 
     $body = [
@@ -215,13 +222,13 @@ test('store() returns 422 for invalid driver_class', function (): void {
     ];
 
     $request = jsonRequest('POST', '/api/v1/llm-configs', $body);
-    $response = $controller->store($request);
+    $response = callController($controller, 'store', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
 });
 
 test('show() returns a config by id', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     bootAuth($authService);
 
     $config = createTestConfig('Show Test', OpenAICompatibleDriver::class, [
@@ -230,7 +237,8 @@ test('show() returns a config by id', function (): void {
     ], false, null, $llmConfigService);
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->show($request, $config->id);
+    $request->attributes->set('id', $config->id);
+    $response = callController($controller, 'show', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
@@ -242,17 +250,18 @@ test('show() returns a config by id', function (): void {
 });
 
 test('show() returns 404 for unknown id', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
     bootAuth($authService);
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->show($request, 99999);
+    $request->attributes->set('id', 99999);
+    $response = callController($controller, 'show', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
 });
 
 test('update() modifies a config', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     bootAuth($authService);
 
     $config = createTestConfig('Update Test', OpenAICompatibleDriver::class, [
@@ -262,7 +271,8 @@ test('update() modifies a config', function (): void {
 
     $body = ['name' => 'Updated Name'];
     $request = jsonRequest('PUT', "/api/v1/llm-configs/{$config->id}", $body);
-    $response = $controller->update($request, $config->id);
+    $request->attributes->set('id', $config->id);
+    $response = callController($controller, 'update', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
@@ -273,13 +283,14 @@ test('update() modifies a config', function (): void {
 });
 
 test('destroy() deletes a config', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     bootAuth($authService);
 
     $config = createTestConfig('Delete Test', OpenAICompatibleDriver::class, ['api_key' => 'sk-del'], false, null, $llmConfigService);
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->destroy($request, $config->id);
+    $request->attributes->set('id', $config->id);
+    $response = callController($controller, 'destroy', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
     $body = json_decode($response->getContent(), true);
@@ -288,7 +299,7 @@ test('destroy() deletes a config', function (): void {
 });
 
 test('setDefault() sets a global config as default when called by admin', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     $userId = bootAuth($authService);
     makeAdmin($authService, $userId);
 
@@ -302,7 +313,8 @@ test('setDefault() sets a global config as default when called by admin', functi
     $config2->save();
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->setDefault($request, $config2->id);
+    $request->attributes->set('id', $config2->id);
+    $response = callController($controller, 'setDefault', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
     $result = json_decode($response->getContent(), true)['data']['config'];
@@ -316,14 +328,15 @@ test('setDefault() sets a global config as default when called by admin', functi
 });
 
 test('setDefault() returns 403 when called on personal config by non-admin', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     $userId = bootAuth($authService);
 
     // Create a personal config (user_id = current user, is_global = false)
     $config = createTestConfig('Personal Config Default', OpenAICompatibleDriver::class, ['api_key' => 'sk-personal'], false, $userId, $llmConfigService);
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->setDefault($request, $config->id);
+    $request->attributes->set('id', $config->id);
+    $response = callController($controller, 'setDefault', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
 
@@ -331,7 +344,7 @@ test('setDefault() returns 403 when called on personal config by non-admin', fun
 });
 
 test('setDefault() returns 403 when non-admin calls set-default on global config', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     bootAuth($authService);
 
     // Create a global config
@@ -340,7 +353,8 @@ test('setDefault() returns 403 when non-admin calls set-default on global config
     $globalConfig->save();
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->setDefault($request, $globalConfig->id);
+    $request->attributes->set('id', $globalConfig->id);
+    $response = callController($controller, 'setDefault', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
 
@@ -348,7 +362,7 @@ test('setDefault() returns 403 when non-admin calls set-default on global config
 });
 
 test('index() returns all configs', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     bootAuth($authService);
 
     $config = createTestConfig('Index Test', AnthropicCompatibleDriver::class, [
@@ -357,7 +371,7 @@ test('index() returns all configs', function (): void {
     ], false, null, $llmConfigService);
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->index($request);
+    $response = callController($controller, 'index', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
@@ -372,7 +386,7 @@ test('index() returns all configs', function (): void {
 // ---------------------------------------------------------------------------
 
 test('index() only returns configs belonging to the current user', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     $userA = bootAuth($authService, 'usera@example.com');
 
     $configA = createTestConfig('UserA Config', OpenAICompatibleDriver::class, ['api_key' => 'sk-usera'], false, null, $llmConfigService);
@@ -383,7 +397,7 @@ test('index() only returns configs belonging to the current user', function (): 
 
     // User B should only see their own config
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->index($request);
+    $response = callController($controller, 'index', $request, [$authMiddleware]);
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
     $body = json_decode($response->getContent(), true);
@@ -395,7 +409,7 @@ test('index() only returns configs belonging to the current user', function (): 
 });
 
 test('show() returns 404 when fetching another user\'s config', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     $userA = bootAuth($authService, 'usera@example.com');
 
     $configA = createTestConfig('UserA Private', OpenAICompatibleDriver::class, ['api_key' => 'sk-private'], false, null, $llmConfigService);
@@ -404,7 +418,8 @@ test('show() returns 404 when fetching another user\'s config', function (): voi
     bootAuth($authService, 'userb@example.com');
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->show($request, $configA->id);
+    $request->attributes->set('id', $configA->id);
+    $response = callController($controller, 'show', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
 
@@ -412,7 +427,7 @@ test('show() returns 404 when fetching another user\'s config', function (): voi
 });
 
 test('update() returns 404 when updating another user\'s config', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     $userA = bootAuth($authService, 'usera@example.com');
 
     $configA = createTestConfig('UserA Update', OpenAICompatibleDriver::class, ['api_key' => 'sk-update'], false, $userA, $llmConfigService);
@@ -421,7 +436,8 @@ test('update() returns 404 when updating another user\'s config', function (): v
     bootAuth($authService, 'userb@example.com');
 
     $request = jsonRequest('PUT', "/api/v1/llm-configs/{$configA->id}", ['name' => 'Hijacked']);
-    $response = $controller->update($request, $configA->id);
+    $request->attributes->set('id', $configA->id);
+    $response = callController($controller, 'update', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
 
@@ -429,7 +445,7 @@ test('update() returns 404 when updating another user\'s config', function (): v
 });
 
 test('destroy() returns 404 when deleting another user\'s config', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     $userA = bootAuth($authService, 'usera@example.com');
 
     $configA = createTestConfig('UserA Delete', OpenAICompatibleDriver::class, ['api_key' => 'sk-delete'], false, $userA, $llmConfigService);
@@ -438,7 +454,8 @@ test('destroy() returns 404 when deleting another user\'s config', function (): 
     bootAuth($authService, 'userb@example.com');
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->destroy($request, $configA->id);
+    $request->attributes->set('id', $configA->id);
+    $response = callController($controller, 'destroy', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
     // Verify config still exists
@@ -448,7 +465,7 @@ test('destroy() returns 404 when deleting another user\'s config', function (): 
 });
 
 test('setDefault() only affects the current user\'s configs', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     $userA = bootAuth($authService, 'usera@example.com');
 
     $configA = createTestConfig('UserA Default', OpenAICompatibleDriver::class, ['api_key' => 'sk-usera'], false, null, $llmConfigService);
@@ -458,7 +475,8 @@ test('setDefault() only affects the current user\'s configs', function (): void 
     $configB = createTestConfig('UserB Default', AnthropicCompatibleDriver::class, ['api_key' => 'sk-userb'], false, null, $llmConfigService);
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $controller->setDefault($request, $configB->id);
+    $request->attributes->set('id', $configB->id);
+    callController($controller, 'setDefault', $request, [$authMiddleware]);
 
     // User A's config should not have been changed
     $configARefresh = LLMDriverConfiguration::find($configA->id);
@@ -472,7 +490,7 @@ test('setDefault() only affects the current user\'s configs', function (): void 
 // ---------------------------------------------------------------------------
 
 test('update() does not corrupt settings when client sends a JSON array instead of object', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     $userId = bootAuth($authService, 'arrayfix@example.com');
 
     $config = createTestConfig(
@@ -488,7 +506,8 @@ test('update() does not corrupt settings when client sends a JSON array instead 
     $request = jsonRequest('PUT', "/api/v1/llm-configs/{$config->id}", [
         'settings' => [['api_key' => 'sk-hijacked']],
     ]);
-    $response = $controller->update($request, $config->id);
+    $request->attributes->set('id', $config->id);
+    $response = callController($controller, 'update', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
@@ -501,7 +520,7 @@ test('update() does not corrupt settings when client sends a JSON array instead 
 });
 
 test('update() applies settings normally when value is a proper JSON object', function (): void {
-    [$controller, $authService, $llmConfigService] = makeLLMConfigController();
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     $userId = bootAuth($authService, 'objectupdate@example.com');
 
     $config = createTestConfig(
@@ -516,7 +535,8 @@ test('update() applies settings normally when value is a proper JSON object', fu
     $request = jsonRequest('PUT', "/api/v1/llm-configs/{$config->id}", [
         'settings' => ['model' => 'gpt-4-turbo'],
     ]);
-    $response = $controller->update($request, $config->id);
+    $request->attributes->set('id', $config->id);
+    $response = callController($controller, 'update', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
@@ -530,7 +550,7 @@ test('update() applies settings normally when value is a proper JSON object', fu
 });
 
 test('store() creates a config owned by the current user', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
     $userA = bootAuth($authService, 'ownera@example.com');
 
     $body = [
@@ -544,7 +564,7 @@ test('store() creates a config owned by the current user', function (): void {
     ];
 
     $request = jsonRequest('POST', '/api/v1/llm-configs', $body);
-    $response = $controller->store($request);
+    $response = callController($controller, 'store', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_CREATED);
 
@@ -560,7 +580,7 @@ test('store() creates a config owned by the current user', function (): void {
 // ---------------------------------------------------------------------------
 
 test('admin can create a global config with is_global=true', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
     $userId = bootAuth($authService, 'admin@example.com');
     makeAdmin($authService, $userId);
 
@@ -576,7 +596,7 @@ test('admin can create a global config with is_global=true', function (): void {
     ];
 
     $request = jsonRequest('POST', '/api/v1/llm-configs', $body);
-    $response = $controller->store($request);
+    $response = callController($controller, 'store', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_CREATED);
 
@@ -591,7 +611,7 @@ test('admin can create a global config with is_global=true', function (): void {
 });
 
 test('non-admin cannot create a global config', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
     bootAuth($authService, 'regular@example.com');
 
     $body = [
@@ -602,7 +622,7 @@ test('non-admin cannot create a global config', function (): void {
     ];
 
     $request = jsonRequest('POST', '/api/v1/llm-configs', $body);
-    $response = $controller->store($request);
+    $response = callController($controller, 'store', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
 
@@ -610,7 +630,7 @@ test('non-admin cannot create a global config', function (): void {
 });
 
 test('global configs are visible to all users via index()', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
 
     // User A (admin) creates a global config
     $userA = bootAuth($authService, 'adminglobal@example.com');
@@ -624,13 +644,13 @@ test('global configs are visible to all users via index()', function (): void {
     ];
 
     $request = jsonRequest('POST', '/api/v1/llm-configs', $globalBody);
-    $controller->store($request);
+    callController($controller, 'store', $request, [$authMiddleware]);
 
     // User B (non-admin) logs in and should see the global config
     $userB = bootAuth($authService, 'userseesglobal@example.com');
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->index($request);
+    $response = callController($controller, 'index', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
@@ -642,7 +662,7 @@ test('global configs are visible to all users via index()', function (): void {
 });
 
 test('global configs are not included in other user\'s personal configs', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
 
     // User A (admin) creates a global config
     $userA = bootAuth($authService, 'adminglobal2@example.com');
@@ -656,14 +676,14 @@ test('global configs are not included in other user\'s personal configs', functi
     ];
 
     $request = jsonRequest('POST', '/api/v1/llm-configs', $globalBody);
-    $controller->store($request);
+    callController($controller, 'store', $request, [$authMiddleware]);
 
     // User B logs in
     bootAuth($authService, 'userseesglobal2@example.com');
 
     // User B's index should include global configs but they should have is_global=true and user_id=null
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->index($request);
+    $response = callController($controller, 'index', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
@@ -685,7 +705,7 @@ test('global configs are not included in other user\'s personal configs', functi
 });
 
 test('getConfigurationsForUser returns both personal and global configs', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
     $userId = bootAuth($authService, 'personalandglobal@example.com');
 
     // Personal config (non-admin user)
@@ -695,7 +715,7 @@ test('getConfigurationsForUser returns both personal and global configs', functi
         'settings' => ['api_key' => 'sk-personal', 'model' => 'claude-3-5-sonnet'],
     ];
     $request = jsonRequest('POST', '/api/v1/llm-configs', $personalBody);
-    $controller->store($request);
+    callController($controller, 'store', $request, [$authMiddleware]);
 
     // Global config (created by same user but as admin)
     makeAdmin($authService, $userId);
@@ -706,10 +726,10 @@ test('getConfigurationsForUser returns both personal and global configs', functi
         'is_global' => true,
     ];
     $request = jsonRequest('POST', '/api/v1/llm-configs', $globalBody);
-    $controller->store($request);
+    callController($controller, 'store', $request, [$authMiddleware]);
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->index($request);
+    $response = callController($controller, 'index', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
@@ -722,7 +742,7 @@ test('getConfigurationsForUser returns both personal and global configs', functi
 });
 
 test('globalConfigs() endpoint returns only global configs', function (): void {
-    [$controller, $authService] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
     $userId = bootAuth($authService, 'adminglobalconfigs@example.com');
     makeAdmin($authService, $userId);
 
@@ -733,7 +753,7 @@ test('globalConfigs() endpoint returns only global configs', function (): void {
         'settings' => ['api_key' => 'sk-personal', 'model' => 'gpt-4o'],
     ];
     $request = jsonRequest('POST', '/api/v1/llm-configs', $personalBody);
-    $controller->store($request);
+    callController($controller, 'store', $request, [$authMiddleware]);
 
     // Global config
     $globalBody = [
@@ -743,10 +763,10 @@ test('globalConfigs() endpoint returns only global configs', function (): void {
         'is_global' => true,
     ];
     $request = jsonRequest('POST', '/api/v1/llm-configs', $globalBody);
-    $controller->store($request);
+    callController($controller, 'store', $request, [$authMiddleware]);
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->globalConfigs($request);
+    $response = callController($controller, 'globalConfigs', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 

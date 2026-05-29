@@ -28,9 +28,10 @@ function makeAuthController(array $configOverrides = [], ?callable $userServiceS
     if ($userServiceSetup !== null) {
         $userServiceSetup($userService);
     }
-    $controller = new AuthController($service, $userService, $config);
+    $csrfService = new Spora\Security\CsrfTokenService();
+    $controller = new AuthController($service, $userService, $csrfService, $config);
 
-    return [$controller, $service, $userService];
+    return [$controller, $service, $userService, $csrfService];
 }
 
 // ---------------------------------------------------------------------------

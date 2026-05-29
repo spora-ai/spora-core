@@ -21,7 +21,8 @@ function makeAuthControllerWithMocks(): array
     $authService = bootAuthLayer();
     $userService = Mockery::mock(UserServiceInterface::class);
     $userService->allows('getUser')->andReturn(null)->byDefault();
-    $controller = new AuthController($authService, $userService, ['allow_registration' => true]);
+    $csrfService = new Spora\Security\CsrfTokenService();
+    $controller = new AuthController($authService, $userService, $csrfService, ['allow_registration' => true]);
 
     return [$controller, $authService];
 }
@@ -35,7 +36,8 @@ function makeAuthControllerWithUserService(): array
     $userService->allows('updateUser')->andReturnUsing(function (int $userId, array $data): array {
         return ['user' => ['id' => $userId, 'username' => $data['username'] ?? null]];
     })->byDefault();
-    $controller = new AuthController($authService, $userService, ['allow_registration' => true]);
+    $csrfService = new Spora\Security\CsrfTokenService();
+    $controller = new AuthController($authService, $userService, $csrfService, ['allow_registration' => true]);
 
     return [$controller, $authService, $userService];
 }
@@ -273,9 +275,9 @@ test('resetPassword resets password with valid selector and token', function ():
             $this->captured['url'] = $resetUrl;
             return true;
         }
-        public function sendVerificationEmail(int $userId, string $email, string $verificationUrl): bool
+        public function sendVerificationEmail(string $email, string $verificationUrl): bool
         {
-            return $this->inner->sendVerificationEmail($userId, $email, $verificationUrl);
+            return $this->inner->sendVerificationEmail($email, $verificationUrl);
         }
         public function sendWelcomeEmail(int $userId, string $email): bool
         {

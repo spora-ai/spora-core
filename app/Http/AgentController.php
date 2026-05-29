@@ -6,7 +6,6 @@ namespace Spora\Http;
 
 use JsonException;
 use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AuthGuard;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Services\AgentServiceInterface;
@@ -28,7 +27,7 @@ final class AgentController
      */
     public function index(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         $agents = $this->agentService->getAgentsForUser($userId);
 
@@ -40,7 +39,7 @@ final class AgentController
      */
     public function store(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
 
         try {
             $body = $this->decodeJson($request);
@@ -74,7 +73,7 @@ final class AgentController
      */
     public function show(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
         $agent = $this->agentService->getAgent($agentId, $userId);
@@ -91,7 +90,7 @@ final class AgentController
      */
     public function update(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
         try {
@@ -117,7 +116,7 @@ final class AgentController
      */
     public function destroy(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
         $deleted = $this->agentService->deleteAgent($agentId, $userId);
@@ -134,7 +133,7 @@ final class AgentController
      */
     public function enableTool(Request $request): JsonResponse
     {
-        $userId    = AuthGuard::requireAuth($this->authService);
+        $userId    = $this->authService->currentUserId();
         $agentId   = (int) $request->attributes->get('id', 0);
         $toolClass = $this->resolveToolClassFromRequest($request);
 
@@ -161,7 +160,7 @@ final class AgentController
      */
     public function patchTool(Request $request): JsonResponse
     {
-        $userId    = AuthGuard::requireAuth($this->authService);
+        $userId    = $this->authService->currentUserId();
         $agentId   = (int) $request->attributes->get('id', 0);
         $toolClass = $this->resolveToolClassFromRequest($request);
 
@@ -189,7 +188,7 @@ final class AgentController
      */
     public function getToolStatus(Request $request): JsonResponse
     {
-        $userId   = AuthGuard::requireAuth($this->authService);
+        $userId   = $this->authService->currentUserId();
         $agentId  = (int) $request->attributes->get('id', 0);
         $toolId   = (string) $request->attributes->get('toolId', '');
         $toolClass = $this->toolConfigService->resolveToolClass($toolId);
@@ -212,7 +211,7 @@ final class AgentController
      */
     public function getToolsStatus(Request $request): JsonResponse
     {
-        $userId  = AuthGuard::requireAuth($this->authService);
+        $userId  = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
         $statuses = $this->agentService->getAllToolsStatus($agentId, $userId);
@@ -229,7 +228,7 @@ final class AgentController
      */
     public function getToolsOperations(Request $request): JsonResponse
     {
-        $userId  = AuthGuard::requireAuth($this->authService);
+        $userId  = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
         $operations = $this->agentService->getToolsOperations($agentId, $userId);
@@ -246,7 +245,7 @@ final class AgentController
      */
     public function disableTool(Request $request): JsonResponse
     {
-        $userId    = AuthGuard::requireAuth($this->authService);
+        $userId    = $this->authService->currentUserId();
         $agentId   = (int) $request->attributes->get('id', 0);
         $toolClass = $this->resolveToolClassFromRequest($request);
 
@@ -264,7 +263,7 @@ final class AgentController
      */
     public function getOverride(Request $request): JsonResponse
     {
-        $userId   = AuthGuard::requireAuth($this->authService);
+        $userId   = $this->authService->currentUserId();
         $agentId  = (int) $request->attributes->get('id', 0);
         $toolId   = (string) $request->attributes->get('toolId', '');
         $rawOnly  = $request->query->get('raw') === 'true';
@@ -287,7 +286,7 @@ final class AgentController
      */
     public function putOverride(Request $request): JsonResponse
     {
-        $userId    = AuthGuard::requireAuth($this->authService);
+        $userId    = $this->authService->currentUserId();
         $agentId   = (int) $request->attributes->get('id', 0);
         $toolClass = $this->resolveToolClassFromRequest($request);
 
@@ -313,7 +312,7 @@ final class AgentController
      */
     public function deleteOverride(Request $request): JsonResponse
     {
-        $userId    = AuthGuard::requireAuth($this->authService);
+        $userId    = $this->authService->currentUserId();
         $agentId   = (int) $request->attributes->get('id', 0);
         $toolClass = $this->resolveToolClassFromRequest($request);
 
@@ -331,7 +330,7 @@ final class AgentController
      */
     public function getOperationOverride(Request $request): JsonResponse
     {
-        $userId     = AuthGuard::requireAuth($this->authService);
+        $userId     = $this->authService->currentUserId();
         $agentId    = (int) $request->attributes->get('id', 0);
         $toolClass  = $this->resolveToolClassFromRequest($request);
         $operation  = (string) $request->attributes->get('operation', '');
@@ -350,7 +349,7 @@ final class AgentController
      */
     public function patchOperationOverride(Request $request): JsonResponse
     {
-        $userId     = AuthGuard::requireAuth($this->authService);
+        $userId     = $this->authService->currentUserId();
         $agentId    = (int) $request->attributes->get('id', 0);
         $toolClass  = $this->resolveToolClassFromRequest($request);
         $operation  = (string) $request->attributes->get('operation', '');

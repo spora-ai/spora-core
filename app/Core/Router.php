@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Spora\Core;
 
+use FastRoute\DataGenerator\GroupCountBased;
 use FastRoute\Dispatcher;
-
-use function FastRoute\simpleDispatcher;
-
+use FastRoute\Dispatcher\GroupCountBased as DispatcherImpl;
+use FastRoute\RouteParser\Std;
 use LogicException;
 use Psr\Container\ContainerInterface;
 use ReflectionMethod;
@@ -24,7 +24,9 @@ final class Router
         private readonly ContainerInterface $container,
         callable $routeDefinitions,
     ) {
-        $this->dispatcher = simpleDispatcher($routeDefinitions);
+        $collector = new MiddlewareRouteCollector(new Std(), new GroupCountBased());
+        $routeDefinitions($collector);
+        $this->dispatcher = new DispatcherImpl($collector->getData());
     }
 
     public function dispatch(Request $request): Response
@@ -37,13 +39,20 @@ final class Router
         return match ($routeInfo[0]) {
             Dispatcher::NOT_FOUND          => $this->notFound(),
             Dispatcher::METHOD_NOT_ALLOWED => $this->methodNotAllowed($routeInfo[1]),
-            Dispatcher::FOUND              => $this->handleFound($request, $routeInfo[1], $routeInfo[2]),
+            Dispatcher::FOUND              => $this->handleFound(
+                $request,
+                $routeInfo[1],
+                $routeInfo[2],
+            ),
             default                        => $this->notFound(),
         };
     }
 
-    private function handleFound(Request $request, mixed $handler, array $vars): Response
+    private function handleFound(Request $request, mixed $routeHandler, array $vars): Response
     {
+        $handler = is_array($routeHandler) && isset($routeHandler['handler']) ? $routeHandler['handler'] : $routeHandler;
+        $middleware = is_array($routeHandler) && isset($routeHandler['middleware']) ? $routeHandler['middleware'] : [];
+
         [$controllerClass, $method] = is_array($handler) ? $handler : [$handler, '__invoke'];
 
         // URL-decode path variables since getPathInfo() does not decode them.
@@ -63,6 +72,29 @@ final class Router
 
         $request->attributes->add($vars);
 
+        // Build the final controller invocation as a closure
+        $next = function (Request $req) use ($controllerClass, $method, $vars): Response {
+            return $this->invokeController($controllerClass, $method, $vars, $req);
+        };
+
+        // Wrap middleware around the controller call (LIFO — last middleware wraps innermost)
+        foreach (array_reverse($middleware) as $middlewareClass) {
+            /** @var \Spora\Http\Middleware\MiddlewareInterface $mw */
+            $mw = $this->container->get($middlewareClass);
+            $currentNext = $next;
+            $next = function (Request $req) use ($mw, $currentNext): Response {
+                return $mw->handle($req, $currentNext);
+            };
+        }
+
+        return $next($request);
+    }
+
+    /**
+     * Invoke a controller method with reflected parameters.
+     */
+    private function invokeController(string $controllerClass, string $method, array $vars, Request $request): Response
+    {
         $controller = $this->container->get($controllerClass);
 
         // Resolve method parameters using reflection so scalars are coerced to their

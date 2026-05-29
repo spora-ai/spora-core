@@ -34,23 +34,12 @@ final class LogTransport extends AbstractTransport
             ? $originalMessage->getSubject()
             : null;
 
-        $textBody = $originalMessage instanceof \Symfony\Component\Mime\Email
-            ? $originalMessage->getTextBody()
-            : null;
-
-        $htmlBody = $originalMessage instanceof \Symfony\Component\Mime\Email
-            ? $originalMessage->getHtmlBody()
-            : null;
-
         $this->getLogger()->info(
             '[Spora] Mail sent via log driver',
             [
                 'to'       => $toAddresses,
                 'from'     => $envelope->getSender()->getAddress(),
                 'subject'  => $subject,
-                // Log driver is for testing and debugging, so it's useful to have the full body in logs. In production, use a real mail driver and avoid logging sensitive data.
-                'text_body' => $textBody,
-                'html_body' => $htmlBody,
             ],
         );
     }

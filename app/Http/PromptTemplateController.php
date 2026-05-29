@@ -7,7 +7,6 @@ namespace Spora\Http;
 use JsonException;
 use RuntimeException;
 use Spora\Auth\AuthService;
-use Spora\Http\Middleware\AuthGuard;
 use Spora\Services\PromptTemplateServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -25,7 +24,7 @@ final class PromptTemplateController
      */
     public function index(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
         $templates = $this->promptTemplateService->getTemplatesForAgent($agentId, $userId);
@@ -42,7 +41,7 @@ final class PromptTemplateController
      */
     public function store(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
         try {
@@ -77,7 +76,7 @@ final class PromptTemplateController
      */
     public function show(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
         $templateId = (int) $request->attributes->get('templateId', 0);
 
@@ -95,7 +94,7 @@ final class PromptTemplateController
      */
     public function update(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
         $templateId = (int) $request->attributes->get('templateId', 0);
 
@@ -119,7 +118,7 @@ final class PromptTemplateController
      */
     public function destroy(Request $request): JsonResponse
     {
-        $userId = AuthGuard::requireAuth($this->authService);
+        $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
         $templateId = (int) $request->attributes->get('templateId', 0);
 
