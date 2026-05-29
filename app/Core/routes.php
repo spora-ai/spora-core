@@ -48,11 +48,11 @@ return static function (MiddlewareRouteCollector $r): void {
     $r->addRoute('PATCH', '/api/v1/auth/password', [AuthController::class, 'password'], [CsrfMiddleware::class]);
     $r->addRoute('PATCH', '/api/v1/auth/account', [AuthController::class, 'account'], [CsrfMiddleware::class]);
     $r->addRoute('GET', '/api/v1/auth/verify/{selector}', [AuthController::class, 'verify'], []);
-    $r->addRoute('POST', '/api/v1/auth/verification/resend', [AuthController::class, 'resendVerification'], [CsrfMiddleware::class]);
+    $r->addRoute('POST', '/api/v1/auth/verification/resend', [AuthController::class, 'resendVerification'], []);
     $r->addRoute('POST', '/api/v1/auth/forgot-password', [AuthController::class, 'forgotPassword'], []);
     $r->addRoute('POST', '/api/v1/auth/reset-password', [AuthController::class, 'resetPassword'], []);
     $r->addRoute('POST', '/api/v1/auth/email/change-request', [AuthController::class, 'requestEmailChange'], [CsrfMiddleware::class]);
-    $r->addRoute('POST', '/api/v1/auth/email/confirm', [AuthController::class, 'confirmEmailChange'], [CsrfMiddleware::class]);
+    $r->addRoute('POST', '/api/v1/auth/email/confirm', [AuthController::class, 'confirmEmailChange'], []);
 
     // Protected routes: auth + CSRF
     $r->addRoute('GET', '/api/v1/agents', [AgentController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);

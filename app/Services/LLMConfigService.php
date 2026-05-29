@@ -312,7 +312,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
         }
 
         // Check if config belongs to another user (only applies to non-global configs)
-        if ($config->user_id !== $userId) {
+        if (!$config->is_global && $config->user_id !== $userId) {
             return false;
         }
 

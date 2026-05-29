@@ -28,7 +28,7 @@ final class ToolController
 
     public function index(Request $request): JsonResponse
     {
-        $this->authService->currentUserId();
+
 
         $tools = array_map(fn(string $class) => $this->toolSchemaResource($class), $this->toolClasses);
 
@@ -37,7 +37,7 @@ final class ToolController
 
     public function getSettings(Request $request): JsonResponse
     {
-        $this->authService->currentUserId();
+
 
         $toolClass = $this->resolveToolClassFromRequest($request);
         if ($toolClass === null) {
@@ -52,7 +52,7 @@ final class ToolController
 
     public function putSettings(Request $request): JsonResponse
     {
-        $this->authService->currentUserId();
+
 
         $toolClass = $this->resolveToolClassFromRequest($request);
         if ($toolClass === null) {
@@ -80,7 +80,7 @@ final class ToolController
 
     public function deleteSettings(Request $request): JsonResponse
     {
-        $this->authService->currentUserId();
+
 
         $toolClass = $this->resolveToolClassFromRequest($request);
         if ($toolClass === null) {

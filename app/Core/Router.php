@@ -48,8 +48,11 @@ final class Router
         };
     }
 
-    private function handleFound(Request $request, mixed $handler, array $vars): Response
+    private function handleFound(Request $request, mixed $routeHandler, array $vars): Response
     {
+        $handler = is_array($routeHandler) && isset($routeHandler['handler']) ? $routeHandler['handler'] : $routeHandler;
+        $middleware = is_array($routeHandler) && isset($routeHandler['middleware']) ? $routeHandler['middleware'] : [];
+
         [$controllerClass, $method] = is_array($handler) ? $handler : [$handler, '__invoke'];
 
         // URL-decode path variables since getPathInfo() does not decode them.
@@ -69,14 +72,9 @@ final class Router
 
         $request->attributes->add($vars);
 
-        // Look up middleware for this route using method + path pattern matching
-        $httpMethod = $request->getMethod();
-        $path = '/' . ltrim($request->getPathInfo(), '/');
-        $middleware = MiddlewareRouteCollector::findMiddleware($httpMethod, $path);
-
         // Build the final controller invocation as a closure
-        $next = function () use ($controllerClass, $method, $vars, $request): Response {
-            return $this->invokeController($controllerClass, $method, $vars, $request);
+        $next = function (Request $req) use ($controllerClass, $method, $vars): Response {
+            return $this->invokeController($controllerClass, $method, $vars, $req);
         };
 
         // Wrap middleware around the controller call (LIFO — last middleware wraps innermost)
@@ -84,12 +82,12 @@ final class Router
             /** @var \Spora\Http\Middleware\MiddlewareInterface $mw */
             $mw = $this->container->get($middlewareClass);
             $currentNext = $next;
-            $next = function () use ($mw, $request, $currentNext): Response {
-                return $mw->handle($request, $currentNext);
+            $next = function (Request $req) use ($mw, $currentNext): Response {
+                return $mw->handle($req, $currentNext);
             };
         }
 
-        return $next();
+        return $next($request);
     }
 
     /**

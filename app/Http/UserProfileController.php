@@ -20,7 +20,7 @@ final class UserProfileController
 
     public function getProfile(Request $request): JsonResponse
     {
-        $this->authService->currentUserId();
+
 
         $userId = $this->authService->currentUserId();
         $result = $this->userService->getProfile($userId);
@@ -34,7 +34,7 @@ final class UserProfileController
 
     public function putProfile(Request $request): JsonResponse
     {
-        $this->authService->currentUserId();
+
 
         $userId = $this->authService->currentUserId();
 
@@ -54,7 +54,7 @@ final class UserProfileController
 
     public function getLocations(Request $request): JsonResponse
     {
-        $this->authService->currentUserId();
+
 
         $userId = $this->authService->currentUserId();
         $locations = $this->userService->getLocations($userId);
@@ -64,7 +64,7 @@ final class UserProfileController
 
     public function postLocation(Request $request): JsonResponse
     {
-        $this->authService->currentUserId();
+
 
         $userId = $this->authService->currentUserId();
 
@@ -94,7 +94,7 @@ final class UserProfileController
 
     public function putLocation(Request $request, int $id): JsonResponse
     {
-        $this->authService->currentUserId();
+
 
         $userId = $this->authService->currentUserId();
 
@@ -132,7 +132,7 @@ final class UserProfileController
 
     public function deleteLocation(Request $request, int $id): JsonResponse
     {
-        $this->authService->currentUserId();
+
 
         $userId = $this->authService->currentUserId();
         $deleted = $this->userService->deleteLocation($id, $userId);

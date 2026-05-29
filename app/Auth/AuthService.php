@@ -90,17 +90,9 @@ final class AuthService
     public function register(string $email, string $password, string $displayName): int
     {
         try {
-            // Create a callback that has the userId available (not dependent on DB lookup)
             $verifyCallback = $this->systemMailer !== null
-                ? function (string $selector, string $token) use ($email): void {
-                    if ($this->systemMailer !== null) {
-                        $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-                        $verifyUrl = "{$baseUrl}/auth/verify/{$selector}?token=" . urlencode($token);
-                        // Note: userId will be 0 here since we don't have it yet from delight-im callback
-                        $this->systemMailer->sendVerificationEmail($email, $verifyUrl);
-                    }
-                }
-            : null;
+                ? $this->sendVerificationEmailViaCallback($email)
+                : null;
 
             $userId = (int) $this->auth->register($email, $password, null, $verifyCallback);
 
