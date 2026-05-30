@@ -96,13 +96,18 @@ function resolveOptionLabel(options: Record<string, string> | string[] | null | 
       <option v-if="!field.required" value="">
         —{{ (field.default != null && field.default !== '') ? ` (Default: ${resolveOptionLabel(field.options, field.default)})` : '' }}
       </option>
-      <option
-        v-for="(label, value) in field.options || {}"
-        :key="Array.isArray(field.options) ? String(label) : String(value)"
-        :value="Array.isArray(field.options) ? String(label) : String(value)"
-      >
-        {{ label }}
-      </option>
+      <!-- Handle Array options -->
+      <template v-if="Array.isArray(field.options)">
+        <option v-for="opt in field.options" :key="opt" :value="opt">
+          {{ opt }}
+        </option>
+      </template>
+      <!-- Handle Object options -->
+      <template v-else>
+        <option v-for="(label, value) in field.options || {}" :key="String(value)" :value="String(value)">
+          {{ label }}
+        </option>
+      </template>
     </select>
 
     <!-- toggle -->

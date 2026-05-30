@@ -46,8 +46,8 @@ use Throwable;
 #[ToolSetting(key: 'core.smtp.host', label: 'SMTP Host', type: 'text', description: 'e.g. smtp.example.com', scope: 'agent')]
 #[ToolSetting(key: 'core.smtp.port', label: 'SMTP Port', type: 'text', description: 'Usually 587 or 465', scope: 'agent', default: '587')]
 #[ToolSetting(key: 'core.smtp.encryption', label: 'SMTP Encryption', type: 'select', description: 'Encryption method for SMTP', scope: 'agent', default: 'tls', options: ['ssl' => 'SSL/Implicit TLS', 'tls' => 'TLS/STARTTLS', 'notls' => 'None (not recommended)'])]
-#[ToolSetting(key: 'core.smtp.from', label: 'From Address', type: 'text', description: 'e.g. agent@spora.local', scope: 'agent', required: true, expose_to_llm: true)]
-#[ToolSetting(key: 'core.smtp.allowed_recipients', label: 'Allowed Recipients', type: 'text', description: 'Comma-separated list of exact email addresses the agent is allowed to send to (or * for all).', scope: 'agent', expose_to_llm: true)]
+#[ToolSetting(key: 'core.smtp.from', label: 'From Address', type: 'text', description: 'e.g. agent@spora.local', scope: 'agent', required: true, exposeToLlm: true)]
+#[ToolSetting(key: 'core.smtp.allowed_recipients', label: 'Allowed Recipients', type: 'text', description: 'Comma-separated list of exact email addresses the agent is allowed to send to (or * for all).', scope: 'agent', exposeToLlm: true)]
 #[ToolSetting(key: 'core.smtp.timeout', label: 'SMTP Timeout', type: 'text', description: 'Seconds before an SMTP connection fails (default: 30)', scope: 'agent', default: '30')]
 // Tool parameters
 #[ToolParameter(name: 'action', type: 'string', description: 'The email operation to perform: read_inbox, list_folders, read_folder, create_draft, send_email, create_folder, rename_folder, delete_folder, move_email, delete_email, mark_email_read', required: true, enum: ['read_inbox', 'list_folders', 'read_folder', 'create_draft', 'send_email', 'create_folder', 'rename_folder', 'delete_folder', 'move_email', 'delete_email', 'mark_email_read'])]
@@ -312,9 +312,9 @@ final class EmailTool implements ToolInterface
         $from = $settings[self::KEY_SMTP_FROM] ?? '';
         $imapSettings['from'] = $from;
 
-        $uid = $this->imapClient->saveDraft($imapSettings, $to, $subject, $body);
+        $success = $this->imapClient->saveDraft($imapSettings, $to, $subject, $body);
 
-        if ($uid === '') {
+        if (!$success) {
             $this->logger?->error('EmailTool: failed to save draft');
             return new ToolResult(false, 'Failed to save draft to the Drafts folder. Check IMAP configuration.');
         }
@@ -324,7 +324,7 @@ final class EmailTool implements ToolInterface
         $draft .= "Subject: {$subject}\n";
         $draft .= "\n{$body}";
 
-        return new ToolResult(true, "Draft saved to Drafts folder (UID: {$uid}):\n\n{$draft}");
+        return new ToolResult(true, "Draft saved to Drafts folder:\n\n{$draft}");
     }
 
     public function sendEmail(array $arguments, int $agentId, ?int $userId): ToolResult

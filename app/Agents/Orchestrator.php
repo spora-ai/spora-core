@@ -534,14 +534,15 @@ final class Orchestrator implements OrchestratorInterface
             $task->save();
         });
 
-        if (!$task instanceof Task || !$state instanceof AgentState) {
-            throw new RuntimeException('Failed to resolve task or state during resume.');
-        }
+        try {
+            if (!$task instanceof Task || !$state instanceof AgentState) {
+                throw new RuntimeException('Failed to resolve task or state during resume.');
+            }
 
-        $this->logger?->info('Task resumed after approval', [
-            'task_id' => $task->id,
-            'approved_count' => count($approvedBatch),
-        ]);
+            $this->logger?->info('Task resumed after approval', [
+                'task_id' => $task->id,
+                'approved_count' => count($approvedBatch),
+            ]);
 
         // Build a map from providerCallId → approved arguments for O(1) lookup.
         $approvedMap = [];
@@ -630,6 +631,15 @@ final class Orchestrator implements OrchestratorInterface
             $this->tick($taskId);
         }
 
+        } catch (Throwable $e) {
+            Task::where('id', $taskId)->update([
+                'status'         => 'FAILED',
+                'error_code'     => 'RESUME_FAILED',
+                'error_message'  => 'Task resume failed: ' . $e->getMessage(),
+                'failure_reason' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
     }
 
     public function reject(int $taskId, string $reason): void
@@ -646,9 +656,7 @@ final class Orchestrator implements OrchestratorInterface
             }
             if ($task->pending_state === null) {
                 // If there's no state, synthesize an empty one to continue the flow
-                $state = new AgentState(taskId: $task->id, agentId: $task->agent_id, pendingToolCalls: [], messageSnapshot: [], stepCount: $task->step_count, maxSteps: $task->max_steps, pausedAt: date('Y-m-d\\TH:i:s\\Z'));
-
-                $state = AgentState::fromJson('{"active_tools":[],"pending_tool_calls":[]}');
+                $state = new AgentState(taskId: $task->id, agentId: $task->agent_id, pendingToolCalls: [], messageSnapshot: [], stepCount: $task->step_count, maxSteps: $task->max_steps, pausedAt: date('Y-m-d\TH:i:s\Z'));
             } else {
                 $state = AgentState::fromJson($task->pending_state);
             }
@@ -660,11 +668,12 @@ final class Orchestrator implements OrchestratorInterface
             $task->save();
         });
 
-        if (!$task instanceof Task || !$state instanceof AgentState) {
-            throw new RuntimeException('Failed to resolve task or state during reject.');
-        }
+        try {
+            if (!$task instanceof Task || !$state instanceof AgentState) {
+                throw new RuntimeException('Failed to resolve task or state during reject.');
+            }
 
-        // Fetch ALL pending tool calls from the database to ensure we don't leak any
+            // Fetch ALL pending tool calls from the database to ensure we don't leak any
         // due to concurrency/corruption issues that dropped them from the JSON state.
         $pendingModels = ToolCallModel::where('task_id', $taskId)
             ->where('status', 'PENDING_APPROVAL')
@@ -696,6 +705,15 @@ final class Orchestrator implements OrchestratorInterface
             $this->tick($taskId);
         }
 
+        } catch (Throwable $e) {
+            Task::where('id', $taskId)->update([
+                'status'         => 'FAILED',
+                'error_code'     => 'REJECT_FAILED',
+                'error_message'  => 'Task reject failed: ' . $e->getMessage(),
+                'failure_reason' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
     }
 
     // -------------------------------------------------------------------------

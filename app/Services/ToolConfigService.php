@@ -681,7 +681,7 @@ class ToolConfigService
     }
 
     /**
-     * Return effective settings filtered to only those with expose_to_llm === true.
+     * Return effective settings filtered to only those with exposeToLlm === true.
      * Each entry includes the human-readable label and the resolved value.
      *
      * @return array<string, array{label: string, value: mixed}>
@@ -705,7 +705,7 @@ class ToolConfigService
     }
 
     /**
-     * Return key => label map for all #[ToolSetting] fields where expose_to_llm === true.
+     * Return key => label map for all #[ToolSetting] fields where exposeToLlm === true.
      *
      * @return array<string, string>
      */
@@ -719,7 +719,7 @@ class ToolConfigService
         foreach ((new ReflectionClass($toolClass))->getAttributes(ToolSetting::class) as $attr) {
             /** @var ToolSetting $setting */
             $setting = $attr->newInstance();
-            if ($setting->expose_to_llm) {
+            if ($setting->exposeToLlm) {
                 $labels[$setting->key] = $setting->label;
             }
         }

@@ -185,7 +185,6 @@ test('getUserPreferredConfig respects user isolation', function (): void {
 
 test('getEffectiveConfigForAgent uses preferred_llm_config_id for tier-2 fallback', function (): void {
     [$service] = makePreferenceService();
-    $security = makePreferenceService()[1];
 
     $userId = Illuminate\Database\Capsule\Manager::table('users')->insertGetId([
         'email'    => 'effective-t2-pref@example.com',

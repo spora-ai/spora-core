@@ -35,6 +35,6 @@ final class ToolSetting
          * Defaults to false because most settings are credentials/infrastructure.
          * Mark true for settings that directly affect what the LLM can do (e.g. allowed_recipients).
          */
-        public readonly bool $expose_to_llm = false,
+        public readonly bool $exposeToLlm = false,
     ) {}
 }

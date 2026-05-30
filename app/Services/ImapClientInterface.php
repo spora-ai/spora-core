@@ -4,17 +4,10 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-/**
- * Wraps an IMAP client for email reading operations.
- * Abstraction over webklex/php-imap to enable isolated testing.
- *
- * Settings (host, port, credentials etc.) are passed in by the caller (EmailTool)
- * so the interface stays purely about IMAP operations and is easy to mock.
- */
 interface ImapClientInterface
 {
     /**
-     * Connect and return a list of message summaries from the INBOX.
+     * Fetch emails from INBOX.
      *
      * @param array<string, string> $settings
      * @return list<array{uid: string, subject: string, from: string, date: string, body: string}>
@@ -22,7 +15,7 @@ interface ImapClientInterface
     public function fetchInboxMessages(array $settings, int $limit, bool $markAsRead): array;
 
     /**
-     * Connect and return a list of message summaries from a named folder.
+     * Fetch emails from a specific folder.
      *
      * @param array<string, string> $settings
      * @return list<array{uid: string, subject: string, from: string, date: string, body: string}>
@@ -30,7 +23,7 @@ interface ImapClientInterface
     public function fetchFolderMessages(array $settings, string $folder, int $limit): array;
 
     /**
-     * Connect and return all folder names.
+     * Fetch all available folders.
      *
      * @param array<string, string> $settings
      * @return list<string>
@@ -41,14 +34,15 @@ interface ImapClientInterface
      * Save a draft message to the Drafts folder.
      *
      * @param array<string, string> $settings
-     * @return string 'saved' on success, '' on failure.
+     * @return bool true on success, false on failure.
      */
-    public function saveDraft(array $settings, string $to, string $subject, string $body): string;
+    public function saveDraft(array $settings, string $to, string $subject, string $body): bool;
 
     /**
      * Create a new email folder.
      *
      * @param array<string, string> $settings
+     * @return bool True on success, false on failure.
      */
     public function createFolder(array $settings, string $name): bool;
 
@@ -56,6 +50,7 @@ interface ImapClientInterface
      * Rename an existing email folder.
      *
      * @param array<string, string> $settings
+     * @return bool True on success, false on failure.
      */
     public function renameFolder(array $settings, string $oldName, string $newName): bool;
 
@@ -63,21 +58,23 @@ interface ImapClientInterface
      * Delete an email folder.
      *
      * @param array<string, string> $settings
+     * @return bool True on success, false on failure.
      */
     public function deleteFolder(array $settings, string $name): bool;
 
     /**
-     * Move an email to a different folder. Returns the new UID assigned by the destination folder, or '' on failure.
+     * Move an email between folders.
      *
      * @param array<string, string> $settings
-     * @return string The new UID in the destination folder, or '' on failure.
+     * @return string The new UID on success, empty string on failure.
      */
     public function moveEmail(array $settings, int $uid, string $fromFolder, string $toFolder): string;
 
     /**
-     * Delete an email (sets \Deleted flag and expunges).
+     * Delete an email.
      *
      * @param array<string, string> $settings
+     * @return bool True on success, false on failure.
      */
     public function deleteEmail(array $settings, int $uid, string $folder): bool;
 
@@ -85,6 +82,7 @@ interface ImapClientInterface
      * Set or unset a flag on an email.
      *
      * @param array<string, string> $settings
+     * @return bool True on success, false on failure.
      */
     public function setEmailFlag(array $settings, int $uid, string $folder, string $flag, bool $enable): bool;
 }

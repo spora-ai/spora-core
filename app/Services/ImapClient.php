@@ -7,6 +7,7 @@ namespace Spora\Services;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mime\Email;
 use Throwable;
+use Webklex\PHPIMAP\Client;
 use Webklex\PHPIMAP\ClientManager;
 
 /**
@@ -17,6 +18,35 @@ final class ImapClient implements ImapClientInterface
     public function __construct(
         private readonly ?LoggerInterface $logger = null,
     ) {}
+
+    private function connect(array $settings): ?Client
+    {
+        $host    = $settings['host'] ?? '';
+        $port    = $settings['port'] ?? '993';
+        $enc     = $settings['encryption'] ?? 'ssl';
+        $user    = $settings['username'] ?? '';
+        $pass    = $settings['password'] ?? '';
+        $timeout = (int) ($settings['timeout'] ?? 60);
+
+        if (empty($host) || empty($user) || empty($pass)) {
+            return null;
+        }
+
+        $cm = new ClientManager();
+        $client = $cm->make([
+            'host'          => $host,
+            'port'          => (int) $port,
+            'encryption'    => $enc,
+            'validate_cert' => true,
+            'username'      => $user,
+            'password'      => $pass,
+            'protocol'      => 'imap',
+            'timeout'       => $timeout,
+        ]);
+
+        $client->connect();
+        return $client;
+    }
 
     public function fetchInboxMessages(array $settings, int $limit, bool $markAsRead): array
     {
@@ -38,31 +68,12 @@ final class ImapClient implements ImapClientInterface
 
     public function fetchFolderNames(array $settings): array
     {
-        $host    = $settings['host'] ?? '';
-        $port    = $settings['port'] ?? '993';
-        $enc     = $settings['encryption'] ?? 'ssl';
-        $user    = $settings['username'] ?? '';
-        $pass    = $settings['password'] ?? '';
-        $timeout = (int) ($settings['timeout'] ?? 60);
-
-        if (empty($host) || empty($user) || empty($pass)) {
-            return [];
-        }
-
         try {
-            $cm = new ClientManager();
-            $client = $cm->make([
-                'host'          => $host,
-                'port'          => (int) $port,
-                'encryption'    => $enc,
-                'validate_cert' => true,
-                'username'      => $user,
-                'password'      => $pass,
-                'protocol'      => 'imap',
-                'timeout'       => $timeout,
-            ]);
+            $client = $this->connect($settings);
+            if (!$client) {
+                return [];
+            }
 
-            $client->connect();
             $folders = $client->getFolders();
             $names = array_map(fn($f) => $f->name, $folders->all());
             sort($names);
@@ -75,34 +86,15 @@ final class ImapClient implements ImapClientInterface
         }
     }
 
-    public function saveDraft(array $settings, string $to, string $subject, string $body): string
+    public function saveDraft(array $settings, string $to, string $subject, string $body): bool
     {
-        $host    = $settings['host'] ?? '';
-        $port    = $settings['port'] ?? '993';
-        $enc     = $settings['encryption'] ?? 'ssl';
-        $user    = $settings['username'] ?? '';
-        $pass    = $settings['password'] ?? '';
-        $timeout = (int) ($settings['timeout'] ?? 60);
-        $from    = $settings['from'] ?? $user;
-
-        if (empty($host) || empty($user) || empty($pass)) {
-            return '';
-        }
-
         try {
-            $cm = new ClientManager();
-            $client = $cm->make([
-                'host'          => $host,
-                'port'          => (int) $port,
-                'encryption'    => $enc,
-                'validate_cert' => true,
-                'username'      => $user,
-                'password'      => $pass,
-                'protocol'      => 'imap',
-                'timeout'       => $timeout,
-            ]);
+            $client = $this->connect($settings);
+            if (!$client) {
+                return false;
+            }
 
-            $client->connect();
+            $from = $settings['from'] ?? ($settings['username'] ?? '');
 
             $email = (new Email())
                 ->from($from)
@@ -116,40 +108,21 @@ final class ImapClient implements ImapClientInterface
             $draftFolder->appendMessage($rawMessage);
             $client->disconnect();
 
-            return 'saved';
+            return true;
         } catch (Throwable $e) {
             $this->logger?->error('IMAP save draft error', ['exception' => $e]);
-            return '';
+            return false;
         }
     }
 
     public function createFolder(array $settings, string $name): bool
     {
-        $host    = $settings['host'] ?? '';
-        $port    = $settings['port'] ?? '993';
-        $enc     = $settings['encryption'] ?? 'ssl';
-        $user    = $settings['username'] ?? '';
-        $pass    = $settings['password'] ?? '';
-        $timeout = (int) ($settings['timeout'] ?? 60);
-
-        if (empty($host) || empty($user) || empty($pass)) {
-            return false;
-        }
-
         try {
-            $cm = new ClientManager();
-            $client = $cm->make([
-                'host'          => $host,
-                'port'          => (int) $port,
-                'encryption'    => $enc,
-                'validate_cert' => true,
-                'username'      => $user,
-                'password'      => $pass,
-                'protocol'      => 'imap',
-                'timeout'       => $timeout,
-            ]);
+            $client = $this->connect($settings);
+            if (!$client) {
+                return false;
+            }
 
-            $client->connect();
             // Passing false to avoid the library's default behavior of calling expunge()
             // after folder operations, which fails if no mailbox is selected.
             $client->createFolder($name, false);
@@ -164,31 +137,12 @@ final class ImapClient implements ImapClientInterface
 
     public function renameFolder(array $settings, string $oldName, string $newName): bool
     {
-        $host    = $settings['host'] ?? '';
-        $port    = $settings['port'] ?? '993';
-        $enc     = $settings['encryption'] ?? 'ssl';
-        $user    = $settings['username'] ?? '';
-        $pass    = $settings['password'] ?? '';
-        $timeout = (int) ($settings['timeout'] ?? 60);
-
-        if (empty($host) || empty($user) || empty($pass)) {
-            return false;
-        }
-
         try {
-            $cm = new ClientManager();
-            $client = $cm->make([
-                'host'          => $host,
-                'port'          => (int) $port,
-                'encryption'    => $enc,
-                'validate_cert' => true,
-                'username'      => $user,
-                'password'      => $pass,
-                'protocol'      => 'imap',
-                'timeout'       => $timeout,
-            ]);
+            $client = $this->connect($settings);
+            if (!$client) {
+                return false;
+            }
 
-            $client->connect();
             // Passing false to avoid the library's default behavior of calling expunge()
             $client->getFolder($oldName)->rename($newName, false);
             $client->disconnect();
@@ -202,31 +156,12 @@ final class ImapClient implements ImapClientInterface
 
     public function deleteFolder(array $settings, string $name): bool
     {
-        $host    = $settings['host'] ?? '';
-        $port    = $settings['port'] ?? '993';
-        $enc     = $settings['encryption'] ?? 'ssl';
-        $user    = $settings['username'] ?? '';
-        $pass    = $settings['password'] ?? '';
-        $timeout = (int) ($settings['timeout'] ?? 60);
-
-        if (empty($host) || empty($user) || empty($pass)) {
-            return false;
-        }
-
         try {
-            $cm = new ClientManager();
-            $client = $cm->make([
-                'host'          => $host,
-                'port'          => (int) $port,
-                'encryption'    => $enc,
-                'validate_cert' => true,
-                'username'      => $user,
-                'password'      => $pass,
-                'protocol'      => 'imap',
-                'timeout'       => $timeout,
-            ]);
+            $client = $this->connect($settings);
+            if (!$client) {
+                return false;
+            }
 
-            $client->connect();
             // Passing false to avoid the library's default behavior of calling expunge()
             $client->deleteFolder($name, false);
             $client->disconnect();
@@ -240,31 +175,12 @@ final class ImapClient implements ImapClientInterface
 
     public function moveEmail(array $settings, int $uid, string $fromFolder, string $toFolder): string
     {
-        $host    = $settings['host'] ?? '';
-        $port    = $settings['port'] ?? '993';
-        $enc     = $settings['encryption'] ?? 'ssl';
-        $user    = $settings['username'] ?? '';
-        $pass    = $settings['password'] ?? '';
-        $timeout = (int) ($settings['timeout'] ?? 60);
-
-        if (empty($host) || empty($user) || empty($pass)) {
-            return '';
-        }
-
         try {
-            $cm = new ClientManager();
-            $client = $cm->make([
-                'host'          => $host,
-                'port'          => (int) $port,
-                'encryption'    => $enc,
-                'validate_cert' => true,
-                'username'      => $user,
-                'password'      => $pass,
-                'protocol'      => 'imap',
-                'timeout'       => $timeout,
-            ]);
+            $client = $this->connect($settings);
+            if (!$client) {
+                return '';
+            }
 
-            $client->connect();
             $movedMessage = $client->getFolder($fromFolder)->messages()->getMessageByUid($uid)->move($toFolder);
             $newUid = $movedMessage?->getUid() ?? '';
             $client->disconnect();
@@ -278,31 +194,12 @@ final class ImapClient implements ImapClientInterface
 
     public function deleteEmail(array $settings, int $uid, string $folder): bool
     {
-        $host    = $settings['host'] ?? '';
-        $port    = $settings['port'] ?? '993';
-        $enc     = $settings['encryption'] ?? 'ssl';
-        $user    = $settings['username'] ?? '';
-        $pass    = $settings['password'] ?? '';
-        $timeout = (int) ($settings['timeout'] ?? 60);
-
-        if (empty($host) || empty($user) || empty($pass)) {
-            return false;
-        }
-
         try {
-            $cm = new ClientManager();
-            $client = $cm->make([
-                'host'          => $host,
-                'port'          => (int) $port,
-                'encryption'    => $enc,
-                'validate_cert' => true,
-                'username'      => $user,
-                'password'      => $pass,
-                'protocol'      => 'imap',
-                'timeout'       => $timeout,
-            ]);
+            $client = $this->connect($settings);
+            if (!$client) {
+                return false;
+            }
 
-            $client->connect();
             $client->getFolder($folder)->messages()->getMessageByUid($uid)->delete(true);
             $client->disconnect();
 
@@ -315,31 +212,12 @@ final class ImapClient implements ImapClientInterface
 
     public function setEmailFlag(array $settings, int $uid, string $folder, string $flag, bool $enable): bool
     {
-        $host    = $settings['host'] ?? '';
-        $port    = $settings['port'] ?? '993';
-        $enc     = $settings['encryption'] ?? 'ssl';
-        $user    = $settings['username'] ?? '';
-        $pass    = $settings['password'] ?? '';
-        $timeout = (int) ($settings['timeout'] ?? 60);
-
-        if (empty($host) || empty($user) || empty($pass)) {
-            return false;
-        }
-
         try {
-            $cm = new ClientManager();
-            $client = $cm->make([
-                'host'          => $host,
-                'port'          => (int) $port,
-                'encryption'    => $enc,
-                'validate_cert' => true,
-                'username'      => $user,
-                'password'      => $pass,
-                'protocol'      => 'imap',
-                'timeout'       => $timeout,
-            ]);
+            $client = $this->connect($settings);
+            if (!$client) {
+                return false;
+            }
 
-            $client->connect();
             $message = $client->getFolder($folder)->messages()->getMessageByUid($uid);
             if ($enable) {
                 $message->setFlag($flag);
@@ -361,68 +239,54 @@ final class ImapClient implements ImapClientInterface
      */
     private function fetchMessages(string $folder, array $settings, int $limit, bool $markAsRead): array
     {
-        $host    = $settings['host'] ?? '';
-        $port    = $settings['port'] ?? '993';
-        $enc     = $settings['encryption'] ?? 'ssl';
-        $user    = $settings['username'] ?? '';
-        $pass    = $settings['password'] ?? '';
-        $timeout = (int) ($settings['timeout'] ?? 60);
+        try {
+            $client = $this->connect($settings);
+            if (!$client) {
+                return [];
+            }
 
-        if (empty($host) || empty($user) || empty($pass)) {
-            return [];
-        }
+            $mailFolder = $client->getFolder($folder);
 
-        $cm = new ClientManager();
-        $client = $cm->make([
-            'host'          => $host,
-            'port'          => (int) $port,
-            'encryption'    => $enc,
-            'validate_cert' => true,
-            'username'      => $user,
-            'password'      => $pass,
-            'protocol'      => 'imap',
-            'timeout'       => $timeout,
-        ]);
+            $query = $mailFolder->messages()->all();
+            if ($folder === 'INBOX') {
+                $query = $query->unseen();
+            }
 
-        $client->connect();
-        $mailFolder = $client->getFolder($folder);
+            $messages = $query->limit($limit)->get();
 
-        $query = $mailFolder->messages()->all();
-        if ($folder === 'INBOX') {
-            $query = $query->unseen();
-        }
+            if ($messages->isEmpty()) {
+                $client->disconnect();
+                return [];
+            }
 
-        $messages = $query->limit($limit)->get();
+            $results = [];
+            foreach ($messages as $message) {
+                $from = $message->getFrom()[0]->mail ?? 'Unknown';
+                $date = $message->getDate()?->toDate()?->format('Y-m-d H:i:s') ?? 'Unknown Date';
+                $body = $message->getTextBody();
+                if (empty($body)) {
+                    $body = strip_tags($message->getHTMLBody() ?? '');
+                }
 
-        if ($messages->isEmpty()) {
+                $results[] = [
+                    'uid'     => (string)$message->getUid(),
+                    'subject' => (string)$message->getSubject(),
+                    'from'    => $from,
+                    'date'    => $date,
+                    'body'    => $body,
+                ];
+
+                if ($markAsRead) {
+                    $message->setFlag('Seen');
+                }
+            }
+
             $client->disconnect();
+
+            return $results;
+        } catch (Throwable $e) {
+            $this->logger?->error('IMAP fetch messages error', ['folder' => $folder, 'exception' => $e]);
             return [];
         }
-
-        $results = [];
-        foreach ($messages as $message) {
-            $from = $message->getFrom()[0]->mail ?? 'Unknown';
-            $date = $message->getDate()?->toDate()?->format('Y-m-d H:i:s') ?? 'Unknown Date';
-            $body = $message->getTextBody();
-            if (empty($body)) {
-                $body = strip_tags($message->getHTMLBody() ?? '');
-            }
-
-            $results[] = [
-                'uid'     => $message->getUid(),
-                'subject' => $message->getSubject(),
-                'from'    => $from,
-                'date'    => $date,
-                'body'    => $body,
-            ];
-
-            if ($markAsRead) {
-                $message->setFlag('Seen');
-            }
-        }
-
-        $client->disconnect();
-
-        return $results;
     }
 }

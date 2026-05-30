@@ -295,7 +295,7 @@ describe('EmailTool', function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')->andReturn($settings);
             $imap = Mockery::mock(ImapClientInterface::class);
-            $imap->allows('saveDraft')->andReturn('saved');
+            $imap->allows('saveDraft')->andReturn(true);
             $tool = makeEmailTool($config, $imap);
 
             $result = $tool->execute([
@@ -318,7 +318,7 @@ describe('EmailTool', function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')->andReturn($settings);
             $imap = Mockery::mock(ImapClientInterface::class);
-            $imap->allows('saveDraft')->andReturn('saved');
+            $imap->allows('saveDraft')->andReturn(true);
             $tool = makeEmailTool($config, $imap);
 
             $result = $tool->execute([
