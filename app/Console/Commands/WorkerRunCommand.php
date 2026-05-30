@@ -64,7 +64,7 @@ final class WorkerRunCommand extends Command
         $this->addOption('include-queue', null, InputOption::VALUE_NONE, 'With --once: also drain the QUEUED task queue in the same run');
         $this->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Max QUEUED tasks to process per run (0 = unlimited)', '0');
         $this->addOption('sleep', 's', InputOption::VALUE_REQUIRED, 'Microseconds to sleep when the queue is empty', '500000');
-        $this->addOption('stale-minutes', null, InputOption::VALUE_REQUIRED, 'Minutes before a RUNNING task is orphaned (0 = disabled, omit to use config/default/60)', '60');
+        $this->addOption('stale-minutes', null, InputOption::VALUE_REQUIRED, 'Minutes before a RUNNING task is orphaned (0 = disabled, omit to use config/default/60)', null);
         $this->addOption('workers', 'w', InputOption::VALUE_OPTIONAL, 'Max concurrent child processes (0 = unlimited, default: unlimited)', null);
         $this->addOption('reap-only', null, InputOption::VALUE_NONE, 'Reap orphaned RUNNING tasks once, then exit. No queue processing.');
     }
@@ -113,7 +113,14 @@ final class WorkerRunCommand extends Command
             default => (int) ($this->container->get('config')['max_workers'] ?? 0),
         };
 
-        // In daemon mode, always use a single-instance lock and set up graceful signal handling.
+        // Lock to prevent concurrent execution (except for --reap-only maintenance).
+        if (!$isReapOnly) {
+            if (!$this->acquireLock($output)) {
+                return Command::FAILURE;
+            }
+        }
+
+        // In daemon mode, set up graceful signal handling.
         if ($isDaemon && extension_loaded('pcntl')) {
             pcntl_async_signals(true);
             pcntl_signal(SIGTERM, function () use ($output): void {
@@ -126,10 +133,6 @@ final class WorkerRunCommand extends Command
                 $this->shutdownParent();
                 $output->writeln('<info>Daemon shut down gracefully.</info>');
             });
-
-            if (!$this->acquireLock($output)) {
-                return Command::FAILURE;
-            }
         }
 
         $processed  = 0;
