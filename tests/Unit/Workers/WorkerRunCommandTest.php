@@ -14,6 +14,7 @@ use Spora\Models\ScheduledRunNext;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\NullOutput;
 
 // Fixed dates for deterministic tests — always before/after wall clock.
@@ -201,7 +202,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         expect($doneCount)->toBe(1);
     });
 
-    it('computes next_run_at from last_run_at not now for recurring runs', function (): void {
+    it('computes next_run_at from wall-clock now, not last_run_at, for recurring runs', function (): void {
         [$command, , $db] = makeWorkerRunCommand();
         [$userId, $agentId] = registerAgentInWorkerDb($db);
 
@@ -473,6 +474,7 @@ describe('WorkerRunCommand processQueuedTaskSync', function (): void {
 
         $notificationService = Mockery::mock(NotificationService::class);
         $notificationService->allows('notifyTaskFailed')->andReturnNull();
+        $notificationService->allows('notifyTaskOrphaned')->andReturnNull();
         $notificationService->allows('notifyScheduledRunCompleted')->andReturnNull();
         $notificationService->allows('sendEmailForScheduledRun')->andReturnNull();
 
@@ -519,5 +521,135 @@ describe('WorkerRunCommand processQueuedTaskSync', function (): void {
         $task->refresh();
         expect($task->status)->toBe('FAILED');
         expect($processed)->toBe(1);
+    });
+});
+
+describe('WorkerRunCommand --reap-only', function (): void {
+    it('exits immediately without processing the queue when --reap-only is set', function (): void {
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+        $db->boot();
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        // tick() must NOT be called in --reap-only mode
+        $orchestrator->shouldNotReceive('tick');
+        // start() must NOT be called either
+        $orchestrator->shouldNotReceive('start');
+
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+
+        $notificationService = Mockery::mock(NotificationService::class);
+
+        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+        $container->allows('get')->with('tool_instances')->andReturn([]);
+
+        $command = new WorkerRunCommand(
+            $db,
+            $orchestrator,
+            new NullLogger(),
+            $container,
+            $mercure,
+            $notificationService,
+        );
+
+        $authService = bootAuthLayer();
+        $userId = $authService->register('reaponly-test@example.com', 'Password1!', 'ReapOnlyTest');
+        $agent = Agent::create([
+            'user_id'   => $userId,
+            'name'      => 'ReapOnlyTestAgent',
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
+
+        // Create a QUEUED task — it should NOT be processed in --reap-only mode
+        Task::create([
+            'agent_id'    => $agent->id,
+            'user_id'     => $userId,
+            'status'      => 'QUEUED',
+            'user_prompt' => 'Should not run',
+            'max_steps'   => 10,
+            'step_count'  => 0,
+        ]);
+
+        // ArrayInput needs the command's definition to resolve options.
+        // Bind the input to the command so it gets the option definitions.
+        $input = new ArrayInput(['--reap-only' => true], $command->getDefinition());
+        $output = new NullOutput();
+
+        $ref = new ReflectionMethod($command, 'execute');
+        $exitCode = $ref->invoke($command, $input, $output);
+
+        // Must exit cleanly
+        expect($exitCode)->toBe(0);
+
+        // Task must still be QUEUED (not processed)
+        $task = Task::first();
+        expect($task->status)->toBe('QUEUED');
+    });
+
+    it('calls reapStaleTasks and marks orphaned tasks FAILED in --reap-only mode', function (): void {
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+        $db->boot();
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->shouldNotReceive('tick');
+
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+
+        $notificationService = Mockery::mock(NotificationService::class);
+        $notificationService->allows('notifyTaskOrphaned')->andReturnNull();
+
+        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 1]);
+        $container->allows('get')->with('tool_instances')->andReturn([]);
+
+        $command = new WorkerRunCommand(
+            $db,
+            $orchestrator,
+            new NullLogger(),
+            $container,
+            $mercure,
+            $notificationService,
+        );
+
+        $authService = bootAuthLayer();
+        $userId = $authService->register('reaponly2-test@example.com', 'Password1!', 'ReapOnly2Test');
+        $agent = Agent::create([
+            'user_id'   => $userId,
+            'name'      => 'ReapOnly2TestAgent',
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
+
+        // Create a task stuck in RUNNING for longer than stale-minutes
+        $orphanedTask = Task::create([
+            'agent_id'    => $agent->id,
+            'user_id'     => $userId,
+            'status'      => 'RUNNING',
+            'user_prompt' => 'Orphaned',
+            'max_steps'   => 10,
+            'step_count'  => 0,
+        ]);
+        // Override updated_at directly so Eloquent doesn't refresh it on save().
+        Task::where('id', $orphanedTask->id)->update([
+            'updated_at' => date('Y-m-d H:i:s', strtotime('-10 minutes')),
+        ]);
+
+        // Explicit --stale-minutes=1 so the test overrides the CLI default of 60.
+        $input = new ArrayInput(['--reap-only' => true, '--stale-minutes' => 1], $command->getDefinition());
+        $output = new NullOutput();
+
+        $ref = new ReflectionMethod($command, 'execute');
+        $exitCode = $ref->invoke($command, $input, $output);
+
+        expect($exitCode)->toBe(0);
+
+        $orphanedTask->refresh();
+        expect($orphanedTask->status)->toBe('FAILED');
+        expect($orphanedTask->error_code)->toBe('ORPHANED');
     });
 });
