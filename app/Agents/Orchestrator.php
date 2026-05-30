@@ -544,23 +544,54 @@ final class Orchestrator implements OrchestratorInterface
                 'approved_count' => count($approvedBatch),
             ]);
 
-        // Build a map from providerCallId → approved arguments for O(1) lookup.
-        $approvedMap = [];
-        foreach ($approvedBatch as $item) {
-            $approvedMap[$item['provider_call_id']] = $item['arguments'];
-        }
+            // Build a map from providerCallId → approved arguments for O(1) lookup.
+            $approvedMap = [];
+            foreach ($approvedBatch as $item) {
+                $approvedMap[$item['provider_call_id']] = $item['arguments'];
+            }
 
-        foreach ($state->pendingToolCalls as $pendingToolCall) {
-            $approvedArgs = $approvedMap[$pendingToolCall->providerCallId] ?? $pendingToolCall->arguments;
+            foreach ($state->pendingToolCalls as $pendingToolCall) {
+                $approvedArgs = $approvedMap[$pendingToolCall->providerCallId] ?? $pendingToolCall->arguments;
 
-            $toolInstance = $this->resolveToolByName($pendingToolCall->toolName);
+                $toolInstance = $this->resolveToolByName($pendingToolCall->toolName);
 
-            // Fix #4: Validate the human-edited arguments before trusting them.
-            try {
-                SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema());
-            } catch (Throwable $e) {
-                $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
-                // Skip execution, immediately inject failure
+                // Fix #4: Validate the human-edited arguments before trusting them.
+                try {
+                    SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema());
+                } catch (Throwable $e) {
+                    $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
+                    // Skip execution, immediately inject failure
+                    $this->appendHistory(
+                        taskId: $task->id,
+                        role: 'tool',
+                        content: $result->content,
+                        toolCallId: $pendingToolCall->providerCallId,
+                        toolName: $pendingToolCall->toolName,
+                    );
+                    ToolCallModel::where('task_id', $taskId)
+                        ->where('provider_call_id', $pendingToolCall->providerCallId)
+                        ->update([
+                            'status'         => 'APPROVED',
+                            'result_content' => $result->content,
+                            'executed_at'    => date('Y-m-d H:i:s'),
+                        ]);
+                    continue;
+                }
+
+                // Fix #5: Safe execution — community plugins may throw.
+                $result = $this->safeExecute($toolInstance, $approvedArgs, $state->agentId, $taskId, $task->user_id);
+
+                ToolCallModel::where('task_id', $taskId)
+                    ->where('provider_call_id', $pendingToolCall->providerCallId)
+                    ->update([
+                        'status'             => 'APPROVED',
+                        'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
+                        'result_content'     => $result->content,
+                        'result_data'        => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
+                        'executed_at'        => date('Y-m-d H:i:s'),
+                    ]);
+
+                // Append the tool result into history so the LLM sees it on the next tick.
                 $this->appendHistory(
                     taskId: $task->id,
                     role: 'tool',
@@ -568,68 +599,37 @@ final class Orchestrator implements OrchestratorInterface
                     toolCallId: $pendingToolCall->providerCallId,
                     toolName: $pendingToolCall->toolName,
                 );
-                ToolCallModel::where('task_id', $taskId)
-                    ->where('provider_call_id', $pendingToolCall->providerCallId)
-                    ->update([
-                        'status'         => 'APPROVED',
-                        'result_content' => $result->content,
-                        'executed_at'    => date('Y-m-d H:i:s'),
-                    ]);
-                continue;
             }
 
-            // Fix #5: Safe execution — community plugins may throw.
-            $result = $this->safeExecute($toolInstance, $approvedArgs, $state->agentId, $taskId, $task->user_id);
+            // Clean up any leaked tools that were stranded in PENDING_APPROVAL due to concurrency bugs.
+            // This ensures the frontend doesn't infinitely display stranded approvals.
+            $danglingTools = ToolCallModel::where('task_id', $taskId)
+                ->where('status', 'PENDING_APPROVAL')
+                ->get();
+
+            foreach ($danglingTools as $danglingTool) {
+                $this->appendHistory(
+                    taskId: $task->id,
+                    role: 'tool',
+                    content: 'Action discarded (state mismatch/timeout)',
+                    toolCallId: $danglingTool->provider_call_id,
+                    toolName: $danglingTool->tool_name,
+                );
+            }
 
             ToolCallModel::where('task_id', $taskId)
-                ->where('provider_call_id', $pendingToolCall->providerCallId)
-                ->update([
-                    'status'             => 'APPROVED',
-                    'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
-                    'result_content'     => $result->content,
-                    'result_data'        => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                    'executed_at'        => date('Y-m-d H:i:s'),
-                ]);
+                ->where('status', 'PENDING_APPROVAL')
+                ->update(['status' => 'REJECTED']);
 
-            // Append the tool result into history so the LLM sees it on the next tick.
-            $this->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: $result->content,
-                toolCallId: $pendingToolCall->providerCallId,
-                toolName: $pendingToolCall->toolName,
-            );
-        }
+            // Now that tool results are safely in the history, update status to RUNNING or QUEUED
+            $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
+            Task::where('id', $taskId)->update(['status' => $taskStatus]);
 
-        // Clean up any leaked tools that were stranded in PENDING_APPROVAL due to concurrency bugs.
-        // This ensures the frontend doesn't infinitely display stranded approvals.
-        $danglingTools = ToolCallModel::where('task_id', $taskId)
-            ->where('status', 'PENDING_APPROVAL')
-            ->get();
-
-        foreach ($danglingTools as $danglingTool) {
-            $this->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: 'Action discarded (state mismatch/timeout)',
-                toolCallId: $danglingTool->provider_call_id,
-                toolName: $danglingTool->tool_name,
-            );
-        }
-
-        ToolCallModel::where('task_id', $taskId)
-            ->where('status', 'PENDING_APPROVAL')
-            ->update(['status' => 'REJECTED']);
-
-        // Now that tool results are safely in the history, update status to RUNNING or QUEUED
-        $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
-        Task::where('id', $taskId)->update(['status' => $taskStatus]);
-
-        if ($this->workerMode === WorkerMode::Sync) {
-            // Tick is called after the transaction commits so the LLM round-trip
-            // does not hold the lockForUpdate open for its full duration.
-            $this->tick($taskId);
-        }
+            if ($this->workerMode === WorkerMode::Sync) {
+                // Tick is called after the transaction commits so the LLM round-trip
+                // does not hold the lockForUpdate open for its full duration.
+                $this->tick($taskId);
+            }
 
         } catch (Throwable $e) {
             Task::where('id', $taskId)->update([
@@ -674,36 +674,36 @@ final class Orchestrator implements OrchestratorInterface
             }
 
             // Fetch ALL pending tool calls from the database to ensure we don't leak any
-        // due to concurrency/corruption issues that dropped them from the JSON state.
-        $pendingModels = ToolCallModel::where('task_id', $taskId)
-            ->where('status', 'PENDING_APPROVAL')
-            ->get();
+            // due to concurrency/corruption issues that dropped them from the JSON state.
+            $pendingModels = ToolCallModel::where('task_id', $taskId)
+                ->where('status', 'PENDING_APPROVAL')
+                ->get();
 
-        ToolCallModel::where('task_id', $taskId)
-            ->where('status', 'PENDING_APPROVAL')
-            ->update(['status' => 'REJECTED']);
+            ToolCallModel::where('task_id', $taskId)
+                ->where('status', 'PENDING_APPROVAL')
+                ->update(['status' => 'REJECTED']);
 
-        // Inject one synthetic tool-result row per rejected call so the LLM
-        // can reason about the refusal for each individual action.
-        foreach ($pendingModels as $model) {
-            $this->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: "Action rejected by user: {$reason}",
-                toolCallId: $model->provider_call_id,
-                toolName: $model->tool_name,
-            );
-        }
+            // Inject one synthetic tool-result row per rejected call so the LLM
+            // can reason about the refusal for each individual action.
+            foreach ($pendingModels as $model) {
+                $this->appendHistory(
+                    taskId: $task->id,
+                    role: 'tool',
+                    content: "Action rejected by user: {$reason}",
+                    toolCallId: $model->provider_call_id,
+                    toolName: $model->tool_name,
+                );
+            }
 
-        // Now that tool results are safely in the history, update status to RUNNING or QUEUED
-        $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
-        Task::where('id', $taskId)->update(['status' => $taskStatus]);
+            // Now that tool results are safely in the history, update status to RUNNING or QUEUED
+            $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
+            Task::where('id', $taskId)->update(['status' => $taskStatus]);
 
-        if ($this->workerMode === WorkerMode::Sync) {
-            // Tick is called after the transaction commits so the LLM round-trip
-            // does not hold the lockForUpdate open for its full duration.
-            $this->tick($taskId);
-        }
+            if ($this->workerMode === WorkerMode::Sync) {
+                // Tick is called after the transaction commits so the LLM round-trip
+                // does not hold the lockForUpdate open for its full duration.
+                $this->tick($taskId);
+            }
 
         } catch (Throwable $e) {
             Task::where('id', $taskId)->update([

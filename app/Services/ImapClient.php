@@ -269,8 +269,8 @@ final class ImapClient implements ImapClientInterface
                 }
 
                 $results[] = [
-                    'uid'     => (string)$message->getUid(),
-                    'subject' => (string)$message->getSubject(),
+                    'uid'     => (string) $message->getUid(),
+                    'subject' => (string) $message->getSubject(),
                     'from'    => $from,
                     'date'    => $date,
                     'body'    => $body,
