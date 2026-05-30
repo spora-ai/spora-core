@@ -1,139 +1,91 @@
-# Spora
+<!-- Spora Logo -->
+<p align="center">
+  <img src="public/logo.svg" alt="Spora" width="200">
+</p>
 
-**WordPress of AI Agents** — portable, zero-config agent orchestration in PHP 8.4+.
+<!-- Badges -->
+<p align="center">
 
----
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.0--alpha-red?style=flat-square)](https://github.com/fabeat/spora)
+[![PHP 8.4+](https://img.shields.io/badge/PHP-8.4%2B-777BB4?style=flat-square&logo=php&logoColor=white)](https://www.php.net/releases/8.4/en.php)
+[![Node 18+](https://img.shields.io/badge/Node-18%2B-339933?style=flat-square&logo=node&logoColor=white)](https://nodejs.org)
 
-## Quick Start
-
-### Local Development
-
-```bash
-# Install dependencies
-composer install
-cd frontend && npm install
-
-# Start dev servers (PHP built-in + Vite)
-composer dev
-```
-
-Access at **http://localhost:5173** (Vite) — uses SQLite by default, no database server needed.
-
-### Docker Deployment
-
-```bash
-# 1. Create env file from template
-cp docker/.env.local.example .env.local
-
-# 2. Edit .env.local with your settings
-#    - Set SPORA_DB_PASSWORD
-#    - Set SPORA_MERCURE_JWT_KEY (generate with: php -r "echo bin2hex(random_bytes(32));")
-
-# 3. Start services
-docker compose -f docker/docker-compose.yml up
-```
-
-Access at **http://localhost:8081**
-
-For production (ports 80/443):
-```bash
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up
-```
+</p>
 
 ---
 
-## Services (Docker)
+## ⚠️ Early Alpha
 
-| Service | Port (Local) | Port (Prod) | Description |
-|---------|-------------|-------------|-------------|
-| spora | 8080, 8443 | 80, 443 | FrankenPHP + worker daemon |
-| mariadb | 3306 (internal) | 3306 (internal) | MySQL database |
+> **Spora v0.1.0 is early alpha software.** It is functional and runs in production for personal use, but the API, database schema, and plugin system may change in breaking ways before v1.0. Use at your own risk.
 
-FrankenPHP provides the web server, PHP runtime, and — via its built-in Mercure hub — real-time SSE. **No separate Mercure service is needed.**
+---
+
+## What is Spora?
+
+Spora is a **self-hosted AI agent orchestration platform** built in PHP 8.4+.
+
+It is designed to be:
+
+- **Zero-config** — works out of the box with sensible defaults (SQLite, no server required)
+- **Portable** — runs on any PHP 8.4+ environment, from a laptop to a shared cPanel/FTP host
+- **Extensible** — a WordPress-like plugin system lets you add tools, drivers, and agent behaviors
+
+You define agents, give them tools, and Spora handles the execution loop — tick-based, stateless, with human-in-the-loop approval for write operations.
+
+---
+
+## Key Features
+
+- **Tick-based agent execution** — stateless, LLM-agnostic orchestration loop (Think → Act)
+- **Built-in tools** — email, calendar, web search, calculator, web scraping, and more
+- **Plugin system** — drop a folder with a `Plugin.php` file, auto-discovered at boot
+- **LLM drivers** — OpenAI-compatible and Anthropic-compatible drivers via `DriverFactory`
+- **Recipes** — define agent prompts in YAML/JSON, scanned at runtime from `recipes/`
+- **Human-in-the-loop** — write tools (email, posting, etc.) require approval before execution
 
 ---
 
 ## Requirements
 
-- PHP 8.4+
-- Composer
-- Node.js 20+
-- npm
+| Requirement | Minimum |
+|-------------|---------|
+| PHP | 8.4+ |
+| Node.js | 18+ |
+| Database | SQLite (dev) / MySQL 8+ (prod) |
 
-For Docker: [Docker Desktop](https://docs.docker.com/desktop/)
-
----
-
-## Environment
-
-For local overrides, copy `.env.local.example` to `.env.local`:
-
-```bash
-cp .env.local.example .env.local
-```
-
-Key local dev settings (already defaults in `.env`):
-- `SPORA_DB_DRIVER=sqlite` (default — zero config)
-- `SPORA_SYNC_MODE=true` (HTTP blocks until agent completes)
-- `SPORA_MERCURE_URL=` (empty — SSE disabled, polling works fine)
+See [Installation Guide](docs/13_installation.md) for full details.
 
 ---
 
-## Common Tasks
+## Installation
 
-### Run migrations / seed database
-```bash
-# Local
-php bin/spora db:seed
-
-# Docker
-docker compose -f docker/docker-compose.yml exec spora php bin/spora db:seed
-```
-
-### View logs
-```bash
-# Local
-tail -f storage/spora.log
-
-# Docker
-docker compose -f docker/docker-compose.yml logs -f spora
-
-# Or inside container
-docker compose -f docker/docker-compose.yml exec spora tail -f storage/spora.log
-```
-
-### Rebuild after code changes
-```bash
-docker compose -f docker/docker-compose.yml up --build
-```
-
-### Stop services
-```bash
-docker compose -f docker/docker-compose.yml down
-```
-
-### Reset database (Docker)
-```bash
-docker compose -f docker/docker-compose.yml exec spora rm -f storage/database.sqlite
-docker compose -f docker/docker-compose.yml exec spora php bin/spora db:seed
-```
-
-Or by removing the volume:
-```bash
-docker compose -f docker/docker-compose.yml down -v
-docker compose -f docker/docker-compose.yml up -d
-docker compose -f docker/docker-compose.yml exec spora php bin/spora db:seed
-```
+Detailed installation instructions are in the [Installation Guide](docs/13_installation.md).
 
 ---
 
-## Troubleshooting
+## Documentation
 
-**Mercure SSE not working**
-- Verify `SPORA_MERCURE_URL=http://localhost/.well-known/mercure`
-- Check `SPORA_MERCURE_JWT_KEY` matches in both `docker/frankenphp.conf` and `.env.local`
-- Run: `curl http://localhost:8081/.well-known/mercure` — should return hub info (or port 80 in production)
+Full documentation is in the [`docs/`](docs/) directory:
 
-**Database connection failed (Docker)**
-- Verify `SPORA_DB_HOST=mariadb` in `.env.local`
-- Check mariadb container is healthy: `docker compose -f docker/docker-compose.yml ps`
+| Document | Coverage |
+|----------|----------|
+| [Architecture](docs/01_architecture.md) | System overview, config, orchestrator loop, plugin system |
+| [API Reference](docs/04_api.md) | REST API endpoints |
+| [Plugin System](docs/07_plugins.md) | How to write plugins |
+| [Tool Development](docs/06_tools.md) | How to build tools |
+| [LLM Drivers](docs/05_drivers.md) | Driver architecture |
+| [Worker Modes](docs/11_agent_loop_async.md) | sync, cron, and daemon deployment |
+| [Testing](docs/16_testing.md) | How to test Spora |
+
+---
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and coding standards.
+
+---
+
+## License
+
+Spora is open source software under the MIT License. See the [LICENSE](LICENSE) file for full terms.

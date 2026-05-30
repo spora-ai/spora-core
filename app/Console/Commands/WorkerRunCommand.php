@@ -59,13 +59,14 @@ final class WorkerRunCommand extends Command
     protected function configure(): void
     {
         $this->setDescription('Drain QUEUED tasks, process scheduled runs, or run as a persistent daemon.');
-        $this->addOption('daemon', 'd', InputOption::VALUE_NONE, 'Run as a persistent daemon that processes both QUEUED tasks and due scheduled runs on each iteration');
+        $this->addOption('daemon', 'd', InputOption::VALUE_NONE, 'Run as a persistent daemon (default when no flag is given).');
         $this->addOption('once', null, InputOption::VALUE_NONE, 'Run once: process all due scheduled runs (and QUEUED tasks with --include-queue), then exit. Ideal for cron-driven deployments.');
         $this->addOption('include-queue', null, InputOption::VALUE_NONE, 'With --once: also drain the QUEUED task queue in the same run');
         $this->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Max QUEUED tasks to process per run (0 = unlimited)', '0');
         $this->addOption('sleep', 's', InputOption::VALUE_REQUIRED, 'Microseconds to sleep when the queue is empty', '500000');
-        $this->addOption('stale-minutes', null, InputOption::VALUE_REQUIRED, 'Minutes after which a RUNNING task is orphaned and failed (0 = disabled, omit to use config/default)', '0');
+        $this->addOption('stale-minutes', null, InputOption::VALUE_REQUIRED, 'Minutes before a RUNNING task is orphaned (0 = disabled, omit to use config/default/60)', null);
         $this->addOption('workers', 'w', InputOption::VALUE_OPTIONAL, 'Max concurrent child processes (0 = unlimited, default: unlimited)', null);
+        $this->addOption('reap-only', null, InputOption::VALUE_NONE, 'Reap orphaned RUNNING tasks once, then exit. No queue processing.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -76,17 +77,31 @@ final class WorkerRunCommand extends Command
         $isOnce = (bool) $input->getOption('once');
         $includeQueue = (bool) $input->getOption('include-queue');
 
-        // --daemon and --once are mutually exclusive
+        $isReapOnly = (bool) $input->getOption('reap-only');
+
+        // --daemon, --once, and --reap-only are mutually exclusive
         if ($isDaemon && $isOnce) {
             $output->writeln('<error>--daemon and --once cannot be used together.</error>');
             return Command::FAILURE;
         }
+        if ($isDaemon && $isReapOnly) {
+            $output->writeln('<error>--daemon and --reap-only cannot be used together.</error>');
+            return Command::FAILURE;
+        }
+        if ($isOnce && $isReapOnly) {
+            $output->writeln('<error>--once and --reap-only cannot be used together.</error>');
+            return Command::FAILURE;
+        }
+
+        // Daemon is the implicit default when no limiting flag is given.
+        $isDaemon = $isDaemon || (!$isOnce && !$isReapOnly);
 
         // Resolve stale-minutes: CLI always wins; omit flag → config → default (60)
-        $staleMinutesCli = $input->getOption('stale-minutes');
-        $staleMinutes = $staleMinutesCli !== '0'
-            ? (int) $staleMinutesCli
-            : (int) ($this->container->get('config')['worker_stale_minutes'] ?? 60);
+        // Explicit 0 from CLI means "disabled" (never reap).
+        $staleMinutesRaw = $input->getOption('stale-minutes');
+        $staleMinutes = (int) ($staleMinutesRaw !== null
+            ? $staleMinutesRaw
+            : ($this->container->get('config')['worker_stale_minutes'] ?? 60));
 
         $limit = (int) $input->getOption('limit');
         $sleep = (int) $input->getOption('sleep');
@@ -98,7 +113,14 @@ final class WorkerRunCommand extends Command
             default => (int) ($this->container->get('config')['max_workers'] ?? 0),
         };
 
-        // In daemon mode, always use a single-instance lock and set up graceful signal handling.
+        // Lock to prevent concurrent execution (except for --reap-only maintenance).
+        if (!$isReapOnly) {
+            if (!$this->acquireLock($output)) {
+                return Command::FAILURE;
+            }
+        }
+
+        // In daemon mode, set up graceful signal handling.
         if ($isDaemon && extension_loaded('pcntl')) {
             pcntl_async_signals(true);
             pcntl_signal(SIGTERM, function () use ($output): void {
@@ -111,10 +133,6 @@ final class WorkerRunCommand extends Command
                 $this->shutdownParent();
                 $output->writeln('<info>Daemon shut down gracefully.</info>');
             });
-
-            if (!$this->acquireLock($output)) {
-                return Command::FAILURE;
-            }
         }
 
         $processed  = 0;
@@ -131,17 +149,24 @@ final class WorkerRunCommand extends Command
             $output->writeln(sprintf('<info>Running in --once mode: processing %s then exiting.</info>', $modeLabel));
             $this->logger->info('Worker run (--once)', ['include_queue' => $includeQueue]);
         } else {
-            $output->writeln('<info>Running in default (cron) mode: processing QUEUED tasks once then exiting.</info>');
-            $this->logger->info('Worker run (default/cron)');
+            $output->writeln('<info>Running in --reap-only mode: reaping orphaned tasks then exiting.</info>');
+            $this->logger->info('Worker run (--reap-only)');
         }
 
         // Reap orphaned tasks at startup — covers any tasks left RUNNING by a previous crash.
         $this->reapStaleTasks($output, $staleMinutes);
         $lastReapAt = time();
 
+        // --reap-only: one-shot orphan cleanup only, no queue or scheduled run processing.
+        if ($isReapOnly) {
+            $output->writeln('<info>Orphan reaping complete. Exiting.</info>');
+            return Command::SUCCESS;
+        }
+
         // Child processes give true parallelism for QUEUED tasks in daemon mode.
         // maxWorkers 0 = unlimited (spawn a child for every QUEUED task).
         // Scheduled runs are always processed synchronously in the parent.
+        // Daemon is the default when no limiting flag (--once, --reap-only) is given.
         $useChildProcesses = $isDaemon;
 
         while (!$this->shouldQuit && ($limit === 0 || $processed < $limit)) {
