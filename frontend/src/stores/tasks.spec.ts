@@ -43,8 +43,8 @@ describe('useTaskStore', () => {
       const store = useTaskStore()
       store.activeTask = makeMinimalTaskDetail({
         tool_calls: [
-          { id: 1, status: 'PENDING', tool_name: 'test', tool_type: 'input', operation: null, operation_description: null, proposed_arguments: null, approved_arguments: null, human_description: null, result_content: null, executed_at: null },
-          { id: 2, status: 'EXECUTED', tool_name: 'test', tool_type: 'input', operation: null, operation_description: null, proposed_arguments: null, approved_arguments: null, human_description: null, result_content: null, executed_at: null },
+          { id: 1, provider_call_id: 'c_1', status: 'PENDING', tool_name: 'test', tool_type: 'input', operation: null, operation_description: null, proposed_arguments: null, approved_arguments: null, human_description: null, result_content: null, executed_at: null },
+          { id: 2, provider_call_id: 'c_2', status: 'EXECUTED', tool_name: 'test', tool_type: 'input', operation: null, operation_description: null, proposed_arguments: null, approved_arguments: null, human_description: null, result_content: null, executed_at: null },
         ],
       })
       expect(store.pendingToolCalls).toHaveLength(1)
@@ -55,7 +55,7 @@ describe('useTaskStore', () => {
       const store = useTaskStore()
       store.activeTask = makeMinimalTaskDetail({
         tool_calls: [
-          { id: 1, status: 'PENDING', tool_name: 'test', tool_type: 'input', operation: null, operation_description: null, proposed_arguments: null, approved_arguments: null, human_description: null, result_content: null, executed_at: null },
+          { id: 1, provider_call_id: 'c_1', status: 'PENDING', tool_name: 'test', tool_type: 'input', operation: null, operation_description: null, proposed_arguments: null, approved_arguments: null, human_description: null, result_content: null, executed_at: null },
         ],
       })
       const results: unknown[] = []

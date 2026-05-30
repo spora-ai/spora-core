@@ -28,29 +28,34 @@ function createConfigForTest(
     bool $isDefault = false,
     ?Spora\Services\LLMConfigService $service = null,
     int $userId = 1,
+    bool $isGlobal = false,
 ): LLMDriverConfiguration {
     $service ??= makeSecureLLMConfigService();
 
-    // Ensure the user exists (FK constraint on user_id). Use SELECT + INSERT to avoid
-    // the deferred-FK behavior of INSERT OR IGNORE in SQLite transactions.
-    $userExists = Capsule::table('users')->where('id', $userId)->exists();
-    if (!$userExists) {
-        Capsule::table('users')->insert([
-            'id'         => $userId,
-            'email'      => "user{$userId}@test.local",
-            'password'   => password_hash('Password1!', PASSWORD_DEFAULT),
-            'registered' => time(),
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
+    // Global configs have no user FK
+    if (!$isGlobal) {
+        // Ensure the user exists (FK constraint on user_id). Use SELECT + INSERT to avoid
+        // the deferred-FK behavior of INSERT OR IGNORE in SQLite transactions.
+        $userExists = Capsule::table('users')->where('id', $userId)->exists();
+        if (!$userExists) {
+            Capsule::table('users')->insert([
+                'id'         => $userId,
+                'email'      => "user{$userId}@test.local",
+                'password'   => password_hash('Password1!', PASSWORD_DEFAULT),
+                'registered' => time(),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+        }
     }
 
     $config = new LLMDriverConfiguration();
-    $config->user_id = $userId;
+    $config->user_id = $isGlobal ? null : $userId;
     $config->name = $name;
     $config->driver_class = $driverClass;
     $config->settings = json_encode($service->encodeSettings($driverClass, $settings));
     $config->is_default = $isDefault;
+    $config->is_global = $isGlobal;
     $config->save();
 
     return $config;
@@ -90,6 +95,7 @@ test('makeFromAgent falls back to global default when agent has no config', func
         isDefault: true,
         service: $service,
         userId: 999,
+        isGlobal: true,
     );
 
     $agent = new Agent();

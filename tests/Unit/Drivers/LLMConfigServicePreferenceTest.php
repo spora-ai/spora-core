@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\UserPreference;
 use Spora\Services\LLMConfigService;
@@ -176,6 +177,101 @@ test('getUserPreferredConfig respects user isolation', function (): void {
     $result = $service->getUserPreferredConfig($userB);
 
     expect($result)->toBeNull();
+});
+
+// ---------------------------------------------------------------------------
+// getEffectiveConfigForAgent uses preferred_llm_config_id (Tier 2)
+// ---------------------------------------------------------------------------
+
+test('getEffectiveConfigForAgent uses preferred_llm_config_id for tier-2 fallback', function (): void {
+    [$service] = makePreferenceService();
+    $security = makePreferenceService()[1];
+
+    $userId = Illuminate\Database\Capsule\Manager::table('users')->insertGetId([
+        'email'    => 'effective-t2-pref@example.com',
+        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'registered' => time(),
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    // Config that has is_default=true but is NOT the preferred one
+    $defaultConfig = new LLMDriverConfiguration();
+    $defaultConfig->user_id = $userId;
+    $defaultConfig->name = 'Should Not Use';
+    $defaultConfig->driver_class = AnthropicCompatibleDriver::class;
+    $defaultConfig->settings = json_encode(['api_key' => 'test', 'model' => 'claude']);
+    $defaultConfig->is_default = true;
+    $defaultConfig->save();
+
+    // Preferred config (different from is_default)
+    $preferredConfig = new LLMDriverConfiguration();
+    $preferredConfig->user_id = $userId;
+    $preferredConfig->name = 'Should Use This';
+    $preferredConfig->driver_class = OpenAICompatibleDriver::class;
+    $preferredConfig->settings = json_encode(['api_key' => 'test', 'model' => 'gpt-4o']);
+    $preferredConfig->save();
+
+    UserPreference::create([
+        'user_id' => $userId,
+        'preferred_llm_config_id' => $preferredConfig->id,
+    ]);
+
+    $agent = new Agent();
+    $agent->id = 999;
+    $agent->user_id = $userId;
+    $agent->llm_driver_config_id = null;
+
+    $result = $service->getEffectiveConfigForAgent($agent);
+
+    // Should use preferred config, NOT the is_default config
+    expect($result)->not->toBeNull()
+        ->and($result->id)->toBe($preferredConfig->id)
+        ->and($result->name)->toBe('Should Use This');
+});
+
+test('getEffectiveConfigForAgent prefers agent config over user preferred config', function (): void {
+    [$service] = makePreferenceService();
+
+    $userId = Illuminate\Database\Capsule\Manager::table('users')->insertGetId([
+        'email'    => 'effective-t1-override@example.com',
+        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'registered' => time(),
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    // Agent-specific config (should be used - Tier 1)
+    $agentConfig = new LLMDriverConfiguration();
+    $agentConfig->user_id = $userId;
+    $agentConfig->name = 'Agent Override';
+    $agentConfig->driver_class = AnthropicCompatibleDriver::class;
+    $agentConfig->settings = json_encode(['api_key' => 'test', 'model' => 'claude']);
+    $agentConfig->save();
+
+    // User preferred config (should NOT be used because agent has its own)
+    $preferredConfig = new LLMDriverConfiguration();
+    $preferredConfig->user_id = $userId;
+    $preferredConfig->name = 'User Preferred';
+    $preferredConfig->driver_class = OpenAICompatibleDriver::class;
+    $preferredConfig->settings = json_encode(['api_key' => 'test', 'model' => 'gpt-4o']);
+    $preferredConfig->save();
+
+    UserPreference::create([
+        'user_id' => $userId,
+        'preferred_llm_config_id' => $preferredConfig->id,
+    ]);
+
+    $agent = new Agent();
+    $agent->id = 1000;
+    $agent->user_id = $userId;
+    $agent->llm_driver_config_id = $agentConfig->id;
+
+    $result = $service->getEffectiveConfigForAgent($agent);
+
+    expect($result)->not->toBeNull()
+        ->and($result->id)->toBe($agentConfig->id)
+        ->and($result->name)->toBe('Agent Override');
 });
 
 // ---------------------------------------------------------------------------

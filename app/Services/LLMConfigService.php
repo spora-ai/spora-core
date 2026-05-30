@@ -356,15 +356,15 @@ final class LLMConfigService implements LLMConfigServiceInterface
      */
     public function getDefaultConfiguration(int $userId): ?LLMDriverConfiguration
     {
-        return LLMDriverConfiguration::where('user_id', $userId)->where('is_default', true)->first();
+        return $this->getUserPreferredConfig($userId);
     }
 
     /**
      * Resolves the effective LLMDriverConfiguration for an agent using three-tier fallback.
      *
-     * Tier 1: Agent-specific config  (agent.llm_driver_config_id)
-     * Tier 2: User's personal default (user_id match, is_default=true)
-     * Tier 3: Global default         (is_global=true, is_default=true)
+     * Tier 1: Agent-specific config     (agent.llm_driver_config_id)
+     * Tier 2: User's preferred config   (user_preferences.preferred_llm_config_id)
+     * Tier 3: Global default           (is_global=true, is_default=true)
      */
     public function getEffectiveConfigForAgent(Agent $agent): ?LLMDriverConfiguration
     {
@@ -376,12 +376,12 @@ final class LLMConfigService implements LLMConfigServiceInterface
             }
         }
 
-        // Tier 2: user default
-        $config = LLMDriverConfiguration::where('user_id', $agent->user_id)
-            ->where('is_default', true)
-            ->first();
-        if ($config !== null) {
-            return $config;
+        // Tier 2: user preferred config (via user_preferences)
+        if ($agent->user_id !== null) {
+            $config = $this->getUserPreferredConfig($agent->user_id);
+            if ($config !== null) {
+                return $config;
+            }
         }
 
         // Tier 3: global default

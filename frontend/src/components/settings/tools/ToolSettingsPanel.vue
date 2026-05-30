@@ -37,6 +37,10 @@ const hasExistingSettings = computed(() =>
   Object.values(serverSettings.value).some((v) => v !== '' && v !== null),
 )
 
+const llmExposedFields = computed(() =>
+  props.tool.settings_schema.filter((f) => f.expose_to_llm),
+)
+
 const settingsCount = computed(() =>
   Object.values(serverSettings.value).filter((v) => v !== '' && v !== null).length,
 )
@@ -152,6 +156,34 @@ function displayValue(key: string, value: string): string {
         </div>
       </div>
     </details>
+  </div>
+
+  <!-- LLM Capabilities -->
+  <div v-if="llmExposedFields.length > 0" class="mb-4">
+    <div class="rounded-lg border border-primary/20 bg-primary/5 p-4">
+      <div class="flex items-center gap-1.5 mb-2">
+        <Icon name="sparkles" class="h-4 w-4 text-primary" />
+        <h3 class="text-sm font-medium text-foreground">LLM Capabilities</h3>
+      </div>
+      <p class="text-xs text-muted-foreground mb-3">
+        These settings directly influence how the LLM uses this tool.
+      </p>
+      <div class="space-y-2">
+        <div
+          v-for="field in llmExposedFields"
+          :key="field.key"
+          class="flex items-start justify-between gap-4 text-sm"
+        >
+          <div class="flex-1">
+            <span class="font-medium text-foreground">{{ field.label }}</span>
+            <p class="text-xs text-muted-foreground mt-0.5">{{ field.description }}</p>
+          </div>
+          <span class="shrink-0 font-mono text-xs text-muted-foreground/80 text-right min-w-[80px]">
+            {{ displayValue(field.key, serverSettings[field.key] ?? '') }}
+          </span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="rounded-xl border border-border bg-card p-5">

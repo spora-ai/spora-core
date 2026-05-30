@@ -143,23 +143,67 @@ The `ToolConfigService::getEffectiveSettings()` method resolves settings by scan
 
 ---
 
+## LLM Exposure (`expose_to_llm`)
+
+By default, tool settings are **server-side only** — they influence how a tool behaves at execution time but are never sent to the LLM.
+
+The `expose_to_llm` parameter on `#[ToolSetting]` controls whether a setting's resolved value is included in the tool definition the LLM receives. This lets the LLM make informed decisions based on its effective configuration.
+
+```php
+#[ToolSetting(
+    key: 'core.smtp.allowed_recipients',
+    label: 'Allowed Recipients',
+    type: 'text',
+    description: 'Comma-separated list of email addresses the agent is allowed to send to.',
+    expose_to_llm: true,  // included in LLM tool definition
+)]
+#[ToolSetting(
+    key: 'core.smtp.host',
+    label: 'SMTP Host',
+    type: 'text',
+    expose_to_llm: false,  // NOT sent to LLM (infrastructure)
+)]
+```
+
+### Default behavior
+
+`expose_to_llm` defaults to `false` because most settings are credentials or infrastructure (hosts, ports, timeouts). Only mark `expose_to_llm: true` for settings that **directly affect what the LLM can do** — e.g. allowed recipient lists, sender addresses, toggle-able capabilities.
+
+### How it reaches the LLM
+
+`ToolConfigService::getLlmToolSettings()` returns the effective (cascaded) values for all `expose_to_llm` settings on a tool. The Orchestrator appends these to the tool's description before sending it to the LLM:
+
+```
+[Effective Configuration]
+- Allowed Recipients: alice@example.com, bob@example.com
+- From Address: agent@spora.local
+```
+
+Unconfigured settings are shown as `(not configured)` so the LLM knows a capability may be unavailable.
+
+---
+
 ## Quick Reference: All Core Keys
 
-| Key                            | Type     | Tool Class           | Purpose |
-|--------------------------------|----------|----------------------|---------|
-| `core.openai.api_key`         | password | `LLMConfiguration`   | OpenAI / compatible API key |
-| `core.anthropic.api_key`      | password | `LLMConfiguration`   | Anthropic Claude API key |
-| `core.tavily.api_key`         | password | `TavilySearchTool`   | Tavily web search key |
-| `core.serper.api_key`         | password | `SerperSearchTool`   | Serper.dev Google search key |
-| `core.worldnewsapi.api_key`   | password | `WorldNewsApiTool`   | WorldNewsAPI key |
-| `core.imap.host`              | text     | `ReadEmailTool`      | IMAP server hostname |
-| `core.imap.port`              | text     | `ReadEmailTool`      | IMAP port (default 993) |
-| `core.imap.encryption`        | text     | `ReadEmailTool`      | `ssl` or `tls` |
-| `core.imap.username`          | text     | `ReadEmailTool`      | IMAP login |
-| `core.imap.password`          | password | `ReadEmailTool`      | IMAP password / app token |
-| `core.smtp.dsn`               | password | `SendEmailTool`      | Symfony Mailer DSN |
-| `core.smtp.from`              | text     | `SendEmailTool`      | Sender email address |
-| `core.smtp.allowed_recipients`| text     | `SendEmailTool`      | Comma-separated whitelist (or `*`) |
-| `core.caldav.url`             | text     | `CalDavCalendarTool` | CalDAV server URL |
-| `core.caldav.username`        | text     | `CalDavCalendarTool` | CalDAV login |
-| `core.caldav.password`        | password | `CalDavCalendarTool` | CalDAV password / app token |
+| Key                            | Type     | Tool Class           | Purpose | LLM Exposed |
+|--------------------------------|----------|----------------------|---------|-------------|
+| `core.openai.api_key`         | password | `LLMConfiguration`   | OpenAI / compatible API key | — |
+| `core.anthropic.api_key`      | password | `LLMConfiguration`   | Anthropic Claude API key | — |
+| `core.tavily.api_key`         | password | `TavilySearchTool`   | Tavily web search key | — |
+| `core.serper.api_key`         | password | `SerperSearchTool`   | Serper.dev Google search key | — |
+| `core.worldnewsapi.api_key`   | password | `WorldNewsApiTool`   | WorldNewsAPI key | — |
+| `core.imap.host`              | text     | `EmailTool`          | IMAP server hostname | — |
+| `core.imap.port`              | text     | `EmailTool`          | IMAP port (default 993) | — |
+| `core.imap.encryption`        | select   | `EmailTool`          | `ssl` or `tls` or `notls` | — |
+| `core.email.username`         | text     | `EmailTool`          | Email login for both IMAP and SMTP | — |
+| `core.email.password`         | password | `EmailTool`          | Email password / app token for both | — |
+| `core.smtp.host`              | text     | `EmailTool`          | SMTP server hostname | — |
+| `core.smtp.port`              | text     | `EmailTool`          | SMTP port (default 587) | — |
+| `core.smtp.encryption`        | select   | `EmailTool`          | `tls` or `ssl` or `notls` | — |
+| `core.smtp.from`              | text     | `EmailTool`          | Sender email address | ✓ |
+| `core.smtp.allowed_recipients`| text     | `EmailTool`          | Comma-separated whitelist (or `*`) | ✓ |
+| `core.caldav.url`             | text     | `CalDavCalendarTool` | CalDAV server URL | — |
+| `core.caldav.username`        | text     | `CalDavCalendarTool` | CalDAV login | — |
+| `core.caldav.password`        | password | `CalDavCalendarTool` | CalDAV password / app token | — |
+
+"LLM Exposed ✓" means `expose_to_llm: true` — the setting's effective value is included in the tool definition sent to the LLM.

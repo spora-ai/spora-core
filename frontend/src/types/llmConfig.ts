@@ -10,7 +10,8 @@ export interface LLMSettingsSchema {
   default: unknown
   required: boolean
   scope: 'global' | 'agent'
-  options: string[] | null
+  options: Record<string, string> | string[] | null
+  expose_to_llm: boolean
 }
 
 export interface LLMDriverInfo {

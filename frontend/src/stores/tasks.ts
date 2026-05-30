@@ -95,8 +95,12 @@ export const useTaskStore = defineStore('tasks', () => {
     return result.task
   }
 
-  async function continueTask(taskId: number, prompt: string): Promise<Task> {
-    const result = await api.post<{ task: Task }>(`/tasks/${taskId}/continue`, { prompt })
+  async function continueTask(taskId: number, prompt: string, additionalSteps?: number): Promise<Task> {
+    const body: Record<string, unknown> = { prompt }
+    if (additionalSteps !== undefined) {
+      body.additional_steps = additionalSteps
+    }
+    const result = await api.post<{ task: Task }>(`/tasks/${taskId}/continue`, body)
     return result.task
   }
 

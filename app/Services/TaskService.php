@@ -300,6 +300,7 @@ final class TaskService implements TaskServiceInterface
 
         $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => [
             'id'                    => $tc->id,
+            'provider_call_id'      => $tc->provider_call_id,
             'tool_name'             => $tc->tool_name,
             'tool_type'             => $tc->tool_type,
             'status'                => $tc->status,
@@ -433,6 +434,7 @@ final class TaskService implements TaskServiceInterface
 
         $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => [
             'id'                 => $tc->id,
+            'provider_call_id'   => $tc->provider_call_id,
             'tool_name'          => $tc->tool_name,
             'tool_type'          => $tc->tool_type,
             'status'             => $tc->status,

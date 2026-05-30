@@ -30,5 +30,11 @@ final class ToolSetting
         public readonly array  $options = [],
         /** PCRE regex pattern for input validation, e.g. '/^[0-2](\.[0-9]+)?$/' for temperature. */
         public readonly string $validation = '',
+        /**
+         * Whether this setting's effective value should be included in the LLM tool definition.
+         * Defaults to false because most settings are credentials/infrastructure.
+         * Mark true for settings that directly affect what the LLM can do (e.g. allowed_recipients).
+         */
+        public readonly bool $expose_to_llm = false,
     ) {}
 }

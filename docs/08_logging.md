@@ -28,12 +28,16 @@ Every call to `safeExecute()` (the single chokepoint for all tool execution) pro
 | Event | Level | Fields |
 |---|---|---|
 | Tool is about to be called | `DEBUG` | `tool`, `agent_id`, `task_id`, `arguments` |
-| Tool returned `success=false` | `ERROR` | `tool`, `agent_id`, `task_id`, `content` |
+| Tool returned failure | `ERROR` | `tool`, `agent_id`, `task_id`, `content` |
 | Tool threw an unhandled exception | `ERROR` | `tool`, `agent_id`, `task_id`, `exception_class`, `message` |
 
 ### LLM Driver HTTP Requests (`app/Drivers/`)
 
-Every HTTP request to an LLM provider (Anthropic, OpenAI-compatible) is logged via Monolog's HTTP client integration at the level configured by `SPORA_LOG_LEVEL`. Request/response bodies are included at `DEBUG`.
+Every HTTP request to an LLM provider (Anthropic, OpenAI-compatible) is logged at `DEBUG` with request/response bodies included. Each driver makes explicit `logger->debug()` calls from its `complete()` method.
+
+### Email — Log Transport
+
+When `SPORA_MAIL_DRIVER=log`, emails are logged (not sent) via `LogTransport`. Each logged entry includes `to`, `from`, and `subject` at `info` level.
 
 ---
 
@@ -126,7 +130,7 @@ $this->logger?->error("API call to Tavily failed with status {$code}");
 | Level | When to use |
 |---|---|
 | `debug` | Full execution traces, argument dumps, HTTP request/response bodies. Only useful during active development or debugging a specific incident. |
-| `info` | Notable operational events (agent started, task completed). Currently unused in Spora core. |
+| `info` | Notable operational events. Currently unused in Spora core — add to `Orchestrator` for task lifecycle events if needed. |
 | `warning` | Unexpected but recoverable situations that don't require immediate action. |
 | `error` | Failures that prevent a tool or request from completing. Always logged — even in production. |
 | `critical` / `alert` / `emergency` | Reserved for system-level failures (database unreachable, out of memory). Not used by tools. |

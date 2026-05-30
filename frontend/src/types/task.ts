@@ -27,6 +27,7 @@ export interface Task {
 
 export interface ToolCall {
   id: number
+  provider_call_id: string
   tool_name: string
   tool_type: string
   operation: string | null

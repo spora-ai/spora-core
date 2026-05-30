@@ -12,6 +12,7 @@ use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Models\UserPreference;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentService;
 use Spora\Services\LLMConfigService;
@@ -443,8 +444,12 @@ test('getOverride for llm_configuration falls back to the user default LLMDriver
         'api_key' => 'sk-test-secret',
         'model' => 'gpt-4o',
     ]));
-    $config->is_default = true;
     $config->save();
+
+    UserPreference::create([
+        'user_id' => $userId,
+        'preferred_llm_config_id' => $config->id,
+    ]);
 
     $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('llm_configuration') . '/override');
     $request->attributes->set('id', $agentId);
@@ -482,8 +487,12 @@ test('getOverride for llm_configuration returns empty settings when decryption f
     $config->name       = 'Corrupted Config';
     $config->driver_class = OpenAICompatibleDriver::class;
     $config->settings   = json_encode($alienService->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'secret', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1']));
-    $config->is_default = true;
     $config->save();
+
+    UserPreference::create([
+        'user_id' => $userId,
+        'preferred_llm_config_id' => $config->id,
+    ]);
 
     $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/llm_configuration/override');
     $request->attributes->set('id', $agentId);
