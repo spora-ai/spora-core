@@ -12,6 +12,7 @@ use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Core\Database;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Task;
+use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Symfony\Component\Console\Command\Command;
@@ -128,6 +129,7 @@ final class TaskRunCommand extends Command
 
         return new Orchestrator(
             driverFactory: $this->container->get(DriverFactory::class),
+            llmConfigService: $this->container->get(LLMConfigService::class),
             toolInstances: $this->container->get('tool_instances'),
             logger: $logger,
             workerMode: WorkerMode::Sync,

@@ -1496,3 +1496,34 @@ test('tick sets NO_LLM_CONFIGURATION error code and message when resolveLlmConfi
         ->and($task->error_code)->toBe('NO_LLM_CONFIGURATION')
         ->and($task->error_message)->toBe('No LLM configuration set. Please configure an LLM driver or set a global default.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('buildToolDefinitions only queries operation overrides for enabled tool classes', function (): void {
+    [$agentId, $userId] = seedAgent();
+
+    // Enable query log to verify the whereIn clause is used
+    Illuminate\Database\Capsule\Manager::connection()->enableQueryLog();
+    Illuminate\Database\Capsule\Manager::connection()->flushQueryLog();
+
+    $orch = makeOrchestrator(
+        Mockery::mock(DriverFactory::class),
+        [new StubInputTool(), new StubOutputTool()],
+    );
+
+    $reflection = new ReflectionClass($orch);
+    $method = $reflection->getMethod('buildToolDefinitions');
+
+    // Call it with only StubInputTool enabled
+    $method->invoke($orch, [StubInputTool::class], $agentId, $userId);
+
+    $logs = Illuminate\Database\Capsule\Manager::connection()->getQueryLog();
+    Illuminate\Database\Capsule\Manager::connection()->disableQueryLog();
+
+    // Find the override query in the log
+    $overrideQueryLog = array_filter($logs, fn($log) => str_contains($log['query'], 'agent_tool_operation_overrides'));
+
+    expect($overrideQueryLog)->not->toBeEmpty();
+    $query = reset($overrideQueryLog)['query'];
+
+    // Check that it includes the 'in' clause for the tool_class
+    expect($query)->toContain('in (?)');
+});

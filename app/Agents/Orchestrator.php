@@ -1051,8 +1051,9 @@ final class Orchestrator implements OrchestratorInterface
     {
         $defs = [];
 
-        // Fetch all operation overrides for this agent in one query.
+        // Fetch operation overrides for this agent's enabled tools in one query.
         $overrides = AgentToolOperationOverride::where('agent_id', $agentId)
+            ->whereIn('tool_class', $enabledClasses)
             ->get()
             ->keyBy(fn($row) => $row->tool_class . '::' . $row->operation);
 
