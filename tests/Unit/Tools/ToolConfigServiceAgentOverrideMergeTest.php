@@ -261,7 +261,7 @@ test('agent override falls back to global when user not set', function () {
     expect($effective['api_key'])->toBe('global-value');
 });
 
-test('scope global keys in agent override are discarded', function () {
+test('all keys can be overridden at agent level (scope removed)', function () {
     $authService = bootAuthLayer();
     $userId = $authService->register('scope-global@example.com', 'Password1!', 'Scope Global');
 
@@ -273,23 +273,22 @@ test('scope global keys in agent override are discarded', function () {
         'max_results' => '50',
     ]);
 
-    // Try to set max_results in agent override (scope: global → should be discarded)
+    // All keys can now be overridden
     $toolConfig->putAgentOverride(TestTool::class, $agentId, [
         'max_results' => '100',
     ]);
 
     $effective = $toolConfig->getEffectiveSettings(TestTool::class, $agentId);
-    expect($effective['max_results'])->toBe('50');
+    expect($effective['max_results'])->toBe('100');
 });
 
-test('scope agent keys can be overridden at agent level', function () {
+test('api_key can be overridden at agent level', function () {
     $authService = bootAuthLayer();
     $userId = $authService->register('scope-agent@example.com', 'Password1!', 'Scope Agent');
 
     $toolConfig = makeToolConfigServiceForMerge();
     $agentId = createAgentForMerge($userId);
 
-    // api_key has scope: agent (default)
     $toolConfig->putAgentOverride(TestTool::class, $agentId, [
         'api_key' => 'agent-key',
     ]);

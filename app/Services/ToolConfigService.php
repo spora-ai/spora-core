@@ -181,7 +181,6 @@ class ToolConfigService
     /**
      * Return effective settings: global defaults merged with user settings and agent-specific overrides.
      * Cascade: schema defaults → global settings → user settings → agent overrides.
-     * Only `scope: 'agent'` keys from agent overrides are applied.
      *
      * @return array<string, mixed>
      */
@@ -207,13 +206,8 @@ class ToolConfigService
                 $override->getRawOriginal('settings'),
             );
 
-            $scopeMap = $this->getScopeMap($toolClass);
-
             foreach ($overrideSettings as $key => $value) {
-                // Only apply override for keys explicitly scoped to 'agent'
-                if (($scopeMap[$key] ?? 'agent') === 'agent') {
-                    $merged[$key] = $value;
-                }
+                $merged[$key] = $value;
             }
         }
 
@@ -251,22 +245,18 @@ class ToolConfigService
 
     /**
      * Persist agent-specific overrides.
-     * Only `scope: 'agent'` keys are stored; global-scoped keys are silently discarded.
      * Settings are merged with existing stored values; null/empty values break inheritance.
      */
     public function putAgentOverride(string $toolClass, int $agentId, array $settings): void
     {
-        $scopeMap = $this->getScopeMap($toolClass);
         $existing = $this->getRawAgentOverride($toolClass, $agentId);
         $agentSettings = [];
 
         foreach ($settings as $key => $value) {
-            if (($scopeMap[$key] ?? 'agent') === 'agent') {
-                if ($value === '***' && array_key_exists($key, $existing)) {
-                    $value = $existing[$key];
-                }
-                $agentSettings[$key] = $value;
+            if ($value === '***' && array_key_exists($key, $existing)) {
+                $value = $existing[$key];
             }
+            $agentSettings[$key] = $value;
         }
 
         // Merge with existing stored settings so omitted fields are preserved.
@@ -461,25 +451,6 @@ class ToolConfigService
     }
 
     /**
-     * Return a map of key => scope for all #[ToolSetting] attributes on the class.
-     *
-     * @return array<string, string>
-     */
-    private function getScopeMap(string $toolClass): array
-    {
-        $reflection = new ReflectionClass($toolClass);
-        $map        = [];
-
-        foreach ($reflection->getAttributes(ToolSetting::class) as $attribute) {
-            /** @var ToolSetting $instance */
-            $instance       = $attribute->newInstance();
-            $map[$instance->key] = $instance->scope;
-        }
-
-        return $map;
-    }
-
-    /**
      * Extract the tool name from the #[Tool] attribute on the class.
      * Falls back to the short class name if the attribute is absent.
      */
@@ -630,23 +601,17 @@ class ToolConfigService
                 $toolClass,
                 $override->getRawOriginal('settings'),
             );
-            $scopeMap = $this->getScopeMap($toolClass);
 
             foreach ($overrideSettings as $key => $value) {
-                if (($scopeMap[$key] ?? 'agent') === 'agent') {
-                    $result[$key] = ['value' => $value, 'source' => 'agent'];
-                }
+                $result[$key] = ['value' => $value, 'source' => 'agent'];
             }
         }
 
         // Fill in schema defaults where nothing is set yet
-        $scopeMap = $this->getScopeMap($toolClass);
-        foreach ($scopeMap as $key => $scope) {
+        $defaults = $this->getSchemaDefaults($toolClass);
+        foreach ($defaults as $key => $defaultValue) {
             if (!array_key_exists($key, $result)) {
-                $defaults = $this->getSchemaDefaults($toolClass);
-                if (isset($defaults[$key])) {
-                    $result[$key] = ['value' => $defaults[$key], 'source' => 'default'];
-                }
+                $result[$key] = ['value' => $defaultValue, 'source' => 'default'];
             }
         }
 

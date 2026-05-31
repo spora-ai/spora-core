@@ -9,7 +9,6 @@ export interface LLMSettingsSchema {
   description: string
   default: unknown
   required: boolean
-  scope: 'global' | 'agent'
   options: Record<string, string> | string[] | null
   expose_to_llm: boolean
 }

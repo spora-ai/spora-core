@@ -171,7 +171,7 @@ test('getEffectiveSettings with override: agent-scoped key from override wins ov
     expect($effective['api_key'])->toBe('agent-specific-key');
 })->afterEach(fn() => Database::resetBootState());
 
-test('getEffectiveSettings with override: global-scoped key is not overridden by agent override', function (): void {
+test('getEffectiveSettings with override: all keys can be overridden (scope removed)', function (): void {
     [$service, , $authService] = makeToolConfigService();
     $toolClass = TestTool::class;
     $agentId   = makeAgent($authService);
@@ -181,7 +181,6 @@ test('getEffectiveSettings with override: global-scoped key is not overridden by
         'max_results' => '20',
     ]);
 
-    // max_results has scope: 'global' in TestTool — putAgentOverride must silently discard it
     $service->putAgentOverride($toolClass, $agentId, [
         'api_key'     => 'agent-key',
         'max_results' => '999',
@@ -189,8 +188,9 @@ test('getEffectiveSettings with override: global-scoped key is not overridden by
 
     $effective = $service->getEffectiveSettings($toolClass, $agentId);
 
-    // The global value must be preserved
-    expect($effective['max_results'])->toBe('20');
+    // All keys from override should be applied
+    expect($effective['api_key'])->toBe('agent-key');
+    expect($effective['max_results'])->toBe('999');
 })->afterEach(fn() => Database::resetBootState());
 
 // DecryptionFailedException resilience
@@ -295,7 +295,7 @@ test('getEffectiveSettingsWithSource: agent-scoped override key has source agent
 
     expect($annotated['api_key']['source'])->toBe('agent');
     expect($annotated['api_key']['value'])->toBe('agent-key');
-    expect($annotated['max_results']['source'])->toBe('global'); // global-scoped, not overridden
+    expect($annotated['max_results']['source'])->toBe('global'); // not overridden
     expect($annotated['max_results']['value'])->toBe('20');
 });
 
@@ -308,7 +308,7 @@ test('getEffectiveSettingsWithSource: unset field with schema default has source
     $annotated = $service->getEffectiveSettingsWithSource($toolClass, $agentId);
 
     // api_key is required and has no default — not in result unless override sets it
-    // max_results has no default either (scope: global)
+    // max_results has no default either
     // Since neither global nor override sets them, they won't appear in annotated output
     // unless the schema provides defaults — TestTool has none, so result may be empty
     // The important thing is the method doesn't crash

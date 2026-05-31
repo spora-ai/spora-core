@@ -271,7 +271,6 @@ final class LLMConfigController
                 'description' => $setting->description,
                 'default' => $setting->default,
                 'required' => $setting->required,
-                'scope' => $setting->scope,
                 'options' => $setting->options,
                 'validation' => $setting->validation,
             ];

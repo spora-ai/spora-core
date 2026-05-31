@@ -534,7 +534,7 @@ test('putOverride saves agent-scoped settings and masks passwords', function ():
     expect($body['data']['settings']['api_key'])->toBe('***');
 });
 
-test('putOverride discards global-scoped keys', function (): void {
+test('putOverride stores all keys (scope removed)', function (): void {
     clearSession();
     [$controller, $authService, $toolConfig, , $authMiddleware] = makeAgentController();
     registerUser($authService);
@@ -547,17 +547,16 @@ test('putOverride discards global-scoped keys', function (): void {
     callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
 
     $request = jsonRequest('PUT', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override', [
-        'api_key'     => 'secret',   // scope: agent → stored
-        'max_results' => '10',        // scope: global → discarded
+        'api_key'     => 'secret',
+        'max_results' => '10',
     ]);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
     callController($controller, 'putOverride', $request, [$authMiddleware]);
 
     $effective = $toolConfig->getEffectiveSettings(TestTool::class, $agentId);
-    // max_results is global-scoped — not stored as override, but schema default applies
-    expect($effective['max_results'])->toBe('10'); // from schema default, not override
-    // api_key was stored by override (scope: agent)
+    // All keys are now stored as overrides
+    expect($effective['max_results'])->toBe('10');
     expect($effective['api_key'])->toBe('secret');
 });
 
@@ -832,13 +831,16 @@ test('getOverride with raw=true returns only stored agent override keys (passwor
     $enableReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
 
+    // Clear any prior override so we start fresh
+    $toolConfig->deleteAgentOverride(TestTool::class, $agentId);
+
     // Set global settings and agent override
     $toolConfig->putGlobalSettings(TestTool::class, [
         'api_key'     => 'global-key',
         'max_results' => '20',
     ]);
     $toolConfig->putAgentOverride(TestTool::class, $agentId, [
-        'api_key' => 'agent-key', // scope: agent, stored; type: password → masked by maskForApi
+        'api_key' => 'agent-key', // stored; type: password → masked by maskForApi
     ]);
 
     $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override?raw=true');
@@ -883,6 +885,9 @@ test('getOverride returns effective settings with source annotation (without raw
     $enableReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
 
+    // Clear any prior override so we start fresh
+    $toolConfig->deleteAgentOverride(TestTool::class, $agentId);
+
     // Set global settings and agent override
     $toolConfig->putGlobalSettings(TestTool::class, [
         'api_key'     => 'global-key',
@@ -905,7 +910,7 @@ test('getOverride returns effective settings with source annotation (without raw
     // api_key is overridden by agent, but is type: password → value is masked
     expect($settings['api_key']['value'])->toBe('***');
     expect($settings['api_key']['source'])->toBe('agent');
-    // max_results is from global (not overridden, scope: global)
+    // max_results is from global (not overridden)
     expect($settings['max_results']['value'])->toBe('20');
     expect($settings['max_results']['source'])->toBe('global');
 });

@@ -17,7 +17,6 @@ export interface ToolSettingSchema {
   description: string
   default: unknown
   required: boolean
-  scope: 'global' | 'agent'
   options: Record<string, string> | string[] | null
   /** Whether this setting's value is exposed to the LLM in the tool definition. */
   expose_to_llm: boolean

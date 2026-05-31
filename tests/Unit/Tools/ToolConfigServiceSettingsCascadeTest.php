@@ -80,7 +80,7 @@ test('agent override overrides global config', function () {
     expect($effective['max_results'])->toBe('50');
 });
 
-test('scope global keys in agent override are discarded', function () {
+test('all keys can be overridden at agent level', function () {
     $authService = bootAuthLayer();
     $userId = $authService->register('global-scope@example.com', 'Password1!', 'Globalscope');
 
@@ -92,15 +92,15 @@ test('scope global keys in agent override are discarded', function () {
         'max_results' => '50',
     ]);
 
-    // Attempt to set max_results in agent override (scope: global → should be discarded)
+    // All keys can now be overridden
     $toolConfig->putAgentOverride(TestTool::class, $agentId, [
-        'max_results' => '100', // scope: global → should be discarded
+        'max_results' => '100',
     ]);
 
     $effective = $toolConfig->getEffectiveSettings(TestTool::class, $agentId);
 
-    // max_results should still be the global value (100 was discarded, not applied)
-    expect($effective['max_results'])->toBe('50');
+    // max_results should be the override value
+    expect($effective['max_results'])->toBe('100');
 });
 
 test('getEffectiveSettingsWithSource annotates correctly', function () {
