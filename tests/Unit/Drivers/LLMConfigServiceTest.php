@@ -8,6 +8,7 @@ use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Models\UserPreference;
 use Spora\Services\LLMConfigService;
 
 test('getDrivers returns all registered drivers', function (): void {
@@ -277,8 +278,12 @@ test('getEffectiveConfigForAgent falls back to tier-2 user default when no agent
     $userDefault->name = 'User Default';
     $userDefault->driver_class = OpenAICompatibleDriver::class;
     $userDefault->settings = json_encode([]);
-    $userDefault->is_default = true;
     $userDefault->save();
+
+    UserPreference::create([
+        'user_id' => $userId,
+        'preferred_llm_config_id' => $userDefault->id,
+    ]);
 
     $agent = new Agent();
     $agent->id = 998;

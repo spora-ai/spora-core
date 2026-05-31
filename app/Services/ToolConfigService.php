@@ -679,4 +679,51 @@ class ToolConfigService
 
         return $this->decodeSettings($toolClass, $override->getRawOriginal('settings'));
     }
+
+    /**
+     * Return effective settings filtered to only those with exposeToLlm === true.
+     * Each entry includes the human-readable label and the resolved value.
+     *
+     * @return array<string, array{label: string, value: mixed}>
+     */
+    public function getLlmToolSettings(string $toolClass, int $agentId, ?int $userId = null): array
+    {
+        $effective = $this->getEffectiveSettings($toolClass, $agentId, $userId);
+        $labels = $this->getLlmSettingLabels($toolClass);
+
+        $result = [];
+        foreach ($labels as $key => $label) {
+            if (array_key_exists($key, $effective)) {
+                $result[$key] = [
+                    'label' => $label,
+                    'value' => $effective[$key],
+                ];
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Return key => label map for all #[ToolSetting] fields where exposeToLlm === true.
+     *
+     * @return array<string, string>
+     */
+    private function getLlmSettingLabels(string $toolClass): array
+    {
+        if (!class_exists($toolClass)) {
+            return [];
+        }
+
+        $labels = [];
+        foreach ((new ReflectionClass($toolClass))->getAttributes(ToolSetting::class) as $attr) {
+            /** @var ToolSetting $setting */
+            $setting = $attr->newInstance();
+            if ($setting->exposeToLlm) {
+                $labels[$setting->key] = $setting->label;
+            }
+        }
+
+        return $labels;
+    }
 }

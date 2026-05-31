@@ -20,6 +20,21 @@ return new class extends Migration
             $table->foreign('preferred_llm_config_id')->references('id')->on('llm_driver_configurations')->onDelete('set null');
             $table->unique('user_id');
         });
+
+        // Backfill user preferences for existing default llm configurations
+        $usersWithDefaults = Capsule::table('llm_driver_configurations')
+            ->where('is_default', true)
+            ->whereNotNull('user_id')
+            ->get(['user_id', 'id']);
+
+        foreach ($usersWithDefaults as $config) {
+            Capsule::table('user_preferences')->insert([
+                'user_id' => $config->user_id,
+                'preferred_llm_config_id' => $config->id,
+                'created_at' => \Carbon\Carbon::now(),
+                'updated_at' => \Carbon\Carbon::now(),
+            ]);
+        }
     }
 
     public function down(): void

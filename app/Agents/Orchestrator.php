@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Agents;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use ReflectionClass;
 use RuntimeException;
@@ -28,6 +29,7 @@ use Spora\Services\ContextWindowErrorParser;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\Traits\HasOperations;
@@ -49,11 +51,7 @@ final class Orchestrator implements OrchestratorInterface
     ];
 
     /**
-     * @param  list<object>         $toolInstances      Instances of ToolInterface.
-     * @param  ?LoggerInterface     $logger             Optional PSR-3 logger. When null, all log calls
-     *                                                    are silently skipped — no behaviour change.
-     * @param  ?NotificationService $notificationService Optional notification service for task events.
-     * @param  ?MercurePublisherInterface $mercure       Optional Mercure publisher for real-time SSE updates.
+     * @param list<object> $toolInstances
      */
     public function __construct(
         private readonly DriverFactory              $driverFactory,
@@ -64,6 +62,7 @@ final class Orchestrator implements OrchestratorInterface
         private readonly ?NotificationService      $notificationService = null,
         private readonly ?PluginLoader              $pluginLoader   = null,
         private readonly ?MercurePublisherInterface $mercure       = null,
+        private readonly ?ToolConfigService        $toolConfigService = null,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -87,7 +86,7 @@ final class Orchestrator implements OrchestratorInterface
             'data'          => $taskData,
         ]);
 
-        // Seed the conversation with the user's prompt as the first history row.
+        // Seed the conversation
         $this->appendHistory($task->id, 'user', $userPrompt);
 
         if ($this->workerMode === WorkerMode::Sync) {
@@ -125,62 +124,62 @@ final class Orchestrator implements OrchestratorInterface
 
     public function tick(int $taskId): void
     {
-        // Phase 1 — short claim transaction: lock the task row, validate state, claim this step,
-        // and read all data needed for the LLM call. Lock is released when the transaction commits,
-        // before any network I/O, so the DB connection is not held idle during the LLM round-trip.
+        // Phase 1: validate task state without DB lock for heavy I/O
         $context = null;
 
-        try {
-            Capsule::connection()->transaction(function () use ($taskId, &$context): void {
-                $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
+        Capsule::connection()->transaction(function () use ($taskId, &$context): void {
+            $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
-                if ($task->status !== 'RUNNING') {
-                    return;
-                }
+            if ($task->status !== 'RUNNING') {
+                return;
+            }
 
-                // Each tick() represents one full Agent lifecycle turn (Think → Act).
-                // Increment exactly once so N parallel tools in a single turn count as 1 step.
-                if ($task->step_count >= $task->max_steps) {
-                    $task->status         = 'FAILED';
-                    $task->failure_reason = 'Max steps reached.';
-                    $task->save();
-                    return;
-                }
-
-                $task->step_count++;
+            // Enforce max step limit (N parallel tools count as 1 step)
+            if ($task->step_count >= $task->max_steps) {
+                $task->status         = 'FAILED';
+                $task->failure_reason = 'Max steps reached.';
                 $task->save();
+                return;
+            }
 
-                $agent          = Agent::findOrFail($task->agent_id);
-                $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->toArray();
+            $context = ['task' => $task];
+        });
 
-                $systemPrompt = ($agent->system_prompt !== null && $agent->system_prompt !== '')
-                    ? $agent->system_prompt
-                    : 'You are a helpful AI assistant.';
+        if ($context === null) {
+            return;
+        }
 
-                $llmConfig = $this->resolveLlmConfig($agent);
-                $contextWindow = $llmConfig['context_window'];
-                $maxTokensOutput = $llmConfig['max_tokens_output'];
-                $temperature = $llmConfig['temperature'];
+        try {
+            $task = $context['task'];
+            $agent          = Agent::findOrFail($task->agent_id);
+            $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->toArray();
 
-                $context = [
-                    'task'           => $task,
-                    'agent'          => $agent,
-                    'enabledClasses' => $enabledClasses,
-                    'contextWindow'  => $contextWindow,
-                    'maxTokensOutput' => $maxTokensOutput,
-                    'request'        => new LLMRequest(
-                        systemPrompt: $systemPrompt,
-                        messages: $this->buildMessages($taskId),
-                        tools: $this->buildToolDefinitions($enabledClasses, $agent->id),
-                        contextWindow: $contextWindow,
-                        maxTokens: $maxTokensOutput,
-                        temperature: $temperature,
-                    ),
-                ];
-            });
+            $systemPrompt = ($agent->system_prompt !== null && $agent->system_prompt !== '')
+                ? $agent->system_prompt
+                : 'You are a helpful AI assistant.';
+
+            $llmConfig = $this->resolveLlmConfig($agent);
+            $contextWindow = $llmConfig['context_window'];
+            $maxTokensOutput = $llmConfig['max_tokens_output'];
+            $temperature = $llmConfig['temperature'];
+
+            $context = [
+                'task'           => $task,
+                'agent'          => $agent,
+                'enabledClasses' => $enabledClasses,
+                'contextWindow'  => $contextWindow,
+                'maxTokensOutput' => $maxTokensOutput,
+                'request'        => new LLMRequest(
+                    systemPrompt: $systemPrompt,
+                    messages: $this->buildMessages($taskId),
+                    tools: $this->buildToolDefinitions($enabledClasses, $agent->id, $agent->user_id),
+                    contextWindow: $contextWindow,
+                    maxTokens: $maxTokensOutput,
+                    temperature: $temperature,
+                ),
+            ];
         } catch (RuntimeException $e) {
-            // resolveLlmConfig() threw — the transaction rolled back but the exception
-            // propagated out. Mark the task FAILED so it never stays stuck in RUNNING.
+            // resolveLlmConfig threw; mark FAILED
             if (str_contains($e->getMessage(), 'No LLM configuration')) {
                 Task::where('id', $taskId)->update([
                     'status'         => 'FAILED',
@@ -192,27 +191,19 @@ final class Orchestrator implements OrchestratorInterface
             throw $e;
         }
 
-        if ($context === null) {
-            return; // Task was not RUNNING (or hit max_steps) — nothing to do.
-        }
+        // Atomic step increment
+        Task::where('id', $taskId)->increment('step_count');
 
-        // Phases 2 and 3 run outside any transaction. On unexpected failure, mark the task
-        // FAILED before re-throwing so it never remains stuck in RUNNING indefinitely.
+        // Phases 2 and 3 outside transaction mapping
         try {
-            // Phase 2 — LLM call: no DB lock held during I/O.
             $response = $this->driverFactory->makeFromAgent($context['agent'])->complete($context['request']);
 
-            // Phase 3 — write results: each tick step's writes are their own atomic unit,
-            // independent of any other tick step. This prevents a failure in a later step from
-            // rolling back history rows already committed by an earlier step.
             $task           = $context['task'];
             $agent          = $context['agent'];
             $enabledClasses = $context['enabledClasses'];
 
             if ($response->hasToolCalls()) {
-                // Append ONE assistant history row carrying ALL tool calls as a JSON array.
-                // This matches the OpenAI/Anthropic wire format so buildMessages() reconstructs
-                // the conversation correctly for parallel tool call providers.
+                // Save tool calls payload for provider compatibility
                 $this->appendHistory(
                     taskId: $task->id,
                     role: 'assistant',
@@ -223,9 +214,7 @@ final class Orchestrator implements OrchestratorInterface
                             'type'     => 'function',
                             'function' => [
                                 'name'      => $tc->toolName,
-                                // Normalize empty array [] to {} to satisfy strict providers
-                                // (e.g. LM Studio, MiniMax) that require arguments to be an object
-                                // when the schema declares type "object" with no required properties.
+                                // Normalize empty array [] to {} for strict providers
                                 'arguments' => empty($tc->arguments) ? '{}' : json_encode($tc->arguments, JSON_THROW_ON_ERROR),
                             ],
                         ], $response->toolCalls),
@@ -238,7 +227,7 @@ final class Orchestrator implements OrchestratorInterface
 
                 $this->handleToolCalls($task, $agent, $response->toolCalls, $enabledClasses);
             } else {
-                // Pure text response — task is complete.
+                // Task complete
                 $this->appendHistory(
                     taskId: $task->id,
                     role: 'assistant',
@@ -252,8 +241,7 @@ final class Orchestrator implements OrchestratorInterface
                 $task->final_response = $response->content;
                 $task->save();
 
-                // Skip task_completed notification if this task was triggered by a scheduled run —
-                // notifyScheduledRunCompleted already fired in WorkerRunCommand.
+                // Notify unless triggered by scheduled run
                 if (! isset($task->data['run_id'])) {
                     $this->notificationService?->notifyTaskCompleted($task);
                 }
@@ -268,7 +256,7 @@ final class Orchestrator implements OrchestratorInterface
             $task = $context['task'];
             $agent = $context['agent'];
 
-            // Check for context window error — try compaction + retry if possible
+            // Check for context window error, try compaction + retry
             if ($this->isContextWindowError($e)) {
                 $this->tryCompactionAndRetry($task, $agent, $e);
                 return;
@@ -304,7 +292,7 @@ final class Orchestrator implements OrchestratorInterface
                     }
                 }
             } catch (Throwable) {
-                // DB itself may be unavailable — nothing more we can do here.
+                // Ignore failure — DB itself may be unavailable.
             }
 
             throw $e;
@@ -342,10 +330,10 @@ final class Orchestrator implements OrchestratorInterface
 
         $taskId = $task->id;
 
-        // Check if there's history to compact — if not, this is a first-turn error
+        // Check if there's history to compact
         $historyCount = TaskHistory::where('task_id', $taskId)->count();
         if ($historyCount <= 1) {
-            // First turn — no history to compact, fail with specific message
+            // First turn fail: no history to compact
             $actualLimit = $this->extractActualContextWindow($originalError);
             $msg = $actualLimit !== null
                 ? "Context window too small ({$actualLimit} tokens). The model cannot process this request even without any conversation history. Try a model with a larger context window (e.g., 128K+ tokens) or reduce the system prompt length."
@@ -376,11 +364,9 @@ final class Orchestrator implements OrchestratorInterface
             throw $originalError;
         }
 
-        // Retry the tick
         try {
             $this->tick($taskId);
         } catch (Throwable) {
-            // Summarization also failed — fail with original error
             throw $originalError;
         }
     }
@@ -522,20 +508,36 @@ final class Orchestrator implements OrchestratorInterface
      */
     public function resume(int $taskId, array $approvedBatch): void
     {
-        Capsule::connection()->transaction(function () use ($taskId, $approvedBatch) {
+        $task = null;
+        $state = null;
+
+        Capsule::connection()->transaction(function () use ($taskId, &$task, &$state) {
             /** @var Task $task */
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
-            if ($task->status !== 'PENDING_APPROVAL' || $task->pending_state === null) {
-                throw new RuntimeException("Task {$taskId} is not awaiting approval.");
+            if ($task->status !== 'PENDING_APPROVAL') {
+                throw new InvalidArgumentException("Task {$taskId} is not awaiting approval.");
+            }
+            if ($task->pending_state === null) {
+                // If there's no state, synthesize an empty one to continue the flow
+                // and flush any dangling PENDING_APPROVAL tool calls.
+                $state = new AgentState(taskId: $task->id, agentId: $task->agent_id, pendingToolCalls: [], messageSnapshot: [], stepCount: $task->step_count, maxSteps: $task->max_steps, pausedAt: date('Y-m-d\\TH:i:s\\Z'));
+
+            } else {
+                $state = AgentState::fromJson($task->pending_state);
             }
 
-            $state = AgentState::fromJson($task->pending_state);
-
-            // Clear pending state and restore RUNNING status before executing.
-            $task->status        = 'RUNNING';
+            // Clear pending_state to prevent double execution via race.
+            // Leave status as PENDING_APPROVAL so the daemon does not prematurely
+            // pick up the task and call the LLM before tool results are written.
             $task->pending_state = null;
             $task->save();
+        });
+
+        try {
+            if (!$task instanceof Task || !$state instanceof AgentState) {
+                throw new RuntimeException('Failed to resolve task or state during resume.');
+            }
 
             $this->logger?->info('Task resumed after approval', [
                 'task_id' => $task->id,
@@ -599,56 +601,119 @@ final class Orchestrator implements OrchestratorInterface
                 );
             }
 
-            $task->save();
-        });
+            // Clean up any leaked tools that were stranded in PENDING_APPROVAL due to concurrency bugs.
+            // This ensures the frontend doesn't infinitely display stranded approvals.
+            $danglingTools = ToolCallModel::where('task_id', $taskId)
+                ->where('status', 'PENDING_APPROVAL')
+                ->get();
 
-        // Tick is called after the transaction commits so the LLM round-trip
-        // does not hold the lockForUpdate open for its full duration.
-        $this->tick($taskId);
+            foreach ($danglingTools as $danglingTool) {
+                $this->appendHistory(
+                    taskId: $task->id,
+                    role: 'tool',
+                    content: 'Action discarded (state mismatch/timeout)',
+                    toolCallId: $danglingTool->provider_call_id,
+                    toolName: $danglingTool->tool_name,
+                );
+            }
+
+            ToolCallModel::where('task_id', $taskId)
+                ->where('status', 'PENDING_APPROVAL')
+                ->update(['status' => 'REJECTED']);
+
+            // Now that tool results are safely in the history, update status to RUNNING or QUEUED
+            $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
+            Task::where('id', $taskId)->update(['status' => $taskStatus]);
+
+            if ($this->workerMode === WorkerMode::Sync) {
+                // Tick is called after the transaction commits so the LLM round-trip
+                // does not hold the lockForUpdate open for its full duration.
+                $this->tick($taskId);
+            }
+
+        } catch (Throwable $e) {
+            Task::where('id', $taskId)->update([
+                'status'         => 'FAILED',
+                'error_code'     => 'RESUME_FAILED',
+                'error_message'  => 'Task resume failed: ' . $e->getMessage(),
+                'failure_reason' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
     }
 
     public function reject(int $taskId, string $reason): void
     {
-        Capsule::connection()->transaction(function () use ($taskId, $reason) {
+        $task = null;
+        $state = null;
+
+        Capsule::connection()->transaction(function () use ($taskId, &$task, &$state) {
             /** @var Task $task */
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
-            if ($task->status !== 'PENDING_APPROVAL' || $task->pending_state === null) {
-                throw new RuntimeException("Task {$taskId} is not awaiting approval.");
+            if ($task->status !== 'PENDING_APPROVAL') {
+                throw new InvalidArgumentException("Task {$taskId} is not awaiting approval.");
+            }
+            if ($task->pending_state === null) {
+                // If there's no state, synthesize an empty one to continue the flow
+                $state = new AgentState(taskId: $task->id, agentId: $task->agent_id, pendingToolCalls: [], messageSnapshot: [], stepCount: $task->step_count, maxSteps: $task->max_steps, pausedAt: date('Y-m-d\TH:i:s\Z'));
+            } else {
+                $state = AgentState::fromJson($task->pending_state);
             }
 
-            $state = AgentState::fromJson($task->pending_state);
-
-            // Reject every pending tool call in the batch.
-            $providerCallIds = array_map(
-                static fn(DriverToolCall $tc) => $tc->providerCallId,
-                $state->pendingToolCalls,
-            );
-
-            ToolCallModel::where('task_id', $taskId)
-                ->whereIn('provider_call_id', $providerCallIds)
-                ->update(['status' => 'REJECTED']);
-
-            // Inject one synthetic tool-result row per rejected call so the LLM
-            // can reason about the refusal for each individual action.
-            foreach ($state->pendingToolCalls as $pendingToolCall) {
-                $this->appendHistory(
-                    taskId: $task->id,
-                    role: 'tool',
-                    content: "Action rejected by user: {$reason}",
-                    toolCallId: $pendingToolCall->providerCallId,
-                    toolName: $pendingToolCall->toolName,
-                );
-            }
-
-            $task->status        = 'RUNNING';
+            // Clear pending_state to prevent double execution via race.
+            // Leave status as PENDING_APPROVAL so the daemon does not prematurely
+            // pick up the task and call the LLM before tool results are written.
             $task->pending_state = null;
             $task->save();
         });
 
-        // Tick is called after the transaction commits so the LLM round-trip
-        // does not hold the lockForUpdate open for its full duration.
-        $this->tick($taskId);
+        try {
+            if (!$task instanceof Task || !$state instanceof AgentState) {
+                throw new RuntimeException('Failed to resolve task or state during reject.');
+            }
+
+            // Fetch ALL pending tool calls from the database to ensure we don't leak any
+            // due to concurrency/corruption issues that dropped them from the JSON state.
+            $pendingModels = ToolCallModel::where('task_id', $taskId)
+                ->where('status', 'PENDING_APPROVAL')
+                ->get();
+
+            ToolCallModel::where('task_id', $taskId)
+                ->where('status', 'PENDING_APPROVAL')
+                ->update(['status' => 'REJECTED']);
+
+            // Inject one synthetic tool-result row per rejected call so the LLM
+            // can reason about the refusal for each individual action.
+            foreach ($pendingModels as $model) {
+                $this->appendHistory(
+                    taskId: $task->id,
+                    role: 'tool',
+                    content: "Action rejected by user: {$reason}",
+                    toolCallId: $model->provider_call_id,
+                    toolName: $model->tool_name,
+                );
+            }
+
+            // Now that tool results are safely in the history, update status to RUNNING or QUEUED
+            $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
+            Task::where('id', $taskId)->update(['status' => $taskStatus]);
+
+            if ($this->workerMode === WorkerMode::Sync) {
+                // Tick is called after the transaction commits so the LLM round-trip
+                // does not hold the lockForUpdate open for its full duration.
+                $this->tick($taskId);
+            }
+
+        } catch (Throwable $e) {
+            Task::where('id', $taskId)->update([
+                'status'         => 'FAILED',
+                'error_code'     => 'REJECT_FAILED',
+                'error_message'  => 'Task reject failed: ' . $e->getMessage(),
+                'failure_reason' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -656,14 +721,10 @@ final class Orchestrator implements OrchestratorInterface
     // -------------------------------------------------------------------------
 
     /**
-     * Process a batch of tool calls from a single LLM response turn.
+     * Process tool calls: execute immediately or pause for approval.
      *
-     * Immediately executes tools that are enabled and not requiring approval.
-     * Collects any tools that need approval into a batch; if any exist,
-     * the task is paused and the full batch is serialised into pending_state.
-     *
-     * @param  list<DriverToolCall>  $toolCalls
-     * @param  list<string>          $enabledClasses
+     * @param list<DriverToolCall> $toolCalls
+     * @param list<string> $enabledClasses
      */
     private function handleToolCalls(Task $task, Agent $agent, array $toolCalls, array $enabledClasses): void
     {
@@ -826,8 +887,7 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Publish the current task state to Mercure for real-time SSE delivery.
-     * Includes tool_calls and history so the frontend sees intermediate execution results.
+     * Publish the current task state to Mercure for SSE delivery.
      */
     private function publishIntermediateState(Task $task): void
     {
@@ -866,18 +926,8 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Execute a tool, catching any Throwable thrown by community plugin bugs.
-     * The error is encoded into a ToolResult so the Orchestrator loop survives
-     * and the LLM sees the failure on the next tick.
-     *
-     * Logging behaviour (controlled by SPORA_LOG_LEVEL):
-     *   DEBUG — every dispatch is logged, including full arguments (may contain PII —
-     *           only enable DEBUG in environments where log storage is trusted and
-     *           data-retention obligations have been considered).
-     *   ERROR — logged on ToolResult failure (success=false) or unhandled exception.
-     *           Arguments are intentionally EXCLUDED from ERROR logs to prevent PII
-     *           (email addresses, search queries, message bodies) from reaching
-     *           aggregators that may have broader access or retention than DEBUG logs.
+     * Execute a tool safely. Catches any Throwable from tool bugs and wraps
+     * it into a ToolResult so the Orchestrator loop survives.
      */
     private function safeExecute(
         ToolInterface $toolInstance,
@@ -936,15 +986,7 @@ final class Orchestrator implements OrchestratorInterface
 
     /**
      * Resolve whether the tool requires human approval before execution.
-     *
-     * Precedence for operation-aware tools (uses HasOperations):
-     *   1. agent_tool_operation_overrides.default_requires_approval for this agent + tool_class + operation
-     *   2. #[ToolOperation(name:)].requiresApprovalByDefault on the operation
-     *
-     *
-     * Returns true → pause for approval, false → execute immediately.
-     *
-     * @param  array<string, mixed> $arguments  Arguments from the LLM tool call.
+     * Checks operation overrides first, then agent_tools.auto_approve, then defaults.
      */
     private function resolveRequiresApproval(object $toolInstance, string $toolClass, int $agentId, array|object $arguments = []): bool
     {
@@ -991,10 +1033,6 @@ final class Orchestrator implements OrchestratorInterface
 
     /**
      * Check whether a specific operation is enabled for an agent.
-     *
-     * Precedence:
-     *   1. agent_tool_operation_overrides.enabled for this agent + tool_class + operation
-     *   2. #[ToolOperation(name:)].enabledByDefault on the operation
      */
     private function isOperationEnabled(object $toolInstance, string $operationName, int $agentId): bool
     {
@@ -1018,10 +1056,6 @@ final class Orchestrator implements OrchestratorInterface
 
     /**
      * Build the OpenAI-compatible message array from task_history rows.
-     *
-     * The tool_call_payload column stores a JSON-encoded array of tool call objects
-     * (even when only one tool was called) so that parallel tool call turns round-trip
-     * correctly through the conversation history.
      *
      * @return list<array{role: string, content: string|null, tool_calls?: array, tool_call_id?: string, name?: string}>
      */
@@ -1106,15 +1140,34 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Build the tool definitions array for the LLM request from registered tool instances.
+     * Build a human-readable capabilities block from effective LLM-exposed tool settings.
      *
-     * Plugin-contributed tools are prefixed with "{slug}:" to ensure global uniqueness.
-     * Core tools are sent with their plain name.
+     * @param  array<string, array{label: string, value: mixed}> $llmSettings
+     */
+    private function buildLlmConfigBlock(array $llmSettings): string
+    {
+        if ($llmSettings === []) {
+            return '';
+        }
+
+        $lines = [];
+        foreach ($llmSettings as $setting) {
+            $display = $setting['value'] === null || $setting['value'] === ''
+                ? '(not configured)'
+                : (string) $setting['value'];
+            $lines[] = '- ' . $setting['label'] . ': ' . $display;
+        }
+
+        return "\n[Effective Configuration]\n" . implode("\n", $lines);
+    }
+
+    /**
+     * Build the tool definitions array for the LLM request from tool instances.
      *
-     * @param  list<string> $enabledClasses
+     * @param list<string> $enabledClasses
      * @return list<array{type: "function", function: array{name: string, description: string, parameters: array}}>
      */
-    private function buildToolDefinitions(array $enabledClasses, int $agentId): array
+    private function buildToolDefinitions(array $enabledClasses, int $agentId, ?int $userId = null): array
     {
         $defs = [];
 
@@ -1175,11 +1228,16 @@ final class Orchestrator implements OrchestratorInterface
                 // Filter the schema's action enum and parameter descriptions to only the enabled ops.
                 $filteredSchema = $this->filterSchemaForOperations($schema, $allowedOps);
 
+                $llmSettings = $this->toolConfigService !== null
+                    ? $this->toolConfigService->getLlmToolSettings($toolClass, $agentId, $userId)
+                    : [];
+                $configBlock = $this->buildLlmConfigBlock($llmSettings);
+
                 $defs[] = [
                     'type'     => 'function',
                     'function' => [
                         'name'        => $qualifiedName,
-                        'description' => $toolAttr->description,
+                        'description' => $toolAttr->description . $configBlock,
                         'parameters'  => $filteredSchema,
                     ],
                 ];
@@ -1192,11 +1250,16 @@ final class Orchestrator implements OrchestratorInterface
                     $schema['properties'] = (object) [];
                 }
 
+                $llmSettings = $this->toolConfigService !== null
+                    ? $this->toolConfigService->getLlmToolSettings($toolClass, $agentId, $userId)
+                    : [];
+                $configBlock = $this->buildLlmConfigBlock($llmSettings);
+
                 $defs[] = [
                     'type'     => 'function',
                     'function' => [
                         'name'        => $qualifiedName,
-                        'description' => $toolAttr->description,
+                        'description' => $toolAttr->description . $configBlock,
                         'parameters'  => $schema,
                     ],
                 ];
@@ -1256,13 +1319,7 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Find the tool instance matching the given tool name (from #[Tool(name:)] attribute).
-     *
-     * Accepts both plain names ("web_search") and namespaced names ("my-plugin:web_search").
-     * For namespaced names the slug is stripped before lookup, so the class's #[Tool] attribute
-     * always holds the plain name — only the LLM-facing wire format is namespaced.
-     *
-     * @throws RuntimeException  When no matching tool is registered.
+     * Find the tool instance matching the given tool name (plain or namespaced).
      */
     private function resolveToolByName(string $toolName): ToolInterface
     {
@@ -1292,12 +1349,10 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Return the LLM-facing tool name, prefixed with the plugin slug if the tool
-     * was contributed by a plugin. Core tools use their plain name.
+     * Return the LLM-facing tool name (namespaced if contributed by a plugin).
      *
-     * @param  class-string $toolClass
-     * @param  string       $plainName  From #[Tool(name:)]
-     * @return string                 e.g. "my-plugin:web_search" or "web_search"
+     * @param class-string $toolClass
+     * @param string $plainName
      */
     private function qualifiedToolName(string $toolClass, string $plainName): string
     {
@@ -1475,11 +1530,8 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Schedule an automatic retry if the error is retryable and the agent has retry config.
-     *
-     * All retry tasks link to the ROOT original task (not immediate parent) so that
-     * the entire chain can be cancelled with a single WHERE clause:
-     * WHERE retry_of_task_id = rootId AND retry_count >= N
+     * Schedule auto-retry if error is retryable and configured.
+     * Retries link to the ROOT task for single-query cancellation.
      */
     private function scheduleAutoRetry(Task $failedTask, string $errorCode): void
     {

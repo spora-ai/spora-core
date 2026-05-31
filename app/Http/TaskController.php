@@ -162,6 +162,12 @@ final class TaskController
         // Normalize arguments: ensure all approved argument objects are arrays,
         // not stdClass (which can happen when request body is JSON-decoded).
         foreach ($approvedBatch as &$item) {
+            if (!isset($item['provider_call_id'])) {
+                return new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required in all approvals.']],
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                );
+            }
             if (isset($item['arguments']) && is_object($item['arguments'])) {
                 $item['arguments'] = (array) $item['arguments'];
             }

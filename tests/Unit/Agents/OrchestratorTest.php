@@ -559,6 +559,62 @@ it('resume executes the approved OutputTool, appends history, and re-dispatches 
         ->and($toolCallRecord->approved_arguments)->toBe(['x' => 99]);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
+it('keeps the task status as PENDING_APPROVAL during tool execution to prevent async daemon race conditions', function (): void {
+    [$agentId] = seedAgent();
+
+    $callCount = 0;
+    $mock      = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+        $callCount++;
+        return $callCount === 1
+            ? new LLMResponse(null, [new DriverToolCall('call_race', 'race_condition_checker_tool', [])], 5, 3, 'cmp_1')
+            : new LLMResponse('Finished.', [], 5, 3, 'cmp_2');
+    });
+
+    // Create an inline diagnostic tool that checks the Task's status directly from the DB mid-execution
+    $checkerTool = new
+    #[Spora\Tools\Attributes\Tool(name: 'race_condition_checker_tool', description: 'Checks task status')]
+    #[Spora\Tools\Attributes\ToolOperation(name: 'default', description: 'Run check', enabledByDefault: true, requiresApprovalByDefault: true)]
+    class implements Spora\Tools\ToolInterface {
+        use Spora\Tools\Traits\HasOperations;
+        public ?string $statusInsideTool = null;
+        public ?int $taskId = null;
+        public function getParametersSchema(): array
+        {
+            return ['type' => 'object', 'properties' => [], 'required' => []];
+        }
+        public function execute(array $arguments, int $agentId, ?int $userId = null): Spora\Tools\ValueObjects\ToolResult
+        {
+            // Task status should still be PENDING_APPROVAL while the tool is heavily executing
+            $task = Task::find($this->taskId);
+            $this->statusInsideTool = $task->status;
+            return new Spora\Tools\ValueObjects\ToolResult(true, 'Checked.');
+        }
+        public function describeAction(array $arguments): string
+        {
+            return 'Checking.';
+        }
+    };
+
+    $tools = [$checkerTool];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+
+    // Start task, it pauses
+    $task = $orch->start($agentId, 'Test race condition', maxSteps: 10);
+    $checkerTool->taskId = $task->id;
+
+    $task->refresh();
+    expect($task->status)->toBe('PENDING_APPROVAL');
+
+    $orch->resume($task->id, [['provider_call_id' => 'call_race', 'arguments' => []]]);
+
+    expect($checkerTool->statusInsideTool)->toBe('PENDING_APPROVAL', 'The task status should NOT flip to RUNNING before the tool finishes executing.');
+
+    $task->refresh();
+    expect($task->status)->toBe('COMPLETED');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
 it('resume throws when task is not PENDING_APPROVAL', function (): void {
     [$agentId] = seedAgent();
 
@@ -574,7 +630,7 @@ it('resume throws when task is not PENDING_APPROVAL', function (): void {
     $mock = Mockery::mock(LLMDriverInterface::class);
     $orch = makeOrchestrator(mockDriverFactory($mock));
 
-    expect(fn() => $orch->resume($task->id, []))->toThrow(RuntimeException::class);
+    expect(fn() => $orch->resume($task->id, []))->toThrow(InvalidArgumentException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -663,7 +719,7 @@ it('reject throws when task is not PENDING_APPROVAL', function (): void {
     $mock = Mockery::mock(LLMDriverInterface::class);
     $orch = makeOrchestrator(mockDriverFactory($mock));
 
-    expect(fn() => $orch->reject($task->id, 'reason'))->toThrow(RuntimeException::class);
+    expect(fn() => $orch->reject($task->id, 'reason'))->toThrow(InvalidArgumentException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import Toggle from '@/components/ui/Toggle.vue'
+import Icon from '@/components/ui/Icon.vue'
 import type { ToolSettingSchema } from '@/composables/useToolSettings'
 
 const props = defineProps<{
@@ -43,14 +44,27 @@ function onInput(e: Event): void {
   const target = e.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
   emit('update:modelValue', target.value)
 }
+
+function resolveOptionLabel(options: Record<string, string> | string[] | null | undefined, value: unknown): string {
+  if (!options || value == null) return String(value ?? '')
+  if (Array.isArray(options)) return String(value)
+  return (options as Record<string, string>)[String(value)] ?? String(value)
+}
 </script>
 
 <template>
   <div class="flex flex-col gap-1.5">
     <!-- Label (suppressed when the parent renders its own header row) -->
-    <label v-if="!hideLabel" :for="field.key" class="text-sm font-medium">
+    <label v-if="!hideLabel" :for="field.key" class="text-sm font-medium flex items-center gap-1.5">
       {{ field.label }}
       <span v-if="field.required" class="text-destructive">*</span>
+      <span
+        v-if="field.expose_to_llm"
+        title="This setting is visible to the LLM and influences its behavior"
+        class="text-primary/60"
+      >
+        <Icon name="sparkles" class="h-3.5 w-3.5" />
+      </span>
     </label>
 
     <!-- textarea -->
@@ -79,14 +93,21 @@ function onInput(e: Event): void {
       class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
       :class="error ? 'border-destructive focus:ring-destructive' : ''"
     >
-      <option v-if="!field.required" value="">—</option>
-      <option
-        v-for="opt in field.options ?? []"
-        :key="opt"
-        :value="opt"
-      >
-        {{ opt }}
+      <option v-if="!field.required" value="">
+        —{{ (field.default != null && field.default !== '') ? ` (Default: ${resolveOptionLabel(field.options, field.default)})` : '' }}
       </option>
+      <!-- Handle Array options -->
+      <template v-if="Array.isArray(field.options)">
+        <option v-for="opt in field.options" :key="opt" :value="opt">
+          {{ opt }}
+        </option>
+      </template>
+      <!-- Handle Object options -->
+      <template v-else>
+        <option v-for="(label, value) in field.options || {}" :key="String(value)" :value="String(value)">
+          {{ label }}
+        </option>
+      </template>
     </select>
 
     <!-- toggle -->

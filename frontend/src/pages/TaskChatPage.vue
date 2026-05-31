@@ -14,6 +14,7 @@ import { useToast } from '@/composables/useToast'
 import AgentLayout from '@/components/layout/AgentLayout.vue'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
 import Icon from '@/components/ui/Icon.vue'
+import ToolArgumentsEditor from '@/components/agent/ToolArgumentsEditor.vue'
 import type { HistoryEntry } from '@/types/task'
 
 const route = useRoute()
@@ -57,6 +58,16 @@ const expandedTools = ref<Record<number, boolean>>({})
 // ── Error banner ───────────────────────────────────────────────────────────
 
 const errorBannerDismissed = ref(false)
+
+// Max steps reached banner
+const showMaxStepsBanner = computed(() => {
+  if (!task.value) return false
+  if (task.value.status !== 'FAILED') return false
+  if (task.value.failure_reason !== 'Max steps reached.') return false
+  const agent = agentStore.currentAgent
+  if (!agent) return false
+  return agent.allow_continuation !== false
+})
 
 const RETRYABLE_ERROR_CODES = ['RATE_LIMIT', 'SERVER_OVERLOADED', 'SERVER_ERROR', 'GATEWAY_ERROR', 'AUTH_ERROR', 'LLM_TIMEOUT', 'ORPHANED'] as const
 
@@ -193,6 +204,7 @@ async function submitFollowup(): Promise<void> {
   followupError.value = null
   submittingFollowup.value = true
   try {
+    // Reset: no additionalSteps, keeps max_steps unchanged, step_count resets to 0
     await taskStore.continueTask(task.value.id, text)
     await taskStore.fetchTaskDetail(task.value.id)
     // Restart polling since the task is now RUNNING again
@@ -238,7 +250,7 @@ const chatMessages = computed((): ChatMessage[] => {
   for (const entry of task.value.history) {
     if (entry.role === 'user') {
       result.push({ kind: 'user', entry })
-    } else if (entry.role === 'assistant' && entry.content) {
+    } else if (entry.role === 'assistant' && (entry.content || entry.reasoning)) {
       result.push({ kind: 'assistant', entry })
     } else if (entry.role === 'tool') {
       result.push({ kind: 'tool-result', entry })
@@ -274,18 +286,31 @@ function isToolExpanded(toolId: number): boolean {
 
 // ── Approval ───────────────────────────────────────────────────────────────
 
+function parseArgs(args: unknown): Record<string, unknown> {
+  if (!args) return {}
+  if (typeof args === 'object') return args as Record<string, unknown>
+  if (typeof args === 'string') {
+    try {
+      const parsed = JSON.parse(args)
+      if (typeof parsed === 'object' && parsed !== null) return parsed as Record<string, unknown>
+    } catch { /* ignore */ }
+  }
+  return {}
+}
+
 function initApprovalArgs(): void {
   const fresh: Record<number, string> = {}
   const perToolFresh: Record<number, string> = {}
   const calls = Array.isArray(pending.value) ? pending.value : []
   for (const tc of calls) {
+    const parsed = parseArgs(tc.proposed_arguments)
     if (approvalArgs.value[tc.id] === undefined) {
-      fresh[tc.id] = JSON.stringify(tc.proposed_arguments ?? {}, null, 2)
+      fresh[tc.id] = JSON.stringify(parsed, null, 2)
     } else {
       fresh[tc.id] = approvalArgs.value[tc.id]
     }
     if (perToolArgs.value[tc.id] === undefined) {
-      perToolFresh[tc.id] = JSON.stringify(tc.proposed_arguments ?? {}, null, 2)
+      perToolFresh[tc.id] = JSON.stringify(parsed, null, 2)
     } else {
       perToolFresh[tc.id] = perToolArgs.value[tc.id]
     }
@@ -302,7 +327,7 @@ async function approveAll(): Promise<void> {
   try {
     const approvals = (pending.value ?? []).map((tc) => {
       try {
-        return { provider_call_id: String(tc.id), arguments: JSON.parse(perToolArgs.value[tc.id] ?? '{}') as Record<string, unknown> }
+        return { provider_call_id: tc.provider_call_id, arguments: JSON.parse(perToolArgs.value[tc.id] ?? '{}') as Record<string, unknown> }
       } catch {
         toast.error(`Invalid JSON for tool "${tc.tool_name}".`)
         throw new Error(`Invalid JSON for tool "${tc.tool_name}".`)
@@ -326,7 +351,7 @@ async function reject(): Promise<void> {
   approveError.value = null
   try {
     await taskStore.rejectTask(taskId.value, rejectReason.value || 'No reason provided.')
-    toast.success('Tool rejected.')
+    toast.success('All tools rejected.')
     rejectReason.value = ''
     showRejectInput.value = false
     taskStore.startDetailPolling(taskId.value)
@@ -339,7 +364,7 @@ async function reject(): Promise<void> {
   }
 }
 
-async function approveToolCall(tc: { id: number; tool_name: string }): Promise<void> {
+async function approveToolCall(tc: { id: number; provider_call_id: string; tool_name: string }): Promise<void> {
   perToolApproving.value[tc.id] = true
   try {
     let args: Record<string, unknown> = {}
@@ -350,7 +375,8 @@ async function approveToolCall(tc: { id: number; tool_name: string }): Promise<v
       perToolApproving.value[tc.id] = false
       return
     }
-    await taskStore.approveTask(taskId.value, [{ provider_call_id: String(tc.id), arguments: args }])
+    // Use provider_call_id (LLM's ID) not tc.id (DB ID) for the approval lookup
+    await taskStore.approveTask(taskId.value, [{ provider_call_id: tc.provider_call_id, arguments: args }])
     toast.success(`Tool "${tc.tool_name}" approved.`)
     taskStore.startDetailPolling(taskId.value)
     scrollToBottom()
@@ -601,6 +627,43 @@ onUnmounted(() => {
         </button>
       </div>
 
+      <!-- Max steps reached: reset step counter and continue -->
+      <div
+        v-if="showMaxStepsBanner"
+        class="mx-4 mt-4 max-w-2xl mx-auto flex items-start gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-4 text-sm"
+      >
+        <Icon name="warning" class="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+        <div class="flex-1 min-w-0 flex flex-col gap-3">
+          <div>
+            <p class="font-semibold text-amber-900 dark:text-amber-100">Max steps reached.</p>
+            <p class="text-amber-700 dark:text-amber-300 mt-0.5">
+              This task used all {{ task.step_count }} step{{ task.step_count !== 1 ? 's' : '' }} (limit: {{ task.max_steps }}).
+            </p>
+          </div>
+
+          <!-- Reset steps and continue (primary) -->
+          <div class="flex flex-col gap-1.5">
+            <textarea
+              v-model="followupPrompt"
+              rows="2"
+              placeholder="Tell the agent what to do next…"
+              class="w-full rounded-lg border border-amber-200 dark:border-amber-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-amber-900 dark:text-amber-100 placeholder:text-amber-400 dark:placeholder:text-amber-600 focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none"
+            />
+            <div class="flex items-center gap-2">
+              <button
+                @click="submitFollowup"
+                :disabled="submittingFollowup || !followupPrompt.trim()"
+                class="inline-flex h-8 items-center justify-center rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium shadow transition-colors px-4 disabled:pointer-events-none disabled:opacity-50"
+              >
+                {{ submittingFollowup ? 'Continuing…' : 'Reset steps & continue' }}
+              </button>
+              <span class="text-xs text-amber-700 dark:text-amber-300">— keeps the step limit, resets counter</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
       <!-- Chat area -->
       <div class="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-3">
 
@@ -616,16 +679,19 @@ onUnmounted(() => {
           <!-- Assistant message: reasoning (above) + text (below) -->
           <template v-if="msg.kind === 'assistant'">
             <!-- Reasoning foldout -->
-            <div v-if="msg.entry.reasoning" class="flex justify-start">
-              <div class="ml-9 mt-1 text-xs text-muted-foreground">
-                <details class="rounded-lg border border-border">
-                  <summary class="px-3 py-1.5 cursor-pointer select-none">Reasoning</summary>
-                  <div class="px-3 py-2 border-t border-border chat-bubble-content" v-html="renderMarkdown(msg.entry.reasoning)" />
+            <div v-if="msg.entry.reasoning" class="flex justify-start -mb-1.5">
+              <div class="ml-9 mt-1 text-xs text-muted-foreground w-full max-w-[85%]">
+                <details class="group">
+                  <summary class="inline-flex items-center gap-1.5 px-1.5 py-0.5 cursor-pointer select-none list-none text-[11px] font-medium text-muted-foreground/60 hover:text-muted-foreground transition-colors">
+                    <Icon name="chevron-right" class="h-3 w-3 transition-transform group-open:rotate-90" />
+                    Reasoning
+                  </summary>
+                  <div class="mt-1.5 px-3 py-2 rounded-lg border border-border bg-muted/10 chat-bubble-content !text-[11px]" v-html="renderMarkdown(msg.entry.reasoning)" />
                 </details>
               </div>
             </div>
             <!-- Assistant text -->
-            <div class="flex justify-start">
+            <div v-if="msg.entry.content" class="flex justify-start">
               <div class="flex gap-2.5 max-w-[85%]">
                 <div class="shrink-0 h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground mt-0.5">
                   AI
@@ -664,11 +730,14 @@ onUnmounted(() => {
         </template>
 
         <!-- Final reasoning (from last message before deduplication) -->
-        <div v-if="finalReasoning" class="flex justify-start">
-          <div class="ml-9 mt-1 text-xs text-muted-foreground">
-            <details class="rounded-lg border border-border">
-              <summary class="px-3 py-1.5 cursor-pointer select-none">Reasoning</summary>
-              <div class="px-3 py-2 border-t border-border chat-bubble-content" v-html="renderMarkdown(finalReasoning)" />
+        <div v-if="finalReasoning" class="flex justify-start -mb-1.5">
+          <div class="ml-9 mt-1 text-xs text-muted-foreground w-full max-w-[85%]">
+            <details class="group">
+              <summary class="inline-flex items-center gap-1.5 px-1.5 py-0.5 cursor-pointer select-none list-none text-[11px] font-medium text-muted-foreground/60 hover:text-muted-foreground transition-colors">
+                <Icon name="chevron-right" class="h-3 w-3 transition-transform group-open:rotate-90" />
+                Reasoning
+              </summary>
+              <div class="mt-1.5 px-3 py-2 rounded-lg border border-border bg-muted/10 chat-bubble-content !text-[11px]" v-html="renderMarkdown(finalReasoning)" />
             </details>
           </div>
         </div>
@@ -798,24 +867,12 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div class="rounded-lg border border-border bg-muted/20 overflow-hidden">
-              <details class="group">
-                <summary class="flex items-center gap-1.5 px-3 py-2 cursor-pointer select-none list-none text-xs text-muted-foreground hover:bg-muted/30 transition-colors">
-                  <Icon name="chevron-right" class="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
-                  Proposed arguments
-                </summary>
-                <pre class="px-3 py-2 border-t border-border text-xs font-mono text-muted-foreground whitespace-pre-wrap break-all">{{ JSON.stringify(tc.proposed_arguments ?? {}, null, 2) }}</pre>
-              </details>
-            </div>
-
-            <div class="flex flex-col gap-1">
-              <label class="text-xs font-medium text-muted-foreground">Edit arguments before approving</label>
-              <textarea
-                v-model="perToolArgs[tc.id]"
-                rows="3"
-                class="w-full resize-y rounded-lg border border-border bg-muted/30 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
+            <ToolArgumentsEditor
+              :arguments="tc.proposed_arguments"
+              :tool-name="tc.tool_name"
+              :operation="tc.operation"
+              @update:arguments="perToolArgs[tc.id] = $event"
+            />
 
             <div v-if="perToolRejectInput[tc.id]" class="flex flex-col gap-1">
               <label class="text-xs font-medium text-muted-foreground">Reason for rejecting "{{ tc.tool_name }}"</label>

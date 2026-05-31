@@ -57,6 +57,12 @@ final class Database
                 'prefix'   => '',
                 'foreign_key_constraints' => true,
                 'busy_timeout' => (int) ($this->config['sqlite_busy_timeout'] ?? 5000),
+                'journal_mode' => 'wal',
+                'synchronous'  => 'NORMAL',
+                'pragmas' => [
+                    'wal_autocheckpoint' => 100,
+                    'cache_size' => -32000,
+                ],
             ]);
         }
 

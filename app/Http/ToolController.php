@@ -177,6 +177,7 @@ final class ToolController
                 'required'    => $setting->required,
                 'scope'       => $setting->scope,
                 'options'     => $setting->options,
+                'expose_to_llm' => $setting->exposeToLlm,
             ];
         }
 

@@ -18,6 +18,8 @@ use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
 use Spora\Recipes\RecipeScanner;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\ImapClient;
+use Spora\Services\ImapClientInterface;
 use Spora\Services\MailTemplateService;
 use Spora\Services\MailTemplateServiceInterface;
 use Spora\Services\MemoryService;
@@ -260,6 +262,12 @@ return [
         );
     },
 
+    ImapClientInterface::class => static function (ContainerInterface $c): ImapClientInterface {
+        return new ImapClient(
+            $c->get(LoggerInterface::class),
+        );
+    },
+
     DriverFactory::class => static function (ContainerInterface $c): DriverFactory {
         return new DriverFactory(
             $c->get(LoggerInterface::class),
@@ -443,6 +451,7 @@ return [
             notificationService: $c->get(NotificationService::class),
             pluginLoader: $c->get(PluginLoader::class),
             mercure: $c->get(MercurePublisherInterface::class),
+            toolConfigService: $c->get(ToolConfigService::class),
         );
     },
 

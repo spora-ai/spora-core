@@ -41,6 +41,10 @@ const form = ref<Record<string, string>>({})
 
 const hasSchema = computed(() => (props.tool?.settings_schema?.length ?? 0) > 0)
 
+const llmExposedFields = computed(() =>
+  (props.tool?.settings_schema ?? []).filter((f) => f.expose_to_llm),
+)
+
 const hasAnyEffectiveSettings = computed(() => {
   return Object.values(settingsWithSource.value).some((item) => item.source !== 'default')
 })
@@ -243,6 +247,34 @@ function goToGlobalSettings(): void {
           </div>
           <div v-if="!hasAnyEffectiveSettings" class="px-4 py-3 text-xs text-muted-foreground">
             Using defaults (no settings configured)
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================ -->
+      <!-- SECTION 1b: LLM Capabilities (expose_to_llm fields) -->
+      <!-- ============================================ -->
+      <div v-if="llmExposedFields.length > 0" class="mb-6">
+        <h3 class="text-sm font-medium text-foreground mb-3 flex items-center gap-1.5">
+          <Icon name="sparkles" class="h-4 w-4 text-primary" />
+          LLM Capabilities
+        </h3>
+        <p class="text-xs text-muted-foreground mb-3">
+          These settings directly influence how the LLM uses this tool.
+        </p>
+        <div class="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2.5">
+          <div
+            v-for="field in llmExposedFields"
+            :key="field.key"
+            class="flex items-start justify-between gap-4 text-sm"
+          >
+            <div class="flex-1">
+              <span class="font-medium text-foreground">{{ field.label }}</span>
+              <p class="text-xs text-muted-foreground mt-0.5">{{ field.description }}</p>
+            </div>
+            <span class="shrink-0 font-mono text-xs text-muted-foreground/80 text-right min-w-[80px]">
+              {{ getMaskedValue(field.key) }}
+            </span>
           </div>
         </div>
       </div>
