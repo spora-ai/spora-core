@@ -3,6 +3,9 @@ import { ref } from 'vue'
 import { api } from '@/api/client'
 import type { ScheduledRunResource } from '@/types/scheduledRun'
 
+/**
+ * Manages scheduled runs for agents: fetch, create, update, delete, and manual trigger.
+ */
 export const useScheduledRunsStore = defineStore('scheduledRuns', () => {
   const runs = ref<ScheduledRunResource[]>([])
 

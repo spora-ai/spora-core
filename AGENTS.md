@@ -60,6 +60,9 @@
 - Frontend unit: `composer frontend:test` (Vitest)
 - E2E: `composer frontend:test:e2e` (Playwright)
 
+### Code Comments
+See [docs/14_code_documentation.md](docs/14_code_documentation.md) for comment standards (DELETE noise, KEEP rationale, ADD docblocks).
+
 ---
 
 ## Project Structure

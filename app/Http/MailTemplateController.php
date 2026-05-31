@@ -11,6 +11,9 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
+/**
+ * Manages customizable mail templates (CRUD, preview, system template protection).
+ */
 final class MailTemplateController
 {
     public function __construct(

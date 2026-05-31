@@ -8,7 +8,11 @@ use Attribute;
 use InvalidArgumentException;
 
 /**
- * Applied at class level. Provides the LLM-facing tool name and description.
+ * Marks a class as a Tool the agent can invoke.
+ *
+ * Usage:
+ *   #[Tool(name: 'my_tool', description: 'Does something useful')]
+ *   final class MyTool implements ToolInterface { ... }
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final class Tool

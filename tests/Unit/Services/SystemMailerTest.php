@@ -5,10 +5,6 @@ declare(strict_types=1);
 use Psr\Log\NullLogger;
 use Spora\Services\SystemMailer;
 
-// ---------------------------------------------------------------------------
-// Log driver — NullLogger fix
-// ---------------------------------------------------------------------------
-
 test('SystemMailer with log driver and no logger injected uses NullLogger', function (): void {
     $mailer = new SystemMailer(['mail_driver' => 'log']);
 

@@ -5,7 +5,7 @@ import GlobalNavbar from '@/components/GlobalNavbar.vue'
 
 const auth = useAuthStore()
 
-// ── Display name form ─────────────────────────────────────────────────────────
+// Display name form
 
 const displayName = ref(auth.user?.name ?? '')
 const displayNameSaving = ref(false)
@@ -29,7 +29,7 @@ async function saveDisplayName(): Promise<void> {
   }
 }
 
-// ── Email change form ─────────────────────────────────────────────────────────
+// Email change form
 
 const newEmail = ref('')
 const emailSaving = ref(false)
@@ -52,7 +52,7 @@ async function saveEmail(): Promise<void> {
   }
 }
 
-// ── Password form ───────────────────────────────────────────────────────────
+// Password form
 
 const currentPassword = ref('')
 const newPassword = ref('')

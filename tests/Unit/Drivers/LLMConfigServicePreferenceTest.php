@@ -51,9 +51,7 @@ function createConfigForService(LLMConfigService $service, string $name, int $us
     return $config;
 }
 
-// ---------------------------------------------------------------------------
 // setUserPreferredConfig
-// ---------------------------------------------------------------------------
 
 test('setUserPreferredConfig creates preference row', function (): void {
     [$service, $security] = makePreferenceService();
@@ -129,9 +127,7 @@ test('setUserPreferredConfig allows global config', function (): void {
     expect($pref->preferred_llm_config_id)->toBe($globalConfig->id);
 });
 
-// ---------------------------------------------------------------------------
 // getUserPreferredConfig
-// ---------------------------------------------------------------------------
 
 test('getUserPreferredConfig returns null when no preference', function (): void {
     [$service] = makePreferenceService();
@@ -179,9 +175,7 @@ test('getUserPreferredConfig respects user isolation', function (): void {
     expect($result)->toBeNull();
 });
 
-// ---------------------------------------------------------------------------
 // getEffectiveConfigForAgent uses preferred_llm_config_id (Tier 2)
-// ---------------------------------------------------------------------------
 
 test('getEffectiveConfigForAgent uses preferred_llm_config_id for tier-2 fallback', function (): void {
     [$service] = makePreferenceService();
@@ -273,9 +267,7 @@ test('getEffectiveConfigForAgent prefers agent config over user preferred config
         ->and($result->name)->toBe('Agent Override');
 });
 
-// ---------------------------------------------------------------------------
 // unsetUserPreferredConfig
-// ---------------------------------------------------------------------------
 
 test('unsetUserPreferredConfig deletes the row', function (): void {
     [$service] = makePreferenceService();

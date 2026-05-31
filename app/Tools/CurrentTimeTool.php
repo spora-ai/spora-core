@@ -12,6 +12,10 @@ use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use stdClass;
 
+/**
+ * Returns the current date, time, and timezone. Useful for scheduling
+ * and any time-sensitive operations.
+ */
 #[Tool(
     name: 'current_time',
     description: 'Returns the exact current date, time, and timezone. Use this whenever you need to know the current date to answer a question or schedule an event.',

@@ -298,9 +298,7 @@ test('scope agent keys can be overridden at agent level', function () {
     expect($effective['api_key'])->toBe('agent-key');
 });
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function makeToolConfigServiceForMerge(): ToolConfigService
 {

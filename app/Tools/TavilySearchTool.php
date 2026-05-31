@@ -15,6 +15,10 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 
+/**
+ * Searches the web using Tavily AI, optimized for LLM agents.
+ * Provides direct answers and search results with fact-checking capabilities.
+ */
 #[Tool(
     name: 'tavily_search',
     description: 'Search the web using Tavily AI (optimized for agents). Use this for fact-checking, recent events, research, or finding current data online. This provides direct concise answers.',

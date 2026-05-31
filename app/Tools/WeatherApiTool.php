@@ -14,6 +14,10 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 
+/**
+ * Fetches weather data from WeatherAPI.com including current conditions,
+ * multi-day forecasts, location search, and astronomy data (sunrise/sunset, moon phase).
+ */
 #[Tool(
     name: 'weather_api',
     description: 'Fetch weather data from WeatherAPI.com. Use this to get current conditions, multi-day forecasts, location search, or astronomy (sunrise/sunset, moon phase) for any location worldwide.',

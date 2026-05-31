@@ -10,9 +10,7 @@ use Spora\Tools\GlobalMemoryTool;
 
 describe('Memory Tools', function (): void {
 
-    // -------------------------------------------------------------------------
     // Shared helpers
-    // -------------------------------------------------------------------------
 
     /**
      * Create a user and agent, return [userId, agentId].
@@ -46,9 +44,7 @@ describe('Memory Tools', function (): void {
         return $attr->newInstance()->name;
     }
 
-    // -------------------------------------------------------------------------
     // AgentMemoryTool
-    // -------------------------------------------------------------------------
 
     describe('AgentMemoryTool', function (): void {
 
@@ -293,9 +289,7 @@ describe('Memory Tools', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
     // GlobalMemoryTool
-    // -------------------------------------------------------------------------
 
     describe('GlobalMemoryTool', function (): void {
 
@@ -494,9 +488,7 @@ describe('Memory Tools', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
     // Isolation between users
-    // -------------------------------------------------------------------------
 
     describe('User isolation', function (): void {
 

@@ -347,50 +347,6 @@ describe('useAgentStore', () => {
     })
   })
 
-  describe('getAllOperationOverrides', () => {
-    it('calls GET /agents/{id}/tools/operations and returns nested map', async () => {
-      const operationsResponse = {
-        operations: [
-          {
-            tool_class: 'TestTool',
-            tool_name: 'test_tool',
-            operation: 'search',
-            effective_enabled: true,
-            effective_requires_approval: false,
-          },
-          {
-            tool_class: 'TestTool',
-            tool_name: 'test_tool',
-            operation: 'scrape',
-            effective_enabled: false,
-            effective_requires_approval: true,
-          },
-        ],
-      }
-      mockApi.get.mockResolvedValueOnce(operationsResponse)
-
-      const store = useAgentStore()
-      const result = await store.getAllOperationOverrides(1)
-
-      expect(mockApi.get).toHaveBeenCalledWith('/agents/1/tools/operations')
-      expect(result).toEqual({
-        test_tool: {
-          search: { enabled: true, requiresApproval: false },
-          scrape: { enabled: false, requiresApproval: true },
-        },
-      })
-    })
-
-    it('returns empty object when no operations exist', async () => {
-      mockApi.get.mockResolvedValueOnce({ operations: [] })
-
-      const store = useAgentStore()
-      const result = await store.getAllOperationOverrides(42)
-
-      expect(result).toEqual({})
-    })
-  })
-
   describe('composerDrafts', () => {
     it('getComposerDraft creates a new draft lazily for unknown agent', () => {
       const store = useAgentStore()

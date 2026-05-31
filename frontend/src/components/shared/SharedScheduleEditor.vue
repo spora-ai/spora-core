@@ -51,7 +51,7 @@ function varToken(token: string): string {
   return `{{${token}}}`
 }
 
-// ── Props / Emits ─────────────────────────────────────────────────────────────
+// Props / Emits
 
 const props = defineProps<{
   modelValue: boolean
@@ -65,12 +65,12 @@ const emit = defineEmits<{
   closed: []
 }>()
 
-// ── Wizard state ─────────────────────────────────────────────────────────────
+// Wizard state
 
 const TOTAL_STEPS = 3
 const currentStep = ref(1)
 
-// ── Timezone list (all IANA zones via Intl, common ones sorted first) ─────────
+// Timezone list (all IANA zones via Intl, common ones sorted first)
 
 // eslint-disable-next-line no-unused-vars -- Intl.supportedValuesOf type annotation, type parameter intentionally unused
 const allTimezones: string[] = (Intl as { supportedValuesOf?: (_t: string) => string[] }).supportedValuesOf?.('timeZone') ?? ['UTC']
@@ -111,7 +111,7 @@ const FREQUENCY_OPTIONS: { value: Frequency; label: string }[] = [
   { value: 'custom', label: 'Custom cron' },
 ]
 
-// ── Form state ────────────────────────────────────────────────────────────────
+// Form state
 
 const mode = ref<'oneshot' | 'recurring'>('oneshot')
 const frequency = ref<Frequency>('daily')
@@ -146,7 +146,7 @@ const promptTemplatesStore = usePromptTemplatesStore()
 const showCreateTemplate = ref(false)
 const newTemplateName = ref('')
 
-// ── Step 1 validation ─────────────────────────────────────────────────────────
+// Step 1 validation
 
 const canProceedFromStep1 = computed(() => {
   if (templateId.value === null) return false
@@ -157,9 +157,9 @@ const canProceedFromStep1 = computed(() => {
   return true
 })
 
-// ── Step 2: nothing extra to validate beyond mode selection ────────────────────
+// Step 2: nothing extra to validate beyond mode selection
 
-// ── Step 3 validation ─────────────────────────────────────────────────────────
+// Step 3 validation
 
 const computedCron = computed((): string => {
   if (mode.value === 'oneshot') return ''
@@ -220,7 +220,7 @@ const previewRuns = computed((): string[] => {
   }
 })
 
-// ── Reverse parser ────────────────────────────────────────────────────────────
+// Reverse parser
 
 function applyParsedCron(cron: string): void {
   const result = parseCron(cron)
@@ -249,7 +249,7 @@ function applyParsedCron(cron: string): void {
   }
 }
 
-// ── Watchers ─────────────────────────────────────────────────────────────────
+// Watchers
 
 watch(() => props.modelValue, async (open) => {
   if (!open) return
@@ -333,7 +333,7 @@ watch(templateId, (id) => {
   }
 })
 
-// ── Navigation ────────────────────────────────────────────────────────────────
+// Navigation
 
 function nextStep(): void {
   if (currentStep.value < TOTAL_STEPS) {
@@ -347,7 +347,7 @@ function prevStep(): void {
   }
 }
 
-// ── Submit ────────────────────────────────────────────────────────────────────
+// Submit
 
 async function submit(): Promise<void> {
   if (!canSubmit.value) return
@@ -429,7 +429,7 @@ function close(): void {
   emit('closed')
 }
 
-// ── Computed helpers ──────────────────────────────────────────────────────────
+// Computed helpers
 
 const isEditing = computed(() => !!props.initialData?.id)
 const modalTitle = computed(() => isEditing.value ? 'Edit Schedule' : 'Schedule Run')
@@ -471,7 +471,7 @@ const stepLabels = ['Template', 'Schedule Type', 'Schedule']
         </div>
       </div>
 
-      <!-- ── STEP 1: Template ─────────────────────────────────────────────── -->
+      <!-- STEP 1: Template -->
 
       <div v-show="currentStep === 1" class="flex flex-col gap-4">
         <p class="text-sm text-muted-foreground">
@@ -537,7 +537,7 @@ const stepLabels = ['Template', 'Schedule Type', 'Schedule']
         </div>
       </div>
 
-      <!-- ── STEP 2: Schedule Type ───────────────────────────────────────── -->
+      <!-- STEP 2: Schedule Type -->
 
       <div v-show="currentStep === 2" class="flex flex-col gap-4">
         <p class="text-sm text-muted-foreground">
@@ -567,7 +567,7 @@ const stepLabels = ['Template', 'Schedule Type', 'Schedule']
         </div>
       </div>
 
-      <!-- ── STEP 3: Schedule ─────────────────────────────────────────────── -->
+      <!-- STEP 3: Schedule -->
 
       <div v-show="currentStep === 3" class="flex flex-col gap-4">
 

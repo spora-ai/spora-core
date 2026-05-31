@@ -10,7 +10,6 @@ use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
-use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
@@ -422,48 +421,6 @@ it('OutputTool with requiresApproval=false executes immediately', function (): v
         ->and($toolCallRecord->result_content)->toBe('auto_output_result');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// tick() — Operation auto-approved via AgentToolOperationOverride
-// ---------------------------------------------------------------------------
-
-it('AgentToolOperationOverride.default_requires_approval=0 overrides requiresApprovalByDefault=true', function (): void {
-    [$agentId] = seedAgent();
-
-    AgentTool::create([
-        'agent_id'     => $agentId,
-        'tool_class'   => StubOutputTool::class,
-        'tool_name'    => 'stub_output',
-    ]);
-
-    // Override the operation to auto-approve instead of requiring approval.
-    AgentToolOperationOverride::create([
-        'agent_id'                  => $agentId,
-        'tool_class'                => StubOutputTool::class,
-        'operation'                 => 'default',
-        'default_requires_approval' => 0, // false
-    ]);
-
-    $callCount = 0;
-    $mock      = Mockery::mock(LLMDriverInterface::class);
-    $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
-        $callCount++;
-
-        return $callCount === 1
-            ? new LLMResponse(null, [new DriverToolCall('call_ovr', 'stub_output', [])], 5, 3, 'cmp_1')
-            : new LLMResponse('Override done.', [], 5, 3, 'cmp_2');
-    });
-
-    $tools = [new StubOutputTool()];
-    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
-    $task = $orch->start($agentId, 'Override auto approve', maxSteps: 10);
-
-    $task->refresh();
-    // 2 LLM turns: one for the tool, one for the final text.
-    expect($task->status)->toBe('COMPLETED')
-        ->and($task->step_count)->toBe(2);
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
-
-// ---------------------------------------------------------------------------
 // max_steps
 // ---------------------------------------------------------------------------
 

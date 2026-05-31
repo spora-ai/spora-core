@@ -27,15 +27,11 @@ function makeUserPreferenceController(): array
 // Note: makeAdmin() and createTestConfig() are defined in LLMConfigControllerTest.php
 // and shared globally across all Feature tests
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 // jsonRequest() is defined globally in tests/Pest.php
 
-// ---------------------------------------------------------------------------
 // GET /api/v1/user-preferences/llm
-// ---------------------------------------------------------------------------
 
 test('get returns null when no preference set', function (): void {
     [$controller, $authService] = makeUserPreferenceController();
@@ -121,9 +117,7 @@ test('user cannot access another user preference (returns null for other user)',
     LLMDriverConfiguration::where('id', $configA->id)->delete();
 });
 
-// ---------------------------------------------------------------------------
 // PUT /api/v1/user-preferences/llm
-// ---------------------------------------------------------------------------
 
 test('put sets a personal config as preference', function (): void {
     [$controller, $authService, $llmConfigService] = makeUserPreferenceController();

@@ -18,7 +18,7 @@ const auth = useAuthStore()
 const usersStore = useUsersStore()
 const toast = useToast()
 
-// ── Pagination ─────────────────────────────────────────────────────────────
+// Pagination
 
 const deletingUser = ref<User | null>(null)
 
@@ -48,7 +48,7 @@ async function loadPage(page: number): Promise<void> {
   }
 }
 
-// ── Create modal ────────────────────────────────────────────────────────────
+// Create modal
 
 const showCreate = ref(false)
 const createForm = ref({ email: '', password: '' })
@@ -71,7 +71,7 @@ async function createUser(): Promise<void> {
   }
 }
 
-// ── Edit modal ─────────────────────────────────────────────────────────────
+// Edit modal
 
 const editingUser = ref<User | null>(null)
 
@@ -84,7 +84,7 @@ function openEdit(user: User): void {
   editingUser.value = user
 }
 
-// ── Role toggling (admin only) ──────────────────────────────────────────────
+// Role toggling (admin only)
 
 const togglingRole = ref<number | null>(null)
 
@@ -104,7 +104,7 @@ async function toggleAdminRole(user: User): Promise<void> {
   }
 }
 
-// ── Verified toggling ────────────────────────────────────────────────────────
+// Verified toggling
 
 const togglingVerified = ref<number | null>(null)
 
@@ -120,7 +120,7 @@ async function toggleVerified(user: User): Promise<void> {
   }
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// Helpers
 
 function isOwnAccount(user: User): boolean {
   return auth.user?.id === user.id
@@ -268,7 +268,7 @@ function isOwnAccount(user: User): boolean {
     </div>
   </div>
 
-  <!-- ── Create User Modal ────────────────────────────────────────────── -->
+  <!-- Create User Modal -->
   <Modal v-model="showCreate" title="Create User" size="sm" @close="showCreate = false">
     <form @submit.prevent="createUser" class="flex flex-col gap-4">
       <div class="flex flex-col gap-1.5">
@@ -314,9 +314,9 @@ function isOwnAccount(user: User): boolean {
     </template>
   </Modal>
 
-  <!-- ── Edit User Modal ─────────────────────────────────────────────── -->
+  <!-- Edit User Modal -->
   <EditUserModal v-model="isEditingOpen" :user="editingUser" />
 
-  <!-- ── Delete Confirmation Modal ────────────────────────────────────── -->
+  <!-- Delete Confirmation Modal -->
   <DeleteUserModal v-model="isDeleteOpen" :user="deletingUser" />
 </template>

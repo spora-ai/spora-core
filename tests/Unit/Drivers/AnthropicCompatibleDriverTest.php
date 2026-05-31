@@ -10,9 +10,7 @@ use Spora\Drivers\ValueObjects\LLMRequest;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function makeAnthropicDriver(MockHttpClient $client): AnthropicCompatibleDriver
 {
@@ -33,9 +31,7 @@ function makeAnthropicRequest(array $messages = [], array $tools = []): LLMReque
     );
 }
 
-// ---------------------------------------------------------------------------
 // Provider / model metadata
-// ---------------------------------------------------------------------------
 
 test('getProviderName returns anthropic_compatible', function (): void {
     $driver = makeAnthropicDriver(new MockHttpClient());
@@ -47,9 +43,7 @@ test('getModelName returns the model passed at construction', function (): void 
     expect($driver->getModelName())->toBe('claude-3-5-sonnet-20241022');
 });
 
-// ---------------------------------------------------------------------------
 // Text response path
-// ---------------------------------------------------------------------------
 
 test('complete returns text content when stop_reason is end_turn', function (): void {
     $payload = json_encode([
@@ -72,9 +66,7 @@ test('complete returns text content when stop_reason is end_turn', function (): 
         ->and($response->hasToolCalls())->toBeFalse();
 });
 
-// ---------------------------------------------------------------------------
 // Tool use response path
-// ---------------------------------------------------------------------------
 
 test('complete returns tool calls when stop_reason is tool_use', function (): void {
     $payload = json_encode([
@@ -128,9 +120,7 @@ test('complete handles multiple parallel tool calls', function (): void {
         ->and($response->toolCalls[1]->arguments)->toBe(['x' => 99]);
 });
 
-// ---------------------------------------------------------------------------
 // Message conversion — tool result batching
-// ---------------------------------------------------------------------------
 
 test('consecutive tool result messages are batched into one user turn', function (): void {
     $capturedBody = null;
@@ -167,9 +157,7 @@ test('consecutive tool result messages are batched into one user turn', function
     ]);
 });
 
-// ---------------------------------------------------------------------------
 // Message conversion — assistant tool_calls → Anthropic content blocks
-// ---------------------------------------------------------------------------
 
 test('assistant message with tool_calls is converted to Anthropic tool_use content blocks', function (): void {
     $capturedBody = null;
@@ -211,9 +199,7 @@ test('assistant message with tool_calls is converted to Anthropic tool_use conte
     ]);
 });
 
-// ---------------------------------------------------------------------------
 // Tool definition conversion
-// ---------------------------------------------------------------------------
 
 test('OpenAI-format tools are converted to Anthropic input_schema format', function (): void {
     $capturedBody = null;
@@ -252,9 +238,7 @@ test('OpenAI-format tools are converted to Anthropic input_schema format', funct
     ]);
 });
 
-// ---------------------------------------------------------------------------
 // Error handling
-// ---------------------------------------------------------------------------
 
 test('complete throws LLMRateLimitException on HTTP 429', function (): void {
     $client = new MockHttpClient(new MockResponse('{"error":{"type":"rate_limit_error"}}', ['http_code' => 429]));

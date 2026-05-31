@@ -8,9 +8,7 @@ use Spora\Models\Agent;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\EmailTool;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function makeLlmSettingsService(): array
 {
@@ -41,9 +39,7 @@ function makeAgentWithLlm(mixed $authService): int
     ])->id;
 }
 
-// ---------------------------------------------------------------------------
 // getLlmToolSettings
-// ---------------------------------------------------------------------------
 
 test('getLlmToolSettings returns only expose_to_llm fields with their labels and values', function (): void {
     [$service, , $authService] = makeLlmSettingsService();
@@ -83,7 +79,10 @@ test('getLlmToolSettings returns empty array when no settings are configured', f
 
     $result = $service->getLlmToolSettings(EmailTool::class, $agentId);
 
-    expect($result)->toBe([]);
+    // All expose_to_llm fields are returned with null when nothing is configured
+    expect($result)->toHaveKeys(['core.smtp.from', 'core.smtp.allowed_recipients']);
+    expect($result['core.smtp.from']['value'])->toBeNull();
+    expect($result['core.smtp.allowed_recipients']['value'])->toBeNull();
 })->afterEach(fn() => Database::resetBootState());
 
 test('getLlmToolSettings shows empty string values as empty string when stored', function (): void {
@@ -130,9 +129,11 @@ test('getLlmToolSettings uses schema defaults when no settings exist', function 
     // Don't set anything; EmailTool has no defaults for expose_to_llm fields anyway
     $result = $service->getLlmToolSettings(EmailTool::class, $agentId);
 
-    // No defaults are set on the expose_to_llm fields in EmailTool schema
-    // so result should be empty when nothing is configured
-    expect($result)->toBe([]);
+    // All expose_to_llm fields are returned with null value when not configured
+    // so the LLM always sees these settings (as "(not configured)")
+    expect($result)->toHaveKeys(['core.smtp.from', 'core.smtp.allowed_recipients']);
+    expect($result['core.smtp.from']['value'])->toBeNull();
+    expect($result['core.smtp.allowed_recipients']['value'])->toBeNull();
 })->afterEach(fn() => Database::resetBootState());
 
 test('getLlmToolSettings respects user-specific settings cascade', function (): void {

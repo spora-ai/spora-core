@@ -7,6 +7,10 @@ namespace Spora\Tools;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 
+/**
+ * Stores and retrieves persistent memories shared across all agents.
+ * Global memories are visible to every agent but scoped to a user.
+ */
 #[Tool(
     name: 'global_memory',
     description: 'Store and retrieve persistent memories shared across all agents.',

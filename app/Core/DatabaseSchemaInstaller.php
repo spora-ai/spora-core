@@ -75,10 +75,6 @@ final class DatabaseSchemaInstaller
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Private helpers
-    // -------------------------------------------------------------------------
-
     /**
      * Build a deterministic version string combining all component versions.
      * Format: "core_v1|my-plugin_v2|other-plugin_v1" (components sorted by name).

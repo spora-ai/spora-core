@@ -12,6 +12,9 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Manages agent prompt templates: list, create, update, delete.
+ */
 final class PromptTemplateController
 {
     public function __construct(

@@ -17,6 +17,10 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 
+/**
+ * Fetches calendar events from a CalDAV-compatible server (e.g. Nextcloud, Baikal).
+ * Lists events within a specified date range.
+ */
 #[Tool(
     name: 'calendar_list_events',
     description: 'Fetch upcoming events from the configured CalDAV calendar within a selected timezone. Always query real-time dates rather than assuming.',

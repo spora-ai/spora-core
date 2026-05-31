@@ -306,8 +306,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         return ['scheduled_run' => $this->resource($run), 'task_id' => $task->id];
     }
 
-    // ── Private helpers ─────────────────────────────────────────────────────────
-
     private function findAgent(int $id, int $userId): ?Agent
     {
         return Agent::where('id', $id)->where('user_id', $userId)->first();

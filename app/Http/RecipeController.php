@@ -11,6 +11,9 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Lists all available recipe definitions scanned from the recipes/ directory.
+ */
 final class RecipeController
 {
     public function __construct(

@@ -42,9 +42,7 @@ function makeAuthControllerWithUserService(): array
     return [$controller, $authService, $userService];
 }
 
-// ---------------------------------------------------------------------------
 // Rate limiting
-// ---------------------------------------------------------------------------
 
 test('login returns 429 after exceeding rate limit', function (): void {
     [$controller] = makeAuthControllerWithMocks();
@@ -248,9 +246,7 @@ test('account endpoint requires authentication', function (): void {
     expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
 });
 
-// ---------------------------------------------------------------------------
 // Password reset
-// ---------------------------------------------------------------------------
 
 test('resetPassword resets password with valid selector and token', function (): void {
     [$controller, $authService] = makeAuthControllerWithMocks();

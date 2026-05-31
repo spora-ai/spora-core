@@ -33,7 +33,6 @@ use Throwable;
  */
 final class WorkerRunCommand extends Command
 {
-    /** Seconds between reaper passes in daemon mode. */
     private const REAP_INTERVAL_SECONDS = 300;
 
     private bool $shouldQuit = false;
@@ -79,7 +78,6 @@ final class WorkerRunCommand extends Command
 
         $isReapOnly = (bool) $input->getOption('reap-only');
 
-        // --daemon, --once, and --reap-only are mutually exclusive
         if ($isDaemon && $isOnce) {
             $output->writeln('<error>--daemon and --once cannot be used together.</error>');
             return Command::FAILURE;
@@ -93,7 +91,6 @@ final class WorkerRunCommand extends Command
             return Command::FAILURE;
         }
 
-        // Daemon is the implicit default when no limiting flag is given.
         $isDaemon = $isDaemon || (!$isOnce && !$isReapOnly);
 
         // Resolve stale-minutes: CLI always wins; omit flag → config → default (60)
@@ -113,14 +110,12 @@ final class WorkerRunCommand extends Command
             default => (int) ($this->container->get('config')['max_workers'] ?? 0),
         };
 
-        // Lock to prevent concurrent execution (except for --reap-only maintenance).
         if (!$isReapOnly) {
             if (!$this->acquireLock($output)) {
                 return Command::FAILURE;
             }
         }
 
-        // In daemon mode, set up graceful signal handling.
         if ($isDaemon && extension_loaded('pcntl')) {
             pcntl_async_signals(true);
             pcntl_signal(SIGTERM, function () use ($output): void {
@@ -153,20 +148,14 @@ final class WorkerRunCommand extends Command
             $this->logger->info('Worker run (--reap-only)');
         }
 
-        // Reap orphaned tasks at startup — covers any tasks left RUNNING by a previous crash.
         $this->reapStaleTasks($output, $staleMinutes);
         $lastReapAt = time();
 
-        // --reap-only: one-shot orphan cleanup only, no queue or scheduled run processing.
         if ($isReapOnly) {
             $output->writeln('<info>Orphan reaping complete. Exiting.</info>');
             return Command::SUCCESS;
         }
 
-        // Child processes give true parallelism for QUEUED tasks in daemon mode.
-        // maxWorkers 0 = unlimited (spawn a child for every QUEUED task).
-        // Scheduled runs are always processed synchronously in the parent.
-        // Daemon is the default when no limiting flag (--once, --reap-only) is given.
         $useChildProcesses = $isDaemon;
 
         while (!$this->shouldQuit && ($limit === 0 || $processed < $limit)) {
@@ -176,18 +165,14 @@ final class WorkerRunCommand extends Command
             }
 
             // Always process due scheduled runs in daemon mode and --once mode.
-            // In --once mode this runs once per iteration (which is exactly one).
             if ($isDaemon || $isOnce) {
                 $this->processScheduledRuns($output);
             }
 
-            // Reap finished children on each iteration to avoid zombie procs.
             $this->reapChildren();
 
-            // Process QUEUED tasks: always in daemon mode, only with --include-queue in --once mode.
             $shouldProcessQueue = $isDaemon || ($isOnce && $includeQueue);
             if ($shouldProcessQueue) {
-                // Process retry queue first (retry tasks have retry_after timestamp)
                 $this->processRetryQueue($output);
 
                 if ($useChildProcesses) {
@@ -197,12 +182,10 @@ final class WorkerRunCommand extends Command
                 }
             }
 
-            // In --once mode, exit after one iteration.
             if ($isOnce) {
                 break;
             }
 
-            // Daemon: sleep before next poll cycle.
             if ($isDaemon) {
                 usleep($sleep);
             }
@@ -213,7 +196,6 @@ final class WorkerRunCommand extends Command
         $this->shutdownParent();
 
         if ($isDaemon && $this->shouldQuit) {
-            // Message already written by signal handler above
         } else {
             $output->writeln(sprintf('<info>Worker run complete. Processed %d task(s).</info>', $processed));
             $this->logger->info('Worker run complete', ['processed' => $processed]);
@@ -242,10 +224,9 @@ final class WorkerRunCommand extends Command
             ]);
 
         if ($claimed === 0) {
-            return; // Nothing due right now
+            return;
         }
 
-        // Re-read the claimed entry
         $entry = Capsule::table('scheduled_runs_next')
             ->where('status', ScheduledRunNext::STATUS_CLAIMED)
             ->where('due_at', '<=', $now)
@@ -260,7 +241,6 @@ final class WorkerRunCommand extends Command
         $run = ScheduledRun::find((int) $entry->scheduled_run_id);
 
         if ($run === null || !$run->is_active) {
-            // Mark as SKIPPED if the schedule was deactivated or deleted
             Capsule::table('scheduled_runs_next')
                 ->where('id', $entry->id)
                 ->update(['status' => ScheduledRunNext::STATUS_SKIPPED]);
@@ -281,7 +261,6 @@ final class WorkerRunCommand extends Command
             $template = AgentPromptTemplate::find($run->template_id);
         }
 
-        // Determine prompt
         $prompt = '';
         if ($template !== null) {
             $variables = $template->variables ?? [];
@@ -320,12 +299,8 @@ final class WorkerRunCommand extends Command
 
         $completedAt = date('Y-m-d H:i:s');
 
-        // Compute next_due_at BEFORE the transaction.
-        // Use wall-clock now as cron reference to avoid the same-day skip: when
-        // last_run_at is just before the scheduled time (e.g. 06:58 UTC for a 07:10
-        // UTC schedule), getNextRunDate(last_run_at) returns the same day's 07:10
-        // which is already past. Using now as reference always yields the next future
-        // occurrence. last_run_at is still tracked separately for historical accuracy.
+        // Use wall-clock now as cron reference to avoid the same-day skip.
+        // last_run_at is still tracked separately for historical accuracy.
         $nextDueAt = null;
         if ($run->cron_expression !== null) {
             $nowInScheduleTz = (new DateTimeImmutable('now', new DateTimeZone('UTC')))
@@ -337,11 +312,10 @@ final class WorkerRunCommand extends Command
                 ->format('Y-m-d H:i:s');
         }
 
-        // Atomically: mark current entry DONE + insert next PENDING entry (if recurring).
+        // Atomically mark DONE and insert next PENDING entry (if recurring).
         // This prevents the gap where the old entry is CLAIMED/DONE but the next entry
         // was never created (e.g. process crash or signal interruption between steps).
         Capsule::connection()->transaction(function () use ($run, $entry, $completedAt, $nextDueAt): void {
-            // Mark current PENDING entry as DONE
             Capsule::table('scheduled_runs_next')
                 ->where('id', $entry->id)
                 ->update([
@@ -350,17 +324,12 @@ final class WorkerRunCommand extends Command
                 ]);
 
             if ($nextDueAt !== null) {
-                // Remove any stale PENDING/CLAIMED entry for the same due_at so the
-                // INSERT below does not conflict on the unique (scheduled_run_id, due_at) index.
                 Capsule::table('scheduled_runs_next')
                     ->where('scheduled_run_id', $run->id)
                     ->where('due_at', $nextDueAt)
                     ->whereIn('status', [ScheduledRunNext::STATUS_PENDING, ScheduledRunNext::STATUS_CLAIMED])
                     ->delete();
 
-                // Use INSERT OR IGNORE as a safety net: if the DELETE above didn't catch a
-                // stale entry (e.g. race with another worker), the unique constraint
-                // violation is silently ignored rather than crashing the whole run.
                 Capsule::connection()->statement(
                     "INSERT OR IGNORE INTO scheduled_runs_next (scheduled_run_id, due_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
                     [$run->id, $nextDueAt, ScheduledRunNext::STATUS_PENDING, $completedAt, $completedAt],
@@ -373,7 +342,6 @@ final class WorkerRunCommand extends Command
                         'next_run_at' => $nextDueAt,
                     ]);
             } else {
-                // One-shot: update last_run_at, clear next_run_at, deactivate
                 Capsule::table('scheduled_runs')
                     ->where('id', $run->id)
                     ->update([
@@ -386,10 +354,8 @@ final class WorkerRunCommand extends Command
 
         $this->notificationService->notifyScheduledRunCompleted($run->id, $task);
 
-        // Send e-mail notification if enabled
         $this->notificationService->sendEmailForScheduledRun($task);
 
-        // Publish Mercure update
         $taskData = [
             'id'          => $task->id,
             'agent_id'    => $task->agent_id,
@@ -503,12 +469,11 @@ final class WorkerRunCommand extends Command
     private function reapStaleTasks(OutputInterface $output, int $staleMinutes): void
     {
         if ($staleMinutes <= 0) {
-            return; // Reaping disabled
+            return;
         }
 
         $cutoff = date('Y-m-d H:i:s', time() - $staleMinutes * 60);
 
-        // Capture IDs before UPDATE so we can notify after
         $orphanedIds = Task::where('status', 'RUNNING')
             ->where('updated_at', '<', $cutoff)
             ->pluck('id')
@@ -539,7 +504,6 @@ final class WorkerRunCommand extends Command
                 $staleMinutes,
             ));
 
-            // Batch-fetch + send orphaned notifications
             $orphaned = Task::findMany($orphanedIds);
             foreach ($orphaned as $task) {
                 $this->notificationService->notifyTaskOrphaned($task);
@@ -549,7 +513,6 @@ final class WorkerRunCommand extends Command
 
     /**
      * Claim and process a single QUEUED task synchronously in the parent process.
-     * Used when --workers is 0 (single-threaded mode).
      */
     private function processQueuedTaskSync(OutputInterface $output, int $sleep, int &$processed): void
     {
@@ -557,7 +520,7 @@ final class WorkerRunCommand extends Command
             $task = Capsule::connection()->transaction(function (): ?Task {
                 /** @var Task|null $task */
                 $task = Task::where('status', 'QUEUED')
-                    ->where('retry_of_task_id', null) // skip retry tasks (handled by processRetryQueue)
+                    ->where('retry_of_task_id', null)
                     ->orderBy('id')
                     ->lockForUpdate()
                     ->first();
@@ -589,7 +552,6 @@ final class WorkerRunCommand extends Command
         $this->logger->info('Processing task', ['task_id' => $task->id]);
         $output->writeln(sprintf('<info>Processing task %d...</info>', $task->id));
 
-        // Publish RUNNING state to Mercure so frontend sees the transition immediately
         $this->mercure->publish($task->id, $task->user_id, [
             'task_id'  => $task->id,
             'status'   => 'RUNNING',
@@ -597,7 +559,6 @@ final class WorkerRunCommand extends Command
 
         try {
             $this->orchestrator->tick($task->id);
-            // Notification is sent by Orchestrator.tick() — do not duplicate here.
             $this->logger->info('Task completed', ['task_id' => $task->id]);
         } catch (Throwable $e) {
             $this->logger->error('Task failed', [
@@ -607,8 +568,6 @@ final class WorkerRunCommand extends Command
             ]);
             $output->writeln(sprintf('<error>Task %d failed: %s</error>', $task->id, $e->getMessage()));
 
-            // Ensure task is marked FAILED in case the Orchestrator's update was skipped
-            // (e.g., a race condition where status changed between claim and tick).
             Task::where('id', $task->id)
                 ->where('status', 'RUNNING')
                 ->update([
@@ -624,8 +583,6 @@ final class WorkerRunCommand extends Command
 
     /**
      * Spawn child processes for all available QUEUED tasks.
-     * The parent claims each task (QUEUED → RUNNING) before spawning its child.
-     * The child skips re-claiming since the parent already did it.
      * Loops until either maxWorkers (0 = unlimited) is reached or no more QUEUED tasks exist.
      */
     private function processQueuedTaskWithChild(OutputInterface $output, int $maxWorkers, int $sleep, int &$processed): void
@@ -653,7 +610,6 @@ final class WorkerRunCommand extends Command
                 break;
             }
 
-            // Publish RUNNING state to Mercure so the frontend sees the transition
             $this->mercure->publish($task->id, $task->user_id, [
                 'task_id' => $task->id,
                 'status'  => 'RUNNING',
@@ -674,7 +630,6 @@ final class WorkerRunCommand extends Command
 
     /**
      * Spawn a child process to handle a single task.
-     * The child inherits stdout/stderr from the parent — no pipe management needed.
      */
     private function spawnChild(int $taskId): ?int
     {
@@ -702,7 +657,7 @@ final class WorkerRunCommand extends Command
     }
 
     /**
-     * Reap any child processes that have exited (non-blocking).
+     * Reap any child processes that have exited.
      */
     private function reapChildren(): void
     {
@@ -716,22 +671,15 @@ final class WorkerRunCommand extends Command
     }
 
     /**
-     * Process tasks that are waiting for a retry after a failure.
+     * Process retry tasks whose retry_after <= now.
      *
-     * Retry tasks have retry_of_task_id (→ root original), retry_count, and
-     * retry_after (UTC timestamp). When retry_after <= now, the task is picked
-     * up, marked RUNNING, notified, and processed via tick().
-     *
-     * All retry tasks always link to the ROOT original task (not the immediate
-     * parent), enabling single-query cancellation: WHERE retry_of_task_id = root
-     * AND retry_count >= N.
+     * All retry tasks link to the ROOT original task (not the immediate parent),
+     * enabling single-query cancellation: WHERE retry_of_task_id = root AND retry_count >= N.
      */
     private function processRetryQueue(OutputInterface $output): void
     {
         $now = date('Y-m-d H:i:s');
 
-        // Single query: fetch retry tasks JOINed with root task status.
-        // Filters out retry tasks whose root is CANCELLED.
         $retryTasks = Capsule::connection()->select("
             SELECT t.id, t.retry_of_task_id, t.retry_count, o.status AS original_status, o.agent_id
             FROM tasks t
@@ -748,7 +696,6 @@ final class WorkerRunCommand extends Command
 
         $taskIds = array_column($retryTasks, 'id');
 
-        // Single batch UPDATE: mark all due retry tasks as RUNNING
         Capsule::table('tasks')
             ->whereIn('id', $taskIds)
             ->update(['status' => 'RUNNING']);
@@ -762,7 +709,6 @@ final class WorkerRunCommand extends Command
         $agentMaxRetries = collect($allAgents)->keyBy->id->map(fn(Agent $a) => $a->max_retries)->toArray();
 
         foreach ($allRetryTasks as $retryTask) {
-            // Publish RUNNING state to Mercure
             $this->mercure->publish($retryTask->id, $retryTask->user_id, [
                 'task_id' => $retryTask->id,
                 'status'  => 'RUNNING',

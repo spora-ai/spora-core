@@ -7,12 +7,10 @@ namespace Spora\Tools\Attributes;
 use Attribute;
 
 /**
- * Applied zero-or-more times at class level (repeatable).
- * Each instance declares one named operation within a tool class.
+ * Declares a named operation within a tool class.
  *
- * The orchestrator resolves the operation name by reading the `discriminatorKey` argument
- * from the incoming tool call. The corresponding #[ToolOperation] is then looked up to
- * determine whether that specific operation is enabled and whether it requires approval.
+ * The orchestrator reads the `discriminatorKey` field from an incoming tool call to
+ * select the matching #[ToolOperation] and check whether it is enabled/requires approval.
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class ToolOperation

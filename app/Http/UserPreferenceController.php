@@ -11,6 +11,9 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Manages user preferences, currently limited to preferred LLM configuration.
+ */
 final class UserPreferenceController
 {
     public function __construct(

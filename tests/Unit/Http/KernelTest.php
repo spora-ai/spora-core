@@ -9,18 +9,10 @@ use Spora\Core\Kernel;
 use Spora\Services\AgentServiceInterface;
 use Symfony\Component\HttpFoundation\Request;
 
-// ---------------------------------------------------------------------------
-// Cleanup hook — reset superglobals modified by tests
-// ---------------------------------------------------------------------------
-
 afterEach(function (): void {
     unset($_ENV['SPORA_SECRET_KEY']);
     $_SESSION = [];
 });
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 test('Kernel instantiates without throwing', function (): void {
     expect(fn() => new Kernel())->not()->toThrow(Throwable::class);
@@ -34,10 +26,6 @@ test('getContainer() returns a DI Container instance', function (): void {
     unset($kernel);
     gc_collect_cycles();
 });
-
-// ---------------------------------------------------------------------------
-// 404 Not Found
-// ---------------------------------------------------------------------------
 
 test('GET to unknown route returns 404 JSON with correct envelope shape', function (): void {
     $kernel   = new Kernel();
@@ -78,10 +66,6 @@ test('404 response has Content-Type application/json', function (): void {
     gc_collect_cycles();
 });
 
-// ---------------------------------------------------------------------------
-// 405 Method Not Allowed
-// ---------------------------------------------------------------------------
-
 test('wrong HTTP method on known route returns 405 JSON with METHOD_NOT_ALLOWED code', function (): void {
     $kernel  = new Kernel();
     // /api/v1/auth/login only accepts POST
@@ -119,10 +103,6 @@ test('405 response has Content-Type application/json', function (): void {
     unset($kernel);
     gc_collect_cycles();
 });
-
-// ---------------------------------------------------------------------------
-// Successful dispatch
-// ---------------------------------------------------------------------------
 
 test('valid route with correct method dispatches to controller and returns a response', function (): void {
     $kernel   = new Kernel();
@@ -268,10 +248,6 @@ test('500 response has Content-Type application/json', function (): void {
     expect($response->headers->get('Content-Type'))->toContain('application/json');
 });
 
-// ---------------------------------------------------------------------------
-// 401 Unauthenticated (UnauthenticatedException -> Kernel -> 401)
-// ---------------------------------------------------------------------------
-
 test('UnauthenticatedException from a protected route returns 401 UNAUTHENTICATED', function (): void {
     clearSession();
 
@@ -308,10 +284,6 @@ test('401 response has Content-Type application/json', function (): void {
 
     $kernel->__destruct();
 });
-
-// ---------------------------------------------------------------------------
-// 500 debug mode - exposes exception details when app_env=development
-// ---------------------------------------------------------------------------
 
 test('500 response in development mode includes a debug block with exception details', function (): void {
     $_ENV['SPORA_APP_ENV'] = 'development';
@@ -351,10 +323,6 @@ test('500 response in development mode includes a debug block with exception det
     expect($body['debug'])->toHaveKey('line');
     expect($body['debug']['exception'])->toBeString()->not()->toBeEmpty();
 });
-
-// ---------------------------------------------------------------------------
-// Error handling - vendor deprecations captured by set_error_handler
-// ---------------------------------------------------------------------------
 
 test('deprecation warnings are logged to Monolog and not output to screen', function (): void {
     $_ENV['SPORA_APP_ENV'] = 'production';
@@ -412,10 +380,6 @@ test('log stdout configures Monolog to write to stdout', function (): void {
         unset($_ENV['SPORA_LOG_PATH']);
     }
 });
-
-// ---------------------------------------------------------------------------
-// Middleware — verifies AuthMiddleware and CsrfMiddleware are actually applied
-// ---------------------------------------------------------------------------
 
 test('public route with no middleware works without session or CSRF', function (): void {
     $kernel = new Kernel();

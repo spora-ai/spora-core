@@ -13,6 +13,9 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Handles task listing, status updates, cancellation, and real-time SSE streaming.
+ */
 final class TaskController
 {
     public function __construct(
@@ -361,10 +364,6 @@ final class TaskController
 
         return new JsonResponse(['data' => ['deleted' => true]]);
     }
-
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
 
     private function decodeJson(Request $request): array
     {

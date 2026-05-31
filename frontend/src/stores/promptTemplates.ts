@@ -3,6 +3,9 @@ import { ref } from 'vue'
 import { api } from '@/api/client'
 import type { PromptTemplateResource } from '@/types/promptTemplate'
 
+/**
+ * Manages prompt templates for agents: fetch, create, update, and delete.
+ */
 export const usePromptTemplatesStore = defineStore('promptTemplates', () => {
   const templates = ref<PromptTemplateResource[]>([])
 

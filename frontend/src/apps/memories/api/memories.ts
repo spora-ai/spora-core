@@ -1,6 +1,9 @@
 import { api } from '@/api/client'
 import type { MemoryResource, CreateMemoryDto, UpdateMemoryDto } from '../types/memory'
 
+/**
+ * Memory API client for global and agent-scoped memory operations.
+ */
 export async function getGlobalMemories(): Promise<MemoryResource[]> {
   const result = await api.get<{ memories: MemoryResource[] }>('/memories')
   return result.memories

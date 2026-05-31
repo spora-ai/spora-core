@@ -14,14 +14,10 @@ import { useAuthStore } from '@/stores/auth'
 import { useAgentStore } from '@/stores/agent'
 import { api } from '@/api/client'
 
-// ── Module-level singleton ────────────────────────────────────────────────────
-
 let globalEventSource: EventSource | null = null
 let globalConnected = ref(false)
 
 export { globalConnected }
-
-// ── Composable ────────────────────────────────────────────────────────────────
 
 export function useRealtime() {
   const taskStore = useTaskStore()

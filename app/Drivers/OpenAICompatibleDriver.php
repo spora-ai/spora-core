@@ -33,8 +33,6 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
         private readonly ?int                $timeout = null,
     ) {}
 
-    // ── LLMDriverInterface ──────────────────────────────────────────────────────
-
     public function getProviderName(): string
     {
         return 'openai_compatible';
@@ -143,8 +141,6 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
             reasoning: $parsedContent['reasoning'],
         );
     }
-
-    // ── LLMDriverConfigInterface ────────────────────────────────────────────────
 
     public static function getName(): string
     {

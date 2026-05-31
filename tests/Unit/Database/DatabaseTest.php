@@ -5,9 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Core\Database;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function makeTempSqliteConfig(): array
 {
@@ -27,9 +25,7 @@ function bootFreshDatabase(array $config = []): Database
     return $db;
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 
 test('database boots successfully with in-memory SQLite', function (): void {
     expect(fn() => bootFreshDatabase())->not()->toThrow(Throwable::class);

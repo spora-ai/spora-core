@@ -106,8 +106,6 @@ final class MailTemplateService implements MailTemplateServiceInterface
         ];
     }
 
-    // ── Private helpers ─────────────────────────────────────────────────────────
-
     private function serializeTemplate(MailTemplate $template): array
     {
         return [

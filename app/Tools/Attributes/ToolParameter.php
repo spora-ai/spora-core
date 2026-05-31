@@ -7,8 +7,11 @@ namespace Spora\Tools\Attributes;
 use Attribute;
 
 /**
- * Applied zero-or-more times at class level (repeatable).
- * Each instance describes one parameter the tool accepts.
+ * Describes a parameter the tool accepts, for LLM-facing schema generation.
+ *
+ * Usage:
+ *   #[ToolParameter(name: 'query', type: 'string', description: 'Search term', required: true)]
+ *   #[ToolParameter(name: 'limit', type: 'number', description: 'Max results', required: false, default: 10)]
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class ToolParameter

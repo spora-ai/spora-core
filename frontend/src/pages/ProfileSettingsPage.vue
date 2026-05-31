@@ -19,7 +19,7 @@ interface UserLocation {
   is_default: boolean
 }
 
-// ── Profile form ─────────────────────────────────────────────────────────────
+// Profile form
 
 const profile = ref<UserProfile>({
   name: null,
@@ -34,7 +34,7 @@ const profileError = ref<string | null>(null)
 const profileSuccess = ref(false)
 const healthSuccess = ref(false)
 
-// ── Locations ────────────────────────────────────────────────────────────────
+// Locations
 
 const locations = ref<UserLocation[]>([])
 const locationsLoading = ref(false)
@@ -112,7 +112,7 @@ async function deleteLocation(id: number): Promise<void> {
   }
 }
 
-// ── Load data ────────────────────────────────────────────────────────────────
+// Load data
 
 onMounted(async () => {
   profileLoading.value = true
@@ -135,7 +135,7 @@ onMounted(async () => {
   }
 })
 
-// ── Save profile ─────────────────────────────────────────────────────────────
+// Save profile
 
 async function saveProfile(): Promise<void> {
   profileSaving.value = true
@@ -179,7 +179,7 @@ async function saveHealthData(): Promise<void> {
       </div>
       <div class="space-y-6">
 
-        <!-- ── Base Data ──────────────────────────────────────────────────── -->
+        <!-- Base Data -->
         <section class="rounded-xl border border-border bg-card p-5 space-y-4">
           <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Base Data</h3>
           <div v-if="profileLoading" class="text-sm text-muted-foreground">Loading…</div>
@@ -229,7 +229,7 @@ async function saveHealthData(): Promise<void> {
           </div>
         </section>
 
-        <!-- ── Locations ──────────────────────────────────────────────────── -->
+        <!-- Locations -->
         <section class="rounded-xl border border-border bg-card p-5 space-y-4">
           <div class="flex items-center justify-between">
             <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Locations</h3>
@@ -278,7 +278,7 @@ async function saveHealthData(): Promise<void> {
           <p v-if="locationsError" role="alert" class="text-xs text-destructive">{{ locationsError }}</p>
         </section>
 
-        <!-- ── Health Data ────────────────────────────────────────────────── -->
+        <!-- Health Data -->
         <section class="rounded-xl border border-border bg-card p-5 space-y-4">
           <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Health Data</h3>
           <div class="space-y-3">
@@ -324,7 +324,7 @@ async function saveHealthData(): Promise<void> {
       </div>
     </main>
 
-    <!-- ── Location Form Modal ─────────────────────────────────────────────── -->
+    <!-- Location Form Modal -->
     <div
       v-if="showLocationForm"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"

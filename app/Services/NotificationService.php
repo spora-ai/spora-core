@@ -221,8 +221,6 @@ class NotificationService implements NotificationServiceInterface
         ];
     }
 
-    // ── CRUD ─────────────────────────────────────────────────────────────────
-
     /**
      * @return array{data: list<array>, pagination: array{total: int, per_page: int, current_page: int, last_page: int}}
      */

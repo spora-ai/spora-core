@@ -14,6 +14,9 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Administrative user management: list, create, update, delete, and role grant/revoke.
+ */
 final class UserController
 {
     private const ROLE_MAP = [

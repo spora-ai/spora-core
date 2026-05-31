@@ -18,6 +18,10 @@ use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mime\Email;
 use Throwable;
 
+/**
+ * Email tool supporting IMAP (read inbox, list folders, read folders) and SMTP (send, drafts).
+ * Security: SMTP recipients are validated against core.smtp.allowed_recipients (comma-separated list or *).
+ */
 #[Tool(
     name: 'email',
     description: 'All email operations including reading inbox, listing folders, and sending emails. The "action" argument selects the operation.',
@@ -182,8 +186,6 @@ final class EmailTool implements ToolInterface
             'required' => ['action'],
         ];
     }
-
-    // ── Operations ──────────────────────────────────────────────────────────────
 
     public function readInbox(array $arguments, int $agentId, ?int $userId): ToolResult
     {
@@ -466,8 +468,6 @@ final class EmailTool implements ToolInterface
         $read = ($arguments['read'] ?? true) ? 'read' : 'unread';
         return "Mark email UID {$uid} as {$read}";
     }
-
-    // ── Folder & Email Management Operations ──────────────────────────────────────
 
     public function createFolder(array $arguments, int $agentId, ?int $userId): ToolResult
     {

@@ -7,6 +7,9 @@ namespace Spora\Http;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 
+/**
+ * Returns public application configuration for the frontend.
+ */
 final class ConfigController
 {
     public function __construct(

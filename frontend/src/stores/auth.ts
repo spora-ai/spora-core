@@ -5,6 +5,10 @@ import type { User } from '@/types/user'
 
 export { type User }
 
+/**
+ * Manages authentication: session init, login, logout, registration,
+ * password/email changes, and CSRF token handling.
+ */
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const csrfToken = ref<string | null>(null)

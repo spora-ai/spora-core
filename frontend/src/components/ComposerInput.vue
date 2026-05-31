@@ -34,7 +34,7 @@ const currentLlmConfig = computed(() =>
 )
 const configName = computed(() => currentLlmConfig.value?.name ?? 'Custom LLM config')
 
-// ── Draft state (persisted per-agent) ─────────────────────────────────────────
+// Draft state (persisted per-agent)
 
 const promptText = computed({
   get: () => agentStore.getComposerDraft(props.agentId).promptText,
@@ -51,7 +51,7 @@ const showTemplateDialog = ref(false)
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 
-// ── Auto-resize ───────────────────────────────────────────────────────────────
+// Auto-resize
 
 function adjustTextareaHeight(): void {
   nextTick(() => {
@@ -63,7 +63,7 @@ function adjustTextareaHeight(): void {
 
 watch(promptText, adjustTextareaHeight)
 
-// ── Template ───────────────────────────────────────────────────────────────────
+// Template─────────────────────────────────────────────────────────────────
 
 function onTemplateChange(templateId: number | null): void {
   selectedTemplateId.value = templateId
@@ -121,7 +121,7 @@ function onScheduleSaved(): void {
   selectedTemplateId.value = null
 }
 
-// ── Submission ─────────────────────────────────────────────────────────────────
+// Submission
 
 function onComposerKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {

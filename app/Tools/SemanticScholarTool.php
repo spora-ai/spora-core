@@ -15,6 +15,10 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 
+/**
+ * Searches academic papers and retrieves metadata via the Semantic Scholar API.
+ * Supports paper search, citations, references, and recommendations. Free, no API key required.
+ */
 #[Tool(
     name: 'semantic_scholar',
     description: 'Search academic papers, fetch metadata, citations, references, and recommendations using the Semantic Scholar API. Free, no API key required.',

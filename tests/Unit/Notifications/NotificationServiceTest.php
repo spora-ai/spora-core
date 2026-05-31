@@ -12,10 +12,6 @@ use Spora\Security\CsrfTokenService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeNotificationService(?MercurePublisherInterface $mercureOverride = null): NotificationService
 {
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
@@ -53,10 +49,6 @@ function seedUserAndAgentForNotification(): array
 
     return [$userId, $agent, $authService];
 }
-
-// ---------------------------------------------------------------------------
-// NotificationService
-// ---------------------------------------------------------------------------
 
 describe('NotificationService', function (): void {
     it('notifyTaskCompleted creates a task_completed notification and publishes to Mercure', function (): void {
@@ -198,10 +190,6 @@ describe('NotificationService', function (): void {
             ->and($all[1]->id)->toBe($older->id);
     });
 });
-
-// ---------------------------------------------------------------------------
-// NotificationController
-// ---------------------------------------------------------------------------
 
 describe('NotificationController', function (): void {
     it('index returns paginated notifications for the logged-in user', function (): void {

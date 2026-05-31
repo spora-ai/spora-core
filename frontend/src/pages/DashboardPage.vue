@@ -13,7 +13,7 @@ const taskStore = useTaskStore()
 
 const showNewAgentModal = ref(false)
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// Helpers
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
@@ -46,7 +46,7 @@ const sortedAgents = computed(() => {
   })
 })
 
-// ── Lifecycle ────────────────────────────────────────────────────────────────
+// Lifecycle
 
 onMounted(async () => {
   await agentStore.fetchAgents()

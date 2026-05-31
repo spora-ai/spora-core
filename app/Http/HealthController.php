@@ -8,6 +8,9 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Throwable;
 
+/**
+ * Health check endpoint for monitoring database connectivity.
+ */
 final class HealthController
 {
     public function check(): JsonResponse

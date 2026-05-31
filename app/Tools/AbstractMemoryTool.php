@@ -9,6 +9,10 @@ use Spora\Models\Memory;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 
+/**
+ * Abstract base for memory tools that provide list, get, save, and delete operations.
+ * Subclasses define the scope (agent or global) via getScope().
+ */
 abstract class AbstractMemoryTool implements ToolInterface
 {
     use HasOperations;

@@ -12,6 +12,10 @@ use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
+/**
+ * Evaluates mathematical expressions safely using the StringCalc library.
+ * Supports standard arithmetic operators, parentheses, and common functions.
+ */
 #[Tool(
     name: 'calculator',
     description: 'Evaluates a mathematical expression safely. Use this to calculate exact results. Supports standard arithmetic operators (+, -, *, /) and parentheses.',

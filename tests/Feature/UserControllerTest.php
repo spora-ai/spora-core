@@ -27,9 +27,7 @@ function makeAdmin(AuthService $authService, int $userId): void
     $authService->grantRole($userId, Role::ADMIN);
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 
 test('updateUser can set name field', function (): void {
     [$controller, $authService] = makeUserController();

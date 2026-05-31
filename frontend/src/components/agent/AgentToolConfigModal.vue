@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import Icon from '@/components/ui/Icon.vue'
 import Modal from '@/components/Modal.vue'
 import ToolSettingField from '@/components/settings/ToolSettingField.vue'
 import type { ToolSchema, SettingsWithSource } from '@/composables/useToolSettings'
@@ -209,7 +210,7 @@ function goToGlobalSettings(): void {
   <Modal
     :modelValue="toolName !== null"
     :title="`Configure: ${tool?.display_name || toolName || ''}`"
-    size="md"
+    size="lg"
     @update:modelValue="(v) => !v && emit('close')"
     @close="emit('close')"
   >
@@ -219,173 +220,174 @@ function goToGlobalSettings(): void {
     </div>
 
     <template v-else-if="tool && hasSchema">
-      <!-- ============================================ -->
-      <!-- SECTION 1: Currently Active Settings (Read-only info) -->
-      <!-- ============================================ -->
-      <div class="mb-6">
-        <h3 class="text-sm font-medium text-foreground mb-3">Currently Active Settings</h3>
-        <div class="rounded-lg border border-border bg-muted/30">
-          <div class="px-4 py-3 space-y-2">
+      <form @submit.prevent="onSave" class="contents">
+        <!-- ============================================ -->
+        <!-- SECTION 1: Currently Active Settings (Read-only info) -->
+        <!-- ============================================ -->
+        <div class="mb-6">
+          <h3 class="text-sm font-medium text-foreground mb-3">Currently Active Settings</h3>
+          <div class="rounded-lg border border-border bg-muted/30">
+            <div class="px-4 py-3 space-y-2">
+              <div
+                v-for="field in tool.settings_schema"
+                :key="field.key"
+                class="flex items-center justify-between text-sm"
+              >
+                <span class="text-muted-foreground">{{ field.label }}</span>
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-muted-foreground/80">
+                    {{ getMaskedValue(field.key) }}
+                  </span>
+                  <span
+                    class="text-xs px-1.5 py-0.5 rounded"
+                    :class="getSourceBadgeClass(getSource(field.key))"
+                  >
+                    {{ getSourceLabel(getSource(field.key)) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div v-if="!hasAnyEffectiveSettings" class="px-4 py-3 text-xs text-muted-foreground">
+              Using defaults (no settings configured)
+            </div>
+          </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- SECTION 1b: LLM Capabilities (expose_to_llm fields) -->
+        <!-- ============================================ -->
+        <div v-if="llmExposedFields.length > 0" class="mb-6">
+          <h3 class="text-sm font-medium text-foreground mb-3 flex items-center gap-1.5">
+            <Icon name="sparkles" class="h-4 w-4 text-primary" />
+            LLM Capabilities
+          </h3>
+          <p class="text-xs text-muted-foreground mb-3">
+            These settings directly influence how the LLM uses this tool.
+          </p>
+          <div class="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2.5">
             <div
-              v-for="field in tool.settings_schema"
+              v-for="field in llmExposedFields"
               :key="field.key"
-              class="flex items-center justify-between text-sm"
+              class="flex flex-col sm:flex-row sm:items-start justify-between gap-2 sm:gap-4 text-sm"
             >
-              <span class="text-muted-foreground">{{ field.label }}</span>
-              <div class="flex items-center gap-2">
-                <span class="font-mono text-muted-foreground/80">
-                  {{ getMaskedValue(field.key) }}
-                </span>
-                <span
-                  class="text-xs px-1.5 py-0.5 rounded"
-                  :class="getSourceBadgeClass(getSource(field.key))"
-                >
-                  {{ getSourceLabel(getSource(field.key)) }}
-                </span>
+              <div class="flex-1 min-w-0">
+                <span class="font-medium text-foreground">{{ field.label }}</span>
+                <p class="text-xs text-muted-foreground mt-0.5">{{ field.description }}</p>
               </div>
+              <span class="shrink-0 font-mono text-xs text-muted-foreground/80 sm:text-right min-w-[80px] break-all sm:max-w-[50%]">
+                {{ getMaskedValue(field.key) }}
+              </span>
             </div>
           </div>
-          <div v-if="!hasAnyEffectiveSettings" class="px-4 py-3 text-xs text-muted-foreground">
-            Using defaults (no settings configured)
+        </div>
+
+        <!-- ============================================ -->
+        <!-- SECTION 2: Agent-Level Overrides -->
+        <!-- ============================================ -->
+        <div class="mb-6">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-medium text-foreground">Agent-Level Overrides</h3>
+            <button
+              v-if="agentOverridesExist"
+              type="button"
+              @click="removeAgentOverride"
+              class="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors"
+            >
+              Remove all agent overrides
+            </button>
           </div>
-        </div>
-      </div>
 
-      <!-- ============================================ -->
-      <!-- SECTION 1b: LLM Capabilities (expose_to_llm fields) -->
-      <!-- ============================================ -->
-      <div v-if="llmExposedFields.length > 0" class="mb-6">
-        <h3 class="text-sm font-medium text-foreground mb-3 flex items-center gap-1.5">
-          <Icon name="sparkles" class="h-4 w-4 text-primary" />
-          LLM Capabilities
-        </h3>
-        <p class="text-xs text-muted-foreground mb-3">
-          These settings directly influence how the LLM uses this tool.
-        </p>
-        <div class="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2.5">
-          <div
-            v-for="field in llmExposedFields"
-            :key="field.key"
-            class="flex items-start justify-between gap-4 text-sm"
-          >
-            <div class="flex-1">
-              <span class="font-medium text-foreground">{{ field.label }}</span>
-              <p class="text-xs text-muted-foreground mt-0.5">{{ field.description }}</p>
-            </div>
-            <span class="shrink-0 font-mono text-xs text-muted-foreground/80 text-right min-w-[80px]">
-              {{ getMaskedValue(field.key) }}
-            </span>
-          </div>
-        </div>
-      </div>
+          <p class="text-xs text-muted-foreground mb-4">
+            Override settings specifically for this agent. Leave empty to inherit from global/user settings.
+          </p>
 
-      <!-- ============================================ -->
-      <!-- SECTION 2: Agent-Level Overrides -->
-      <!-- ============================================ -->
-      <div class="mb-6">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-medium text-foreground">Agent-Level Overrides</h3>
-          <button
-            v-if="agentOverridesExist"
-            type="button"
-            @click="removeAgentOverride"
-            class="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors"
-          >
-            Remove all agent overrides
-          </button>
-        </div>
-
-        <p class="text-xs text-muted-foreground mb-4">
-          Override settings specifically for this agent. Leave empty to inherit from global/user settings.
-        </p>
-
-        <!-- Per-Field Override Form -->
-        <div class="space-y-4">
-          <div v-for="field in tool.settings_schema" :key="field.key" class="flex flex-col gap-1.5">
-            <!-- Field header: label -->
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-1.5">
-                <span class="text-sm font-medium">{{ field.label }}</span>
-                <span v-if="field.required" class="text-destructive text-xs">*</span>
-                <span
-                  v-if="getSource(field.key) !== 'default'"
-                  class="text-xs px-1.5 py-0.5 rounded"
-                  :class="getSourceBadgeClass(getSource(field.key))"
-                >
-                  {{ getSourceLabel(getSource(field.key)) }}
-                </span>
+          <!-- Per-Field Override Form -->
+          <div class="space-y-4">
+            <div v-for="field in tool.settings_schema" :key="field.key" class="flex flex-col gap-1.5">
+              <!-- Field header: label -->
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-sm font-medium">{{ field.label }}</span>
+                  <span v-if="field.required" class="text-destructive text-xs">*</span>
+                  <span
+                    v-if="getSource(field.key) !== 'default'"
+                    class="text-xs px-1.5 py-0.5 rounded"
+                    :class="getSourceBadgeClass(getSource(field.key))"
+                  >
+                    {{ getSourceLabel(getSource(field.key)) }}
+                  </span>
+                </div>
               </div>
-            </div>
 
-            <ToolSettingField
-              :modelValue="form[field.key] ?? ''"
-              :field="field"
-              :error="fieldErrors[field.key] ?? null"
-              :hideLabel="true"
-              @update:modelValue="form[field.key] = String($event ?? '')"
-            />
+              <ToolSettingField
+                :modelValue="form[field.key] ?? ''"
+                :field="field"
+                :error="fieldErrors[field.key] ?? null"
+                :hideLabel="true"
+                @update:modelValue="form[field.key] = String($event ?? '')"
+              />
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Error -->
-      <p v-if="error" role="alert" class="text-xs text-destructive mt-4">{{ error }}</p>
+        <!-- Error -->
+        <p v-if="error" role="alert" class="text-xs text-destructive mt-4">{{ error }}</p>
 
-      <!-- ============================================ -->
-      <!-- SECTION 3: Danger Zone -->
-      <!-- ============================================ -->
-      <div class="mt-6 pt-4 border-t border-border">
-        <p class="text-xs font-medium text-muted-foreground mb-3">Manage Other Settings</p>
-        <div class="flex flex-wrap gap-4">
-          <!-- Delete global settings -->
+        <!-- ============================================ -->
+        <!-- SECTION 3: Danger Zone -->
+        <!-- ============================================ -->
+        <div class="mt-6 pt-4 border-t border-border">
+          <p class="text-xs font-medium text-muted-foreground mb-3">Manage Other Settings</p>
+          <div class="flex flex-wrap gap-4">
+            <!-- Delete global settings -->
+            <button
+              v-if="globalSettingsExist"
+              type="button"
+              @click="deleteGlobalSettings"
+              class="text-xs text-muted-foreground hover:text-destructive transition-colors"
+            >
+              Delete global defaults
+            </button>
+
+            <!-- Delete user settings -->
+            <button
+              v-if="userSettingsExist"
+              type="button"
+              @click="deleteUserSettings"
+              class="text-xs text-muted-foreground hover:text-destructive transition-colors"
+            >
+              Delete my user overrides
+            </button>
+
+            <!-- Go to global settings -->
+            <button
+              type="button"
+              @click="goToGlobalSettings"
+              class="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Configure global settings →
+            </button>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex justify-end gap-2 mt-6">
           <button
-            v-if="globalSettingsExist"
             type="button"
-            @click="deleteGlobalSettings"
-            class="text-xs text-muted-foreground hover:text-destructive transition-colors"
+            @click="emit('close')"
+            class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
           >
-            Delete global defaults
+            Cancel
           </button>
-
-          <!-- Delete user settings -->
           <button
-            v-if="userSettingsExist"
-            type="button"
-            @click="deleteUserSettings"
-            class="text-xs text-muted-foreground hover:text-destructive transition-colors"
+            type="submit"
+            :disabled="saving"
+            class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
-            Delete my user overrides
-          </button>
-
-          <!-- Go to global settings -->
-          <button
-            type="button"
-            @click="goToGlobalSettings"
-            class="text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            Configure global settings →
+            {{ saving ? 'Saving…' : 'Save Agent Overrides' }}
           </button>
         </div>
-      </div>
-
-      <!-- Actions -->
-      <div class="flex justify-end gap-2 mt-6">
-        <button
-          type="button"
-          @click="emit('close')"
-          class="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          @click="onSave"
-          :disabled="saving"
-          class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:opacity-50"
-        >
-          {{ saving ? 'Saving…' : 'Save Agent Overrides' }}
-        </button>
-      </div>
+      </form>
     </template>
 
     <template v-else-if="tool && !hasSchema">

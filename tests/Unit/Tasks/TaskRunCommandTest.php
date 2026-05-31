@@ -3,22 +3,26 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Psr\Container\ContainerInterface;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Core\Database;
+use Spora\Core\SecurityManager;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Models\Agent;
+use Spora\Models\AgentTool;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
+use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\ToolConfigService;
+use Spora\Tools\EmailTool;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Create a mock LLM driver that returns a text response.
@@ -52,9 +56,7 @@ function makeThrowingDriver(Throwable $e): LLMDriverInterface
     return $driver;
 }
 
-// ---------------------------------------------------------------------------
 // TaskRunCommand — task claiming
-// ---------------------------------------------------------------------------
 
 describe('TaskRunCommand — task claiming', function (): void {
     beforeEach(function (): void {
@@ -62,7 +64,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $this->userId = $this->authService->register('taskrun@example.com', 'Password1!', 'Taskrun');
         simulateLoggedInSession($this->userId, 'taskrun@example.com');
 
-        $this->container = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $this->container = Mockery::mock(ContainerInterface::class);
         $this->container->allows('get')->with('config')->andReturn([
             'db_driver' => 'sqlite',
             'db_path' => ':memory:',
@@ -112,7 +114,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         );
         $db->bootDatabaseConnectionOnly();
 
-        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container = Mockery::mock(ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn([
             'db_driver' => 'sqlite',
             'db_path' => ':memory:',
@@ -204,7 +206,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $nullFactory = Mockery::mock(DriverFactory::class);
         $nullFactory->allows('makeFromAgent')->andReturn($nullDriver);
 
-        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container = Mockery::mock(ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn([
             'db_driver' => 'sqlite',
             'db_path' => ':memory:',
@@ -243,9 +245,7 @@ describe('TaskRunCommand — task claiming', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
 // TaskRunCommand — task processing via Orchestrator
-// ---------------------------------------------------------------------------
 
 describe('TaskRunCommand — orchestrator integration', function (): void {
     beforeEach(function (): void {
@@ -304,7 +304,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         $factory = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn($textDriver);
 
-        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container = Mockery::mock(ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn([
             'db_driver' => 'sqlite',
             'db_path' => ':memory:',
@@ -390,4 +390,172 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         $task->refresh();
         expect($task->status)->toBe('FAILED');
     });
+});
+
+// TaskRunCommand — tool config injection
+
+describe('TaskRunCommand — tool config injection', function (): void {
+    beforeEach(function (): void {
+        $this->authService = bootAuthLayer();
+        $this->userId = $this->authService->register('toolconfig@example.com', 'Password1!', 'ToolConfig');
+
+        // Create a global LLM config
+        $this->llmConfig = LLMDriverConfiguration::create([
+            'user_id'       => null,
+            'name'          => 'Test Global Config',
+            'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
+            'settings'      => json_encode(['api_key' => 'test']),
+            'is_global'     => true,
+            'is_default'    => true,
+            'context_window' => 128000,
+            'max_tokens_output' => 4096,
+        ]);
+
+        // Set up ToolConfigService with EmailTool
+        $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $this->security = new SecurityManager($key);
+        $this->toolConfigService = new ToolConfigService(
+            $this->security,
+            new Monolog\Logger('test'),
+            [EmailTool::class],
+        );
+
+        // Set up LLMConfigService (required by Orchestrator.getTemperatureFromSettings)
+        $this->llmConfigService = new LLMConfigService(
+            $this->security,
+            [
+                Spora\Drivers\OpenAICompatibleDriver::class,
+                Spora\Drivers\AnthropicCompatibleDriver::class,
+            ],
+        );
+
+        // Set up LLM config for the agent
+        $this->agent = Agent::create([
+            'user_id'              => $this->userId,
+            'name'                 => 'ToolConfigAgent',
+            'llm_driver_config_id' => $this->llmConfig->id,
+            'max_steps'            => 10,
+            'is_active'            => true,
+        ]);
+
+        // Enable EmailTool for the agent
+        AgentTool::create([
+            'agent_id'   => $this->agent->id,
+            'tool_class' => EmailTool::class,
+            'tool_name'  => 'email',
+        ]);
+    });
+
+    it('buildToolDefinitions includes exposeToLlm settings in tool description when configured', function (): void {
+        // Store expose_to_llm settings via ToolConfigService
+        $this->toolConfigService->putAgentOverride(EmailTool::class, $this->agent->id, [
+            'core.smtp.from'              => 'agent@example.com',
+            'core.smtp.allowed_recipients' => 'alice@example.com, bob@example.com',
+        ]);
+
+        // Use reflection to call private buildToolDefinitions
+        $emailTool = new EmailTool(
+            $this->toolConfigService,
+            Mockery::mock(Spora\Services\ImapClientInterface::class),
+        );
+        $capturingDriver = Mockery::mock(LLMDriverInterface::class);
+        $capturingDriver->allows('complete')->andReturn(new LLMResponse(
+            content: 'Done.',
+            toolCalls: [],
+            inputTokens: 10,
+            outputTokens: 5,
+            completionId: 'test',
+        ));
+        $capturingDriver->allows('getProviderName')->andReturn('mock');
+        $capturingDriver->allows('getModelName')->andReturn('mock-model');
+
+        $capturingFactory = Mockery::mock(DriverFactory::class);
+        $capturingFactory->allows('makeFromAgent')->andReturn($capturingDriver);
+
+        $mockNotification = Mockery::mock(NotificationService::class);
+        $mockNotification->allows('notifyTaskCompleted')->andReturnNull();
+        $mockNotification->allows('notifyTaskFailed')->andReturnNull();
+
+        $orchestrator = new Orchestrator(
+            driverFactory: $capturingFactory,
+            toolInstances: [$emailTool],
+            logger: null,
+            workerMode: WorkerMode::Sync,
+            notificationService: $mockNotification,
+            mercure: Mockery::mock(MercurePublisherInterface::class),
+            toolConfigService: $this->toolConfigService,
+            llmConfigService: $this->llmConfigService,
+        );
+
+        $task = Task::create([
+            'agent_id'    => $this->agent->id,
+            'user_id'     => $this->userId,
+            'status'      => 'RUNNING',
+            'user_prompt' => 'What can you do?',
+            'max_steps'   => 10,
+            'step_count'  => 0,
+        ]);
+
+        $orchestrator->tick($task->id);
+
+        // Verify the email tool description includes the config block
+        $reflection = new ReflectionClass($orchestrator);
+        $method = $reflection->getMethod('buildToolDefinitions');
+        $method->setAccessible(true);
+        $defs = $method->invoke($orchestrator, [EmailTool::class], $this->agent->id, $this->userId);
+
+        $emailDef = collect($defs)->firstWhere('function.name', 'email');
+        expect($emailDef)->not->toBeNull();
+        expect($emailDef['function']['description'])->toContain('[Effective Configuration]');
+        expect($emailDef['function']['description'])->toContain('From Address: agent@example.com');
+        expect($emailDef['function']['description'])->toContain('Allowed Recipients: alice@example.com, bob@example.com');
+    })->afterEach(fn() => Database::resetBootState());
+
+    it('buildToolDefinitions shows (not configured) for unset exposeToLlm settings', function (): void {
+        // No settings stored — all exposeToLlm fields should show as (not configured)
+
+        $emailTool = new EmailTool(
+            $this->toolConfigService,
+            Mockery::mock(Spora\Services\ImapClientInterface::class),
+        );
+        $capturingDriver = Mockery::mock(LLMDriverInterface::class);
+        $capturingDriver->allows('complete')->andReturn(new LLMResponse(
+            content: 'Done.',
+            toolCalls: [],
+            inputTokens: 10,
+            outputTokens: 5,
+            completionId: 'test',
+        ));
+        $capturingDriver->allows('getProviderName')->andReturn('mock');
+        $capturingDriver->allows('getModelName')->andReturn('mock-model');
+
+        $capturingFactory = Mockery::mock(DriverFactory::class);
+        $capturingFactory->allows('makeFromAgent')->andReturn($capturingDriver);
+
+        $mockNotification = Mockery::mock(NotificationService::class);
+        $mockNotification->allows('notifyTaskCompleted')->andReturnNull();
+        $mockNotification->allows('notifyTaskFailed')->andReturnNull();
+
+        $orchestrator = new Orchestrator(
+            driverFactory: $capturingFactory,
+            toolInstances: [$emailTool],
+            logger: null,
+            workerMode: WorkerMode::Sync,
+            notificationService: $mockNotification,
+            mercure: Mockery::mock(MercurePublisherInterface::class),
+            toolConfigService: $this->toolConfigService,
+            llmConfigService: $this->llmConfigService,
+        );
+
+        $reflection = new ReflectionClass($orchestrator);
+        $method = $reflection->getMethod('buildToolDefinitions');
+        $method->setAccessible(true);
+        $defs = $method->invoke($orchestrator, [EmailTool::class], $this->agent->id, $this->userId);
+
+        $emailDef = collect($defs)->firstWhere('function.name', 'email');
+        expect($emailDef)->not->toBeNull();
+        expect($emailDef['function']['description'])->toContain('[Effective Configuration]');
+        expect($emailDef['function']['description'])->toContain('From Address: (not configured)');
+        expect($emailDef['function']['description'])->toContain('Allowed Recipients: (not configured)');
+    })->afterEach(fn() => Database::resetBootState());
 });

@@ -27,7 +27,7 @@ const taskId = computed(() => Number(route.params.id))
 const task = computed(() => taskStore.activeTask)
 const pending = computed(() => taskStore.pendingToolCalls)
 
-// ── Back navigation ─────────────────────────────────────────────────────────
+// Back navigation
 
 const backDestination = computed(() => {
   if (task.value?.agent_id) {
@@ -39,7 +39,7 @@ const backDestination = computed(() => {
 // Track whether we've successfully loaded the task at least once
 let taskLoadSucceeded = false
 
-// ── Approval state ─────────────────────────────────────────────────────────
+// Approval state
 
 const approvalArgs = ref<Record<number, string>>({})
 const approveError = ref<string | null>(null)
@@ -55,7 +55,7 @@ const perToolApproving = ref<Record<number, boolean>>({})
 const perToolRejecting = ref<Record<number, boolean>>({})
 const expandedTools = ref<Record<number, boolean>>({})
 
-// ── Error banner ───────────────────────────────────────────────────────────
+// Error banner
 
 const errorBannerDismissed = ref(false)
 
@@ -184,7 +184,7 @@ async function retryNow(): Promise<void> {
   }
 }
 
-// ── Follow-up ───────────────────────────────────────────────────────────────
+// Follow-up
 
 const followupPrompt = ref('')
 const submittingFollowup = ref(false)
@@ -219,7 +219,7 @@ async function submitFollowup(): Promise<void> {
   }
 }
 
-// ── Scroll anchor ───────────────────────────────────────────────────────────
+// Scroll anchor
 
 const bottomEl = ref<HTMLDivElement | null>(null)
 
@@ -227,7 +227,7 @@ function scrollToBottom(): void {
   nextTick(() => bottomEl.value?.scrollIntoView({ behavior: 'smooth' }))
 }
 
-// ── Chat rendering helpers ──────────────────────────────────────────────────
+// Chat rendering helpers
 
 type ChatMessage =
   | { kind: 'user'; entry: HistoryEntry }
@@ -284,7 +284,7 @@ function isToolExpanded(toolId: number): boolean {
   return expandedTools.value[toolId] ?? false
 }
 
-// ── Approval ───────────────────────────────────────────────────────────────
+// Approval
 
 function parseArgs(args: unknown): Record<string, unknown> {
   if (!args) return {}
@@ -404,7 +404,7 @@ async function rejectToolCall(tc: { id: number; tool_name: string }): Promise<vo
   }
 }
 
-// ── Lifecycle ──────────────────────────────────────────────────────────────
+// Lifecycle
 
 watch(taskId, async (newId, oldId) => {
   if (!Number.isFinite(newId) || newId === oldId) return

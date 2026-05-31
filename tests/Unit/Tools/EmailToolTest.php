@@ -39,7 +39,7 @@ function allSmtpSettings(string $from = 'alice@example.com', string $allowedTo =
 
 describe('EmailTool', function () {
 
-    // ── read_inbox ─────────────────────────────────────────────────────────────
+    // read_inbox
 
     describe('read_inbox', function () {
         it('returns error when IMAP config is incomplete', function () {
@@ -136,7 +136,7 @@ describe('EmailTool', function () {
         });
     });
 
-    // ── list_folders ─────────────────────────────────────────────────────────
+    // list_folders
 
     describe('list_folders', function () {
         it('returns error when IMAP config is incomplete', function () {
@@ -195,7 +195,7 @@ describe('EmailTool', function () {
         });
     });
 
-    // ── read_folder ──────────────────────────────────────────────────────────
+    // read_folder
 
     describe('read_folder', function () {
         it('returns error when folder parameter is missing', function () {
@@ -276,7 +276,7 @@ describe('EmailTool', function () {
         });
     });
 
-    // ── create_draft ─────────────────────────────────────────────────────────
+    // create_draft
 
     describe('create_draft', function () {
         it('returns error when required fields are missing', function () {
@@ -334,7 +334,7 @@ describe('EmailTool', function () {
         });
     });
 
-    // ── send_email ───────────────────────────────────────────────────────────
+    // send_email
 
     describe('send_email', function () {
         it('returns error when required fields are missing', function () {
@@ -425,7 +425,7 @@ describe('EmailTool', function () {
         });
     });
 
-    // ── create_folder ──────────────────────────────────────────────────────
+    // create_folder
 
     describe('create_folder', function () {
         it('returns error when new_folder is missing', function () {
@@ -493,7 +493,7 @@ describe('EmailTool', function () {
         });
     });
 
-    // ── rename_folder ──────────────────────────────────────────────────────
+    // rename_folder
 
     describe('rename_folder', function () {
         it('returns error when folder or new_folder is missing', function () {
@@ -522,7 +522,7 @@ describe('EmailTool', function () {
         });
     });
 
-    // ── delete_folder ──────────────────────────────────────────────────────
+    // delete_folder
 
     describe('delete_folder', function () {
         it('returns error when folder is missing', function () {
@@ -564,7 +564,7 @@ describe('EmailTool', function () {
         });
     });
 
-    // ── move_email ─────────────────────────────────────────────────────────
+    // move_email
 
     describe('move_email', function () {
         it('returns error when uid is missing', function () {
@@ -605,7 +605,7 @@ describe('EmailTool', function () {
         });
     });
 
-    // ── delete_email ───────────────────────────────────────────────────────
+    // delete_email
 
     describe('delete_email', function () {
         it('returns error when uid is missing', function () {
@@ -644,7 +644,7 @@ describe('EmailTool', function () {
         });
     });
 
-    // ── mark_email_read ────────────────────────────────────────────────────
+    // mark_email_read
 
     describe('mark_email_read', function () {
         it('returns error when uid is missing', function () {
@@ -685,7 +685,7 @@ describe('EmailTool', function () {
         });
     });
 
-    // ── describeAction ──────────────────────────────────────────────────────
+    // describeAction
 
     describe('describeAction', function () {
         it('returns human-readable description for each operation', function () {

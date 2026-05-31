@@ -61,7 +61,7 @@ onMounted(async () => {
   if (queryTool) selectTool(queryTool)
 })
 
-// ── Category helpers ────────────────────────────────────────────────────────────
+// Category helpers
 
 function toLabel(cat: string): string {
   return cat.charAt(0).toUpperCase() + cat.slice(1)

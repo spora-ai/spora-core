@@ -21,8 +21,6 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 
 /**
- * Processes a single task in a child process.
- *
  * Spawned via proc_open() by WorkerRunCommand when running in --daemon --workers mode.
  * Each invocation is a fresh PHP interpreter — no shared static state.
  *
@@ -57,13 +55,11 @@ final class TaskRunCommand extends Command
             pcntl_signal(SIGINT, static fn() => exit(0));
         }
 
-        // Build a minimal orchestrator for this child.
         // No separate log file — stdout/stderr go to parent's inherited file descriptors
         // so the process manager (systemd/supervisord) captures all child output centrally.
         $orchestrator = $this->buildOrchestrator($output);
 
         // Claim the task (QUEUED → RUNNING) inside a lock-safe transaction.
-        // If the task is already RUNNING, the parent already claimed it — just proceed.
         $task = Capsule::connection()->transaction(function () use ($taskId): ?Task {
             /** @var Task|null $task */
             $task = Task::where('id', $taskId)
@@ -90,8 +86,7 @@ final class TaskRunCommand extends Command
 
         $output->writeln(sprintf('<info>Processing task %d...</info>', $taskId));
 
-        // Run the orchestrator loop until the task reaches a terminal state.
-        // NotificationService is called by Orchestrator.tick() — do not duplicate here.
+        // Notification is sent by Orchestrator.tick() — do not duplicate here.
         try {
             while (in_array($task->status, ['RUNNING', 'PENDING_APPROVAL'], true)) {
                 $orchestrator->tick($task->id);
@@ -138,6 +133,7 @@ final class TaskRunCommand extends Command
             workerMode: WorkerMode::Sync,
             notificationService: $this->container->get(NotificationService::class),
             mercure: $this->mercure,
+            toolConfigService: $this->container->get(\Spora\Services\ToolConfigService::class),
         );
     }
 }

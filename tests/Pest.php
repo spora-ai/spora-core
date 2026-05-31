@@ -32,9 +32,7 @@ set_error_handler(static function (int $errno, string $_errstr, string $errfile)
     return false;
 }, E_DEPRECATED);
 
-// ---------------------------------------------------------------------------
 // Shared test helpers (available to all test files)
-// ---------------------------------------------------------------------------
 
 /**
  * Boot a fresh in-memory SQLite database and return a ready-to-use AuthService.

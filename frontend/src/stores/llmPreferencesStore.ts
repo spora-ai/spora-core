@@ -13,13 +13,9 @@ interface PreferenceResponse {
 }
 
 export const useLlmPreferencesStore = defineStore('llmPreferences', () => {
-  // ── State ─────────────────────────────────────────────────────────────────
-
   const preference = ref<{ config: LLMConfigResource } | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
-
-  // ── Actions ───────────────────────────────────────────────────────────────
 
   async function loadPreference(): Promise<void> {
     loading.value = true

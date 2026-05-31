@@ -9,8 +9,6 @@ namespace Spora\Services;
  */
 interface UserServiceInterface
 {
-    // ── User lifecycle ─────────────────────────────────────────────────────────
-
     /**
      * Get paginated users.
      *
@@ -60,8 +58,6 @@ interface UserServiceInterface
      */
     public function listRoles(int $userId): array;
 
-    // ── Profile ───────────────────────────────────────────────────────────────
-
     /**
      * Get user profile (name, date_of_birth, about_me, height_cm, weight_kg).
      *
@@ -75,8 +71,6 @@ interface UserServiceInterface
      * @return array{profile: array}
      */
     public function updateProfile(int $userId, array $data): array;
-
-    // ── Locations ────────────────────────────────────────────────────────────
 
     /**
      * Get all locations for a user.

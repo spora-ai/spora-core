@@ -55,7 +55,7 @@ useRealtime()
 
 const agentId = computed(() => Number(route.params.id))
 
-// ── Relative time ───────────────────────────────────────────────────────────
+// Relative time
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
@@ -67,7 +67,7 @@ function formatRelativeTime(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
-// ── Lifecycle ──────────────────────────────────────────────────────────────
+// Lifecycle
 
 // Refetch when navigating between agents (browser back/forward)
 watch(agentId, async (newId) => {

@@ -18,6 +18,9 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Handles authentication: registration, login, logout, password reset, and email verification.
+ */
 final class AuthController
 {
     private const RATE_LIMIT_MAX_ATTEMPTS = 5;

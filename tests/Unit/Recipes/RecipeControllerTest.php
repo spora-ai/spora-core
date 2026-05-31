@@ -5,10 +5,6 @@ declare(strict_types=1);
 use Spora\Http\RecipeController;
 use Spora\Recipes\RecipeScanner;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeRecipeController(?RecipeScanner $scanner = null): RecipeController
 {
     $service = bootAuthLayer();
@@ -16,10 +12,6 @@ function makeRecipeController(?RecipeScanner $scanner = null): RecipeController
 
     return new RecipeController($service, $scanner);
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 test('index returns 401 when not authenticated', function (): void {
     clearSession();

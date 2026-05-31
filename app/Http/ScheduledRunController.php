@@ -15,6 +15,9 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
+/**
+ * Manages scheduled runs: list, create, update, delete, and trigger agent tasks on a cron schedule.
+ */
 final class ScheduledRunController
 {
     public function __construct(

@@ -219,7 +219,7 @@ test('maskForApi leaves empty password fields unchanged', function (): void {
     expect($masked['api_key'])->toBe('');
 });
 
-// ── getEffectiveConfigForAgent ─────────────────────────────────────────────────
+// getEffectiveConfigForAgent
 
 test('getEffectiveConfigForAgent returns tier-1 agent-specific config', function (): void {
     $security = Mockery::mock(SecurityManagerInterface::class);
