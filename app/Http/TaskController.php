@@ -26,6 +26,7 @@ final class TaskController
     /**
      * GET /api/v1/tasks
      * Optional ?agent_id=X query param to scope results to a specific agent.
+     * Optional ?page=X&per_page=X for pagination (default per_page=20, max=100).
      */
     public function index(Request $request): JsonResponse
     {
@@ -33,15 +34,31 @@ final class TaskController
         $agentId = $request->query->has('agent_id') ? (int) $request->query->get('agent_id') : null;
         $since = $request->query->has('since') ? $request->query->get('since') : null;
 
+        $page = $request->query->has('page') ? max(1, (int) $request->query->get('page')) : null;
+        $perPageRaw = $request->query->has('per_page') ? (int) $request->query->get('per_page') : null;
+        $perPage = $perPageRaw !== null ? min(max(1, $perPageRaw), 100) : null;
+
         // Compute server_time before querying to avoid gaps on next poll
         $serverTime = Carbon::now()->toIso8601String();
 
         // Agent ownership validation is done inside the service
-        $tasks = $this->taskService->getTasksForUser($userId, $agentId, $since);
+        $result = $this->taskService->getTasksForUser($userId, $agentId, $since, $page, $perPage);
+
+        // When paginated, result is ['tasks' => [...], 'meta' => [...]] (not a list)
+        // When not paginated, result is a flat array (list)
+        if (!array_is_list($result) && array_key_exists('tasks', $result)) {
+            return new JsonResponse([
+                'data' => [
+                    'tasks'       => $result['tasks'],
+                    'server_time' => $serverTime,
+                    'meta'        => $result['meta'],
+                ],
+            ]);
+        }
 
         return new JsonResponse([
             'data' => [
-                'tasks'       => $tasks,
+                'tasks'       => $result,
                 'server_time' => $serverTime,
             ],
         ]);

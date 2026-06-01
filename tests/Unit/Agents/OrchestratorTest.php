@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Spora\Agents\Orchestrator;
 use Spora\Agents\ValueObjects\AgentState;
+use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
@@ -34,12 +35,14 @@ function makeOrchestrator(
     DriverFactory $driverFactory,
     array $toolInstances = [],
     ?Psr\Log\LoggerInterface $logger = null,
+    WorkerMode $workerMode = WorkerMode::Sync,
 ): Orchestrator {
     return new Orchestrator(
         driverFactory: $driverFactory,
         llmConfigService: null,
         toolInstances: $toolInstances,
         logger: $logger,
+        workerMode: $workerMode,
     );
 }
 
@@ -1495,6 +1498,48 @@ test('tick sets NO_LLM_CONFIGURATION error code and message when resolveLlmConfi
     expect($task->status)->toBe('FAILED')
         ->and($task->error_code)->toBe('NO_LLM_CONFIGURATION')
         ->and($task->error_message)->toBe('No LLM configuration set. Please configure an LLM driver or set a global default.');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// continue()
+// ---------------------------------------------------------------------------
+
+it('continue() updates Task.user_prompt to the new prompt', function (): void {
+    [$agentId] = seedAgent();
+
+    $llm = mockLlm(new LLMResponse('Continued response.', [], 10, 5, 'cmp_cont'));
+    $orch = makeOrchestrator(mockDriverFactory($llm), [], null, WorkerMode::Sync);
+
+    $task = Task::create([
+        'agent_id'    => $agentId,
+        'user_id'     => Agent::find($agentId)->user_id,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'Original prompt',
+        'step_count'  => 1,
+        'max_steps'   => 10,
+    ]);
+
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'role'     => 'user',
+        'content'  => 'Original prompt',
+        'sequence' => 0,
+    ]);
+
+    $continuedTask = $orch->continue($task->id, 'Continued prompt');
+
+    // user_prompt MUST be updated to the new prompt (the bug this tests)
+    expect($continuedTask->user_prompt)->toBe('Continued prompt');
+
+    // History should contain the new continuation prompt as the last user message
+    $userEntries = TaskHistory::where('task_id', $task->id)
+        ->where('role', 'user')
+        ->orderBy('id')
+        ->get();
+
+    expect($userEntries->count())->toBe(2)
+        ->and($userEntries->first()->content)->toBe('Original prompt')
+        ->and($userEntries->last()->content)->toBe('Continued prompt');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('buildToolDefinitions only queries operation overrides for enabled tool classes', function (): void {

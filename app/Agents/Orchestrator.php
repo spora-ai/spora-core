@@ -105,6 +105,7 @@ final class Orchestrator implements OrchestratorInterface
 
         $task->status = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
         $task->step_count = 0;
+        $task->user_prompt = $newPrompt;
 
         if ($additionalSteps !== null) {
             $task->max_steps = $additionalSteps;

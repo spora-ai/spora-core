@@ -7,7 +7,30 @@ namespace Spora\Services;
 interface TaskServiceInterface
 {
     /**
-     * @return array<array{
+     * Returns paginated tasks when $page is given, otherwise all tasks.
+     *
+     * @return array{
+     *     tasks: array<array{
+     *         id: int,
+     *         agent_id: int,
+     *         status: string,
+     *         user_prompt: string,
+     *         final_response: string|null,
+     *         step_count: int,
+     *         max_steps: int,
+     *         created_at: string|null,
+     *         updated_at: string|null,
+     *         parent_task_id?: int,
+     *         error_code?: string,
+     *         error_message?: string,
+     *         retry_of_task_id?: int,
+     *         retry_count?: int,
+     *         max_retries?: int,
+     *         retry_after_minutes?: int,
+     *         retry_after?: string
+     *     }>,
+     *     meta: array{current_page: int, last_page: int, per_page: int, total: int}
+     * }|array<array{
      *     id: int,
      *     agent_id: int,
      *     status: string,
@@ -27,7 +50,7 @@ interface TaskServiceInterface
      *     retry_after?: string
      * }>
      */
-    public function getTasksForUser(int $userId, ?int $agentId = null, ?string $since = null): array;
+    public function getTasksForUser(int $userId, ?int $agentId = null, ?string $since = null, ?int $page = null, ?int $perPage = null): array;
 
     /**
      * @return array{

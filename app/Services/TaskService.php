@@ -27,10 +27,10 @@ final class TaskService implements TaskServiceInterface
     /**
      * @inheritDoc
      */
-    public function getTasksForUser(int $userId, ?int $agentId = null, ?string $since = null): array
+    public function getTasksForUser(int $userId, ?int $agentId = null, ?string $since = null, ?int $page = null, ?int $perPage = null): array
     {
         $query = Task::where('user_id', $userId)
-            ->orderByDesc('created_at')
+            ->orderByDesc('updated_at')
             ->with(['agent']);
 
         if ($agentId !== null) {
@@ -43,6 +43,20 @@ final class TaskService implements TaskServiceInterface
             } catch (Throwable) {
                 // Ignore invalid date format
             }
+        }
+
+        if ($page !== null) {
+            $perPage = $perPage ?? 20;
+            $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+            return [
+                'tasks' => $paginator->getCollection()->map(fn(Task $t) => $this->taskListResource($t))->all(),
+                'meta' => [
+                    'current_page' => $paginator->currentPage(),
+                    'last_page' => $paginator->lastPage(),
+                    'per_page' => $paginator->perPage(),
+                    'total' => $paginator->total(),
+                ],
+            ];
         }
 
         return $query->get()->map(fn(Task $t) => $this->taskListResource($t))->all();

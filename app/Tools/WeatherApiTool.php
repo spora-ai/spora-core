@@ -33,7 +33,6 @@ use Throwable;
     label: 'WeatherAPI.com Key',
     type: 'password',
     description: 'API key from weatherapi.com (free plan: 100k calls/month)',
-
     required: true,
 )]
 #[ToolSetting(
@@ -41,21 +40,18 @@ use Throwable;
     label: 'Base URL',
     type: 'text',
     description: 'API base URL (default: https://api.weatherapi.com/v1)',
-
 )]
 #[ToolSetting(
     key: 'core.weatherapi.default_days',
     label: 'Default Forecast Days',
     type: 'text',
     description: 'Number of forecast days 1-3 on free plan (default: 3)',
-
 )]
 #[ToolSetting(
     key: 'core.weatherapi.units',
     label: 'Units',
     type: 'select',
     description: 'Metric or Imperial units',
-
     options: ['metric' => 'Metric (°C, km/h)', 'imperial' => 'Imperial (°F, mph)'],
 )]
 #[ToolSetting(
@@ -63,7 +59,6 @@ use Throwable;
     label: 'HTTP Timeout',
     type: 'text',
     description: 'Seconds before an HTTP request fails (default: 10)',
-
 )]
 final class WeatherApiTool implements ToolInterface
 {

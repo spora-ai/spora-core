@@ -27,6 +27,9 @@ export const useAgentStore = defineStore('agent', () => {
   const agents = ref<Agent[]>([])
   const currentAgent = ref<Agent | null>(null)
   const currentAgentTasks = ref<Task[]>([])
+  const tasksCurrentPage = ref(1)
+  const tasksHasMore = ref(false)
+  const tasksTotal = ref(0)
   const composerDrafts = reactive<Record<number, { promptText: string }>>(loadComposerDrafts())
 
   // Auto-persist drafts to sessionStorage
@@ -101,9 +104,34 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
 
-  async function fetchAgentTasks(agentId: number): Promise<void> {
-    const result = await api.get<{ tasks: Task[] }>(`/tasks?agent_id=${agentId}`)
-    currentAgentTasks.value = result.tasks
+  async function fetchAgentTasks(agentId: number, options?: { page?: number }): Promise<void> {
+    const page = options?.page ?? 1
+    const params = new URLSearchParams({ agent_id: String(agentId), page: String(page) })
+    const result = await api.get<{ tasks: Task[]; meta?: { current_page: number; last_page: number; per_page: number; total: number } }>(`/tasks?${params}`)
+    if (page === 1) {
+      currentAgentTasks.value = result.tasks
+    } else {
+      currentAgentTasks.value.push(...result.tasks)
+    }
+    if (result.meta) {
+      tasksCurrentPage.value = result.meta.current_page
+      tasksHasMore.value = result.meta.current_page < result.meta.last_page
+      tasksTotal.value = result.meta.total
+    }
+  }
+
+  const tasksLoading = ref(false)
+
+  async function loadMoreTasks(): Promise<void> {
+    if (!tasksHasMore.value) return
+    const agentId = currentAgent.value?.id
+    if (!agentId) return
+    tasksLoading.value = true
+    try {
+      await fetchAgentTasks(agentId, { page: tasksCurrentPage.value + 1 })
+    } finally {
+      tasksLoading.value = false
+    }
   }
 
   async function deleteTask(taskId: number): Promise<void> {
@@ -267,12 +295,19 @@ export const useAgentStore = defineStore('agent', () => {
   function clearCurrentAgent(): void {
     currentAgent.value = null
     currentAgentTasks.value = []
+    tasksCurrentPage.value = 1
+    tasksHasMore.value = false
+    tasksTotal.value = 0
   }
 
   return {
     agents,
     currentAgent,
     currentAgentTasks,
+    tasksCurrentPage,
+    tasksHasMore,
+    tasksTotal,
+    tasksLoading,
     composerDrafts,
     fetchAgents,
     fetchAgent,
@@ -280,6 +315,7 @@ export const useAgentStore = defineStore('agent', () => {
     updateAgent,
     deleteAgent,
     fetchAgentTasks,
+    loadMoreTasks,
     deleteTask,
     applySseTaskEvent,
     enableTool,

@@ -48,9 +48,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         expect($result)->toHaveCount(1);
         $taskData = $result[0];
-        // @phpstan-ignore-next-line
         expect(array_key_exists('tool_calls', $taskData))->toBe(false);
-        // @phpstan-ignore-next-line
         expect(array_key_exists('history', $taskData))->toBe(false);
         expect($taskData['id'])->toBe($task->id);
         expect($taskData['status'])->toBe('COMPLETED');
@@ -208,5 +206,96 @@ describe('TaskService — getTasksForUser', function (): void {
         $result = $service->getTasksForUser($userId, null, '2099-01-01T00:00:00Z');
 
         expect($result)->toBeEmpty();
+    });
+
+    it('orders tasks by updated_at desc (most recently updated first)', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('order@example.com', 'Password1!', 'Order');
+        simulateLoggedInSession($userId, 'order@example.com');
+
+        $agent = Agent::create([
+            'user_id'      => $userId,
+            'name'         => 'OrderAgent',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+
+        $task1 = Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'First', 'max_steps' => 5]);
+        Task::where('id', $task1->id)->update(['updated_at' => '2025-01-01 00:00:00']);
+
+        $task2 = Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Second', 'max_steps' => 5]);
+        Task::where('id', $task2->id)->update(['updated_at' => '2025-06-01 00:00:00']);
+
+        $task3 = Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING', 'user_prompt' => 'Third', 'max_steps' => 5]);
+        Task::where('id', $task3->id)->update(['updated_at' => '2025-03-01 00:00:00']);
+
+        $service = makeTaskService();
+        $result = $service->getTasksForUser($userId);
+
+        expect($result)->toHaveCount(3);
+        // Most recently updated (task2) should be first
+        expect($result[0]['id'])->toBe($task2->id);
+        expect($result[1]['id'])->toBe($task3->id);
+        expect($result[2]['id'])->toBe($task1->id);
+    });
+
+    it('returns paginated results with meta when page is provided', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('paged@example.com', 'Password1!', 'Paged');
+        simulateLoggedInSession($userId, 'paged@example.com');
+
+        $agent = Agent::create([
+            'user_id'      => $userId,
+            'name'         => 'PagedAgent',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+
+        // Create 5 tasks
+        for ($i = 1; $i <= 5; $i++) {
+            Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
+        }
+
+        $service = makeTaskService();
+
+        // Request page 1 with per_page=2
+        $result = $service->getTasksForUser($userId, null, null, 1, 2);
+
+        expect($result)->toBeArray();
+        expect($result)->toHaveKeys(['tasks', 'meta']);
+        expect($result['tasks'])->toHaveCount(2);
+        expect($result['meta']['current_page'])->toBe(1);
+        expect($result['meta']['last_page'])->toBe(3);
+        expect($result['meta']['per_page'])->toBe(2);
+        expect($result['meta']['total'])->toBe(5);
+    });
+
+    it('returns second page correctly when paginated', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('page2@example.com', 'Password1!', 'Page2');
+        simulateLoggedInSession($userId, 'page2@example.com');
+
+        $agent = Agent::create([
+            'user_id'      => $userId,
+            'name'         => 'Page2Agent',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+
+        for ($i = 1; $i <= 5; $i++) {
+            Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
+        }
+
+        $service = makeTaskService();
+        $result = $service->getTasksForUser($userId, null, null, 2, 2);
+
+        expect($result['tasks'])->toHaveCount(2);
+        expect($result['meta']['current_page'])->toBe(2);
     });
 });

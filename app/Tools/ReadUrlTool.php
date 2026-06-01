@@ -32,7 +32,6 @@ use Throwable;
     label: 'HTTP Timeout',
     type: 'text',
     description: 'Seconds before an HTTP request fails (default: 15)',
-
 )]
 #[ToolParameter(
     name: 'url',

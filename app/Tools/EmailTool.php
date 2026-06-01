@@ -40,14 +40,14 @@ use Throwable;
 #[ToolOperation(name: 'delete_email', description: 'Permanently delete an email', enabledByDefault: false, requiresApprovalByDefault: true)]
 #[ToolOperation(name: 'mark_email_read', description: 'Mark an email as read or unread', enabledByDefault: false, requiresApprovalByDefault: true)]
 // IMAP settings (for read operations)
-#[ToolSetting(key: 'core.imap.host', label: 'IMAP Host', type: 'text', description: 'e.g. imap.example.com',)]
+#[ToolSetting(key: 'core.imap.host', label: 'IMAP Host', type: 'text', description: 'e.g. imap.example.com', )]
 #[ToolSetting(key: 'core.imap.port', label: 'IMAP Port', type: 'text', description: 'Usually 993', default: '993')]
 #[ToolSetting(key: 'core.imap.encryption', label: 'IMAP Encryption', type: 'select', description: 'Encryption method for IMAP', default: 'ssl', options: ['ssl' => 'SSL/Implicit TLS', 'tls' => 'TLS/STARTTLS', 'notls' => 'None (not recommended)'])]
 #[ToolSetting(key: 'core.email.username', label: 'Email Username', type: 'text', description: 'Email address used for both IMAP and SMTP authentication', required: true)]
 #[ToolSetting(key: 'core.email.password', label: 'Email Password', type: 'password', description: 'Email password or App password used for both IMAP and SMTP', required: true)]
 #[ToolSetting(key: 'core.imap.timeout', label: 'IMAP Timeout', type: 'text', description: 'Seconds before an IMAP connection fails (default: 60)', default: '60')]
 // SMTP settings (for send operations)
-#[ToolSetting(key: 'core.smtp.host', label: 'SMTP Host', type: 'text', description: 'e.g. smtp.example.com',)]
+#[ToolSetting(key: 'core.smtp.host', label: 'SMTP Host', type: 'text', description: 'e.g. smtp.example.com', )]
 #[ToolSetting(key: 'core.smtp.port', label: 'SMTP Port', type: 'text', description: 'Usually 587 or 465', default: '587')]
 #[ToolSetting(key: 'core.smtp.encryption', label: 'SMTP Encryption', type: 'select', description: 'Encryption method for SMTP', default: 'tls', options: ['ssl' => 'SSL/Implicit TLS', 'tls' => 'TLS/STARTTLS', 'notls' => 'None (not recommended)'])]
 #[ToolSetting(key: 'core.smtp.from', label: 'From Address', type: 'text', description: 'e.g. agent@spora.local', required: true, exposeToLlm: true)]

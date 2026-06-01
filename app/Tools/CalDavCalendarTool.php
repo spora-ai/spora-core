@@ -28,8 +28,8 @@ use Throwable;
     category: 'productivity',
 )]
 #[ToolOperation(name: 'list_events', description: 'Fetch upcoming events from CalDAV calendar', enabledByDefault: true, requiresApprovalByDefault: false)]
-#[ToolSetting(key: 'core.caldav.url', label: 'CalDAV URL', type: 'text', description: 'URL to the Calendar server (e.g. Nextcloud, Baikal)',)]
-#[ToolSetting(key: 'core.caldav.username', label: 'Username', type: 'text', description: 'CalDAV username',)]
+#[ToolSetting(key: 'core.caldav.url', label: 'CalDAV URL', type: 'text', description: 'URL to the Calendar server (e.g. Nextcloud, Baikal)', )]
+#[ToolSetting(key: 'core.caldav.username', label: 'Username', type: 'text', description: 'CalDAV username', )]
 #[ToolSetting(key: 'core.caldav.password', label: 'Password', type: 'password', description: 'CalDAV password or app token', required: true)]
 #[ToolSetting(
     key: 'core.caldav.http_timeout',

@@ -29,11 +29,7 @@ final class CsrfTokenService
         return $_SESSION[self::SESSION_KEY] ?? null;
     }
 
-    /**
-     * Returns the token, generating one if it doesn't exist yet.
-     * Use this when you need to return a token to the client — it ensures
-     * a token is always available even for sessions restored via remember-me.
-     */
+    /** Returns the token (creates one if needed — works for remember-me sessions). */
     public function getOrCreateToken(): string
     {
         if (!isset($_SESSION[self::SESSION_KEY])) {

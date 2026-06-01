@@ -118,7 +118,7 @@ it('index returns list of tasks for the authenticated user', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('getTasksForUser')
         ->once()
-        ->withArgs(fn(int $userId, $agentId, $since) => $userId === 1 && $agentId === null && $since === null)
+        ->withArgs(fn(int $userId, $agentId, $since, $page, $perPage) => $userId === 1 && $agentId === null && $since === null && $page === null && $perPage === null)
         ->andReturn([[
             'id'          => 1,
             'agent_id'    => 1,
@@ -146,7 +146,7 @@ it('index returns server_time in response envelope', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('getTasksForUser')
         ->once()
-        ->withArgs(fn(int $userId, $agentId, $since) => $userId === 1 && $agentId === null && $since === null)
+        ->withArgs(fn(int $userId, $agentId, $since, $page, $perPage) => $userId === 1 && $agentId === null && $since === null && $page === null && $perPage === null)
         ->andReturn([]);
 
     [$controller, $authService] = makeTaskController($taskService);
@@ -164,7 +164,7 @@ it('index with since param passes since to service and returns empty tasks on fu
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('getTasksForUser')
         ->once()
-        ->withArgs(fn(int $userId, $agentId, $since) => $userId === 1 && $agentId === null && $since === '2099-01-01T00:00:00Z')
+        ->withArgs(fn(int $userId, $agentId, $since, $page, $perPage) => $userId === 1 && $agentId === null && $since === '2099-01-01T00:00:00Z' && $page === null && $perPage === null)
         ->andReturn([]);
 
     [$controller, $authService] = makeTaskController($taskService);
@@ -176,6 +176,60 @@ it('index with since param passes since to service and returns empty tasks on fu
     $body = json_decode($resp->getContent(), true);
     expect($body['data']['tasks'])->toBeEmpty();
     expect($body['data']['server_time'])->toBeString();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('index with page and per_page params passes pagination to service and includes meta', function (): void {
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTasksForUser')
+        ->once()
+        ->withArgs(fn(int $userId, $agentId, $since, $page, $perPage) => $userId === 1 && $agentId === null && $since === null && $page === 2 && $perPage === 10)
+        ->andReturn([
+            'tasks' => [
+                ['id' => 11, 'agent_id' => 1, 'status' => 'COMPLETED', 'user_prompt' => 'Page 2 task', 'final_response' => null, 'step_count' => 1, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null],
+            ],
+            'meta' => ['current_page' => 2, 'last_page' => 3, 'per_page' => 10, 'total' => 25],
+        ]);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    seedUserAndAgent($authService);
+
+    $resp = $controller->index(jsonRequest('GET', '/api/v1/tasks?page=2&per_page=10'));
+    expect($resp->getStatusCode())->toBe(200);
+
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['tasks'])->toHaveCount(1);
+    expect($body['data']['meta']['current_page'])->toBe(2);
+    expect($body['data']['meta']['last_page'])->toBe(3);
+    expect($body['data']['meta']['per_page'])->toBe(10);
+    expect($body['data']['meta']['total'])->toBe(25);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('index caps per_page at 100', function (): void {
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTasksForUser')
+        ->once()
+        ->withArgs(fn(int $userId, $agentId, $since, $page, $perPage) => $userId === 1 && $perPage === 100)
+        ->andReturn(['tasks' => [], 'meta' => ['current_page' => 1, 'last_page' => 0, 'per_page' => 100, 'total' => 0]]);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    seedUserAndAgent($authService);
+
+    $resp = $controller->index(jsonRequest('GET', '/api/v1/tasks?per_page=500'));
+    expect($resp->getStatusCode())->toBe(200);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('index uses default per_page of 20 when per_page is not provided', function (): void {
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTasksForUser')
+        ->once()
+        ->withArgs(fn(int $userId, $agentId, $since, $page, $perPage) => $userId === 1 && $page === 1 && $perPage === 20)
+        ->andReturn(['tasks' => [], 'meta' => ['current_page' => 1, 'last_page' => 0, 'per_page' => 20, 'total' => 0]]);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    seedUserAndAgent($authService);
+
+    $resp = $controller->index(jsonRequest('GET', '/api/v1/tasks?page=1&per_page=20'));
+    expect($resp->getStatusCode())->toBe(200);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // show()

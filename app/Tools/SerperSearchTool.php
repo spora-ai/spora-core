@@ -40,7 +40,6 @@ use Throwable;
     label: 'Serper.dev API Key',
     type: 'password',
     description: 'API key for serper.dev',
-
     required: true,
 )]
 #[ToolSetting(
@@ -48,7 +47,6 @@ use Throwable;
     label: 'HTTP Timeout',
     type: 'text',
     description: 'Seconds before an HTTP request fails (default: 30)',
-
 )]
 #[ToolParameter(
     name: 'q',

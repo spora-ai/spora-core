@@ -201,6 +201,23 @@ onMounted(async () => {
           </template>
         </li>
       </ul>
+
+      <!-- Load more -->
+      <div v-if="agentStore.tasksHasMore" class="flex justify-center py-4 px-6">
+        <button
+          @click="agentStore.loadMoreTasks()"
+          :disabled="agentStore.tasksLoading"
+          class="inline-flex items-center justify-center h-9 rounded-lg border border-border bg-background hover:bg-muted px-4 text-sm font-medium text-muted-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <span v-if="agentStore.tasksLoading" class="mr-2">
+            <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </span>
+          {{ agentStore.tasksLoading ? 'Loading...' : 'Load more' }}
+        </button>
+      </div>
     </div>
 
   </AgentLayout>

@@ -35,7 +35,6 @@ use Throwable;
     label: 'HTTP Timeout',
     type: 'text',
     description: 'Seconds before an HTTP request fails (default: 30)',
-
 )]
 #[ToolParameter(name: 'action', type: 'string', description: 'The research operation: paper_search, get_paper, get_citations, get_references, get_recommendations', required: true, enum: ['paper_search', 'get_paper', 'get_citations', 'get_references', 'get_recommendations'])]
 #[ToolParameter(name: 'query', type: 'string', description: 'Search query for paper_search (e.g. "machine learning protein folding")', required: false)]

@@ -31,7 +31,6 @@ use Throwable;
     label: 'WorldNewsAPI Key',
     type: 'password',
     description: 'API key for worldnewsapi.com',
-
     required: true,
 )]
 #[ToolSetting(
@@ -39,7 +38,6 @@ use Throwable;
     label: 'HTTP Timeout',
     type: 'text',
     description: 'Seconds before an HTTP request fails (default: 30)',
-
 )]
 final class WorldNewsApiTool implements ToolInterface
 {
