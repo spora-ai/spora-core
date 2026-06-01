@@ -76,12 +76,10 @@ test('index returns correct schema field structure', function (): void {
 
     $apiKeyField = collect($schema)->firstWhere('key', 'api_key');
     expect($apiKeyField['type'])->toBe('password');
-    expect($apiKeyField['scope'])->toBe('agent');
     expect($apiKeyField['label'])->toBe('API Key');
 
     $maxResultsField = collect($schema)->firstWhere('key', 'max_results');
     expect($maxResultsField['type'])->toBe('text');
-    expect($maxResultsField['scope'])->toBe('global');
 });
 
 test('index returns empty tools list when no classes registered', function (): void {

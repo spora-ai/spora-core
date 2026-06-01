@@ -64,7 +64,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
     }
 
     /**
-     * @return list<array{key: string, label: string, type: string, description: string, default: mixed, required: bool, scope: string, options: array|null}>
+     * @return list<array{key: string, label: string, type: string, description: string, default: mixed, required: bool, options: array|null}>
      */
     private function buildSchemaFromClass(string $class): array
     {
@@ -80,7 +80,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
                 'description' => $setting->description,
                 'default' => $setting->default,
                 'required' => $setting->required,
-                'scope' => $setting->scope,
                 'options' => $setting->options,
             ];
         }
@@ -483,7 +482,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
                 'description' => $setting->description,
                 'default' => $setting->default,
                 'required' => $setting->required,
-                'scope' => $setting->scope,
                 'options' => $setting->options,
             ];
         }

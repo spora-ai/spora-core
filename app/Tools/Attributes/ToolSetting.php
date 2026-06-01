@@ -10,8 +10,8 @@ use Attribute;
  * Declares a UI-configurable setting for a tool.
  *
  * Usage:
- *   #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', scope: 'agent')]
- *   #[ToolSetting(key: 'max_results', label: 'Max Results', type: 'text', scope: 'global', default: '10')]
+ *   #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', required: true)]
+ *   #[ToolSetting(key: 'max_results', label: 'Max Results', type: 'text', default: '10')]
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class ToolSetting
@@ -24,11 +24,6 @@ final class ToolSetting
         public readonly string $description = '',
         public readonly mixed  $default     = null,
         public readonly bool   $required    = false,
-        /**
-         * "global"  — can only be set in global tool configuration.
-         * "agent"   — can be overridden per-agent via agent_tool_overrides.
-         */
-        public readonly string $scope   = 'agent',
         /** @var array<array-key, string> key => label pairs. Only used when type === "select". */
         public readonly array  $options = [],
         /** PCRE regex pattern for input validation, e.g. '/^[0-2](\.[0-9]+)?$/' for temperature. */

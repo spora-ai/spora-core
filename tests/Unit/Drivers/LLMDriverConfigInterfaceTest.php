@@ -61,20 +61,6 @@ test('AnthropicCompatibleDriver schema contains expected keys', function (): voi
         ->and($keys)->toContain('model');
 });
 
-test('OpenAICompatibleDriver schema fields have correct scope', function (): void {
-    $ref = new ReflectionClass(OpenAICompatibleDriver::class);
-    foreach ($ref->getAttributes(ToolSetting::class) as $attr) {
-        expect($attr->newInstance()->scope)->toBe('global');
-    }
-});
-
-test('AnthropicCompatibleDriver schema fields have correct scope', function (): void {
-    $ref = new ReflectionClass(AnthropicCompatibleDriver::class);
-    foreach ($ref->getAttributes(ToolSetting::class) as $attr) {
-        expect($attr->newInstance()->scope)->toBe('global');
-    }
-});
-
 test('OpenAICompatibleDriver::getDefaultTools returns empty array', function (): void {
     expect(OpenAICompatibleDriver::getDefaultTools())->toBeArray()->toBeEmpty();
 });
