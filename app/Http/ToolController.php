@@ -147,10 +147,6 @@ final class ToolController
         return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
-    // -----------------------------------------------------------------------
-    // Private helpers
-    // -----------------------------------------------------------------------
-
     private function toolSchemaResource(string $toolClass): array
     {
         if (!class_exists($toolClass)) {

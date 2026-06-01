@@ -27,7 +27,7 @@ const selectedTool = computed<ToolSchema | null>(
 const globalDefaults = ref<Record<string, string>>({})
 const loadError = ref<string | null>(null)
 
-// ── Tools by category ────────────────────────────────────────────────────────
+// Tools by category
 
 function toLabel(cat: string): string {
   return cat.charAt(0).toUpperCase() + cat.slice(1)
@@ -47,7 +47,7 @@ const sortedCategories = computed(() =>
   Object.keys(toolsByCategory.value).sort((a, b) => toLabel(a).localeCompare(toLabel(b))),
 )
 
-// ── Category collapse state ───────────────────────────────────────────────────
+// Category collapse state
 
 const collapsedCategories = ref<Record<string, boolean>>({})
 

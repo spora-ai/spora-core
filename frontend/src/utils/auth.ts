@@ -1,5 +1,8 @@
 import type { ApiConfig } from '@/types/auth'
 
+/**
+ * Authentication utilities for config fetching and route guards.
+ */
 let cachedConfig: ApiConfig | null = null
 
 /**

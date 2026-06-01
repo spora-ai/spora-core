@@ -28,7 +28,7 @@ const emit = defineEmits<{
 
 const promptTemplatesStore = usePromptTemplatesStore()
 
-// ── Variable detection ──────────────────────────────────────────────────────
+// Variable detection
 
 const SYSTEM_VARS = ['current_time', 'current_date', 'current_datetime'] as const
 
@@ -56,7 +56,7 @@ function detectVariables(template: string): DetectedVariable[] {
   return vars
 }
 
-// ── Form state ───────────────────────────────────────────────────────────────
+// Form state
 
 const formName = ref('')
 const formPrompt = ref('')
@@ -88,7 +88,7 @@ watch(
   },
 )
 
-// ── Submission ────────────────────────────────────────────────────────────────
+// Submission
 
 async function save(overwrite: boolean = false): Promise<void> {
   if (!formName.value.trim() || !formPrompt.value.trim()) return

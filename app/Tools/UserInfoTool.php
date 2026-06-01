@@ -13,6 +13,10 @@ use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 
+/**
+ * Accesses the authenticated user's personal information including
+ * profile data, saved locations, and health measurements.
+ */
 #[Tool(
     name: 'user_info',
     description: 'Access the users personal information, locations, and health data.',

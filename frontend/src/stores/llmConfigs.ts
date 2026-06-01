@@ -7,8 +7,6 @@ import { api, ApiError } from '@/api/client'
 import type { LLMConfigResource, LLMDriverInfo } from '@/types/llmConfig'
 
 export const useLlmConfigsStore = defineStore('llmConfigs', () => {
-  // ── State ─────────────────────────────────────────────────────────────────
-
   const drivers = ref<LLMDriverInfo[]>([])
   const configs = ref<LLMConfigResource[]>([])
   const loadingDrivers = ref(false)
@@ -26,12 +24,8 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
   const globalAdminConfigs = ref<LLMConfigResource[]>([])
   const loadingGlobalAdminConfigs = ref(false)
 
-  // ── Computed helpers ───────────────────────────────────────────────────────
-
   const globalConfigs = computed(() => configs.value.filter((c) => c.is_global))
   const personalConfigs = computed(() => configs.value.filter((c) => !c.is_global))
-
-  // ── Load drivers (schema discovery, no auth) ──────────────────────────────
 
   async function loadDrivers(): Promise<void> {
     loadingDrivers.value = true
@@ -46,8 +40,6 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     }
   }
 
-  // ── Load configs (auth required) ──────────────────────────────────────────
-
   async function loadConfigs(): Promise<void> {
     loadingConfigs.value = true
     error.value = null
@@ -61,8 +53,6 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     }
   }
 
-  // ── Load global default config (auth required) ────────────────────────────
-
   async function loadGlobalDefault(): Promise<void> {
     try {
       const result = await api.get<{ configs: LLMConfigResource[] }>('/llm-configs/global')
@@ -73,8 +63,6 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
       globalDefaultConfig.value = null
     }
   }
-
-  // ── Load all global configs (admin-only, for DriversSettingsPage) ──────────
 
   async function loadGlobalAdminConfigs(): Promise<void> {
     loadingGlobalAdminConfigs.value = true
@@ -89,8 +77,6 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     }
   }
 
-  // ── Ensure (idempotent init) ──────────────────────────────────────────────
-
   // Load drivers + configs exactly once per Pinia instance (page session).
   // Safe to call from multiple components — subsequent calls are no-ops.
   async function ensure(): Promise<void> {
@@ -98,8 +84,6 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     initialized.value = true // set before await so parallel callers skip
     await Promise.all([loadDrivers(), loadConfigs(), loadGlobalDefault()])
   }
-
-  // ── Create ────────────────────────────────────────────────────────────────
 
   async function createConfig(payload: {
     name: string
@@ -126,8 +110,6 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     }
   }
 
-  // ── Update ───────────────────────────────────────────────────────────────
-
   async function updateConfig(
     id: number,
     payload: { name?: string; settings?: Record<string, string> },
@@ -150,8 +132,6 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
     }
   }
 
-  // ── Delete ────────────────────────────────────────────────────────────────
-
   async function deleteConfig(id: number): Promise<void> {
     saving.value = true
     error.value = null
@@ -166,8 +146,6 @@ export const useLlmConfigsStore = defineStore('llmConfigs', () => {
       saving.value = false
     }
   }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
 
   function driverForClass(driverClass: string): LLMDriverInfo | undefined {
     return drivers.value.find((d) => d.driver_class === driverClass)

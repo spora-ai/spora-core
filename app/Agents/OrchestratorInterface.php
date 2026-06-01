@@ -6,6 +6,12 @@ namespace Spora\Agents;
 
 use Spora\Models\Task;
 
+/**
+ * Contract for the agent orchestration loop.
+ *
+ * Implementations drive the tick-based execution of agent tasks,
+ * handling tool calls, human approval, retries, and task continuation.
+ */
 interface OrchestratorInterface
 {
     /**

@@ -5,10 +5,6 @@ declare(strict_types=1);
 use Spora\Core\Kernel;
 use Symfony\Component\HttpFoundation\Request;
 
-// ---------------------------------------------------------------------------
-// Config endpoint
-// ---------------------------------------------------------------------------
-
 test('GET /api/v1/config returns allow_registration', function (): void {
     $kernel   = new Kernel();
     $request  = Request::create('/api/v1/config', 'GET');
@@ -21,10 +17,6 @@ test('GET /api/v1/config returns allow_registration', function (): void {
     expect(is_bool($body['allow_registration']))->toBeTrue();
 });
 
-// ---------------------------------------------------------------------------
-// GET /api/v1/auth/verify/{selector} — validation errors
-// ---------------------------------------------------------------------------
-
 test('GET /api/v1/auth/verify/{selector} without token returns 422', function (): void {
     $kernel   = new Kernel();
     $request  = Request::create('/api/v1/auth/verify/test-selector', 'GET');
@@ -35,10 +27,6 @@ test('GET /api/v1/auth/verify/{selector} without token returns 422', function ()
     $body = json_decode($response->getContent(), true);
     expect($body['error']['code'])->toBe('VALIDATION_ERROR');
 });
-
-// ---------------------------------------------------------------------------
-// POST /api/v1/auth/forgot-password — validation errors
-// ---------------------------------------------------------------------------
 
 test('POST /api/v1/auth/forgot-password without email returns 422', function (): void {
     $kernel   = new Kernel();
@@ -52,10 +40,6 @@ test('POST /api/v1/auth/forgot-password without email returns 422', function ():
     $body = json_decode($response->getContent(), true);
     expect($body['error']['code'])->toBe('VALIDATION_ERROR');
 });
-
-// ---------------------------------------------------------------------------
-// POST /api/v1/auth/verification/resend — validation errors
-// ---------------------------------------------------------------------------
 
 test('POST /api/v1/auth/verification/resend without email returns 422', function (): void {
     $csrfToken = bin2hex(random_bytes(32));
@@ -74,10 +58,6 @@ test('POST /api/v1/auth/verification/resend without email returns 422', function
     expect($body['error']['code'])->toBe('VALIDATION_ERROR');
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/v1/auth/reset-password — validation errors
-// ---------------------------------------------------------------------------
-
 test('POST /api/v1/auth/reset-password without required fields returns 422', function (): void {
     $kernel   = new Kernel();
     $request  = Request::create('/api/v1/auth/reset-password', 'POST', [], [], [], [
@@ -90,10 +70,6 @@ test('POST /api/v1/auth/reset-password without required fields returns 422', fun
     $body = json_decode($response->getContent(), true);
     expect($body['error']['code'])->toBe('VALIDATION_ERROR');
 });
-
-// ---------------------------------------------------------------------------
-// POST /api/v1/auth/email/change-request — requires authentication
-// ---------------------------------------------------------------------------
 
 test('POST /api/v1/auth/email/change-request without auth returns 401', function (): void {
     clearSession();
@@ -114,10 +90,6 @@ test('POST /api/v1/auth/email/change-request without auth returns 401', function
     $body = json_decode($response->getContent(), true);
     expect($body['error']['code'])->toBe('UNAUTHENTICATED');
 });
-
-// ---------------------------------------------------------------------------
-// POST /api/v1/auth/email/change-request — validation errors (logged in)
-// ---------------------------------------------------------------------------
 
 test('POST /api/v1/auth/email/change-request without email returns 422 when authenticated', function (): void {
     $service = bootAuthLayer();

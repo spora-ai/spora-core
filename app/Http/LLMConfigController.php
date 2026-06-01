@@ -32,8 +32,6 @@ final class LLMConfigController
         private readonly LLMConfigServiceInterface $llmConfigService,
     ) {}
 
-    // ── Schema discovery ────────────────────────────────────────────────────
-
     /**
      * GET /llm-drivers
      *
@@ -46,8 +44,6 @@ final class LLMConfigController
 
         return new JsonResponse(['data' => ['drivers' => $drivers]]);
     }
-
-    // ── Config CRUD ──────────────────────────────────────────────────────────
 
     /**
      * GET /llm-configs
@@ -256,8 +252,6 @@ final class LLMConfigController
 
         return new JsonResponse(['data' => ['config' => $this->llmConfigService->configResource($config)]]);
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
 
     /** @return list<array> */
     private function getSchemaForDriver(string $driverClass): array

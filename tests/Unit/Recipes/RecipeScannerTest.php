@@ -6,18 +6,10 @@ use Spora\Recipes\RecipeScanner;
 
 const FIXTURE_RECIPES = BASE_PATH . '/tests/Fixtures/recipes';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeScanner(array $dirs = []): RecipeScanner
 {
     return new RecipeScanner($dirs ?: [FIXTURE_RECIPES]);
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 test('scan() returns recipes from a JSON file', function (): void {
     $recipes = makeScanner()->scan();

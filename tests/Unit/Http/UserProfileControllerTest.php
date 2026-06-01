@@ -10,10 +10,6 @@ use Spora\Models\UserLocation;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\UserService;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeUserProfileController(): array
 {
     $authService = bootAuthLayer();
@@ -25,10 +21,6 @@ function makeUserProfileController(): array
 
     return [$controller, $authService, $userService, $authMiddleware, $csrfMiddleware];
 }
-
-// ---------------------------------------------------------------------------
-// getProfile
-// ---------------------------------------------------------------------------
 
 test('getProfile returns user profile data', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
@@ -87,10 +79,6 @@ test('getProfile rejects unauthenticated requests', function (): void {
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
 
-// ---------------------------------------------------------------------------
-// putProfile
-// ---------------------------------------------------------------------------
-
 test('putProfile updates profile fields', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile3@example.com', 'Password1!');
@@ -137,10 +125,6 @@ test('putProfile rejects unauthenticated requests', function (): void {
     expect(fn() => callController($controller, 'putProfile', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
-
-// ---------------------------------------------------------------------------
-// getLocations
-// ---------------------------------------------------------------------------
 
 test('getLocations returns empty list when no locations', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
@@ -191,10 +175,6 @@ test('getLocations rejects unauthenticated requests', function (): void {
     expect(fn() => callController($controller, 'getLocations', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
-
-// ---------------------------------------------------------------------------
-// postLocation
-// ---------------------------------------------------------------------------
 
 test('postLocation creates a new location', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
@@ -274,10 +254,6 @@ test('postLocation rejects unauthenticated requests', function (): void {
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
 
-// ---------------------------------------------------------------------------
-// putLocation
-// ---------------------------------------------------------------------------
-
 test('putLocation updates own location', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile11@example.com', 'Password1!');
@@ -332,10 +308,6 @@ test('putLocation rejects unauthenticated requests', function (): void {
     expect(fn() => callController($controller, 'putLocation', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
-
-// ---------------------------------------------------------------------------
-// deleteLocation
-// ---------------------------------------------------------------------------
 
 test('deleteLocation deletes own location', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();

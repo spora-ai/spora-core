@@ -2,6 +2,9 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/api/client'
 
+/**
+ * Manages notifications: fetch, mark read, delete, and real-time updates via SSE.
+ */
 export interface Notification {
   id: number
   type: 'task_completed' | 'task_failed' | 'pending_approval' | 'scheduled_run_completed'

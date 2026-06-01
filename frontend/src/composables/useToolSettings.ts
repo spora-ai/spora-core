@@ -55,8 +55,6 @@ export interface SettingsWithSource {
 }
 
 export function useToolSettings(agentId?: number) {
-  // ── Helpers ────────────────────────────────────────────────────────────────
-
   function isGlobal(): boolean {
     return agentId === undefined
   }
@@ -67,8 +65,6 @@ export function useToolSettings(agentId?: number) {
     }
     return `/agents/${agentId}/tools/${encodeURIComponent(toolId)}/override`
   }
-
-  // ── Fetch current settings for a tool ─────────────────────────────────────
 
   async function getSettings(toolId: string): Promise<Record<string, string>> {
     try {
@@ -82,7 +78,6 @@ export function useToolSettings(agentId?: number) {
     }
   }
 
-  // ── Save settings for a tool ───────────────────────────────────────────────
   //
   // callerSettings: the full form state (key → value).
   // serverSettings: the current settings from GET (may contain "***" for unchanged passwords).
@@ -131,8 +126,6 @@ export function useToolSettings(agentId?: number) {
     )
     return result.settings ?? {}
   }
-
-  // ── Agent-specific helpers (only when agentId is provided) ─────────────────
 
   async function getToolStatus(toolId: string): Promise<ToolStatus | null> {
     if (isGlobal()) {
@@ -210,8 +203,6 @@ export function useToolSettings(agentId?: number) {
       return {}
     }
   }
-
-  // ── Per-user tool settings overrides ─────────────────────────────────────────
 
 async function getUserSettings(toolId: string): Promise<Record<string, string>> {
   try {

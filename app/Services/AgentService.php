@@ -26,7 +26,6 @@ final class AgentService implements AgentServiceInterface
         private readonly LLMConfigService $llmConfig,
     ) {}
 
-    // ── Agent lifecycle ─────────────────────────────────────────────────────────
 
     public function getAgentsForUser(int $userId): array
     {
@@ -91,7 +90,6 @@ final class AgentService implements AgentServiceInterface
         return true;
     }
 
-    // ── Tool management ─────────────────────────────────────────────────────────
 
     public function enableTool(int $agentId, int $userId, string $toolClass): array
     {
@@ -187,7 +185,6 @@ final class AgentService implements AgentServiceInterface
         return $tool;
     }
 
-    // ── Tool status & settings ────────────────────────────────────────────────────
 
     public function getToolStatus(int $agentId, int $userId, string $toolClass): ?array
     {
@@ -313,7 +310,6 @@ final class AgentService implements AgentServiceInterface
         $this->toolConfig->deleteAgentOverride($toolClass, $agentId);
     }
 
-    // ── Operation overrides ─────────────────────────────────────────────────────
 
     public function getToolsOperations(int $agentId, int $userId): ?array
     {
@@ -432,7 +428,6 @@ final class AgentService implements AgentServiceInterface
         return $this->getOperationOverride($agentId, $userId, $toolClass, $operation);
     }
 
-    // ── Private helpers ─────────────────────────────────────────────────────────
 
     private function resolveAutoApproveDefault(string $toolClass): ?bool
     {

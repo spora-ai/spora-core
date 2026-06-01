@@ -10,9 +10,7 @@ use Spora\Drivers\ValueObjects\LLMRequest;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function makeOpenAIDriver(MockHttpClient $client): OpenAICompatibleDriver
 {
@@ -33,9 +31,7 @@ function makeRequest(array $messages = []): LLMRequest
     );
 }
 
-// ---------------------------------------------------------------------------
 // Provider / model metadata
-// ---------------------------------------------------------------------------
 
 test('getProviderName returns openai_compatible', function (): void {
     $driver = makeOpenAIDriver(new MockHttpClient());
@@ -47,9 +43,7 @@ test('getModelName returns the model passed at construction', function (): void 
     expect($driver->getModelName())->toBe('gpt-4o');
 });
 
-// ---------------------------------------------------------------------------
 // Text response path
-// ---------------------------------------------------------------------------
 
 test('complete returns LLMResponse with text content when finish_reason is stop', function (): void {
     $payload = json_encode([
@@ -74,9 +68,7 @@ test('complete returns LLMResponse with text content when finish_reason is stop'
         ->and($response->hasToolCalls())->toBeFalse();
 });
 
-// ---------------------------------------------------------------------------
 // Tool call response path
-// ---------------------------------------------------------------------------
 
 test('complete returns tool calls when finish_reason is tool_calls', function (): void {
     $payload = json_encode([
@@ -144,9 +136,7 @@ test('complete handles multiple parallel tool calls', function (): void {
         ->and($response->toolCalls[1]->arguments)->toBe(['x' => 1]);
 });
 
-// ---------------------------------------------------------------------------
 // Error handling
-// ---------------------------------------------------------------------------
 
 test('complete throws LLMRateLimitException on HTTP 429', function (): void {
     $client = new MockHttpClient(new MockResponse('{"error":"rate limited"}', ['http_code' => 429]));
@@ -169,9 +159,7 @@ test('complete throws LLMRetryableException on HTTP 500', function (): void {
     expect(fn() => $driver->complete(makeRequest()))->toThrow(LLMRetryableException::class);
 });
 
-// ---------------------------------------------------------------------------
 // Request construction — system prompt prepended
-// ---------------------------------------------------------------------------
 
 test('complete prepends the system prompt as the first message', function (): void {
     $capturedBody = [];
@@ -199,9 +187,7 @@ test('complete prepends the system prompt as the first message', function (): vo
         ->and($capturedBody['messages'][1])->toBe(['role' => 'user', 'content' => 'Hello']);
 });
 
-// ---------------------------------------------------------------------------
 // Timeout configuration
-// ---------------------------------------------------------------------------
 
 test('complete uses the timeout value passed at construction', function (): void {
     $capturedOptions = [];

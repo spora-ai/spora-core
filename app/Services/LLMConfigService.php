@@ -34,8 +34,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
         private readonly array $driverClasses = [],
     ) {}
 
-    // ── Discovery ───────────────────────────────────────────────────────────────
-
     /**
      * Returns all registered driver classes with their resolved schemas.
      *
@@ -89,8 +87,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
 
         return $schema;
     }
-
-    // ── Encryption helpers ──────────────────────────────────────────────────────
 
     /**
      * Encode settings: encrypt password fields per-field, store others as plain JSON.
@@ -185,8 +181,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
 
         return $masked;
     }
-
-    // ── CRUD ─────────────────────────────────────────────────────────────────
 
     /**
      * @return list<array>
@@ -390,8 +384,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
             ->first();
     }
 
-    // ── User Preferences ─────────────────────────────────────────────────────
-
     public function getUserPreferredConfig(int $userId): ?LLMDriverConfiguration
     {
         $preference = UserPreference::where('user_id', $userId)->first();
@@ -425,8 +417,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
     {
         UserPreference::where('user_id', $userId)->delete();
     }
-
-    // ── Helpers ──────────────────────────────────────────────────────────────
 
     /**
      * @return list<string>

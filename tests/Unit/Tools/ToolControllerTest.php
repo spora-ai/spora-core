@@ -11,9 +11,7 @@ use Spora\Security\CsrfTokenService;
 use Spora\Services\ToolConfigService;
 use Tests\Fixtures\TestTool;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Boot a fresh in-memory DB and return ToolController + AuthService.
@@ -36,9 +34,7 @@ function makeToolController(array $toolClasses = []): array
     return [$controller, $authService, $toolConfig, $authMiddleware, $csrfMiddleware, $csrfService];
 }
 
-// ---------------------------------------------------------------------------
 // Auth guard
-// ---------------------------------------------------------------------------
 
 test('unauthenticated request throws UnauthenticatedException', function (): void {
     clearSession();
@@ -48,9 +44,7 @@ test('unauthenticated request throws UnauthenticatedException', function (): voi
         ->toThrow(UnauthenticatedException::class);
 });
 
-// ---------------------------------------------------------------------------
 // index
-// ---------------------------------------------------------------------------
 
 test('index returns schema for registered tool classes', function (): void {
     clearSession();
@@ -102,9 +96,7 @@ test('index returns empty tools list when no classes registered', function (): v
     expect($body['data']['tools'])->toBe([]);
 });
 
-// ---------------------------------------------------------------------------
 // getSettings
-// ---------------------------------------------------------------------------
 
 test('getSettings returns empty array when no settings saved yet', function (): void {
     clearSession();
@@ -140,9 +132,7 @@ test('getSettings returns masked password after putSettings', function (): void 
     expect($body['data']['settings']['api_key'])->toBe('***');
 });
 
-// ---------------------------------------------------------------------------
 // putSettings
-// ---------------------------------------------------------------------------
 
 test('putSettings saves settings and returns masked result', function (): void {
     clearSession();

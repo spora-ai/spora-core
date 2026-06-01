@@ -14,6 +14,10 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 
+/**
+ * Searches world news from thousands of sources via WorldNewsAPI.
+ * Supports text search, category filters, date ranges, and top news by country.
+ */
 #[Tool(
     name: 'worldnews_search',
     description: 'Search world news from thousands of sources with no time delay. Use this to find out what is happening right now regarding a specific topic.',

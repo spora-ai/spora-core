@@ -19,7 +19,7 @@ const { confirm } = useConfirmDialog()
 
 const agentId = computed(() => Number(route.params.id))
 
-// ── Data ────────────────────────────────────────────────────────────────────────
+// Data
 
 interface AgentSummary {
   id: number
@@ -31,12 +31,12 @@ const runs = ref<ScheduledRunResource[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-// ── Modal state ───────────────────────────────────────────────────────────────
+// Modal state
 
 const showEditor = ref(false)
 const editingRun = ref<Partial<ScheduledRunResource> | null>(null)
 
-// ── Lifecycle ──────────────────────────────────────────────────────────────────
+// Lifecycle
 
 onMounted(async () => {
   await loadData()
@@ -64,7 +64,7 @@ async function loadData(): Promise<void> {
   }
 }
 
-// ── Formatting helpers ───────────────────────────────────────────────────────
+// Formatting helpers
 
 function formatSchedule(run: ScheduledRunResource): string {
   if (run.cron_expression) {
@@ -89,7 +89,7 @@ function formatTs(iso: string | null, tz: string): string {
   }
 }
 
-// ── Actions ───────────────────────────────────────────────────────────────────
+// Actions
 
 async function toggleActive(run: ScheduledRunResource): Promise<void> {
   try {

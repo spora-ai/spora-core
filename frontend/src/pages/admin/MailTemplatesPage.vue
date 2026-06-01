@@ -13,7 +13,7 @@ const auth = useAuthStore()
 const mailTemplates = useMailTemplatesStore()
 const toast = useToast()
 
-// ── Admin guard ────────────────────────────────────────────────────────────
+// Admin guard
 
 onMounted(async () => {
   if (!auth.user?.roles?.includes('ADMIN')) {
@@ -27,7 +27,7 @@ onMounted(async () => {
   }
 })
 
-// ── UI State ────────────────────────────────────────────────────────────────
+// UI State
 
 const editorForm = ref({ name: '', subject: '', body_text: '', body_html: '' })
 const showCreateModal = ref(false)
@@ -37,7 +37,7 @@ const previewResult = ref<{ subject: string; body_text: string; body_html: strin
 const previewParams = ref({ user_name: '', email: '', site_name: 'Spora', verification_link: '', reset_link: '' })
 const previewLoading = ref(false)
 
-// ── Computed ────────────────────────────────────────────────────────────────
+// Computed
 
 const isSystemTemplate = computed(() =>
   mailTemplates.currentTemplate ? SYSTEM_TEMPLATES.includes(mailTemplates.currentTemplate.name) : false,
@@ -61,7 +61,7 @@ function goBack(): void {
   mailTemplates.currentTemplate = null
 }
 
-// ── Save ────────────────────────────────────────────────────────────────────
+// Save
 
 async function saveTemplate(): Promise<void> {
   if (!mailTemplates.currentTemplate) return
@@ -78,7 +78,7 @@ async function saveTemplate(): Promise<void> {
   }
 }
 
-// ── Delete ─────────────────────────────────────────────────────────────────
+// Delete
 
 async function deleteTemplate(): Promise<void> {
   if (!mailTemplates.currentTemplate || isSystemTemplate.value) return
@@ -91,7 +91,7 @@ async function deleteTemplate(): Promise<void> {
   }
 }
 
-// ── Create ─────────────────────────────────────────────────────────────────
+// Create
 
 async function createTemplate(): Promise<void> {
   if (!createForm.value.name.trim() || !createForm.value.subject.trim()) return
@@ -111,7 +111,7 @@ async function createTemplate(): Promise<void> {
   }
 }
 
-// ── Preview ────────────────────────────────────────────────────────────────
+// Preview
 
 function openPreview(): void {
   previewResult.value = null
@@ -134,7 +134,7 @@ async function runPreview(): Promise<void> {
   }
 }
 
-// ── Placeholder chips ──────────────────────────────────────────────────────
+// Placeholder chips
 
 const PLACEHOLDERS = ['user_name', 'email', 'verification_link', 'reset_link', 'site_name']
 

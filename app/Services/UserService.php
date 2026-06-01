@@ -23,8 +23,6 @@ final class UserService implements UserServiceInterface
         'MODERATOR'   => Role::MODERATOR,
     ];
 
-    // ── User lifecycle ─────────────────────────────────────────────────────────
-
     public function getUsers(int $page, int $perPage): array
     {
         $paginator = User::orderBy('id', 'asc')
@@ -152,8 +150,6 @@ final class UserService implements UserServiceInterface
         return $roles;
     }
 
-    // ── Profile ───────────────────────────────────────────────────────────────
-
     public function getProfile(int $userId): ?array
     {
         $user = User::find($userId);
@@ -200,8 +196,6 @@ final class UserService implements UserServiceInterface
             'weight_kg'    => $user->weight_kg,
         ]];
     }
-
-    // ── Locations ────────────────────────────────────────────────────────────
 
     public function getLocations(int $userId): array
     {
@@ -286,8 +280,6 @@ final class UserService implements UserServiceInterface
 
         return true;
     }
-
-    // ── Private helpers ─────────────────────────────────────────────────────────
 
     private function serializeUser(User $user): array
     {

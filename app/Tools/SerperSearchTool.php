@@ -16,6 +16,10 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 
+/**
+ * Searches the web via Google using the Serper.dev API.
+ * Supports web search, images, news, video, scholar, shopping, patents, maps, and places.
+ */
 #[Tool(
     name: 'serper_search',
     description: 'Search the web using Google Search via Serper.dev. Use this for general queries, looking up specific websites, or finding real-time information.',

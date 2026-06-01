@@ -3,9 +3,7 @@
 declare(strict_types=1);
 
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function getContainerConfig(): array
 {
@@ -67,9 +65,7 @@ function resolveConfig(array $tempEnv = [], ?array $fileConfig = null): array
     return $config;
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 
 test('config closure resolves basic defaults', function (): void {
     $config = resolveConfig([

@@ -13,23 +13,17 @@ import type { ToolSchema } from '@/composables/useToolSettings'
 import { useAuthStore } from '@/stores/auth'
 
 export const useGlobalSettingsStore = defineStore('globalSettings', () => {
-  // ── LLM Drivers ──────────────────────────────────────────────────────────────
-
   const drivers = ref<LLMDriverInfo[]>([])
   const driverSettings = ref<Record<string, Record<string, string>>>({})
   const loadingDrivers = ref(false)
   const savingDriver = ref<string | null>(null)
   const driverError = ref<string | null>(null)
 
-  // ── Tool Defaults ───────────────────────────────────────────────────────────
-
   const allTools = ref<ToolSchema[]>([])
   const toolSettings = ref<Record<string, Record<string, string>>>({})
   const loadingTools = ref(false)
   const savingTool = ref<string | null>(null)
   const toolError = ref<string | null>(null)
-
-  // ── LLM Drivers ─────────────────────────────────────────────────────────────
 
   async function loadDrivers(): Promise<void> {
     loadingDrivers.value = true
@@ -73,8 +67,6 @@ export const useGlobalSettingsStore = defineStore('globalSettings', () => {
       savingDriver.value = null
     }
   }
-
-  // ── Tool Defaults ───────────────────────────────────────────────────────────
 
   async function loadTools(): Promise<void> {
     loadingTools.value = true
@@ -128,8 +120,6 @@ export const useGlobalSettingsStore = defineStore('globalSettings', () => {
       savingTool.value = null
     }
   }
-
-  // ── Bulk load ─────────────────────────────────────────────────────────────
 
   async function loadAll(): Promise<void> {
     await Promise.all([loadDrivers(), loadTools()])

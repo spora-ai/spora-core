@@ -19,6 +19,13 @@ use Throwable;
 
 final class Kernel
 {
+    /**
+     * The application kernel that bootstraps the entire Spora framework.
+     *
+     * Handles environment loading, dependency injection container setup,
+     * HTTP request routing, error handling, and request/response lifecycle.
+     * This is the entry point for all HTTP requests to the application.
+     */
     private Container $container;
     private bool $errorHandlerInstalled = false;
 

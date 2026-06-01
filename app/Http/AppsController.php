@@ -7,6 +7,9 @@ namespace Spora\Http;
 use Spora\Apps\AppRegistry;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
+/**
+ * Lists all registered applications (plugins) available in the system.
+ */
 final class AppsController
 {
     public function __construct(

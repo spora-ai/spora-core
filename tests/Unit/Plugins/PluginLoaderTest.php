@@ -8,10 +8,6 @@ const FIXTURE_MANIFEST_PLUGINS    = BASE_PATH . '/tests/Fixtures/plugins_with_ma
 const FIXTURE_CUSTOM_FILE_PLUGINS = BASE_PATH . '/tests/Fixtures/plugins_with_custom_file';
 const FIXTURE_INVALID_MANIFESTS   = BASE_PATH . '/tests/Fixtures/plugins_invalid_manifest';
 
-// ---------------------------------------------------------------------------
-// Basics
-// ---------------------------------------------------------------------------
-
 test('boot() with non-existent directory loads zero plugins', function (): void {
     $loader = new PluginLoader('/tmp/spora_no_plugins_' . uniqid());
     $loader->boot();
@@ -26,10 +22,6 @@ test('boot() is idempotent — calling twice does not double-load plugins', func
 
     expect($loader->getPlugins())->toHaveCount(1);
 });
-
-// ---------------------------------------------------------------------------
-// plugin.json — slug is the key in getPlugins()
-// ---------------------------------------------------------------------------
 
 test('plugin is keyed by its manifest slug in getPlugins()', function (): void {
     $loader = new PluginLoader(FIXTURE_MANIFEST_PLUGINS);
@@ -53,10 +45,6 @@ test('toolClasses() returns empty array when plugin contributes no tools', funct
     expect($loader->toolClasses())->toBe([]);
 });
 
-// ---------------------------------------------------------------------------
-// plugin.json — explicit "file" key
-// ---------------------------------------------------------------------------
-
 test('"file" key loads the plugin from the specified path instead of Plugin.php', function (): void {
     $loader = new PluginLoader(FIXTURE_CUSTOM_FILE_PLUGINS);
     $loader->boot();
@@ -65,10 +53,6 @@ test('"file" key loads the plugin from the specified path instead of Plugin.php'
     expect($loader->getPlugins()['named-plugin']->getName())->toBe('Named Plugin');
     expect($loader->drivers())->toHaveKey('named_driver');
 });
-
-// ---------------------------------------------------------------------------
-// Slug validation — structural manifest errors throw, runtime class errors are silent
-// ---------------------------------------------------------------------------
 
 test('manifest missing "slug" throws RuntimeException', function (): void {
     $loader = new PluginLoader(FIXTURE_INVALID_MANIFESTS . '/MissingClassKey');
@@ -90,10 +74,6 @@ test('manifest whose declared class cannot be resolved is silently skipped', fun
 
     expect($loader->getPlugins())->toHaveCount(0);
 });
-
-// ---------------------------------------------------------------------------
-// Plugin migration paths use slug as key
-// ---------------------------------------------------------------------------
 
 test('pluginMigrationPaths() is empty for plugins with schemaVersion 0', function (): void {
     $loader = new PluginLoader(FIXTURE_MANIFEST_PLUGINS);

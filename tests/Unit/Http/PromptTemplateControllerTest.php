@@ -38,10 +38,6 @@ function registerAndGetAgentId(AuthService $authService): array
     return [$userId, $agent->id];
 }
 
-// ---------------------------------------------------------------------------
-// CRUD operations
-// ---------------------------------------------------------------------------
-
 describe('PromptTemplateController', function (): void {
     it('index returns templates for the authenticated user agent', function (): void {
         [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());

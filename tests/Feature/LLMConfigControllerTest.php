@@ -54,15 +54,11 @@ function createTestConfig(string $name, string $driverClass, array $settings, bo
     return $config;
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 // jsonRequest() is defined globally in tests/Pest.php
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 
 test('drivers() returns all registered drivers with schemas', function (): void {
     [$controller, , , , $authMiddleware] = makeLLMConfigController();
@@ -381,9 +377,7 @@ test('index() returns all configs', function (): void {
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });
 
-// ---------------------------------------------------------------------------
 // Multi-tenancy isolation
-// ---------------------------------------------------------------------------
 
 test('index() only returns configs belonging to the current user', function (): void {
     [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
@@ -485,9 +479,7 @@ test('setDefault() only affects the current user\'s configs', function (): void 
     LLMDriverConfiguration::whereIn('id', [$configA->id, $configB->id])->delete();
 });
 
-// ---------------------------------------------------------------------------
 // Fix: update() ignores settings when value is a JSON array (not an object)
-// ---------------------------------------------------------------------------
 
 test('update() does not corrupt settings when client sends a JSON array instead of object', function (): void {
     [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
@@ -575,9 +567,7 @@ test('store() creates a config owned by the current user', function (): void {
     LLMDriverConfiguration::where('id', $result['id'])->delete();
 });
 
-// ---------------------------------------------------------------------------
 // Global LLM Driver Configurations
-// ---------------------------------------------------------------------------
 
 test('admin can create a global config with is_global=true', function (): void {
     [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();

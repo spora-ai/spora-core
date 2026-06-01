@@ -12,6 +12,9 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Handles agent-scoped memory CRUD and reordering.
+ */
 final class AgentMemoryController
 {
     public function __construct(

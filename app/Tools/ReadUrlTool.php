@@ -16,6 +16,10 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 
+/**
+ * Fetches and parses web content from HTTP(S) URLs.
+ * Converts HTML pages to Markdown and handles XML/RSS feeds directly.
+ */
 #[Tool(
     name: 'read_url',
     description: 'Fetch and read the contents of a URL. Can parse HTML pages into Markdown, and can read XML/RSS feeds. Only http:// and https:// URLs are supported.',

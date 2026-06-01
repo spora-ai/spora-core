@@ -7,6 +7,10 @@ namespace Spora\Tools;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 
+/**
+ * Stores and retrieves persistent memories scoped to the current agent.
+ * Each agent has its own isolated memory namespace.
+ */
 #[Tool(
     name: 'memory',
     description: 'Store and retrieve persistent memories scoped to this agent.',

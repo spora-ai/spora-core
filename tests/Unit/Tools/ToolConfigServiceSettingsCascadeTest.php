@@ -265,9 +265,7 @@ test('deleteAgentOverride is idempotent (no error if no override exists)', funct
     expect(true)->toBeTrue();
 });
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function makeToolConfigService(): ToolConfigService
 {

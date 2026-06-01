@@ -10,9 +10,7 @@ use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall;
 use Spora\Services\TaskServiceInterface;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function makeTaskController(?TaskServiceInterface $taskService = null): array
 {
@@ -43,9 +41,7 @@ function seedUserAndAgent(mixed $authService): array
     return [$userId, $agent];
 }
 
-// ---------------------------------------------------------------------------
 // Unauthenticated requests
-// ---------------------------------------------------------------------------
 
 it('unauthenticated index throws UnauthenticatedException', function (): void {
     [$controller, , , $authMiddleware] = makeTaskController();
@@ -63,9 +59,7 @@ it('unauthenticated store throws UnauthenticatedException', function (): void {
         ->toThrow(UnauthenticatedException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // store()
-// ---------------------------------------------------------------------------
 
 it('store returns 422 when prompt is missing', function (): void {
     [$controller, $authService] = makeTaskController();
@@ -118,9 +112,7 @@ it('store returns 404 when user has no agent', function (): void {
     expect($resp->getStatusCode())->toBe(404);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // index()
-// ---------------------------------------------------------------------------
 
 it('index returns list of tasks for the authenticated user', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
@@ -186,9 +178,7 @@ it('index with since param passes since to service and returns empty tasks on fu
     expect($body['data']['server_time'])->toBeString();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // show()
-// ---------------------------------------------------------------------------
 
 it('show returns 404 for unknown task', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
@@ -281,9 +271,7 @@ it('show respects since_sequence to filter task history', function (): void {
         ->and($history[0]['content'])->toBe('Third');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // approve()
-// ---------------------------------------------------------------------------
 
 it('approve returns 409 when task is not PENDING_APPROVAL', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
@@ -359,9 +347,7 @@ it('approve calls orchestrator resume and returns updated task', function (): vo
     expect($resp->getStatusCode())->toBe(200);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // reject()
-// ---------------------------------------------------------------------------
 
 it('reject returns 409 when task is not PENDING_APPROVAL', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
@@ -427,9 +413,7 @@ it('reject calls orchestrator reject and returns 200', function (): void {
     expect($resp->getStatusCode())->toBe(200);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // Fix: legacy approve format must have a non-empty provider_call_id
-// ---------------------------------------------------------------------------
 
 it('approve returns 422 when legacy format omits provider_call_id', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
@@ -525,9 +509,7 @@ it('approve legacy format with valid provider_call_id still calls orchestrator r
     expect($resp->getStatusCode())->toBe(200);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // destroy()
-// ---------------------------------------------------------------------------
 
 it('destroy throws UnauthenticatedException when not logged in', function (): void {
     [$controller, , , $authMiddleware] = makeTaskController();
@@ -695,9 +677,7 @@ it('destroy cascade-deletes tool_calls rows', function (): void {
     // Cascade delete is tested in TaskService integration tests
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // retry()
-// ---------------------------------------------------------------------------
 
 it('retry returns 404 for unknown task', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
@@ -826,9 +806,7 @@ it('retry returns 201 with the new task resource', function (): void {
     expect($body['data']['task']['status'])->toBe('RUNNING');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // show() includes error_code and error_message in response
-// ---------------------------------------------------------------------------
 
 it('show returns error_code and error_message when set on task', function (): void {
     $taskDetail = [
@@ -867,9 +845,7 @@ it('show returns error_code and error_message when set on task', function (): vo
     expect($body['data']['task']['error_message'])->toBe('The AI service is under high load.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // continue()
-// ---------------------------------------------------------------------------
 
 it('continue returns 200 and resets task for completed task', function (): void {
     $taskResource = [
@@ -1042,9 +1018,7 @@ it('continue returns 404 for unknown task', function (): void {
     expect($resp->getStatusCode())->toBe(404);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // cancelRetryChain()
-// ---------------------------------------------------------------------------
 
 it('cancelRetryChain returns 404 for unknown task', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);

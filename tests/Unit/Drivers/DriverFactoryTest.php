@@ -185,9 +185,7 @@ test('makeFromAgent uses agent config over global default', function (): void {
     LLMDriverConfiguration::whereIn('id', [$globalConfig->id, $agentConfig->id])->delete();
 });
 
-// ---------------------------------------------------------------------------
 // Timeout configuration
-// ---------------------------------------------------------------------------
 
 test('makeDriverFromConfig passes per-LLM-config timeout to the driver', function (): void {
     $service = makeSecureLLMConfigService();
@@ -249,9 +247,7 @@ test('makeDriverFromConfig uses global llmTimeout when config has no timeout', f
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });
 
-// ---------------------------------------------------------------------------
 // Decryption failure handling
-// ---------------------------------------------------------------------------
 
 test('makeFromAgent handles decryption failure gracefully — api_key null, other fields readable', function (): void {
     // serviceA creates a config with per-field encrypted api_key + plain model/base_url

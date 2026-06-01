@@ -4,6 +4,12 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+/**
+ * Contract for memory persistence (global and agent-scoped).
+ *
+ * Implementations handle CRUD and reordering of key-value memories
+ * that agents use to maintain context across task executions.
+ */
 interface MemoryServiceInterface
 {
     /**

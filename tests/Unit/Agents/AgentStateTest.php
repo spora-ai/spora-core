@@ -5,9 +5,7 @@ declare(strict_types=1);
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Drivers\ValueObjects\ToolCall;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function makeAgentState(array $overrides = []): AgentState
 {
@@ -29,9 +27,7 @@ function makeAgentState(array $overrides = []): AgentState
     );
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 
 test('fromJson(toJson()) roundtrip preserves all fields', function (): void {
     $original  = makeAgentState();

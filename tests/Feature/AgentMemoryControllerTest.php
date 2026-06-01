@@ -47,9 +47,7 @@ function createMemoryTestUserWithAgents(AuthService $authService, string $email 
     return [$userId, $agentId1, $agentId2];
 }
 
-// ---------------------------------------------------------------------------
 // reorder
-// ---------------------------------------------------------------------------
 
 describe('AgentMemoryController::reorder', function (): void {
 
@@ -196,9 +194,7 @@ describe('AgentMemoryController::reorder', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
 // index
-// ---------------------------------------------------------------------------
 
 describe('AgentMemoryController::index', function (): void {
 
@@ -240,9 +236,7 @@ describe('AgentMemoryController::index', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
 // store
-// ---------------------------------------------------------------------------
 
 describe('AgentMemoryController::store', function (): void {
 
@@ -297,9 +291,7 @@ describe('AgentMemoryController::store', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
 // show
-// ---------------------------------------------------------------------------
 
 describe('AgentMemoryController::show', function (): void {
 
@@ -327,9 +319,7 @@ describe('AgentMemoryController::show', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
 // update
-// ---------------------------------------------------------------------------
 
 describe('AgentMemoryController::update', function (): void {
 
@@ -370,9 +360,7 @@ describe('AgentMemoryController::update', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
 // destroy
-// ---------------------------------------------------------------------------
 
 describe('AgentMemoryController::destroy', function (): void {
 

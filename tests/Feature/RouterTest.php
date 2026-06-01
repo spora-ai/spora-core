@@ -35,9 +35,7 @@ final class RouterTestController
     }
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 
 test('Router passes {id} route variable as method argument to GET handler', function (): void {
     $container = (new ContainerBuilder())->build();
@@ -144,9 +142,7 @@ test('Router dispatches 405 for wrong method', function (): void {
     expect($response->getStatusCode())->toBe(Response::HTTP_METHOD_NOT_ALLOWED);
 });
 
-// ---------------------------------------------------------------------------
 // Fix: null byte in path param is rejected with 400
-// ---------------------------------------------------------------------------
 
 final class NullByteTestController
 {
@@ -190,9 +186,7 @@ test('Router allows normal percent-encoded path variables (no null byte)', funct
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 });
 
-// ---------------------------------------------------------------------------
 // Route without path variables — optional params use their defaults
-// ---------------------------------------------------------------------------
 
 final class NoVarsController
 {
@@ -219,9 +213,7 @@ test('Router calls method without path variables and lets optional params use de
     expect($body['vars'])->toBe([]);
 });
 
-// ---------------------------------------------------------------------------
 // Guard: non-optional parameter with no matching route variable throws
-// ---------------------------------------------------------------------------
 
 final class RequiredParamController
 {

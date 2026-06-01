@@ -258,8 +258,6 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
         return $converted;
     }
 
-    // ── LLMDriverConfigInterface ────────────────────────────────────────────────
-
     public static function getName(): string
     {
         return 'anthropic_compatible';

@@ -117,8 +117,6 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
         return true;
     }
 
-    // ── Private helpers ─────────────────────────────────────────────────────────
-
     private function findAgent(int $id, int $userId): ?Agent
     {
         return Agent::where('id', $id)->where('user_id', $userId)->first();

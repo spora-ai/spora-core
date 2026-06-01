@@ -95,7 +95,7 @@ const sortedCategories = computed(() =>
             <p class="text-sm text-muted-foreground mt-0.5">Configure system-wide LLM drivers and tool defaults.</p>
           </div>
 
-          <!-- ── LLM Drivers Section ─────────────────────────────────────── -->
+          <!-- LLM Drivers Section -->
           <section class="mb-10">
             <div class="flex items-center justify-between mb-4">
               <h2 class="text-base font-semibold">LLM Drivers</h2>
@@ -146,7 +146,7 @@ const sortedCategories = computed(() =>
             </div>
           </section>
 
-          <!-- ── Tool Defaults Section ──────────────────────────────────── -->
+          <!-- Tool Defaults Section -->
           <section>
             <div class="flex items-center justify-between mb-4">
               <h2 class="text-base font-semibold">Tool Defaults</h2>

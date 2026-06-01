@@ -47,7 +47,6 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
-  // ── List / CRUD ─────────────────────────────────────────────────────────────
 
   async function fetchAgents(): Promise<void> {
     const result = await api.get<{ agents: Agent[] }>('/agents')
@@ -101,7 +100,6 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
-  // ── Tasks ───────────────────────────────────────────────────────────────────
 
   async function fetchAgentTasks(agentId: number): Promise<void> {
     const result = await api.get<{ tasks: Task[] }>(`/tasks?agent_id=${agentId}`)
@@ -158,7 +156,6 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
-  // ── Tools ───────────────────────────────────────────────────────────────────
 
   async function enableTool(agentId: number, toolName: string): Promise<AgentTool> {
     const result = await api.post<{ tool: AgentTool }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/enable`)
@@ -251,7 +248,6 @@ export const useAgentStore = defineStore('agent', () => {
     return result as any
   }
 
-  // ── LLM Config (setup detection) ────────────────────────────────────────────
 
   async function getLLMConfig(agentId: number): Promise<LLMConfigSettings> {
     const result = await api.get<{ settings: LLMConfigSettings }>(

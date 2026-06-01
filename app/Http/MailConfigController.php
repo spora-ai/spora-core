@@ -13,6 +13,9 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
+/**
+ * Manages mail server configuration: view, update, and send test emails.
+ */
 final class MailConfigController
 {
     private const ENV_KEYS = [

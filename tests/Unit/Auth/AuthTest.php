@@ -34,9 +34,7 @@ function makeAuthController(array $configOverrides = [], ?callable $userServiceS
     return [$controller, $service, $userService, $csrfService];
 }
 
-// ---------------------------------------------------------------------------
 // Registration tests
-// ---------------------------------------------------------------------------
 
 test('register happy path returns 201 with user data and creates DB row', function (): void {
     clearSession();
@@ -175,9 +173,7 @@ test('register with mismatched passwords returns 422 VALIDATION_ERROR', function
     expect($body['error']['message'])->toBe('Passwords do not match.');
 });
 
-// ---------------------------------------------------------------------------
 // Login tests
-// ---------------------------------------------------------------------------
 
 test('login happy path returns 200 with user data', function (): void {
     clearSession();
@@ -233,9 +229,7 @@ test('login with unknown email returns 401 INVALID_CREDENTIALS', function (): vo
     expect($body['error']['code'])->toBe('INVALID_CREDENTIALS');
 });
 
-// ---------------------------------------------------------------------------
 // Me tests
-// ---------------------------------------------------------------------------
 
 test('me when logged in returns 200 with user data including ISO 8601 registered', function (): void {
     clearSession();
@@ -287,9 +281,7 @@ test('me when not logged in returns 401 UNAUTHENTICATED', function (): void {
     expect($body['error']['code'])->toBe('UNAUTHENTICATED');
 });
 
-// ---------------------------------------------------------------------------
 // Logout tests
-// ---------------------------------------------------------------------------
 
 test('logout returns 204 with no body', function (): void {
     clearSession();

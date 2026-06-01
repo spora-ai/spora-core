@@ -7,8 +7,11 @@ namespace Spora\Tools\Attributes;
 use Attribute;
 
 /**
- * Applied zero-or-more times at class level (repeatable).
- * Describes a UI-configurable setting stored in tool_configurations or agent_tool_overrides.
+ * Declares a UI-configurable setting for a tool.
+ *
+ * Usage:
+ *   #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', scope: 'agent')]
+ *   #[ToolSetting(key: 'max_results', label: 'Max Results', type: 'text', scope: 'global', default: '10')]
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class ToolSetting

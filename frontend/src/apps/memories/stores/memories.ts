@@ -4,8 +4,11 @@ import { ApiError } from '@/api/client'
 import type { MemoryResource, CreateMemoryDto, UpdateMemoryDto } from '../types/memory'
 import * as api from '../api/memories'
 
+/**
+ * Manages global and agent-scoped memories with CRUD and reordering.
+ */
 export const useMemoriesStore = defineStore('memories', () => {
-  // ── State ─────────────────────────────────────────────────────────────────
+  // State
   const globalMemories = ref<MemoryResource[]>([])
   const agentMemories = ref<MemoryResource[]>([])
   const loadingGlobal = ref(false)
@@ -13,7 +16,7 @@ export const useMemoriesStore = defineStore('memories', () => {
   const saving = ref(false)
   const error = ref<string | null>(null)
 
-  // ── Global memories ────────────────────────────────────────────────────────
+  // Global memories
 
   async function loadGlobalMemories(): Promise<void> {
     loadingGlobal.value = true
@@ -72,7 +75,7 @@ export const useMemoriesStore = defineStore('memories', () => {
     }
   }
 
-  // ── Agent memories ──────────────────────────────────────────────────────────
+  // Agent memories
 
   async function loadAgentMemories(agentId: number): Promise<void> {
     loadingAgent.value = true

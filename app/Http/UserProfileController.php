@@ -11,6 +11,9 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Manages user profiles and associated locations.
+ */
 final class UserProfileController
 {
     public function __construct(

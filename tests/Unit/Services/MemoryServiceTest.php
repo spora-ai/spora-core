@@ -8,9 +8,9 @@ use Spora\Services\MemoryService;
 
 describe('MemoryService', function (): void {
 
-    // -------------------------------------------------------------------------
+    //
     // Shared helpers
-    // -------------------------------------------------------------------------
+    //
 
     function makeMemoryService(): MemoryService
     {
@@ -39,9 +39,9 @@ describe('MemoryService', function (): void {
         return [$userId, $agentId];
     }
 
-    // -------------------------------------------------------------------------
+    //
     // listGlobalMemories
-    // -------------------------------------------------------------------------
+    //
 
     describe('listGlobalMemories', function (): void {
 
@@ -123,9 +123,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // listAgentMemories
-    // -------------------------------------------------------------------------
+    //
 
     describe('listAgentMemories', function (): void {
 
@@ -166,9 +166,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // createGlobalMemory
-    // -------------------------------------------------------------------------
+    //
 
     describe('createGlobalMemory', function (): void {
 
@@ -234,9 +234,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // createAgentMemory
-    // -------------------------------------------------------------------------
+    //
 
     describe('createAgentMemory', function (): void {
 
@@ -264,9 +264,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // getGlobalMemory
-    // -------------------------------------------------------------------------
+    //
 
     describe('getGlobalMemory', function (): void {
 
@@ -329,9 +329,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // getAgentMemory
-    // -------------------------------------------------------------------------
+    //
 
     describe('getAgentMemory', function (): void {
 
@@ -389,9 +389,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // updateGlobalMemory
-    // -------------------------------------------------------------------------
+    //
 
     describe('updateGlobalMemory', function (): void {
 
@@ -462,9 +462,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // updateAgentMemory
-    // -------------------------------------------------------------------------
+    //
 
     describe('updateAgentMemory', function (): void {
 
@@ -507,9 +507,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // deleteGlobalMemory
-    // -------------------------------------------------------------------------
+    //
 
     describe('deleteGlobalMemory', function (): void {
 
@@ -572,9 +572,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // deleteAgentMemory
-    // -------------------------------------------------------------------------
+    //
 
     describe('deleteAgentMemory', function (): void {
 
@@ -633,9 +633,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // Auto-assigned order on creation
-    // -------------------------------------------------------------------------
+    //
 
     describe('createGlobalMemory auto-assigns order', function (): void {
 
@@ -685,9 +685,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // reorderGlobalMemories
-    // -------------------------------------------------------------------------
+    //
 
     describe('reorderGlobalMemories', function (): void {
 
@@ -721,9 +721,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // reorderAgentMemories
-    // -------------------------------------------------------------------------
+    //
 
     describe('reorderAgentMemories', function (): void {
 
@@ -758,9 +758,9 @@ describe('MemoryService', function (): void {
         });
     });
 
-    // -------------------------------------------------------------------------
+    //
     // Resource transformation
-    // -------------------------------------------------------------------------
+    //
 
     describe('resource transformation', function (): void {
 

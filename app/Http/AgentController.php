@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use JsonException;
+use SensitiveParameter;
 use Spora\Auth\AuthService;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
@@ -25,7 +26,7 @@ final class AgentController
     /**
      * GET /api/v1/agents
      */
-    public function index(Request $request): JsonResponse
+    public function index(#[SensitiveParameter] Request $request): JsonResponse
     {
         $userId = $this->authService->currentUserId();
 
@@ -369,7 +370,6 @@ final class AgentController
         return new JsonResponse(['data' => $result]);
     }
 
-    // ── Private helpers ─────────────────────────────────────────────────────────
 
     private function resolveToolClassFromRequest(Request $request): ?string
     {

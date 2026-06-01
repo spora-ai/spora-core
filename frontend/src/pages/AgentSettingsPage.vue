@@ -23,17 +23,14 @@ const preferenceStore = useLlmPreferencesStore()
 
 const agentId = computed(() => Number(route.params.id))
 
-// ── Tool registry ─────────────────────────────────────────────────────────────
 
 const toolRegistry = ref<ToolSchema[]>([])
 const loadingTools = ref(false)
 
-// ── Tool status map (missing required settings per tool) ─────────────────────
 
 const toolStatusMap = ref<Record<string, ToolStatus>>({})
 const toolSettings = useToolSettings(agentId.value)
 
-// ── LLM Configs ───────────────────────────────────────────────────────────────
 
 interface LLMConfigResource {
   id: number
@@ -66,7 +63,6 @@ function configLabel(config: LLMConfigResource): string {
   return config.is_global ? `${config.name} (${config.driver_display_name}) — Global` : `${config.name} (${config.driver_display_name})`
 }
 
-// ── Identity form ─────────────────────────────────────────────────────────────
 
 const identityForm = ref({
   name: '',
@@ -81,7 +77,6 @@ const savingIdentity = ref(false)
 const identityError = ref<string | null>(null)
 const identitySaved = ref(false)
 
-// ── Tools ─────────────────────────────────────────────────────────────────────
 
 // Track enabled tool names and auto-approve status separately
 const enabledToolNames = ref<Set<string>>(new Set())
@@ -106,7 +101,6 @@ const pendingEnableTool = ref<string | null>(null)
 // Collapsed state per category
 const collapsedCategories = ref<Record<string, boolean>>({})
 
-// ── Tools by category ────────────────────────────────────────────────────────
 
 function toLabel(cat: string): string {
   return cat.charAt(0).toUpperCase() + cat.slice(1)
@@ -134,12 +128,10 @@ function configuringToolSchema(): ToolSchema | null {
   return toolRegistry.value.find((t) => t.tool_name === configuringTool.value) ?? null
 }
 
-// ── Delete agent ─────────────────────────────────────────────────────────────
 
 const deleting = ref(false)
 const confirmDeleteName = ref('')
 
-// ── Load data ────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
   await Promise.all([
@@ -201,7 +193,6 @@ onMounted(async () => {
   await loadOperationOverrides()
 })
 
-// ── Identity ─────────────────────────────────────────────────────────────────
 
 async function saveIdentity(): Promise<void> {
   identityError.value = null
@@ -226,7 +217,6 @@ async function saveIdentity(): Promise<void> {
   }
 }
 
-// ── LLM Config ───────────────────────────────────────────────────────────────
 
 async function saveLlmSettings(): Promise<void> {
   llmSettingsError.value = null
@@ -245,7 +235,6 @@ async function saveLlmSettings(): Promise<void> {
   }
 }
 
-// ── Tools ─────────────────────────────────────────────────────────────────────
 
 async function toggleTool(toolName: string): Promise<void> {
   savingTool.value[toolName] = true
@@ -371,7 +360,6 @@ async function toggleOperationAutoApprove(toolName: string, operationName: strin
   }
 }
 
-// ── Tool config saved ─────────────────────────────────────────────────────────
 // Re-fetch tool status after the config modal saves successfully so the
 // "Missing config" badge clears immediately without requiring a page reload.
 
@@ -382,7 +370,6 @@ async function onToolSaved(toolName: string): Promise<void> {
   }
 }
 
-// ── Delete ───────────────────────────────────────────────────────────────────
 
 async function deleteAgent(): Promise<void> {
   if (confirmDeleteName.value !== agentStore.currentAgent?.name) return

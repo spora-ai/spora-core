@@ -10,9 +10,7 @@ use Spora\Models\Agent;
 use Spora\Services\ToolConfigService;
 use Tests\Fixtures\TestTool;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Boot a fresh in-memory SQLite database and return a ready-to-use
@@ -54,9 +52,7 @@ function makeAgent(mixed $authService, string $suffix = ''): int
     ])->id;
 }
 
-// ---------------------------------------------------------------------------
 // putGlobalSettings / getGlobalSettings
-// ---------------------------------------------------------------------------
 
 test('putGlobalSettings encrypts password fields at rest and getGlobalSettings decrypts them', function (): void {
     [$service] = makeToolConfigService();
@@ -107,9 +103,7 @@ test('non-password fields are stored as plain JSON and returned unchanged', func
     expect($settings['max_results'])->toBe('50');
 });
 
-// ---------------------------------------------------------------------------
 // maskForApi
-// ---------------------------------------------------------------------------
 
 test('maskForApi replaces non-empty password value with *** and leaves non-password fields unchanged', function (): void {
     [$service] = makeToolConfigService();
@@ -141,9 +135,7 @@ test('maskForApi leaves empty-string password field as-is', function (): void {
     expect($masked['max_results'])->toBe('5');
 });
 
-// ---------------------------------------------------------------------------
 // getEffectiveSettings
-// ---------------------------------------------------------------------------
 
 test('getEffectiveSettings without agent override returns global settings', function (): void {
     [$service] = makeToolConfigService();
@@ -201,9 +193,7 @@ test('getEffectiveSettings with override: global-scoped key is not overridden by
     expect($effective['max_results'])->toBe('20');
 })->afterEach(fn() => Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // DecryptionFailedException resilience
-// ---------------------------------------------------------------------------
 
 test('getGlobalSettings throws for a completely corrupted encrypted blob in the DB', function (): void {
     [$service] = makeToolConfigService();
@@ -224,9 +214,7 @@ test('getGlobalSettings throws for a completely corrupted encrypted blob in the 
     expect(fn() => $service->getGlobalSettings($toolClass))->toThrow(DecryptionFailedException::class);
 });
 
-// ---------------------------------------------------------------------------
 // getMissingRequiredSettings
-// ---------------------------------------------------------------------------
 
 test('getMissingRequiredSettings: required field is empty → reported as missing', function (): void {
     [$service] = makeToolConfigService();
@@ -271,9 +259,7 @@ test('getMissingRequiredSettings returns empty array for unknown tool class', fu
     expect($missing)->toBe([]);
 });
 
-// ---------------------------------------------------------------------------
 // getEffectiveSettingsWithSource
-// ---------------------------------------------------------------------------
 
 test('getEffectiveSettingsWithSource: global key has source global', function (): void {
     [$service] = makeToolConfigService();
@@ -344,9 +330,7 @@ test('getEffectiveSettingsWithSource: no override falls back to global', functio
     expect($annotated['api_key']['value'])->toBe('only-global');
 });
 
-// ---------------------------------------------------------------------------
 // getRawAgentOverride
-// ---------------------------------------------------------------------------
 
 test('getRawAgentOverride returns empty array when no override exists', function (): void {
     [$service, , $authService] = makeToolConfigService();
@@ -386,9 +370,7 @@ test('getRawAgentOverride returns empty for non-existent tool class', function (
     expect($raw)->toBe([]);
 })->afterEach(fn() => Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // deleteGlobalSettings
-// ---------------------------------------------------------------------------
 
 test('deleteGlobalSettings removes the row', function (): void {
     [$service] = makeToolConfigService();
@@ -409,9 +391,7 @@ test('deleteGlobalSettings is idempotent (no error if not exists)', function ():
     expect(true)->toBeTrue(); // reach here means no exception was thrown
 });
 
-// ---------------------------------------------------------------------------
 // deleteUserSettings
-// ---------------------------------------------------------------------------
 
 test('deleteUserSettings removes the row', function (): void {
     [$service, , $authService] = makeToolConfigService();

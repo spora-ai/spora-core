@@ -4,6 +4,10 @@ import { api, ApiError } from '@/api/client'
 import { useAgentStore } from '@/stores/agent'
 import type { Task, TaskDetail, TaskStatus, HistoryEntry, TaskErrorCode } from '@/types/task'
 
+/**
+ * Manages tasks, active task detail view, polling for updates,
+ * SSE-driven real-time updates, and task operations (approve, reject, retry, continue).
+ */
 const TERMINAL_STATUSES: TaskStatus[] = ['COMPLETED', 'FAILED', 'CANCELLED']
 
 export const useTaskStore = defineStore('tasks', () => {
@@ -22,8 +26,6 @@ export const useTaskStore = defineStore('tasks', () => {
   let dashboardPollGen = 0
   let lastDashboardPollAt: string | null = null
 
-  // ── Task list ──────────────────────────────────────────────────────────────
-
   async function fetchTasks(): Promise<void> {
     const result = await api.get<{ tasks: Task[] }>('/tasks')
     tasks.value = result.tasks
@@ -37,8 +39,6 @@ export const useTaskStore = defineStore('tasks', () => {
     const result = await api.post<{ task: Task }>('/tasks', payload)
     return result.task
   }
-
-  // ── Task detail ───────────────────────────────────────────────────────────
 
   async function fetchTaskDetail(taskId: number, sinceSequence?: number): Promise<boolean> {
     const query = sinceSequence !== undefined ? `?since_sequence=${sinceSequence}` : ''
@@ -127,8 +127,6 @@ export const useTaskStore = defineStore('tasks', () => {
     return result.task
   }
 
-  // ── Polling ───────────────────────────────────────────────────────────────
-
   function startListPolling(): void {
     const gen = ++listPollGeneration
     if (listPollTimer !== null) {
@@ -179,8 +177,6 @@ export const useTaskStore = defineStore('tasks', () => {
       detailPollTimer = null
     }
   }
-
-  // ── Dashboard SSE ─────────────────────────────────────────────────────────
 
   /**
    * Merge a real-time task update from SSE into the tasks[] array (Dashboard).
@@ -323,8 +319,6 @@ export const useTaskStore = defineStore('tasks', () => {
     if (data.retry_count !== undefined) activeTask.value.retry_count = data.retry_count as number | undefined
     if (data.retry_after !== undefined) activeTask.value.retry_after = data.retry_after as string | null
   }
-
-  // ── Derived ───────────────────────────────────────────────────────────────
 
   const pendingToolCalls = computed(() => {
     const calls = activeTask.value?.tool_calls

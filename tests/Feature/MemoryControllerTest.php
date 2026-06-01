@@ -38,9 +38,7 @@ function createMemoryTestUser(AuthService $authService, string $email = 'control
     return [$userId, $agentId];
 }
 
-// ---------------------------------------------------------------------------
 // reorder
-// ---------------------------------------------------------------------------
 
 describe('MemoryController::reorder', function (): void {
 
@@ -168,9 +166,7 @@ describe('MemoryController::reorder', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
 // index
-// ---------------------------------------------------------------------------
 
 describe('MemoryController::index', function (): void {
 
@@ -196,9 +192,7 @@ describe('MemoryController::index', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
 // store
-// ---------------------------------------------------------------------------
 
 describe('MemoryController::store', function (): void {
 
@@ -241,9 +235,7 @@ describe('MemoryController::store', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
 // show
-// ---------------------------------------------------------------------------
 
 describe('MemoryController::show', function (): void {
 
@@ -269,9 +261,7 @@ describe('MemoryController::show', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
 // update
-// ---------------------------------------------------------------------------
 
 describe('MemoryController::update', function (): void {
 
@@ -308,9 +298,7 @@ describe('MemoryController::update', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
 // destroy
-// ---------------------------------------------------------------------------
 
 describe('MemoryController::destroy', function (): void {
 

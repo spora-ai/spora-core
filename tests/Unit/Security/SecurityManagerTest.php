@@ -6,10 +6,6 @@ use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\SecurityManager;
 use Spora\Core\ValueObjects\EncryptedValue;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function makeValidKey(): string
 {
     return random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
@@ -19,10 +15,6 @@ function makeSecurityManager(?string $key = null): SecurityManager
 {
     return new SecurityManager($key ?? makeValidKey());
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 test('encrypt and decrypt roundtrip returns original plaintext', function (): void {
     $sm        = makeSecurityManager();
@@ -94,10 +86,6 @@ test('EncryptedValue cannot be cast to string', function (): void {
     expect(fn() => (string) $enc)->toThrow(LogicException::class);
 });
 
-// ---------------------------------------------------------------------------
-// decrypt() — error branches
-// ---------------------------------------------------------------------------
-
 test('decrypt() throws DecryptionFailedException for invalid base64 input', function (): void {
     $sm  = makeSecurityManager();
     $bad = new EncryptedValue('!!!not-valid-base64===');
@@ -118,10 +106,6 @@ test('decrypt() throws DecryptionFailedException when decoded bytes are too shor
         'too short',
     );
 });
-
-// ---------------------------------------------------------------------------
-// loadFromFile() — error branches
-// ---------------------------------------------------------------------------
 
 test('constructing with a non-existent file path throws RuntimeException', function (): void {
     expect(fn() => new SecurityManager('/tmp/spora_does_not_exist_' . uniqid() . '.key'))

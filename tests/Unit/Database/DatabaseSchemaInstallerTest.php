@@ -7,9 +7,7 @@ use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Plugins\PluginLoader;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Boot a fresh in-memory SQLite connection and return the installer under test.
@@ -31,9 +29,7 @@ function bootLoaderFromFixture(string $dir): PluginLoader
     return $loader;
 }
 
-// ---------------------------------------------------------------------------
 // Infrastructure tables
-// ---------------------------------------------------------------------------
 
 test('install() creates schema_versions table', function (): void {
     $installer = bootInstaller();
@@ -49,9 +45,7 @@ test('install() creates the Laravel migrations tracking table', function (): voi
     expect(Capsule::schema()->hasTable('migrations'))->toBeTrue();
 })->afterEach(fn() => Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // Core schema
-// ---------------------------------------------------------------------------
 
 test('install() creates all core application tables', function (): void {
     $installer = bootInstaller();
@@ -97,9 +91,7 @@ test('core component row is written to schema_versions after install', function 
     expect((int) $row->version)->toBe($max);
 })->afterEach(fn() => Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // Idempotency (without stamp — relies on schema_versions DB check)
-// ---------------------------------------------------------------------------
 
 test('install() is idempotent — running twice does not throw or duplicate tables', function (): void {
     $installer = bootInstaller();
@@ -127,9 +119,7 @@ test('install() skips a component whose stored version is already at code versio
     expect(true)->toBeTrue();
 })->afterEach(fn() => Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // Filesystem stamp cache
-// ---------------------------------------------------------------------------
 
 test('install() writes stamp file after successful run', function (): void {
     $stamp     = sys_get_temp_dir() . '/.spora_test_stamp_' . uniqid();
@@ -197,9 +187,7 @@ test('install() re-runs migrations when stamp file contains a stale hash', funct
     }
 });
 
-// ---------------------------------------------------------------------------
 // Plugin migrations
-// ---------------------------------------------------------------------------
 
 test('plugin migrations are run when the plugin declares schemaVersion > 0', function (): void {
     $loader    = bootLoaderFromFixture(BASE_PATH . '/tests/Fixtures/plugins_with_migrations');
@@ -241,9 +229,7 @@ test('plugin migrations are idempotent — running install() twice does not dupl
     expect($count)->toBe(1);
 })->afterEach(fn() => Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // Migration filename prefix enforcement
-// ---------------------------------------------------------------------------
 
 test('install() throws RuntimeException when a plugin migration file lacks the slug prefix', function (): void {
     $loader    = bootLoaderFromFixture(BASE_PATH . '/tests/Fixtures/plugins_bad_migrations');
@@ -252,9 +238,7 @@ test('install() throws RuntimeException when a plugin migration file lacks the s
     expect(fn() => $installer->install())->toThrow(RuntimeException::class, 'bad-prefix-plugin_');
 })->afterEach(fn() => Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // Database::boot() integration
-// ---------------------------------------------------------------------------
 
 test('Database::boot() installs the full schema end-to-end', function (): void {
     Database::resetBootState();

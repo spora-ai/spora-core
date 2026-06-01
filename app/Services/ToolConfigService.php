@@ -49,10 +49,6 @@ class ToolConfigService
         $this->toolClasses = $toolClasses;
     }
 
-    // -----------------------------------------------------------------------
-    // Public API
-    // -----------------------------------------------------------------------
-
     /**
      * Load global settings for a tool class, decrypting password fields.
      *
@@ -332,10 +328,6 @@ class ToolConfigService
             ->where('tool_class', $toolClass)
             ->delete();
     }
-
-    // -----------------------------------------------------------------------
-    // Private helpers
-    // -----------------------------------------------------------------------
 
     /**
      * Decode raw JSON from DB, decrypting password fields.
@@ -650,7 +642,7 @@ class ToolConfigService
         // Fill in schema defaults where nothing is set yet
         $scopeMap = $this->getScopeMap($toolClass);
         foreach ($scopeMap as $key => $scope) {
-            if (!isset($result[$key])) {
+            if (!array_key_exists($key, $result)) {
                 $defaults = $this->getSchemaDefaults($toolClass);
                 if (isset($defaults[$key])) {
                     $result[$key] = ['value' => $defaults[$key], 'source' => 'default'];
@@ -693,12 +685,10 @@ class ToolConfigService
 
         $result = [];
         foreach ($labels as $key => $label) {
-            if (array_key_exists($key, $effective)) {
-                $result[$key] = [
-                    'label' => $label,
-                    'value' => $effective[$key],
-                ];
-            }
+            $result[$key] = [
+                'label' => $label,
+                'value' => $effective[$key] ?? null,
+            ];
         }
 
         return $result;

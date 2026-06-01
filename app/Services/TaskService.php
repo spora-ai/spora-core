@@ -237,10 +237,6 @@ final class TaskService implements TaskServiceInterface
         return true;
     }
 
-    // -------------------------------------------------------------------------
-    // Resource transformation helpers
-    // -------------------------------------------------------------------------
-
     /**
      * @return array{
      *     id: int,
