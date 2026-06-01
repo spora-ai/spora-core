@@ -6,7 +6,7 @@ Contributions are welcome! Spora is still in early alpha, and there are many way
 
 1. Read the [architecture overview](docs/01_architecture.md) to understand how Spora works
 2. Check the [plugin system docs](docs/07_plugins.md) if you're interested in extending Spora
-3. Look at the [open issues](https://github.com/fabeat/spora/issues) for things to work on
+3. Look at the [open issues](https://github.com/spora-ai/Spora/issues) for things to work on
 
 ## Development Setup
 

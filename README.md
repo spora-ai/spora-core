@@ -1,15 +1,14 @@
 <!-- Spora Logo -->
 <p align="center">
-  <img src="public/logo.svg" alt="Spora" width="200">
+  <img src="public/logo.png" alt="Spora">
 </p>
 
 <!-- Badges -->
 <p align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0--alpha-red?style=flat-square)](https://github.com/fabeat/spora)
+[![Version](https://img.shields.io/badge/version-0.1.0--alpha-red?style=flat-square)](https://github.com/spora-ai/Spora)
 [![PHP 8.4+](https://img.shields.io/badge/PHP-8.4%2B-777BB4?style=flat-square&logo=php&logoColor=white)](https://www.php.net/releases/8.4/en.php)
-[![Node 18+](https://img.shields.io/badge/Node-18%2B-339933?style=flat-square&logo=node&logoColor=white)](https://nodejs.org)
 
 </p>
 
@@ -28,7 +27,7 @@ Spora is a **self-hosted AI agent orchestration platform** built in PHP 8.4+.
 It is designed to be:
 
 - **Zero-config** — works out of the box with sensible defaults (SQLite, no server required)
-- **Portable** — runs on any PHP 8.4+ environment, from a laptop to a shared cPanel/FTP host
+- **Portable** — runs on any PHP 8.4+ environment, from a laptop to a shared cPanel/FTP host or as a Docker Container
 - **Extensible** — a WordPress-like plugin system lets you add tools, drivers, and agent behaviors
 
 You define agents, give them tools, and Spora handles the execution loop — tick-based, stateless, with human-in-the-loop approval for write operations.
@@ -39,20 +38,19 @@ You define agents, give them tools, and Spora handles the execution loop — tic
 
 - **Tick-based agent execution** — stateless, LLM-agnostic orchestration loop (Think → Act)
 - **Built-in tools** — email, calendar, web search, calculator, web scraping, and more
-- **Plugin system** — drop a folder with a `Plugin.php` file, auto-discovered at boot
+- **Plugin system** — drop a plugin folder with a `plugin.json` manifest, auto-discovered at boot
 - **LLM drivers** — OpenAI-compatible and Anthropic-compatible drivers via `DriverFactory`
-- **Recipes** — define agent prompts in YAML/JSON, scanned at runtime from `recipes/`
 - **Human-in-the-loop** — write tools (email, posting, etc.) require approval before execution
 
 ---
 
 ## Requirements
 
-| Requirement | Minimum |
-|-------------|---------|
-| PHP | 8.4+ |
-| Node.js | 18+ |
-| Database | SQLite (dev) / MySQL 8+ (prod) |
+| Requirement | Minimum | Notes |
+|-------------|---------|-------|
+| PHP | 8.4+ | Required |
+| Node.js | 18+ | Only for frontend builds |
+| Database | SQLite (dev) / MySQL 8+ (prod) | |
 
 See [Installation Guide](docs/13_installation.md) for full details.
 
