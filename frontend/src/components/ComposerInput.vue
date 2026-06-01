@@ -63,7 +63,7 @@ function adjustTextareaHeight(): void {
 
 watch(promptText, adjustTextareaHeight)
 
-// Template─────────────────────────────────────────────────────────────────
+// Template
 
 function onTemplateChange(templateId: number | null): void {
   selectedTemplateId.value = templateId

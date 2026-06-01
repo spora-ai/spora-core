@@ -163,7 +163,7 @@ function formatValue(value: unknown, format: string): string {
           </svg>
           Copy
         </button>
-        <pre class="px-3 py-2 text-xs font-mono overflow-x-auto"><!-- eslint-disable-next-line vue/no-v-html --><code v-html="highlightedJson"></code></pre>
+        <pre class="px-3 py-2 text-xs font-mono overflow-x-auto"><code v-html="highlightedJson"></code></pre>
       </div>
     </details>
   </div>

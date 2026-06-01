@@ -242,6 +242,35 @@ describe('useAgentStore', () => {
     })
   })
 
+  describe('getAllOperationOverrides', () => {
+    it('fetches and maps operation overrides by tool name', async () => {
+      mockApi.get.mockResolvedValueOnce({
+        operations: [
+          { tool_class: 'App\\Tools\\FileTool', tool_name: 'file_tool', operation: 'read', effective_enabled: true, effective_requires_approval: false },
+          { tool_class: 'App\\Tools\\FileTool', tool_name: 'file_tool', operation: 'write', effective_enabled: false, effective_requires_approval: true },
+        ],
+      })
+
+      const store = useAgentStore()
+      const result = await store.getAllOperationOverrides(1)
+
+      expect(mockApi.get).toHaveBeenCalledWith('/agents/1/tools/operations')
+      expect(result).toEqual({
+        file_tool: {
+          read: { enabled: true, requiresApproval: false },
+          write: { enabled: false, requiresApproval: true },
+        },
+      })
+    })
+
+    it('handles empty operations list', async () => {
+      mockApi.get.mockResolvedValueOnce({ operations: [] })
+      const store = useAgentStore()
+      const result = await store.getAllOperationOverrides(1)
+      expect(result).toEqual({})
+    })
+  })
+
   describe('getLLMConfig', () => {
     it('fetches LLM config override for agent', async () => {
       const config = { 'core.openai.api_key': 'sk-test' }

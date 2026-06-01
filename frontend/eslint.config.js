@@ -23,6 +23,7 @@ export default tseslint.config(
       ...vuePlugin.configs.recommended.rules,
       'no-undef': 'off',
       'vue/attributes-order': 'off',
+      'vue/no-v-html': 'off',
     },
   },
   {

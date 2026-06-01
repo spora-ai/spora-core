@@ -1,5 +1,4 @@
 <script setup lang="ts">
-/* eslint-disable vue/no-v-html */
 /**
  * TaskChatPage — task detail / chat view.
  * Route: /tasks/:id

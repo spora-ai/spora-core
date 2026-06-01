@@ -21,6 +21,7 @@ use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\EmailTool;
+use Symfony\Component\Console\Tester\CommandTester;
 
 // Helpers
 
@@ -167,6 +168,68 @@ describe('TaskRunCommand — task claiming', function (): void {
 
         expect($claimedTask)->not->toBeNull()
             ->and($claimedTask->status)->toBe('RUNNING');
+    });
+
+    it('executes and requests LLMConfigService from the container', function (): void {
+        $agent = Agent::create([
+            'user_id'   => $this->userId,
+            'name'      => 'TestAgentTester',
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
+
+        $task = Task::create([
+            'agent_id'    => $agent->id,
+            'user_id'     => $this->userId,
+            'status'      => 'QUEUED',
+            'user_prompt' => 'Hello',
+            'max_steps'   => 10,
+            'step_count'  => 0,
+        ]);
+
+        $db = new Database(
+            ['db_driver' => 'sqlite', 'db_path' => ':memory:'],
+            new Spora\Plugins\PluginLoader(BASE_PATH . '/plugins'),
+        );
+        $db->bootDatabaseConnectionOnly();
+
+        $textDriver = makeTextResponseDriver('Done');
+        $factory = Mockery::mock(DriverFactory::class);
+        $factory->allows('makeFromAgent')->andReturn($textDriver);
+
+        $container = Mockery::mock(ContainerInterface::class);
+        $container->allows('get')->with('config')->andReturn([
+            'db_driver' => 'sqlite',
+            'db_path' => ':memory:',
+        ]);
+        $container->allows('get')->with(Database::class)->andReturn($db);
+        $container->allows('get')->with(DriverFactory::class)->andReturn($factory);
+        $container->allows('get')->with('tool_instances')->andReturn([]);
+        $notificationMock = Mockery::mock(NotificationService::class);
+        $notificationMock->allows('notifyTaskCompleted')->andReturnNull();
+        $container->allows('get')->with(NotificationService::class)->andReturn($notificationMock);
+
+        $mockSecurity = Mockery::mock(Spora\Core\SecurityManagerInterface::class);
+        $realConfigService = new LLMConfigService($mockSecurity, []);
+        $container->shouldReceive('get')->with(LLMConfigService::class)->once()->andReturn($realConfigService);
+        $container->allows('get')->with(ToolConfigService::class)->andReturn(Mockery::mock(ToolConfigService::class));
+        $container->allows('get')->with(MercurePublisherInterface::class)->andReturn(Mockery::mock(MercurePublisherInterface::class));
+
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publishUpdate')->andReturnNull();
+
+        $command = new TaskRunCommand($db, $container, $mercure);
+        $command->setName('task:run');
+        $tester = new CommandTester($command);
+
+        $tester->execute(['taskId' => $task->id]);
+
+        if ($tester->getStatusCode() !== 0) {
+            throw new Exception($tester->getDisplay());
+        } expect($tester->getStatusCode())->toBe(0);
+
+        $task->refresh();
+        expect($task->status)->toBe('COMPLETED');
     });
 
     it('returns null when the task is not QUEUED', function (): void {
@@ -501,7 +564,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
         // Verify the email tool description includes the config block
         $reflection = new ReflectionClass($orchestrator);
         $method = $reflection->getMethod('buildToolDefinitions');
-        $method->setAccessible(true);
         $defs = $method->invoke($orchestrator, [EmailTool::class], $this->agent->id, $this->userId);
 
         $emailDef = collect($defs)->firstWhere('function.name', 'email');
@@ -549,7 +611,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
 
         $reflection = new ReflectionClass($orchestrator);
         $method = $reflection->getMethod('buildToolDefinitions');
-        $method->setAccessible(true);
         $defs = $method->invoke($orchestrator, [EmailTool::class], $this->agent->id, $this->userId);
 
         $emailDef = collect($defs)->firstWhere('function.name', 'email');
