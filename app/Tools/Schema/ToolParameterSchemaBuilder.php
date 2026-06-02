@@ -6,6 +6,7 @@ namespace Spora\Tools\Schema;
 
 use ReflectionAttribute;
 use ReflectionClass;
+use RuntimeException;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use stdClass;
@@ -40,8 +41,9 @@ final class ToolParameterSchemaBuilder
     {
         $ref = new ReflectionClass($target);
 
-        $properties = [];
-        $required   = [];
+        $properties        = [];
+        $required          = [];
+        $discriminatorKey  = null;
 
         // 1. Discriminator synthesis — runs first so the dispatch field is
         //    always the first property in the resulting schema, matching the
@@ -74,6 +76,20 @@ final class ToolParameterSchemaBuilder
         foreach (self::collectInheritedAttributes($ref, ToolParameter::class) as $attr) {
             /** @var ToolParameter $param */
             $param = $attr->newInstance();
+
+            // Fail fast on collision: silently overwriting the synthesized
+            // discriminator would let the LLM submit values outside the
+            // operation enum and surface as a baffling "Unknown operation"
+            // at dispatch time. Force the author to rename one.
+            if ($discriminatorKey !== null && $param->name === $discriminatorKey) {
+                throw new RuntimeException(sprintf(
+                    'Tool %s declares #[ToolParameter(name: %s)] which collides with the synthesized '
+                    . 'operation discriminator. Remove the parameter (the builder owns this property) '
+                    . 'or pick a different discriminatorKey on its #[ToolOperation] attributes.',
+                    $ref->getName(),
+                    var_export($param->name, true),
+                ));
+            }
 
             $properties[$param->name] = self::propertyJson($param);
 

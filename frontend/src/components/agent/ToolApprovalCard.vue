@@ -20,6 +20,13 @@ const props = defineProps<{
 const emit = defineEmits<{
   approve: [payload: { providerCallId: string; arguments: Record<string, unknown> }]
   reject: [payload: { providerCallId: string; reason: string }]
+  /**
+   * Emitted whenever the in-card argument editor changes so the parent
+   * (ToolApprovalBar) can keep a snapshot for bulk approve-all. Payload
+   * mirrors the `approve` event shape but is fired on edit rather than
+   * on click.
+   */
+  'update:arguments': [payload: { providerCallId: string; arguments: Record<string, unknown> }]
 }>()
 
 const argsJson = ref('')
@@ -39,20 +46,37 @@ const parsedProposedArgs = computed<Record<string, unknown>>(() => {
   return {}
 })
 
+function emitCurrentArgs(): void {
+  const parsed = tryParseArgs(argsJson.value)
+  if (parsed === null) return
+  emit('update:arguments', { providerCallId: props.toolCall.provider_call_id, arguments: parsed })
+}
+
+function tryParseArgs(json: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(json) as unknown
+    if (typeof parsed === 'object' && parsed !== null) return parsed as Record<string, unknown>
+  } catch { /* fall through */ }
+  return null
+}
+
 // Seed the editable JSON when the underlying proposed arguments change
-// (e.g. a fresh tool call arrives).
+// (e.g. a fresh tool call arrives). Also broadcast the initial value so the
+// parent's "approve all" snapshot starts in sync with what the card shows.
 watch(
   () => props.toolCall.id,
   () => {
     argsJson.value = JSON.stringify(parsedProposedArgs.value, null, 2)
     showRejectInput.value = false
     rejectReason.value = ''
+    emitCurrentArgs()
   },
   { immediate: true },
 )
 
 function onArgumentsUpdated(json: string): void {
   argsJson.value = json
+  emitCurrentArgs()
 }
 
 function onApproveClick(): void {

@@ -178,10 +178,6 @@ it('get_event returns error on 404', function () {
         ->and($result->content)->toContain('not found');
 });
 
-// =============================================================================
-// URL resolution tests
-// =============================================================================
-
 it('delete_event resolves relative event_uri against base URL', function () {
     $config = Mockery::mock(ToolConfigService::class);
     $config->allows('getEffectiveSettings')->with(CalDavCalendarTool::class, 1, null)->andReturn([

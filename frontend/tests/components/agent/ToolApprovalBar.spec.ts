@@ -71,10 +71,13 @@ describe('ToolApprovalBar', () => {
     expect(wrapper.findAll('button').find(b => b.text().includes('Reject All'))).toBeDefined()
   })
 
-  it('emits approve-all when the Approve All button is clicked', async () => {
+  it('emits approve-all with edited arguments per pending tool when clicked', async () => {
     const wrapper = mount(ToolApprovalBar, {
       props: {
-        pending: [makeToolCall({ id: 1 }), makeToolCall({ id: 2, provider_call_id: 'pc_2' })],
+        pending: [
+          makeToolCall({ id: 1, provider_call_id: 'pc_1', proposed_arguments: { to: 'a@b.c' } }),
+          makeToolCall({ id: 2, provider_call_id: 'pc_2', proposed_arguments: { to: 'x@y.z' } }),
+        ],
       },
       global,
     })
@@ -82,7 +85,12 @@ describe('ToolApprovalBar', () => {
     const btn = wrapper.findAll('button').find(b => b.text().includes('Approve All'))!
     await btn.trigger('click')
 
-    expect(wrapper.emitted('approve-all')).toBeTruthy()
+    const events = wrapper.emitted('approve-all')
+    expect(events).toBeTruthy()
+    const payload = events![0][0] as { approvals: Array<{ providerCallId: string; arguments: Record<string, unknown> }> }
+    expect(payload.approvals).toHaveLength(2)
+    expect(payload.approvals[0]).toEqual({ providerCallId: 'pc_1', arguments: { to: 'a@b.c' } })
+    expect(payload.approvals[1]).toEqual({ providerCallId: 'pc_2', arguments: { to: 'x@y.z' } })
   })
 
   it('reveals the reject reason input then emits reject-all with reason', async () => {

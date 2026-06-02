@@ -73,7 +73,7 @@ Put the most important parameters first.
 
 ### Inheritance
 
-`#[ToolOperation]` and `#[ToolParameter]` declared on a parent class are inherited by subclasses. Use this for shared parameter sets:
+`#[ToolParameter]` declared on a parent class is inherited by subclasses for **schema generation** — `ToolParameterSchemaBuilder` walks the class hierarchy when collecting `#[ToolParameter]` attributes. Use this for shared parameter sets:
 
 ```php
 #[ToolParameter(name: 'name',    type: 'string',  description: '...', required: false)]
@@ -87,6 +87,8 @@ final class AgentMemoryTool extends AbstractMemoryTool { protected function getS
 ```
 
 The concrete `AgentMemoryTool` schema includes `action`, `name`, and `content` automatically.
+
+> **Note on `#[ToolOperation]`:** `HasOperations` reads operation attributes only from the concrete class — it does **not** walk parent classes. Always declare `#[ToolOperation]` on the concrete tool class, otherwise dispatch will fail to resolve operations advertised by an inherited schema.
 
 ### `#[ToolParameter]` reference
 

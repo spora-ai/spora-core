@@ -91,6 +91,17 @@ final class ToolCallSerializer
             return null;
         }
 
+        // Guard before any instantiation: the class must both carry the #[Tool]
+        // attribute and implement ToolInterface. A persisted tool_class that no
+        // longer resolves to a real tool (renamed plugin, type confusion, etc.)
+        // must NOT cause a fatal here — history rendering has to stay robust.
+        if ($ref->getAttributes(Tool::class) === []) {
+            return null;
+        }
+        if (!$ref->implementsInterface(ToolInterface::class)) {
+            return null;
+        }
+
         // Only safe to instantiate without args if the constructor has zero
         // required parameters — anything else risks calling tool DI.
         $constructor = $ref->getConstructor();
@@ -100,11 +111,6 @@ final class ToolCallSerializer
 
         /** @var ToolInterface $instance */
         $instance = $ref->newInstance();
-
-        // Sanity check it's actually a tool before trusting its schema.
-        if ($ref->getAttributes(Tool::class) === []) {
-            return null;
-        }
 
         return $instance->getParametersSchema();
     }

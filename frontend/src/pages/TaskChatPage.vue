@@ -291,18 +291,15 @@ function isToolExpanded(toolId: number): boolean {
 // in-flight maps are kept here so the bar can visually mark the correct card while
 // the request is in flight.
 
-async function onApproveAll(): Promise<void> {
+async function onApproveAll(payload: { approvals: Array<{ providerCallId: string; arguments: Record<string, unknown> }> }): Promise<void> {
   approveError.value = null
   approvingAll.value = true
   try {
-    // The bar doesn't surface per-card argument edits up to the page when
-    // Approve All is clicked, so we use the proposed_arguments as the
-    // submission payload. (Per-card edits flow through `approve-one`.)
-    const approvals = (pending.value ?? []).map((tc) => ({
-      provider_call_id: tc.provider_call_id,
-      arguments: (typeof tc.proposed_arguments === 'object' && tc.proposed_arguments !== null
-        ? tc.proposed_arguments
-        : {}) as Record<string, unknown>,
+    // The bar snapshots edited arguments per card and sends them here, so
+    // bulk approval submits exactly what the user sees in each editor.
+    const approvals = payload.approvals.map((a) => ({
+      provider_call_id: a.providerCallId,
+      arguments: a.arguments,
     }))
     await taskStore.approveTask(taskId.value, approvals)
     toast.success('All tools approved.')

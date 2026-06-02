@@ -8,7 +8,7 @@
  * The parent (TaskChatPage) supplies the pending list and reacts to events
  * by calling the task store. This component is purely presentational.
  */
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import ToolApprovalCard from '@/components/agent/ToolApprovalCard.vue'
 import type { ToolCall } from '@/types/task'
@@ -23,7 +23,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'approve-all': []
+  'approve-all': [payload: { approvals: Array<{ providerCallId: string; arguments: Record<string, unknown> }> }]
   'reject-all': [payload: { reason: string }]
   'approve-one': [payload: { providerCallId: string; arguments: Record<string, unknown> }]
   'reject-one': [payload: { providerCallId: string; reason: string }]
@@ -31,6 +31,43 @@ const emit = defineEmits<{
 
 const showRejectInput = ref(false)
 const rejectReason = ref('')
+
+// Snapshot of the most recent arguments each card emitted via update:arguments.
+// Keyed by provider_call_id so it survives reordering and prunes naturally
+// when a call leaves the pending list.
+const editedArgs = ref<Record<string, Record<string, unknown>>>({})
+
+watch(
+  () => props.pending.map(tc => tc.provider_call_id),
+  (ids) => {
+    const allowed = new Set(ids)
+    for (const id of Object.keys(editedArgs.value)) {
+      if (!allowed.has(id)) delete editedArgs.value[id]
+    }
+  },
+)
+
+function onCardArgumentsUpdated(payload: { providerCallId: string; arguments: Record<string, unknown> }): void {
+  editedArgs.value[payload.providerCallId] = payload.arguments
+}
+
+function onApproveAll(): void {
+  // Fall back to the proposed_arguments only when no card has emitted an
+  // update yet (e.g. user clicked Approve All before any edit). This keeps
+  // edited values intact even when only some cards were touched.
+  const approvals = props.pending.map((tc) => {
+    const edited = editedArgs.value[tc.provider_call_id]
+    if (edited !== undefined) {
+      return { providerCallId: tc.provider_call_id, arguments: edited }
+    }
+    const proposed = tc.proposed_arguments
+    const args = (typeof proposed === 'object' && proposed !== null
+      ? (proposed as Record<string, unknown>)
+      : {})
+    return { providerCallId: tc.provider_call_id, arguments: args }
+  })
+  emit('approve-all', { approvals })
+}
 
 function onRejectAllConfirm(): void {
   emit('reject-all', { reason: rejectReason.value || 'No reason provided.' })
@@ -66,7 +103,7 @@ function isRejecting(id: number): boolean {
 
         <div v-if="pending.length > 1" class="flex gap-2 shrink-0">
           <button
-            @click="emit('approve-all')"
+            @click="onApproveAll"
             :disabled="approvingAll"
             class="inline-flex h-8 items-center justify-center rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium shadow transition-colors disabled:pointer-events-none disabled:opacity-50"
           >
@@ -117,6 +154,7 @@ function isRejecting(id: number): boolean {
         :rejecting="isRejecting(tc.id)"
         @approve="emit('approve-one', $event)"
         @reject="emit('reject-one', $event)"
+        @update:arguments="onCardArgumentsUpdated"
       />
     </div>
   </div>
