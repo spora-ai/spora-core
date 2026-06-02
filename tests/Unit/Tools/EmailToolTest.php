@@ -54,7 +54,7 @@ describe('EmailTool', function () {
                 ->and($result->content)->toContain('IMAP configuration is incomplete');
         });
 
-        it('returns empty message when no unread emails', function () {
+        it('returns empty message when no recent emails', function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')->andReturn(allImapSettings());
             $imap = Mockery::mock(ImapClientInterface::class);
@@ -64,7 +64,7 @@ describe('EmailTool', function () {
             $result = $tool->execute(['action' => 'read_inbox', 'limit' => 5], 1);
 
             expect($result->success)->toBeTrue()
-                ->and($result->content)->toContain('No new/unread emails');
+                ->and($result->content)->toContain('No recent emails');
         });
 
         it('formats messages correctly', function () {
@@ -98,7 +98,7 @@ describe('EmailTool', function () {
             $config->allows('getEffectiveSettings')->andReturn(allImapSettings());
             $imap = Mockery::mock(ImapClientInterface::class);
             $imap->expects('fetchInboxMessages')
-                ->with(Mockery::type('array'), 5, true)
+                ->with(Mockery::type('array'), 5, true, false)
                 ->andReturn([]);
             $tool = makeEmailTool($config, $imap);
 
@@ -113,7 +113,7 @@ describe('EmailTool', function () {
             $imap = Mockery::mock(ImapClientInterface::class);
             // With limit 100: EmailTool clamps to 20, ImapClient clamps 20 to 5
             $imap->expects('fetchInboxMessages')
-                ->with(Mockery::type('array'), 5, false)
+                ->with(Mockery::type('array'), 5, false, false)
                 ->andReturn([]);
             $tool = makeEmailTool($config, $imap);
 
@@ -133,6 +133,78 @@ describe('EmailTool', function () {
             expect($result->success)->toBeFalse()
                 ->and($result->content)->toContain('Failed to fetch emails')
                 ->and($result->content)->toContain('Connection refused');
+        });
+
+        it('passes unread_only=true to IMAP client when set', function () {
+            $config = Mockery::mock(ToolConfigService::class);
+            $config->allows('getEffectiveSettings')->andReturn(allImapSettings());
+            $imap = Mockery::mock(ImapClientInterface::class);
+            $imap->expects('fetchInboxMessages')
+                ->with(Mockery::type('array'), 5, false, true)
+                ->andReturn([]);
+            $tool = makeEmailTool($config, $imap);
+
+            $result = $tool->execute(['action' => 'read_inbox', 'unread_only' => true], 1);
+
+            expect($result->success)->toBeTrue();
+        });
+
+        it('uses "Latest Emails" header by default', function () {
+            $messages = [
+                [
+                    'uid'     => '123',
+                    'subject' => 'Hello',
+                    'from'    => 'bob@example.com',
+                    'date'    => '2025-01-15 10:30:00',
+                    'body'    => 'Hi Alice',
+                ],
+            ];
+            $config = Mockery::mock(ToolConfigService::class);
+            $config->allows('getEffectiveSettings')->andReturn(allImapSettings());
+            $imap = Mockery::mock(ImapClientInterface::class);
+            $imap->allows('fetchInboxMessages')->andReturn($messages);
+            $tool = makeEmailTool($config, $imap);
+
+            $result = $tool->execute(['action' => 'read_inbox'], 1);
+
+            expect($result->success)->toBeTrue()
+                ->and($result->content)->toContain('Latest Emails:')
+                ->and($result->content)->not->toContain('Latest Unread Emails:');
+        });
+
+        it('uses "Latest Unread Emails" header when unread_only=true', function () {
+            $messages = [
+                [
+                    'uid'     => '123',
+                    'subject' => 'Hello',
+                    'from'    => 'bob@example.com',
+                    'date'    => '2025-01-15 10:30:00',
+                    'body'    => 'Hi Alice',
+                ],
+            ];
+            $config = Mockery::mock(ToolConfigService::class);
+            $config->allows('getEffectiveSettings')->andReturn(allImapSettings());
+            $imap = Mockery::mock(ImapClientInterface::class);
+            $imap->allows('fetchInboxMessages')->andReturn($messages);
+            $tool = makeEmailTool($config, $imap);
+
+            $result = $tool->execute(['action' => 'read_inbox', 'unread_only' => true], 1);
+
+            expect($result->success)->toBeTrue()
+                ->and($result->content)->toContain('Latest Unread Emails:');
+        });
+
+        it('uses "No unread emails" empty message when unread_only=true', function () {
+            $config = Mockery::mock(ToolConfigService::class);
+            $config->allows('getEffectiveSettings')->andReturn(allImapSettings());
+            $imap = Mockery::mock(ImapClientInterface::class);
+            $imap->allows('fetchInboxMessages')->andReturn([]);
+            $tool = makeEmailTool($config, $imap);
+
+            $result = $tool->execute(['action' => 'read_inbox', 'unread_only' => true], 1);
+
+            expect($result->success)->toBeTrue()
+                ->and($result->content)->toContain('No unread emails');
         });
     });
 
@@ -693,7 +765,8 @@ describe('EmailTool', function () {
             $imap = Mockery::mock(ImapClientInterface::class);
             $tool = makeEmailTool($config, $imap);
 
-            expect($tool->describeAction(['action' => 'read_inbox']))->toBe('Read unread emails from the inbox');
+            expect($tool->describeAction(['action' => 'read_inbox']))->toBe('Read recent emails from the inbox');
+            expect($tool->describeAction(['action' => 'read_inbox', 'unread_only' => true]))->toBe('Read unread emails from the inbox');
             expect($tool->describeAction(['action' => 'list_folders']))->toBe('List all email folders');
             expect($tool->describeAction(['action' => 'read_folder']))->toBe('Read emails from a specific folder');
             expect($tool->describeAction(['action' => 'create_draft']))->toBe('Save an email draft to the Drafts folder');

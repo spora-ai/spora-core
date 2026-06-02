@@ -10,7 +10,6 @@ use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -52,9 +51,8 @@ use Throwable;
     required: false,
     enum: ['basic', 'advanced'],
 )]
-final class TavilySearchTool implements ToolInterface
+final class TavilySearchTool extends AbstractTool
 {
-    use HasOperations;
     public function __construct(
         private readonly ToolConfigService $configService,
         private readonly HttpClientInterface $httpClient,
@@ -152,24 +150,5 @@ final class TavilySearchTool implements ToolInterface
             $this->logger?->error('Tavily API Exception', ['exception' => $e]);
             return new ToolResult(false, "Search tool error: " . $e->getMessage());
         }
-    }
-
-    public function getParametersSchema(): array
-    {
-        return [
-            'type'       => 'object',
-            'properties' => [
-                'query' => [
-                    'type'        => 'string',
-                    'description' => 'The exact research question or search query.',
-                ],
-                'search_depth' => [
-                    'type'        => 'string',
-                    'description' => 'Either "basic" or "advanced". Advanced takes longer but traverses deeper.',
-                    'enum'        => ['basic', 'advanced'],
-                ],
-            ],
-            'required' => ['query'],
-        ];
     }
 }

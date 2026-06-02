@@ -1,6 +1,124 @@
 # Spora Tool System
 
-This document covers tool naming conventions, the `#[Tool]` attribute, and how tools are sent to the LLM.
+This document covers how to author a tool, the attribute system, naming conventions, and how tools reach the LLM.
+
+---
+
+## Authoring a Tool
+
+A tool is a `final` PHP class that **extends `AbstractTool`** and declares its identity, operations, parameters, and settings as PHP attributes. The base class composes `HasOperations` (operation dispatch) and `HasParameterSchema` (auto-generated JSON Schema), so a minimal tool is just `execute()` + `describeAction()`.
+
+```php
+use Spora\Tools\AbstractTool;
+use Spora\Tools\Attributes\Tool;
+use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\Attributes\ToolParameter;
+use Spora\Tools\ValueObjects\ToolResult;
+
+#[Tool(
+    name: 'web_search',
+    description: 'Search the web.',
+    displayName: 'Web Search',
+    category: 'research',
+)]
+#[ToolOperation(name: 'search', description: 'Run a search', enabledByDefault: true, requiresApprovalByDefault: false)]
+#[ToolParameter(name: 'query', type: 'string', description: 'The search query.', required: true)]
+final class MyWebSearchTool extends AbstractTool
+{
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+    {
+        $query = trim((string) ($arguments['query'] ?? ''));
+        // ...
+        return new ToolResult(true, "Results for {$query}");
+    }
+
+    public function describeAction(array $arguments): string
+    {
+        return "Search the web for: '{$arguments['query']}'";
+    }
+}
+```
+
+That's it — no hand-written `getParametersSchema()`. The `ToolParameterSchemaBuilder` reads the `#[ToolOperation]` and `#[ToolParameter]` attributes via reflection and produces the JSON Schema sent to the LLM.
+
+### The auto-synthesized `action` discriminator
+
+When a tool declares **two or more** `#[ToolOperation]` attributes, the builder prepends a property to the schema (named after the first operation's `discriminatorKey`, default `'action'`) whose `enum` lists every declared operation name. **Do not also write `#[ToolParameter(name: 'action', ...)]`** — the builder owns that property.
+
+```php
+#[ToolOperation(name: 'list_events', description: 'Fetch upcoming events')]
+#[ToolOperation(name: 'create_event', description: 'Create an event')]
+// Auto-generated:
+//   properties.action = {type: string, enum: ['list_events', 'create_event'], description: '...'}
+//   required = ['action']
+```
+
+Single-op tools skip discriminator synthesis — the LLM has no choice to make, and `HasOperations::getOperationName()` falls back to the one declared operation when the argument is absent.
+
+To use a different discriminator key (e.g. `'operation'` for parity with an external API), declare it on **every** `#[ToolOperation]`:
+
+```php
+#[ToolOperation(name: 'search', ..., discriminatorKey: 'operation')]
+#[ToolOperation(name: 'top_news', ..., discriminatorKey: 'operation')]
+```
+
+### Parameter declaration order is significant
+
+The order in which `#[ToolParameter]` attributes appear on the class determines:
+
+1. The property order in the JSON Schema sent to the LLM.
+2. The render order of fields in the approval UI (the `parameter_schema` field on `tool_calls` API responses carries this order to the frontend).
+
+Put the most important parameters first.
+
+### Inheritance
+
+`#[ToolOperation]` and `#[ToolParameter]` declared on a parent class are inherited by subclasses. Use this for shared parameter sets:
+
+```php
+#[ToolParameter(name: 'name',    type: 'string',  description: '...', required: false)]
+#[ToolParameter(name: 'content', type: 'string',  description: '...', required: false)]
+abstract class AbstractMemoryTool extends AbstractTool { /* shared CRUD */ }
+
+#[Tool(name: 'memory', description: 'Agent-scoped memory.')]
+#[ToolOperation(name: 'list', ...)] #[ToolOperation(name: 'get', ...)]
+#[ToolOperation(name: 'save', ...)] #[ToolOperation(name: 'delete', ...)]
+final class AgentMemoryTool extends AbstractMemoryTool { protected function getScope(): string { return 'agent'; } }
+```
+
+The concrete `AgentMemoryTool` schema includes `action`, `name`, and `content` automatically.
+
+### `#[ToolParameter]` reference
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | `string` | Argument key the LLM sends. |
+| `type` | `string` | One of `string`, `number`, `integer`, `boolean`, `array`, `object`. |
+| `description` | `string` | Sent to the LLM. |
+| `required` | `bool` (default `true`) | Adds the name to `required[]` in the schema. |
+| `default` | `mixed` (default `null`) | Emitted as JSON Schema `default`. When set, the parameter is omitted from `required[]` regardless of the `required` flag. |
+| `enum` | `list<string>` | Value allowlist (string types). |
+| `minimum` / `maximum` | `int\|float\|null` | Numeric bounds. |
+| `format` | `?string` | JSON Schema format hint (e.g. `'date'`, `'email'`). |
+| `items` | `?array` | Sub-schema for `array` types, e.g. `['type' => 'string']`. |
+
+### Plugin tools
+
+Plugin tools can either `extends AbstractTool` like core tools, or — if they need to extend a third-party base class — opt in via:
+
+```php
+use Spora\Tools\Traits\HasOperations;
+use Spora\Tools\Traits\HasParameterSchema;
+
+final class MyPluginTool extends ThirdPartyBase implements ToolInterface
+{
+    use HasOperations;
+    use HasParameterSchema;
+    // ...
+}
+```
+
+The schema builder works on any FQCN via reflection — no path coupling.
 
 ---
 
@@ -80,30 +198,33 @@ Settings are declared as `#[ToolSetting]` PHP attributes **directly on the tool 
 ```php
 #[Tool(
     name: 'tavily_search',
-    description: 'Search the web using Tavily AI.'
+    description: 'Search the web using Tavily AI.',
 )]
 #[ToolSetting(
     key: 'core.tavily.api_key',
     label: 'Tavily API Key',
     type: 'password',
     description: 'API key for api.tavily.com',
-    scope: 'agent'
+    required: true,
 )]
-#[ToolParameter(
-    name: 'query',
-    type: 'string',
-    description: 'The search query.',
-    required: true
-)]
-final class TavilySearchTool implements InputToolInterface
+#[ToolOperation(name: 'search', description: 'Search', enabledByDefault: true, requiresApprovalByDefault: false)]
+#[ToolParameter(name: 'query', type: 'string', description: 'The search query.', required: true)]
+final class TavilySearchTool extends AbstractTool
 {
-    public function execute(array $arguments, int $agentId): ToolResult
+    public function __construct(
+        private readonly ToolConfigService $configService,
+        private readonly HttpClientInterface $httpClient,
+    ) {}
+
+    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         // Settings are resolved from the tool's OWN class:
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey   = $settings['core.tavily.api_key'] ?? '';
         // ...
     }
+
+    public function describeAction(array $arguments): string { /* ... */ }
 }
 ```
 
@@ -119,16 +240,15 @@ final class TavilySearchTool implements InputToolInterface
 
 ---
 
-## Global vs Agent-Scoped Settings
+## Setting cascade: global → user → agent
 
-Each `#[ToolSetting]` has a `scope` parameter:
+`ToolConfigService::getEffectiveSettings(toolClass, agentId, userId)` resolves each setting in order:
 
-| Scope    | Stored In                 | Behavior |
-|----------|---------------------------|----------|
-| `global` | `tool_configurations`     | Set once, applies to all agents. Cannot be overridden per-agent. |
-| `agent`  | `agent_tool_overrides`    | Can be overridden per-agent. Falls back to global if not overridden. |
+1. Global value (`tool_configurations` table, scoped to the setting key).
+2. User-level override (`user_tool_configurations`, when `userId` is provided).
+3. Agent-level override (`agent_tool_configurations`, when an entry exists for `agentId + toolClass`).
 
-Most API keys are `scope: 'agent'` so that different agents can use different provider accounts.
+The first non-null value wins. Tools never read `tool_configurations` directly — always go through `ToolConfigService`.
 
 ---
 

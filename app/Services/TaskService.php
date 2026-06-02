@@ -22,6 +22,7 @@ final class TaskService implements TaskServiceInterface
     public function __construct(
         private readonly OrchestratorInterface $orchestrator,
         private readonly MercurePublisherInterface $mercure,
+        private readonly ?ToolCallSerializer $toolCallSerializer = null,
     ) {}
 
     /**
@@ -308,20 +309,8 @@ final class TaskService implements TaskServiceInterface
             $resource['retry_after'] = $task->retry_after->toIso8601String();
         }
 
-        $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => [
-            'id'                    => $tc->id,
-            'provider_call_id'      => $tc->provider_call_id,
-            'tool_name'             => $tc->tool_name,
-            'tool_type'             => $tc->tool_type,
-            'status'                => $tc->status,
-            'proposed_arguments'    => $tc->proposed_arguments,
-            'approved_arguments'    => $tc->approved_arguments,
-            'human_description'     => $tc->human_description,
-            'operation'             => $tc->operation,
-            'operation_description' => $tc->operation_description,
-            'result_content'        => $tc->result_content,
-            'executed_at'           => $tc->executed_at?->toIso8601String(),
-        ])->all();
+        $serializer = $this->toolCallSerializer ?? new ToolCallSerializer();
+        $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => $serializer->toArray($tc))->all();
 
         $resource['history'] = $task->taskHistory()->orderBy('sequence')->get()->map(fn(TaskHistory $h) => [
             'sequence'     => $h->sequence,

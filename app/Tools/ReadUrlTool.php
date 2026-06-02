@@ -11,7 +11,6 @@ use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -36,12 +35,11 @@ use Throwable;
 #[ToolParameter(
     name: 'url',
     type: 'string',
-    description: 'The absolute http:// or https:// URL to read (e.g., https://example.com).',
+    description: 'The absolute http:// or https:// URL to read.',
     required: true,
 )]
-final class ReadUrlTool implements ToolInterface
+final class ReadUrlTool extends AbstractTool
 {
-    use HasOperations;
     /** Maximum output length in characters before truncation. */
     private const MAX_OUTPUT_CHARS = 40_000;
 
@@ -162,19 +160,5 @@ final class ReadUrlTool implements ToolInterface
         }
 
         return $text;
-    }
-
-    public function getParametersSchema(): array
-    {
-        return [
-            'type'       => 'object',
-            'properties' => [
-                'url' => [
-                    'type'        => 'string',
-                    'description' => 'The absolute http:// or https:// URL to read.',
-                ],
-            ],
-            'required' => ['url'],
-        ];
     }
 }

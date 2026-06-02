@@ -477,6 +477,12 @@ return [
         );
     },
 
+    Spora\Services\ToolCallSerializer::class => static function (ContainerInterface $c): Spora\Services\ToolCallSerializer {
+        return new Spora\Services\ToolCallSerializer(
+            toolInstances: $c->get('tool_instances'),
+        );
+    },
+
     Spora\Console\Commands\SetupCommand::class => static function (ContainerInterface $c): Spora\Console\Commands\SetupCommand {
         return new Spora\Console\Commands\SetupCommand(
             $c->get(Database::class),
@@ -526,6 +532,7 @@ return [
             pluginLoader: $c->get(PluginLoader::class),
             mercure: $c->get(MercurePublisherInterface::class),
             toolConfigService: $c->get(ToolConfigService::class),
+            toolCallSerializer: $c->get(Spora\Services\ToolCallSerializer::class),
         );
     },
 
@@ -549,6 +556,7 @@ return [
         return new TaskService(
             $c->get(OrchestratorInterface::class),
             $c->get(MercurePublisherInterface::class),
+            $c->get(Spora\Services\ToolCallSerializer::class),
         );
     },
 

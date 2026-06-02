@@ -8,8 +8,8 @@ use Psr\Log\LoggerInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -60,10 +60,12 @@ use Throwable;
     type: 'text',
     description: 'Seconds before an HTTP request fails (default: 10)',
 )]
-final class WeatherApiTool implements ToolInterface
+#[ToolParameter(name: 'location', type: 'string', description: 'Location query (city name, lat/lon, zip, etc.)', required: false)]
+#[ToolParameter(name: 'query', type: 'string', description: 'Search query for location autocomplete (min 2 chars)', required: false)]
+#[ToolParameter(name: 'days', type: 'integer', description: 'Number of forecast days (1-3 on free plan)', required: false, minimum: 1, maximum: 3)]
+#[ToolParameter(name: 'date', type: 'string', description: 'Date for astronomy data (yyyy-MM-dd, defaults to today)', required: false, format: 'date')]
+final class WeatherApiTool extends AbstractTool
 {
-    use HasOperations;
-
     private const DEFAULT_BASE_URL = 'https://api.weatherapi.com/v1';
 
     public function __construct(
@@ -97,40 +99,6 @@ final class WeatherApiTool implements ToolInterface
             'astronomy'  => "Get astronomy data for '{$location}'",
             default      => "Fetch weather data",
         };
-    }
-
-    public function getParametersSchema(): array
-    {
-        return [
-            'type'       => 'object',
-            'properties' => [
-                'action' => [
-                    'type'        => 'string',
-                    'description' => 'The weather action to perform',
-                    'enum'        => ['current', 'forecast', 'search', 'astronomy'],
-                ],
-                'location' => [
-                    'type'        => 'string',
-                    'description' => 'Location query (city name, lat/lon, zip, etc.)',
-                ],
-                'query' => [
-                    'type'        => 'string',
-                    'description' => 'Search query for location autocomplete (min 2 chars)',
-                ],
-                'days' => [
-                    'type'        => 'integer',
-                    'description' => 'Number of forecast days (1-3 on free plan)',
-                    'minimum'     => 1,
-                    'maximum'     => 3,
-                ],
-                'date' => [
-                    'type'        => 'string',
-                    'description' => 'Date for astronomy data (yyyy-MM-dd, defaults to today)',
-                    'format'      => 'date',
-                ],
-            ],
-            'required' => ['action'],
-        ];
     }
 
     private function current(array $arguments, int $agentId, ?int $userId): ToolResult

@@ -29,8 +29,10 @@ use Spora\Services\ContextWindowErrorParser;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
+use Spora\Tools\Schema\OperationSchemaFilter;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -63,6 +65,7 @@ final class Orchestrator implements OrchestratorInterface
         private readonly ?PluginLoader              $pluginLoader   = null,
         private readonly ?MercurePublisherInterface $mercure       = null,
         private readonly ?ToolConfigService        $toolConfigService = null,
+        private readonly ?ToolCallSerializer       $toolCallSerializer = null,
     ) {}
 
     // Public API
@@ -818,23 +821,13 @@ final class Orchestrator implements OrchestratorInterface
             return;
         }
 
+        $serializer = $this->toolCallSerializer ?? new ToolCallSerializer($this->toolInstances);
+
         $taskData = [
             'id'         => $task->id,
             'status'     => $task->status,
             'step_count' => $task->step_count,
-            'tool_calls' => $task->toolCalls->map(fn(ToolCallModel $tc) => [
-                'id'                    => $tc->id,
-                'tool_name'             => $tc->tool_name,
-                'tool_type'             => $tc->tool_type,
-                'operation'             => $tc->operation,
-                'operation_description' => $tc->operation_description,
-                'human_description'     => $tc->human_description,
-                'status'                => $tc->status,
-                'proposed_arguments'    => $tc->proposed_arguments,
-                'approved_arguments'    => $tc->approved_arguments,
-                'result_content'        => $tc->result_content,
-                'executed_at'           => $tc->executed_at?->toIso8601String(),
-            ])->all(),
+            'tool_calls' => $task->toolCalls->map(fn(ToolCallModel $tc) => $serializer->toArray($tc))->all(),
             'history' => $task->taskHistory()->orderBy('sequence')->get()->map(fn(TaskHistory $h) => [
                 'sequence'     => $h->sequence,
                 'role'         => $h->role,
@@ -908,7 +901,20 @@ final class Orchestrator implements OrchestratorInterface
         if ($usesOperations) {
             $operationName = $toolInstance->getOperationName($arguments);
 
-            // Check per-operation override first
+            // Approval resolution is per-operation only. The UI exposes a
+            // per-operation auto-approve toggle (no agent-wide toggle for
+            // tools that have #[ToolOperation] declarations — every current
+            // tool qualifies). Precedence:
+            //
+            //   1. Per-op override (#[AgentToolOperationOverride] row) wins.
+            //   2. Otherwise the operation's #[ToolOperation(requiresApprovalByDefault:)]
+            //      class default wins.
+            //
+            // The legacy agent-wide AgentTool.auto_approve column is intentionally
+            // NOT consulted here — it was previously a footgun: a stale `0` value
+            // (from an earlier UI that no longer renders the toggle) silently
+            // forced every operation to require approval, overriding read-only
+            // class defaults like read_inbox.
             /** @var AgentToolOperationOverride|null $override */
             $override = AgentToolOperationOverride::where('agent_id', $agentId)
                 ->where('tool_class', $toolClass)
@@ -919,17 +925,6 @@ final class Orchestrator implements OrchestratorInterface
                 $raw = $override->getRawOriginal('default_requires_approval');
                 if ($raw !== null) {
                     return (bool) $raw; // 1 = approval required → true, 0 = auto-approve → false
-                }
-            }
-
-            // Fall back to agent-level auto_approve setting
-            $agentTool = AgentTool::where('agent_id', $agentId)
-                ->where('tool_class', $toolClass)
-                ->first();
-            if ($agentTool !== null) {
-                $autoApproveRaw = $agentTool->getRawOriginal('auto_approve');
-                if ($autoApproveRaw !== null) {
-                    return !(bool) $autoApproveRaw;
                 }
             }
 
@@ -1103,7 +1098,8 @@ final class Orchestrator implements OrchestratorInterface
                     continue;
                 }
 
-                $filteredSchema = $this->filterSchemaForOperations($schema, $allowedOps);
+                $discriminatorKey = $instance->getOperations()[0]->discriminatorKey ?? 'action';
+                $filteredSchema = OperationSchemaFilter::filter($schema, $allowedOps, $discriminatorKey);
 
                 $llmSettings = $this->toolConfigService !== null
                     ? $this->toolConfigService->getLlmToolSettings($toolClass, $agentId, $userId)
@@ -1142,28 +1138,6 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         return $defs;
-    }
-
-    private function filterSchemaForOperations(array $schema, array $allowedOps): array
-    {
-        $allowedOpsSet = array_flip($allowedOps);
-
-        // properties may be a stdClass (from json_decode('{}')) or an array.
-        $properties = $schema['properties'] ?? [];
-        if (is_object($properties)) {
-            $properties = (array) $properties;
-        }
-
-        if (isset($properties['action']['enum'])) {
-            $properties['action']['enum'] = array_values(array_filter(
-                $properties['action']['enum'],
-                static fn($op) => isset($allowedOpsSet[$op]),
-            ));
-        }
-        // Operation-specific params are kept — the LLM only calls allowed ops anyway.
-        $schema['properties'] = (object) $properties;
-
-        return $schema;
     }
 
     private function callTraitMethod(object $object, string $method, array $args): mixed

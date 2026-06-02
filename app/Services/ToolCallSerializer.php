@@ -1,0 +1,111 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Spora\Services;
+
+use ReflectionClass;
+use Spora\Models\ToolCall;
+use Spora\Tools\Attributes\Tool;
+use Spora\Tools\ToolInterface;
+
+/**
+ * Single source of truth for the JSON shape of a ToolCall sent to the
+ * frontend — both via the REST task resource (TaskService::taskResource)
+ * and via the Mercure live-update stream (Orchestrator::publishIntermediateState).
+ *
+ * Keeping both serialization paths through this class guarantees the frontend
+ * sees identical fields on a tool call regardless of the transport, and that
+ * any future additions to the payload (e.g. the new `parameter_schema` field)
+ * land in one place.
+ *
+ * The `parameter_schema` field is derived at serialization time from the live
+ * tool instance — no DB column required. If the tool class can't be resolved
+ * (e.g. a plugin tool whose class was uninstalled after the call was made),
+ * the field is omitted gracefully.
+ */
+final class ToolCallSerializer
+{
+    /**
+     * @param list<ToolInterface> $toolInstances The same tool instances the Orchestrator was constructed with.
+     */
+    public function __construct(
+        private readonly array $toolInstances = [],
+    ) {}
+
+    /**
+     * Convert a ToolCall model to its API/Mercure JSON shape.
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(ToolCall $tc): array
+    {
+        $payload = [
+            'id'                    => $tc->id,
+            'provider_call_id'      => $tc->provider_call_id,
+            'tool_name'             => $tc->tool_name,
+            'tool_type'             => $tc->tool_type,
+            'status'                => $tc->status,
+            'proposed_arguments'    => $tc->proposed_arguments,
+            'approved_arguments'    => $tc->approved_arguments,
+            'human_description'     => $tc->human_description,
+            'operation'             => $tc->operation,
+            'operation_description' => $tc->operation_description,
+            'result_content'        => $tc->result_content,
+            'executed_at'           => $tc->executed_at?->toIso8601String(),
+        ];
+
+        $schema = $this->resolveParameterSchema($tc->tool_class);
+        if ($schema !== null) {
+            $payload['parameter_schema'] = $schema;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @return array{type: string, properties: object|array<string, mixed>, required: list<string>}|null
+     */
+    private function resolveParameterSchema(?string $toolClass): ?array
+    {
+        if ($toolClass === null || $toolClass === '') {
+            return null;
+        }
+
+        foreach ($this->toolInstances as $instance) {
+            if ($instance::class === $toolClass) {
+                return $instance->getParametersSchema();
+            }
+        }
+
+        // Fallback: instantiate via reflection if the class still exists but
+        // wasn't registered (defensive — keeps history rendering robust when
+        // a plugin tool isn't currently loaded but the class is still
+        // autoloadable).
+        if (!class_exists($toolClass)) {
+            return null;
+        }
+
+        $ref = new ReflectionClass($toolClass);
+        if (!$ref->isInstantiable()) {
+            return null;
+        }
+
+        // Only safe to instantiate without args if the constructor has zero
+        // required parameters — anything else risks calling tool DI.
+        $constructor = $ref->getConstructor();
+        if ($constructor !== null && $constructor->getNumberOfRequiredParameters() > 0) {
+            return null;
+        }
+
+        /** @var ToolInterface $instance */
+        $instance = $ref->newInstance();
+
+        // Sanity check it's actually a tool before trusting its schema.
+        if ($ref->getAttributes(Tool::class) === []) {
+            return null;
+        }
+
+        return $instance->getParametersSchema();
+    }
+}

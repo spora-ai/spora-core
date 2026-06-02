@@ -17,8 +17,8 @@ use RuntimeException;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -47,10 +47,19 @@ use Throwable;
     type: 'text',
     description: 'Seconds before an HTTP request fails (default: 30)',
 )]
-final class CalDavCalendarTool implements ToolInterface
+// Parameter declaration order matches the hand-rolled schema so the approval UI
+// renders fields in the same sequence. `action` is auto-synthesized.
+#[ToolParameter(name: 'start_date', type: 'string', description: 'Start date in ISO-8601 format (or YYYY-MM-DD for all_day events)', required: false)]
+#[ToolParameter(name: 'end_date', type: 'string', description: 'End date in ISO-8601 format (or YYYY-MM-DD for all_day events)', required: false)]
+#[ToolParameter(name: 'event_uri', type: 'string', description: 'The CalDAV URI of the event (required for get_event, edit_event, delete_event)', required: false)]
+#[ToolParameter(name: 'etag', type: 'string', description: 'The ETag of the event (required for edit_event, optional for delete_event)', required: false)]
+#[ToolParameter(name: 'summary', type: 'string', description: 'Event title/summary (required for create_event)', required: false)]
+#[ToolParameter(name: 'description', type: 'string', description: 'Event description (optional)', required: false)]
+#[ToolParameter(name: 'location', type: 'string', description: 'Event location (optional)', required: false)]
+#[ToolParameter(name: 'timezone', type: 'string', description: 'IANA timezone identifier (e.g. Europe/Berlin). Optional for create_event and edit_event.', required: false)]
+#[ToolParameter(name: 'all_day', type: 'boolean', description: 'If true, start_date and end_date are interpreted as date-only (YYYY-MM-DD) and the event is an all-day event. Optional.', required: false)]
+final class CalDavCalendarTool extends AbstractTool
 {
-    use HasOperations;
-
     public function __construct(
         private readonly ToolConfigService $configService,
         private readonly HttpClientInterface $httpClient,
@@ -959,29 +968,5 @@ XML;
         $slug = trim($slug, '-');
         $timestamp = $start->format('Ymd-His');
         return "{$timestamp}-{$slug}.ics";
-    }
-
-    public function getParametersSchema(): array
-    {
-        return [
-            'type'       => 'object',
-            'properties' => [
-                'action' => [
-                    'type'        => 'string',
-                    'description' => 'The operation to perform: list_events, get_event, create_event, edit_event, delete_event',
-                    'enum'        => ['list_events', 'get_event', 'create_event', 'edit_event', 'delete_event'],
-                ],
-                'start_date' => ['type' => 'string', 'description' => 'Start date in ISO-8601 format (or YYYY-MM-DD for all_day events)'],
-                'end_date' => ['type' => 'string', 'description' => 'End date in ISO-8601 format (or YYYY-MM-DD for all_day events)'],
-                'event_uri' => ['type' => 'string', 'description' => 'The CalDAV URI of the event (required for get_event, edit_event, delete_event)'],
-                'etag' => ['type' => 'string', 'description' => 'The ETag of the event (required for edit_event, optional for delete_event)'],
-                'summary' => ['type' => 'string', 'description' => 'Event title/summary (required for create_event)'],
-                'description' => ['type' => 'string', 'description' => 'Event description (optional)'],
-                'location' => ['type' => 'string', 'description' => 'Event location (optional)'],
-                'timezone' => ['type' => 'string', 'description' => 'IANA timezone identifier (e.g. Europe/Berlin). Optional for create_event and edit_event.'],
-                'all_day' => ['type' => 'boolean', 'description' => 'If true, start_date and end_date are interpreted as date-only (YYYY-MM-DD) and the event is an all-day event. Optional.'],
-            ],
-            'required' => ['action'],
-        ];
     }
 }

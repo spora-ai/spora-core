@@ -8,8 +8,8 @@ use Psr\Log\LoggerInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -24,8 +24,12 @@ use Throwable;
     displayName: 'World News Search',
     category: 'research',
 )]
-#[ToolOperation(name: 'search', description: 'Search news by text, country, language, or semantic entities', enabledByDefault: true, requiresApprovalByDefault: false)]
-#[ToolOperation(name: 'top-news', description: 'Get top trending news for a specific country', enabledByDefault: true, requiresApprovalByDefault: false)]
+// Historical wart: this tool has always used the LLM-facing key 'operation'
+// instead of the default 'action'. The discriminatorKey on every operation
+// declares that explicitly so the auto-synthesized property name matches what
+// the LLM is told to send (and what dispatch reads).
+#[ToolOperation(name: 'search', description: 'Search news by text, country, language, or semantic entities', enabledByDefault: true, requiresApprovalByDefault: false, discriminatorKey: 'operation')]
+#[ToolOperation(name: 'top-news', description: 'Get top trending news for a specific country', enabledByDefault: true, requiresApprovalByDefault: false, discriminatorKey: 'operation')]
 #[ToolSetting(
     key: 'core.worldnewsapi.api_key',
     label: 'WorldNewsAPI Key',
@@ -39,10 +43,17 @@ use Throwable;
     type: 'text',
     description: 'Seconds before an HTTP request fails (default: 30)',
 )]
-final class WorldNewsApiTool implements ToolInterface
+#[ToolParameter(name: 'q', type: 'string', description: 'Keywords or phrases to search for (required for search).', required: false)]
+#[ToolParameter(name: 'source-country', type: 'string', description: 'ISO country code, e.g. "us" or "de" (required for top-news).', required: false)]
+#[ToolParameter(name: 'language', type: 'string', description: 'ISO 2-letter language code, e.g. "en" or "de" (required for top-news).', required: false)]
+#[ToolParameter(name: 'category', type: 'string', description: 'News category, e.g. "politics", "sports", "technology".', required: false)]
+#[ToolParameter(name: 'earliest-publish-date', type: 'string', description: 'Earliest publish date (ISO 8601 format, e.g. 2026-04-01).', required: false)]
+#[ToolParameter(name: 'latest-publish-date', type: 'string', description: 'Latest publish date (ISO 8601 format, e.g. 2026-04-23).', required: false)]
+#[ToolParameter(name: 'entities', type: 'array', description: 'Semantic entities to search for: people, organizations, locations.', required: false, items: ['type' => 'string'])]
+#[ToolParameter(name: 'number', type: 'integer', description: 'Maximum number of results (1-100, default 10).', required: false)]
+#[ToolParameter(name: 'offset', type: 'integer', description: 'Pagination offset.', required: false)]
+final class WorldNewsApiTool extends AbstractTool
 {
-    use HasOperations;
-
     private const BASE_URL = 'https://api.worldnewsapi.com';
 
     public function __construct(
@@ -62,7 +73,7 @@ final class WorldNewsApiTool implements ToolInterface
 
     public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
-        $operation = $arguments['operation'] ?? 'search';
+        $operation = $this->getOperationName($arguments);
 
         return match ($operation) {
             'top-news' => $this->topNews($arguments, $agentId, $userId),
@@ -72,11 +83,11 @@ final class WorldNewsApiTool implements ToolInterface
 
     public function describeAction(array $arguments): string
     {
-        $operation = $arguments['operation'] ?? 'search';
+        $operation = $this->getOperationName($arguments);
 
         return match ($operation) {
             'top-news' => "Fetch top news from WorldNewsAPI for country: '" . ($arguments['source-country'] ?? 'unknown') . "'",
-            default => "Search WorldNewsAPI for: '{$arguments['q']}'",
+            default => "Search WorldNewsAPI for: '" . ($arguments['q'] ?? '') . "'",
         };
     }
 
@@ -267,57 +278,5 @@ final class WorldNewsApiTool implements ToolInterface
         }
 
         return new ToolResult(true, $output);
-    }
-
-    public function getParametersSchema(): array
-    {
-        return [
-            'type' => 'object',
-            'properties' => [
-                'operation' => [
-                    'type' => 'string',
-                    'enum' => ['search', 'top-news'],
-                    'description' => 'Operation to perform: search (default) or top-news',
-                ],
-                'q' => [
-                    'type' => 'string',
-                    'description' => 'Keywords or phrases to search for (required for search).',
-                ],
-                'source-country' => [
-                    'type' => 'string',
-                    'description' => 'ISO country code, e.g. "us" or "de" (required for top-news).',
-                ],
-                'language' => [
-                    'type' => 'string',
-                    'description' => 'ISO 2-letter language code, e.g. "en" or "de" (required for top-news).',
-                ],
-                'category' => [
-                    'type' => 'string',
-                    'description' => 'News category, e.g. "politics", "sports", "technology".',
-                ],
-                'earliest-publish-date' => [
-                    'type' => 'string',
-                    'description' => 'Earliest publish date (ISO 8601 format, e.g. 2026-04-01).',
-                ],
-                'latest-publish-date' => [
-                    'type' => 'string',
-                    'description' => 'Latest publish date (ISO 8601 format, e.g. 2026-04-23).',
-                ],
-                'entities' => [
-                    'type' => 'array',
-                    'items' => ['type' => 'string'],
-                    'description' => 'Semantic entities to search for: people, organizations, locations.',
-                ],
-                'number' => [
-                    'type' => 'integer',
-                    'description' => 'Maximum number of results (1-100, default 10).',
-                ],
-                'offset' => [
-                    'type' => 'integer',
-                    'description' => 'Pagination offset.',
-                ],
-            ],
-            'required' => [],
-        ];
     }
 }

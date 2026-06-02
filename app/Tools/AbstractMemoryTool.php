@@ -6,17 +6,23 @@ namespace Spora\Tools;
 
 use Spora\Models\Agent;
 use Spora\Models\Memory;
-use Spora\Tools\Traits\HasOperations;
+use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
  * Abstract base for memory tools that provide list, get, save, and delete operations.
  * Subclasses define the scope (agent or global) via getScope().
+ *
+ * Extending AbstractTool gives the subclasses (AgentMemoryTool, GlobalMemoryTool)
+ * the auto-generated parameter schema for free — they only need their own #[Tool]
+ * declaration and an implementation of getScope().
  */
-abstract class AbstractMemoryTool implements ToolInterface
+#[ToolParameter(name: 'name', type: 'string', description: 'Unique name for the memory (e.g. "user_preferences", "project_context").', required: false)]
+#[ToolParameter(name: 'content', type: 'string', description: 'Memory content in markdown. Required for save action.', required: false)]
+#[ToolParameter(name: 'summary', type: 'string', description: 'Brief one-line summary for list view. Auto-derived from content if omitted.', required: false)]
+#[ToolParameter(name: 'order', type: 'integer', description: 'Sort order for listing. Defaults to 0.', required: false)]
+abstract class AbstractMemoryTool extends AbstractTool
 {
-    use HasOperations;
-
     abstract protected function getScope(): string;
 
     public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
@@ -44,37 +50,6 @@ abstract class AbstractMemoryTool implements ToolInterface
         $op = (string) ($arguments['action'] ?? $this->getOperationName($arguments));
         $name = (string) ($arguments['name'] ?? '');
         return "Memory {$op}: {$name}";
-    }
-
-    public function getParametersSchema(): array
-    {
-        return [
-            'type'       => 'object',
-            'properties' => [
-                'action' => [
-                    'type'        => 'string',
-                    'description' => 'The action to perform: "list", "get", "save", or "delete".',
-                    'enum'        => ['list', 'get', 'save', 'delete'],
-                ],
-                'name' => [
-                    'type'        => 'string',
-                    'description' => 'Unique name for the memory (e.g. "user_preferences", "project_context").',
-                ],
-                'content' => [
-                    'type'        => 'string',
-                    'description' => 'Memory content in markdown. Required for save action.',
-                ],
-                'summary' => [
-                    'type'        => 'string',
-                    'description' => 'Brief one-line summary for list view. Auto-derived from content if omitted.',
-                ],
-                'order' => [
-                    'type'        => 'integer',
-                    'description' => 'Sort order for listing. Defaults to 0.',
-                ],
-            ],
-            'required' => ['action'],
-        ];
     }
 
     public function list(string $scope, int $agentId, ?int $userId = null): ToolResult

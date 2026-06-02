@@ -10,9 +10,12 @@ interface ImapClientInterface
      * Fetch emails from INBOX.
      *
      * @param array<string, string> $settings
+     * @param bool $markAsRead  When true, set the Seen flag on returned messages.
+     * @param bool $unreadOnly  When true, return only messages without the Seen flag.
+     *                          When false, return the most recent N messages.
      * @return list<array{uid: string, subject: string, from: string, date: string, body: string}>
      */
-    public function fetchInboxMessages(array $settings, int $limit, bool $markAsRead): array;
+    public function fetchInboxMessages(array $settings, int $limit, bool $markAsRead, bool $unreadOnly): array;
 
     /**
      * Fetch emails from a specific folder.

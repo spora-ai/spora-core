@@ -8,9 +8,7 @@ use DateTimeImmutable;
 use DateTimeInterface;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
-use stdClass;
 
 /**
  * Returns the current date, time, and timezone. Useful for scheduling
@@ -23,10 +21,8 @@ use stdClass;
     category: 'productivity',
 )]
 #[ToolOperation(name: 'now', description: 'Get the current date and time', enabledByDefault: true, requiresApprovalByDefault: false)]
-final class CurrentTimeTool implements ToolInterface
+final class CurrentTimeTool extends AbstractTool
 {
-    use HasOperations;
-
     public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         return $this->now($arguments, $agentId);
@@ -47,14 +43,5 @@ final class CurrentTimeTool implements ToolInterface
         $content = "Current Date & Time: {$iso8601}\nTimezone: {$timezone}\nUnix Timestamp: {$unix}";
 
         return new ToolResult(true, $content);
-    }
-
-    public function getParametersSchema(): array
-    {
-        return [
-            'type'       => 'object',
-            'properties' => new stdClass(),
-            'required'   => [],
-        ];
     }
 }

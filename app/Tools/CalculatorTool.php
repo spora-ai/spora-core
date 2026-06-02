@@ -8,7 +8,6 @@ use ChrisKonnertz\StringCalc\StringCalc;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
@@ -29,10 +28,8 @@ use Throwable;
     description: 'The mathematical expression to evaluate (e.g. "100 * 2.5 + 50").',
     required: true,
 )]
-final class CalculatorTool implements ToolInterface
+final class CalculatorTool extends AbstractTool
 {
-    use HasOperations;
-
     public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         return $this->calculate($arguments, $agentId);
@@ -60,19 +57,5 @@ final class CalculatorTool implements ToolInterface
         } catch (Throwable $e) {
             return new ToolResult(false, 'Calculator error: ' . $e->getMessage());
         }
-    }
-
-    public function getParametersSchema(): array
-    {
-        return [
-            'type'       => 'object',
-            'properties' => [
-                'expression' => [
-                    'type'        => 'string',
-                    'description' => 'The mathematical expression to evaluate (e.g. "100 * 2.5 + 50").',
-                ],
-            ],
-            'required' => ['expression'],
-        ];
     }
 }
