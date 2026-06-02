@@ -9,8 +9,6 @@ use Spora\Models\Agent;
 use Spora\Models\User;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
-use Spora\Tools\Attributes\ToolParameter;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
@@ -26,11 +24,8 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolOperation(name: 'get_base_data', description: 'Get the users base profile data', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolOperation(name: 'get_locations', description: 'Get the users saved locations', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolOperation(name: 'get_health_data', description: 'Get the users health measurements', enabledByDefault: false, requiresApprovalByDefault: true)]
-#[ToolParameter(name: 'action', type: 'string', description: 'The operation to perform: get_base_data, get_locations, get_health_data', required: true, enum: ['get_base_data', 'get_locations', 'get_health_data'])]
-final class UserInfoTool implements ToolInterface
+final class UserInfoTool extends AbstractTool
 {
-    use HasOperations;
-
     private function getUser(int $agentId): ?User
     {
         /** @var Agent|null $agent */
@@ -64,21 +59,6 @@ final class UserInfoTool implements ToolInterface
             'get_health_data'  => 'Read the users health measurements (height, weight)',
             default            => 'Access user information',
         };
-    }
-
-    public function getParametersSchema(): array
-    {
-        return [
-            'type'       => 'object',
-            'properties' => [
-                'action' => [
-                    'type'        => 'string',
-                    'description' => 'The operation to perform: get_base_data, get_locations, get_health_data',
-                    'enum'        => ['get_base_data', 'get_locations', 'get_health_data'],
-                ],
-            ],
-            'required' => ['action'],
-        ];
     }
 
     private function getBaseData(int $agentId): ToolResult

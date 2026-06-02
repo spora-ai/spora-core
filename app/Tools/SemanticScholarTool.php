@@ -10,7 +10,6 @@ use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -36,17 +35,14 @@ use Throwable;
     type: 'text',
     description: 'Seconds before an HTTP request fails (default: 30)',
 )]
-#[ToolParameter(name: 'action', type: 'string', description: 'The research operation: paper_search, get_paper, get_citations, get_references, get_recommendations', required: true, enum: ['paper_search', 'get_paper', 'get_citations', 'get_references', 'get_recommendations'])]
-#[ToolParameter(name: 'query', type: 'string', description: 'Search query for paper_search (e.g. "machine learning protein folding")', required: false)]
-#[ToolParameter(name: 'paper_id', type: 'string', description: 'Semantic Scholar paper ID (40-char hex), DOI, ArXiv ID, or PubMed ID. Required for get_paper, get_citations, get_references, get_recommendations.', required: false)]
+#[ToolParameter(name: 'query', type: 'string', description: 'Search query (required for paper_search). E.g. "machine learning protein folding"', required: false)]
+#[ToolParameter(name: 'paper_id', type: 'string', description: 'Semantic Scholar paper ID (40-char hex) or external ID (DOI, ArXiv, PubMed). Required for get_paper, get_citations, get_references, get_recommendations.', required: false)]
 #[ToolParameter(name: 'limit', type: 'number', description: 'Maximum number of results (1-100 for search/citations/references, 1-20 for recommendations).', required: false)]
 #[ToolParameter(name: 'offset', type: 'number', description: 'Pagination offset for citations/references results.', required: false)]
 #[ToolParameter(name: 'year', type: 'string', description: 'Year filter for paper_search (e.g. "2023", "2020-2024", "<2020").', required: false)]
 #[ToolParameter(name: 'open_access_only', type: 'boolean', description: 'Restrict paper_search to open-access papers with available PDFs.', required: false)]
-final class SemanticScholarTool implements ToolInterface
+final class SemanticScholarTool extends AbstractTool
 {
-    use HasOperations;
-
     private const BASE_URL = 'https://api.semanticscholar.org';
     private const GRAPH_FIELDS = 'title,abstract,authors,year,venue,citationCount,url,openAccessPdf,externalIds,isOpenAccess';
     private const REC_FIELDS = 'title,abstract,authors,year,venue,citationCount,url,openAccessPdf,externalIds';
@@ -59,7 +55,7 @@ final class SemanticScholarTool implements ToolInterface
 
     public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
-        $action = $arguments['action'] ?? 'paper_search';
+        $action = $this->getOperationName($arguments);
 
         return match ($action) {
             'paper_search' => $this->paperSearch($arguments, $agentId, $userId),
@@ -73,7 +69,7 @@ final class SemanticScholarTool implements ToolInterface
 
     public function describeAction(array $arguments): string
     {
-        $action = $arguments['action'] ?? 'paper_search';
+        $action = $this->getOperationName($arguments);
 
         return match ($action) {
             'paper_search' => "Search Semantic Scholar for: '" . ($arguments['query'] ?? '') . "'",
@@ -83,45 +79,6 @@ final class SemanticScholarTool implements ToolInterface
             'get_recommendations' => "Get recommended papers for: " . ($arguments['paper_id'] ?? ''),
             default => "Unknown research action: {$action}",
         };
-    }
-
-    public function getParametersSchema(): array
-    {
-        return [
-            'type' => 'object',
-            'properties' => [
-                'action' => [
-                    'type' => 'string',
-                    'description' => 'The research operation to perform.',
-                    'enum' => ['paper_search', 'get_paper', 'get_citations', 'get_references', 'get_recommendations'],
-                ],
-                'query' => [
-                    'type' => 'string',
-                    'description' => 'Search query (required for paper_search). E.g. "machine learning protein folding"',
-                ],
-                'paper_id' => [
-                    'type' => 'string',
-                    'description' => 'Semantic Scholar paper ID (40-char hex) or external ID (DOI, ArXiv, PubMed). Required for get_paper, get_citations, get_references, get_recommendations.',
-                ],
-                'limit' => [
-                    'type' => 'number',
-                    'description' => 'Maximum number of results (1-100 for search/citations/references, 1-20 for recommendations).',
-                ],
-                'offset' => [
-                    'type' => 'number',
-                    'description' => 'Pagination offset for citations/references results.',
-                ],
-                'year' => [
-                    'type' => 'string',
-                    'description' => 'Year filter for paper_search (e.g. "2023", "2020-2024", "<2020").',
-                ],
-                'open_access_only' => [
-                    'type' => 'boolean',
-                    'description' => 'Restrict paper_search to open-access papers with available PDFs.',
-                ],
-            ],
-            'required' => ['action'],
-        ];
     }
 
     public function paperSearch(array $arguments, int $agentId, ?int $userId): ToolResult

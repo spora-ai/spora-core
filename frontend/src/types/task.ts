@@ -38,6 +38,38 @@ export interface ToolCall {
   human_description: string | null
   result_content: string | null
   executed_at: string | null
+  /**
+   * JSON Schema for this tool's parameters, derived at serialization time
+   * from the live tool instance. Used to render parameters in #[ToolParameter]
+   * declaration order in the approval UI, and to drive typed inputs (enum,
+   * number, boolean) where the schema provides hints. Optional because
+   * historical tool calls whose tool class is no longer registered will be
+   * serialized without it.
+   */
+  parameter_schema?: ParameterSchema
+}
+
+/** JSON Schema "parameters" object emitted by ToolParameterSchemaBuilder. */
+export interface ParameterSchema {
+  type: 'object'
+  /**
+   * Object map keyed by parameter name. Insertion order is significant — it
+   * mirrors #[ToolParameter] declaration order and drives the approval UI's
+   * field render order. May be an empty object when the tool takes no params.
+   */
+  properties: Record<string, ParameterProperty>
+  required: string[]
+}
+
+export interface ParameterProperty {
+  type: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object'
+  description?: string
+  enum?: string[]
+  default?: unknown
+  minimum?: number
+  maximum?: number
+  format?: string
+  items?: ParameterProperty
 }
 
 export interface HistoryEntry {

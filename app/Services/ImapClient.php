@@ -48,13 +48,13 @@ final class ImapClient implements ImapClientInterface
         return $client;
     }
 
-    public function fetchInboxMessages(array $settings, int $limit, bool $markAsRead): array
+    public function fetchInboxMessages(array $settings, int $limit, bool $markAsRead, bool $unreadOnly): array
     {
         if ($limit <= 0 || $limit > 20) {
             $limit = 5;
         }
 
-        return $this->fetchMessages('INBOX', $settings, $limit, $markAsRead);
+        return $this->fetchMessages('INBOX', $settings, $limit, $markAsRead, $unreadOnly);
     }
 
     public function fetchFolderMessages(array $settings, string $folder, int $limit): array
@@ -237,7 +237,7 @@ final class ImapClient implements ImapClientInterface
      * @param array<string, string> $settings
      * @return list<array{uid: string, subject: string, from: string, date: string, body: string}>
      */
-    private function fetchMessages(string $folder, array $settings, int $limit, bool $markAsRead): array
+    private function fetchMessages(string $folder, array $settings, int $limit, bool $markAsRead, bool $unreadOnly = false): array
     {
         try {
             $client = $this->connect($settings);
@@ -247,8 +247,8 @@ final class ImapClient implements ImapClientInterface
 
             $mailFolder = $client->getFolder($folder);
 
-            $query = $mailFolder->messages()->all();
-            if ($folder === 'INBOX') {
+            $query = $mailFolder->messages()->all()->fetchOrderDesc();
+            if ($unreadOnly) {
                 $query = $query->unseen();
             }
 

@@ -12,13 +12,14 @@ use Icalendar\Component\VCalendar;
 use Icalendar\Component\VEvent;
 use Icalendar\Parser\Parser;
 use Icalendar\Writer\Writer;
+use LibXMLError;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -47,10 +48,19 @@ use Throwable;
     type: 'text',
     description: 'Seconds before an HTTP request fails (default: 30)',
 )]
-final class CalDavCalendarTool implements ToolInterface
+// Parameter declaration order matches the hand-rolled schema so the approval UI
+// renders fields in the same sequence. `action` is auto-synthesized.
+#[ToolParameter(name: 'start_date', type: 'string', description: 'Start date in ISO-8601 format (or YYYY-MM-DD for all_day events)', required: false)]
+#[ToolParameter(name: 'end_date', type: 'string', description: 'End date in ISO-8601 format (or YYYY-MM-DD for all_day events)', required: false)]
+#[ToolParameter(name: 'event_uri', type: 'string', description: 'The CalDAV URI of the event (required for get_event, edit_event, delete_event)', required: false)]
+#[ToolParameter(name: 'etag', type: 'string', description: 'The ETag of the event (required for edit_event, optional for delete_event)', required: false)]
+#[ToolParameter(name: 'summary', type: 'string', description: 'Event title/summary (required for create_event)', required: false)]
+#[ToolParameter(name: 'description', type: 'string', description: 'Event description (optional)', required: false)]
+#[ToolParameter(name: 'location', type: 'string', description: 'Event location (optional)', required: false)]
+#[ToolParameter(name: 'timezone', type: 'string', description: 'IANA timezone identifier (e.g. Europe/Berlin). Optional for create_event and edit_event.', required: false)]
+#[ToolParameter(name: 'all_day', type: 'boolean', description: 'If true, start_date and end_date are interpreted as date-only (YYYY-MM-DD) and the event is an all-day event. Optional.', required: false)]
+final class CalDavCalendarTool extends AbstractTool
 {
-    use HasOperations;
-
     public function __construct(
         private readonly ToolConfigService $configService,
         private readonly HttpClientInterface $httpClient,
@@ -90,12 +100,27 @@ final class CalDavCalendarTool implements ToolInterface
 
     private function logHttpError(string $method, string $url, int $statusCode, string $responseBody, array $headers = []): void
     {
+        // Per docs/08_logging.md: CalDAV response bodies may carry event content
+        // (PII like summaries, descriptions, attendees). Log only a short, ASCII
+        // preview at ERROR; keep the full body confined to DEBUG.
+        $preview = mb_substr($responseBody, 0, 200);
+        if (mb_strlen($responseBody) > 200) {
+            $preview .= '…';
+        }
+
         $this->logger?->error('CalDAV HTTP Error', [
             'method' => $method,
             'url' => $url,
             'status_code' => $statusCode,
-            'response' => $responseBody,
+            'response_preview' => $preview,
             'www_authenticate' => $headers['www-authenticate'][0] ?? null,
+        ]);
+
+        $this->logger?->debug('CalDavCalendarTool: full HTTP error body', [
+            'method' => $method,
+            'url' => $url,
+            'status_code' => $statusCode,
+            'response' => $responseBody,
         ]);
     }
 
@@ -627,11 +652,24 @@ XML;
 
     private function parseCalDavResponse(string $xmlBody): ToolResult
     {
-        // Extract calendar-data elements from CalDAV XML response using XPath
+        // Restore the caller's libxml error mode and clear any errors we
+        // suppress here — leaking either into other code paths makes XML
+        // failures elsewhere in the request silently disappear.
         $parser = new DOMDocument();
-        libxml_use_internal_errors(true);
-        $parser->loadXML($xmlBody);
-        libxml_clear_errors();
+        $previousUseErrors = libxml_use_internal_errors(true);
+        try {
+            $loaded = $parser->loadXML($xmlBody);
+            $loadErrors = libxml_get_errors();
+            libxml_clear_errors();
+        } finally {
+            libxml_use_internal_errors($previousUseErrors);
+        }
+
+        if ($loaded === false) {
+            $firstError = $loadErrors[0] ?? null;
+            $detail = $firstError instanceof LibXMLError ? trim($firstError->message) : 'malformed XML';
+            return new ToolResult(false, "CalDAV response could not be parsed: {$detail}");
+        }
 
         $xpath = new DOMXPath($parser);
         $xpath->registerNamespace('d', 'DAV:');
@@ -850,7 +888,10 @@ XML;
 
         $event = new VEvent();
         $event->setUid($uid);
-        $event->setDtStamp(date('Ymd\THis\Z'));
+        // DTSTAMP must be UTC (the trailing Z is the RFC 5545 marker); date()
+        // would emit the server-local time mislabeled as UTC. gmdate() does
+        // the right thing without an extra DateTimeImmutable.
+        $event->setDtStamp(gmdate('Ymd\THis\Z'));
 
         if ($allDay) {
             // For all-day events, use date-only format YYYYMMDD.
@@ -969,29 +1010,5 @@ XML;
         $slug = trim($slug, '-');
         $timestamp = $start->format('Ymd-His');
         return "{$timestamp}-{$slug}.ics";
-    }
-
-    public function getParametersSchema(): array
-    {
-        return [
-            'type'       => 'object',
-            'properties' => [
-                'action' => [
-                    'type'        => 'string',
-                    'description' => 'The operation to perform: list_events, get_event, create_event, edit_event, delete_event',
-                    'enum'        => ['list_events', 'get_event', 'create_event', 'edit_event', 'delete_event'],
-                ],
-                'start_date' => ['type' => 'string', 'description' => 'Start date in ISO-8601 format (or YYYY-MM-DD for all_day events)'],
-                'end_date' => ['type' => 'string', 'description' => 'End date in ISO-8601 format (or YYYY-MM-DD for all_day events)'],
-                'event_uri' => ['type' => 'string', 'description' => 'The CalDAV URI of the event (required for get_event, edit_event, delete_event)'],
-                'etag' => ['type' => 'string', 'description' => 'The ETag of the event (required for edit_event, optional for delete_event)'],
-                'summary' => ['type' => 'string', 'description' => 'Event title/summary (required for create_event)'],
-                'description' => ['type' => 'string', 'description' => 'Event description (optional)'],
-                'location' => ['type' => 'string', 'description' => 'Event location (optional)'],
-                'timezone' => ['type' => 'string', 'description' => 'IANA timezone identifier (e.g. Europe/Berlin). Optional for create_event and edit_event.'],
-                'all_day' => ['type' => 'boolean', 'description' => 'If true, start_date and end_date are interpreted as date-only (YYYY-MM-DD) and the event is an all-day event. Optional.'],
-            ],
-            'required' => ['action'],
-        ];
     }
 }

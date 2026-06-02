@@ -11,7 +11,6 @@ use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
@@ -28,7 +27,7 @@ use Throwable;
     displayName: 'Email',
     category: 'communication',
 )]
-#[ToolOperation(name: 'read_inbox', description: 'Read unread emails from the INBOX', enabledByDefault: true, requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'read_inbox', description: 'Read recent emails from the INBOX. Set unread_only=true to fetch only unread emails.', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolOperation(name: 'list_folders', description: 'List all available email folders', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolOperation(name: 'read_folder', description: 'Read emails from a specific folder by name', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolOperation(name: 'create_draft', description: 'Save an email draft to the Drafts folder for later editing or sending', enabledByDefault: false, requiresApprovalByDefault: false)]
@@ -53,21 +52,21 @@ use Throwable;
 #[ToolSetting(key: 'core.smtp.from', label: 'From Address', type: 'text', description: 'e.g. agent@spora.local', required: true, exposeToLlm: true)]
 #[ToolSetting(key: 'core.smtp.allowed_recipients', label: 'Allowed Recipients', type: 'text', description: 'Comma-separated list of exact email addresses the agent is allowed to send to (or * for all).', exposeToLlm: true)]
 #[ToolSetting(key: 'core.smtp.timeout', label: 'SMTP Timeout', type: 'text', description: 'Seconds before an SMTP connection fails (default: 30)', default: '30')]
-// Tool parameters
-#[ToolParameter(name: 'action', type: 'string', description: 'The email operation to perform: read_inbox, list_folders, read_folder, create_draft, send_email, create_folder, rename_folder, delete_folder, move_email, delete_email, mark_email_read', required: true, enum: ['read_inbox', 'list_folders', 'read_folder', 'create_draft', 'send_email', 'create_folder', 'rename_folder', 'delete_folder', 'move_email', 'delete_email', 'mark_email_read'])]
+// Tool parameters — `action` is auto-synthesized from the #[ToolOperation] list above.
+// Declaration order here mirrors the hand-rolled schema's property order so the
+// approval UI renders fields in the same place.
 #[ToolParameter(name: 'limit', type: 'integer', description: 'Maximum number of emails to retrieve (default 5, max 20). Used with read_inbox.', required: false)]
 #[ToolParameter(name: 'mark_as_read', type: 'boolean', description: 'If true, marks fetched emails as read. Irreversible. Defaults to false.', required: false)]
-#[ToolParameter(name: 'folder', type: 'string', description: 'The folder name to read from (e.g. INBOX, Sent, Drafts). Used with read_folder.', required: false)]
-#[ToolParameter(name: 'to', type: 'string', description: 'The email address of the recipient. Used with send_email.', required: false)]
-#[ToolParameter(name: 'subject', type: 'string', description: 'The subject line of the email. Used with send_email.', required: false)]
-#[ToolParameter(name: 'body', type: 'string', description: 'The plain text body content of the email. Used with send_email.', required: false)]
-#[ToolParameter(name: 'new_folder', type: 'string', description: 'The new folder name. Used with create_folder, rename_folder, and move_email (as destination).', required: false)]
-#[ToolParameter(name: 'uid', type: 'integer', description: 'The UID of the email to act on. Used with move_email, delete_email, mark_email_read.', required: false)]
-#[ToolParameter(name: 'read', type: 'boolean', description: 'If true, marks the email as read. If false, marks as unread. Defaults to true. Used with mark_email_read.', required: false)]
-final class EmailTool implements ToolInterface
+#[ToolParameter(name: 'unread_only', type: 'boolean', description: 'If true, returns only unread emails. Defaults to false (returns recent emails regardless of read state). Used with read_inbox.', required: false)]
+#[ToolParameter(name: 'folder', type: 'string', description: 'The folder name to read from, rename from, delete, move from, or act on. E.g. INBOX, Sent, Drafts.', required: false)]
+#[ToolParameter(name: 'to', type: 'string', description: 'The email address of the recipient.', required: false)]
+#[ToolParameter(name: 'subject', type: 'string', description: 'The subject line of the email.', required: false)]
+#[ToolParameter(name: 'body', type: 'string', description: 'The plain text body content of the email.', required: false)]
+#[ToolParameter(name: 'new_folder', type: 'string', description: 'The new folder name for create_folder, rename_folder, or the destination folder for move_email.', required: false)]
+#[ToolParameter(name: 'uid', type: 'integer', description: 'The UID of the email to move, delete, or mark read/unread.', required: false)]
+#[ToolParameter(name: 'read', type: 'boolean', description: 'If true, marks as read. If false, marks as unread. Defaults to true. Used with mark_email_read.', required: false)]
+final class EmailTool extends AbstractTool
 {
-    use HasOperations;
-
     // IMAP settings keys
     private const KEY_IMAP_HOST       = 'core.imap.host';
     private const KEY_IMAP_PORT       = 'core.imap.port';
@@ -115,7 +114,7 @@ final class EmailTool implements ToolInterface
         $operation = $this->getOperationName($arguments);
 
         return match ($operation) {
-            'read_inbox'   => 'Read unread emails from the inbox',
+            'read_inbox'   => $this->describeReadInbox($arguments),
             'list_folders' => 'List all email folders',
             'read_folder'  => 'Read emails from a specific folder',
             'create_draft' => 'Save an email draft to the Drafts folder',
@@ -130,67 +129,11 @@ final class EmailTool implements ToolInterface
         };
     }
 
-    public function getParametersSchema(): array
-    {
-        return [
-            'type'       => 'object',
-            'properties' => [
-                'action' => [
-                    'type'        => 'string',
-                    'description' => 'The email operation to perform: read_inbox, list_folders, read_folder, create_draft, send_email, create_folder, rename_folder, delete_folder, move_email, delete_email, mark_email_read',
-                    'enum'        => ['read_inbox', 'list_folders', 'read_folder', 'create_draft', 'send_email', 'create_folder', 'rename_folder', 'delete_folder', 'move_email', 'delete_email', 'mark_email_read'],
-                ],
-                // read_inbox parameters
-                'limit' => [
-                    'type'        => 'integer',
-                    'description' => 'Maximum number of emails to retrieve (default 5, max 20). Used with read_inbox.',
-                ],
-                'mark_as_read' => [
-                    'type'        => 'boolean',
-                    'description' => 'If true, marks fetched emails as read. Irreversible. Defaults to false.',
-                ],
-                // read_folder parameter
-                'folder' => [
-                    'type'        => 'string',
-                    'description' => 'The folder name to read from, rename from, delete, move from, or act on. E.g. INBOX, Sent, Drafts.',
-                ],
-                // create_draft / send_email parameters
-                'to' => [
-                    'type'        => 'string',
-                    'description' => 'The email address of the recipient.',
-                ],
-                'subject' => [
-                    'type'        => 'string',
-                    'description' => 'The subject line of the email.',
-                ],
-                'body' => [
-                    'type'        => 'string',
-                    'description' => 'The plain text body content of the email.',
-                ],
-                // create_folder / rename_folder / move_email (dest) parameters
-                'new_folder' => [
-                    'type'        => 'string',
-                    'description' => 'The new folder name for create_folder, rename_folder, or the destination folder for move_email.',
-                ],
-                // move_email / delete_email / mark_email_read parameters
-                'uid' => [
-                    'type'        => 'integer',
-                    'description' => 'The UID of the email to move, delete, or mark read/unread.',
-                ],
-                // mark_email_read parameter
-                'read' => [
-                    'type'        => 'boolean',
-                    'description' => 'If true, marks as read. If false, marks as unread. Defaults to true. Used with mark_email_read.',
-                ],
-            ],
-            'required' => ['action'],
-        ];
-    }
-
     public function readInbox(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $limit      = (int) ($arguments['limit'] ?? 5);
         $markAsRead = (bool) ($arguments['mark_as_read'] ?? false);
+        $unreadOnly = (bool) ($arguments['unread_only'] ?? false);
 
         if ($limit <= 0 || $limit > 20) {
             $limit = 5;
@@ -204,13 +147,18 @@ final class EmailTool implements ToolInterface
         }
 
         try {
-            $messages = $this->imapClient->fetchInboxMessages($imapSettings, $limit, $markAsRead);
+            $messages = $this->imapClient->fetchInboxMessages($imapSettings, $limit, $markAsRead, $unreadOnly);
 
             if ($messages === []) {
-                return new ToolResult(true, 'No new/unread emails in the INBOX.');
+                return new ToolResult(
+                    true,
+                    $unreadOnly
+                        ? 'No unread emails in the INBOX.'
+                        : 'No recent emails in the INBOX.',
+                );
             }
 
-            $output = "Latest Unread Emails:\n\n";
+            $output = ($unreadOnly ? "Latest Unread Emails:\n\n" : "Latest Emails:\n\n");
             foreach ($messages as $msg) {
                 $output .= "--- [UID: {$msg['uid']}] ---\n";
                 $output .= "From: {$msg['from']}\n";
@@ -426,6 +374,14 @@ final class EmailTool implements ToolInterface
         $to = $arguments['to'] ?? 'Unknown Recipient';
         $sub = $arguments['subject'] ?? 'No Subject';
         return "Sending email to {$to} with subject: '{$sub}'";
+    }
+
+    private function describeReadInbox(array $arguments): string
+    {
+        $unreadOnly = (bool) ($arguments['unread_only'] ?? false);
+        return $unreadOnly
+            ? 'Read unread emails from the inbox'
+            : 'Read recent emails from the inbox';
     }
 
     private function describeCreateFolder(array $arguments): string

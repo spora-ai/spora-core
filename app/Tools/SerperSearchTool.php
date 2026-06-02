@@ -11,7 +11,6 @@ use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
-use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -54,22 +53,8 @@ use Throwable;
     description: 'The search query.',
     required: true,
 )]
-final class SerperSearchTool implements ToolInterface
+final class SerperSearchTool extends AbstractTool
 {
-    use HasOperations;
-
-    private const VALID_OPERATIONS = [
-        'search',
-        'image_search',
-        'news_search',
-        'video_search',
-        'scholar_search',
-        'shopping_search',
-        'patents_search',
-        'maps_search',
-        'places_search',
-    ];
-
     public function __construct(
         private readonly ToolConfigService $configService,
         private readonly HttpClientInterface $httpClient,
@@ -586,24 +571,5 @@ final class SerperSearchTool implements ToolInterface
             $this->logger?->error('Serper Places Search Exception', ['exception' => $e]);
             return new ToolResult(false, 'Places search error: ' . $e->getMessage());
         }
-    }
-
-    public function getParametersSchema(): array
-    {
-        return [
-            'type'       => 'object',
-            'properties' => [
-                'action' => [
-                    'type'        => 'string',
-                    'description' => 'The type of search to perform.',
-                    'enum'        => self::VALID_OPERATIONS,
-                ],
-                'q' => [
-                    'type'        => 'string',
-                    'description' => 'The search query.',
-                ],
-            ],
-            'required' => ['action', 'q'],
-        ];
     }
 }

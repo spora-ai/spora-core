@@ -7,11 +7,19 @@ import {
   parseArguments,
   type FormattedField,
 } from '@/composables/useToolArgumentFormatter'
+import type { ParameterSchema } from '@/types/task'
 
 const props = defineProps<{
   arguments: Record<string, unknown> | string | null
   toolName?: string
   operation?: string | null
+  /**
+   * The tool's parameter JSON Schema. When provided, fields render in the
+   * schema's declared property order (matches #[ToolParameter] declaration
+   * order). Optional — without it the formatter falls back to its legacy
+   * important-first alphabetical sort.
+   */
+  parameterSchema?: ParameterSchema | null
 }>()
 
 const emit = defineEmits<{
@@ -27,11 +35,21 @@ const parsedArgs = computed(() => parseArguments(props.arguments))
 // Check if arguments are flat (all primitives)
 const flat = computed(() => isFlatArguments(parsedArgs.value))
 
+// Canonical declaration order from the backend-supplied schema; empty when no
+// schema is available so the formatter keeps its legacy sort.
+const parameterOrder = computed<string[]>(() =>
+  props.parameterSchema?.properties ? Object.keys(props.parameterSchema.properties) : [],
+)
+
 // Initialize local fields when props change
 watch(
-  parsedArgs,
-  (newArgs) => {
-    localFields.value = formatToolArguments(newArgs, { toolName: props.toolName, operation: props.operation })
+  [parsedArgs, parameterOrder],
+  ([newArgs, order]) => {
+    localFields.value = formatToolArguments(newArgs, {
+      toolName: props.toolName,
+      operation: props.operation,
+      parameterOrder: order,
+    })
     showSensitive.value = {}
   },
   { immediate: true, deep: true }

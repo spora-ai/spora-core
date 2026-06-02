@@ -108,31 +108,57 @@ export function isFlatArguments(args: Record<string, unknown> | null): boolean {
 export interface ToolArgumentFormatterOptions {
   toolName?: string
   operation?: string | null
+  /**
+   * Canonical parameter order from the tool's #[ToolParameter] declarations,
+   * surfaced to the frontend via `ToolCall.parameter_schema.properties` keys.
+   * When provided, fields render in this order regardless of LLM emission order.
+   * Keys not in the list sort to the end (preserves the existing object-key
+   * iteration order for unknown extras). When omitted, falls back to the
+   * legacy important-first-alphabetical sort for backward compatibility.
+   */
+  parameterOrder?: string[]
 }
 
 export function formatToolArguments(
   args: Record<string, unknown> | null,
-  _options?: ToolArgumentFormatterOptions,
+  options?: ToolArgumentFormatterOptions,
 ): FormattedField[] {
   if (!args || typeof args !== 'object') return []
 
-  return Object.entries(args)
-    .map(([key, value]) => {
-      const format = inferFormat(key, value)
-      return {
-        key,
-        label: extractLabel(key, value),
-        value,
-        displayValue: formatDisplayValue(value, format),
-        format,
-        type: typeof value,
-        isImportant: isImportantField(key),
-      }
-    })
-    .sort((a, b) => {
-      if (a.isImportant !== b.isImportant) return a.isImportant ? -1 : 1
-      return a.key.localeCompare(b.key)
-    })
+  const fields = Object.entries(args).map(([key, value]) => {
+    const format = inferFormat(key, value)
+    return {
+      key,
+      label: extractLabel(key, value),
+      value,
+      displayValue: formatDisplayValue(value, format),
+      format,
+      type: typeof value,
+      isImportant: isImportantField(key),
+    }
+  })
+
+  const parameterOrder = options?.parameterOrder
+  if (parameterOrder && parameterOrder.length > 0) {
+    // Build the index map once; unknown keys sort to the end in their original
+    // object-iteration order via a stable sort fallback.
+    const indexOf = new Map<string, number>()
+    parameterOrder.forEach((k, i) => indexOf.set(k, i))
+    return fields
+      .map((field, originalIndex) => ({ field, originalIndex }))
+      .sort((a, b) => {
+        const ia = indexOf.get(a.field.key) ?? Infinity
+        const ib = indexOf.get(b.field.key) ?? Infinity
+        if (ia !== ib) return ia - ib
+        return a.originalIndex - b.originalIndex
+      })
+      .map(({ field }) => field)
+  }
+
+  return fields.sort((a, b) => {
+    if (a.isImportant !== b.isImportant) return a.isImportant ? -1 : 1
+    return a.key.localeCompare(b.key)
+  })
 }
 
 export function buildArgumentsFromFields(
