@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "6b543525371c8ff7c6cef356e25f9dbd",
+    "content-hash": "d970404fbc2a88901db9916d3365dde1",
     "packages": [
         {
             "name": "brick/math",
@@ -186,6 +186,55 @@
                 "source": "https://github.com/chriskonnertz/string-calc/tree/v2.0.0"
             },
             "time": "2022-05-13T17:29:03+00:00"
+        },
+        {
+            "name": "craigk5n/php-icalendar-core",
+            "version": "1.1.4",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/craigk5n/php-icalendar-core.git",
+                "reference": "5dcfc2b6fb940322312fb0884f000ff574058e17"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/craigk5n/php-icalendar-core/zipball/5dcfc2b6fb940322312fb0884f000ff574058e17",
+                "reference": "5dcfc2b6fb940322312fb0884f000ff574058e17",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.2"
+            },
+            "require-dev": {
+                "infection/infection": "^0.29",
+                "phpstan/phpstan": "^1.10",
+                "phpunit/phpunit": "^10.0",
+                "vimeo/psalm": "^5.0 || ^6.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Icalendar\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "RFC 5545 compliant PHP library for iCalendar parsing and writing",
+            "homepage": "https://github.com/craigk5n/php-icalendar-core",
+            "keywords": [
+                "calendar",
+                "iCalendar",
+                "ics",
+                "parser",
+                "rfc5545",
+                "writer"
+            ],
+            "support": {
+                "issues": "https://github.com/craigk5n/php-icalendar-core/issues",
+                "source": "https://github.com/craigk5n/php-icalendar-core"
+            },
+            "time": "2026-02-27T05:24:31+00:00"
         },
         {
             "name": "delight-im/auth",

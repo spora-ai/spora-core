@@ -321,6 +321,80 @@ return [
         );
     },
 
+    // Tool definitions - explicit construction ensures the logger is injected (PHP-DI autowiring misses optional LoggerInterface).
+    Spora\Tools\CurrentTimeTool::class => static function (ContainerInterface $c): Spora\Tools\CurrentTimeTool {
+        return new Spora\Tools\CurrentTimeTool();
+    },
+    Spora\Tools\CalculatorTool::class => static function (ContainerInterface $c): Spora\Tools\CalculatorTool {
+        return new Spora\Tools\CalculatorTool();
+    },
+    Spora\Tools\AgentMemoryTool::class => static function (): Spora\Tools\AgentMemoryTool {
+        return new Spora\Tools\AgentMemoryTool();
+    },
+    Spora\Tools\GlobalMemoryTool::class => static function (): Spora\Tools\GlobalMemoryTool {
+        return new Spora\Tools\GlobalMemoryTool();
+    },
+    Spora\Tools\TavilySearchTool::class => static function (ContainerInterface $c): Spora\Tools\TavilySearchTool {
+        return new Spora\Tools\TavilySearchTool(
+            $c->get(ToolConfigService::class),
+            $c->get(Symfony\Contracts\HttpClient\HttpClientInterface::class),
+            $c->get(LoggerInterface::class),
+        );
+    },
+    Spora\Tools\SerperSearchTool::class => static function (ContainerInterface $c): Spora\Tools\SerperSearchTool {
+        return new Spora\Tools\SerperSearchTool(
+            $c->get(ToolConfigService::class),
+            $c->get(Symfony\Contracts\HttpClient\HttpClientInterface::class),
+            $c->get(LoggerInterface::class),
+        );
+    },
+    Spora\Tools\ReadUrlTool::class => static function (ContainerInterface $c): Spora\Tools\ReadUrlTool {
+        return new Spora\Tools\ReadUrlTool(
+            $c->get(Symfony\Contracts\HttpClient\HttpClientInterface::class),
+            $c->get(ToolConfigService::class),
+            $c->get(LoggerInterface::class),
+        );
+    },
+    Spora\Tools\WorldNewsApiTool::class => static function (ContainerInterface $c): Spora\Tools\WorldNewsApiTool {
+        return new Spora\Tools\WorldNewsApiTool(
+            $c->get(ToolConfigService::class),
+            $c->get(Symfony\Contracts\HttpClient\HttpClientInterface::class),
+            $c->get(LoggerInterface::class),
+        );
+    },
+    Spora\Tools\EmailTool::class => static function (ContainerInterface $c): Spora\Tools\EmailTool {
+        return new Spora\Tools\EmailTool(
+            $c->get(ToolConfigService::class),
+            $c->get(ImapClientInterface::class),
+            $c->get(LoggerInterface::class),
+        );
+    },
+    Spora\Tools\CalDavCalendarTool::class => static function (ContainerInterface $c): Spora\Tools\CalDavCalendarTool {
+        return new Spora\Tools\CalDavCalendarTool(
+            $c->get(ToolConfigService::class),
+            $c->get(Symfony\Contracts\HttpClient\HttpClientInterface::class),
+            $c->get(LoggerInterface::class),
+            $c->get('config'),
+        );
+    },
+    Spora\Tools\UserInfoTool::class => static function (ContainerInterface $c): Spora\Tools\UserInfoTool {
+        return new Spora\Tools\UserInfoTool();
+    },
+    Spora\Tools\SemanticScholarTool::class => static function (ContainerInterface $c): Spora\Tools\SemanticScholarTool {
+        return new Spora\Tools\SemanticScholarTool(
+            $c->get(ToolConfigService::class),
+            $c->get(Symfony\Contracts\HttpClient\HttpClientInterface::class),
+            $c->get(LoggerInterface::class),
+        );
+    },
+    Spora\Tools\WeatherApiTool::class => static function (ContainerInterface $c): Spora\Tools\WeatherApiTool {
+        return new Spora\Tools\WeatherApiTool(
+            $c->get(ToolConfigService::class),
+            $c->get(Symfony\Contracts\HttpClient\HttpClientInterface::class),
+            $c->get(LoggerInterface::class),
+        );
+    },
+
     Spora\Http\UserPreferenceController::class => static function (ContainerInterface $c): Spora\Http\UserPreferenceController {
         return new Spora\Http\UserPreferenceController(
             $c->get(AuthService::class),

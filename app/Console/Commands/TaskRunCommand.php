@@ -122,16 +122,11 @@ final class TaskRunCommand extends Command
     private function buildOrchestrator(OutputInterface $output): OrchestratorInterface
     {
         $config = $this->container->get('config');
-
-        // Null logger — child output goes to stdout via OutputInterface, not a log file.
-        // The process manager captures stdout/stderr for centralized logging.
-        $logger = null;
-
         return new Orchestrator(
             driverFactory: $this->container->get(DriverFactory::class),
             llmConfigService: $this->container->get(LLMConfigService::class),
             toolInstances: $this->container->get('tool_instances'),
-            logger: $logger,
+            logger: $this->container->get(\Psr\Log\LoggerInterface::class),
             workerMode: WorkerMode::Sync,
             notificationService: $this->container->get(NotificationService::class),
             mercure: $this->mercure,

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Container\ContainerInterface;
+use Psr\Log\LoggerInterface;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Console\Commands\TaskRunCommand;
@@ -77,6 +78,9 @@ describe('TaskRunCommand — task claiming', function (): void {
         $mockMercure->allows('publishToUser')->andReturn(true);
         $this->container->allows('get')->with(NotificationService::class)->andReturn(
             Mockery::mock(NotificationService::class),
+        );
+        $this->container->allows('get')->with(LoggerInterface::class)->andReturn(
+            Mockery::mock(LoggerInterface::class),
         );
 
         // Create a global LLM config for tests (tests mock the DriverFactory, so credentials don't matter)
@@ -214,6 +218,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container->shouldReceive('get')->with(LLMConfigService::class)->once()->andReturn($realConfigService);
         $container->allows('get')->with(ToolConfigService::class)->andReturn(Mockery::mock(ToolConfigService::class));
         $container->allows('get')->with(MercurePublisherInterface::class)->andReturn(Mockery::mock(MercurePublisherInterface::class));
+        $container->allows('get')->with(LoggerInterface::class)->andReturn(Mockery::mock(LoggerInterface::class));
 
         $mercure = Mockery::mock(MercurePublisherInterface::class);
         $mercure->allows('publishUpdate')->andReturnNull();
