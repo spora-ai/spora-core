@@ -493,6 +493,10 @@ XML;
             return new ToolResult(false, 'Invalid date format: ' . $e->getMessage());
         }
 
+        if (!$start instanceof DateTimeImmutable || !$end instanceof DateTimeImmutable) {
+            return new ToolResult(false, 'Failed to parse existing event dates. Fetch the latest event details and verify DTSTART/DTEND are present.');
+        }
+
         if ($end <= $start) {
             return new ToolResult(false, 'end_date must be after start_date.');
         }
@@ -795,31 +799,33 @@ XML;
             return null;
         }
 
-        // Handle UTC format (YYYYMMDDTHHMMSSZ)
         if (str_ends_with($dateStr, 'Z')) {
-            return DateTimeImmutable::createFromFormat('Ymd\THis\Z', $dateStr)
-                ->setTimezone(new DateTimeZone('UTC'));
+            $parsed = DateTimeImmutable::createFromFormat('Ymd\THis\Z', $dateStr, new DateTimeZone('UTC'));
+
+            return $parsed instanceof DateTimeImmutable
+                ? $parsed->setTimezone(new DateTimeZone('UTC'))
+                : null;
         }
 
-        // Handle date-only format (YYYYMMDD)
         if (strlen($dateStr) === 8) {
-            return DateTimeImmutable::createFromFormat('Ymd', $dateStr);
+            $parsed = DateTimeImmutable::createFromFormat('!Ymd', $dateStr);
+
+            return $parsed instanceof DateTimeImmutable ? $parsed : null;
         }
 
-        // Handle format with TZID (e.g., DTSTART;TZID=America/New_York:20260415T100000)
         if (str_contains($dateStr, ';TZID=')) {
             if (preg_match('/;TZID=([^:]+):(.+)$/', $dateStr, $m)) {
                 try {
                     $tz = new DateTimeZone($m[1]);
                     $datePart = $m[2];
-                    return DateTimeImmutable::createFromFormat('Ymd\THis', $datePart)->setTimezone($tz);
+                    $parsed = DateTimeImmutable::createFromFormat('Ymd\THis', $datePart, $tz);
+
+                    return $parsed instanceof DateTimeImmutable ? $parsed->setTimezone($tz) : null;
                 } catch (Throwable) {
-                    // Fall through to default
                 }
             }
         }
 
-        // Default: try to parse as-is
         try {
             return new DateTimeImmutable($dateStr);
         } catch (Throwable) {
@@ -913,13 +919,17 @@ XML;
             return $parsed;
         }
 
-        $parsed = new DateTimeImmutable($dateStr);
         if (!empty($timezone)) {
             $tz = new DateTimeZone($timezone);
-            // Convert to the requested timezone; this is the local time for the event.
+            $parsed = new DateTimeImmutable($dateStr, $tz);
+
             return $parsed->setTimezone($tz);
         }
-        return $parsed->setTimezone(new DateTimeZone('UTC'));
+
+        $utc = new DateTimeZone('UTC');
+        $parsed = new DateTimeImmutable($dateStr, $utc);
+
+        return $parsed->setTimezone($utc);
     }
 
     private function generateUid(int $agentId = 0): string
