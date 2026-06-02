@@ -133,10 +133,6 @@ XML;
         ->and($result->data['events'][0]['summary'])->toBe('Team Meeting');
 });
 
-// =============================================================================
-// get_event Tests
-// =============================================================================
-
 it('get_event returns error if event_uri is missing', function () {
     $config = Mockery::mock(ToolConfigService::class);
     $client = Mockery::mock(HttpClientInterface::class);
@@ -189,7 +185,7 @@ it('get_event returns error on 404', function () {
 it('delete_event resolves relative event_uri against base URL', function () {
     $config = Mockery::mock(ToolConfigService::class);
     $config->allows('getEffectiveSettings')->with(CalDavCalendarTool::class, 1, null)->andReturn([
-        'core.caldav.url' => 'https://caldav.web.de/begenda/dav/grassl-fabian@web.de/calendar',
+        'core.caldav.url' => 'https://caldav.example.com/begenda/dav/user@example.com/calendar',
         'core.caldav.username' => 'test_user',
         'core.caldav.password' => 'secret123',
     ]);
@@ -199,12 +195,12 @@ it('delete_event resolves relative event_uri against base URL', function () {
     $response->allows('getStatusCode')->andReturn(204);
     $response->allows('getHeaders')->andReturn([]);
 
-    $client->expects('request')->with('DELETE', 'https://caldav.web.de/begenda/dav/grassl-fabian@web.de/calendar/abc.ics', Mockery::any())->andReturn($response);
+    $client->expects('request')->with('DELETE', 'https://caldav.example.com/begenda/dav/user@example.com/calendar/abc.ics', Mockery::any())->andReturn($response);
 
     $tool = new CalDavCalendarTool($config, $client);
     $result = $tool->execute([
         'action' => 'delete_event',
-        'event_uri' => '/begenda/dav/grassl-fabian@web.de/calendar/abc.ics',
+        'event_uri' => '/begenda/dav/user@example.com/calendar/abc.ics',
     ], 1);
 
     expect($result->success)->toBeTrue()
@@ -214,7 +210,7 @@ it('delete_event resolves relative event_uri against base URL', function () {
 it('delete_event handles event_uri without leading slash', function () {
     $config = Mockery::mock(ToolConfigService::class);
     $config->allows('getEffectiveSettings')->with(CalDavCalendarTool::class, 1, null)->andReturn([
-        'core.caldav.url' => 'https://caldav.web.de/begenda/dav/grassl-fabian@web.de/calendar',
+        'core.caldav.url' => 'https://caldav.example.com/begenda/dav/user@example.com/calendar',
         'core.caldav.username' => 'test_user',
         'core.caldav.password' => 'secret123',
     ]);
@@ -226,12 +222,12 @@ it('delete_event handles event_uri without leading slash', function () {
 
     // Bug: when href doesn't start with "/", concatenation produced broken URL like
     // "https://caldav.web.detest-event-123". This test guards against regression.
-    $client->expects('request')->with('DELETE', 'https://caldav.web.de/test-event-123', Mockery::any())->andReturn($response);
+    $client->expects('request')->with('DELETE', 'https://caldav.example.com/test-event-123', Mockery::any())->andReturn($response);
 
     $tool = new CalDavCalendarTool($config, $client);
     $result = $tool->execute([
         'action' => 'delete_event',
-        'event_uri' => 'test-event-123',  // no leading slash!
+        'event_uri' => 'test-event-123',
     ], 1);
 
     expect($result->success)->toBeTrue()
@@ -241,7 +237,7 @@ it('delete_event handles event_uri without leading slash', function () {
 it('get_event resolves relative event_uri against base URL', function () {
     $config = Mockery::mock(ToolConfigService::class);
     $config->allows('getEffectiveSettings')->with(CalDavCalendarTool::class, 1, null)->andReturn([
-        'core.caldav.url' => 'https://caldav.web.de/begenda/dav/grassl-fabian@web.de/calendar',
+        'core.caldav.url' => 'https://caldav.example.com/begenda/dav/user@example.com/calendar',
         'core.caldav.username' => 'test_user',
         'core.caldav.password' => 'secret123',
     ]);
@@ -252,12 +248,12 @@ it('get_event resolves relative event_uri against base URL', function () {
     $response->allows('getHeaders')->andReturn(['etag' => ['"abc"']]);
     $response->allows('getContent')->andReturn("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:event-1\r\nSUMMARY:Test\r\nDTSTART:20260601T100000Z\r\nDTEND:20260601T110000Z\r\nEND:VEVENT\r\nEND:VCALENDAR");
 
-    $client->expects('request')->with('GET', 'https://caldav.web.de/begenda/dav/grassl-fabian@web.de/calendar/abc.ics', Mockery::any())->andReturn($response);
+    $client->expects('request')->with('GET', 'https://caldav.example.com/begenda/dav/user@example.com/calendar/abc.ics', Mockery::any())->andReturn($response);
 
     $tool = new CalDavCalendarTool($config, $client);
     $result = $tool->execute([
         'action' => 'get_event',
-        'event_uri' => '/begenda/dav/grassl-fabian@web.de/calendar/abc.ics',
+        'event_uri' => '/begenda/dav/user@example.com/calendar/abc.ics',
     ], 1);
 
     expect($result->success)->toBeTrue()
@@ -289,10 +285,6 @@ it('get_event parses ics content correctly', function () {
         ->and($result->content)->toContain('Test location')
         ->and($result->content)->toContain('"abc123"');
 });
-
-// =============================================================================
-// create_event Tests
-// =============================================================================
 
 it('create_event returns error if required params are missing', function () {
     $config = Mockery::mock(ToolConfigService::class);
@@ -435,18 +427,17 @@ it('create_event supports timezone parameter', function () {
     $response->allows('getHeaders')->with(false)->andReturn(['etag' => ['"new-etag"']]);
 
     $client->expects('request')->with('PUT', Mockery::any(), Mockery::on(function ($options) {
-        // The date "2026-06-01T10:00:00" is parsed as UTC, then converted to Europe/Berlin
-        // (CEST = UTC+2), so the local time is 12:00. We just check TZID is in the body.
         return str_contains($options['body'], 'TZID=Europe/Berlin')
-            && str_contains($options['body'], 'DTSTART;TZID=Europe/Berlin:');
+            && str_contains($options['body'], 'DTSTART;TZID=Europe/Berlin:20260601T100000')
+            && str_contains($options['body'], 'DTEND;TZID=Europe/Berlin:20260601T110000');
     }))->andReturn($response);
 
     $tool = new CalDavCalendarTool($config, $client);
     $result = $tool->execute([
         'action' => 'create_event',
         'summary' => 'Berlin Meeting',
-        'start_date' => '2026-06-01T10:00:00+00:00',
-        'end_date' => '2026-06-01T11:00:00+00:00',
+        'start_date' => '2026-06-01T10:00:00',
+        'end_date' => '2026-06-01T11:00:00',
         'timezone' => 'Europe/Berlin',
     ], 1);
 
@@ -496,10 +487,6 @@ it('create_event handles 415 unsupported media type', function () {
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('unsupported media type');
 });
-
-// =============================================================================
-// edit_event Tests
-// =============================================================================
 
 it('edit_event returns error if event_uri is missing', function () {
     $config = Mockery::mock(ToolConfigService::class);
@@ -596,9 +583,34 @@ it('edit_event handles 412 Precondition Failed', function () {
         ->and($result->content)->toContain('Precondition Failed');
 });
 
-// =============================================================================
-// delete_event Tests
-// =============================================================================
+it('edit_event returns failure when existing event dates cannot be parsed', function () {
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->allows('getEffectiveSettings')->with(CalDavCalendarTool::class, 1, null)->andReturn([
+        'core.caldav.url' => 'https://cal.example.com/',
+        'core.caldav.username' => 'test_user',
+        'core.caldav.password' => 'secret123',
+    ]);
+
+    $client = Mockery::mock(HttpClientInterface::class);
+
+    $getResponse = Mockery::mock(ResponseInterface::class);
+    $getResponse->allows('getStatusCode')->andReturn(200);
+    $getResponse->allows('getHeaders')->andReturn([]);
+    $getResponse->allows('getContent')->andReturn("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:event-1\r\nSUMMARY:Broken Event\r\nEND:VEVENT\r\nEND:VCALENDAR");
+
+    $client->expects('request')->with('GET', 'https://cal.example.com/events/1.ics', Mockery::any())->andReturn($getResponse);
+
+    $tool = new CalDavCalendarTool($config, $client);
+    $result = $tool->execute([
+        'action' => 'edit_event',
+        'event_uri' => 'https://cal.example.com/events/1.ics',
+        'etag' => '"abc123"',
+        'summary' => 'Still Broken',
+    ], 1);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain('Failed to parse existing event dates');
+});
 
 it('delete_event returns error if event_uri is missing', function () {
     $config = Mockery::mock(ToolConfigService::class);
@@ -677,10 +689,6 @@ it('delete_event handles 404 Not Found', function () {
         ->and($result->content)->toContain('not found');
 });
 
-// =============================================================================
-// describeAction Tests
-// =============================================================================
-
 it('describeAction returns correct description for list_events', function () {
     $config = Mockery::mock(ToolConfigService::class);
     $client = Mockery::mock(HttpClientInterface::class);
@@ -740,10 +748,6 @@ it('describeAction returns correct description for unknown operation', function 
 
     expect($result)->toBe('Unknown CalDAV operation');
 });
-
-// =============================================================================
-// HTTP Error Handling Tests
-// =============================================================================
 
 it('listEvents returns error on HTTP 500', function () {
     $config = Mockery::mock(ToolConfigService::class);
