@@ -165,8 +165,14 @@ test('help text documents both SQLite and MySQL paths', function (): void {
 
 test('MySQL branch with missing config fails with a clear error', function (): void {
     withSchemaStamp(function (): void {
-        // No db_host / db_name / db_user / db_password — all null.
-        $db = new Database(['db_driver' => 'mysql']);
+        // db_name is given a valid identifier (otherwise the identifier check
+        // fires first, before the missing-config scan). db_host, db_user, and
+        // db_password are all null — they should appear in the missing-config
+        // error.
+        $db = new Database([
+            'db_driver' => 'mysql',
+            'db_name'   => 'spora',
+        ]);
         $tester = makeTester($db);
 
         $tester->execute(['--force' => true], ['interactive' => false]);
@@ -174,7 +180,6 @@ test('MySQL branch with missing config fails with a clear error', function (): v
         expect($tester->getStatusCode())->toBe(Command::FAILURE);
         expect($tester->getDisplay())
             ->toContain('SPORA_DB_HOST')
-            ->toContain('SPORA_DB_NAME')
             ->toContain('SPORA_DB_USER')
             ->toContain('SPORA_DB_PASSWORD');
     });
@@ -202,7 +207,7 @@ test('MySQL branch with full config DROPs and CREATEs the database via PDO', fun
 
         $command = new DbResetCommand(
             $db,
-            static fn(string $dsn, string $user, string $password, array $options) => $pdo,
+            static fn(string $dsn, string $_user, string $_password, array $_options) => $pdo,
         );
         $command->setName('db:reset');
         $tester = new CommandTester($command);
@@ -233,7 +238,7 @@ test('MySQL branch defaults db_port to 3306 when not configured', function (): v
         $pdo->shouldReceive('exec')->andReturn(0);
         $command = new DbResetCommand(
             $db,
-            static function (string $dsn, string $user, string $password, array $options) use (&$capturedDsn, $pdo): PDO {
+            static function (string $dsn, string $_user, string $_password, array $_options) use (&$capturedDsn, $pdo): PDO {
                 $capturedDsn = $dsn;
                 return $pdo;
             },
@@ -283,7 +288,8 @@ test('MySQL branch with partial config lists every missing env var', function ()
         $config = [
             'db_driver'   => 'mysql',
             'db_host'     => 'db.example.com',
-            // db_name, db_user, db_password all missing.
+            'db_name'     => 'spora', // valid identifier — keeps the test on the missing-config path
+            // db_user, db_password missing.
         ];
         $db = new Database($config);
         $tester = makeTester($db);
@@ -292,12 +298,12 @@ test('MySQL branch with partial config lists every missing env var', function ()
 
         expect($tester->getStatusCode())->toBe(Command::FAILURE);
         $display = $tester->getDisplay();
-        // All three missing env vars must be listed; Spora_DB_HOST was provided
-        // so it should NOT appear in the "missing" error.
-        expect($display)->toContain('SPORA_DB_NAME');
+        // Both missing env vars must be listed; SPORA_DB_HOST and SPORA_DB_NAME
+        // were provided, so they should NOT appear in the "missing" error.
         expect($display)->toContain('SPORA_DB_USER');
         expect($display)->toContain('SPORA_DB_PASSWORD');
         expect($display)->not->toContain('SPORA_DB_HOST');
+        expect($display)->not->toContain('SPORA_DB_NAME');
     });
 });
 
@@ -432,5 +438,117 @@ test('schema stamp is left alone if it does not exist (no error)', function (): 
         expect($tester->getStatusCode())->toBe(Command::SUCCESS);
         // Stamp never existed, command should not error.
         expect(file_exists(BASE_PATH . '/storage/.schema_stamp'))->toBeFalse();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// MySQL db_name identifier validation
+//
+// DROP/CREATE DATABASE cannot be parameterised via PDO::prepare(), so the
+// command validates the identifier against MySQL's identifier rules BEFORE
+// it reaches the SQL string. These tests pin that contract: bad names must
+// short-circuit with Command::FAILURE and zero PDO::exec() calls, good
+// names must reach the DDL with the name wrapped in backticks exactly once.
+// ---------------------------------------------------------------------------
+
+/**
+ * @param array<string, string> $extraConfig  Extra db_* keys to merge on top of the base mysql config.
+ *
+ * @return array{0: list<string>, 1: int, 2: string}  [executedSql, statusCode, display]
+ */
+function runMysqlResetWithName(string $dbName, array $extraConfig = []): array
+{
+    $captured = [
+        'executedSql' => [],
+        'statusCode'  => null,
+        'display'     => '',
+    ];
+
+    withSchemaStamp(function () use ($dbName, $extraConfig, &$captured): void {
+        $config = array_merge([
+            'db_driver'   => 'mysql',
+            'db_host'     => 'db.example.com',
+            'db_port'     => 3306,
+            'db_name'     => $dbName,
+            'db_user'     => 'root',
+            'db_password' => 'secret',
+        ], $extraConfig);
+        $db = new Database($config);
+
+        $pdo = Mockery::mock(PDO::class);
+        $pdo->shouldReceive('exec')
+            ->andReturnUsing(function (string $sql) use (&$captured): int {
+                $captured['executedSql'][] = $sql;
+                return 0;
+            });
+        $command = new DbResetCommand(
+            $db,
+            static fn(string $dsn, string $_user, string $_password, array $_options) => $pdo,
+        );
+        $command->setName('db:reset');
+        $tester = new CommandTester($command);
+        $tester->execute(['--force' => true], ['interactive' => false]);
+
+        $captured['statusCode'] = $tester->getStatusCode();
+        $captured['display']    = $tester->getDisplay();
+    });
+
+    return [$captured['executedSql'], (int) $captured['statusCode'], $captured['display']];
+}
+
+dataset('invalid_mysql_db_names', [
+    'semicolon injection'         => ['spora; DROP DATABASE other'],
+    'backtick character'          => ['spo`ra'],
+    'whitespace'                  => ['spora name'],
+    'leading digit'               => ['1spora'],
+    'empty string'                => [''],
+    'control character (newline)' => ["spora\nname"],
+    'NUL byte'                    => ["spora\0name"],
+    'sql comment'                 => ['spora -- comment'],
+    'single-quote'                => ["spo'ra"],
+    'too long (65 chars)'         => [str_repeat('a', 65)],
+]);
+
+test('rejects invalid db_name without invoking PDO::exec()', function (string $badName): void {
+    [$executedSql, $status, $display] = runMysqlResetWithName($badName);
+
+    expect($status)->toBe(Command::FAILURE);
+    expect($executedSql)->toBe([]); // no DROP, no CREATE — never reaches the server
+    expect($display)->toContain('Invalid MySQL identifier for db_name');
+})->with('invalid_mysql_db_names');
+
+dataset('valid_mysql_db_names', [
+    'plain ascii'      => ['spora_test'],
+    'underscored'      => ['spora_test_1'],
+    'dollar sign'      => ['$hidden'],
+    'single char'      => ['a'],
+    'starts with _'    => ['_spora'],
+    'mixed case'       => ['Spora_Test'],
+    'extended unicode' => ['€uro'],
+    'max length (64)'  => [str_repeat('a', 64)],
+]);
+
+test('accepts valid db_name and interpolates it as a backtick-quoted identifier', function (string $goodName): void {
+    [$executedSql, $status] = runMysqlResetWithName($goodName);
+
+    expect($status)->toBe(Command::SUCCESS);
+    expect($executedSql)->toHaveCount(2);
+    expect($executedSql[0])->toBe("DROP DATABASE IF EXISTS `{$goodName}`");
+    expect($executedSql[1])->toBe("CREATE DATABASE `{$goodName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+})->with('valid_mysql_db_names');
+
+test('rejection short-circuits before missing-config check (no host)', function (): void {
+    // Even without a db_host, a bad db_name is caught first and never tries
+    // to read the rest of the config.
+    withSchemaStamp(function (): void {
+        $db = new Database([
+            'db_driver' => 'mysql',
+            'db_name'   => 'spora; DROP DATABASE other',
+        ]);
+        $tester = makeTester($db);
+        $tester->execute(['--force' => true], ['interactive' => false]);
+
+        expect($tester->getStatusCode())->toBe(Command::FAILURE);
+        expect($tester->getDisplay())->toContain('Invalid MySQL identifier for db_name');
     });
 });

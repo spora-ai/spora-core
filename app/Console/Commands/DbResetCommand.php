@@ -23,7 +23,10 @@ use Throwable;
  *  - mysql: DROP DATABASE + CREATE DATABASE on SPORA_DB_NAME.
  *
  * The MySQL path ALWAYS requires --force (or a typed "yes" at the prompt),
- * because it hits a shared server rather than a local file.
+ * because it hits a shared server rather than a local file. The MySQL
+ * db_name is also validated against MySQL's identifier rules before it
+ * is interpolated into the DDL — DROP/CREATE DATABASE cannot be
+ * parameterised, so rejection is the only safe path for unusual inputs.
  */
 #[AsCommand(
     name: 'db:reset',
@@ -33,8 +36,7 @@ final class DbResetCommand extends Command
 {
     /**
      * @param Closure(string $dsn, string $user, string $password, array<int, mixed> $options): PDO $pdoFactory
-     *        Builds the server-level PDO connection used by the MySQL branch.
-     *        Injected so tests can swap in a mock PDO without spinning up a real server.
+     *        Injected so tests can swap in a mock PDO without spinning up a real MySQL server.
      */
     public function __construct(
         private readonly Database $database,
@@ -99,17 +101,22 @@ HELP);
     }
 
     /**
-     * SQLite branch: unlink + touch the local file. A fresh `touch`'d file is
-     * always 0 bytes, so a non-empty file is a reliable signal of "user data".
+     * A fresh `touch`'d file is always 0 bytes, so `filesize() > 0` is a
+     * reliable "this has user data" signal — we only prompt in that case.
      *
      * @param array<string, mixed> $config
      */
     private function resetSqlite(SymfonyStyle $io, bool $force, array $config): int
     {
-        $dbPath = $config['db_path'] ?? (BASE_PATH . '/storage/database.sqlite');
+        // `??` alone lets an explicit `db_path => null` (or empty string) slip
+        // through to the filesystem calls and explode — normalise to a real path.
+        $rawPath  = $config['db_path'] ?? null;
+        $dbPath   = (is_string($rawPath) && $rawPath !== '' && $rawPath !== ':memory:')
+            ? $rawPath
+            : BASE_PATH . '/storage/database.sqlite';
 
         if (!$force && is_file($dbPath) && filesize($dbPath) > 0) {
-            $io->writeln("storage/database.sqlite already exists and is non-empty.");
+            $io->writeln("{$dbPath} already exists and is non-empty.");
             $io->writeln("  Path: {$dbPath}  (size: " . filesize($dbPath) . " bytes)");
             if (!$io->confirm('Wipe and re-migrate?', false)) {
                 $io->writeln('Aborted. No changes made. (Pass --force to skip the prompt in non-interactive runs.)');
@@ -133,10 +140,6 @@ HELP);
     }
 
     /**
-     * MySQL branch: connect to the server's system DB, then DROP + CREATE the
-     * configured db_name. Requires --force (or typed "yes") because it's
-     * irreversible on a shared server.
-     *
      * @param array<string, mixed> $config
      */
     private function resetMysql(SymfonyStyle $io, bool $force, array $config): int
@@ -147,9 +150,22 @@ HELP);
         $user     = $config['db_user']     ?? null;
         $password = $config['db_password'] ?? null;
 
+        // Validate db_name BEFORE the missing-config scan. An injection-shaped
+        // db_name is the most dangerous input we can receive — refusing it
+        // first means it never reaches the rest of the config-reading path,
+        // and the error message can name the bad value unambiguously.
+        $name = (string) $name;
+        if (!preg_match('/^[\x{0080}-\x{FFFF}a-zA-Z_\$][\x{0080}-\x{FFFF}a-zA-Z0-9_\$]{0,63}$/u', $name)) {
+            $io->error("Invalid MySQL identifier for db_name: {$name}");
+            return Command::FAILURE;
+        }
+
+        // `empty()` would false-positive on a password literally equal to "0"
+        // and raise a notice on absent keys — check string-presence directly.
         $missing = [];
-        foreach (['db_host' => 'SPORA_DB_HOST', 'db_name' => 'SPORA_DB_NAME', 'db_user' => 'SPORA_DB_USER', 'db_password' => 'SPORA_DB_PASSWORD'] as $key => $env) {
-            if (empty($config[$key])) {
+        foreach (['db_host' => 'SPORA_DB_HOST', 'db_user' => 'SPORA_DB_USER', 'db_password' => 'SPORA_DB_PASSWORD'] as $key => $env) {
+            $value = $config[$key] ?? null;
+            if (!is_string($value) || $value === '') {
                 $missing[] = $env;
             }
         }
@@ -163,7 +179,7 @@ HELP);
             $io->writeln("About to <error>DROP DATABASE</error> `{$name}` on {$host}:{$port} and recreate it empty.");
             $io->writeln('This is irreversible.');
             // ask() returns the default ('') in non-interactive mode, so non-TTY
-            // runs fail closed even without the explicit comparison below.
+            // runs already fail closed at the `!== 'yes'` check below.
             $answer = $io->ask('Type "yes" to continue, anything else to abort', '');
             if ($answer !== 'yes') {
                 $io->writeln('Aborted. No changes made. (Pass --force to skip the prompt in non-interactive runs.)');
@@ -171,22 +187,25 @@ HELP);
             }
         }
 
-        // Connect to the *server* (not the user's DB) so we can DROP it.
-        // The Eloquent connection bootstrapped below targets the user's DB
-        // and is unused for the wipe — we need a separate PDO handle.
-        $this->database->bootDatabaseConnectionOnly();
-
+        // Skip booting the Eloquent connection — it targets the user's DB and
+        // would fail precisely when the DB is missing/corrupt (the scenario
+        // `db:reset` is meant to recover from). Connect to the server instead.
         $dsn = "mysql:host={$host};port={$port};charset=utf8mb4";
         $pdoFactory = $this->pdoFactory ?? static fn(string $d, string $u, string $p, array $o): PDO => new PDO($d, $u, $p, $o);
         $pdo = $pdoFactory($dsn, $user, $password, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         ]);
 
-        $pdo->exec("DROP DATABASE IF EXISTS `{$name}`");
-        $io->writeln("Dropped database `{$name}`.");
+        // db_name is already validated against MySQL's identifier rules at the
+        // top of this method (DROP/CREATE DATABASE can't be parameterised),
+        // so it can be interpolated directly into the DDL with no further
+        // escaping.
+        $quoted = '`' . $name . '`';
+        $pdo->exec("DROP DATABASE IF EXISTS {$quoted}");
+        $io->writeln("Dropped database {$quoted}.");
 
-        $pdo->exec("CREATE DATABASE `{$name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-        $io->writeln("Created database `{$name}` (utf8mb4 / utf8mb4_unicode_ci).");
+        $pdo->exec("CREATE DATABASE {$quoted} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $io->writeln("Created database {$quoted} (utf8mb4 / utf8mb4_unicode_ci).");
 
         return Command::SUCCESS;
     }
