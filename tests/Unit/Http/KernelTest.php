@@ -4,6 +4,14 @@ declare(strict_types=1);
 
 /* namespace removed */
 
+const KERNEL_MIME_JSON = 'application/json';
+const KERNEL_TEST_PASSWORD = 'Password1!';
+const KERNEL_AGENT_PATH = '/api/v1/agents';
+const KERNEL_AGENT_ID_123 = '/api/v1/agents/123';
+const KERNEL_LOGIN_PATH = '/api/v1/auth/login';
+const KERNEL_TEST_USER_NAME = 'Kernel Test';
+const KERNEL_CONTROLLER_ERROR = 'Controller error';
+
 use DI\Container;
 use Spora\Core\Kernel;
 use Spora\Services\AgentServiceInterface;
@@ -60,7 +68,7 @@ test('404 response has Content-Type application/json', function (): void {
     $kernel   = new Kernel();
     $response = $kernel->handle(Request::create('/nope', 'GET'));
 
-    expect($response->headers->get('Content-Type'))->toContain('application/json');
+    expect($response->headers->get('Content-Type'))->toContain(KERNEL_MIME_JSON);
 
     unset($kernel);
     gc_collect_cycles();
@@ -69,7 +77,7 @@ test('404 response has Content-Type application/json', function (): void {
 test('wrong HTTP method on known route returns 405 JSON with METHOD_NOT_ALLOWED code', function (): void {
     $kernel  = new Kernel();
     // /api/v1/auth/login only accepts POST
-    $request  = Request::create('/api/v1/auth/login', 'GET');
+    $request  = Request::create(KERNEL_LOGIN_PATH, 'GET');
     $response = $kernel->handle($request);
 
     expect($response->getStatusCode())->toBe(405);
@@ -84,7 +92,7 @@ test('wrong HTTP method on known route returns 405 JSON with METHOD_NOT_ALLOWED 
 
 test('405 response body contains a message string', function (): void {
     $kernel   = new Kernel();
-    $response = $kernel->handle(Request::create('/api/v1/auth/login', 'GET'));
+    $response = $kernel->handle(Request::create(KERNEL_LOGIN_PATH, 'GET'));
     $body     = json_decode($response->getContent(), true);
 
     expect($body['error'])->toHaveKey('message');
@@ -96,9 +104,9 @@ test('405 response body contains a message string', function (): void {
 
 test('405 response has Content-Type application/json', function (): void {
     $kernel   = new Kernel();
-    $response = $kernel->handle(Request::create('/api/v1/auth/login', 'DELETE'));
+    $response = $kernel->handle(Request::create(KERNEL_LOGIN_PATH, 'DELETE'));
 
-    expect($response->headers->get('Content-Type'))->toContain('application/json');
+    expect($response->headers->get('Content-Type'))->toContain(KERNEL_MIME_JSON);
 
     unset($kernel);
     gc_collect_cycles();
@@ -107,7 +115,7 @@ test('405 response has Content-Type application/json', function (): void {
 test('valid route with correct method dispatches to controller and returns a response', function (): void {
     $kernel   = new Kernel();
     // POST /api/v1/auth/login is routed to AuthController::login (stub returns 501)
-    $request  = Request::create('/api/v1/auth/login', 'POST');
+    $request  = Request::create(KERNEL_LOGIN_PATH, 'POST');
     $response = $kernel->handle($request);
 
     // Must not be a routing error - controller was reached
@@ -120,7 +128,7 @@ test('valid route with correct method dispatches to controller and returns a res
 
 test('dispatched stub controller returns JSON with error envelope', function (): void {
     $kernel   = new Kernel();
-    $request  = Request::create('/api/v1/auth/login', 'POST');
+    $request  = Request::create(KERNEL_LOGIN_PATH, 'POST');
     $response = $kernel->handle($request);
 
     $body = json_decode($response->getContent(), true);
@@ -162,8 +170,8 @@ function withoutSecretKey(callable $fn): mixed
 
 test('uncaught controller exception returns 500 JSON', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('kernel500@example.com', 'Password1!', 'Kernel Test');
-    $authService->login('kernel500@example.com', 'Password1!');
+    $authService->register('kernel500@example.com', KERNEL_TEST_PASSWORD, KERNEL_TEST_USER_NAME);
+    $authService->login('kernel500@example.com', KERNEL_TEST_PASSWORD);
 
     $csrfToken = bin2hex(random_bytes(32));
     $_SESSION['csrf_token'] = $csrfToken;
@@ -172,10 +180,10 @@ test('uncaught controller exception returns 500 JSON', function (): void {
     $container = $kernel->getContainer();
 
     $mockAgentService = Mockery::mock(AgentServiceInterface::class);
-    $mockAgentService->shouldReceive('getAgentsForUser')->andThrow(new RuntimeException('Controller error'));
+    $mockAgentService->shouldReceive('getAgentsForUser')->andThrow(new RuntimeException(KERNEL_CONTROLLER_ERROR));
     $container->set(AgentServiceInterface::class, $mockAgentService);
 
-    $request = Request::create('/api/v1/agents', 'GET', [], [], [], [
+    $request = Request::create(KERNEL_AGENT_PATH, 'GET', [], [], [], [
         'HTTP_X_CSRF_TOKEN' => $csrfToken,
     ]);
     $response = $kernel->handle($request);
@@ -195,8 +203,8 @@ test('500 response in production mode does not expose exception details', functi
     putenv('SPORA_APP_ENV=production');
 
     $authService = bootAuthLayer();
-    $userId = $authService->register('kernel500prod@example.com', 'Password1!', 'Kernel Test');
-    $authService->login('kernel500prod@example.com', 'Password1!');
+    $authService->register('kernel500prod@example.com', KERNEL_TEST_PASSWORD, KERNEL_TEST_USER_NAME);
+    $authService->login('kernel500prod@example.com', KERNEL_TEST_PASSWORD);
 
     $csrfToken = bin2hex(random_bytes(32));
     $_SESSION['csrf_token'] = $csrfToken;
@@ -206,10 +214,10 @@ test('500 response in production mode does not expose exception details', functi
         $container = $kernel->getContainer();
 
         $mockAgentService = Mockery::mock(AgentServiceInterface::class);
-        $mockAgentService->shouldReceive('getAgentsForUser')->andThrow(new RuntimeException('Controller error'));
+        $mockAgentService->shouldReceive('getAgentsForUser')->andThrow(new RuntimeException(KERNEL_CONTROLLER_ERROR));
         $container->set(AgentServiceInterface::class, $mockAgentService);
 
-        $request = Request::create('/api/v1/agents', 'GET', [], [], [], [
+        $request = Request::create(KERNEL_AGENT_PATH, 'GET', [], [], [], [
             'HTTP_X_CSRF_TOKEN' => $csrfToken,
         ]);
         $response = $kernel->handle($request);
@@ -226,8 +234,8 @@ test('500 response in production mode does not expose exception details', functi
 
 test('500 response has Content-Type application/json', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('kernel500ct@example.com', 'Password1!', 'Kernel Test');
-    $authService->login('kernel500ct@example.com', 'Password1!');
+    $authService->register('kernel500ct@example.com', KERNEL_TEST_PASSWORD, KERNEL_TEST_USER_NAME);
+    $authService->login('kernel500ct@example.com', KERNEL_TEST_PASSWORD);
 
     $csrfToken = bin2hex(random_bytes(32));
     $_SESSION['csrf_token'] = $csrfToken;
@@ -236,16 +244,16 @@ test('500 response has Content-Type application/json', function (): void {
     $container = $kernel->getContainer();
 
     $mockAgentService = Mockery::mock(AgentServiceInterface::class);
-    $mockAgentService->shouldReceive('getAgentsForUser')->andThrow(new RuntimeException('Controller error'));
+    $mockAgentService->shouldReceive('getAgentsForUser')->andThrow(new RuntimeException(KERNEL_CONTROLLER_ERROR));
     $container->set(AgentServiceInterface::class, $mockAgentService);
 
-    $request = Request::create('/api/v1/agents', 'GET', [], [], [], [
+    $request = Request::create(KERNEL_AGENT_PATH, 'GET', [], [], [], [
         'HTTP_X_CSRF_TOKEN' => $csrfToken,
     ]);
     $response = $kernel->handle($request);
     $kernel->__destruct();
 
-    expect($response->headers->get('Content-Type'))->toContain('application/json');
+    expect($response->headers->get('Content-Type'))->toContain(KERNEL_MIME_JSON);
 });
 
 test('UnauthenticatedException from a protected route returns 401 UNAUTHENTICATED', function (): void {
@@ -255,7 +263,7 @@ test('UnauthenticatedException from a protected route returns 401 UNAUTHENTICATE
 
     try {
         $kernel   = new Kernel();
-        $response = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
+        $response = $kernel->handle(Request::create(KERNEL_AGENT_PATH, 'GET'));
     } finally {
         unset($_ENV['SPORA_SECRET_KEY']);
     }
@@ -275,12 +283,12 @@ test('401 response has Content-Type application/json', function (): void {
 
     try {
         $kernel   = new Kernel();
-        $response = $kernel->handle(Request::create('/api/v1/agents', 'GET'));
+        $response = $kernel->handle(Request::create(KERNEL_AGENT_PATH, 'GET'));
     } finally {
         unset($_ENV['SPORA_SECRET_KEY']);
     }
 
-    expect($response->headers->get('Content-Type'))->toContain('application/json');
+    expect($response->headers->get('Content-Type'))->toContain(KERNEL_MIME_JSON);
 
     $kernel->__destruct();
 });
@@ -289,8 +297,8 @@ test('500 response in development mode includes a debug block with exception det
     $_ENV['SPORA_APP_ENV'] = 'development';
 
     $authService = bootAuthLayer();
-    $userId = $authService->register('kernel500dev@example.com', 'Password1!', 'Kernel Test');
-    $authService->login('kernel500dev@example.com', 'Password1!');
+    $authService->register('kernel500dev@example.com', KERNEL_TEST_PASSWORD, KERNEL_TEST_USER_NAME);
+    $authService->login('kernel500dev@example.com', KERNEL_TEST_PASSWORD);
 
     $csrfToken = bin2hex(random_bytes(32));
     $_SESSION['csrf_token'] = $csrfToken;
@@ -300,10 +308,10 @@ test('500 response in development mode includes a debug block with exception det
         $container = $kernel->getContainer();
 
         $mockAgentService = Mockery::mock(AgentServiceInterface::class);
-        $mockAgentService->shouldReceive('getAgentsForUser')->andThrow(new RuntimeException('Controller error'));
+        $mockAgentService->shouldReceive('getAgentsForUser')->andThrow(new RuntimeException(KERNEL_CONTROLLER_ERROR));
         $container->set(AgentServiceInterface::class, $mockAgentService);
 
-        $request = Request::create('/api/v1/agents', 'GET', [], [], [], [
+        $request = Request::create(KERNEL_AGENT_PATH, 'GET', [], [], [], [
             'HTTP_X_CSRF_TOKEN' => $csrfToken,
         ]);
         $response = $kernel->handle($request);
@@ -402,7 +410,7 @@ test('protected route without session returns 401 UNAUTHENTICATED', function ():
     $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
 
     $kernel = new Kernel();
-    $request = Request::create('/api/v1/agents', 'GET');
+    $request = Request::create(KERNEL_AGENT_PATH, 'GET');
     $response = $kernel->handle($request);
 
     expect($response->getStatusCode())->toBe(401);
@@ -416,16 +424,16 @@ test('protected route without session returns 401 UNAUTHENTICATED', function ():
 
 test('protected route with valid session but no CSRF token returns 403 CSRF_TOKEN_MISSING', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('mw_nocsrf@example.com', 'Password1!', 'MW Test');
-    $authService->login('mw_nocsrf@example.com', 'Password1!');
+    $authService->register('mw_nocsrf@example.com', KERNEL_TEST_PASSWORD, 'MW Test');
+    $authService->login('mw_nocsrf@example.com', KERNEL_TEST_PASSWORD);
 
     // No CSRF token in session
     unset($_SESSION['csrf_token']);
 
     $kernel = new Kernel();
     // POST /api/v1/agents requires CSRF token (POST is not a safe method)
-    $request = Request::create('/api/v1/agents', 'POST', [], [], [], [
-        'CONTENT_TYPE' => 'application/json',
+    $request = Request::create(KERNEL_AGENT_PATH, 'POST', [], [], [], [
+        'CONTENT_TYPE' => KERNEL_MIME_JSON,
         // No X-CSRF-Token header
     ]);
     $response = $kernel->handle($request);
@@ -440,8 +448,8 @@ test('protected route with valid session but no CSRF token returns 403 CSRF_TOKE
 
 test('protected route with valid session and valid CSRF token succeeds', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('mw_success@example.com', 'Password1!', 'MW Test');
-    $authService->login('mw_success@example.com', 'Password1!');
+    $authService->register('mw_success@example.com', KERNEL_TEST_PASSWORD, 'MW Test');
+    $authService->login('mw_success@example.com', KERNEL_TEST_PASSWORD);
 
     $csrfToken = bin2hex(random_bytes(32));
     $_SESSION['csrf_token'] = $csrfToken;
@@ -454,7 +462,7 @@ test('protected route with valid session and valid CSRF token succeeds', functio
     $mockAgentService->shouldReceive('getAgentsForUser')->andReturn([]);
     $container->set(AgentServiceInterface::class, $mockAgentService);
 
-    $request = Request::create('/api/v1/agents', 'GET', [], [], [], [
+    $request = Request::create(KERNEL_AGENT_PATH, 'GET', [], [], [], [
         'HTTP_X_CSRF_TOKEN' => $csrfToken,
     ]);
     $response = $kernel->handle($request);
@@ -476,7 +484,7 @@ test('csrf-only route without CSRF token returns 403 CSRF_TOKEN_MISSING', functi
 
     $kernel = new Kernel();
     $request = Request::create('/api/v1/auth/logout', 'POST', [], [], [], [
-        'CONTENT_TYPE' => 'application/json',
+        'CONTENT_TYPE' => KERNEL_MIME_JSON,
         // No X-CSRF-Token header
     ]);
     $response = $kernel->handle($request);
@@ -494,7 +502,7 @@ test('csrf-only route with valid CSRF token passes through to controller', funct
 
     $kernel = new Kernel();
     $request = Request::create('/api/v1/auth/logout', 'POST', [], [], [], [
-        'CONTENT_TYPE' => 'application/json',
+        'CONTENT_TYPE' => KERNEL_MIME_JSON,
         'HTTP_X_CSRF_TOKEN' => $csrfToken,
     ]);
     $response = $kernel->handle($request);
@@ -512,7 +520,7 @@ test('protected route with wrong HTTP method returns 401 when not authenticated'
 
     $kernel = new Kernel();
     // POST to a GET-only route — but AuthMiddleware blocks first (no session) → 401
-    $request = Request::create('/api/v1/agents', 'POST');
+    $request = Request::create(KERNEL_AGENT_PATH, 'POST');
     $response = $kernel->handle($request);
 
     // Middleware runs before HTTP method check, so auth is checked first
@@ -530,7 +538,7 @@ test('parameterized protected route GET /api/v1/agents/{id} without session retu
 
     $kernel = new Kernel();
     // Request to /api/v1/agents/123 (route has {id} parameter)
-    $request = Request::create('/api/v1/agents/123', 'GET');
+    $request = Request::create(KERNEL_AGENT_ID_123, 'GET');
     $response = $kernel->handle($request);
 
     expect($response->getStatusCode())->toBe(401);
@@ -560,8 +568,8 @@ test('parameterized protected route DELETE /api/v1/agents/{id} without session r
 
 test('parameterized protected route PATCH /api/v1/agents/{id} with valid auth but no CSRF returns 403', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('param_nocsrf@example.com', 'Password1!', 'Param Test');
-    $authService->login('param_nocsrf@example.com', 'Password1!');
+    $authService->register('param_nocsrf@example.com', KERNEL_TEST_PASSWORD, 'Param Test');
+    $authService->login('param_nocsrf@example.com', KERNEL_TEST_PASSWORD);
 
     // No CSRF token in session
     unset($_SESSION['csrf_token']);
@@ -569,8 +577,8 @@ test('parameterized protected route PATCH /api/v1/agents/{id} with valid auth bu
     $kernel = new Kernel();
 
     // Request to /api/v1/agents/123 (route has {id} parameter) using PATCH (not safe)
-    $request = Request::create('/api/v1/agents/123', 'PATCH', [], [], [], [
-        'CONTENT_TYPE' => 'application/json',
+    $request = Request::create(KERNEL_AGENT_ID_123, 'PATCH', [], [], [], [
+        'CONTENT_TYPE' => KERNEL_MIME_JSON,
         // No X-CSRF-Token header
     ]);
     $response = $kernel->handle($request);
@@ -585,8 +593,8 @@ test('parameterized protected route PATCH /api/v1/agents/{id} with valid auth bu
 
 test('parameterized protected route GET /api/v1/agents/{id} with valid auth and CSRF passes through middleware', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('param_success@example.com', 'Password1!', 'Param Success');
-    $authService->login('param_success@example.com', 'Password1!');
+    $authService->register('param_success@example.com', KERNEL_TEST_PASSWORD, 'Param Success');
+    $authService->login('param_success@example.com', KERNEL_TEST_PASSWORD);
 
     $csrfToken = bin2hex(random_bytes(32));
     $_SESSION['csrf_token'] = $csrfToken;
@@ -600,7 +608,7 @@ test('parameterized protected route GET /api/v1/agents/{id} with valid auth and 
     $container->set(AgentServiceInterface::class, $mockAgentService);
 
     // Request to /api/v1/agents/123 (route has {id} parameter)
-    $request = Request::create('/api/v1/agents/123', 'GET', [], [], [], [
+    $request = Request::create(KERNEL_AGENT_ID_123, 'GET', [], [], [], [
         'HTTP_X_CSRF_TOKEN' => $csrfToken,
     ]);
     $response = $kernel->handle($request);
@@ -613,8 +621,8 @@ test('parameterized protected route GET /api/v1/agents/{id} with valid auth and 
 
 test('parameterized protected route DELETE /api/v1/agents/{id} with valid auth and CSRF passes through middleware', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('param_delete@example.com', 'Password1!', 'Param Delete');
-    $authService->login('param_delete@example.com', 'Password1!');
+    $authService->register('param_delete@example.com', KERNEL_TEST_PASSWORD, 'Param Delete');
+    $authService->login('param_delete@example.com', KERNEL_TEST_PASSWORD);
 
     $csrfToken = bin2hex(random_bytes(32));
     $_SESSION['csrf_token'] = $csrfToken;

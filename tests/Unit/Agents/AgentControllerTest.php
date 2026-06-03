@@ -20,6 +20,15 @@ use Spora\Services\ToolConfigService;
 use Symfony\Component\HttpFoundation\Request;
 use Tests\Fixtures\TestTool;
 
+const AGENTS_API_PATH = '/api/v1/agents';
+const AGENT_NAME_MY_BOT = 'My Bot';
+const AGENT_NAME_MY_AGENT = 'My Agent';
+const AGENT_PATH_PREFIX = '/api/v1/agents/';
+const TOOL_PATH_SEGMENT = '/tools/';
+const TOOL_PATH_ENABLE = '/enable';
+const TOOL_PATH_OVERRIDE = '/override';
+const TOOL_PATH_STATUS = '/status';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -61,7 +70,7 @@ function registerUser(AuthService $authService, string $email = 'user@example.co
  */
 function createAgent(AgentController $controller, string $name = 'My Assistant', array $middleware = []): int
 {
-    $response = callController($controller, 'store', jsonRequest('POST', '/api/v1/agents', ['name' => $name]), $middleware);
+    $response = callController($controller, 'store', jsonRequest('POST', AGENTS_API_PATH, ['name' => $name]), $middleware);
     $body = json_decode($response->getContent(), true);
 
     return (int) $body['data']['agent']['id'];
@@ -86,7 +95,7 @@ test('unauthenticated request throws UnauthenticatedException', function (): voi
     clearSession();
     [$controller, , , , $authMiddleware] = makeAgentController();
 
-    expect(fn() => callController($controller, 'index', jsonRequest('GET', '/api/v1/agents'), [$authMiddleware]))
+    expect(fn() => callController($controller, 'index', jsonRequest('GET', AGENTS_API_PATH), [$authMiddleware]))
         ->toThrow(UnauthenticatedException::class);
 });
 
@@ -99,7 +108,7 @@ test('index returns empty array when no agents exist', function (): void {
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
 
-    $response = callController($controller, 'index', jsonRequest('GET', '/api/v1/agents'), [$authMiddleware]);
+    $response = callController($controller, 'index', jsonRequest('GET', AGENTS_API_PATH), [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
@@ -113,7 +122,7 @@ test('index returns all agents for the current user', function (): void {
     createAgent($controller, 'Agent A', [$authMiddleware]);
     createAgent($controller, 'Agent B', [$authMiddleware]);
 
-    $response = callController($controller, 'index', jsonRequest('GET', '/api/v1/agents'), [$authMiddleware]);
+    $response = callController($controller, 'index', jsonRequest('GET', AGENTS_API_PATH), [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
@@ -128,7 +137,7 @@ test('store creates a new agent and returns 201', function (): void {
     $response = callController(
         $controller,
         'store',
-        jsonRequest('POST', '/api/v1/agents', ['name' => 'Research Bot']),
+        jsonRequest('POST', AGENTS_API_PATH, ['name' => 'Research Bot']),
         [$authMiddleware],
     );
 
@@ -146,7 +155,7 @@ test('store requires a name', function (): void {
     $response = callController(
         $controller,
         'store',
-        jsonRequest('POST', '/api/v1/agents', ['name' => '']),
+        jsonRequest('POST', AGENTS_API_PATH, ['name' => '']),
         [$authMiddleware],
     );
 
@@ -161,24 +170,24 @@ test('show returns the agent by id', function (): void {
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Bot', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_BOT, [$authMiddleware]);
 
-    $response = callController($controller, 'show', agentJsonRequest('GET', '/api/v1/agents/' . $agentId, [], $agentId), [$authMiddleware]);
+    $response = callController($controller, 'show', agentJsonRequest('GET', AGENT_PATH_PREFIX . $agentId, [], $agentId), [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
-    expect($body['data']['agent']['name'])->toBe('My Bot');
+    expect($body['data']['agent']['name'])->toBe(AGENT_NAME_MY_BOT);
 });
 
 test('show returns 404 for another user\'s agent', function (): void {
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Bot', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_BOT, [$authMiddleware]);
 
     // Register and switch to a different user
     registerUser($authService, 'other@example.com');
-    $response = callController($controller, 'show', agentJsonRequest('GET', '/api/v1/agents/' . $agentId, [], $agentId), [$authMiddleware]);
+    $response = callController($controller, 'show', agentJsonRequest('GET', AGENT_PATH_PREFIX . $agentId, [], $agentId), [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(404);
 });
@@ -187,14 +196,14 @@ test('show includes tools in the agent resource', function (): void {
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Bot', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_BOT, [$authMiddleware]);
 
-    $request = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $request = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
     callController($controller, 'enableTool', $request, [$authMiddleware]);
 
-    $response = callController($controller, 'show', agentJsonRequest('GET', '/api/v1/agents/' . $agentId, [], $agentId), [$authMiddleware]);
+    $response = callController($controller, 'show', agentJsonRequest('GET', AGENT_PATH_PREFIX . $agentId, [], $agentId), [$authMiddleware]);
     $body = json_decode($response->getContent(), true);
 
     expect($body['data']['agent']['tools'])->toHaveCount(1);
@@ -205,13 +214,13 @@ test('update patches allowed agent fields', function (): void {
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Bot', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_BOT, [$authMiddleware]);
 
     $response = callController(
         $controller,
         'update',
-        agentJsonRequest('PATCH', '/api/v1/agents/' . $agentId, [
-            'name' => 'My Bot',
+        agentJsonRequest('PATCH', AGENT_PATH_PREFIX . $agentId, [
+            'name' => AGENT_NAME_MY_BOT,
             'description' => 'An updated description',
         ], $agentId),
         [$authMiddleware],
@@ -219,7 +228,7 @@ test('update patches allowed agent fields', function (): void {
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
-    expect($body['data']['agent']['name'])->toBe('My Bot');
+    expect($body['data']['agent']['name'])->toBe(AGENT_NAME_MY_BOT);
     expect($body['data']['agent']['description'])->toBe('An updated description');
 });
 
@@ -227,12 +236,12 @@ test('update ignores unknown fields', function (): void {
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Bot', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_BOT, [$authMiddleware]);
 
     $response = callController(
         $controller,
         'update',
-        agentJsonRequest('PATCH', '/api/v1/agents/' . $agentId, [
+        agentJsonRequest('PATCH', AGENT_PATH_PREFIX . $agentId, [
             'user_id' => 999,
             'name' => 'Safe Name',
         ], $agentId),
@@ -266,12 +275,12 @@ test('destroy removes the agent and returns 204', function (): void {
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     $response = callController(
         $controller,
         'destroy',
-        agentJsonRequest('DELETE', '/api/v1/agents/' . $agentId, [], $agentId),
+        agentJsonRequest('DELETE', AGENT_PATH_PREFIX . $agentId, [], $agentId),
         [$authMiddleware],
     );
 
@@ -289,9 +298,9 @@ test('enableTool inserts an AgentTool row and returns 201', function (): void {
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
-    $request = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $request = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
 
@@ -306,9 +315,9 @@ test('enableTool is idempotent: second call returns 200 without duplicating', fu
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
-    $request = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $request = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
 
@@ -323,14 +332,14 @@ test('disableTool removes the AgentTool row and returns 204', function (): void 
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
-    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $enableReq->attributes->set('id', $agentId);
     $enableReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
 
-    $disableReq = jsonRequest('DELETE', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $disableReq = jsonRequest('DELETE', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $disableReq->attributes->set('id', $agentId);
     $disableReq->attributes->set('toolId', 'test_tool');
     $response = callController($controller, 'disableTool', $disableReq, [$authMiddleware]);
@@ -349,9 +358,9 @@ test('getOverride returns empty settings when no override set', function (): voi
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
-    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override');
+    $request = jsonRequest('GET', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_OVERRIDE);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
     $response = callController($controller, 'getOverride', $request, [$authMiddleware]);
@@ -367,7 +376,7 @@ test('getOverride for llm_configuration falls back to the user default LLMDriver
     clearSession();
     [$controller, $authService, , $llmConfig, $authMiddleware] = makeAgentController();
     $userId = registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     // Create a default LLMDriverConfiguration for the same user
     $config = new LLMDriverConfiguration();
@@ -385,7 +394,7 @@ test('getOverride for llm_configuration falls back to the user default LLMDriver
         'preferred_llm_config_id' => $config->id,
     ]);
 
-    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('llm_configuration') . '/override');
+    $request = jsonRequest('GET', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('llm_configuration') . TOOL_PATH_OVERRIDE);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'llm_configuration');
     $response = callController($controller, 'getOverride', $request, [$authMiddleware]);
@@ -405,9 +414,9 @@ test('getOverride for llm_configuration falls back to the user default LLMDriver
 
 test('getOverride for llm_configuration returns empty settings when decryption fails', function (): void {
     clearSession();
-    [$controller, $authService, , $llmConfig, $authMiddleware] = makeAgentController();
+    [$controller, $authService, , , $authMiddleware] = makeAgentController();
     $userId = registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     // Create a config encoded with a DIFFERENT key than the one the controller uses.
     // With per-field encryption: non-password fields (model, base_url) decrypt fine,
@@ -428,7 +437,7 @@ test('getOverride for llm_configuration returns empty settings when decryption f
         'preferred_llm_config_id' => $config->id,
     ]);
 
-    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/llm_configuration/override');
+    $request = jsonRequest('GET', AGENT_PATH_PREFIX . $agentId . '/tools/llm_configuration' . TOOL_PATH_OVERRIDE);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'llm_configuration');
 
@@ -450,15 +459,15 @@ test('putOverride saves agent-scoped settings and masks passwords', function ():
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     // Enable the tool first (override requires the tool to be assigned)
-    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $enableReq->attributes->set('id', $agentId);
     $enableReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
 
-    $request = jsonRequest('PUT', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override', ['api_key' => 'secret-key']);
+    $request = jsonRequest('PUT', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_OVERRIDE, ['api_key' => 'secret-key']);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
     $response = callController($controller, 'putOverride', $request, [$authMiddleware]);
@@ -472,15 +481,15 @@ test('putOverride stores all keys (scope removed)', function (): void {
     clearSession();
     [$controller, $authService, $toolConfig, , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     // Enable the tool first (override requires the tool to be assigned)
-    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $enableReq->attributes->set('id', $agentId);
     $enableReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
 
-    $request = jsonRequest('PUT', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override', [
+    $request = jsonRequest('PUT', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_OVERRIDE, [
         'api_key'     => 'secret',
         'max_results' => '10',
     ]);
@@ -498,20 +507,20 @@ test('deleteOverride removes the override and returns 204', function (): void {
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     // Enable the tool first (override requires the tool to be assigned)
-    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $enableReq->attributes->set('id', $agentId);
     $enableReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
 
-    $putReq = jsonRequest('PUT', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override', ['api_key' => 'secret-key']);
+    $putReq = jsonRequest('PUT', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_OVERRIDE, ['api_key' => 'secret-key']);
     $putReq->attributes->set('id', $agentId);
     $putReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'putOverride', $putReq, [$authMiddleware]);
 
-    $delReq = jsonRequest('DELETE', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override');
+    $delReq = jsonRequest('DELETE', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_OVERRIDE);
     $delReq->attributes->set('id', $agentId);
     $delReq->attributes->set('toolId', 'test_tool');
     $response = callController($controller, 'deleteOverride', $delReq, [$authMiddleware]);
@@ -521,7 +530,7 @@ test('deleteOverride removes the override and returns 204', function (): void {
     expect($body['data']['deleted'])->toBe(true);
 
     // Override row should be gone
-    $getReq = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override');
+    $getReq = jsonRequest('GET', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_OVERRIDE);
     $getReq->attributes->set('id', $agentId);
     $getReq->attributes->set('toolId', 'test_tool');
     $body = json_decode(callController($controller, 'getOverride', $getReq, [$authMiddleware])->getContent(), true);
@@ -534,10 +543,10 @@ test('putOverride saves agent-scoped settings even when tool is not enabled', fu
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     // Override is now allowed even without enabling the tool first
-    $request = jsonRequest('PUT', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override', ['api_key' => 'secret-key']);
+    $request = jsonRequest('PUT', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_OVERRIDE, ['api_key' => 'secret-key']);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
     $response = callController($controller, 'putOverride', $request, [$authMiddleware]);
@@ -551,16 +560,16 @@ test('deleteOverride succeeds even when tool is not enabled', function (): void 
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     // First save an override (no enable needed)
-    $putReq = jsonRequest('PUT', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override', ['api_key' => 'secret-key']);
+    $putReq = jsonRequest('PUT', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_OVERRIDE, ['api_key' => 'secret-key']);
     $putReq->attributes->set('id', $agentId);
     $putReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'putOverride', $putReq, [$authMiddleware]);
 
     // Now delete without enabling first
-    $delReq = jsonRequest('DELETE', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override');
+    $delReq = jsonRequest('DELETE', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_OVERRIDE);
     $delReq->attributes->set('id', $agentId);
     $delReq->attributes->set('toolId', 'test_tool');
     $response = callController($controller, 'deleteOverride', $delReq, [$authMiddleware]);
@@ -578,9 +587,9 @@ test('getToolStatus returns is_enabled false and missing_required when tool not 
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
-    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/status');
+    $request = jsonRequest('GET', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_STATUS);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
 
@@ -598,14 +607,14 @@ test('getToolStatus returns is_enabled true when tool is enabled', function (): 
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
-    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $enableReq->attributes->set('id', $agentId);
     $enableReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
 
-    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/status');
+    $request = jsonRequest('GET', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_STATUS);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
 
@@ -621,7 +630,7 @@ test('getToolStatus returns 404 for non-existent agent', function (): void {
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
 
-    $request = jsonRequest('GET', '/api/v1/agents/99999/tools/' . urlencode('test_tool') . '/status');
+    $request = jsonRequest('GET', AGENT_PATH_PREFIX . '99999' . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_STATUS);
     $request->attributes->set('id', 99999);
     $request->attributes->set('toolId', 'test_tool');
 
@@ -638,15 +647,15 @@ test('getToolsStatus returns all registered tools with correct is_enabled and mi
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     // Enable one tool
-    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $enableReq->attributes->set('id', $agentId);
     $enableReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
 
-    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/status');
+    $request = jsonRequest('GET', AGENT_PATH_PREFIX . $agentId . '/tools' . TOOL_PATH_STATUS);
     $request->attributes->set('id', $agentId);
 
     $response = callController($controller, 'getToolsStatus', $request, [$authMiddleware]);
@@ -679,7 +688,7 @@ test('getToolsStatus is_enabled is keyed by tool_class, not tool_name — same t
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     // Directly insert two agent_tool records with the SAME tool_name but DIFFERENT tool_class.
     // This simulates the orphaned MemoryTool scenario where a stale tool_class remains in the DB.
@@ -692,7 +701,7 @@ test('getToolsStatus is_enabled is keyed by tool_class, not tool_name — same t
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
 
-    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/status');
+    $request = jsonRequest('GET', AGENT_PATH_PREFIX . $agentId . '/tools' . TOOL_PATH_STATUS);
     $request->attributes->set('id', $agentId);
 
     $response = callController($controller, 'getToolsStatus', $request, [$authMiddleware]);
@@ -715,9 +724,9 @@ test('enableTool returns warning and missing_required when settings are incomple
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
-    $request = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $request = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
 
@@ -734,9 +743,9 @@ test('enableTool is idempotent: no warning on already-enabled tool', function ()
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
-    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $enableReq->attributes->set('id', $agentId);
     $enableReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'enableTool', $enableReq, [$authMiddleware]); // First call
@@ -756,10 +765,10 @@ test('getOverride with raw=true returns only stored agent override keys (passwor
     clearSession();
     [$controller, $authService, $toolConfig, , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     // Enable the tool first
-    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $enableReq->attributes->set('id', $agentId);
     $enableReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
@@ -776,7 +785,7 @@ test('getOverride with raw=true returns only stored agent override keys (passwor
         'api_key' => 'agent-key', // stored; type: password → masked by maskForApi
     ]);
 
-    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override?raw=true');
+    $request = jsonRequest('GET', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_OVERRIDE . '?raw=true');
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
 
@@ -793,9 +802,9 @@ test('getOverride with raw=true returns empty when no override exists', function
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
-    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override?raw=true');
+    $request = jsonRequest('GET', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_OVERRIDE . '?raw=true');
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
 
@@ -810,10 +819,10 @@ test('getOverride returns effective settings with source annotation (without raw
     clearSession();
     [$controller, $authService, $toolConfig, , $authMiddleware] = makeAgentController();
     registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
+    $agentId = createAgent($controller, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     // Enable the tool
-    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
+    $enableReq = jsonRequest('POST', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_ENABLE);
     $enableReq->attributes->set('id', $agentId);
     $enableReq->attributes->set('toolId', 'test_tool');
     callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
@@ -830,7 +839,7 @@ test('getOverride returns effective settings with source annotation (without raw
         'api_key' => 'agent-key',
     ]);
 
-    $request = jsonRequest('GET', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/override');
+    $request = jsonRequest('GET', AGENT_PATH_PREFIX . $agentId . TOOL_PATH_SEGMENT . urlencode('test_tool') . TOOL_PATH_OVERRIDE);
     $request->attributes->set('id', $agentId);
     $request->attributes->set('toolId', 'test_tool');
 

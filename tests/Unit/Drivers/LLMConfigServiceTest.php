@@ -11,6 +11,11 @@ use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\UserPreference;
 use Spora\Services\LLMConfigService;
 
+const TEST_API_BASE_URL = 'https://api.example.com';
+const TEST_USER_PASSWORD = 'Password1!';
+defined('TEST_TIMESTAMP_FORMAT') || define('TEST_TIMESTAMP_FORMAT', 'Y-m-d H:i:s');
+const TEST_USER_DEFAULT_NAME = 'User Default';
+
 test('getDrivers returns all registered drivers', function (): void {
     $security = Mockery::mock(SecurityManagerInterface::class);
     $service = new LLMConfigService($security, [
@@ -93,7 +98,7 @@ test('encodeSettings encrypts only password fields and stores others as plain st
 
     $result = $service->encodeSettings(OpenAICompatibleDriver::class, [
         'api_key' => 'sk-test-key',
-        'base_url' => 'https://api.example.com',
+        'base_url' => TEST_API_BASE_URL,
         'model' => 'gpt-4o',
     ]);
 
@@ -101,7 +106,7 @@ test('encodeSettings encrypts only password fields and stores others as plain st
     expect(is_string($result['api_key']))->toBe(true);
     expect($result['api_key'])->not->toBe('sk-test-key');
     // base_url and model should be plain strings
-    expect($result['base_url'])->toBe('https://api.example.com');
+    expect($result['base_url'])->toBe(TEST_API_BASE_URL);
     expect($result['model'])->toBe('gpt-4o');
 });
 
@@ -112,12 +117,12 @@ test('encodeSettings handles empty password field', function (): void {
 
     $result = $service->encodeSettings(OpenAICompatibleDriver::class, [
         'api_key' => '',
-        'base_url' => 'https://api.example.com',
+        'base_url' => TEST_API_BASE_URL,
     ]);
 
     // Empty password should not be encrypted
     expect($result['api_key'])->toBe('');
-    expect($result['base_url'])->toBe('https://api.example.com');
+    expect($result['base_url'])->toBe(TEST_API_BASE_URL);
 });
 
 test('decodeSettings decrypts per-field format correctly', function (): void {
@@ -127,14 +132,14 @@ test('decodeSettings decrypts per-field format correctly', function (): void {
 
     $encoded = $service->encodeSettings(OpenAICompatibleDriver::class, [
         'api_key' => 'sk-secret-key',
-        'base_url' => 'https://api.example.com',
+        'base_url' => TEST_API_BASE_URL,
     ]);
 
     $json = json_encode($encoded);
     $decoded = $service->decodeSettings(OpenAICompatibleDriver::class, $json);
 
     expect($decoded['api_key'])->toBe('sk-secret-key');
-    expect($decoded['base_url'])->toBe('https://api.example.com');
+    expect($decoded['base_url'])->toBe(TEST_API_BASE_URL);
 });
 
 test('decodeSettings handles legacy wholesale-encrypted format', function (): void {
@@ -227,10 +232,10 @@ test('getEffectiveConfigForAgent returns tier-1 agent-specific config', function
 
     $userId = Capsule::table('users')->insertGetId([
         'email'    => 'agent-test@example.com',
-        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'password' => password_hash(TEST_USER_PASSWORD, PASSWORD_DEFAULT),
         'registered' => time(),
-        'created_at' => date('Y-m-d H:i:s'),
-        'updated_at' => date('Y-m-d H:i:s'),
+        'created_at' => date(TEST_TIMESTAMP_FORMAT),
+        'updated_at' => date(TEST_TIMESTAMP_FORMAT),
     ]);
 
     $agentConfig = new LLMDriverConfiguration();
@@ -243,7 +248,7 @@ test('getEffectiveConfigForAgent returns tier-1 agent-specific config', function
 
     $userDefault = new LLMDriverConfiguration();
     $userDefault->user_id = $userId;
-    $userDefault->name = 'User Default';
+    $userDefault->name = TEST_USER_DEFAULT_NAME;
     $userDefault->driver_class = OpenAICompatibleDriver::class;
     $userDefault->settings = json_encode([]);
     $userDefault->is_default = true;
@@ -267,15 +272,15 @@ test('getEffectiveConfigForAgent falls back to tier-2 user default when no agent
 
     $userId = Capsule::table('users')->insertGetId([
         'email'    => 'user-default-test@example.com',
-        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'password' => password_hash(TEST_USER_PASSWORD, PASSWORD_DEFAULT),
         'registered' => time(),
-        'created_at' => date('Y-m-d H:i:s'),
-        'updated_at' => date('Y-m-d H:i:s'),
+        'created_at' => date(TEST_TIMESTAMP_FORMAT),
+        'updated_at' => date(TEST_TIMESTAMP_FORMAT),
     ]);
 
     $userDefault = new LLMDriverConfiguration();
     $userDefault->user_id = $userId;
-    $userDefault->name = 'User Default';
+    $userDefault->name = TEST_USER_DEFAULT_NAME;
     $userDefault->driver_class = OpenAICompatibleDriver::class;
     $userDefault->settings = json_encode([]);
     $userDefault->save();
@@ -294,7 +299,7 @@ test('getEffectiveConfigForAgent falls back to tier-2 user default when no agent
 
     expect($result)->not->toBeNull()
         ->and($result->id)->toBe($userDefault->id)
-        ->and($result->name)->toBe('User Default');
+        ->and($result->name)->toBe(TEST_USER_DEFAULT_NAME);
 });
 
 test('getEffectiveConfigForAgent falls back to tier-3 global default when no user default', function (): void {
@@ -303,10 +308,10 @@ test('getEffectiveConfigForAgent falls back to tier-3 global default when no use
 
     $userId = Capsule::table('users')->insertGetId([
         'email'    => 'global-default-test@example.com',
-        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'password' => password_hash(TEST_USER_PASSWORD, PASSWORD_DEFAULT),
         'registered' => time(),
-        'created_at' => date('Y-m-d H:i:s'),
-        'updated_at' => date('Y-m-d H:i:s'),
+        'created_at' => date(TEST_TIMESTAMP_FORMAT),
+        'updated_at' => date(TEST_TIMESTAMP_FORMAT),
     ]);
 
     $globalDefault = new LLMDriverConfiguration();
@@ -336,10 +341,10 @@ test('getEffectiveConfigForAgent returns null when no config at any tier', funct
 
     $userId = Capsule::table('users')->insertGetId([
         'email'    => 'no-config-test@example.com',
-        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'password' => password_hash(TEST_USER_PASSWORD, PASSWORD_DEFAULT),
         'registered' => time(),
-        'created_at' => date('Y-m-d H:i:s'),
-        'updated_at' => date('Y-m-d H:i:s'),
+        'created_at' => date(TEST_TIMESTAMP_FORMAT),
+        'updated_at' => date(TEST_TIMESTAMP_FORMAT),
     ]);
 
     $agent = new Agent();

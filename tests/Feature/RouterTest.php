@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+const ROUTE_TEST_ID = '/test/{id}';
+const ROUTE_BROKEN = '/broken';
+
 use DI\ContainerBuilder;
 use Spora\Core\Router;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -24,8 +27,7 @@ final class RouterTestController
 
     public function updateResource(Request $request, int $id): Response
     {
-        $this->receivedId = $id;
-        return new Response(json_encode(['id' => $id]), Response::HTTP_OK);
+        return $this->getResource($request, $id);
     }
 
     public function deleteResource(Request $request, int $id): JsonResponse
@@ -42,7 +44,7 @@ test('Router passes {id} route variable as method argument to GET handler', func
     $container->set(RouterTestController::class, new RouterTestController());
 
     $router = new Router($container, function (FastRoute\RouteCollector $r): void {
-        $r->addRoute('GET', '/test/{id}', [RouterTestController::class, 'getResource']);
+        $r->addRoute('GET', ROUTE_TEST_ID, [RouterTestController::class, 'getResource']);
     });
 
     $request = Request::create('/test/42', 'GET');
@@ -62,7 +64,7 @@ test('Router passes {id} route variable as method argument to PUT handler', func
     $container->set(RouterTestController::class, new RouterTestController());
 
     $router = new Router($container, function (FastRoute\RouteCollector $r): void {
-        $r->addRoute('PUT', '/test/{id}', [RouterTestController::class, 'updateResource']);
+        $r->addRoute('PUT', ROUTE_TEST_ID, [RouterTestController::class, 'updateResource']);
     });
 
     $request = Request::create('/test/99', 'PUT');
@@ -82,7 +84,7 @@ test('Router passes {id} route variable as method argument to DELETE handler', f
     $container->set(RouterTestController::class, new RouterTestController());
 
     $router = new Router($container, function (FastRoute\RouteCollector $r): void {
-        $r->addRoute('DELETE', '/test/{id}', [RouterTestController::class, 'deleteResource']);
+        $r->addRoute('DELETE', ROUTE_TEST_ID, [RouterTestController::class, 'deleteResource']);
     });
 
     $request = Request::create('/test/7', 'DELETE');
@@ -100,7 +102,7 @@ test('Router dispatches 404 for unknown route', function (): void {
     $container = (new ContainerBuilder())->build();
 
     $router = new Router($container, function (FastRoute\RouteCollector $r): void {
-        $r->addRoute('GET', '/test/{id}', [RouterTestController::class, 'getResource']);
+        $r->addRoute('GET', ROUTE_TEST_ID, [RouterTestController::class, 'getResource']);
     });
 
     $request = Request::create('/unknown', 'GET');
@@ -133,7 +135,7 @@ test('Router dispatches 405 for wrong method', function (): void {
     $container = (new ContainerBuilder())->build();
 
     $router = new Router($container, function (FastRoute\RouteCollector $r): void {
-        $r->addRoute('GET', '/test/{id}', [RouterTestController::class, 'getResource']);
+        $r->addRoute('GET', ROUTE_TEST_ID, [RouterTestController::class, 'getResource']);
     });
 
     $request = Request::create('/test/1', 'POST');
@@ -236,10 +238,10 @@ test('Router throws LogicException when required parameter has no matching route
 
     // Route does NOT declare {id}, but the controller method requires it
     $router = new Router($container, function (FastRoute\RouteCollector $r): void {
-        $r->addRoute('GET', '/broken', [RequiredParamController::class, 'handle']);
+        $r->addRoute('GET', ROUTE_BROKEN, [RequiredParamController::class, 'handle']);
     });
 
-    $request = Request::create('/broken', 'GET');
+    $request = Request::create(ROUTE_BROKEN, 'GET');
 
     expect(fn() => $router->dispatch($request))->toThrow(LogicException::class, 'Required parameter "id"');
 });
@@ -266,10 +268,10 @@ test('Router error message names both the parameter and the controller method', 
     $container->set(RequiredParamController::class, new RequiredParamController());
 
     $router = new Router($container, function (FastRoute\RouteCollector $r): void {
-        $r->addRoute('GET', '/broken', [RequiredParamController::class, 'handle']);
+        $r->addRoute('GET', ROUTE_BROKEN, [RequiredParamController::class, 'handle']);
     });
 
-    $request = Request::create('/broken', 'GET');
+    $request = Request::create(ROUTE_BROKEN, 'GET');
 
     try {
         $router->dispatch($request);

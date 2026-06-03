@@ -21,13 +21,18 @@ use Symfony\Component\Console\Output\NullOutput;
 define('WORKER_TEST_PAST_DUE_AT', '2025-01-01 10:00:00');
 define('WORKER_TEST_FUTURE_DUE_AT', '2099-01-01 10:00:00');
 
+defined('SQLITE_MEMORY') || define('SQLITE_MEMORY', ':memory:');
+const WORKER_TEST_PASSWORD = 'Password1!';
+const DATETIME_FORMAT = 'Y-m-d H:i:s';
+const DAILY_9AM_CRON = '0 9 * * *';
+
 /**
  * @return array{0: WorkerRunCommand, 1: OrchestratorInterface, 2: Database}
  */
 function makeWorkerRunCommand(): array
 {
     Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
     $db->boot();
 
     $orchestrator = Mockery::mock(OrchestratorInterface::class);
@@ -68,14 +73,14 @@ function makeWorkerRunCommand(): array
  * Registers an agent in the same DB that makeWorkerRunCommand() boots.
  * Must be called AFTER makeWorkerRunCommand() so both share the same in-memory DB.
  */
-function registerAgentInWorkerDb($db = null): array
+function registerAgentInWorkerDb(): array
 {
     // Use the already-booted global Capsule (set up by makeWorkerRunCommand).
     // Do NOT call resetBootState() or boot() here — that would create a
     // second in-memory database with a different connection, causing the worker
     // and test assertions to query different databases.
     $authService = bootAuthLayer();
-    $userId = $authService->register('worker-test@example.com', 'Password1!', 'Workertest');
+    $userId = $authService->register('worker-test@example.com', WORKER_TEST_PASSWORD, 'Workertest');
 
     $agent = Agent::create([
         'user_id'   => $userId,
@@ -100,14 +105,14 @@ function runProcessScheduledRuns(WorkerRunCommand $command): int
 
 describe('WorkerRunCommand processScheduledRuns', function (): void {
     it('picks up a PENDING entry that is due and marks it DONE', function (): void {
-        [$command, , $db] = makeWorkerRunCommand();
-        [$userId, $agentId] = registerAgentInWorkerDb($db);
+        [$command] = makeWorkerRunCommand();
+        [$userId, $agentId] = registerAgentInWorkerDb();
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
             'user_id'         => $userId,
             'raw_prompt'      => 'Daily check',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
             'is_active'       => true,
             'next_run_at'     => WORKER_TEST_PAST_DUE_AT,
@@ -117,8 +122,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             'scheduled_run_id' => $run->id,
             'due_at'          => WORKER_TEST_PAST_DUE_AT,
             'status'          => ScheduledRunNext::STATUS_PENDING,
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(DATETIME_FORMAT),
+            'updated_at'      => date(DATETIME_FORMAT),
         ]);
 
         $processed = runProcessScheduledRuns($command);
@@ -132,14 +137,14 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
     });
 
     it('does not pick up a future PENDING entry', function (): void {
-        [$command, , $db] = makeWorkerRunCommand();
-        [$userId, $agentId] = registerAgentInWorkerDb($db);
+        [$command] = makeWorkerRunCommand();
+        [$userId, $agentId] = registerAgentInWorkerDb();
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
             'user_id'         => $userId,
             'raw_prompt'      => 'Future task',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
             'is_active'       => true,
             'next_run_at'     => WORKER_TEST_FUTURE_DUE_AT,
@@ -149,8 +154,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             'scheduled_run_id' => $run->id,
             'due_at'          => WORKER_TEST_FUTURE_DUE_AT,
             'status'          => ScheduledRunNext::STATUS_PENDING,
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(DATETIME_FORMAT),
+            'updated_at'      => date(DATETIME_FORMAT),
         ]);
 
         $processed = runProcessScheduledRuns($command);
@@ -164,14 +169,14 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
     });
 
     it('inserts next PENDING entry after processing a recurring run', function (): void {
-        [$command, , $db] = makeWorkerRunCommand();
-        [$userId, $agentId] = registerAgentInWorkerDb($db);
+        [$command] = makeWorkerRunCommand();
+        [$userId, $agentId] = registerAgentInWorkerDb();
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
             'user_id'         => $userId,
             'raw_prompt'      => 'Recurring task',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
             'is_active'       => true,
             'next_run_at'     => WORKER_TEST_PAST_DUE_AT,
@@ -181,8 +186,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             'scheduled_run_id' => $run->id,
             'due_at'          => WORKER_TEST_PAST_DUE_AT,
             'status'          => ScheduledRunNext::STATUS_PENDING,
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(DATETIME_FORMAT),
+            'updated_at'      => date(DATETIME_FORMAT),
         ]);
 
         $processed = runProcessScheduledRuns($command);
@@ -203,14 +208,14 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
     });
 
     it('computes next_run_at from wall-clock now, not last_run_at, for recurring runs', function (): void {
-        [$command, , $db] = makeWorkerRunCommand();
-        [$userId, $agentId] = registerAgentInWorkerDb($db);
+        [$command] = makeWorkerRunCommand();
+        [$userId, $agentId] = registerAgentInWorkerDb();
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
             'user_id'         => $userId,
             'raw_prompt'      => 'Recurring from last_run',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
             'is_active'       => true,
             'last_run_at'     => '2025-01-01 08:00:00',
@@ -221,8 +226,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             'scheduled_run_id' => $run->id,
             'due_at'          => WORKER_TEST_PAST_DUE_AT,
             'status'          => ScheduledRunNext::STATUS_PENDING,
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(DATETIME_FORMAT),
+            'updated_at'      => date(DATETIME_FORMAT),
         ]);
 
         runProcessScheduledRuns($command);
@@ -236,24 +241,24 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $nextDue = new DateTimeImmutable($nextEntry->due_at, new DateTimeZone('UTC'));
         // next run is computed from wall-clock now, not from last_run_at.
-        // With cron '0 9 * * *' and the current date being past 9 AM,
+        // With cron DAILY_9AM_CRON and the current date being past 9 AM,
         // the next occurrence is tomorrow 09:00 UTC.
         $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
-        $expected = (new CronExpression('0 9 * * *'))
+        $expected = (new CronExpression(DAILY_9AM_CRON))
             ->getNextRunDate($now, 0, false, 'UTC')
             ->setTimezone(new DateTimeZone('UTC'));
         expect($nextDue->format('Y-m-d H:i'))->toBe($expected->format('Y-m-d H:i'));
     });
 
     it('skips PENDING entry for deactivated scheduled runs and marks it SKIPPED', function (): void {
-        [$command, , $db] = makeWorkerRunCommand();
-        [$userId, $agentId] = registerAgentInWorkerDb($db);
+        [$command] = makeWorkerRunCommand();
+        [$userId, $agentId] = registerAgentInWorkerDb();
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
             'user_id'         => $userId,
             'raw_prompt'      => 'Deactivated task',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
             'is_active'       => false,
             'next_run_at'     => WORKER_TEST_PAST_DUE_AT,
@@ -263,8 +268,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             'scheduled_run_id' => $run->id,
             'due_at'          => WORKER_TEST_PAST_DUE_AT,
             'status'          => ScheduledRunNext::STATUS_PENDING,
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(DATETIME_FORMAT),
+            'updated_at'      => date(DATETIME_FORMAT),
         ]);
 
         $processed = runProcessScheduledRuns($command);
@@ -278,14 +283,14 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
     });
 
     it('handles Europe/Berlin timezone correctly — next run is 09:00 Berlin time', function (): void {
-        [$command, , $db] = makeWorkerRunCommand();
-        [$userId, $agentId] = registerAgentInWorkerDb($db);
+        [$command] = makeWorkerRunCommand();
+        [$userId, $agentId] = registerAgentInWorkerDb();
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
             'user_id'         => $userId,
             'raw_prompt'      => 'Berlin daily at 09:00',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'Europe/Berlin',
             'is_active'       => true,
             'last_run_at'     => '2025-01-01 08:00:00',
@@ -296,8 +301,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             'scheduled_run_id' => $run->id,
             'due_at'          => WORKER_TEST_PAST_DUE_AT,
             'status'          => ScheduledRunNext::STATUS_PENDING,
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(DATETIME_FORMAT),
+            'updated_at'      => date(DATETIME_FORMAT),
         ]);
 
         runProcessScheduledRuns($command);
@@ -316,14 +321,14 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
     });
 
     it('only one worker can claim the same PENDING entry — atomic claim prevents double-run', function (): void {
-        [$command, , $db] = makeWorkerRunCommand();
-        [$userId, $agentId] = registerAgentInWorkerDb($db);
+        [$command] = makeWorkerRunCommand();
+        [$userId, $agentId] = registerAgentInWorkerDb();
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
             'user_id'         => $userId,
             'raw_prompt'      => 'Concurrent test',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
             'is_active'       => true,
             'next_run_at'     => WORKER_TEST_PAST_DUE_AT,
@@ -333,8 +338,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             'scheduled_run_id' => $run->id,
             'due_at'          => WORKER_TEST_PAST_DUE_AT,
             'status'          => ScheduledRunNext::STATUS_PENDING,
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(DATETIME_FORMAT),
+            'updated_at'      => date(DATETIME_FORMAT),
         ]);
 
         $p1 = runProcessScheduledRuns($command);
@@ -351,14 +356,14 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
     });
 
     it('worker creates new PENDING entry after processing a past-due recurring run', function (): void {
-        [$command, , $db] = makeWorkerRunCommand();
-        [$userId, $agentId] = registerAgentInWorkerDb($db);
+        [$command] = makeWorkerRunCommand();
+        [$userId, $agentId] = registerAgentInWorkerDb();
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
             'user_id'         => $userId,
             'raw_prompt'      => 'Daily briefing',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
             'is_active'       => true,
             'last_run_at'     => null,
@@ -369,8 +374,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             'scheduled_run_id' => $run->id,
             'due_at'          => WORKER_TEST_PAST_DUE_AT,
             'status'          => ScheduledRunNext::STATUS_PENDING,
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(DATETIME_FORMAT),
+            'updated_at'      => date(DATETIME_FORMAT),
         ]);
 
         $processed = runProcessScheduledRuns($command);
@@ -393,14 +398,14 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
     });
 
     it('marks entry DONE and creates next PENDING atomically — no partial state if DB update fails', function (): void {
-        [$command, , $db] = makeWorkerRunCommand();
-        [$userId, $agentId] = registerAgentInWorkerDb($db);
+        [$command] = makeWorkerRunCommand();
+        [$userId, $agentId] = registerAgentInWorkerDb();
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
             'user_id'         => $userId,
             'raw_prompt'      => 'Atomic test',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
             'is_active'       => true,
             'last_run_at'     => null,
@@ -411,8 +416,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             'scheduled_run_id' => $run->id,
             'due_at'          => WORKER_TEST_PAST_DUE_AT,
             'status'          => ScheduledRunNext::STATUS_PENDING,
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(DATETIME_FORMAT),
+            'updated_at'      => date(DATETIME_FORMAT),
         ]);
 
         // Intercept the Capsule connection to make the UPDATE fail after orchestrator succeeds.
@@ -452,7 +457,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 describe('WorkerRunCommand processQueuedTaskSync', function (): void {
     it('marks task FAILED when orchestrator->tick() throws an exception', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
         $db->boot();
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
@@ -492,7 +497,7 @@ describe('WorkerRunCommand processQueuedTaskSync', function (): void {
 
         // Create agent and task
         $authService = bootAuthLayer();
-        $userId = $authService->register('worker-test@example.com', 'Password1!', 'Workertest');
+        $userId = $authService->register('worker-test@example.com', WORKER_TEST_PASSWORD, 'Workertest');
 
         $agent = Agent::create([
             'user_id'   => $userId,
@@ -527,7 +532,7 @@ describe('WorkerRunCommand processQueuedTaskSync', function (): void {
 describe('WorkerRunCommand --reap-only', function (): void {
     it('exits immediately without processing the queue when --reap-only is set', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
         $db->boot();
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
@@ -555,7 +560,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
         );
 
         $authService = bootAuthLayer();
-        $userId = $authService->register('reaponly-test@example.com', 'Password1!', 'ReapOnlyTest');
+        $userId = $authService->register('reaponly-test@example.com', WORKER_TEST_PASSWORD, 'ReapOnlyTest');
         $agent = Agent::create([
             'user_id'   => $userId,
             'name'      => 'ReapOnlyTestAgent',
@@ -591,7 +596,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
 
     it('calls reapStaleTasks and marks orphaned tasks FAILED in --reap-only mode', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
         $db->boot();
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
@@ -617,7 +622,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
         );
 
         $authService = bootAuthLayer();
-        $userId = $authService->register('reaponly2-test@example.com', 'Password1!', 'ReapOnly2Test');
+        $userId = $authService->register('reaponly2-test@example.com', WORKER_TEST_PASSWORD, 'ReapOnly2Test');
         $agent = Agent::create([
             'user_id'   => $userId,
             'name'      => 'ReapOnly2TestAgent',
@@ -636,7 +641,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
         ]);
         // Override updated_at directly so Eloquent doesn't refresh it on save().
         Task::where('id', $orphanedTask->id)->update([
-            'updated_at' => date('Y-m-d H:i:s', strtotime('-10 minutes')),
+            'updated_at' => date(DATETIME_FORMAT, strtotime('-10 minutes')),
         ]);
 
         // Explicit --stale-minutes=1 so the test overrides the CLI default of 60.

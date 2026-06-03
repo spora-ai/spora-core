@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+const TEMPLATE_TEST_PASSWORD = 'Password1!';
+
 use Spora\Auth\AuthService;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
@@ -25,7 +27,7 @@ function makePromptTemplateController(): array
 
 function registerAndGetAgentId(AuthService $authService): array
 {
-    $userId = $authService->register('template@example.com', 'Password1!', 'Template');
+    $userId = $authService->register('template@example.com', TEMPLATE_TEST_PASSWORD, 'Template');
     simulateLoggedInSession($userId, 'template@example.com');
 
     $agent = Agent::create([
@@ -40,7 +42,7 @@ function registerAndGetAgentId(AuthService $authService): array
 
 describe('PromptTemplateController', function (): void {
     it('index returns templates for the authenticated user agent', function (): void {
-        [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
+        [, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
         AgentPromptTemplate::create([
             'agent_id' => $agentId,
@@ -66,7 +68,7 @@ describe('PromptTemplateController', function (): void {
     });
 
     it('index returns empty array when agent has no templates', function (): void {
-        [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
+        [, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
         [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('GET', "/api/v1/agents/{$agentId}/templates");
@@ -80,8 +82,8 @@ describe('PromptTemplateController', function (): void {
 
     it('index returns 404 for agent belonging to another user', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('owner@example.com', 'Password1!', 'Owner');
-        $otherUserId = bootAuthLayer()->register('other@example.com', 'Password1!', 'Other');
+        $userId = $authService->register('owner@example.com', TEMPLATE_TEST_PASSWORD, 'Owner');
+        $otherUserId = bootAuthLayer()->register('other@example.com', TEMPLATE_TEST_PASSWORD, 'Other');
         simulateLoggedInSession($otherUserId, 'other@example.com');
 
         $agent = Agent::create([
@@ -100,7 +102,7 @@ describe('PromptTemplateController', function (): void {
     });
 
     it('store creates a new template', function (): void {
-        [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
+        [, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
         [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/templates", [
@@ -123,7 +125,7 @@ describe('PromptTemplateController', function (): void {
     });
 
     it('store returns 422 when name is missing', function (): void {
-        [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
+        [, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
         [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/templates", [
@@ -136,7 +138,7 @@ describe('PromptTemplateController', function (): void {
     });
 
     it('store returns 422 when prompt_template is missing', function (): void {
-        [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
+        [, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
         [$controller, , , $authMiddleware] = makePromptTemplateController();
         $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/templates", [
@@ -149,7 +151,7 @@ describe('PromptTemplateController', function (): void {
     });
 
     it('show returns a single template', function (): void {
-        [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
+        [, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
         $template = AgentPromptTemplate::create([
             'agent_id' => $agentId,
@@ -195,7 +197,7 @@ describe('PromptTemplateController', function (): void {
     });
 
     it('update modifies a template', function (): void {
-        [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
+        [, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
         $template = AgentPromptTemplate::create([
             'agent_id' => $agentId,
@@ -221,7 +223,7 @@ describe('PromptTemplateController', function (): void {
     });
 
     it('destroy deletes a template', function (): void {
-        [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
+        [, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
         $template = AgentPromptTemplate::create([
             'agent_id' => $agentId,

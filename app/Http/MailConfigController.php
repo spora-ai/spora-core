@@ -35,9 +35,8 @@ final class MailConfigController
         private readonly array $config = [],
     ) {}
 
-    public function index(Request $request, array $vars = []): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-
         $mailConfig = [
             'driver'       => $this->config['mail_driver']     ?? 'php_mail',
             'host'         => $this->config['mail_host']       ?? null,
@@ -59,9 +58,8 @@ final class MailConfigController
         ], Response::HTTP_OK);
     }
 
-    public function update(Request $request, array $vars = []): JsonResponse
+    public function update(Request $request): JsonResponse
     {
-
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
@@ -106,9 +104,8 @@ final class MailConfigController
         ], Response::HTTP_OK);
     }
 
-    public function test(Request $request, array $vars = []): JsonResponse
+    public function test(Request $request): JsonResponse
     {
-
         $currentUserEmail = $this->authService->currentUserEmail();
 
         if ($currentUserEmail === null) {

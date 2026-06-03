@@ -26,6 +26,10 @@ final class AuthController
     private const RATE_LIMIT_MAX_ATTEMPTS = 5;
     private const RATE_LIMIT_WINDOW_SECONDS = 60;
 
+    private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
+    private const MSG_AUTHENTICATION_REQUIRED = 'Authentication required.';
+    private const MSG_EMAIL_REQUIRED = 'The field "email" is required.';
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly UserServiceInterface $userService,
@@ -33,7 +37,7 @@ final class AuthController
         private readonly array $config = [],
     ) {}
 
-    public function register(Request $request, array $vars = []): JsonResponse
+    public function register(Request $request): JsonResponse
     {
         $clientIp = $this->getClientIp($request);
 
@@ -48,7 +52,7 @@ final class AuthController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         if ($this->missingFields($body, ['email', 'password', 'display_name', 'confirm_password'])) {
@@ -81,7 +85,7 @@ final class AuthController
         );
     }
 
-    public function login(Request $request, array $vars = []): JsonResponse
+    public function login(Request $request): JsonResponse
     {
         $clientIp = $this->getClientIp($request);
 
@@ -92,7 +96,7 @@ final class AuthController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         if ($this->missingFields($body, ['email', 'password'])) {
@@ -125,7 +129,7 @@ final class AuthController
         );
     }
 
-    public function logout(Request $request, array $vars = []): JsonResponse
+    public function logout(): JsonResponse
     {
         $this->csrfService->invalidate();
         $this->authService->logout();
@@ -136,12 +140,12 @@ final class AuthController
         return $response;
     }
 
-    public function me(Request $request, array $vars = []): JsonResponse
+    public function me(): JsonResponse
     {
         $userId = $this->authService->currentUserId();
 
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
         }
 
         $result = $this->userService->getUser($userId);
@@ -167,17 +171,17 @@ final class AuthController
         );
     }
 
-    public function password(Request $request, array $vars = []): JsonResponse
+    public function password(Request $request): JsonResponse
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
         }
 
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         if ($this->missingFields($body, ['current_password', 'new_password'])) {
@@ -187,7 +191,7 @@ final class AuthController
         try {
             $this->authService->changePassword((string) $body['current_password'], (string) $body['new_password']);
         } catch (\Delight\Auth\NotLoggedInException) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
         } catch (\Delight\Auth\InvalidPasswordException) {
             return $this->error('INVALID_PASSWORD', 'The new password does not meet the minimum requirements.', Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (\Delight\Auth\AuthError) {
@@ -197,17 +201,17 @@ final class AuthController
         return new JsonResponse(['message' => 'Password updated'], Response::HTTP_OK);
     }
 
-    public function account(Request $request, array $vars = []): JsonResponse
+    public function account(Request $request): JsonResponse
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
         }
 
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         $result = $this->userService->updateUser($userId, $body);
@@ -221,7 +225,7 @@ final class AuthController
         );
     }
 
-    public function verify(Request $request, string $selector, array $vars = []): JsonResponse
+    public function verify(Request $request, string $selector): JsonResponse
     {
         $token = $request->query->get('token', '');
 
@@ -255,11 +259,11 @@ final class AuthController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         if ($this->missingFields($body, ['email'])) {
-            return $this->error('VALIDATION_ERROR', 'The field "email" is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->error('VALIDATION_ERROR', self::MSG_EMAIL_REQUIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         $this->authService->forgotPassword((string) $body['email']);
@@ -275,7 +279,7 @@ final class AuthController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         if ($this->missingFields($body, ['selector', 'token', 'password'])) {
@@ -310,11 +314,11 @@ final class AuthController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         if ($this->missingFields($body, ['email'])) {
-            return $this->error('VALIDATION_ERROR', 'The field "email" is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->error('VALIDATION_ERROR', self::MSG_EMAIL_REQUIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         try {
@@ -334,17 +338,17 @@ final class AuthController
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
         }
 
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         if ($this->missingFields($body, ['email'])) {
-            return $this->error('VALIDATION_ERROR', 'The field "email" is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->error('VALIDATION_ERROR', self::MSG_EMAIL_REQUIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         try {
@@ -356,7 +360,7 @@ final class AuthController
         } catch (\Delight\Auth\EmailNotVerifiedException) {
             return $this->error('EMAIL_NOT_VERIFIED', 'You must verify your current email address before changing it.', Response::HTTP_FORBIDDEN);
         } catch (\Delight\Auth\NotLoggedInException) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
         } catch (\Delight\Auth\AuthError) {
             return $this->error('AUTH_ERROR', 'An authentication error occurred.', Response::HTTP_INTERNAL_SERVER_ERROR);
         }
@@ -369,7 +373,7 @@ final class AuthController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         if ($this->missingFields($body, ['selector', 'token'])) {

@@ -26,6 +26,11 @@ use Symfony\Component\Console\Tester\CommandTester;
 
 // Helpers
 
+defined('SQLITE_MEMORY') || define('SQLITE_MEMORY', ':memory:');
+const PLUGINS_PATH = '/plugins';
+const TEST_PASSWORD_RUN = 'Password1!';
+const TEST_GLOBAL_CONFIG_NAME = 'Test Global Config';
+
 /**
  * Create a mock LLM driver that returns a text response.
  */
@@ -63,13 +68,13 @@ function makeThrowingDriver(Throwable $e): LLMDriverInterface
 describe('TaskRunCommand — task claiming', function (): void {
     beforeEach(function (): void {
         $this->authService = bootAuthLayer();
-        $this->userId = $this->authService->register('taskrun@example.com', 'Password1!', 'Taskrun');
+        $this->userId = $this->authService->register('taskrun@example.com', TEST_PASSWORD_RUN, 'Taskrun');
         simulateLoggedInSession($this->userId, 'taskrun@example.com');
 
         $this->container = Mockery::mock(ContainerInterface::class);
         $this->container->allows('get')->with('config')->andReturn([
             'db_driver' => 'sqlite',
-            'db_path' => ':memory:',
+            'db_path' => SQLITE_MEMORY,
             'worker_mode' => true,
             'llm_timeout' => 300,
         ]);
@@ -86,7 +91,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         // Create a global LLM config for tests (tests mock the DriverFactory, so credentials don't matter)
         $this->llmConfig = LLMDriverConfiguration::create([
             'user_id'       => null,
-            'name'          => 'Test Global Config',
+            'name'          => TEST_GLOBAL_CONFIG_NAME,
             'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
             'settings'      => json_encode(['api_key' => 'test']),
             'is_global'     => true,
@@ -114,15 +119,15 @@ describe('TaskRunCommand — task claiming', function (): void {
         ]);
 
         $db = new Database(
-            ['db_driver' => 'sqlite', 'db_path' => ':memory:'],
-            new Spora\Plugins\PluginLoader(BASE_PATH . '/plugins'),
+            ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
+            new Spora\Plugins\PluginLoader(BASE_PATH . PLUGINS_PATH),
         );
         $db->bootDatabaseConnectionOnly();
 
         $container = Mockery::mock(ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn([
             'db_driver' => 'sqlite',
-            'db_path' => ':memory:',
+            'db_path' => SQLITE_MEMORY,
         ]);
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(NotificationService::class)->andReturn(
@@ -148,8 +153,6 @@ describe('TaskRunCommand — task claiming', function (): void {
         $nullFactory->allows('makeFromAgent')->andReturn($nullDriver);
         $container->allows('get')->with(DriverFactory::class)->andReturn($nullFactory);
         $container->allows('get')->with('tool_instances')->andReturn([]);
-
-        $command = new TaskRunCommand($db, $container, $container->get(MercurePublisherInterface::class));
 
         // Simulate what execute() does at the task claim step.
         $taskId = $task->id;
@@ -192,8 +195,8 @@ describe('TaskRunCommand — task claiming', function (): void {
         ]);
 
         $db = new Database(
-            ['db_driver' => 'sqlite', 'db_path' => ':memory:'],
-            new Spora\Plugins\PluginLoader(BASE_PATH . '/plugins'),
+            ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
+            new Spora\Plugins\PluginLoader(BASE_PATH . PLUGINS_PATH),
         );
         $db->bootDatabaseConnectionOnly();
 
@@ -204,7 +207,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container = Mockery::mock(ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn([
             'db_driver' => 'sqlite',
-            'db_path' => ':memory:',
+            'db_path' => SQLITE_MEMORY,
         ]);
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(DriverFactory::class)->andReturn($factory);
@@ -230,7 +233,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $tester->execute(['taskId' => $task->id]);
 
         if ($tester->getStatusCode() !== 0) {
-            throw new Exception($tester->getDisplay());
+            throw new RuntimeException($tester->getDisplay());
         } expect($tester->getStatusCode())->toBe(0);
 
         $task->refresh();
@@ -255,8 +258,8 @@ describe('TaskRunCommand — task claiming', function (): void {
         ]);
 
         $db = new Database(
-            ['db_driver' => 'sqlite', 'db_path' => ':memory:'],
-            new Spora\Plugins\PluginLoader(BASE_PATH . '/plugins'),
+            ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
+            new Spora\Plugins\PluginLoader(BASE_PATH . PLUGINS_PATH),
         );
         $db->bootDatabaseConnectionOnly();
 
@@ -277,7 +280,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container = Mockery::mock(ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn([
             'db_driver' => 'sqlite',
-            'db_path' => ':memory:',
+            'db_path' => SQLITE_MEMORY,
         ]);
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(DriverFactory::class)->andReturn($nullFactory);
@@ -288,8 +291,6 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container->allows('get')->with(MercurePublisherInterface::class)->andReturn(
             Mockery::mock(MercurePublisherInterface::class),
         );
-
-        $command = new TaskRunCommand($db, $container, $container->get(MercurePublisherInterface::class));
 
         $taskId = $task->id;
         $claimedTask = Capsule::connection()->transaction(function () use ($taskId): ?Task {
@@ -318,13 +319,13 @@ describe('TaskRunCommand — task claiming', function (): void {
 describe('TaskRunCommand — orchestrator integration', function (): void {
     beforeEach(function (): void {
         $this->authService = bootAuthLayer();
-        $this->userId = $this->authService->register('taskrun3@example.com', 'Password1!', 'Taskrun3');
+        $this->userId = $this->authService->register('taskrun3@example.com', TEST_PASSWORD_RUN, 'Taskrun3');
         simulateLoggedInSession($this->userId, 'taskrun3@example.com');
 
         // Create a global LLM config for tests (tests mock the DriverFactory, so credentials don't matter)
         $this->llmConfig = LLMDriverConfiguration::create([
             'user_id'       => null,
-            'name'          => 'Test Global Config',
+            'name'          => TEST_GLOBAL_CONFIG_NAME,
             'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
             'settings'      => json_encode(['api_key' => 'test']),
             'is_global'     => true,
@@ -353,8 +354,8 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         ]);
 
         $db = new Database(
-            ['db_driver' => 'sqlite', 'db_path' => ':memory:'],
-            new Spora\Plugins\PluginLoader(BASE_PATH . '/plugins'),
+            ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
+            new Spora\Plugins\PluginLoader(BASE_PATH . PLUGINS_PATH),
         );
         $db->bootDatabaseConnectionOnly();
 
@@ -375,7 +376,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         $container = Mockery::mock(ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn([
             'db_driver' => 'sqlite',
-            'db_path' => ':memory:',
+            'db_path' => SQLITE_MEMORY,
         ]);
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(DriverFactory::class)->andReturn($factory);
@@ -402,7 +403,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         // Create a global LLM config in the same DB the agent will use
         $llmConfig = LLMDriverConfiguration::create([
             'user_id'       => null,
-            'name'          => 'Test Global Config',
+            'name'          => TEST_GLOBAL_CONFIG_NAME,
             'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
             'settings'      => json_encode(['api_key' => 'test']),
             'is_global'     => true,
@@ -429,8 +430,8 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         ]);
 
         $db = new Database(
-            ['db_driver' => 'sqlite', 'db_path' => ':memory:'],
-            new Spora\Plugins\PluginLoader(BASE_PATH . '/plugins'),
+            ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
+            new Spora\Plugins\PluginLoader(BASE_PATH . PLUGINS_PATH),
         );
         $db->bootDatabaseConnectionOnly();
 
@@ -465,12 +466,12 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
 describe('TaskRunCommand — tool config injection', function (): void {
     beforeEach(function (): void {
         $this->authService = bootAuthLayer();
-        $this->userId = $this->authService->register('toolconfig@example.com', 'Password1!', 'ToolConfig');
+        $this->userId = $this->authService->register('toolconfig@example.com', TEST_PASSWORD_RUN, 'ToolConfig');
 
         // Create a global LLM config
         $this->llmConfig = LLMDriverConfiguration::create([
             'user_id'       => null,
-            'name'          => 'Test Global Config',
+            'name'          => TEST_GLOBAL_CONFIG_NAME,
             'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
             'settings'      => json_encode(['api_key' => 'test']),
             'is_global'     => true,

@@ -16,6 +16,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class UserProfileController
 {
+    private const ERR_INVALID_JSON_MESSAGE = 'Request body must be valid JSON.';
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly UserServiceInterface $userService,
@@ -45,7 +47,7 @@ final class UserProfileController
             $body = $this->decodeJson($request);
         } catch (JsonException) {
             return new JsonResponse(
-                ['error' => ['code' => 'INVALID_JSON', 'message' => 'Request body must be valid JSON.']],
+                ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON_MESSAGE]],
                 Response::HTTP_BAD_REQUEST,
             );
         }
@@ -75,19 +77,14 @@ final class UserProfileController
             $body = $this->decodeJson($request);
         } catch (JsonException) {
             return new JsonResponse(
-                ['error' => ['code' => 'INVALID_JSON', 'message' => 'Request body must be valid JSON.']],
+                ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON_MESSAGE]],
                 Response::HTTP_BAD_REQUEST,
             );
         }
 
-        $name = trim((string) ($body['name'] ?? ''));
-        if ($name === '') {
-            return new JsonResponse(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'name is required.']], 422);
-        }
-
-        $address = trim((string) ($body['address'] ?? ''));
-        if ($address === '') {
-            return new JsonResponse(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'address is required.']], 422);
+        $validationError = $this->validateLocationFields($body, true);
+        if ($validationError !== null) {
+            return $validationError;
         }
 
         $result = $this->userService->createLocation($userId, $body);
@@ -105,23 +102,14 @@ final class UserProfileController
             $body = $this->decodeJson($request);
         } catch (JsonException) {
             return new JsonResponse(
-                ['error' => ['code' => 'INVALID_JSON', 'message' => 'Request body must be valid JSON.']],
+                ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON_MESSAGE]],
                 Response::HTTP_BAD_REQUEST,
             );
         }
 
-        if (isset($body['name'])) {
-            $name = trim((string) $body['name']);
-            if ($name === '') {
-                return new JsonResponse(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'name is required and cannot be empty.']], 422);
-            }
-        }
-
-        if (isset($body['address'])) {
-            $address = trim((string) $body['address']);
-            if ($address === '') {
-                return new JsonResponse(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'address is required and cannot be empty.']], 422);
-            }
+        $validationError = $this->validateLocationFields($body, false);
+        if ($validationError !== null) {
+            return $validationError;
         }
 
         $result = $this->userService->updateLocation($id, $userId, $body);
@@ -155,5 +143,46 @@ final class UserProfileController
         }
 
         return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * Validate name/address fields. Returns a JsonResponse on the first violation, or null if valid.
+     *
+     * @param bool $requireBoth when true (POST), both fields are required; when false (PUT), only present fields are checked
+     */
+    private function validateLocationFields(array $body, bool $requireBoth): ?JsonResponse
+    {
+        $result = null;
+        if (isset($body['name'])) {
+            $name = trim((string) $body['name']);
+            if ($name === '') {
+                $result = new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $requireBoth ? 'name is required.' : 'name is required and cannot be empty.']],
+                    422,
+                );
+            }
+        } elseif ($requireBoth) {
+            $result = new JsonResponse(
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'name is required.']],
+                422,
+            );
+        }
+
+        if ($result === null && isset($body['address'])) {
+            $address = trim((string) $body['address']);
+            if ($address === '') {
+                $result = new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $requireBoth ? 'address is required.' : 'address is required and cannot be empty.']],
+                    422,
+                );
+            }
+        } elseif ($result === null && $requireBoth) {
+            $result = new JsonResponse(
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'address is required.']],
+                422,
+            );
+        }
+
+        return $result;
     }
 }

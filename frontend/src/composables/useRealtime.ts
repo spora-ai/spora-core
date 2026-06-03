@@ -15,7 +15,7 @@ import { useAgentStore } from '@/stores/agent'
 import { api } from '@/api/client'
 
 let globalEventSource: EventSource | null = null
-let globalConnected = ref(false)
+const globalConnected = ref(false)
 
 export { globalConnected }
 
@@ -68,13 +68,11 @@ export function useRealtime() {
 
       // Fetch auth token and subscribe to user-specific notification topic
       const authResponse = await api.get<{ hubUrl: string; token: string }>('/sse/auth')
-      const userId = authStore.user!.id
+      const userId = authStore.user.id
 
       // Support both relative (/path) and absolute (http://host/path) hubUrl
-      const baseUrl = authResponse.hubUrl.startsWith('/')
-        ? authResponse.hubUrl
-        : authResponse.hubUrl
-      const url = new URL(baseUrl, window.location.origin)
+      const baseUrl = authResponse.hubUrl
+      const url = new URL(baseUrl, globalThis.location.origin)
 
       // append() adds both topics (set() overwrites the first one)
       url.searchParams.append('topic', `user/${userId}/tasks`)
@@ -90,22 +88,22 @@ export function useRealtime() {
           // The task id is inside the payload — either `task_id` (explicit publish)
           // or `id` (from taskResource()). Both are supported.
           type MercureTaskPayload = { task_id?: number; id?: number }
-          const innerData = data.data as Record<string, unknown>
+          const innerData = data.data
           const taskId = (innerData as unknown as MercureTaskPayload).task_id
             ?? (innerData as { id?: number }).id
-          if (taskId !== undefined) {
-            // Task event on user/{userId}/tasks — use targeted update
-            taskStore.applyTaskUpdate(taskId, innerData)
-            // Also update agentStore task list so AgentPage can skip polling
-            agentStore.applySseTaskEvent(innerData)
-            taskStore.applySseEventToTasks(innerData)
-          } else {
+          if (taskId === undefined) {
             // Notification event on user/{userId}/notifications
             type MercureNotificationPayload = { notification: Parameters<typeof notificationStore.prependFromSSE>[0] }
             const payload = data.data as unknown as MercureNotificationPayload
             if (payload.notification) {
               notificationStore.prependFromSSE(payload.notification)
             }
+          } else {
+            // Task event on user/{userId}/tasks — use targeted update
+            taskStore.applyTaskUpdate(taskId, innerData)
+            // Also update agentStore task list so AgentPage can skip polling
+            agentStore.applySseTaskEvent(innerData)
+            taskStore.applySseEventToTasks(innerData)
           }
         }
       }

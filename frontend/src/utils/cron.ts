@@ -65,26 +65,26 @@ export function parseCron(
   if (parts.length !== 5) return { frequency: 'custom', fields: null }
 
   const [minute, hour, dayOfMonth, , dayOfWeek] = parts
-  const min = parseInt(minute, 10)
-  const hr = parseInt(hour, 10)
+  const min = Number.parseInt(minute, 10)
+  const hr = Number.parseInt(hour, 10)
 
   const validate = (result: { frequency: Frequency; fields: any }) => {
     if (result.fields && !Object.values(result.fields).every((v) => Number.isFinite(v))) {
       return { frequency: 'custom', fields: null } as const
     }
-    return result as { frequency: Frequency; fields: any }
+    return result
   }
 
   // Hourly: M H-E/X * * *  OR  M * * * * (every hour)
-  const hourlyMatch = hour.match(/^(\d+)-(\d+)\/(\d+)$/)
+  const hourlyMatch = /^(\d+)-(\d+)\/(\d+)$/.exec(hour)
   if (dayOfMonth === '*' && dayOfWeek === '*') {
     if (hourlyMatch) {
       return validate({
         frequency: 'hourly',
         fields: {
-          interval: parseInt(hourlyMatch[3], 10),
-          startHour: parseInt(hourlyMatch[1], 10),
-          endHour: parseInt(hourlyMatch[2], 10),
+          interval: Number.parseInt(hourlyMatch[3], 10),
+          startHour: Number.parseInt(hourlyMatch[1], 10),
+          endHour: Number.parseInt(hourlyMatch[2], 10),
           minute: min,
         },
       })
@@ -98,12 +98,12 @@ export function parseCron(
   }
 
   // Daily: M H */X * *
-  const dailyMatch = dayOfMonth.match(/^\*\/(\d+)$/)
+  const dailyMatch = /^\*\/(\d+)$/.exec(dayOfMonth)
   if (dailyMatch && hour !== '*' && dayOfWeek === '*') {
     return validate({
       frequency: 'daily',
       fields: {
-        interval: parseInt(dailyMatch[1], 10),
+        interval: Number.parseInt(dailyMatch[1], 10),
         hour: hr,
         minute: min,
       },
@@ -115,7 +115,7 @@ export function parseCron(
     return validate({
       frequency: 'weekly',
       fields: {
-        day: parseInt(dayOfWeek, 10),
+        day: Number.parseInt(dayOfWeek, 10),
         hour: hr,
         minute: min,
       },
@@ -127,7 +127,7 @@ export function parseCron(
     return validate({
       frequency: 'monthly',
       fields: {
-        day: parseInt(dayOfMonth, 10),
+        day: Number.parseInt(dayOfMonth, 10),
         hour: hr,
         minute: min,
       },

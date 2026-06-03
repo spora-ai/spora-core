@@ -152,6 +152,37 @@ final class PluginLoader
             return; // unreadable file — filesystem issue, not a manifest error
         }
 
+        $manifest = $this->parseAndValidateManifest($raw, $manifestFile);
+        $slug     = $manifest['slug'];
+        $fqcn     = $manifest['class'];
+        $pluginDir = dirname($manifestFile);
+
+        $this->registerManifestAutoload($manifest, $classLoader, $pluginDir);
+
+        // Resolve the file to load: explicit "file" key in manifest, or conventional Plugin.php.
+        // Skipped entirely when the class is already available via PSR-4 autoloading above.
+        $fileToRequire = isset($manifest['file']) && is_string($manifest['file'])
+            ? $pluginDir . '/' . ltrim($manifest['file'], '/')
+            : $pluginDir . '/Plugin.php';
+
+        if (is_file($fileToRequire)) {
+            require_once $fileToRequire;
+        }
+
+        $this->instantiatePlugin($slug, $fqcn, $classLoader);
+    }
+
+    /**
+     * Decodes and structurally validates the manifest. Returns the full manifest array
+     * (preserving autoload, file, and other optional fields) so callers can read them
+     * after the required slug/class fields have been verified.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws RuntimeException
+     */
+    private function parseAndValidateManifest(string $raw, string $manifestFile): array
+    {
         $manifest = json_decode($raw, true);
 
         if (!is_array($manifest)) {
@@ -184,9 +215,14 @@ final class PluginLoader
             );
         }
 
-        $fqcn      = $manifest['class'];
-        $pluginDir = dirname($manifestFile);
+        return $manifest;
+    }
 
+    /**
+     * @param array<string, mixed> $manifest
+     */
+    private function registerManifestAutoload(array $manifest, ?\Composer\Autoload\ClassLoader $classLoader, string $pluginDir): void
+    {
         // Register PSR-4 autoload mappings declared in the manifest before require_once.
         if ($classLoader !== null && isset($manifest['autoload']['psr-4']) && is_array($manifest['autoload']['psr-4'])) {
             foreach ($manifest['autoload']['psr-4'] as $namespace => $relativePath) {
@@ -203,18 +239,6 @@ final class PluginLoader
                 }
             }
         }
-
-        // Resolve the file to load: explicit "file" key in manifest, or conventional Plugin.php.
-        // Skipped entirely when the class is already available via PSR-4 autoloading above.
-        $fileToRequire = isset($manifest['file']) && is_string($manifest['file'])
-            ? $pluginDir . '/' . ltrim($manifest['file'], '/')
-            : $pluginDir . '/Plugin.php';
-
-        if (is_file($fileToRequire)) {
-            require_once $fileToRequire;
-        }
-
-        $this->instantiatePlugin($slug, $fqcn, $classLoader);
     }
 
     private function instantiatePlugin(string $slug, string $fqcn, ?\Composer\Autoload\ClassLoader $classLoader): void

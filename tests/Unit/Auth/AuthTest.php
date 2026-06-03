@@ -2,6 +2,14 @@
 
 declare(strict_types=1);
 
+const REGISTER_URL = '/api/v1/auth/register';
+const LOGIN_URL = '/api/v1/auth/login';
+const ME_URL = '/api/v1/auth/me';
+defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
+const ALICE_EMAIL = 'alice@example.com';
+const EVE_EMAIL = 'eve@example.com';
+const GRACE_EMAIL = 'grace@example.com';
+
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Http\AuthController;
 use Spora\Services\RateLimiter;
@@ -40,10 +48,10 @@ test('register happy path returns 201 with user data and creates DB row', functi
     clearSession();
     [$controller] = makeAuthController();
 
-    $request  = jsonRequest('POST', '/api/v1/auth/register', [
-        'email'    => 'alice@example.com',
-        'password' => 'Password1!',
-        'confirm_password' => 'Password1!',
+    $request  = jsonRequest('POST', REGISTER_URL, [
+        'email'    => ALICE_EMAIL,
+        'password' => TEST_PASSWORD,
+        'confirm_password' => TEST_PASSWORD,
         'display_name' => 'Alice',
     ]);
     $response = $controller->register($request);
@@ -53,26 +61,26 @@ test('register happy path returns 201 with user data and creates DB row', functi
     $body = json_decode($response->getContent(), true);
     expect($body)->toHaveKey('data');
     expect($body['data']['user'])->toHaveKey('id');
-    expect($body['data']['user']['email'])->toBe('alice@example.com');
+    expect($body['data']['user']['email'])->toBe(ALICE_EMAIL);
 
     // Verify the row is in the users table
     $userId = $body['data']['user']['id'];
     $row    = Capsule::table('users')->where('id', $userId)->first();
     expect($row)->not()->toBeNull();
-    expect($row->email)->toBe('alice@example.com');
+    expect($row->email)->toBe(ALICE_EMAIL);
 });
 
 test('register duplicate email returns 409 EMAIL_TAKEN', function (): void {
     clearSession();
     [$controller] = makeAuthController();
 
-    $payload = ['email' => 'bob@example.com', 'password' => 'Password1!', 'confirm_password' => 'Password1!', 'display_name' => 'Bob'];
+    $payload = ['email' => 'bob@example.com', 'password' => TEST_PASSWORD, 'confirm_password' => TEST_PASSWORD, 'display_name' => 'Bob'];
 
     // First registration succeeds
-    $controller->register(jsonRequest('POST', '/api/v1/auth/register', $payload));
+    $controller->register(jsonRequest('POST', REGISTER_URL, $payload));
 
     // Second registration with same email should fail
-    $response = $controller->register(jsonRequest('POST', '/api/v1/auth/register', $payload));
+    $response = $controller->register(jsonRequest('POST', REGISTER_URL, $payload));
 
     expect($response->getStatusCode())->toBe(409);
 
@@ -84,9 +92,9 @@ test('register with allow_registration=false returns 403 REGISTRATION_DISABLED',
     clearSession();
     [$controller] = makeAuthController(['allow_registration' => false]);
 
-    $response = $controller->register(jsonRequest('POST', '/api/v1/auth/register', [
+    $response = $controller->register(jsonRequest('POST', REGISTER_URL, [
         'email'    => 'carol@example.com',
-        'password' => 'Password1!',
+        'password' => TEST_PASSWORD,
         'display_name' => 'Carol',
     ]));
 
@@ -100,9 +108,9 @@ test('register with missing email returns 422 VALIDATION_ERROR', function (): vo
     clearSession();
     [$controller] = makeAuthController();
 
-    $response = $controller->register(jsonRequest('POST', '/api/v1/auth/register', [
-        'password' => 'Password1!',
-        'confirm_password' => 'Password1!',
+    $response = $controller->register(jsonRequest('POST', REGISTER_URL, [
+        'password' => TEST_PASSWORD,
+        'confirm_password' => TEST_PASSWORD,
         'display_name' => 'Dave',
     ]));
 
@@ -115,9 +123,9 @@ test('register with missing password returns 422 VALIDATION_ERROR', function ():
     clearSession();
     [$controller] = makeAuthController();
 
-    $response = $controller->register(jsonRequest('POST', '/api/v1/auth/register', [
+    $response = $controller->register(jsonRequest('POST', REGISTER_URL, [
         'email' => 'dave@example.com',
-        'confirm_password' => 'Password1!',
+        'confirm_password' => TEST_PASSWORD,
         'display_name' => 'Dave',
     ]));
 
@@ -130,10 +138,10 @@ test('register with missing display_name returns 422 VALIDATION_ERROR', function
     clearSession();
     [$controller] = makeAuthController();
 
-    $response = $controller->register(jsonRequest('POST', '/api/v1/auth/register', [
-        'email' => 'eve@example.com',
-        'password' => 'Password1!',
-        'confirm_password' => 'Password1!',
+    $response = $controller->register(jsonRequest('POST', REGISTER_URL, [
+        'email' => EVE_EMAIL,
+        'password' => TEST_PASSWORD,
+        'confirm_password' => TEST_PASSWORD,
     ]));
 
     expect($response->getStatusCode())->toBe(422);
@@ -145,9 +153,9 @@ test('register with missing confirm_password returns 422 VALIDATION_ERROR', func
     clearSession();
     [$controller] = makeAuthController();
 
-    $response = $controller->register(jsonRequest('POST', '/api/v1/auth/register', [
-        'email' => 'eve@example.com',
-        'password' => 'Password1!',
+    $response = $controller->register(jsonRequest('POST', REGISTER_URL, [
+        'email' => EVE_EMAIL,
+        'password' => TEST_PASSWORD,
         'display_name' => 'Eve',
     ]));
 
@@ -160,9 +168,9 @@ test('register with mismatched passwords returns 422 VALIDATION_ERROR', function
     clearSession();
     [$controller] = makeAuthController();
 
-    $response = $controller->register(jsonRequest('POST', '/api/v1/auth/register', [
+    $response = $controller->register(jsonRequest('POST', REGISTER_URL, [
         'email' => 'mismatch@example.com',
-        'password' => 'Password1!',
+        'password' => TEST_PASSWORD,
         'confirm_password' => 'DifferentPass1!',
         'display_name' => 'Mismatch',
     ]));
@@ -180,19 +188,19 @@ test('login happy path returns 200 with user data', function (): void {
     [$controller, $service] = makeAuthController();
 
     // Register the user first
-    $service->register('eve@example.com', 'Password1!', 'Eve');
+    $service->register(EVE_EMAIL, TEST_PASSWORD, 'Eve');
     clearSession();
 
-    $response = $controller->login(jsonRequest('POST', '/api/v1/auth/login', [
-        'email'    => 'eve@example.com',
-        'password' => 'Password1!',
+    $response = $controller->login(jsonRequest('POST', LOGIN_URL, [
+        'email'    => EVE_EMAIL,
+        'password' => TEST_PASSWORD,
     ]));
 
     expect($response->getStatusCode())->toBe(200);
 
     $body = json_decode($response->getContent(), true);
     expect($body)->toHaveKey('data');
-    expect($body['data']['user']['email'])->toBe('eve@example.com');
+    expect($body['data']['user']['email'])->toBe(EVE_EMAIL);
     expect($body['data']['user'])->toHaveKey('id');
     expect($body['data']['user'])->toHaveKey('username');
 });
@@ -201,10 +209,10 @@ test('login with wrong password returns 401 INVALID_CREDENTIALS', function (): v
     clearSession();
     [$controller, $service] = makeAuthController();
 
-    $service->register('frank@example.com', 'Password1!', 'Frank');
+    $service->register('frank@example.com', TEST_PASSWORD, 'Frank');
     clearSession();
 
-    $response = $controller->login(jsonRequest('POST', '/api/v1/auth/login', [
+    $response = $controller->login(jsonRequest('POST', LOGIN_URL, [
         'email'    => 'frank@example.com',
         'password' => 'WrongPassword99!',
     ]));
@@ -219,9 +227,9 @@ test('login with unknown email returns 401 INVALID_CREDENTIALS', function (): vo
     clearSession();
     [$controller] = makeAuthController();
 
-    $response = $controller->login(jsonRequest('POST', '/api/v1/auth/login', [
+    $response = $controller->login(jsonRequest('POST', LOGIN_URL, [
         'email'    => 'nobody@example.com',
-        'password' => 'Password1!',
+        'password' => TEST_PASSWORD,
     ]));
 
     expect($response->getStatusCode())->toBe(401);
@@ -235,10 +243,10 @@ test('me when logged in returns 200 with user data including ISO 8601 registered
     clearSession();
     [$controller, $service, $userService] = makeAuthController();
 
-    $userId = $service->register('grace@example.com', 'Password1!', 'Grace');
+    $userId = $service->register(GRACE_EMAIL, TEST_PASSWORD, 'Grace');
 
     // Simulate session as if login() had been called
-    simulateLoggedInSession($userId, 'grace@example.com');
+    simulateLoggedInSession($userId, GRACE_EMAIL);
 
     // Mock getUser to return the real user data
     $userService->expects('getUser')
@@ -246,20 +254,20 @@ test('me when logged in returns 200 with user data including ISO 8601 registered
         ->andReturn([
             'user' => [
                 'id'       => $userId,
-                'email'    => 'grace@example.com',
+                'email'    => GRACE_EMAIL,
                 'name'     => 'Grace',
                 'registered' => time(),
                 'roles'    => [],
             ],
         ]);
 
-    $response = $controller->me(jsonRequest('GET', '/api/v1/auth/me'));
+    $response = $controller->me(jsonRequest('GET', ME_URL));
 
     expect($response->getStatusCode())->toBe(200);
 
     $body = json_decode($response->getContent(), true);
     expect($body['data']['user']['id'])->toBe($userId);
-    expect($body['data']['user']['email'])->toBe('grace@example.com');
+    expect($body['data']['user']['email'])->toBe(GRACE_EMAIL);
     expect($body['data']['user'])->toHaveKey('name');
     expect($body['data']['user'])->toHaveKey('registered');
 
@@ -273,7 +281,7 @@ test('me when not logged in returns 401 UNAUTHENTICATED', function (): void {
     clearSession();
     [$controller] = makeAuthController();
 
-    $response = $controller->me(jsonRequest('GET', '/api/v1/auth/me'));
+    $response = $controller->me(jsonRequest('GET', ME_URL));
 
     expect($response->getStatusCode())->toBe(401);
 
@@ -287,7 +295,7 @@ test('logout returns 204 with no body', function (): void {
     clearSession();
     [$controller, $service] = makeAuthController();
 
-    $userId = $service->register('henry@example.com', 'Password1!', 'Henry');
+    $userId = $service->register('henry@example.com', TEST_PASSWORD, 'Henry');
     simulateLoggedInSession($userId, 'henry@example.com');
 
     $response = $controller->logout(jsonRequest('POST', '/api/v1/auth/logout'));
@@ -300,14 +308,14 @@ test('after logout me returns 401 UNAUTHENTICATED', function (): void {
     clearSession();
     [$controller, $service] = makeAuthController();
 
-    $userId = $service->register('iris@example.com', 'Password1!', 'Iris');
+    $userId = $service->register('iris@example.com', TEST_PASSWORD, 'Iris');
     simulateLoggedInSession($userId, 'iris@example.com');
 
     // Log out
     $controller->logout(jsonRequest('POST', '/api/v1/auth/logout'));
 
     // Now me should return 401
-    $response = $controller->me(jsonRequest('GET', '/api/v1/auth/me'));
+    $response = $controller->me(jsonRequest('GET', ME_URL));
 
     expect($response->getStatusCode())->toBe(401);
 });

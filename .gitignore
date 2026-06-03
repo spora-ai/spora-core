@@ -20,6 +20,7 @@ storage/secret.key
 
 # ── Database ─────────────────────────────────────────────────────────────────
 storage/database.sqlite
+storage/database-backup.sqlite
 storage/database.sqlite-shm
 storage/database.sqlite-wal
 storage/database.sqlite-journal

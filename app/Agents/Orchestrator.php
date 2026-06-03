@@ -41,6 +41,9 @@ use Throwable;
 
 final class Orchestrator implements OrchestratorInterface
 {
+    /** Format used when writing UTC wall-clock timestamps to the DB. */
+    private const DB_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
+
     /** Error codes that qualify for auto-retry. */
     private const RETRYABLE_ERROR_CODES = [
         'RATE_LIMIT',
@@ -533,7 +536,7 @@ final class Orchestrator implements OrchestratorInterface
                         ->update([
                             'status'         => 'APPROVED',
                             'result_content' => $result->content,
-                            'executed_at'    => date('Y-m-d H:i:s'),
+                            'executed_at'    => date(self::DB_TIMESTAMP_FORMAT),
                         ]);
                     continue;
                 }
@@ -547,7 +550,7 @@ final class Orchestrator implements OrchestratorInterface
                         'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
                         'result_content'     => $result->content,
                         'result_data'        => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                        'executed_at'        => date('Y-m-d H:i:s'),
+                        'executed_at'        => date(self::DB_TIMESTAMP_FORMAT),
                     ]);
 
                 // Append the tool result into history so the LLM sees it on the next tick.
@@ -736,7 +739,7 @@ final class Orchestrator implements OrchestratorInterface
                         $toolCallRecord->update([
                             'status'         => 'APPROVED',
                             'result_content' => $result->content,
-                            'executed_at'    => date('Y-m-d H:i:s'),
+                            'executed_at'    => date(self::DB_TIMESTAMP_FORMAT),
                         ]);
                         $this->appendHistory(
                             taskId: $task->id,
@@ -757,7 +760,7 @@ final class Orchestrator implements OrchestratorInterface
                             'status'         => 'APPROVED',
                             'result_content' => $result->content,
                             'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                            'executed_at'    => date('Y-m-d H:i:s'),
+                            'executed_at'    => date(self::DB_TIMESTAMP_FORMAT),
                         ]);
                         $this->appendHistory(
                             taskId: $task->id,
@@ -1222,26 +1225,13 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         if ($e instanceof LLMRetryableException) {
-            $msg = $e->getMessage();
-            if (str_contains($msg, '529')) {
-                return 'SERVER_OVERLOADED';
-            }
-            if (str_contains($msg, '520') || str_contains($msg, '500')) {
-                return 'SERVER_ERROR';
-            }
-            return 'GATEWAY_ERROR';
+            return $this->classifyRetryableError($e);
         }
 
         if ($e instanceof LLMProviderException) {
-            $msg = $e->getMessage();
-            if (str_contains($msg, '401') || str_contains($msg, '403')) {
-                return 'AUTH_ERROR';
-            }
-            if (str_contains($msg, '400')) {
-                return 'BAD_REQUEST';
-            }
-            if ($e->isRetryable()) {
-                return 'GATEWAY_ERROR';
+            $code = $this->classifyProviderError($e);
+            if ($code !== null) {
+                return $code;
             }
         }
 
@@ -1250,6 +1240,33 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         return 'UNKNOWN';
+    }
+
+    private function classifyRetryableError(LLMRetryableException $e): string
+    {
+        $msg = $e->getMessage();
+        if (str_contains($msg, '529')) {
+            return 'SERVER_OVERLOADED';
+        }
+        if (str_contains($msg, '520') || str_contains($msg, '500')) {
+            return 'SERVER_ERROR';
+        }
+        return 'GATEWAY_ERROR';
+    }
+
+    private function classifyProviderError(LLMProviderException $e): ?string
+    {
+        $msg = $e->getMessage();
+        if (str_contains($msg, '401') || str_contains($msg, '403')) {
+            return 'AUTH_ERROR';
+        }
+        if (str_contains($msg, '400')) {
+            return 'BAD_REQUEST';
+        }
+        if ($e->isRetryable()) {
+            return 'GATEWAY_ERROR';
+        }
+        return null;
     }
 
     private function friendlyMessages(): array
@@ -1355,7 +1372,7 @@ final class Orchestrator implements OrchestratorInterface
             $retryTask->update([
                 'retry_of_task_id' => $rootTaskId,
                 'retry_count'      => $retryCount,
-                'retry_after'      => date('Y-m-d H:i:s', time() + $retryAfterMinutes * 60),
+                'retry_after'      => date(self::DB_TIMESTAMP_FORMAT, time() + $retryAfterMinutes * 60),
                 'status'           => 'QUEUED',
             ]);
 

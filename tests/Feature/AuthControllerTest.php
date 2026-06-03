@@ -2,6 +2,17 @@
 
 declare(strict_types=1);
 
+const SLOW_USER_EMAIL = 'slowuser@example.com';
+const RETRY_USER_EMAIL = 'retryuser@example.com';
+const CLEAR_USER_EMAIL = 'clearuser@example.com';
+const PW_USER_EMAIL = 'pwuser@example.com';
+const VALID_PASSWORD = 'Password1!';
+const OLD_PASSWORD = 'OldPassword1!';
+const NEW_PASSWORD = 'NewPassword1!';
+const LOGIN_ENDPOINT = '/api/v1/auth/login';
+const RESET_PASSWORD_ENDPOINT = '/api/v1/auth/reset-password';
+const PASSWORD_ENDPOINT = '/api/v1/auth/password';
+
 use Spora\Http\AuthController;
 use Spora\Services\RateLimiter;
 use Spora\Services\UserServiceInterface;
@@ -48,18 +59,18 @@ test('login returns 429 after exceeding rate limit', function (): void {
     [$controller] = makeAuthControllerWithMocks();
 
     $authService = bootAuthLayer();
-    $authService->register('slowuser@example.com', 'Password1!', 'Slow User');
+    $authService->register(SLOW_USER_EMAIL, VALID_PASSWORD, 'Slow User');
 
     for ($i = 0; $i < 5; $i++) {
-        $req = jsonRequest('POST', '/api/v1/auth/login', [
-            'email' => 'slowuser@example.com',
+        $req = jsonRequest('POST', LOGIN_ENDPOINT, [
+            'email' => SLOW_USER_EMAIL,
             'password' => 'wrongpassword',
         ]);
         $controller->login($req);
     }
 
-    $req = jsonRequest('POST', '/api/v1/auth/login', [
-        'email' => 'slowuser@example.com',
+    $req = jsonRequest('POST', LOGIN_ENDPOINT, [
+        'email' => SLOW_USER_EMAIL,
         'password' => 'wrongpassword',
     ]);
     $response = $controller->login($req);
@@ -71,11 +82,11 @@ test('login returns 429 after exceeding rate limit', function (): void {
 
 test('login returns rate limit headers on success', function (): void {
     [$controller, $authService] = makeAuthControllerWithMocks();
-    $userId = $authService->register('headeruser@example.com', 'Password1!', 'Header User');
+    $authService->register('headeruser@example.com', VALID_PASSWORD, 'Header User');
 
-    $req = jsonRequest('POST', '/api/v1/auth/login', [
+    $req = jsonRequest('POST', LOGIN_ENDPOINT, [
         'email' => 'headeruser@example.com',
-        'password' => 'Password1!',
+        'password' => VALID_PASSWORD,
     ]);
     $response = $controller->login($req);
 
@@ -88,18 +99,18 @@ test('login includes Retry-After header when rate limited', function (): void {
     [$controller] = makeAuthControllerWithMocks();
 
     $authService = bootAuthLayer();
-    $authService->register('retryuser@example.com', 'Password1!', 'Retry User');
+    $authService->register(RETRY_USER_EMAIL, VALID_PASSWORD, 'Retry User');
 
     for ($i = 0; $i < 5; $i++) {
-        $req = jsonRequest('POST', '/api/v1/auth/login', [
-            'email' => 'retryuser@example.com',
+        $req = jsonRequest('POST', LOGIN_ENDPOINT, [
+            'email' => RETRY_USER_EMAIL,
             'password' => 'wrong',
         ]);
         $controller->login($req);
     }
 
-    $req = jsonRequest('POST', '/api/v1/auth/login', [
-        'email' => 'retryuser@example.com',
+    $req = jsonRequest('POST', LOGIN_ENDPOINT, [
+        'email' => RETRY_USER_EMAIL,
         'password' => 'wrong',
     ]);
     $response = $controller->login($req);
@@ -114,7 +125,7 @@ test('register returns 429 after exceeding rate limit', function (): void {
     for ($i = 0; $i < 5; $i++) {
         $req = jsonRequest('POST', '/api/v1/auth/register', [
             'email' => "ratelimit{$i}@example.com",
-            'password' => 'Password1!',
+            'password' => VALID_PASSWORD,
             'display_name' => "Ratelimit{$i}",
         ]);
         $controller->register($req);
@@ -122,7 +133,7 @@ test('register returns 429 after exceeding rate limit', function (): void {
 
     $req = jsonRequest('POST', '/api/v1/auth/register', [
         'email' => 'ratelimit6@example.com',
-        'password' => 'Password1!',
+        'password' => VALID_PASSWORD,
         'display_name' => 'Ratelimit6',
     ]);
     $response = $controller->register($req);
@@ -134,26 +145,26 @@ test('register returns 429 after exceeding rate limit', function (): void {
 
 test('successful login clears rate limit bucket', function (): void {
     [$controller, $authService] = makeAuthControllerWithMocks();
-    $userId = $authService->register('clearuser@example.com', 'Password1!', 'Clear User');
+    $authService->register(CLEAR_USER_EMAIL, VALID_PASSWORD, 'Clear User');
 
     for ($i = 0; $i < 3; $i++) {
-        $req = jsonRequest('POST', '/api/v1/auth/login', [
-            'email' => 'clearuser@example.com',
+        $req = jsonRequest('POST', LOGIN_ENDPOINT, [
+            'email' => CLEAR_USER_EMAIL,
             'password' => 'wrong',
         ]);
         $controller->login($req);
     }
 
-    $req = jsonRequest('POST', '/api/v1/auth/login', [
-        'email' => 'clearuser@example.com',
-        'password' => 'Password1!',
+    $req = jsonRequest('POST', LOGIN_ENDPOINT, [
+        'email' => CLEAR_USER_EMAIL,
+        'password' => VALID_PASSWORD,
     ]);
     $response = $controller->login($req);
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
     for ($i = 0; $i < 3; $i++) {
-        $req = jsonRequest('POST', '/api/v1/auth/login', [
-            'email' => 'clearuser@example.com',
+        $req = jsonRequest('POST', LOGIN_ENDPOINT, [
+            'email' => CLEAR_USER_EMAIL,
             'password' => 'wrong',
         ]);
         $response = $controller->login($req);
@@ -163,26 +174,26 @@ test('successful login clears rate limit bucket', function (): void {
 
 test('password endpoint changes password', function (): void {
     [$controller, $authService] = makeAuthControllerWithMocks();
-    $authService->register('pwuser@example.com', 'OldPassword1!', 'Pw User');
+    $authService->register(PW_USER_EMAIL, OLD_PASSWORD, 'Pw User');
 
-    $req = jsonRequest('POST', '/api/v1/auth/login', [
-        'email' => 'pwuser@example.com',
-        'password' => 'OldPassword1!',
+    $req = jsonRequest('POST', LOGIN_ENDPOINT, [
+        'email' => PW_USER_EMAIL,
+        'password' => OLD_PASSWORD,
     ]);
     $controller->login($req);
 
-    $req = jsonRequest('PATCH', '/api/v1/auth/password', [
-        'current_password' => 'OldPassword1!',
-        'new_password' => 'NewPassword1!',
+    $req = jsonRequest('PATCH', PASSWORD_ENDPOINT, [
+        'current_password' => OLD_PASSWORD,
+        'new_password' => NEW_PASSWORD,
     ]);
     $response = $controller->password($req);
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
     $body = json_decode($response->getContent(), true);
     expect($body['message'])->toBe('Password updated');
 
-    $req = jsonRequest('POST', '/api/v1/auth/login', [
-        'email' => 'pwuser@example.com',
-        'password' => 'NewPassword1!',
+    $req = jsonRequest('POST', LOGIN_ENDPOINT, [
+        'email' => PW_USER_EMAIL,
+        'password' => NEW_PASSWORD,
     ]);
     $response = $controller->login($req);
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
@@ -191,7 +202,7 @@ test('password endpoint changes password', function (): void {
 test('password endpoint requires authentication', function (): void {
     [$controller] = makeAuthControllerWithMocks();
 
-    $req = jsonRequest('PATCH', '/api/v1/auth/password', [
+    $req = jsonRequest('PATCH', PASSWORD_ENDPOINT, [
         'current_password' => 'old',
         'new_password' => 'new',
     ]);
@@ -201,15 +212,15 @@ test('password endpoint requires authentication', function (): void {
 
 test('password endpoint validates required fields', function (): void {
     [$controller, $authService] = makeAuthControllerWithMocks();
-    $authService->register('pwvalidate@example.com', 'Password1!', 'Pw Validate');
+    $authService->register('pwvalidate@example.com', VALID_PASSWORD, 'Pw Validate');
 
-    $req = jsonRequest('POST', '/api/v1/auth/login', [
+    $req = jsonRequest('POST', LOGIN_ENDPOINT, [
         'email' => 'pwvalidate@example.com',
-        'password' => 'Password1!',
+        'password' => VALID_PASSWORD,
     ]);
     $controller->login($req);
 
-    $req = jsonRequest('PATCH', '/api/v1/auth/password', [
+    $req = jsonRequest('PATCH', PASSWORD_ENDPOINT, [
         'current_password' => 'old',
         // missing new_password
     ]);
@@ -219,11 +230,11 @@ test('password endpoint validates required fields', function (): void {
 
 test('account endpoint updates username', function (): void {
     [$controller, $authService] = makeAuthControllerWithUserService();
-    $authService->register('accuser@example.com', 'Password1!', 'Acc User');
+    $authService->register('accuser@example.com', VALID_PASSWORD, 'Acc User');
 
-    $req = jsonRequest('POST', '/api/v1/auth/login', [
+    $req = jsonRequest('POST', LOGIN_ENDPOINT, [
         'email' => 'accuser@example.com',
-        'password' => 'Password1!',
+        'password' => VALID_PASSWORD,
     ]);
     $controller->login($req);
 
@@ -252,8 +263,8 @@ test('resetPassword resets password with valid selector and token', function ():
     [$controller, $authService] = makeAuthControllerWithMocks();
 
     $email = 'resetuser@example.com';
-    $oldPassword = 'OldPassword1!';
-    $newPassword = 'NewPassword1!';
+    $oldPassword = OLD_PASSWORD;
+    $newPassword = NEW_PASSWORD;
     $authService->register($email, $oldPassword, 'Reset User');
 
     // Capture the reset URL by using the real mailer but intercepting via a proxy
@@ -292,7 +303,7 @@ test('resetPassword resets password with valid selector and token', function ():
     $token = urldecode($matches[2]);
 
     // Reset the password using captured selector and token
-    $req = jsonRequest('POST', '/api/v1/auth/reset-password', [
+    $req = jsonRequest('POST', RESET_PASSWORD_ENDPOINT, [
         'selector' => $selector,
         'token' => $token,
         'password' => $newPassword,
@@ -303,7 +314,7 @@ test('resetPassword resets password with valid selector and token', function ():
     expect($body['message'])->toBe('Password reset successfully.');
 
     // Login with new password should work
-    $req = jsonRequest('POST', '/api/v1/auth/login', [
+    $req = jsonRequest('POST', LOGIN_ENDPOINT, [
         'email' => $email,
         'password' => $newPassword,
     ]);
@@ -314,10 +325,10 @@ test('resetPassword resets password with valid selector and token', function ():
 test('resetPassword returns error for invalid selector', function (): void {
     [$controller] = makeAuthControllerWithMocks();
 
-    $req = jsonRequest('POST', '/api/v1/auth/reset-password', [
+    $req = jsonRequest('POST', RESET_PASSWORD_ENDPOINT, [
         'selector' => 'invalid_selector',
         'token' => 'invalid_token',
-        'password' => 'NewPassword1!',
+        'password' => NEW_PASSWORD,
     ]);
     $response = $controller->resetPassword($req);
     expect($response->getStatusCode())->toBe(Response::HTTP_BAD_REQUEST);
@@ -329,23 +340,23 @@ test('resetPassword validates required fields', function (): void {
     [$controller] = makeAuthControllerWithMocks();
 
     // Missing selector
-    $req = jsonRequest('POST', '/api/v1/auth/reset-password', [
+    $req = jsonRequest('POST', RESET_PASSWORD_ENDPOINT, [
         'token' => 'some_token',
-        'password' => 'NewPassword1!',
+        'password' => NEW_PASSWORD,
     ]);
     $response = $controller->resetPassword($req);
     expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
 
     // Missing token
-    $req = jsonRequest('POST', '/api/v1/auth/reset-password', [
+    $req = jsonRequest('POST', RESET_PASSWORD_ENDPOINT, [
         'selector' => 'some_selector',
-        'password' => 'NewPassword1!',
+        'password' => NEW_PASSWORD,
     ]);
     $response = $controller->resetPassword($req);
     expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
 
     // Missing password
-    $req = jsonRequest('POST', '/api/v1/auth/reset-password', [
+    $req = jsonRequest('POST', RESET_PASSWORD_ENDPOINT, [
         'selector' => 'some_selector',
         'token' => 'some_token',
     ]);

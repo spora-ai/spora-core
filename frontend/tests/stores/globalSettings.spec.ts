@@ -43,7 +43,7 @@ const mockDrivers = [
   {
     name: 'openai',
     display_name: 'OpenAI',
-    driver_class: 'Spora\\Drivers\\OpenAICompatibleDriver',
+    driver_class: String.raw`Spora\Drivers\OpenAICompatibleDriver`,
     settings_schema: [
       { key: 'api_key', label: 'API Key', type: 'password', description: '', default: null, required: false, scope: 'global', options: null },
     ],
@@ -52,7 +52,7 @@ const mockDrivers = [
 
 const mockTools = [
   {
-    tool_class: 'Spora\\Tools\\TavilyTool',
+    tool_class: String.raw`Spora\Tools\TavilyTool`,
     tool_name: 'tavily',
     display_name: 'Tavily',
     category: 'search',
@@ -114,7 +114,7 @@ describe('useGlobalSettingsStore', () => {
     })
 
     it('awaits auth.init() when auth is not yet initialized', async () => {
-      const mockAuthStore = useAuthStore as ReturnType<typeof vi.fn>
+      const mockAuthStore = vi.mocked(useAuthStore)
       mockAuthStore.mockReturnValue({
         initialized: false,
         init: vi.fn().mockResolvedValue(undefined),
@@ -129,7 +129,7 @@ describe('useGlobalSettingsStore', () => {
     })
 
     it('does not call auth.init() when already initialized', async () => {
-      const mockAuthStore = useAuthStore as ReturnType<typeof vi.fn>
+      const mockAuthStore = vi.mocked(useAuthStore)
       mockAuthStore.mockReturnValue({
         initialized: true,
         init: vi.fn(),

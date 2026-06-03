@@ -26,6 +26,8 @@ use Spora\Tools\Attributes\ToolSetting;
  */
 class ToolConfigService
 {
+    private const DATETIME_FORMAT = 'Y-m-d H:i:s';
+
     /** @var array<string, string> tool name (from #[Tool(name:)]) => fully-qualified class name */
     private ?array $toolNameMap = null;
 
@@ -98,15 +100,15 @@ class ToolConfigService
                 ->update([
                     'tool_name'  => $toolName,
                     'settings'   => $encrypted,
-                    'updated_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date(self::DATETIME_FORMAT),
                 ]);
         } else {
             Capsule::table('tool_configurations')->insert([
                 'tool_class'  => $toolClass,
                 'tool_name'   => $toolName,
                 'settings'    => $encrypted,
-                'created_at'  => date('Y-m-d H:i:s'),
-                'updated_at'  => date('Y-m-d H:i:s'),
+                'created_at'  => date(self::DATETIME_FORMAT),
+                'updated_at'  => date(self::DATETIME_FORMAT),
             ]);
         }
     }
@@ -163,15 +165,15 @@ class ToolConfigService
                 ->where('tool_class', $toolClass)
                 ->update([
                     'settings'   => $encrypted,
-                    'updated_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date(self::DATETIME_FORMAT),
                 ]);
         } else {
             Capsule::table('tool_user_settings')->insert([
                 'user_id'    => $userId,
                 'tool_class' => $toolClass,
                 'settings'   => $encrypted,
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
+                'created_at' => date(self::DATETIME_FORMAT),
+                'updated_at' => date(self::DATETIME_FORMAT),
             ]);
         }
 
@@ -278,15 +280,15 @@ class ToolConfigService
                 ->where('tool_class', $toolClass)
                 ->update([
                     'settings'   => $encrypted,
-                    'updated_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date(self::DATETIME_FORMAT),
                 ]);
         } else {
             Capsule::table('agent_tool_overrides')->insert([
                 'agent_id'   => $agentId,
                 'tool_class' => $toolClass,
                 'settings'   => $encrypted,
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
+                'created_at' => date(self::DATETIME_FORMAT),
+                'updated_at' => date(self::DATETIME_FORMAT),
             ]);
         }
     }
@@ -368,9 +370,7 @@ class ToolConfigService
     {
         $encrypted = new EncryptedValue($storageString);
         $json = $this->security->decrypt($encrypted);
-        /** @var array<string, mixed> $decoded */
-        $decoded = json_decode($json, true) ?? [];
-        return $decoded;
+        return json_decode($json, true) ?? [];
     }
 
     /**

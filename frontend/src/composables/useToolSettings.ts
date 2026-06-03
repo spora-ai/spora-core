@@ -7,8 +7,7 @@
  * Password fields are write-only on the server — GET returns "***" for masked keys.
  * When saving, "***" means "leave unchanged", empty string "" means "clear this value".
  */
-import { api } from '@/api/client'
-import { ApiError } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 
 export interface ToolSettingSchema {
   key: string
@@ -51,6 +50,57 @@ export interface SettingsWithSource {
     value: string | boolean | null
     source: 'global' | 'user' | 'agent' | 'default'
   }
+}
+
+// Functions that do NOT depend on the per-call agentId are hoisted to module
+// scope (SonarQube typescript:S7721) to avoid recreating them on every
+// useToolSettings() invocation.
+
+async function getGlobalSettings(toolId: string): Promise<Record<string, string>> {
+  try {
+    const result = await api.get<{ settings: Record<string, string> }>(
+      `/tools/${encodeURIComponent(toolId)}/settings`,
+    )
+    return result.settings ?? {}
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      return {}
+    }
+    throw e
+  }
+}
+
+async function getUserSettings(toolId: string): Promise<Record<string, string>> {
+  try {
+    const result = await api.get<{ settings: Record<string, string> }>(
+      `/tools/${encodeURIComponent(toolId)}/user-settings`,
+    )
+    return result.settings ?? {}
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      return {}
+    }
+    throw e
+  }
+}
+
+async function deleteUserSettings(toolId: string): Promise<void> {
+  await api.delete(`/tools/${encodeURIComponent(toolId)}/user-settings`)
+}
+
+async function deleteSettings(toolId: string): Promise<void> {
+  await api.delete(`/tools/${encodeURIComponent(toolId)}/settings`)
+}
+
+async function putUserSettings(
+  toolId: string,
+  settings: Record<string, string>,
+): Promise<Record<string, string>> {
+  const result = await api.put<{ settings: Record<string, string> }>(
+    `/tools/${encodeURIComponent(toolId)}/user-settings`,
+    { settings },
+  )
+  return result.settings ?? {}
 }
 
 export function useToolSettings(agentId?: number) {
@@ -175,20 +225,6 @@ export function useToolSettings(agentId?: number) {
     }
   }
 
-  async function getGlobalSettings(toolId: string): Promise<Record<string, string>> {
-    try {
-      const result = await api.get<{ settings: Record<string, string> }>(
-        `/tools/${encodeURIComponent(toolId)}/settings`,
-      )
-      return result.settings ?? {}
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 404) {
-        return {}
-      }
-      throw e
-    }
-  }
-
   async function getSettingsWithSource(toolId: string): Promise<SettingsWithSource> {
     if (isGlobal()) {
       return {}
@@ -198,45 +234,13 @@ export function useToolSettings(agentId?: number) {
         `/agents/${agentId}/tools/${encodeURIComponent(toolId)}/override`,
       )
       return result.settings ?? {}
-    } catch (e) {
+    } catch {
+      // Endpoint may 404 when no override exists yet — treat as "no overrides".
       return {}
     }
   }
 
-async function getUserSettings(toolId: string): Promise<Record<string, string>> {
-  try {
-    const result = await api.get<{ settings: Record<string, string> }>(
-      `/tools/${encodeURIComponent(toolId)}/user-settings`,
-    )
-    return result.settings ?? {}
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) {
-      return {}
-    }
-    throw e
-  }
-}
-
-async function deleteUserSettings(toolId: string): Promise<void> {
-  await api.delete(`/tools/${encodeURIComponent(toolId)}/user-settings`)
-}
-
-async function deleteSettings(toolId: string): Promise<void> {
-  await api.delete(`/tools/${encodeURIComponent(toolId)}/settings`)
-}
-
-async function putUserSettings(
-  toolId: string,
-  settings: Record<string, string>,
-): Promise<Record<string, string>> {
-  const result = await api.put<{ settings: Record<string, string> }>(
-    `/tools/${encodeURIComponent(toolId)}/user-settings`,
-    { settings },
-  )
-  return result.settings ?? {}
-}
-
-return {
+  return {
     getSettings,
     putSettings,
     getToolStatus,

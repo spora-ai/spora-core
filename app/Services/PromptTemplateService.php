@@ -15,6 +15,8 @@ use Spora\Models\AgentPromptTemplate;
  */
 final class PromptTemplateService implements PromptTemplateServiceInterface
 {
+    private const DATE_FORMAT = 'Y-m-d H:i:s';
+
     public function getTemplatesForAgent(int $agentId, int $userId): ?array
     {
         $agent = $this->findAgent($agentId, $userId);
@@ -44,9 +46,9 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
             'prompt_template'  => $data['prompt_template'],
             'variables'        => isset($data['variables']) && is_array($data['variables']) ? json_encode($data['variables']) : null,
             'max_steps'        => isset($data['max_steps']) ? (int) $data['max_steps'] : null,
-            'is_active'        => isset($data['is_active']) ? ($data['is_active'] ? 1 : 0) : 1,
-            'created_at'       => date('Y-m-d H:i:s'),
-            'updated_at'       => date('Y-m-d H:i:s'),
+            'is_active'        => $this->resolveIsActive($data['is_active'] ?? null),
+            'created_at'       => date(self::DATE_FORMAT),
+            'updated_at'       => date(self::DATE_FORMAT),
         ]);
 
         $template = AgentPromptTemplate::findOrFail($id);
@@ -93,7 +95,7 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
             }
             Capsule::table('agent_prompt_templates')
                 ->where('id', $templateId)
-                ->update(array_merge($updateData, ['updated_at' => date('Y-m-d H:i:s')]));
+                ->update(array_merge($updateData, ['updated_at' => date(self::DATE_FORMAT)]));
             $template->refresh();
         }
 
@@ -120,6 +122,15 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
     private function findAgent(int $id, int $userId): ?Agent
     {
         return Agent::where('id', $id)->where('user_id', $userId)->first();
+    }
+
+    private function resolveIsActive(mixed $value): int
+    {
+        if ($value === null) {
+            return 1;
+        }
+
+        return $value ? 1 : 0;
     }
 
     private function findTemplate(int $id, int $agentId): ?AgentPromptTemplate

@@ -44,8 +44,18 @@ use Throwable;
 final class SemanticScholarTool extends AbstractTool
 {
     private const BASE_URL = 'https://api.semanticscholar.org';
+    private const GRAPH_PAPER_PATH = '/graph/v1/paper/';
     private const GRAPH_FIELDS = 'title,abstract,authors,year,venue,citationCount,url,openAccessPdf,externalIds,isOpenAccess';
     private const REC_FIELDS = 'title,abstract,authors,year,venue,citationCount,url,openAccessPdf,externalIds';
+    private const LOG_HTTP_REQUEST = 'SemanticScholarTool: HTTP request';
+    private const LOG_HTTP_RESPONSE = 'SemanticScholarTool: HTTP response';
+    private const LOG_API_ERROR = 'SemanticScholar API error';
+    private const LOG_EXCEPTION = 'SemanticScholarTool Exception';
+    private const ERR_RESEARCH_PREFIX = 'Research tool error: ';
+    private const ERR_PAPER_ID_REQUIRED = 'The paper_id parameter is required.';
+
+    /** @var array<string, mixed> */
+    private array $lastResponseData = [];
 
     public function __construct(
         private readonly ToolConfigService $configService,
@@ -105,112 +115,60 @@ final class SemanticScholarTool extends AbstractTool
             $params['openAccessPdf'] = 'true';
         }
 
-        try {
-            $url = self::BASE_URL . '/graph/v1/paper/search';
-            $this->logger?->debug('SemanticScholarTool: HTTP request', [
-                'method' => 'GET',
-                'url' => $url,
-                'query' => $params,
-                'timeout' => $this->effectiveTimeout($settings),
-            ]);
+        $url = self::BASE_URL . self::GRAPH_PAPER_PATH . 'search';
+        $error = $this->performRequest($url, $params, $settings);
+        if ($error !== null) {
+            return $error;
+        }
 
-            $response = $this->httpClient->request(
-                'GET',
-                $url,
-                ['query' => $params, 'timeout' => $this->effectiveTimeout($settings)],
-            );
+        $data = $this->lastResponseData;
+        $papers = $data['data'] ?? [];
+        $total = $data['total'] ?? 0;
 
-            $statusCode = $response->getStatusCode();
-            $this->logger?->debug('SemanticScholarTool: HTTP response', [
-                'status_code' => $statusCode,
-                'url' => $url,
-            ]);
+        $output = ($papers === [])
+            ? "No papers found for query '{$query}'."
+            : $this->buildPaperSearchOutput($query, $total, $papers);
 
-            if ($statusCode >= 400) {
-                $this->logger?->error('SemanticScholar API error', ['status' => $statusCode]);
-                return new ToolResult(false, "Research tool failed with HTTP {$statusCode}");
-            }
-
-            $data = $response->toArray(false);
-            $papers = $data['data'] ?? [];
-            $total = $data['total'] ?? 0;
-
-            if ($papers === []) {
-                return new ToolResult(true, "No papers found for query '{$query}'.");
-            }
-
-            $output = "PAPER SEARCH RESULTS for '{$query}' ({$total} total, showing " . count($papers) . ")\n\n";
-            foreach ($papers as $i => $paper) {
-                $num = $i + 1;
-                $output .= "[{$num}] " . $this->formatPaperSummary($paper) . "\n\n";
-            }
-
-            return new ToolResult(true, $output, [
+        return new ToolResult(
+            true,
+            $output,
+            [
                 'total' => $total,
                 'returned' => count($papers),
                 'query' => $query,
-            ]);
-        } catch (Throwable $e) {
-            $this->logger?->error('SemanticScholarTool Exception', ['exception' => $e]);
-            return new ToolResult(false, "Research tool error: " . $e->getMessage());
-        }
+            ],
+        );
     }
 
     public function getPaper(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $paperId = trim((string) ($arguments['paper_id'] ?? ''));
         if ($paperId === '') {
-            return new ToolResult(false, 'The paper_id parameter is required.');
+            return new ToolResult(false, self::ERR_PAPER_ID_REQUIRED);
         }
 
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
 
-        try {
-            $url = self::BASE_URL . '/graph/v1/paper/' . urlencode($paperId);
-            $this->logger?->debug('SemanticScholarTool: HTTP request', [
-                'method' => 'GET',
-                'url' => $url,
-                'query' => ['fields' => self::GRAPH_FIELDS],
-                'timeout' => $this->effectiveTimeout($settings),
-            ]);
-
-            $response = $this->httpClient->request(
-                'GET',
-                $url,
-                [
-                    'query' => ['fields' => self::GRAPH_FIELDS],
-                    'timeout' => $this->effectiveTimeout($settings),
-                ],
-            );
-
-            $statusCode = $response->getStatusCode();
-            $this->logger?->debug('SemanticScholarTool: HTTP response', [
-                'status_code' => $statusCode,
-                'url' => $url,
-            ]);
-
-            if ($statusCode >= 400) {
-                $this->logger?->error('SemanticScholar API error', ['status' => $statusCode]);
-                return new ToolResult(false, "Research tool failed with HTTP {$statusCode}");
-            }
-
-            $paper = $response->toArray(false);
-
-            return new ToolResult(true, "PAPER DETAILS\n\n" . $this->formatPaperFull($paper), [
-                'paper_id' => $paperId,
-                'title' => $paper['title'] ?? 'Unknown',
-            ]);
-        } catch (Throwable $e) {
-            $this->logger?->error('SemanticScholarTool Exception', ['exception' => $e]);
-            return new ToolResult(false, "Research tool error: " . $e->getMessage());
+        $url = self::BASE_URL . self::GRAPH_PAPER_PATH . urlencode($paperId);
+        $query = ['fields' => self::GRAPH_FIELDS];
+        $error = $this->performRequest($url, $query, $settings);
+        if ($error !== null) {
+            return $error;
         }
+
+        $paper = $this->lastResponseData;
+
+        return new ToolResult(true, "PAPER DETAILS\n\n" . $this->formatPaperFull($paper), [
+            'paper_id' => $paperId,
+            'title' => $paper['title'] ?? 'Unknown',
+        ]);
     }
 
     public function getCitations(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $paperId = trim((string) ($arguments['paper_id'] ?? ''));
         if ($paperId === '') {
-            return new ToolResult(false, 'The paper_id parameter is required.');
+            return new ToolResult(false, self::ERR_PAPER_ID_REQUIRED);
         }
 
         $limit = min(100, max(1, (int) ($arguments['limit'] ?? 20)));
@@ -218,75 +176,38 @@ final class SemanticScholarTool extends AbstractTool
 
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
 
-        try {
-            $url = self::BASE_URL . '/graph/v1/paper/' . urlencode($paperId) . '/citations';
-            $this->logger?->debug('SemanticScholarTool: HTTP request', [
-                'method' => 'GET',
-                'url' => $url,
-                'query' => [
-                    'limit' => $limit,
-                    'offset' => $offset,
-                    'fields' => self::GRAPH_FIELDS,
-                ],
-                'timeout' => $this->effectiveTimeout($settings),
-            ]);
-
-            $response = $this->httpClient->request(
-                'GET',
-                $url,
-                [
-                    'query' => [
-                        'limit' => $limit,
-                        'offset' => $offset,
-                        'fields' => self::GRAPH_FIELDS,
-                    ],
-                    'timeout' => $this->effectiveTimeout($settings),
-                ],
-            );
-
-            $statusCode = $response->getStatusCode();
-            $this->logger?->debug('SemanticScholarTool: HTTP response', [
-                'status_code' => $statusCode,
-                'url' => $url,
-            ]);
-
-            if ($statusCode >= 400) {
-                $this->logger?->error('SemanticScholar API error', ['status' => $statusCode]);
-                return new ToolResult(false, "Research tool failed with HTTP {$statusCode}");
-            }
-
-            $data = $response->toArray(false);
-            $citations = $data['data'] ?? [];
-            $total = $data['total'] ?? 0;
-
-            if ($citations === []) {
-                return new ToolResult(true, "No citations found for paper '{$paperId}'.");
-            }
-
-            $output = "CITATIONS OF {$paperId} ({$total} total, showing " . count($citations) . " from offset {$offset})\n\n";
-            foreach ($citations as $i => $entry) {
-                $num = $i + 1;
-                $citingPaper = $entry['citingPaper'] ?? [];
-                $output .= "[{$num}] " . $this->formatPaperSummary($citingPaper) . "\n\n";
-            }
-
-            return new ToolResult(true, $output, [
-                'paper_id' => $paperId,
-                'total' => $total,
-                'returned' => count($citations),
-                'offset' => $offset,
-            ]);
-        } catch (Throwable $e) {
-            $this->logger?->error('SemanticScholarTool Exception', ['exception' => $e]);
-            return new ToolResult(false, "Research tool error: " . $e->getMessage());
+        $url = self::BASE_URL . self::GRAPH_PAPER_PATH . urlencode($paperId) . '/citations';
+        $query = [
+            'limit' => $limit,
+            'offset' => $offset,
+            'fields' => self::GRAPH_FIELDS,
+        ];
+        $error = $this->performRequest($url, $query, $settings);
+        if ($error !== null) {
+            return $error;
         }
+
+        $data = $this->lastResponseData;
+        $citations = $data['data'] ?? [];
+        $total = $data['total'] ?? 0;
+
+        $output = ($citations === [])
+            ? "No citations found for paper '{$paperId}'."
+            : $this->buildCitationsOutput($paperId, $total, $citations, $offset, 'citingPaper');
+
+        return new ToolResult(true, $output, [
+            'paper_id' => $paperId,
+            'total' => $total,
+            'returned' => count($citations),
+            'offset' => $offset,
+        ]);
     }
 
     public function getReferences(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $paperId = trim((string) ($arguments['paper_id'] ?? ''));
         if ($paperId === '') {
-            return new ToolResult(false, 'The paper_id parameter is required.');
+            return new ToolResult(false, self::ERR_PAPER_ID_REQUIRED);
         }
 
         $limit = min(100, max(1, (int) ($arguments['limit'] ?? 20)));
@@ -294,137 +215,65 @@ final class SemanticScholarTool extends AbstractTool
 
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
 
-        try {
-            $url = self::BASE_URL . '/graph/v1/paper/' . urlencode($paperId) . '/references';
-            $this->logger?->debug('SemanticScholarTool: HTTP request', [
-                'method' => 'GET',
-                'url' => $url,
-                'query' => [
-                    'limit' => $limit,
-                    'offset' => $offset,
-                    'fields' => self::GRAPH_FIELDS,
-                ],
-                'timeout' => $this->effectiveTimeout($settings),
-            ]);
-
-            $response = $this->httpClient->request(
-                'GET',
-                $url,
-                [
-                    'query' => [
-                        'limit' => $limit,
-                        'offset' => $offset,
-                        'fields' => self::GRAPH_FIELDS,
-                    ],
-                    'timeout' => $this->effectiveTimeout($settings),
-                ],
-            );
-
-            $statusCode = $response->getStatusCode();
-            $this->logger?->debug('SemanticScholarTool: HTTP response', [
-                'status_code' => $statusCode,
-                'url' => $url,
-            ]);
-
-            if ($statusCode >= 400) {
-                $this->logger?->error('SemanticScholar API error', ['status' => $statusCode]);
-                return new ToolResult(false, "Research tool failed with HTTP {$statusCode}");
-            }
-
-            $data = $response->toArray(false);
-            $references = $data['data'] ?? [];
-            $total = $data['total'] ?? 0;
-
-            if ($references === []) {
-                return new ToolResult(true, "No references found for paper '{$paperId}'.");
-            }
-
-            $output = "REFERENCES OF {$paperId} ({$total} total, showing " . count($references) . " from offset {$offset})\n\n";
-            foreach ($references as $i => $entry) {
-                $num = $i + 1;
-                $referencedPaper = $entry['citedPaper'] ?? [];
-                $output .= "[{$num}] " . $this->formatPaperSummary($referencedPaper) . "\n\n";
-            }
-
-            return new ToolResult(true, $output, [
-                'paper_id' => $paperId,
-                'total' => $total,
-                'returned' => count($references),
-                'offset' => $offset,
-            ]);
-        } catch (Throwable $e) {
-            $this->logger?->error('SemanticScholarTool Exception', ['exception' => $e]);
-            return new ToolResult(false, "Research tool error: " . $e->getMessage());
+        $url = self::BASE_URL . self::GRAPH_PAPER_PATH . urlencode($paperId) . '/references';
+        $query = [
+            'limit' => $limit,
+            'offset' => $offset,
+            'fields' => self::GRAPH_FIELDS,
+        ];
+        $error = $this->performRequest($url, $query, $settings);
+        if ($error !== null) {
+            return $error;
         }
+
+        $data = $this->lastResponseData;
+        $references = $data['data'] ?? [];
+        $total = $data['total'] ?? 0;
+
+        $output = ($references === [])
+            ? "No references found for paper '{$paperId}'."
+            : $this->buildCitationsOutput($paperId, $total, $references, $offset, 'citedPaper');
+
+        return new ToolResult(true, $output, [
+            'paper_id' => $paperId,
+            'total' => $total,
+            'returned' => count($references),
+            'offset' => $offset,
+        ]);
     }
 
     public function getRecommendations(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $paperId = trim((string) ($arguments['paper_id'] ?? ''));
         if ($paperId === '') {
-            return new ToolResult(false, 'The paper_id parameter is required.');
+            return new ToolResult(false, self::ERR_PAPER_ID_REQUIRED);
         }
 
         $limit = min(20, max(1, (int) ($arguments['limit'] ?? 10)));
 
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
 
-        try {
-            $url = self::BASE_URL . '/recommendations/v1/papers/forpaper/' . urlencode($paperId);
-            $this->logger?->debug('SemanticScholarTool: HTTP request', [
-                'method' => 'GET',
-                'url' => $url,
-                'query' => [
-                    'limit' => $limit,
-                    'fields' => self::REC_FIELDS,
-                ],
-                'timeout' => $this->effectiveTimeout($settings),
-            ]);
-
-            $response = $this->httpClient->request(
-                'GET',
-                $url,
-                [
-                    'query' => [
-                        'limit' => $limit,
-                        'fields' => self::REC_FIELDS,
-                    ],
-                    'timeout' => $this->effectiveTimeout($settings),
-                ],
-            );
-
-            $statusCode = $response->getStatusCode();
-            $this->logger?->debug('SemanticScholarTool: HTTP response', [
-                'status_code' => $statusCode,
-                'url' => $url,
-            ]);
-
-            if ($statusCode >= 400) {
-                $this->logger?->error('SemanticScholar API error', ['status' => $statusCode]);
-                return new ToolResult(false, "Research tool failed with HTTP {$statusCode}");
-            }
-
-            $data = $response->toArray(false);
-            $recommended = $data['recommendedPapers'] ?? [];
-
-            if ($recommended === []) {
-                return new ToolResult(true, "No recommendations found for paper '{$paperId}'.");
-            }
-
-            $output = "RECOMMENDED PAPERS for {$paperId} (" . count($recommended) . " results)\n\n";
-            foreach ($recommended as $i => $paper) {
-                $num = $i + 1;
-                $output .= "[{$num}] " . $this->formatPaperSummary($paper) . "\n\n";
-            }
-
-            return new ToolResult(true, $output, [
-                'paper_id' => $paperId,
-                'returned' => count($recommended),
-            ]);
-        } catch (Throwable $e) {
-            $this->logger?->error('SemanticScholarTool Exception', ['exception' => $e]);
-            return new ToolResult(false, "Research tool error: " . $e->getMessage());
+        $url = self::BASE_URL . '/recommendations/v1/papers/forpaper/' . urlencode($paperId);
+        $query = [
+            'limit' => $limit,
+            'fields' => self::REC_FIELDS,
+        ];
+        $error = $this->performRequest($url, $query, $settings);
+        if ($error !== null) {
+            return $error;
         }
+
+        $data = $this->lastResponseData;
+        $recommended = $data['recommendedPapers'] ?? [];
+
+        $output = ($recommended === [])
+            ? "No recommendations found for paper '{$paperId}'."
+            : $this->buildRecommendationsOutput($paperId, $recommended);
+
+        return new ToolResult(true, $output, [
+            'paper_id' => $paperId,
+            'returned' => count($recommended),
+        ]);
     }
 
     private function effectiveTimeout(array $settings): int
@@ -434,6 +283,86 @@ final class SemanticScholarTool extends AbstractTool
         }
         $envTimeout = (int) ($_ENV['SPORA_TOOL_HTTP_TIMEOUT'] ?? getenv('SPORA_TOOL_HTTP_TIMEOUT') ?: 0);
         return $envTimeout > 0 ? $envTimeout : 30;
+    }
+
+    /**
+     * Performs a GET request and returns null on success (response data stored in $lastResponseData),
+     * or a ToolResult describing the error (HTTP failure or exception).
+     *
+     * @param array<string, mixed> $query
+     * @param array<string, mixed> $settings
+     */
+    private function performRequest(string $url, array $query, array $settings): ?ToolResult
+    {
+        $timeout = $this->effectiveTimeout($settings);
+        try {
+            $this->logger?->debug(self::LOG_HTTP_REQUEST, [
+                'method' => 'GET',
+                'url' => $url,
+                'query' => $query,
+                'timeout' => $timeout,
+            ]);
+
+            $response = $this->httpClient->request('GET', $url, ['query' => $query, 'timeout' => $timeout]);
+
+            $statusCode = $response->getStatusCode();
+            $this->logger?->debug(self::LOG_HTTP_RESPONSE, [
+                'status_code' => $statusCode,
+                'url' => $url,
+            ]);
+
+            if ($statusCode >= 400) {
+                $this->logger?->error(self::LOG_API_ERROR, ['status' => $statusCode]);
+                return new ToolResult(false, "Research tool failed with HTTP {$statusCode}");
+            }
+
+            $this->lastResponseData = $response->toArray(false);
+            return null;
+        } catch (Throwable $e) {
+            $this->logger?->error(self::LOG_EXCEPTION, ['exception' => $e]);
+            return new ToolResult(false, self::ERR_RESEARCH_PREFIX . $e->getMessage());
+        }
+    }
+
+    /**
+     * @param list<array<string, mixed>> $papers
+     */
+    private function buildPaperSearchOutput(string $query, int $total, array $papers): string
+    {
+        $output = "PAPER SEARCH RESULTS for '{$query}' ({$total} total, showing " . count($papers) . ")\n\n";
+        foreach ($papers as $i => $paper) {
+            $num = $i + 1;
+            $output .= "[{$num}] " . $this->formatPaperSummary($paper) . "\n\n";
+        }
+        return $output;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $entries
+     */
+    private function buildCitationsOutput(string $paperId, int $total, array $entries, int $offset, string $entryKey): string
+    {
+        $label = $entryKey === 'citingPaper' ? 'CITATIONS' : 'REFERENCES';
+        $output = "{$label} OF {$paperId} ({$total} total, showing " . count($entries) . " from offset {$offset})\n\n";
+        foreach ($entries as $i => $entry) {
+            $num = $i + 1;
+            $inner = $entry[$entryKey] ?? [];
+            $output .= "[{$num}] " . $this->formatPaperSummary($inner) . "\n\n";
+        }
+        return $output;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $recommended
+     */
+    private function buildRecommendationsOutput(string $paperId, array $recommended): string
+    {
+        $output = "RECOMMENDED PAPERS for {$paperId} (" . count($recommended) . " results)\n\n";
+        foreach ($recommended as $i => $paper) {
+            $num = $i + 1;
+            $output .= "[{$num}] " . $this->formatPaperSummary($paper) . "\n\n";
+        }
+        return $output;
     }
 
     private function formatPaperSummary(array $paper): string

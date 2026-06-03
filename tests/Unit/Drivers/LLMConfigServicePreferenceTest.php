@@ -9,6 +9,9 @@ use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\UserPreference;
 use Spora\Services\LLMConfigService;
 
+const PREF_TEST_USER_PASSWORD = 'Password1!';
+const PREF_TEST_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
+
 beforeEach(function (): void {
     Spora\Core\Database::resetBootState();
     $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
@@ -54,9 +57,9 @@ function createConfigForService(LLMConfigService $service, string $name, int $us
 // setUserPreferredConfig
 
 test('setUserPreferredConfig creates preference row', function (): void {
-    [$service, $security] = makePreferenceService();
+    [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('pref1@example.com', 'Password1!', 'Pref1');
+    $userId = $authService->register('pref1@example.com', PREF_TEST_USER_PASSWORD, 'Pref1');
 
     $config = createConfigForService($service, 'User Config', $userId);
 
@@ -72,7 +75,7 @@ test('setUserPreferredConfig creates preference row', function (): void {
 test('setUserPreferredConfig updates existing preference', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('pref2@example.com', 'Password1!', 'Pref2');
+    $userId = $authService->register('pref2@example.com', PREF_TEST_USER_PASSWORD, 'Pref2');
 
     $config1 = createConfigForService($service, 'First Config', $userId);
     $config2 = createConfigForService($service, 'Second Config', $userId);
@@ -96,8 +99,8 @@ test('setUserPreferredConfig updates existing preference', function (): void {
 test('setUserPreferredConfig rejects config belonging to another user', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userA = $authService->register('pref3a@example.com', 'Password1!', 'Pref3a');
-    $userB = $authService->register('pref3b@example.com', 'Password1!', 'Pref3b');
+    $userA = $authService->register('pref3a@example.com', PREF_TEST_USER_PASSWORD, 'Pref3a');
+    $userB = $authService->register('pref3b@example.com', PREF_TEST_USER_PASSWORD, 'Pref3b');
 
     $configA = createConfigForService($service, 'User A Config', $userA);
 
@@ -114,7 +117,7 @@ test('setUserPreferredConfig rejects config belonging to another user', function
 test('setUserPreferredConfig allows global config', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('pref4@example.com', 'Password1!', 'Pref4');
+    $userId = $authService->register('pref4@example.com', PREF_TEST_USER_PASSWORD, 'Pref4');
 
     // Create a global config
     $globalConfig = createConfigForService($service, 'Global Config', $userId, isGlobal: true);
@@ -132,7 +135,7 @@ test('setUserPreferredConfig allows global config', function (): void {
 test('getUserPreferredConfig returns null when no preference', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('getpref1@example.com', 'Password1!', 'Getpref1');
+    $userId = $authService->register('getpref1@example.com', PREF_TEST_USER_PASSWORD, 'Getpref1');
 
     $result = $service->getUserPreferredConfig($userId);
 
@@ -142,7 +145,7 @@ test('getUserPreferredConfig returns null when no preference', function (): void
 test('getUserPreferredConfig returns the preferred config', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('getpref2@example.com', 'Password1!', 'Getpref2');
+    $userId = $authService->register('getpref2@example.com', PREF_TEST_USER_PASSWORD, 'Getpref2');
 
     $config = createConfigForService($service, 'My Preferred Config', $userId);
     UserPreference::create([
@@ -160,8 +163,8 @@ test('getUserPreferredConfig returns the preferred config', function (): void {
 test('getUserPreferredConfig respects user isolation', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userA = $authService->register('getpref3a@example.com', 'Password1!', 'Getpref3a');
-    $userB = $authService->register('getpref3b@example.com', 'Password1!', 'Getpref3b');
+    $userA = $authService->register('getpref3a@example.com', PREF_TEST_USER_PASSWORD, 'Getpref3a');
+    $userB = $authService->register('getpref3b@example.com', PREF_TEST_USER_PASSWORD, 'Getpref3b');
 
     $configA = createConfigForService($service, 'User A Config', $userA);
     UserPreference::create([
@@ -182,10 +185,10 @@ test('getEffectiveConfigForAgent uses preferred_llm_config_id for tier-2 fallbac
 
     $userId = Illuminate\Database\Capsule\Manager::table('users')->insertGetId([
         'email'    => 'effective-t2-pref@example.com',
-        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'password' => password_hash(PREF_TEST_USER_PASSWORD, PASSWORD_DEFAULT),
         'registered' => time(),
-        'created_at' => date('Y-m-d H:i:s'),
-        'updated_at' => date('Y-m-d H:i:s'),
+        'created_at' => date(PREF_TEST_TIMESTAMP_FORMAT),
+        'updated_at' => date(PREF_TEST_TIMESTAMP_FORMAT),
     ]);
 
     // Config that has is_default=true but is NOT the preferred one
@@ -228,10 +231,10 @@ test('getEffectiveConfigForAgent prefers agent config over user preferred config
 
     $userId = Illuminate\Database\Capsule\Manager::table('users')->insertGetId([
         'email'    => 'effective-t1-override@example.com',
-        'password' => password_hash('Password1!', PASSWORD_DEFAULT),
+        'password' => password_hash(PREF_TEST_USER_PASSWORD, PASSWORD_DEFAULT),
         'registered' => time(),
-        'created_at' => date('Y-m-d H:i:s'),
-        'updated_at' => date('Y-m-d H:i:s'),
+        'created_at' => date(PREF_TEST_TIMESTAMP_FORMAT),
+        'updated_at' => date(PREF_TEST_TIMESTAMP_FORMAT),
     ]);
 
     // Agent-specific config (should be used - Tier 1)
@@ -272,7 +275,7 @@ test('getEffectiveConfigForAgent prefers agent config over user preferred config
 test('unsetUserPreferredConfig deletes the row', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('unsetpref1@example.com', 'Password1!', 'Unsetpref1');
+    $userId = $authService->register('unsetpref1@example.com', PREF_TEST_USER_PASSWORD, 'Unsetpref1');
 
     $config = createConfigForService($service, 'To Remove', $userId);
     UserPreference::create([
@@ -289,7 +292,7 @@ test('unsetUserPreferredConfig deletes the row', function (): void {
 test('unsetUserPreferredConfig does nothing when no preference exists', function (): void {
     [$service] = makePreferenceService();
     $authService = bootAuthLayer();
-    $userId = $authService->register('unsetpref2@example.com', 'Password1!', 'Unsetpref2');
+    $userId = $authService->register('unsetpref2@example.com', PREF_TEST_USER_PASSWORD, 'Unsetpref2');
 
     // Should not throw
     $service->unsetUserPreferredConfig($userId);

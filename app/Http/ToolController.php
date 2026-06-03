@@ -17,6 +17,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 final class ToolController
 {
+    private const ERR_TOOL_NOT_FOUND_MSG = 'Tool not found.';
+
+    private const ERR_TOOL_NOT_FOUND_CODE = 'NOT_FOUND';
+
     /**
      * @param string[] $toolClasses Registered tool class names (injected via container).
      */
@@ -26,7 +30,7 @@ final class ToolController
         private readonly array $toolClasses = [],
     ) {}
 
-    public function index(Request $request): JsonResponse
+    public function index(): JsonResponse
     {
 
 
@@ -41,7 +45,7 @@ final class ToolController
 
         $toolClass = $this->resolveToolClassFromRequest($request);
         if ($toolClass === null) {
-            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Tool not found.']], 404);
+            return new JsonResponse(['error' => ['code' => self::ERR_TOOL_NOT_FOUND_CODE, 'message' => self::ERR_TOOL_NOT_FOUND_MSG]], 404);
         }
 
         $settings = $this->toolConfigService->getGlobalSettings($toolClass);
@@ -56,7 +60,7 @@ final class ToolController
 
         $toolClass = $this->resolveToolClassFromRequest($request);
         if ($toolClass === null) {
-            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Tool not found.']], 404);
+            return new JsonResponse(['error' => ['code' => self::ERR_TOOL_NOT_FOUND_CODE, 'message' => self::ERR_TOOL_NOT_FOUND_MSG]], 404);
         }
 
         try {
@@ -84,7 +88,7 @@ final class ToolController
 
         $toolClass = $this->resolveToolClassFromRequest($request);
         if ($toolClass === null) {
-            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Tool not found.']], 404);
+            return new JsonResponse(['error' => ['code' => self::ERR_TOOL_NOT_FOUND_CODE, 'message' => self::ERR_TOOL_NOT_FOUND_MSG]], 404);
         }
 
         $this->toolConfigService->deleteGlobalSettings($toolClass);
@@ -98,7 +102,7 @@ final class ToolController
         $toolClass = $this->toolConfigService->resolveToolClass($toolId);
 
         if ($toolClass === null) {
-            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Tool not found.']], 404);
+            return new JsonResponse(['error' => ['code' => self::ERR_TOOL_NOT_FOUND_CODE, 'message' => self::ERR_TOOL_NOT_FOUND_MSG]], 404);
         }
 
         $settings = $this->toolConfigService->getUserSettings($toolClass, $userId);
@@ -113,7 +117,7 @@ final class ToolController
         $toolClass = $this->toolConfigService->resolveToolClass($toolId);
 
         if ($toolClass === null) {
-            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Tool not found.']], 404);
+            return new JsonResponse(['error' => ['code' => self::ERR_TOOL_NOT_FOUND_CODE, 'message' => self::ERR_TOOL_NOT_FOUND_MSG]], 404);
         }
 
         try {
@@ -139,7 +143,7 @@ final class ToolController
         $toolClass = $this->toolConfigService->resolveToolClass($toolId);
 
         if ($toolClass === null) {
-            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Tool not found.']], 404);
+            return new JsonResponse(['error' => ['code' => self::ERR_TOOL_NOT_FOUND_CODE, 'message' => self::ERR_TOOL_NOT_FOUND_MSG]], 404);
         }
 
         $this->toolConfigService->deleteUserSettings($toolClass, $userId);

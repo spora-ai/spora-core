@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use JsonException;
-use SensitiveParameter;
 use Spora\Auth\AuthService;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
@@ -17,6 +16,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 final class AgentController
 {
+    private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly AgentServiceInterface $agentService,
@@ -26,7 +27,7 @@ final class AgentController
     /**
      * GET /api/v1/agents
      */
-    public function index(#[SensitiveParameter] Request $request): JsonResponse
+    public function index(): JsonResponse
     {
         $userId = $this->authService->currentUserId();
 
@@ -45,7 +46,7 @@ final class AgentController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         $name = trim((string) ($body['name'] ?? ''));
@@ -97,7 +98,7 @@ final class AgentController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'retry_after_minutes', 'max_retries'];
@@ -270,7 +271,7 @@ final class AgentController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         $settings = isset($body['settings']) && is_array($body['settings']) ? $body['settings'] : $body;
@@ -334,7 +335,7 @@ final class AgentController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
         $result = $this->agentService->patchOperationOverride($agentId, $userId, $toolClass, $operation, $body);

@@ -23,11 +23,47 @@ export function setupSessionHandler(handler: SessionExpiredHandler): void {
 }
 
 // State-changing HTTP methods that require a CSRF token
-const STATE_CHANGING_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']
+const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function unwrap(val: unknown): unknown {
-  return val && typeof val === 'object' && 'value' in val ? (val as { value: unknown }).value : val
+  return val && typeof val === 'object' && 'value' in val ? val.value : val
+}
+
+async function injectCsrfIfNeeded(method: string, headers: Record<string, string>): Promise<void> {
+  if (!STATE_CHANGING_METHODS.has(method)) {
+    return
+  }
+  const authStore = await import('@/stores/auth')
+  const auth = authStore.useAuthStore()
+  const csrfVal = unwrap(auth.csrfToken) as string | null
+  if (csrfVal) {
+    headers['X-CSRF-Token'] = csrfVal
+    return
+  }
+  if (!unwrap(auth.user)) {
+    return
+  }
+  // Token missing but user appears logged in — fetch a fresh one from /auth/me
+  const meRes = await api.get<{ csrf_token?: string }>('/auth/me')
+  if (meRes.csrf_token) {
+    auth.$patch({ csrfToken: meRes.csrf_token })
+    headers['X-CSRF-Token'] = meRes.csrf_token
+  }
+}
+
+async function notifySessionExpired(): Promise<void> {
+  const auth = await import('@/stores/auth').then(m => m.useAuthStore())
+  if (unwrap(auth.initialized) && unwrap(auth.user)) {
+    _sessionExpiredHandler?.()
+  }
+}
+
+function buildError(body: Record<string, unknown> | null, status: number): ApiError {
+  const err = body?.error as Record<string, string> | undefined
+  const code = err?.code ?? 'UNKNOWN_ERROR'
+  const message = err?.message ?? `HTTP ${status}`
+  return new ApiError(message, code, status)
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -39,21 +75,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   // Inject CSRF token from auth store for state-changing requests
   const method = (init.method ?? 'GET').toUpperCase()
-  if (STATE_CHANGING_METHODS.includes(method)) {
-    const authStore = await import('@/stores/auth')
-    const auth = authStore.useAuthStore()
-    const csrfVal = unwrap(auth.csrfToken) as string | null
-    if (csrfVal) {
-      headers['X-CSRF-Token'] = csrfVal
-    } else if (unwrap(auth.user)) {
-      // Token missing but user appears logged in — fetch a fresh one from /auth/me
-      const meRes = await api.get<{ csrf_token?: string }>('/auth/me')
-      if (meRes.csrf_token) {
-        auth.$patch({ csrfToken: meRes.csrf_token })
-        headers['X-CSRF-Token'] = meRes.csrf_token
-      }
-    }
-  }
+  await injectCsrfIfNeeded(method, headers)
 
   const response = await fetch(`${BASE_URL}/api/v1${path}`, {
     ...init,
@@ -66,28 +88,24 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = text.length > 0 ? (JSON.parse(text) as Record<string, unknown>) : null
 
   if (!response.ok) {
-    const err = body?.error as Record<string, string> | undefined
-    const code = err?.code ?? 'UNKNOWN_ERROR'
-    const message = err?.message ?? `HTTP ${response.status}`
-    if (response.status === 401 && code === 'UNAUTHENTICATED') {
-      const auth = await import('@/stores/auth').then(m => m.useAuthStore())
-      if (unwrap(auth.initialized) && unwrap(auth.user)) {
-        _sessionExpiredHandler?.()
+    if (response.status === 401) {
+      const err = body?.error as Record<string, string> | undefined
+      if (err?.code === 'UNAUTHENTICATED') {
+        await notifySessionExpired()
       }
     }
-
-    throw new ApiError(message, code, response.status)
+    throw buildError(body, response.status)
   }
 
   // body.data is the standard envelope; fall back to the whole body for bare responses.
-  return (body !== null ? ((body.data ?? body) as T) : (undefined as T))
+  return ((body === null ? undefined : (body.data ?? body)) as T)
 }
 
 export const api = {
   get: <T>(path: string) =>
     request<T>(path),
   post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined }),
+    request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }),
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   put: <T>(path: string, body: unknown) =>

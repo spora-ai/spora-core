@@ -2,6 +2,12 @@
 
 declare(strict_types=1);
 
+const USERPROFILE_TEST_PASSWORD = 'Password1!';
+const USERPROFILE_GET_PROFILE_PATH = '/me/profile';
+const USERPROFILE_LOCATIONS_PATH = '/me/locations';
+const USERPROFILE_ADDRESS_HOME = '123 Main St';
+const USERPROFILE_ADDRESS_OFFICE = '456 Office Blvd';
+
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\UserProfileController;
@@ -24,7 +30,7 @@ function makeUserProfileController(): array
 
 test('getProfile returns user profile data', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile1@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile1@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile1@example.com');
 
     User::where('id', $userId)->update([
@@ -35,7 +41,7 @@ test('getProfile returns user profile data', function (): void {
         'weight_kg'    => 70.0,
     ]);
 
-    $request = jsonRequest('GET', '/me/profile');
+    $request = jsonRequest('GET', USERPROFILE_GET_PROFILE_PATH);
     $response = callController($controller, 'getProfile', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
@@ -49,7 +55,7 @@ test('getProfile returns user profile data', function (): void {
 
 test('getProfile returns null fields as null', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile2@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile2@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile2@example.com');
 
     // Ensure user has no profile data set by bootAuth
@@ -57,7 +63,7 @@ test('getProfile returns null fields as null', function (): void {
     $user->name = null;
     $user->save();
 
-    $request = jsonRequest('GET', '/me/profile');
+    $request = jsonRequest('GET', USERPROFILE_GET_PROFILE_PATH);
     $response = callController($controller, 'getProfile', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
@@ -73,7 +79,7 @@ test('getProfile rejects unauthenticated requests', function (): void {
     [$controller, , , $authMiddleware] = makeUserProfileController();
     clearSession();
 
-    $request = jsonRequest('GET', '/me/profile');
+    $request = jsonRequest('GET', USERPROFILE_GET_PROFILE_PATH);
 
     expect(fn() => callController($controller, 'getProfile', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
@@ -81,10 +87,10 @@ test('getProfile rejects unauthenticated requests', function (): void {
 
 test('putProfile updates profile fields', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile3@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile3@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile3@example.com');
 
-    $request = jsonRequest('PUT', '/me/profile', [
+    $request = jsonRequest('PUT', USERPROFILE_GET_PROFILE_PATH, [
         'name'         => 'Bob',
         'date_of_birth' => '1985-03-20',
         'about_me'     => 'Updated bio',
@@ -104,11 +110,11 @@ test('putProfile updates profile fields', function (): void {
 
 test('putProfile clears fields when empty string sent', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile4@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile4@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile4@example.com');
     User::where('id', $userId)->update(['name' => 'Alice']);
 
-    $request = jsonRequest('PUT', '/me/profile', ['name' => '']);
+    $request = jsonRequest('PUT', USERPROFILE_GET_PROFILE_PATH, ['name' => '']);
     $response = callController($controller, 'putProfile', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
@@ -120,7 +126,7 @@ test('putProfile rejects unauthenticated requests', function (): void {
     [$controller, , , $authMiddleware] = makeUserProfileController();
     clearSession();
 
-    $request = jsonRequest('PUT', '/me/profile', ['name' => 'Bob']);
+    $request = jsonRequest('PUT', USERPROFILE_GET_PROFILE_PATH, ['name' => 'Bob']);
 
     expect(fn() => callController($controller, 'putProfile', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
@@ -128,10 +134,10 @@ test('putProfile rejects unauthenticated requests', function (): void {
 
 test('getLocations returns empty list when no locations', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile5@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile5@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile5@example.com');
 
-    $request = jsonRequest('GET', '/me/locations');
+    $request = jsonRequest('GET', USERPROFILE_LOCATIONS_PATH);
     $response = callController($controller, 'getLocations', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
@@ -141,23 +147,23 @@ test('getLocations returns empty list when no locations', function (): void {
 
 test('getLocations returns user locations', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile6@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile6@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile6@example.com');
 
     UserLocation::create([
         'user_id' => $userId,
         'name'   => 'Home',
-        'address' => '123 Main St',
+        'address' => USERPROFILE_ADDRESS_HOME,
         'is_default' => true,
     ]);
     UserLocation::create([
         'user_id' => $userId,
         'name'   => 'Work',
-        'address' => '456 Office Blvd',
+        'address' => USERPROFILE_ADDRESS_OFFICE,
         'is_default' => false,
     ]);
 
-    $request = jsonRequest('GET', '/me/locations');
+    $request = jsonRequest('GET', USERPROFILE_LOCATIONS_PATH);
     $response = callController($controller, 'getLocations', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
@@ -170,7 +176,7 @@ test('getLocations rejects unauthenticated requests', function (): void {
     [$controller, , , $authMiddleware] = makeUserProfileController();
     clearSession();
 
-    $request = jsonRequest('GET', '/me/locations');
+    $request = jsonRequest('GET', USERPROFILE_LOCATIONS_PATH);
 
     expect(fn() => callController($controller, 'getLocations', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
@@ -178,10 +184,10 @@ test('getLocations rejects unauthenticated requests', function (): void {
 
 test('postLocation creates a new location', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile7@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile7@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile7@example.com');
 
-    $request = jsonRequest('POST', '/me/locations', [
+    $request = jsonRequest('POST', USERPROFILE_LOCATIONS_PATH, [
         'name'       => 'Beach House',
         'address'    => '100 Ocean Drive',
         'is_default' => false,
@@ -197,10 +203,10 @@ test('postLocation creates a new location', function (): void {
 
 test('postLocation validates name is required', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile8@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile8@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile8@example.com');
 
-    $request = jsonRequest('POST', '/me/locations', ['address' => '123 Main St']);
+    $request = jsonRequest('POST', USERPROFILE_LOCATIONS_PATH, ['address' => USERPROFILE_ADDRESS_HOME]);
     $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(422);
@@ -209,10 +215,10 @@ test('postLocation validates name is required', function (): void {
 
 test('postLocation validates address is required', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile9@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile9@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile9@example.com');
 
-    $request = jsonRequest('POST', '/me/locations', ['name' => 'Home']);
+    $request = jsonRequest('POST', USERPROFILE_LOCATIONS_PATH, ['name' => 'Home']);
     $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(422);
@@ -221,19 +227,19 @@ test('postLocation validates address is required', function (): void {
 
 test('postLocation sets is_default and unsets other defaults', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile10@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile10@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile10@example.com');
 
     UserLocation::create([
         'user_id' => $userId,
         'name'   => 'Existing',
-        'address' => '123 Main St',
+        'address' => USERPROFILE_ADDRESS_HOME,
         'is_default' => true,
     ]);
 
-    $request = jsonRequest('POST', '/me/locations', [
+    $request = jsonRequest('POST', USERPROFILE_LOCATIONS_PATH, [
         'name'       => 'New Default',
-        'address'    => '456 Office Blvd',
+        'address'    => USERPROFILE_ADDRESS_OFFICE,
         'is_default' => true,
     ]);
     $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
@@ -248,7 +254,7 @@ test('postLocation rejects unauthenticated requests', function (): void {
     [$controller, , , $authMiddleware] = makeUserProfileController();
     clearSession();
 
-    $request = jsonRequest('POST', '/me/locations', ['name' => 'Home', 'address' => '123 Main St']);
+    $request = jsonRequest('POST', USERPROFILE_LOCATIONS_PATH, ['name' => 'Home', 'address' => USERPROFILE_ADDRESS_HOME]);
 
     expect(fn() => callController($controller, 'postLocation', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
@@ -256,19 +262,19 @@ test('postLocation rejects unauthenticated requests', function (): void {
 
 test('putLocation updates own location', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile11@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile11@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile11@example.com');
 
     $loc = UserLocation::create([
         'user_id' => $userId,
         'name'   => 'Old Name',
-        'address' => '123 Main St',
+        'address' => USERPROFILE_ADDRESS_HOME,
         'is_default' => false,
     ]);
 
     $request = jsonRequest('PUT', "/me/locations/{$loc->id}", [
         'name' => 'New Name',
-        'address' => '456 Office Blvd',
+        'address' => USERPROFILE_ADDRESS_OFFICE,
     ]);
     $request->attributes->set('id', $loc->id);
     $response = callController($controller, 'putLocation', $request, [$authMiddleware]);
@@ -276,19 +282,19 @@ test('putLocation updates own location', function (): void {
     expect($response->getStatusCode())->toBe(200);
     $data = json_decode($response->getContent(), true)['data'];
     expect($data['name'])->toBe('New Name');
-    expect($data['address'])->toBe('456 Office Blvd');
+    expect($data['address'])->toBe(USERPROFILE_ADDRESS_OFFICE);
 });
 
 test('putLocation returns 404 for another users location', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile12@example.com', 'Password1!');
-    $otherUserId = bootAuth($authService, 'other12@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile12@example.com', USERPROFILE_TEST_PASSWORD);
+    $otherUserId = bootAuth($authService, 'other12@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile12@example.com');
 
     $loc = UserLocation::create([
         'user_id' => $otherUserId,
         'name'   => 'Other Home',
-        'address' => '123 Main St',
+        'address' => USERPROFILE_ADDRESS_HOME,
     ]);
 
     $request = jsonRequest('PUT', "/me/locations/{$loc->id}", ['name' => 'Hacked']);
@@ -311,13 +317,13 @@ test('putLocation rejects unauthenticated requests', function (): void {
 
 test('deleteLocation deletes own location', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile13@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile13@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile13@example.com');
 
     $loc = UserLocation::create([
         'user_id' => $userId,
         'name'   => 'To Delete',
-        'address' => '123 Main St',
+        'address' => USERPROFILE_ADDRESS_HOME,
     ]);
 
     $request = jsonRequest('DELETE', "/me/locations/{$loc->id}");
@@ -330,14 +336,14 @@ test('deleteLocation deletes own location', function (): void {
 
 test('deleteLocation returns 404 for another users location', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
-    $userId = bootAuth($authService, 'profile14@example.com', 'Password1!');
-    $otherUserId = bootAuth($authService, 'other14@example.com', 'Password1!');
+    $userId = bootAuth($authService, 'profile14@example.com', USERPROFILE_TEST_PASSWORD);
+    $otherUserId = bootAuth($authService, 'other14@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile14@example.com');
 
     $loc = UserLocation::create([
         'user_id' => $otherUserId,
         'name'   => 'Other Location',
-        'address' => '123 Main St',
+        'address' => USERPROFILE_ADDRESS_HOME,
     ]);
 
     $request = jsonRequest('DELETE', "/me/locations/{$loc->id}");

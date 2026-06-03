@@ -23,7 +23,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 // Spy on fetch to inspect headers
-const fetchSpy = vi.spyOn(global, 'fetch')
+const fetchSpy = vi.spyOn(globalThis, 'fetch')
 
 function mockFetch(response: Partial<Response> & { body?: unknown } = {}) {
   fetchSpy.mockResolvedValueOnce({
@@ -33,7 +33,7 @@ function mockFetch(response: Partial<Response> & { body?: unknown } = {}) {
     headers: new Headers({ 'content-type': 'application/json' }),
     text: async () => JSON.stringify({ data: response.body ?? {} }),
     ...response,
-  } as unknown as Response)
+  } as Response)
 }
 
 function mockFetchSequence(responses: Partial<Response>[]) {
@@ -46,7 +46,7 @@ function mockFetchSequence(responses: Partial<Response>[]) {
       headers: new Headers({ 'content-type': 'application/json' }),
       text: async () => JSON.stringify(body ? { data: body } : {}),
       ...r,
-    } as unknown as Response)
+    } as Response)
   })
 }
 
@@ -169,7 +169,7 @@ describe('CSRF token injection', () => {
         statusText: 'Unauthorized',
         headers: new Headers({ 'content-type': 'application/json' }),
         text: async () => JSON.stringify({ error: { code: 'UNAUTHENTICATED', message: 'Session expired' } }),
-      } as unknown as Response)
+      } as Response)
 
       await expect(api.post('/tasks', {})).rejects.toThrow()
 
@@ -190,7 +190,7 @@ describe('CSRF token injection', () => {
         statusText: 'Unauthorized',
         headers: new Headers({ 'content-type': 'application/json' }),
         text: async () => JSON.stringify({ error: { code: 'UNAUTHENTICATED', message: 'Session expired' } }),
-      } as unknown as Response)
+      } as Response)
 
       await expect(api.post('/tasks', {})).rejects.toThrow()
 

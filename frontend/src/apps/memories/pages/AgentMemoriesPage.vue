@@ -7,8 +7,7 @@ import { useAgentStore } from '@/stores/agent'
 import MemoryListItem from '../components/MemoryListItem.vue'
 import MemoryEditor from '../components/MemoryEditor.vue'
 import AlertBanner from '@/components/ui/AlertBanner.vue'
-import type { MemoryResource } from '../types/memory'
-import type { CreateMemoryDto, UpdateMemoryDto } from '../types/memory'
+import type { MemoryResource, CreateMemoryDto, UpdateMemoryDto } from '../types/memory'
 
 const route = useRoute()
 const router = useRouter()
@@ -45,7 +44,7 @@ onMounted(async () => {
   const validAgentId = Number.isNaN(agentId.value) ? null : agentId.value
   await Promise.all([
     agentStore.fetchAgents(),
-    validAgentId !== null ? store.loadAgentMemories(validAgentId) : Promise.resolve(),
+    validAgentId === null ? Promise.resolve() : store.loadAgentMemories(validAgentId),
   ])
   applyQueryParams()
 })

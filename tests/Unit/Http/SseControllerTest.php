@@ -4,11 +4,18 @@ declare(strict_types=1);
 
 use Spora\Http\SseController;
 
+final class SseControllerTestLiterals
+{
+    public const SSE_EMAIL = 'sse@example.com';
+    public const SSE_PASSWORD = 'Password1!';
+    public const SSE_MERCURE_URL = 'http://localhost:3000/.well-known/mercure';
+}
+
 describe('SseController', function (): void {
     it('auth returns 404 when mercure is not configured', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('sse@example.com', 'Password1!', 'Sse');
-        simulateLoggedInSession($userId, 'sse@example.com');
+        $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
+        simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
 
         $controller = new SseController($authService, null, null);
         $response = $controller->auth();
@@ -20,10 +27,10 @@ describe('SseController', function (): void {
 
     it('auth returns hubUrl and token when mercure is configured', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('sse@example.com', 'Password1!', 'Sse');
-        simulateLoggedInSession($userId, 'sse@example.com');
+        $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
+        simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
 
-        $controller = new SseController($authService, 'http://localhost:3000/.well-known/mercure', 'test-secret-key-for-jwt-signing-32ch');
+        $controller = new SseController($authService, SseControllerTestLiterals::SSE_MERCURE_URL, 'test-secret-key-for-jwt-signing-32ch');
         $response = $controller->auth();
 
         expect($response->getStatusCode())->toBe(200);
@@ -38,11 +45,11 @@ describe('SseController', function (): void {
 
     it('auth token has correct mercure subscription topics', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('sse@example.com', 'Password1!', 'Sse');
-        simulateLoggedInSession($userId, 'sse@example.com');
+        $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
+        simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
         $secret = 'test-secret-key-for-jwt-signing-32ch';
 
-        $controller = new SseController($authService, 'http://localhost:3000/.well-known/mercure', $secret);
+        $controller = new SseController($authService, SseControllerTestLiterals::SSE_MERCURE_URL, $secret);
         $response = $controller->auth();
 
         $body = json_decode($response->getContent(), true);
@@ -59,10 +66,10 @@ describe('SseController', function (): void {
 
     it('auth token expires in 1 hour', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('sse@example.com', 'Password1!', 'Sse');
-        simulateLoggedInSession($userId, 'sse@example.com');
+        $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
+        simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
 
-        $controller = new SseController($authService, 'http://localhost:3000/.well-known/mercure', 'test-secret-key-for-jwt-signing-32ch');
+        $controller = new SseController($authService, SseControllerTestLiterals::SSE_MERCURE_URL, 'test-secret-key-for-jwt-signing-32ch');
         $response = $controller->auth();
 
         $body = json_decode($response->getContent(), true);

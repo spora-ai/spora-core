@@ -29,7 +29,7 @@ function createSessionStorageMock() {
 }
 
 const mockSessionStorage = createSessionStorageMock()
-Object.defineProperty(global, 'sessionStorage', { value: mockSessionStorage })
+Object.defineProperty(globalThis, 'sessionStorage', { value: mockSessionStorage })
 
 function resetSessionStorage(): void {
   for (const k in sessionStorageStore) delete sessionStorageStore[k]
@@ -233,8 +233,8 @@ describe('useAgentStore', () => {
     it('fetches and maps operation overrides by tool name', async () => {
       mockApi.get.mockResolvedValueOnce({
         operations: [
-          { tool_class: 'App\\Tools\\FileTool', tool_name: 'file_tool', operation: 'read', effective_enabled: true, effective_requires_approval: false },
-          { tool_class: 'App\\Tools\\FileTool', tool_name: 'file_tool', operation: 'write', effective_enabled: false, effective_requires_approval: true },
+          { tool_class: String.raw`App\Tools\FileTool`, tool_name: 'file_tool', operation: 'read', effective_enabled: true, effective_requires_approval: false },
+          { tool_class: String.raw`App\Tools\FileTool`, tool_name: 'file_tool', operation: 'write', effective_enabled: false, effective_requires_approval: true },
         ],
       })
 

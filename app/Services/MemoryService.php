@@ -15,6 +15,8 @@ use Spora\Models\Memory;
  */
 final class MemoryService implements MemoryServiceInterface
 {
+    private const DATETIME_FORMAT = 'Y-m-d H:i:s';
+
     public function listGlobalMemories(int $userId): array
     {
         $memories = Memory::global()
@@ -83,8 +85,8 @@ final class MemoryService implements MemoryServiceInterface
             'summary'    => isset($data['summary']) ? trim((string) $data['summary']) : null,
             'content'    => isset($data['content']) ? trim((string) $data['content']) : null,
             'order'      => $this->getNextOrder(null, $userId),
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
+            'created_at' => date(self::DATETIME_FORMAT),
+            'updated_at' => date(self::DATETIME_FORMAT),
         ]);
 
         $memory = Memory::findOrFail($id);
@@ -108,8 +110,8 @@ final class MemoryService implements MemoryServiceInterface
             'summary'    => isset($data['summary']) ? trim((string) $data['summary']) : null,
             'content'    => isset($data['content']) ? trim((string) $data['content']) : null,
             'order'      => $this->getNextOrder($agentId, $userId),
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
+            'created_at' => date(self::DATETIME_FORMAT),
+            'updated_at' => date(self::DATETIME_FORMAT),
         ]);
 
         $memory = Memory::findOrFail($id);
@@ -139,7 +141,7 @@ final class MemoryService implements MemoryServiceInterface
             }
             Capsule::table('memories')
                 ->where('id', $memoryId)
-                ->update(array_merge($updateData, ['updated_at' => date('Y-m-d H:i:s')]));
+                ->update(array_merge($updateData, ['updated_at' => date(self::DATETIME_FORMAT)]));
             $memory->refresh();
         }
 
@@ -169,7 +171,7 @@ final class MemoryService implements MemoryServiceInterface
             }
             Capsule::table('memories')
                 ->where('id', $memoryId)
-                ->update(array_merge($updateData, ['updated_at' => date('Y-m-d H:i:s')]));
+                ->update(array_merge($updateData, ['updated_at' => date(self::DATETIME_FORMAT)]));
             $memory->refresh();
         }
 
@@ -234,7 +236,7 @@ final class MemoryService implements MemoryServiceInterface
                 ->where('id', $memoryId)
                 ->where('user_id', $userId)
                 ->whereNull('agent_id')
-                ->update(['order' => $index + 1, 'updated_at' => date('Y-m-d H:i:s')]);
+                ->update(['order' => $index + 1, 'updated_at' => date(self::DATETIME_FORMAT)]);
         }
     }
 
@@ -251,7 +253,7 @@ final class MemoryService implements MemoryServiceInterface
             $updated = Capsule::table('memories')
                 ->where('id', $memoryId)
                 ->where('agent_id', $agentId)
-                ->update(['order' => $order, 'updated_at' => date('Y-m-d H:i:s')]);
+                ->update(['order' => $order, 'updated_at' => date(self::DATETIME_FORMAT)]);
             if ($updated > 0) {
                 $order++;
             }

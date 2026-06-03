@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use ReflectionClass;
 use Spora\Auth\AuthService;
+use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -102,6 +103,28 @@ final class LLMConfigController
             return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         }
 
+        $validationError = $this->validateStoreBody($body);
+        if ($validationError !== null) {
+            return $validationError;
+        }
+
+        $data = $this->prepareStoreData($body);
+        $config = $this->llmConfigService->createConfiguration($userId, $data, $isAdmin);
+        if ($config === null) {
+            return $this->storeCreationError($data, $isAdmin);
+        }
+
+        return new JsonResponse(
+            ['data' => ['config' => $this->llmConfigService->configResource($config)]],
+            Response::HTTP_CREATED,
+        );
+    }
+
+    /**
+     * Validate the body of a create request. Returns an error response on failure.
+     */
+    private function validateStoreBody(array $body): ?JsonResponse
+    {
         $name = trim((string) ($body['name'] ?? ''));
         if ($name === '') {
             return $this->error('VALIDATION_ERROR', 'Name is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
@@ -112,19 +135,28 @@ final class LLMConfigController
             return $this->error('VALIDATION_ERROR', 'Invalid driver_class.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        // Validate required fields against schema
-        $schema = $this->getSchemaForDriver($driverClass);
         $rawSettings = $body['settings'] ?? null;
         $settings = is_array($rawSettings) ? $rawSettings : [];
-        $validationError = $this->validateSettings($settings, $schema);
+        $validationError = $this->validateSettings($settings, $this->getSchemaForDriver($driverClass));
         if ($validationError !== null) {
             return $this->error('VALIDATION_ERROR', $validationError, Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        return null;
+    }
+
+    /**
+     * Build the data array passed to the LLM config service for creation.
+     *
+     * @return array<string, mixed>
+     */
+    private function prepareStoreData(array $body): array
+    {
         $data = $body;
-        $data['name'] = $name;
-        $data['driver_class'] = $driverClass;
-        $data['settings'] = $settings;
+        $data['name'] = trim((string) ($body['name'] ?? ''));
+        $data['driver_class'] = trim((string) ($body['driver_class'] ?? ''));
+        $rawSettings = $body['settings'] ?? null;
+        $data['settings'] = is_array($rawSettings) ? $rawSettings : [];
         $data['is_global'] = !empty($body['is_global']);
         $data['is_default'] = !empty($body['is_default']);
         if (isset($body['context_window'])) {
@@ -133,19 +165,15 @@ final class LLMConfigController
         if (isset($body['max_tokens_output'])) {
             $data['max_tokens_output'] = (int) $body['max_tokens_output'];
         }
+        return $data;
+    }
 
-        $config = $this->llmConfigService->createConfiguration($userId, $data, $isAdmin);
-        if ($config === null) {
-            if (!empty($data['is_global']) && !$isAdmin) {
-                return $this->error('VALIDATION_ERROR', 'Only admins can create global configurations.', Response::HTTP_UNPROCESSABLE_ENTITY);
-            }
-            return $this->error('VALIDATION_ERROR', 'Failed to create configuration.', Response::HTTP_UNPROCESSABLE_ENTITY);
+    private function storeCreationError(array $data, bool $isAdmin): JsonResponse
+    {
+        if (!empty($data['is_global']) && !$isAdmin) {
+            return $this->error('VALIDATION_ERROR', 'Only admins can create global configurations.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
-
-        return new JsonResponse(
-            ['data' => ['config' => $this->llmConfigService->configResource($config)]],
-            Response::HTTP_CREATED,
-        );
+        return $this->error('VALIDATION_ERROR', 'Failed to create configuration.', Response::HTTP_UNPROCESSABLE_ENTITY);
     }
 
     /**
@@ -156,24 +184,9 @@ final class LLMConfigController
         $userId = $this->authService->currentUserId();
         $isAdmin = $this->authService->isAdmin();
 
-        // Check if config exists and is accessible
-        $config = $this->llmConfigService->getConfiguration($id, $userId);
-        if ($config === null) {
-            // Check if it might be a global config (admins can access it)
-            $existingConfig = $this->llmConfigService->findConfiguration($id);
-            if ($existingConfig === null) {
-                return $this->notFound();
-            }
-            // Config exists but relates to a global config that the user is not an admin for - deny access
-            if (!$isAdmin && $existingConfig->is_global) {
-                return $this->forbidden();
-            }
-            // Config belongs to another user - return not found to avoid enumeration
-            if ($existingConfig->user_id !== null && $existingConfig->user_id !== $userId) {
-                return $this->notFound();
-            }
-            // Admin trying to update global config - reload as admin access
-            $config = $existingConfig;
+        $config = $this->resolveAccessibleConfig($id, $userId, $isAdmin);
+        if ($config instanceof JsonResponse) {
+            return $config;
         }
 
         try {
@@ -182,30 +195,17 @@ final class LLMConfigController
             return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         }
 
-        if (isset($body['name'])) {
-            $name = trim((string) $body['name']);
-            if ($name === '') {
-                return $this->error('VALIDATION_ERROR', 'Name cannot be empty.', Response::HTTP_UNPROCESSABLE_ENTITY);
-            }
+        $nameError = $this->validateUpdateName($body);
+        if ($nameError !== null) {
+            return $nameError;
         }
 
-        if (isset($body['settings']) && is_array($body['settings']) && !array_is_list($body['settings'])) {
-            $schema = $this->getSchemaForDriver($config->driver_class);
-            $existing = $this->llmConfigService->decodeSettings($config->driver_class, $config->getRawOriginal('settings') ?? '');
-            $merged = array_merge($existing, $body['settings']);
-            $validationError = $this->validateSettings($merged, $schema);
-            if ($validationError !== null) {
-                return $this->error('VALIDATION_ERROR', $validationError, Response::HTTP_UNPROCESSABLE_ENTITY);
-            }
+        $settingsError = $this->validateUpdateSettings($body, $config);
+        if ($settingsError !== null) {
+            return $settingsError;
         }
 
-        $data = $body;
-        if (isset($body['context_window'])) {
-            $data['context_window'] = (int) $body['context_window'];
-        }
-        if (isset($body['max_tokens_output'])) {
-            $data['max_tokens_output'] = (int) $body['max_tokens_output'];
-        }
+        $data = $this->prepareUpdateData($body);
 
         $updatedConfig = $this->llmConfigService->updateConfiguration($id, $userId, $data, $isAdmin);
         if ($updatedConfig === null) {
@@ -213,6 +213,80 @@ final class LLMConfigController
         }
 
         return new JsonResponse(['data' => ['config' => $this->llmConfigService->configResource($updatedConfig)]]);
+    }
+
+    /**
+     * Resolve a config the current user can modify, or return the appropriate error response.
+     */
+    private function resolveAccessibleConfig(int $id, ?int $userId, bool $isAdmin): LLMDriverConfiguration|JsonResponse
+    {
+        $config = $this->llmConfigService->getConfiguration($id, $userId);
+        if ($config !== null) {
+            return $config;
+        }
+
+        $existingConfig = $this->llmConfigService->findConfiguration($id);
+        if ($existingConfig === null) {
+            return $this->notFound();
+        }
+        if (!$isAdmin && $existingConfig->is_global) {
+            return $this->forbidden();
+        }
+        if ($existingConfig->user_id !== null && $existingConfig->user_id !== $userId) {
+            return $this->notFound();
+        }
+
+        return $existingConfig;
+    }
+
+    /**
+     * Validate the optional 'name' field on update.
+     */
+    private function validateUpdateName(array $body): ?JsonResponse
+    {
+        if (!isset($body['name'])) {
+            return null;
+        }
+        if (trim((string) $body['name']) === '') {
+            return $this->error('VALIDATION_ERROR', 'Name cannot be empty.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        return null;
+    }
+
+    /**
+     * Validate the optional 'settings' payload against the driver's schema.
+     */
+    private function validateUpdateSettings(array $body, LLMDriverConfiguration $config): ?JsonResponse
+    {
+        if (!isset($body['settings']) || !is_array($body['settings']) || array_is_list($body['settings'])) {
+            return null;
+        }
+
+        $schema = $this->getSchemaForDriver($config->driver_class);
+        $existing = $this->llmConfigService->decodeSettings($config->driver_class, $config->getRawOriginal('settings') ?? '');
+        $merged = array_merge($existing, $body['settings']);
+        $validationError = $this->validateSettings($merged, $schema);
+        if ($validationError !== null) {
+            return $this->error('VALIDATION_ERROR', $validationError, Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        return null;
+    }
+
+    /**
+     * Cast integer-valued fields on the update payload.
+     *
+     * @return array<string, mixed>
+     */
+    private function prepareUpdateData(array $body): array
+    {
+        $data = $body;
+        if (isset($body['context_window'])) {
+            $data['context_window'] = (int) $body['context_window'];
+        }
+        if (isset($body['max_tokens_output'])) {
+            $data['max_tokens_output'] = (int) $body['max_tokens_output'];
+        }
+        return $data;
     }
 
     /**

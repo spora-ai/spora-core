@@ -26,6 +26,10 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolOperation(name: 'get_health_data', description: 'Get the users health measurements', enabledByDefault: false, requiresApprovalByDefault: true)]
 final class UserInfoTool extends AbstractTool
 {
+    private const ERR_USER_NOT_FOUND = 'User not found.';
+
+    private const NOT_SET = '(not set)';
+
     private function getUser(int $agentId): ?User
     {
         /** @var Agent|null $agent */
@@ -65,13 +69,13 @@ final class UserInfoTool extends AbstractTool
     {
         $user = $this->getUser($agentId);
         if ($user === null) {
-            return new ToolResult(false, 'User not found.');
+            return new ToolResult(false, self::ERR_USER_NOT_FOUND);
         }
 
         $output = "Base Data:\n";
-        $output .= "Name: " . ($user->name ?: '(not set)') . "\n";
-        $output .= "Date of Birth: " . ($user->date_of_birth ? Carbon::parse($user->date_of_birth)->format('Y-m-d') : '(not set)') . "\n";
-        $output .= "About Me: " . ($user->about_me ?: '(not set)') . "\n";
+        $output .= "Name: " . ($user->name ?: self::NOT_SET) . "\n";
+        $output .= "Date of Birth: " . ($user->date_of_birth ? Carbon::parse($user->date_of_birth)->format('Y-m-d') : self::NOT_SET) . "\n";
+        $output .= "About Me: " . ($user->about_me ?: self::NOT_SET) . "\n";
 
         return new ToolResult(true, $output);
     }
@@ -80,7 +84,7 @@ final class UserInfoTool extends AbstractTool
     {
         $user = $this->getUser($agentId);
         if ($user === null) {
-            return new ToolResult(false, 'User not found.');
+            return new ToolResult(false, self::ERR_USER_NOT_FOUND);
         }
 
         $locations = $user->locations ?? collect();
@@ -103,12 +107,12 @@ final class UserInfoTool extends AbstractTool
     {
         $user = $this->getUser($agentId);
         if ($user === null) {
-            return new ToolResult(false, 'User not found.');
+            return new ToolResult(false, self::ERR_USER_NOT_FOUND);
         }
 
         $output = "Health Data:\n";
-        $output .= "Height: " . ($user->height_cm !== null ? "{$user->height_cm} cm" : '(not set)') . "\n";
-        $output .= "Weight: " . ($user->weight_kg !== null ? "{$user->weight_kg} kg" : '(not set)') . "\n";
+        $output .= "Height: " . ($user->height_cm !== null ? "{$user->height_cm} cm" : self::NOT_SET) . "\n";
+        $output .= "Weight: " . ($user->weight_kg !== null ? "{$user->weight_kg} kg" : self::NOT_SET) . "\n";
 
         return new ToolResult(true, $output);
     }

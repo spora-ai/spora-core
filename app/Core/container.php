@@ -73,6 +73,7 @@ return [
         // Layer 2 — config.php (installer-generated, gitignored, optional)
         // Shared hosting users set all values here, including db_password.
         $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: BASE_PATH . '/config.php');
+        // require (not require_once): tests reload config per-case for isolation.
         $fileConfig = file_exists($configPath) ? require $configPath : [];
 
         // Layer 3 — SPORA_* env vars (highest priority; Docker / VPS / CI)
@@ -80,69 +81,45 @@ return [
         $env = static fn(string $k): ?string => $_ENV[$k] ?? (getenv($k) ?: null);
 
         $envOverrides = [];
-        if (($v = $env('SPORA_DB_DRIVER'))           !== null) {
-            $envOverrides['db_driver']          = $v;
-        }
-        if (($v = $env('SPORA_DB_HOST'))             !== null) {
-            $envOverrides['db_host']             = $v;
-        }
-        if (($v = $env('SPORA_DB_PORT'))             !== null) {
-            $envOverrides['db_port']             = (int) $v;
-        }
-        if (($v = $env('SPORA_DB_NAME'))             !== null) {
-            $envOverrides['db_name']             = $v;
-        }
-        if (($v = $env('SPORA_DB_USER'))             !== null) {
-            $envOverrides['db_user']             = $v;
-        }
-        if (($v = $env('SPORA_DB_PASSWORD'))         !== null) {
-            $envOverrides['db_password']         = $v;
-        }
-        if (($v = $env('SPORA_SQLITE_BUSY_TIMEOUT')) !== null) {
-            $envOverrides['sqlite_busy_timeout']  = (int) $v;
-        }
-        if (($v = $env('SPORA_APP_ENV'))             !== null) {
-            $envOverrides['app_env']             = $v;
-        }
-        if (($v = $env('SPORA_ALLOW_REGISTRATION'))  !== null) {
-            $envOverrides['allow_registration']  = filter_var($v, FILTER_VALIDATE_BOOLEAN);
-        }
-        if (($v = $env('SPORA_LOG_LEVEL')) !== null) {
-            $envOverrides['log_level'] = $v;
-        }
-        if (($v = $env('SPORA_LOG_PATH')) !== null) {
-            $envOverrides['log_path'] = $v;
-        }
-        if (($v = $env('SPORA_SYNC_MODE')) !== null) {
-            $envOverrides['worker_mode'] = filter_var($v, FILTER_VALIDATE_BOOLEAN);
-        }
-        if (($v = $env('SPORA_WORKER_STALE_MINUTES')) !== null) {
-            $envOverrides['worker_stale_minutes'] = (int) $v;
-        }
-        if (($v = $env('SPORA_MAX_WORKERS')) !== null) {
-            $envOverrides['max_workers'] = (int) $v;
-        }
-        if (($v = $env('SPORA_LLM_TIMEOUT')) !== null) {
-            $envOverrides['llm_timeout'] = (int) $v;
-        }
-        if (($v = $env('SPORA_TOOL_HTTP_TIMEOUT')) !== null) {
-            $envOverrides['tool_http_timeout'] = (int) $v;
-        }
-        if (($v = $env('SPORA_MERCURE_URL')) !== null) {
-            $envOverrides['mercure_url'] = $v;
-        }
-        if (($v = $env('SPORA_MERCURE_JWT_KEY')) !== null) {
-            $envOverrides['mercure_jwt_key'] = $v;
-        }
-        if (($v = $env('SPORA_MERCURE_PUBLISH_URL')) !== null) {
-            $envOverrides['mercure_publish_url'] = $v;
-        }
+        $applyString = static function (string $envVar, string $key) use ($env, &$envOverrides): void {
+            if (($v = $env($envVar)) !== null) {
+                $envOverrides[$key] = $v;
+            }
+        };
+        $applyInt = static function (string $envVar, string $key) use ($env, &$envOverrides): void {
+            if (($v = $env($envVar)) !== null) {
+                $envOverrides[$key] = (int) $v;
+            }
+        };
+        $applyBool = static function (string $envVar, string $key) use ($env, &$envOverrides): void {
+            if (($v = $env($envVar)) !== null) {
+                $envOverrides[$key] = filter_var($v, FILTER_VALIDATE_BOOLEAN);
+            }
+        };
+
+        $applyString('SPORA_DB_DRIVER', 'db_driver');
+        $applyString('SPORA_DB_HOST', 'db_host');
+        $applyInt('SPORA_DB_PORT', 'db_port');
+        $applyString('SPORA_DB_NAME', 'db_name');
+        $applyString('SPORA_DB_USER', 'db_user');
+        $applyString('SPORA_DB_PASSWORD', 'db_password');
+        $applyInt('SPORA_SQLITE_BUSY_TIMEOUT', 'sqlite_busy_timeout');
+        $applyString('SPORA_APP_ENV', 'app_env');
+        $applyBool('SPORA_ALLOW_REGISTRATION', 'allow_registration');
+        $applyString('SPORA_LOG_LEVEL', 'log_level');
+        $applyString('SPORA_LOG_PATH', 'log_path');
+        $applyBool('SPORA_SYNC_MODE', 'worker_mode');
+        $applyInt('SPORA_WORKER_STALE_MINUTES', 'worker_stale_minutes');
+        $applyInt('SPORA_MAX_WORKERS', 'max_workers');
+        $applyInt('SPORA_LLM_TIMEOUT', 'llm_timeout');
+        $applyInt('SPORA_TOOL_HTTP_TIMEOUT', 'tool_http_timeout');
+        $applyString('SPORA_MERCURE_URL', 'mercure_url');
+        $applyString('SPORA_MERCURE_JWT_KEY', 'mercure_jwt_key');
+        $applyString('SPORA_MERCURE_PUBLISH_URL', 'mercure_publish_url');
         if (($v = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED')) !== null) {
             $envOverrides['notifications'] = ['email_enabled' => filter_var($v, FILTER_VALIDATE_BOOLEAN)];
         }
-        if (($v = $env('SPORA_APP_URL')) !== null) {
-            $envOverrides['app_url'] = $v;
-        }
+        $applyString('SPORA_APP_URL', 'app_url');
         return array_merge($defaults, $fileConfig, $envOverrides);
     },
 
@@ -322,10 +299,10 @@ return [
     },
 
     // Tool definitions - explicit construction ensures the logger is injected (PHP-DI autowiring misses optional LoggerInterface).
-    Spora\Tools\CurrentTimeTool::class => static function (ContainerInterface $c): Spora\Tools\CurrentTimeTool {
+    Spora\Tools\CurrentTimeTool::class => static function (): Spora\Tools\CurrentTimeTool {
         return new Spora\Tools\CurrentTimeTool();
     },
-    Spora\Tools\CalculatorTool::class => static function (ContainerInterface $c): Spora\Tools\CalculatorTool {
+    Spora\Tools\CalculatorTool::class => static function (): Spora\Tools\CalculatorTool {
         return new Spora\Tools\CalculatorTool();
     },
     Spora\Tools\AgentMemoryTool::class => static function (): Spora\Tools\AgentMemoryTool {
@@ -377,7 +354,7 @@ return [
             $c->get('config'),
         );
     },
-    Spora\Tools\UserInfoTool::class => static function (ContainerInterface $c): Spora\Tools\UserInfoTool {
+    Spora\Tools\UserInfoTool::class => static function (): Spora\Tools\UserInfoTool {
         return new Spora\Tools\UserInfoTool();
     },
     Spora\Tools\SemanticScholarTool::class => static function (ContainerInterface $c): Spora\Tools\SemanticScholarTool {

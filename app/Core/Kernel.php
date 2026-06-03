@@ -7,7 +7,6 @@ namespace Spora\Core;
 use DI\Container;
 use DI\ContainerBuilder;
 use Dotenv\Dotenv;
-use FastRoute\RouteCollector;
 use Psr\Log\LoggerInterface;
 use Spora\Http\Exceptions\ForbiddenException;
 use Spora\Http\Exceptions\InvalidCsrfTokenException;
@@ -84,6 +83,7 @@ final class Kernel
             return [];
         }
 
+        // require (not require_once): tests reload definitions per-case for isolation.
         return require $containerFile;
     }
 
@@ -92,33 +92,20 @@ final class Kernel
         $routeFile = BASE_PATH . '/app/Core/routes.php';
 
         $routeDefinitions = file_exists($routeFile)
+            // require (not require_once): tests reload routes per-case for isolation.
             ? require $routeFile
-            : static function (RouteCollector $r): void {};
+            : static function (): void {
+                // No routes defined — used when routes.php does not exist.
+            };
 
         return new Router($this->container, $routeDefinitions);
     }
 
     private function handleException(Throwable $e): Response
     {
-        if ($e instanceof UnauthenticatedException) {
-            return new JsonResponse(
-                ['error' => ['code' => 'UNAUTHENTICATED', 'message' => 'Authentication required.']],
-                Response::HTTP_UNAUTHORIZED,
-            );
-        }
-
-        if ($e instanceof ForbiddenException) {
-            return new JsonResponse(
-                ['error' => ['code' => 'FORBIDDEN', 'message' => $e->getMessage()]],
-                Response::HTTP_FORBIDDEN,
-            );
-        }
-
-        if ($e instanceof InvalidCsrfTokenException) {
-            return new JsonResponse(
-                ['error' => ['code' => 'CSRF_INVALID', 'message' => $e->getMessage()]],
-                Response::HTTP_FORBIDDEN,
-            );
+        $response = $this->mapKnownExceptionToResponse($e);
+        if ($response !== null) {
+            return $response;
         }
 
         $config  = $this->container->has('config') ? $this->container->get('config') : [];
@@ -154,6 +141,25 @@ final class Kernel
         }
 
         return new JsonResponse($body, Response::HTTP_INTERNAL_SERVER_ERROR);
+    }
+
+    private function mapKnownExceptionToResponse(Throwable $e): ?Response
+    {
+        return match (true) {
+            $e instanceof UnauthenticatedException => new JsonResponse(
+                ['error' => ['code' => 'UNAUTHENTICATED', 'message' => 'Authentication required.']],
+                Response::HTTP_UNAUTHORIZED,
+            ),
+            $e instanceof ForbiddenException => new JsonResponse(
+                ['error' => ['code' => 'FORBIDDEN', 'message' => $e->getMessage()]],
+                Response::HTTP_FORBIDDEN,
+            ),
+            $e instanceof InvalidCsrfTokenException => new JsonResponse(
+                ['error' => ['code' => 'CSRF_INVALID', 'message' => $e->getMessage()]],
+                Response::HTTP_FORBIDDEN,
+            ),
+            default => null,
+        };
     }
 
     private function configureErrorHandling(string $appEnv): void

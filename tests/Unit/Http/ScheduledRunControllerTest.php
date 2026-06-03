@@ -2,6 +2,13 @@
 
 declare(strict_types=1);
 
+const TEST_PASSWORD_SCHEDULED = 'Password1!';
+const SCHEDULED_CRON_DAILY_9AM = '0 9 * * *';
+const SCHEDULED_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
+const SCHEDULED_RUN_OFFSET_DAY = '+1 day';
+const SCHEDULED_RUN_OFFSET_HOUR = '+1 hour';
+const SCHEDULED_TZ_EUROPE_BERLIN = 'Europe/Berlin';
+
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -44,7 +51,7 @@ function makeScheduledRunController(): array
 function registerAndGetAgentForScheduledRun(): array
 {
     $authService = bootAuthLayer();
-    $userId = $authService->register('scheduled@example.com', 'Password1!', 'Scheduled');
+    $userId = $authService->register('scheduled@example.com', TEST_PASSWORD_SCHEDULED, 'Scheduled');
     simulateLoggedInSession($userId, 'scheduled@example.com');
 
     $agent = Agent::create([
@@ -75,10 +82,10 @@ describe('ScheduledRunController', function (): void {
             'user_id'     => $userId,
             'template_id' => null,
             'raw_prompt'  => 'Run me daily',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'    => 'UTC',
             'is_active'   => true,
-            'next_run_at' => date('Y-m-d H:i:s', strtotime('+1 day')),
+            'next_run_at' => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_DAY)),
         ]);
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
@@ -88,11 +95,11 @@ describe('ScheduledRunController', function (): void {
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
         expect($body['data']['scheduled_runs'])->toHaveCount(1);
-        expect($body['data']['scheduled_runs'][0]['cron_expression'])->toBe('0 9 * * *');
+        expect($body['data']['scheduled_runs'][0]['cron_expression'])->toBe(SCHEDULED_CRON_DAILY_9AM);
     });
 
     it('index returns empty array when no scheduled runs', function (): void {
-        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+        [, $agentId] = registerAndGetAgentForScheduledRun();
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agentId}/scheduled-runs", [], ['id' => $agentId]);
@@ -105,8 +112,8 @@ describe('ScheduledRunController', function (): void {
 
     it('index returns 404 for agent belonging to another user', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('owner@example.com', 'Password1!', 'Owner');
-        $otherUserId = $authService->register('other@example.com', 'Password1!', 'Other');
+        $userId = $authService->register('owner@example.com', TEST_PASSWORD_SCHEDULED, 'Owner');
+        $otherUserId = $authService->register('other@example.com', TEST_PASSWORD_SCHEDULED, 'Other');
         simulateLoggedInSession($otherUserId, 'other@example.com');
 
         $agent = Agent::create([
@@ -124,12 +131,12 @@ describe('ScheduledRunController', function (): void {
     });
 
     it('store creates a recurring scheduled run with cron_expression', function (): void {
-        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+        [, $agentId] = registerAndGetAgentForScheduledRun();
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt'      => 'Daily briefing',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'        => 'UTC',
             'is_active'       => true,
         ], ['id' => $agentId]);
@@ -137,18 +144,18 @@ describe('ScheduledRunController', function (): void {
 
         expect($response->getStatusCode())->toBe(201);
         $body = json_decode($response->getContent(), true);
-        expect($body['data']['scheduled_run']['cron_expression'])->toBe('0 9 * * *');
+        expect($body['data']['scheduled_run']['cron_expression'])->toBe(SCHEDULED_CRON_DAILY_9AM);
         expect($body['data']['scheduled_run']['raw_prompt'])->toBe('Daily briefing');
         expect($body['data']['scheduled_run']['next_run_at'])->not->toBeNull();
     });
 
     it('store creates a one-shot scheduled run with run_at', function (): void {
-        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+        [, $agentId] = registerAndGetAgentForScheduledRun();
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt' => 'One-time task',
-            'run_at'     => date('c', strtotime('+1 hour')),
+            'run_at'     => date('c', strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
             'timezone'   => 'UTC',
             'is_active'  => true,
         ], ['id' => $agentId]);
@@ -161,11 +168,11 @@ describe('ScheduledRunController', function (): void {
     });
 
     it('store returns 422 when neither template_id nor raw_prompt is provided', function (): void {
-        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+        [, $agentId] = registerAndGetAgentForScheduledRun();
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
         ], ['id' => $agentId]);
         $response = callController($controller, 'store', $request, [$authMiddleware]);
 
@@ -175,13 +182,13 @@ describe('ScheduledRunController', function (): void {
     });
 
     it('store returns 422 when both cron_expression and run_at are provided', function (): void {
-        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+        [, $agentId] = registerAndGetAgentForScheduledRun();
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt'      => 'Conflicting',
-            'cron_expression' => '0 9 * * *',
-            'run_at'          => date('c', strtotime('+1 hour')),
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
+            'run_at'          => date('c', strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
         ], ['id' => $agentId]);
         $response = callController($controller, 'store', $request, [$authMiddleware]);
 
@@ -189,7 +196,7 @@ describe('ScheduledRunController', function (): void {
     });
 
     it('store returns 422 when cron_expression is invalid', function (): void {
-        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+        [, $agentId] = registerAndGetAgentForScheduledRun();
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
@@ -208,10 +215,10 @@ describe('ScheduledRunController', function (): void {
             'agent_id'      => $agentId,
             'user_id'       => $userId,
             'raw_prompt'    => 'Show run',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'      => 'UTC',
             'is_active'     => true,
-            'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 day')),
+            'next_run_at'   => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_DAY)),
         ]);
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
@@ -236,10 +243,10 @@ describe('ScheduledRunController', function (): void {
             'agent_id'      => $otherAgent->id,
             'user_id'       => $userId,
             'raw_prompt'    => 'Other run',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'      => 'UTC',
             'is_active'     => true,
-            'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 day')),
+            'next_run_at'   => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_DAY)),
         ]);
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
@@ -256,10 +263,10 @@ describe('ScheduledRunController', function (): void {
             'agent_id'      => $agentId,
             'user_id'       => $userId,
             'raw_prompt'    => 'Original prompt',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'      => 'UTC',
             'is_active'     => true,
-            'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 day')),
+            'next_run_at'   => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_DAY)),
         ]);
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
@@ -282,10 +289,10 @@ describe('ScheduledRunController', function (): void {
             'agent_id'      => $agentId,
             'user_id'       => $userId,
             'raw_prompt'    => 'To delete',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'      => 'UTC',
             'is_active'     => true,
-            'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 day')),
+            'next_run_at'   => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_DAY)),
         ]);
         $runId = $run->id;
 
@@ -307,22 +314,22 @@ describe('ScheduledRunController', function (): void {
             'user_id'       => $userId,
             'raw_prompt'    => 'Trigger me',
             'cron_expression' => null,
-            'run_at'        => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'run_at'        => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
             'timezone'      => 'UTC',
             'is_active'     => true,
-            'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'next_run_at'   => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
         ]);
 
         // Pre-create PENDING entry (as store() would have done)
         Capsule::table('scheduled_runs_next')->insert([
             'scheduled_run_id' => $run->id,
-            'due_at'          => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'due_at'          => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
             'status'          => 'PENDING',
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(SCHEDULED_TIMESTAMP_FORMAT),
+            'updated_at'      => date(SCHEDULED_TIMESTAMP_FORMAT),
         ]);
 
-        [$controller, $authService, $orchestrator, , , $authMiddleware] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['id' => $agentId, 'runId' => $run->id]);
         $response = callController($controller, 'trigger', $request, [$authMiddleware]);
 
@@ -353,13 +360,13 @@ describe('ScheduledRunController', function (): void {
             'template_id'   => $template->id,
             'raw_prompt'    => null,
             'cron_expression' => null,
-            'run_at'        => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'run_at'        => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
             'timezone'      => 'UTC',
             'is_active'     => true,
-            'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'next_run_at'   => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
         ]);
 
-        [$controller, $authService, $orchestrator, , , $authMiddleware] = makeScheduledRunController();
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['id' => $agentId, 'runId' => $run->id]);
         $response = callController($controller, 'trigger', $request, [$authMiddleware]);
 
@@ -369,14 +376,14 @@ describe('ScheduledRunController', function (): void {
     });
 
     it('store computes next_run_at correctly in Europe/Berlin timezone for one-shot', function (): void {
-        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+        [, $agentId] = registerAndGetAgentForScheduledRun();
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         // User selects 10:00 in Europe/Berlin (CEST, UTC+02:00) → 08:00 UTC
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt' => 'Berlin test',
             'run_at'     => '2026-04-20T10:00:00+02:00',
-            'timezone'   => 'Europe/Berlin',
+            'timezone'   => SCHEDULED_TZ_EUROPE_BERLIN,
             'is_active'  => true,
         ], ['id' => $agentId]);
         $response = callController($controller, 'store', $request, [$authMiddleware]);
@@ -390,20 +397,20 @@ describe('ScheduledRunController', function (): void {
         expect($nextRunAt)->not->toBeNull();
         // The ISO8601 string must reflect 10:00 Berlin time, not a different hour
         $parsed = new DateTimeImmutable($nextRunAt);
-        $berlin = $parsed->setTimezone(new DateTimeZone('Europe/Berlin'));
+        $berlin = $parsed->setTimezone(new DateTimeZone(SCHEDULED_TZ_EUROPE_BERLIN));
         expect((int) $berlin->format('H'))->toBe(10);
         expect((int) $berlin->format('i'))->toBe(0);
     });
 
     it('store computes next_run_at correctly in Europe/Berlin timezone for recurring', function (): void {
-        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+        [, $agentId] = registerAndGetAgentForScheduledRun();
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         // Daily at 09:00 Berlin
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt'      => 'Berlin daily',
-            'cron_expression' => '0 9 * * *',
-            'timezone'        => 'Europe/Berlin',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
+            'timezone'        => SCHEDULED_TZ_EUROPE_BERLIN,
             'is_active'       => true,
         ], ['id' => $agentId]);
         $response = callController($controller, 'store', $request, [$authMiddleware]);
@@ -414,20 +421,20 @@ describe('ScheduledRunController', function (): void {
         expect($nextRunAt)->not->toBeNull();
         // Next run must be 09:00 Berlin time
         $parsed = new DateTimeImmutable($nextRunAt);
-        $berlin = $parsed->setTimezone(new DateTimeZone('Europe/Berlin'));
+        $berlin = $parsed->setTimezone(new DateTimeZone(SCHEDULED_TZ_EUROPE_BERLIN));
         expect((int) $berlin->format('H'))->toBe(9);
         expect((int) $berlin->format('i'))->toBe(0);
     });
 
     it('store normalizes run_at from ISO 8601 offset to UTC Y-m-d H:i:s', function (): void {
-        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+        [, $agentId] = registerAndGetAgentForScheduledRun();
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         // Frontend sends: 10:00 in Europe/Berlin (CEST, +02:00) → UTC is 08:00
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt' => 'Normalize test',
             'run_at'     => '2026-04-20T10:00:00+02:00',
-            'timezone'   => 'Europe/Berlin',
+            'timezone'   => SCHEDULED_TZ_EUROPE_BERLIN,
             'is_active'  => true,
         ], ['id' => $agentId]);
         $response = callController($controller, 'store', $request, [$authMiddleware]);
@@ -438,17 +445,17 @@ describe('ScheduledRunController', function (): void {
         expect($runAtReturned)->not->toBeNull();
         // run_at in response must be 10:00 Berlin (with offset +02:00), not 08:00 UTC
         $parsed = new DateTimeImmutable($runAtReturned);
-        $berlin = $parsed->setTimezone(new DateTimeZone('Europe/Berlin'));
+        $berlin = $parsed->setTimezone(new DateTimeZone(SCHEDULED_TZ_EUROPE_BERLIN));
         expect((int) $berlin->format('H'))->toBe(10);
     });
 
     it('store creates a PENDING scheduled_runs_next entry for recurring runs', function (): void {
-        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+        [, $agentId] = registerAndGetAgentForScheduledRun();
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt'      => 'Daily check',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'        => 'UTC',
             'is_active'       => true,
         ], ['id' => $agentId]);
@@ -466,12 +473,12 @@ describe('ScheduledRunController', function (): void {
     });
 
     it('store creates a PENDING scheduled_runs_next entry for one-shot runs', function (): void {
-        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+        [, $agentId] = registerAndGetAgentForScheduledRun();
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
         $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
             'raw_prompt' => 'One-time task',
-            'run_at'     => date('c', strtotime('+1 hour')),
+            'run_at'     => date('c', strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
             'timezone'   => 'UTC',
             'is_active'  => true,
         ], ['id' => $agentId]);
@@ -495,20 +502,20 @@ describe('ScheduledRunController', function (): void {
             'agent_id'      => $agentId,
             'user_id'       => $userId,
             'raw_prompt'    => 'Trigger me',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'run_at'        => null,
             'timezone'      => 'UTC',
             'is_active'     => true,
-            'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'next_run_at'   => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
         ]);
 
         // Pre-create a PENDING entry (simulating what store() would have done)
         Capsule::table('scheduled_runs_next')->insert([
             'scheduled_run_id' => $run->id,
-            'due_at'          => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'due_at'          => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
             'status'          => 'PENDING',
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(SCHEDULED_TIMESTAMP_FORMAT),
+            'updated_at'      => date(SCHEDULED_TIMESTAMP_FORMAT),
         ]);
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
@@ -541,18 +548,18 @@ describe('ScheduledRunController', function (): void {
             'user_id'       => $userId,
             'raw_prompt'    => 'One-shot task',
             'cron_expression' => null,
-            'run_at'        => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'run_at'        => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
             'timezone'      => 'UTC',
             'is_active'     => true,
-            'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'next_run_at'   => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
         ]);
 
         Capsule::table('scheduled_runs_next')->insert([
             'scheduled_run_id' => $run->id,
-            'due_at'          => date('Y-m-d H:i:s', strtotime('+1 hour')),
+            'due_at'          => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
             'status'          => 'PENDING',
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(SCHEDULED_TIMESTAMP_FORMAT),
+            'updated_at'      => date(SCHEDULED_TIMESTAMP_FORMAT),
         ]);
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();
@@ -583,10 +590,10 @@ describe('ScheduledRunController', function (): void {
             'agent_id'      => $agentId,
             'user_id'       => $userId,
             'raw_prompt'    => 'Show me',
-            'cron_expression' => '0 9 * * *',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'      => 'UTC',
             'is_active'     => true,
-            'next_run_at'   => date('Y-m-d H:i:s', strtotime('+1 day')),
+            'next_run_at'   => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_DAY)),
         ]);
 
         // Insert a PENDING entry with a deterministic 09:00 UTC due_at
@@ -595,8 +602,8 @@ describe('ScheduledRunController', function (): void {
             'scheduled_run_id' => $run->id,
             'due_at'          => $futureDue,
             'status'          => 'PENDING',
-            'created_at'      => date('Y-m-d H:i:s'),
-            'updated_at'      => date('Y-m-d H:i:s'),
+            'created_at'      => date(SCHEDULED_TIMESTAMP_FORMAT),
+            'updated_at'      => date(SCHEDULED_TIMESTAMP_FORMAT),
         ]);
 
         [$controller, , , , , $authMiddleware] = makeScheduledRunController();

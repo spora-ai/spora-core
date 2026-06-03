@@ -19,6 +19,8 @@ use Symfony\Component\Console\Tester\CommandTester;
  * stamp save/restore the file around the test run.
  */
 
+define('SCHEMA_STAMP_PATH', BASE_PATH . '/storage/.schema_stamp');
+
 function makeTempSqliteFile(string $contents = ''): string
 {
     $dir = sys_get_temp_dir() . '/spora-db-reset-' . bin2hex(random_bytes(6));
@@ -65,7 +67,7 @@ function makeTester(Database $db): CommandTester
 
 function withSchemaStamp(callable $fn): void
 {
-    $stamp = BASE_PATH . '/storage/.schema_stamp';
+    $stamp = SCHEMA_STAMP_PATH;
     $backup = null;
     if (file_exists($stamp)) {
         $backup = file_get_contents($stamp);
@@ -84,7 +86,7 @@ function withSchemaStamp(callable $fn): void
 
 test('--force wipes a non-empty SQLite file and clears the schema stamp', function (): void {
     withSchemaStamp(function (): void {
-        $stamp = BASE_PATH . '/storage/.schema_stamp';
+        $stamp = SCHEMA_STAMP_PATH;
         file_put_contents($stamp, 'stale-hash');
 
         $dbPath = makeTempSqliteFile('not really a sqlite file, just non-empty');
@@ -207,7 +209,7 @@ test('MySQL branch with full config DROPs and CREATEs the database via PDO', fun
 
         $command = new DbResetCommand(
             $db,
-            static fn(string $dsn, string $_user, string $_password, array $_options) => $pdo,
+            static fn(string $dsn) => $pdo,
         );
         $command->setName('db:reset');
         $tester = new CommandTester($command);
@@ -238,7 +240,7 @@ test('MySQL branch defaults db_port to 3306 when not configured', function (): v
         $pdo->shouldReceive('exec')->andReturn(0);
         $command = new DbResetCommand(
             $db,
-            static function (string $dsn, string $_user, string $_password, array $_options) use (&$capturedDsn, $pdo): PDO {
+            static function (string $dsn) use (&$capturedDsn, $pdo): PDO {
                 $capturedDsn = $dsn;
                 return $pdo;
             },
@@ -437,7 +439,7 @@ test('schema stamp is left alone if it does not exist (no error)', function (): 
 
         expect($tester->getStatusCode())->toBe(Command::SUCCESS);
         // Stamp never existed, command should not error.
-        expect(file_exists(BASE_PATH . '/storage/.schema_stamp'))->toBeFalse();
+        expect(file_exists(SCHEMA_STAMP_PATH))->toBeFalse();
     });
 });
 
@@ -483,7 +485,7 @@ function runMysqlResetWithName(string $dbName, array $extraConfig = []): array
             });
         $command = new DbResetCommand(
             $db,
-            static fn(string $dsn, string $_user, string $_password, array $_options) => $pdo,
+            static fn(string $dsn) => $pdo,
         );
         $command->setName('db:reset');
         $tester = new CommandTester($command);

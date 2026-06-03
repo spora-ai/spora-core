@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
-use RuntimeException;
 use Spora\Mailer\LogTransport;
 use Spora\Models\MailTemplate;
 use Spora\Models\User;
@@ -30,7 +30,7 @@ final class SystemMailer implements MailerInterface
     /**
      * Build and return a Symfony Mailer instance configured from container config.
      *
-     * @throws RuntimeException if mail configuration is incomplete or driver is unsupported
+     * @throws InvalidArgumentException if mail configuration is incomplete or driver is unsupported
      */
     public function buildMailer(): Mailer
     {
@@ -42,7 +42,7 @@ final class SystemMailer implements MailerInterface
             'smtp' => $this->buildSmtpDsn($config),
             'php_mail', 'sendmail' => 'sendmail://default',
             'log' => 'log://default',
-            default => throw new RuntimeException(
+            default => throw new InvalidArgumentException(
                 "Mail driver '{$driver}' is not supported. Use 'smtp', 'php_mail', 'sendmail', or 'log'.",
             ),
         };
@@ -64,14 +64,14 @@ final class SystemMailer implements MailerInterface
      * @param array<string, mixed> $variables Key-value pairs for template rendering
      * @param array<string> $to Array of recipient email addresses
      * @return bool True if the email was sent successfully
-     * @throws RuntimeException if template is not found or mail config is missing
+     * @throws InvalidArgumentException if template is not found or mail config is missing
      */
     public function sendTemplatedEmail(string $templateName, array $variables, array $to): bool
     {
         $template = MailTemplate::where('name', $templateName)->first();
 
         if ($template === null) {
-            throw new RuntimeException("Mail template '{$templateName}' not found.");
+            throw new InvalidArgumentException("Mail template '{$templateName}' not found.");
         }
 
         $rendered = $template->render($variables);
@@ -169,7 +169,7 @@ final class SystemMailer implements MailerInterface
     /**
      * Read mail configuration from the container config.
      *
-     * @throws RuntimeException if required mail config is not set (driver, host, from)
+     * @throws InvalidArgumentException if required mail config is not set (driver, host, from)
      * @return array<string, mixed>
      */
     private function getMailConfig(): array
@@ -179,7 +179,7 @@ final class SystemMailer implements MailerInterface
         // Layer mail config from SPORA_MAIL_* env vars
         $env = static fn(string $k): ?string => $_ENV[$k] ?? (getenv($k) ?: null);
 
-        $mailConfig = [
+        return [
             'mail_driver'     => $env('SPORA_MAIL_DRIVER')     ?? $config['mail_driver']     ?? 'php_mail',
             'mail_host'       => $env('SPORA_MAIL_HOST')       ?? $config['mail_host']       ?? null,
             'mail_port'       => $env('SPORA_MAIL_PORT')       ?? $config['mail_port']       ?? 587,
@@ -189,8 +189,6 @@ final class SystemMailer implements MailerInterface
             'mail_from'       => $env('SPORA_MAIL_FROM')       ?? $config['mail_from']       ?? null,
             'mail_from_name'  => $env('SPORA_MAIL_FROM_NAME')  ?? $config['mail_from_name']  ?? 'Spora',
         ];
-
-        return $mailConfig;
     }
 
     /**
@@ -208,7 +206,7 @@ final class SystemMailer implements MailerInterface
         $encryption = $config['mail_encryption'] ?? 'tls';
 
         if ($host === null) {
-            throw new RuntimeException(
+            throw new InvalidArgumentException(
                 'SMTP mail driver configured but SPORA_MAIL_HOST / mail_host is not set.',
             );
         }

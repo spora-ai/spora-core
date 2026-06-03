@@ -55,6 +55,9 @@ use Throwable;
 )]
 final class SerperSearchTool extends AbstractTool
 {
+    private const ERR_EMPTY_QUERY = 'The search query cannot be empty.';
+    private const ERR_API_KEY_MISSING = 'Serper API key is not configured. Please edit the Serper Search settings.';
+
     public function __construct(
         private readonly ToolConfigService $configService,
         private readonly HttpClientInterface $httpClient,
@@ -68,6 +71,29 @@ final class SerperSearchTool extends AbstractTool
         }
         $envTimeout = (int) ($_ENV['SPORA_TOOL_HTTP_TIMEOUT'] ?? getenv('SPORA_TOOL_HTTP_TIMEOUT') ?: 0);
         return $envTimeout > 0 ? $envTimeout : 30;
+    }
+
+    /**
+     * Validate inputs and resolve effective settings.
+     * Returns a failure ToolResult when validation fails, or an array with
+     * 'query' and 'settings' when OK to proceed.
+     *
+     * @return ToolResult|array{query: string, settings: array<string, mixed>}
+     */
+    private function validateAndResolveSettings(array $arguments, int $agentId, ?int $userId): ToolResult|array
+    {
+        $query = trim((string) ($arguments['q'] ?? ''));
+        if ($query === '') {
+            return new ToolResult(false, self::ERR_EMPTY_QUERY);
+        }
+
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
+        $apiKey = $settings['core.serper.api_key'] ?? '';
+        if (empty($apiKey)) {
+            return new ToolResult(false, self::ERR_API_KEY_MISSING);
+        }
+
+        return ['query' => $query, 'settings' => $settings];
     }
 
     public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
@@ -143,16 +169,12 @@ final class SerperSearchTool extends AbstractTool
 
     public function search(array $arguments, int $agentId, ?int $userId): ToolResult
     {
-        $query = trim((string) ($arguments['q'] ?? ''));
-        if ($query === '') {
-            return new ToolResult(false, 'The search query cannot be empty.');
+        $prepared = $this->validateAndResolveSettings($arguments, $agentId, $userId);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
         }
-
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey = $settings['core.serper.api_key'] ?? '';
-        if (empty($apiKey)) {
-            return new ToolResult(false, 'Serper API key is not configured for this agent. Please edit the Serper Search settings.');
-        }
+        $query = $prepared['query'];
+        $settings = $prepared['settings'];
 
         try {
             $this->logger?->debug('SerperSearchTool: executing search request', [
@@ -189,16 +211,12 @@ final class SerperSearchTool extends AbstractTool
 
     public function imageSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
-        $query = trim((string) ($arguments['q'] ?? ''));
-        if ($query === '') {
-            return new ToolResult(false, 'The search query cannot be empty.');
+        $prepared = $this->validateAndResolveSettings($arguments, $agentId, $userId);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
         }
-
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey = $settings['core.serper.api_key'] ?? '';
-        if (empty($apiKey)) {
-            return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
-        }
+        $query = $prepared['query'];
+        $settings = $prepared['settings'];
 
         try {
             $this->logger?->debug('SerperSearchTool: executing image search', ['query' => $query]);
@@ -234,16 +252,12 @@ final class SerperSearchTool extends AbstractTool
 
     public function newsSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
-        $query = trim((string) ($arguments['q'] ?? ''));
-        if ($query === '') {
-            return new ToolResult(false, 'The search query cannot be empty.');
+        $prepared = $this->validateAndResolveSettings($arguments, $agentId, $userId);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
         }
-
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey = $settings['core.serper.api_key'] ?? '';
-        if (empty($apiKey)) {
-            return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
-        }
+        $query = $prepared['query'];
+        $settings = $prepared['settings'];
 
         try {
             $this->logger?->debug('SerperSearchTool: executing news search', ['query' => $query]);
@@ -279,16 +293,12 @@ final class SerperSearchTool extends AbstractTool
 
     public function videoSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
-        $query = trim((string) ($arguments['q'] ?? ''));
-        if ($query === '') {
-            return new ToolResult(false, 'The search query cannot be empty.');
+        $prepared = $this->validateAndResolveSettings($arguments, $agentId, $userId);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
         }
-
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey = $settings['core.serper.api_key'] ?? '';
-        if (empty($apiKey)) {
-            return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
-        }
+        $query = $prepared['query'];
+        $settings = $prepared['settings'];
 
         try {
             $this->logger?->debug('SerperSearchTool: executing video search', ['query' => $query]);
@@ -326,16 +336,12 @@ final class SerperSearchTool extends AbstractTool
 
     public function scholarSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
-        $query = trim((string) ($arguments['q'] ?? ''));
-        if ($query === '') {
-            return new ToolResult(false, 'The search query cannot be empty.');
+        $prepared = $this->validateAndResolveSettings($arguments, $agentId, $userId);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
         }
-
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey = $settings['core.serper.api_key'] ?? '';
-        if (empty($apiKey)) {
-            return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
-        }
+        $query = $prepared['query'];
+        $settings = $prepared['settings'];
 
         try {
             $this->logger?->debug('SerperSearchTool: executing scholar search', ['query' => $query]);
@@ -370,16 +376,12 @@ final class SerperSearchTool extends AbstractTool
 
     public function shoppingSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
-        $query = trim((string) ($arguments['q'] ?? ''));
-        if ($query === '') {
-            return new ToolResult(false, 'The search query cannot be empty.');
+        $prepared = $this->validateAndResolveSettings($arguments, $agentId, $userId);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
         }
-
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey = $settings['core.serper.api_key'] ?? '';
-        if (empty($apiKey)) {
-            return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
-        }
+        $query = $prepared['query'];
+        $settings = $prepared['settings'];
 
         try {
             $this->logger?->debug('SerperSearchTool: executing shopping search', ['query' => $query]);
@@ -417,16 +419,12 @@ final class SerperSearchTool extends AbstractTool
 
     public function patentsSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
-        $query = trim((string) ($arguments['q'] ?? ''));
-        if ($query === '') {
-            return new ToolResult(false, 'The search query cannot be empty.');
+        $prepared = $this->validateAndResolveSettings($arguments, $agentId, $userId);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
         }
-
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey = $settings['core.serper.api_key'] ?? '';
-        if (empty($apiKey)) {
-            return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
-        }
+        $query = $prepared['query'];
+        $settings = $prepared['settings'];
 
         try {
             $this->logger?->debug('SerperSearchTool: executing patents search', ['query' => $query]);
@@ -462,18 +460,31 @@ final class SerperSearchTool extends AbstractTool
         }
     }
 
+    /**
+     * Append a place entry to $output from a normalized row.
+     */
+    private function appendPlace(string &$output, int $num, array $place): void
+    {
+        $output .= "[{$num}] {$place['title']}\n";
+        if (!empty($place['address'])) {
+            $output .= "Address: {$place['address']}\n";
+        }
+        if (!empty($place['phone'])) {
+            $output .= "Phone: {$place['phone']}\n";
+        }
+        if (!empty($place['rating'])) {
+            $output .= "Rating: {$place['rating']}\n";
+        }
+    }
+
     public function mapsSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
-        $query = trim((string) ($arguments['q'] ?? ''));
-        if ($query === '') {
-            return new ToolResult(false, 'The search query cannot be empty.');
+        $prepared = $this->validateAndResolveSettings($arguments, $agentId, $userId);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
         }
-
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey = $settings['core.serper.api_key'] ?? '';
-        if (empty($apiKey)) {
-            return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
-        }
+        $query = $prepared['query'];
+        $settings = $prepared['settings'];
 
         try {
             $this->logger?->debug('SerperSearchTool: executing maps search', ['query' => $query]);
@@ -481,19 +492,11 @@ final class SerperSearchTool extends AbstractTool
             $data = $this->makeSerperRequest('maps', ['q' => $query], $settings);
 
             $output = "Google Maps Results for '{$query}':\n\n";
+            $places = $data['places'] ?? $data['localResults'] ?? [];
 
-            foreach (($data['places'] ?? $data['localResults'] ?? []) as $i => $place) {
+            foreach ($places as $i => $place) {
                 $num = $i + 1;
-                $output .= "[{$num}] {$place['title']}\n";
-                if (!empty($place['address'])) {
-                    $output .= "Address: {$place['address']}\n";
-                }
-                if (!empty($place['phone'])) {
-                    $output .= "Phone: {$place['phone']}\n";
-                }
-                if (!empty($place['rating'])) {
-                    $output .= "Rating: {$place['rating']}\n";
-                }
+                $this->appendPlace($output, $num, $place);
                 if (!empty($place['hours'])) {
                     $output .= "Hours: {$place['hours']}\n";
                 }
@@ -503,7 +506,7 @@ final class SerperSearchTool extends AbstractTool
                 $output .= "\n";
             }
 
-            if (empty($data['places']) && empty($data['localResults'])) {
+            if (empty($places)) {
                 $output .= 'No map results found.';
             }
 
@@ -516,16 +519,12 @@ final class SerperSearchTool extends AbstractTool
 
     public function placesSearch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
-        $query = trim((string) ($arguments['q'] ?? ''));
-        if ($query === '') {
-            return new ToolResult(false, 'The search query cannot be empty.');
+        $prepared = $this->validateAndResolveSettings($arguments, $agentId, $userId);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
         }
-
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey = $settings['core.serper.api_key'] ?? '';
-        if (empty($apiKey)) {
-            return new ToolResult(false, 'Serper API key is not configured. Please edit the Serper Search settings.');
-        }
+        $query = $prepared['query'];
+        $settings = $prepared['settings'];
 
         try {
             $this->logger?->debug('SerperSearchTool: executing places search', ['query' => $query]);
@@ -536,16 +535,7 @@ final class SerperSearchTool extends AbstractTool
 
             foreach (($data['places'] ?? []) as $i => $place) {
                 $num = $i + 1;
-                $output .= "[{$num}] {$place['title']}\n";
-                if (!empty($place['address'])) {
-                    $output .= "Address: {$place['address']}\n";
-                }
-                if (!empty($place['phone'])) {
-                    $output .= "Phone: {$place['phone']}\n";
-                }
-                if (!empty($place['rating'])) {
-                    $output .= "Rating: {$place['rating']}\n";
-                }
+                $this->appendPlace($output, $num, $place);
                 if (!empty($place['type'])) {
                     $output .= "Type: {$place['type']}\n";
                 }

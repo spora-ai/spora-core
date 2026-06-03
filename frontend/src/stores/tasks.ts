@@ -8,7 +8,44 @@ import type { Task, TaskDetail, TaskStatus, HistoryEntry, TaskErrorCode } from '
  * Manages tasks, active task detail view, polling for updates,
  * SSE-driven real-time updates, and task operations (approve, reject, retry, continue).
  */
-const TERMINAL_STATUSES: TaskStatus[] = ['COMPLETED', 'FAILED', 'CANCELLED']
+const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set(['COMPLETED', 'FAILED', 'CANCELLED'])
+
+async function cancelRetryChain(taskId: number): Promise<void> {
+  await api.delete(`/tasks/${taskId}/retry-chain`)
+}
+
+type ActiveTaskRef = { value: TaskDetail | null }
+
+function applyScalarFields(active: ActiveTaskRef, data: Record<string, unknown>): void {
+  if (active.value === null) return
+  if (data.status !== undefined) active.value.status = data.status as TaskStatus
+  if (data.final_response !== undefined) active.value.final_response = data.final_response as string | null
+  if (data.step_count !== undefined) active.value.step_count = data.step_count as number
+  if (data.updated_at !== undefined) active.value.updated_at = data.updated_at as string
+}
+
+function mergeHistory(active: ActiveTaskRef, getLastSequence: () => number, setLastSequence: (n: number) => void, data: Record<string, unknown>): void {
+  if (active.value === null) return
+  if (!Array.isArray(data.history)) return
+  const lastSeq = getLastSequence()
+  const newEntries = (data.history as unknown as HistoryEntry[]).filter(h => h.sequence > lastSeq)
+  if (newEntries.length === 0) return
+  active.value.history.push(...newEntries)
+  setLastSequence(newEntries[newEntries.length - 1].sequence)
+}
+
+function applyErrorFields(active: ActiveTaskRef, data: Record<string, unknown>): void {
+  if (active.value === null) return
+  if (data.error_code !== undefined) active.value.error_code = data.error_code as TaskErrorCode | null
+  if (data.error_message !== undefined) active.value.error_message = data.error_message as string | null
+}
+
+function applyRetryFields(active: ActiveTaskRef, data: Record<string, unknown>): void {
+  if (active.value === null) return
+  if (data.retry_of_task_id !== undefined) active.value.retry_of_task_id = data.retry_of_task_id as number | null
+  if (data.retry_count !== undefined) active.value.retry_count = data.retry_count as number | undefined
+  if (data.retry_after !== undefined) active.value.retry_after = data.retry_after as string | null
+}
 
 export const useTaskStore = defineStore('tasks', () => {
   const tasks = ref<Task[]>([])
@@ -41,7 +78,7 @@ export const useTaskStore = defineStore('tasks', () => {
   }
 
   async function fetchTaskDetail(taskId: number, sinceSequence?: number): Promise<boolean> {
-    const query = sinceSequence !== undefined ? `?since_sequence=${sinceSequence}` : ''
+    const query = sinceSequence === undefined ? '' : `?since_sequence=${sinceSequence}`
     let result: { task: TaskDetail }
     try {
       result = await api.get<{ task: TaskDetail }>(`/tasks/${taskId}${query}`)
@@ -54,7 +91,7 @@ export const useTaskStore = defineStore('tasks', () => {
     }
     const incoming = result.task
 
-    if (activeTask.value === null || activeTask.value.id !== taskId) {
+    if (activeTask.value?.id !== taskId) {
       // First load — replace entirely, then apply any pending SSE update for this task
       activeTask.value = incoming
       lastSequence = Math.max(...incoming.history.map((h) => h.sequence), 0)
@@ -109,10 +146,6 @@ export const useTaskStore = defineStore('tasks', () => {
     await fetchTaskDetail(taskId)
   }
 
-  async function cancelRetryChain(taskId: number): Promise<void> {
-    await api.delete(`/tasks/${taskId}/retry-chain`)
-  }
-
   async function fetchTask(taskId: number): Promise<Task> {
     const result = await api.get<{ task: Task }>(`/tasks/${taskId}`)
     if (activeTask.value?.id === taskId) {
@@ -139,7 +172,7 @@ export const useTaskStore = defineStore('tasks', () => {
         await fetchTasks()
       } finally {
         if (listPollGeneration === gen) {
-          const hasActive = tasks.value.some((t) => !TERMINAL_STATUSES.includes(t.status))
+          const hasActive = tasks.value.some((t) => !TERMINAL_STATUSES.has(t.status))
           listPollTimer = setTimeout(tick, hasActive ? 3000 : 10000)
         }
       }
@@ -161,10 +194,10 @@ export const useTaskStore = defineStore('tasks', () => {
     stopDetailPolling()
     const tick = async () => {
       if (activeTask.value === null || activeTask.value.id !== taskId) return
-      if (TERMINAL_STATUSES.includes(activeTask.value.status)) return
+      if (TERMINAL_STATUSES.has(activeTask.value.status)) return
       const ok = await fetchTaskDetail(taskId, lastSequence)
       if (!ok) return // task was deleted
-      if (activeTask.value && !TERMINAL_STATUSES.includes(activeTask.value.status)) {
+      if (activeTask.value?.status !== undefined && !TERMINAL_STATUSES.has(activeTask.value.status)) {
         detailPollTimer = setTimeout(tick, 2000)
       }
     }
@@ -193,20 +226,18 @@ export const useTaskStore = defineStore('tasks', () => {
         final_response: (data.final_response as string | null) ?? tasks.value[idx].final_response,
         updated_at: (data.updated_at as string) ?? tasks.value[idx].updated_at,
       })
-    } else {
-      if (data.status !== undefined) {
-        tasks.value.unshift({
-          id: taskId,
-          agent_id: (data as { agent_id?: number }).agent_id ?? 0,
-          status: data.status as Task['status'],
-          user_prompt: (data as { user_prompt?: string }).user_prompt ?? '',
-          final_response: (data.final_response as string | null) ?? null,
-          step_count: (data.step_count as number) ?? 0,
-          max_steps: null,
-          created_at: (data.created_at as string) ?? new Date().toISOString(),
-          updated_at: (data.updated_at as string) ?? new Date().toISOString(),
-        })
-      }
+    } else if (data.status !== undefined) {
+      tasks.value.unshift({
+        id: taskId,
+        agent_id: (data as { agent_id?: number }).agent_id ?? 0,
+        status: data.status as Task['status'],
+        user_prompt: (data as { user_prompt?: string }).user_prompt ?? '',
+        final_response: (data.final_response as string | null) ?? null,
+        step_count: (data.step_count as number) ?? 0,
+        max_steps: null,
+        created_at: (data.created_at as string) ?? new Date().toISOString(),
+        updated_at: (data.updated_at as string) ?? new Date().toISOString(),
+      })
     }
   }
 
@@ -225,10 +256,10 @@ export const useTaskStore = defineStore('tasks', () => {
         // Merge: update existing tasks, prepend new ones
         for (const t of result.tasks) {
           const idx = tasks.value.findIndex((x) => x.id === t.id)
-          if (idx !== -1) {
-            tasks.value[idx] = t
-          } else {
+          if (idx === -1) {
             tasks.value.unshift(t)
+          } else {
+            tasks.value[idx] = t
           }
         }
         if (result.server_time) {
@@ -237,7 +268,7 @@ export const useTaskStore = defineStore('tasks', () => {
         // Also sync with agentStore.currentAgentTasks so AgentPage picks up new tasks
         const agentStore = useAgentStore()
         for (const t of result.tasks) {
-          agentStore.applySseTaskEvent(t as unknown as Record<string, unknown>)
+          agentStore.applySseTaskEvent({ ...t })
         }
       } catch {
         // Network or API error — keep polling, don't crash
@@ -279,8 +310,7 @@ export const useTaskStore = defineStore('tasks', () => {
    */
   function applyTaskUpdate(taskId: number, data: Record<string, unknown>): void {
     // Ignore events for a task that has already reached a terminal state
-    if (activeTask.value?.id === taskId && TERMINAL_STATUSES.includes(activeTask.value.status)) return
-
+    if (activeTask.value?.id === taskId && TERMINAL_STATUSES.has(activeTask.value.status)) return
     if (activeTask.value === null) {
       // Store as pending — will be applied by fetchTaskDetail once activeTask is set
       pendingSseUpdate = { taskId, data }
@@ -288,36 +318,23 @@ export const useTaskStore = defineStore('tasks', () => {
     }
     if (activeTask.value.id !== taskId) return
     // Apply pending update if this is the right task
-    if (pendingSseUpdate !== null && pendingSseUpdate.taskId === taskId) {
-      pendingSseUpdate = null
-    }
+    if (pendingSseUpdate?.taskId === taskId) pendingSseUpdate = null
     // SSE has provided fresh data — stop detail polling so SSE drives updates
     stopDetailPolling()
     lastSseUpdateAt = Date.now()
-    // Apply scalar fields
-    if (data.status !== undefined) activeTask.value.status = data.status as TaskStatus
-    if (data.final_response !== undefined) activeTask.value.final_response = data.final_response as string | null
-    if (data.step_count !== undefined) activeTask.value.step_count = data.step_count as number
-    if (data.updated_at !== undefined) activeTask.value.updated_at = data.updated_at as string
-    // Merge new history entries
-    if (Array.isArray(data.history)) {
-      const newEntries = (data.history as unknown as HistoryEntry[]).filter(h => h.sequence > lastSequence)
-      if (newEntries.length > 0) {
-        activeTask.value.history.push(...newEntries)
-        lastSequence = newEntries[newEntries.length - 1].sequence
-      }
-    }
-    // Refresh tool_calls
+    mergeActiveTaskUpdate(data)
+  }
+
+  function mergeActiveTaskUpdate(data: Record<string, unknown>): void {
+    if (activeTask.value === null) return
+    const active: ActiveTaskRef = activeTask
+    applyScalarFields(active, data)
+    mergeHistory(active, () => lastSequence, (n) => { lastSequence = n }, data)
     if (Array.isArray(data.tool_calls)) {
       activeTask.value.tool_calls = data.tool_calls as TaskDetail['tool_calls']
     }
-    // Merge error fields
-    if (data.error_code !== undefined) activeTask.value.error_code = data.error_code as TaskErrorCode | null
-    if (data.error_message !== undefined) activeTask.value.error_message = data.error_message as string | null
-    // Merge retry fields
-    if (data.retry_of_task_id !== undefined) activeTask.value.retry_of_task_id = data.retry_of_task_id as number | null
-    if (data.retry_count !== undefined) activeTask.value.retry_count = data.retry_count as number | undefined
-    if (data.retry_after !== undefined) activeTask.value.retry_after = data.retry_after as string | null
+    applyErrorFields(active, data)
+    applyRetryFields(active, data)
   }
 
   const pendingToolCalls = computed(() => {
@@ -326,7 +343,7 @@ export const useTaskStore = defineStore('tasks', () => {
   })
 
   const isTerminal = computed(() =>
-    activeTask.value !== null && TERMINAL_STATUSES.includes(activeTask.value.status),
+    activeTask.value !== null && TERMINAL_STATUSES.has(activeTask.value.status),
   )
 
   /** All tasks grouped by agent_id, sorted by updated_at desc */

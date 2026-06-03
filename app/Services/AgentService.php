@@ -21,6 +21,8 @@ use Throwable;
  */
 final class AgentService implements AgentServiceInterface
 {
+    private const DATETIME_FORMAT = 'Y-m-d H:i:s';
+
     public function __construct(
         private readonly ToolConfigService $toolConfig,
         private readonly LLMConfigService $llmConfig,
@@ -46,8 +48,8 @@ final class AgentService implements AgentServiceInterface
             'llm_driver_config_id'   => $data['llm_driver_config_id'] ?? null,
             'max_steps'              => (int) ($data['max_steps'] ?? 10),
             'is_active'              => 1,
-            'created_at'            => date('Y-m-d H:i:s'),
-            'updated_at'            => date('Y-m-d H:i:s'),
+            'created_at'            => date(self::DATETIME_FORMAT),
+            'updated_at'            => date(self::DATETIME_FORMAT),
         ]);
 
         return Agent::find($id);
@@ -71,7 +73,7 @@ final class AgentService implements AgentServiceInterface
         if ($filtered !== []) {
             Capsule::table('agents')
                 ->where('id', $agentId)
-                ->update(array_merge($filtered, ['updated_at' => date('Y-m-d H:i:s')]));
+                ->update(array_merge($filtered, ['updated_at' => date(self::DATETIME_FORMAT)]));
             $agent->refresh();
         }
 
@@ -117,8 +119,8 @@ final class AgentService implements AgentServiceInterface
             'agent_id'   => $agentId,
             'tool_class' => $toolClass,
             'tool_name'  => $this->resolveToolName($toolClass),
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
+            'created_at' => date(self::DATETIME_FORMAT),
+            'updated_at' => date(self::DATETIME_FORMAT),
         ]);
 
         // Seed schema defaults if no global config AND no agent override exists
@@ -234,37 +236,32 @@ final class AgentService implements AgentServiceInterface
     public function getOverride(int $agentId, int $userId, string $toolClass, bool $rawOnly = false): array
     {
         $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return [];
-        }
-
-        // llm_configuration is a special case — no registered tool class
-        if ($toolClass === 'llm_configuration') {
-            $config = $this->llmConfig->getEffectiveConfigForAgent($agent);
-            return $config !== null ? $this->maskLlmConfig($config) : [];
-        }
-
-        if ($rawOnly) {
-            $settings = $this->toolConfig->getRawAgentOverride($toolClass, $agentId);
-            return $this->toolConfig->maskForApi($settings, $toolClass);
-        }
-
-        $annotated = $this->toolConfig->getEffectiveSettingsWithSource($toolClass, $agentId);
-        $masked = [];
-
-        foreach ($annotated as $key => $item) {
-            $passwordKeys = $this->getToolPasswordKeys($toolClass);
-            $value = $item['value'];
-            if ($value !== null && $value !== '' && in_array($key, $passwordKeys, true)) {
-                $value = '***';
+        $result = [];
+        if ($agent !== null) {
+            // llm_configuration is a special case — no registered tool class
+            if ($toolClass === 'llm_configuration') {
+                $config = $this->llmConfig->getEffectiveConfigForAgent($agent);
+                $result = $config !== null ? $this->maskLlmConfig($config) : [];
+            } elseif ($rawOnly) {
+                $settings = $this->toolConfig->getRawAgentOverride($toolClass, $agentId);
+                $result = $this->toolConfig->maskForApi($settings, $toolClass);
+            } else {
+                $annotated = $this->toolConfig->getEffectiveSettingsWithSource($toolClass, $agentId);
+                $passwordKeys = $this->getToolPasswordKeys($toolClass);
+                foreach ($annotated as $key => $item) {
+                    $value = $item['value'];
+                    if ($value !== null && $value !== '' && in_array($key, $passwordKeys, true)) {
+                        $value = '***';
+                    }
+                    $result[$key] = [
+                        'value'  => $value,
+                        'source' => $item['source'],
+                    ];
+                }
             }
-            $masked[$key] = [
-                'value'  => $value,
-                'source' => $item['source'],
-            ];
         }
 
-        return $masked;
+        return $result;
     }
 
     public function putOverride(int $agentId, int $userId, string $toolClass, array $settings): array
@@ -383,7 +380,7 @@ final class AgentService implements AgentServiceInterface
                 $updateData['default_requires_approval'] = $defaultRequiresApproval;
             }
             if ($updateData !== []) {
-                $updateData['updated_at'] = date('Y-m-d H:i:s');
+                $updateData['updated_at'] = date(self::DATETIME_FORMAT);
                 Capsule::table('agent_tool_operation_overrides')
                     ->where('id', $existing->id)
                     ->update($updateData);
@@ -393,8 +390,8 @@ final class AgentService implements AgentServiceInterface
                 'agent_id'    => $agentId,
                 'tool_class'  => $toolClass,
                 'operation'   => $operation,
-                'created_at'  => date('Y-m-d H:i:s'),
-                'updated_at'  => date('Y-m-d H:i:s'),
+                'created_at'  => date(self::DATETIME_FORMAT),
+                'updated_at'  => date(self::DATETIME_FORMAT),
             ];
             if ($enabled !== null) {
                 $insertData['enabled'] = $enabled;
@@ -461,6 +458,8 @@ final class AgentService implements AgentServiceInterface
         }
         if (!isset($instances[$toolClass])) {
             try {
+                // Bypass constructor to read tool metadata (e.g. #[Tool], operations)
+                // without triggering side effects from tool constructors.
                 $instances[$toolClass] = (new ReflectionClass($toolClass))->newInstanceWithoutConstructor();
             } catch (Throwable) {
                 return null;
@@ -569,6 +568,9 @@ final class AgentService implements AgentServiceInterface
             return null;
         }
         $value = $data[$key];
-        return $value === null ? null : (filter_var($value, FILTER_VALIDATE_BOOLEAN) ? 1 : 0);
+        if ($value === null) {
+            return null;
+        }
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
     }
 }

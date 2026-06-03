@@ -10,6 +10,8 @@ use Spora\Models\UserPreference;
 use Spora\Services\LLMConfigService;
 use Symfony\Component\HttpFoundation\Response;
 
+const USER_PREFERENCES_LLM_PATH = '/api/v1/user-preferences/llm';
+
 function makeUserPreferenceController(): array
 {
     $authService = bootAuthLayer();
@@ -100,7 +102,7 @@ test('user cannot access another user preference (returns null for other user)',
     ]);
 
     // User B logs in
-    $userB = bootAuth($authService, 'userb_pref@example.com');
+    bootAuth($authService, 'userb_pref@example.com');
 
     // User B should not see User A's preference
     $request = new Symfony\Component\HttpFoundation\Request();
@@ -128,7 +130,7 @@ test('put sets a personal config as preference', function (): void {
         'model' => 'claude-3-5-sonnet',
     ], false, $userId, $llmConfigService);
 
-    $request = jsonRequest('PUT', '/api/v1/user-preferences/llm', [
+    $request = jsonRequest('PUT', USER_PREFERENCES_LLM_PATH, [
         'config_id' => $config->id,
     ]);
     $response = $controller->update($request);
@@ -161,7 +163,7 @@ test('put sets a global config as preference', function (): void {
     $globalConfig->is_global = true;
     $globalConfig->save();
 
-    $request = jsonRequest('PUT', '/api/v1/user-preferences/llm', [
+    $request = jsonRequest('PUT', USER_PREFERENCES_LLM_PATH, [
         'config_id' => $globalConfig->id,
     ]);
     $response = $controller->update($request);
@@ -195,7 +197,7 @@ test('put clears preference when config_id is null', function (): void {
     ]);
 
     // Now clear it
-    $request = jsonRequest('PUT', '/api/v1/user-preferences/llm', [
+    $request = jsonRequest('PUT', USER_PREFERENCES_LLM_PATH, [
         'config_id' => null,
     ]);
     $response = $controller->update($request);
@@ -217,7 +219,7 @@ test('put returns 422 when config_id does not exist', function (): void {
     [$controller, $authService] = makeUserPreferenceController();
     bootAuth($authService, 'notfound@example.com');
 
-    $request = jsonRequest('PUT', '/api/v1/user-preferences/llm', [
+    $request = jsonRequest('PUT', USER_PREFERENCES_LLM_PATH, [
         'config_id' => 99999,
     ]);
     $response = $controller->update($request);
@@ -238,7 +240,7 @@ test('put returns 422 when config_id belongs to another user', function (): void
     // User B tries to set User A's config as their preference
     bootAuth($authService, 'other_pref@example.com');
 
-    $request = jsonRequest('PUT', '/api/v1/user-preferences/llm', [
+    $request = jsonRequest('PUT', USER_PREFERENCES_LLM_PATH, [
         'config_id' => $configA->id,
     ]);
     $response = $controller->update($request);
@@ -253,7 +255,7 @@ test('put returns 401 for unauthenticated request', function (): void {
     [$controller] = makeUserPreferenceController();
     clearSession();
 
-    $request = jsonRequest('PUT', '/api/v1/user-preferences/llm', [
+    $request = jsonRequest('PUT', USER_PREFERENCES_LLM_PATH, [
         'config_id' => 1,
     ]);
     expect(fn() => $controller->update($request))
@@ -261,7 +263,7 @@ test('put returns 401 for unauthenticated request', function (): void {
 });
 
 test('preference is deleted when the referenced config is deleted (cascade)', function (): void {
-    [$controller, $authService, $llmConfigService] = makeUserPreferenceController();
+    [, $authService, $llmConfigService] = makeUserPreferenceController();
     $userId = bootAuth($authService, 'cascade_pref@example.com');
 
     $config = createTestConfig('Cascade Test', OpenAICompatibleDriver::class, [
