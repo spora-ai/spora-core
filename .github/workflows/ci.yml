@@ -29,7 +29,7 @@ jobs:
             command: npm run lint
             working-directory: frontend
           - task: frontend-test
-            command: npm test
+            command: npm run test:coverage
             working-directory: frontend
 
     steps:
@@ -106,3 +106,60 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  php-coverage:
+    name: PHP Coverage (clover)
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup PHP with Xdebug
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, zip
+          coverage: xdebug
+          tools: composer
+
+      - name: Composer install
+        run: composer install --no-interaction
+
+      - name: Generate clover coverage report
+        run: composer test:coverage:clover
+
+      - name: Upload coverage.xml
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            frontend/coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 7
+
+  sonar:
+    name: SonarCloud scan
+    needs: php-coverage
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage.xml
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: .
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
