@@ -78,13 +78,11 @@ const identityError = ref<string | null>(null)
 const identitySaved = ref(false)
 
 
-// Track enabled tool names and auto-approve status separately
+// Track enabled tool names
 const enabledToolNames = ref<Set<string>>(new Set())
-const autoApprovedMap = ref<Record<string, boolean>>({})
 
 // Per-operation saving states (separate keys so operations don't disable each other)
 const savingTool = ref<Record<string, boolean>>({})
-const savingAutoApprove = ref<Record<string, boolean>>({})
 const savingOperation = ref<Record<string, boolean>>({})
 
 // Per-operation effective states: Record<toolName, Record<operationName, { enabled, requiresApproval }>>
@@ -157,9 +155,6 @@ onMounted(async () => {
 
   // Seed enabled tools state
   enabledToolNames.value = new Set(agent.tools.map((t) => t.tool_name))
-  for (const t of agent.tools) {
-    autoApprovedMap.value[t.tool_name] = t.auto_approve === true
-  }
 
   // Fetch tool registry, LLM configs, and LLM drivers in parallel
   const [toolsResult, configsResult, driversResult] = await Promise.all([
@@ -243,7 +238,6 @@ async function toggleTool(toolName: string): Promise<void> {
     if (enabledToolNames.value.has(toolName)) {
       await agentStore.disableTool(agentId.value, toolName)
       enabledToolNames.value.delete(toolName)
-      // Keep autoApprovedMap entry so state is preserved if tool is re-enabled
     } else {
       // Pre-check: if we already know it can't be enabled, show modal and block
       const status = toolStatusMap.value[toolName]
@@ -253,7 +247,7 @@ async function toggleTool(toolName: string): Promise<void> {
         return
       }
       // Attempt enable — backend may still return warning if settings are incomplete
-      const agentTool = await agentStore.enableTool(agentId.value, toolName)
+      await agentStore.enableTool(agentId.value, toolName)
       // Re-fetch status to confirm the tool is actually ready before marking enabled
       const newStatus = await toolSettings.getToolStatus(toolName)
       if (newStatus === null) {
@@ -271,7 +265,6 @@ async function toggleTool(toolName: string): Promise<void> {
       }
       // Tool is fully configured — mark as enabled
       enabledToolNames.value.add(toolName)
-      autoApprovedMap.value[toolName] = agentTool.auto_approve === true
       // Update status map
       toolStatusMap.value[toolName] = newStatus
       // Load operation overrides for newly enabled tool
@@ -288,21 +281,6 @@ async function loadOperationOverrides(): Promise<void> {
   // Single batch request for all operations of all enabled tools
   const allStates = await agentStore.getAllOperationOverrides(agentId.value)
   operationStates.value = allStates
-}
-
-async function toggleAutoApprove(toolName: string): Promise<void> {
-  if (!enabledToolNames.value.has(toolName)) return
-  savingAutoApprove.value[toolName] = true
-  try {
-    const currentValue = autoApprovedMap.value[toolName]
-    const newValue = currentValue ? false : true
-    const updated = await agentStore.patchTool(agentId.value, toolName, { auto_approve: newValue })
-    autoApprovedMap.value[toolName] = updated.auto_approve === true
-  } catch (e) {
-    toolsError.value = e instanceof ApiError ? e.message : 'Failed to update auto-approve.'
-  } finally {
-    savingAutoApprove.value[toolName] = false
-  }
 }
 
 async function toggleOperationEnabled(toolName: string, operationName: string): Promise<void> {
@@ -566,12 +544,10 @@ async function deleteAgent(): Promise<void> {
               :key="tool.tool_name"
               :tool="tool"
               :enabled="enabledToolNames.has(tool.tool_name)"
-              :autoApproved="autoApprovedMap[tool.tool_name] ?? false"
               :saving="savingTool[tool.tool_name] ?? false"
               :missingRequired="toolStatusMap[tool.tool_name]?.missing_required ?? []"
               :operationStates="operationStates[tool.tool_name]"
               @toggle="toggleTool(tool.tool_name)"
-              @toggleAutoApprove="toggleAutoApprove(tool.tool_name)"
               @openConfig="configuringTool = tool.tool_name"
               @toggleOperationEnabled="(op) => toggleOperationEnabled(tool.tool_name, op)"
               @toggleOperationAutoApprove="(op) => toggleOperationAutoApprove(tool.tool_name, op)"

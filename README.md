@@ -26,9 +26,11 @@ Spora is a **self-hosted AI agent orchestration platform** built in PHP 8.4+.
 
 It is designed to be:
 
-- **Zero-config** — works out of the box with sensible defaults (SQLite, no server required)
+- **Zero-config** — works out of the box with sensible defaults (SQLite for small-scale use, MySQL/MariaDB for team or production use)
 - **Portable** — runs on any PHP 8.4+ environment, from a laptop to a shared cPanel/FTP host or as a Docker Container
 - **Extensible** — a WordPress-like plugin system lets you add tools, drivers, and agent behaviors
+- **Bring your own model** — connect any OpenAI- or Anthropic-compatible endpoint, from hosted APIs to local Ollama and LM Studio, and switch providers at any time
+- **Yours to keep** — every tool call, prompt, and result stays on your infrastructure; no vendor lock-in, no third-party telemetry
 
 You define agents, give them tools, and Spora handles the execution loop — tick-based, stateless, with human-in-the-loop approval for write operations.
 
@@ -49,16 +51,14 @@ You define agents, give them tools, and Spora handles the execution loop — tic
 | Requirement | Minimum | Notes |
 |-------------|---------|-------|
 | PHP | 8.4+ | Required |
-| Node.js | 18+ | Only for frontend builds |
+| Node.js | 20+ | Only for frontend builds (Vite 6 / ESLint 10 require ≥ 20) |
 | Database | SQLite (dev) / MySQL 8+ (prod) | |
-
-See [Installation Guide](docs/13_installation.md) for full details.
 
 ---
 
 ## Installation
 
-Detailed installation instructions are in the [Installation Guide](docs/13_installation.md).
+Step-by-step setup — including `composer install`, frontend build, and the optional Docker stack — is in the [Installation Guide](docs/13_installation.md).
 
 ---
 
@@ -68,13 +68,23 @@ Full documentation is in the [`docs/`](docs/) directory:
 
 | Document | Coverage |
 |----------|----------|
+| [Index](docs/00_index.md) | Documentation index and feature overview |
 | [Architecture](docs/01_architecture.md) | System overview, config, orchestrator loop, plugin system |
+| [Database Schema](docs/02_schema.md) | Tables, columns, migrations |
+| [Interfaces](docs/03_interfaces.md) | PHP interfaces and contracts |
 | [API Reference](docs/04_api.md) | REST API endpoints |
-| [Plugin System](docs/07_plugins.md) | How to write plugins |
-| [Tool Development](docs/06_tools.md) | How to build tools |
 | [LLM Drivers](docs/05_drivers.md) | Driver architecture |
-| [Worker Modes](docs/11_agent_loop_async.md) | sync, cron, and daemon deployment |
-| [Testing](docs/16_testing.md) | How to test Spora |
+| [Tool Development](docs/06_tools.md) | How to build tools |
+| [Plugin System](docs/07_plugins.md) | How to write plugins |
+| [Logging](docs/08_logging.md) | Logging conventions and PII policy |
+| [Frontend](docs/09_frontend.md) | Vue 3 app, stores, polling, SSE |
+| [Error Handling](docs/10_error_handling.md) | Error envelope and code registry |
+| [Worker & Async](docs/11_agent_loop_async.md) | sync mode and `worker:run` deployment |
+| [Worker Deployment](docs/12_worker_deployment.md) | Docker, systemd, supervisord |
+| [Installation](docs/13_installation.md) | Setup requirements and steps |
+| [Code Documentation](docs/14_code_documentation.md) | Comment standards |
+| [Security](docs/15_security.md) | Encryption, CSRF, rate limits |
+| [Testing](docs/16_testing.md) | Backend and frontend test setup |
 
 ---
 

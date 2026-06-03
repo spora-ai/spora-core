@@ -18,7 +18,7 @@ function makeMockAgent(overrides = {}) {
     llm_driver_config_id: null,
     max_steps: 10,
     is_active: true,
-    tools: [{ tool_name: 'web_search', tool_class: 'TestTool', display_name: 'Web Search', settings_schema: [], auto_approve: null }],
+    tools: [{ tool_name: 'web_search', tool_class: 'TestTool', display_name: 'Web Search', settings_schema: [] }],
     ...overrides,
   }
 }

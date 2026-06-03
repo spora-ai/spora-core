@@ -11,8 +11,8 @@ self-contained directory deployed alongside the core application.
 plugins/
 └── my-plugin/
     ├── plugin.json        ← required manifest
-    ├── Plugin.php         ← entry-point class (default location)
-    ├── src/               ← plugin source code
+    ├── Plugin.php         ← entry-point class (default file location)
+    ├── src/               ← optional: plugin source code
     └── vendor/            ← optional: plugin's own Composer dependencies
 ```
 
@@ -77,28 +77,35 @@ The class named in `class` must implement `Spora\Plugins\PluginInterface`:
 ```php
 namespace Acme\MyPlugin;
 
+use DI\ContainerBuilder;
 use Spora\Plugins\PluginInterface;
 
 final class Plugin implements PluginInterface
 {
-    public function getName(): string  { return 'My Plugin'; }
+    public function getName(): string { return 'My Plugin'; }
 
-    /** @return list<class-string> */
+    /** @return array<string, string> */
+    public function autoload(): array  { return []; }
+
+    /** @return array<class-string<\Spora\Tools\ToolInterface>> */
     public function tools(): array     { return []; }
 
-    /** @return array<string, class-string> */
+    /** @return array<string, class-string<\Spora\Drivers\LLMDriverInterface>> */
     public function drivers(): array   { return []; }
 
     /** @return string[] */
     public function recipePaths(): array { return []; }
 
-    /** @return array<string, string> */
-    public function autoload(): array  { return []; }
-
-    public function schemaVersion(): int    { return 0; }
+    public function schemaVersion(): int     { return 0; }
     public function migrationsPath(): ?string { return null; }
+
+    public function register(ContainerBuilder $builder): void {}
 }
 ```
+
+**Note:** the plugin system is currently a work-in-progress. The hook methods (`tools()`, `drivers()`, `recipePaths()`, `register()`) are declared on the interface and surfaced by the manifest, but the explicit `PluginLoader → DI container` injection path is not yet fully wired up. New drivers, tools, and recipes contributed via plugins may not take effect without additional glue in `app/Plugins/PluginLoader.php` or direct registration via `config.php`.
+
+To register a new LLM driver via a plugin, return its FQCN from `PluginInterface::drivers()` — see [05_drivers.md](05_drivers.md) for the driver contract and the `llm_driver_classes` container key that plugins are intended to extend.
 
 ---
 
@@ -150,7 +157,7 @@ Plugin tools are automatically prefixed with their `slug` when sent to the LLM, 
 
 Core tools use their plain `#[Tool(name:)]` value without any prefix.
 
-The Orchestrator derives the prefix automatically from `PluginLoader` — no changes to the plugin's `#[Tool]` attribute are needed.
+The Orchestrator derives the prefix automatically from the loaded plugins (via `PluginLoader::getPlugins()` in `app/Agents/Orchestrator.php:1177-1188`) — no changes to the plugin's `#[Tool]` attribute are needed.
 
 ## Shipping third-party dependencies
 
@@ -194,3 +201,11 @@ The following conditions also result in a silent skip rather than a fatal error:
 
 In both cases the second plugin is quietly ignored. If a plugin appears to be "not found" at
 runtime, check that its slug and class are unique across all plugins in the plugins directory.
+
+---
+
+## Security
+
+Plugins are loaded by `Spora\Plugins\PluginLoader` (`app/Plugins/PluginLoader.php`) at boot. They are **not sandboxed** — a plugin runs as ordinary PHP code with full access to the application, the database, the file system, and any decrypted credentials. Only install plugins from sources you trust, and review their `plugin.json` manifest and source before deployment.
+
+For the broader security model (credential encryption, API auth, rate limiting), see `docs/15_security.md`.

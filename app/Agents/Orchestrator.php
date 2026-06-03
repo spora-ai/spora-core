@@ -909,12 +909,6 @@ final class Orchestrator implements OrchestratorInterface
             //   1. Per-op override (#[AgentToolOperationOverride] row) wins.
             //   2. Otherwise the operation's #[ToolOperation(requiresApprovalByDefault:)]
             //      class default wins.
-            //
-            // The legacy agent-wide AgentTool.auto_approve column is intentionally
-            // NOT consulted here — it was previously a footgun: a stale `0` value
-            // (from an earlier UI that no longer renders the toggle) silently
-            // forced every operation to require approval, overriding read-only
-            // class defaults like read_inbox.
             /** @var AgentToolOperationOverride|null $override */
             $override = AgentToolOperationOverride::where('agent_id', $agentId)
                 ->where('tool_class', $toolClass)

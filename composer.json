@@ -5,7 +5,20 @@
     "license": "MIT",
     "version": "0.1.0",
     "require": {
-        "php": "^8.4",
+        "php": "^8.4.1",
+        "ext-curl": "*",
+        "ext-dom": "*",
+        "ext-fileinfo": "*",
+        "ext-iconv": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-openssl": "*",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
+        "ext-pdo_sqlite": "*",
+        "ext-simplexml": "*",
+        "ext-sodium": "*",
+        "ext-zip": "*",
         "chriskonnertz/string-calc": "^2.0",
         "craigk5n/php-icalendar-core": "^1.0",
         "delight-im/auth": "^9.0",
@@ -52,11 +65,10 @@
     },
     "scripts": {
         "setup": [
-            "@php bin/reset-db",
             "@php bin/spora spora:install",
             "@php bin/spora db:seed"
         ],
-        "reset": "@php bin/reset-db",
+        "reset": "@php bin/spora db:reset",
         "dev": [
             "Composer\\Config::disableProcessTimeout",
             "bin/dev"

@@ -43,7 +43,7 @@ Review the diff against the comment standards in `docs/14_code_documentation.md`
 - *Cross-cutting concerns* — singletons, DI registration, the single permitted reader/writer of a column
 
 **ADD — missing documentation:**
-- Docblocks on all attributes in `app/Attributes/` with a usage example
+- Docblocks on all attributes in `app/Tools/Attributes/` with a usage example
 - JSDoc on Vue stores and composables describing their responsibility
 
 ## 4. Report & Draft Commit Message

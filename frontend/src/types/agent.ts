@@ -1,7 +1,6 @@
 export interface AgentTool {
   tool_class: string
   tool_name: string
-  auto_approve: boolean | null
 }
 
 export interface Agent {

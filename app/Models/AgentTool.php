@@ -12,7 +12,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $agent_id
  * @property string $tool_class
  * @property string $tool_name
- * @property int|null $auto_approve  Raw 3-state DB value: 1 = always approve, 0 = always require, null = use OutputTool class default.
  */
 final class AgentTool extends Model
 {
@@ -22,7 +21,6 @@ final class AgentTool extends Model
         'agent_id',
         'tool_class',
         'tool_name',
-        'auto_approve',
     ];
 
     public function agent(): BelongsTo

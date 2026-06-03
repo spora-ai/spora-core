@@ -209,7 +209,7 @@ describe('useAgentStore', () => {
 
   describe('enableTool / disableTool', () => {
     it('enableTool calls POST and returns tool', async () => {
-      const tool = { tool_class: 'TestTool', tool_name: 'TestTool', auto_approve: null }
+      const tool = { tool_class: 'TestTool', tool_name: 'TestTool' }
       mockApi.post.mockResolvedValueOnce({ tool })
 
       const store = useAgentStore()
@@ -226,19 +226,6 @@ describe('useAgentStore', () => {
       await store.disableTool(1, 'TestTool')
 
       expect(mockApi.delete).toHaveBeenCalledWith('/agents/1/tools/TestTool/enable')
-    })
-  })
-
-  describe('patchTool', () => {
-    it('calls PATCH with auto_approve data', async () => {
-      const tool = { tool_class: 'TestTool', tool_name: 'TestTool', auto_approve: true }
-      mockApi.patch.mockResolvedValueOnce({ tool })
-
-      const store = useAgentStore()
-      const result = await store.patchTool(1, 'TestTool', { auto_approve: true })
-
-      expect(mockApi.patch).toHaveBeenCalledWith('/agents/1/tools/TestTool', { auto_approve: true })
-      expect(result).toEqual(tool)
     })
   })
 

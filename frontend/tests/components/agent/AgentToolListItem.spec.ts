@@ -19,7 +19,6 @@ describe('AgentToolListItem', () => {
         props: {
           tool: makeTool({ display_name: 'Web Search', tool_name: 'web_search' }),
           enabled: false,
-          autoApproved: false,
           saving: false,
         },
       })
@@ -31,7 +30,6 @@ describe('AgentToolListItem', () => {
         props: {
           tool: makeTool({ display_name: '', tool_name: 'web_search' }),
           enabled: false,
-          autoApproved: false,
           saving: false,
         },
       })
@@ -45,7 +43,6 @@ describe('AgentToolListItem', () => {
         props: {
           tool: makeTool(),
           enabled: true,
-          autoApproved: false,
           saving: false,
         },
       })
@@ -57,7 +54,6 @@ describe('AgentToolListItem', () => {
         props: {
           tool: makeTool(),
           enabled: false,
-          autoApproved: false,
           saving: false,
         },
       })
@@ -69,37 +65,10 @@ describe('AgentToolListItem', () => {
         props: {
           tool: makeTool({ settings_schema: [] }),
           enabled: true,
-          autoApproved: false,
           saving: false,
         },
       })
       expect(wrapper.text()).not.toContain('Configure')
-    })
-  })
-
-  describe('auto-approve toggle', () => {
-    it('shown when enabled=true', () => {
-      const wrapper = mount(AgentToolListItem, {
-        props: {
-          tool: makeTool(),
-          enabled: true,
-          autoApproved: false,
-          saving: false,
-        },
-      })
-      expect(wrapper.text()).toContain('Auto-approve')
-    })
-
-    it('hidden when enabled=false', () => {
-      const wrapper = mount(AgentToolListItem, {
-        props: {
-          tool: makeTool(),
-          enabled: false,
-          autoApproved: false,
-          saving: false,
-        },
-      })
-      expect(wrapper.text()).not.toContain('Auto-approve')
     })
   })
 
@@ -109,7 +78,6 @@ describe('AgentToolListItem', () => {
         props: {
           tool: makeTool(),
           enabled: true,
-          autoApproved: false,
           saving: false,
         },
       })
@@ -121,7 +89,6 @@ describe('AgentToolListItem', () => {
         props: {
           tool: makeTool(),
           enabled: false,
-          autoApproved: false,
           saving: false,
         },
       })
@@ -133,7 +100,6 @@ describe('AgentToolListItem', () => {
         props: {
           tool: makeTool({ settings_schema: [] }),
           enabled: true,
-          autoApproved: false,
           saving: false,
         },
       })
@@ -144,7 +110,7 @@ describe('AgentToolListItem', () => {
   describe('emits', () => {
     it('emits toggle when enable/disable button clicked', async () => {
       const wrapper = mount(AgentToolListItem, {
-        props: { tool: makeTool(), enabled: false, autoApproved: false, saving: false },
+        props: { tool: makeTool(), enabled: false, saving: false },
       })
       await wrapper.findAll('button')[0].trigger('click')
       expect(wrapper.emitted('toggle')).toBeDefined()
@@ -152,21 +118,10 @@ describe('AgentToolListItem', () => {
 
     it('emits openConfig when configure button clicked', async () => {
       const wrapper = mount(AgentToolListItem, {
-        props: { tool: makeTool(), enabled: true, autoApproved: false, saving: false },
+        props: { tool: makeTool(), enabled: true, saving: false },
       })
       await wrapper.findAll('button').find((b) => b.text() === 'Configure')!.trigger('click')
       expect(wrapper.emitted('openConfig')).toBeDefined()
-    })
-
-    it('emits toggleAutoApprove when auto-approve button clicked', async () => {
-      const wrapper = mount(AgentToolListItem, {
-        props: { tool: makeTool(), enabled: true, autoApproved: false, saving: false },
-      })
-      // Find the auto-approve toggle button (not the enable/disable one)
-      const buttons = wrapper.findAll('button')
-      const autoApproveBtn = buttons.find((b) => b.classes().includes('w-9'))
-      await autoApproveBtn!.trigger('click')
-      expect(wrapper.emitted('toggleAutoApprove')).toBeDefined()
     })
   })
 })

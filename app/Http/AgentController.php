@@ -157,34 +157,6 @@ final class AgentController
     }
 
     /**
-     * PATCH /api/v1/agents/{id}/tools/{toolClass}
-     */
-    public function patchTool(Request $request): JsonResponse
-    {
-        $userId    = $this->authService->currentUserId();
-        $agentId   = (int) $request->attributes->get('id', 0);
-        $toolClass = $this->resolveToolClassFromRequest($request);
-
-        if ($toolClass === null) {
-            return $this->notFound();
-        }
-
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
-        }
-
-        $tool = $this->agentService->patchTool($agentId, $userId, $toolClass, $body);
-
-        if ($tool === null) {
-            return $this->error('NOT_FOUND', 'Tool is not enabled for this agent.', Response::HTTP_NOT_FOUND);
-        }
-
-        return new JsonResponse(['data' => ['tool' => $this->toolResource($tool)]]);
-    }
-
-    /**
      * GET /api/v1/agents/{id}/tools/{toolId}/status
      */
     public function getToolStatus(Request $request): JsonResponse
@@ -401,18 +373,10 @@ final class AgentController
             'is_active'            => (bool) $agent->is_active,
             'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),
             'max_retries'          => (int) ($agent->max_retries ?? 0),
-            'tools'                => $tools->map(fn(AgentTool $t) => $this->toolResource($t))->values()->toArray(),
-        ];
-    }
-
-    private function toolResource(AgentTool $tool): array
-    {
-        $raw = $tool->getRawOriginal('auto_approve');
-
-        return [
-            'tool_class'   => $tool->tool_class,
-            'tool_name'    => $tool->tool_name,
-            'auto_approve' => $raw === null ? null : (bool) $raw,
+            'tools' => $tools->map(static fn(AgentTool $t) => [
+                'tool_class' => $t->tool_class,
+                'tool_name'  => $t->tool_name,
+            ])->values()->toArray(),
         ];
     }
 

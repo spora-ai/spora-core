@@ -16,6 +16,7 @@ use Spora\Core\Kernel;
 use Symfony\Component\Console\Application;
 use Spora\Console\Commands\SetupCommand;
 use Spora\Console\Commands\InstallCommand;
+use Spora\Console\Commands\DbResetCommand;
 use Spora\Console\Commands\SeedCommand;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Console\Commands\ToolSettingsMigrationCommand;
@@ -35,6 +36,7 @@ $application = new Application('Spora CLI', \Spora\Core\Version::current());
 // Register Commands Manually or Autowire them from container
 $application->addCommand($container->get(SetupCommand::class));
 $application->addCommand($container->get(InstallCommand::class));
+$application->addCommand($container->get(DbResetCommand::class));
 $application->addCommand($container->get(SeedCommand::class));
 $application->addCommand($container->get(TaskRunCommand::class));
 $application->addCommand($container->get(ToolSettingsMigrationCommand::class));

@@ -38,8 +38,8 @@ return static function (MiddlewareRouteCollector $r): void {
     $r->addRoute('GET', '/health', [HealthController::class, 'check'], []);
     // Public config (no auth)
     $r->addRoute('GET', '/api/v1/config', [ConfigController::class, 'index'], []);
-    // Apps (no auth)
-    $r->addRoute('GET', '/api/v1/apps', [AppsController::class, 'index'], []);
+    // Apps — protected: app/plugin inventory is only needed inside the authenticated SPA
+    $r->addRoute('GET', '/api/v1/apps', [AppsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
     // Auth (no auth, CSRF handled per-route)
     $r->addRoute('POST', '/api/v1/auth/login', [AuthController::class, 'login'], []);
     $r->addRoute('POST', '/api/v1/auth/register', [AuthController::class, 'register'], []);
@@ -61,9 +61,8 @@ return static function (MiddlewareRouteCollector $r): void {
     $r->addRoute('PATCH', '/api/v1/agents/{id}', [AgentController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
     $r->addRoute('DELETE', '/api/v1/agents/{id}', [AgentController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
-    // Agent tools — enablement & auto_approve override
+    // Agent tools — enablement
     $r->addRoute('POST', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentController::class, 'enableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);
-    $r->addRoute('PATCH', '/api/v1/agents/{id}/tools/{toolId}', [AgentController::class, 'patchTool'], [AuthMiddleware::class, CsrfMiddleware::class]);
     $r->addRoute('DELETE', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentController::class, 'disableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);
     $r->addRoute('GET', '/api/v1/agents/{id}/tools/status', [AgentController::class, 'getToolsStatus'], [AuthMiddleware::class, CsrfMiddleware::class]);
     $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/status', [AgentController::class, 'getToolStatus'], [AuthMiddleware::class, CsrfMiddleware::class]);
