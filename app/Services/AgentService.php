@@ -104,18 +104,21 @@ final class AgentService implements AgentServiceInterface
 
         $isIdempotent = $existing !== null;
         if ($isIdempotent) {
-            return ['tool' => $this->toolResource($existing), 'is_idempotent' => true];
+            return [
+                'tool' => [
+                    'tool_class' => $existing->tool_class,
+                    'tool_name'  => $existing->tool_name,
+                ],
+                'is_idempotent' => true,
+            ];
         }
 
-        $autoApprove = $this->resolveAutoApproveDefault($toolClass);
-
         Capsule::table('agent_tools')->insert([
-            'agent_id'     => $agentId,
-            'tool_class'   => $toolClass,
-            'tool_name'    => $this->resolveToolName($toolClass),
-            'auto_approve' => $autoApprove,
-            'created_at'   => date('Y-m-d H:i:s'),
-            'updated_at'   => date('Y-m-d H:i:s'),
+            'agent_id'   => $agentId,
+            'tool_class' => $toolClass,
+            'tool_name'  => $this->resolveToolName($toolClass),
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
         // Seed schema defaults if no global config AND no agent override exists
@@ -136,7 +139,12 @@ final class AgentService implements AgentServiceInterface
         $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId);
         $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
 
-        $result = ['tool' => $this->toolResource($tool)];
+        $result = [
+            'tool' => [
+                'tool_class' => $tool->tool_class,
+                'tool_name'  => $tool->tool_name,
+            ],
+        ];
         if ($missing !== []) {
             $result['warning'] = 'Required settings are missing. The tool may not work until credentials are configured.';
             $result['missing_required'] = $missing;
@@ -155,34 +163,6 @@ final class AgentService implements AgentServiceInterface
         AgentTool::where('agent_id', $agentId)
             ->where('tool_class', $toolClass)
             ->delete();
-    }
-
-    public function patchTool(int $agentId, int $userId, string $toolClass, array $data): ?AgentTool
-    {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return null;
-        }
-
-        $tool = AgentTool::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->first();
-
-        if ($tool === null) {
-            return null;
-        }
-
-        if (array_key_exists('auto_approve', $data)) {
-            $raw = $data['auto_approve'];
-            $dbValue = $raw === null ? null : ($raw ? 1 : 0);
-
-            Capsule::table('agent_tools')
-                ->where('id', $tool->id)
-                ->update(['auto_approve' => $dbValue, 'updated_at' => date('Y-m-d H:i:s')]);
-            $tool->refresh();
-        }
-
-        return $tool;
     }
 
 
@@ -429,30 +409,6 @@ final class AgentService implements AgentServiceInterface
     }
 
 
-    private function resolveAutoApproveDefault(string $toolClass): ?bool
-    {
-        if (!class_exists($toolClass)) {
-            return null;
-        }
-
-        $ref = new ReflectionClass($toolClass);
-        if (!in_array(HasOperations::class, class_uses_recursive($toolClass), true)) {
-            return null;
-        }
-
-        $instance = $ref->newInstanceWithoutConstructor();
-        $operations = $instance->getOperations();
-        if ($operations === []) {
-            return null;
-        }
-
-        if (array_all($operations, fn($op) => $op->requiresApprovalByDefault === false)) {
-            return true;
-        }
-
-        return null;
-    }
-
     private function resolveOperationEffectiveEnabled(string $toolClass, string $operation, int $agentId): bool
     {
         $override = AgentToolOperationOverride::where('agent_id', $agentId)
@@ -588,18 +544,10 @@ final class AgentService implements AgentServiceInterface
             'is_active'            => (bool) $agent->is_active,
             'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),
             'max_retries'          => (int) ($agent->max_retries ?? 0),
-            'tools'                => $tools->map(fn(AgentTool $t) => $this->toolResource($t))->values()->toArray(),
-        ];
-    }
-
-    private function toolResource(AgentTool $tool): array
-    {
-        $raw = $tool->getRawOriginal('auto_approve');
-
-        return [
-            'tool_class'   => $tool->tool_class,
-            'tool_name'    => $tool->tool_name,
-            'auto_approve' => $raw === null ? null : (bool) $raw,
+            'tools' => $tools->map(static fn(AgentTool $t) => [
+                'tool_class' => $t->tool_class,
+                'tool_name'  => $t->tool_name,
+            ])->values()->toArray(),
         ];
     }
 

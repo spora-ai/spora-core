@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Spora\Models\Agent;
-use Spora\Models\AgentTool;
 
 /**
  * Service interface for agent lifecycle, tool management, and settings overrides.
@@ -37,8 +36,6 @@ interface AgentServiceInterface
     public function enableTool(int $agentId, int $userId, string $toolClass): array;
 
     public function disableTool(int $agentId, int $userId, string $toolClass): void;
-
-    public function patchTool(int $agentId, int $userId, string $toolClass, array $data): ?AgentTool;
 
     // ── Tool status & settings ────────────────────────────────────────────────────
 

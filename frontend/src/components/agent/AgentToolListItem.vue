@@ -6,7 +6,6 @@ import type { ToolSchema } from '@/composables/useToolSettings'
 const props = defineProps<{
   tool: ToolSchema & { operations?: ToolOperationSchema[] }
   enabled: boolean
-  autoApproved: boolean
   saving: boolean
   missingRequired?: string[]
   operationStates?: Record<string, { enabled: boolean; requiresApproval: boolean }>
@@ -14,7 +13,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   toggle: []
-  toggleAutoApprove: []
   openConfig: []
   toggleOperationEnabled: [operationName: string]
   toggleOperationAutoApprove: [operationName: string]
@@ -77,20 +75,6 @@ import { computed } from 'vue'
         >
           Configure
         </button>
-        <!-- Auto-approve toggle (only if enabled and no operations) -->
-        <label
-          v-if="enabled && !hasOperations"
-          class="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer"
-          :title="autoApproved ? 'Auto-approve is on' : 'Auto-approve is off'"
-        >
-          <span>Auto-approve</span>
-          <Toggle
-            size="sm"
-            :model-value="autoApproved"
-            :disabled="saving"
-            @update:model-value="emit('toggleAutoApprove')"
-          />
-        </label>
         <!-- Enable/Disable toggle -->
         <Toggle
           :model-value="enabled"

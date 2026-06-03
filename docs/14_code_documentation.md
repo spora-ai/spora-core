@@ -4,13 +4,13 @@ Guidelines for writing meaningful comments that add value without adding noise.
 
 ## Principles
 
-**1. Clarity over ceremony** — Comments should make code *easier* to understand. If a comment is purely decorative, it hinders rather than helps.
+**1. Clarity over ceremony** — Comments should make code *easier* to understand. Decorative comments hinder more than help.
 
 **2. Token efficiency** — Every comment burns tokens during AI processing. Make each word count.
 
-**3. Developer experience** — Comments serve other developers (and AI agents) reading the code. Focus on *why*, not *what*.
+**3. Focus on *why*, not *what*** — Comments serve other developers (and AI agents). The code already shows what it does; comments explain why.
 
-**4. Self-documenting code first** — Well-named variables, functions, and classes reduce the need for comments. Comments should explain what cannot be expressed in code.
+**4. Self-documenting code first** — Well-named variables, functions, and classes reduce the need for comments.
 
 ---
 
@@ -42,7 +42,7 @@ These patterns add no information and should be removed:
 // Get the user  ← DELETE - the code does this already
 $user = $this->userService->find($id);
 
-// Check if user is admin  ← DELETE - obvious from the if condition
+// Check if user is admin  ← DELETE - obvious from the condition
 if ($user->isAdmin()) {
 ```
 
@@ -57,17 +57,14 @@ These patterns provide genuine value:
 ```php
 // #1 SSRF guard: allowlist only http/https — blocks file://, ftp://, gopher://,
 // cloud metadata endpoints (http://169.254.169.254), etc.
-$scheme = parse_url($url, PHP_URL_SCHEME);
+$scheme = strtolower(parse_url($url, PHP_URL_SCHEME) ?? '');
 ```
-
-```php
-// RFC 5545 §3.1: long property lines may be folded with CRLF + whitespace.
-// Handle both strict CRLF and bare LF (common in XML-embedded ICS data).
-```
+*(from `app/Tools/ReadUrlTool.php`)*
 
 ```php
 // Security Barrier: Allowed Recipients check
 ```
+*(from `app/Tools/EmailTool.php`)*
 
 **Why:** Security decisions often look arbitrary without context. The *why* prevents future developers from accidentally weakening protections.
 
@@ -75,16 +72,9 @@ $scheme = parse_url($url, PHP_URL_SCHEME);
 
 ```php
 // Seed schema defaults if no global config AND no agent override exists
-if (!$config && !$agentOverride) {
-    $settings = $this->getSchemaDefaults($toolName);
-}
+$globalSettings = $this->toolConfig->getGlobalSettings($toolClass);
 ```
-
-```php
-// Diff strategy: preserve keys not in the request (leave existing values),
-// merge in new values, and remove keys set to null (explicit deletion).
-// Password fields: never read back (always masked), write null to clear.
-```
+*(from `app/Services/AgentService.php`)*
 
 **Why:** Non-obvious algorithms or business rules need explanation.
 
@@ -94,27 +84,38 @@ if (!$config && !$agentOverride) {
 /**
  * Send a chat completion request to the LLM and return the normalized response.
  * Intentionally synchronous — async behaviour is managed at the Messenger layer.
+ *
+ * @throws Exceptions\LLMProviderException   Non-recoverable API error.
+ * @throws Exceptions\LLMRateLimitException  HTTP 429; caller should back off.
  */
-public function generate(Message ...$messages): GenerationResult;
+public function complete(LLMRequest $request): LLMResponse;
 ```
+*(from `app/Drivers/LLMDriverInterface.php`)*
 
 **Why:** Interface contracts may not convey runtime behavior.
 
 ### Cross-cutting Concerns
 
 ```php
-// Singleton. Registered via PHP-DI factory.
-// Loads master key once at construction. Fails immediately if key is invalid.
-final class SecurityManager
+/**
+ * Singleton. Registered via PHP-DI factory.
+ * Loads master key once at construction. Fails immediately if key is invalid.
+ */
+final class SecurityManager implements SecurityManagerInterface
 ```
+*(from `app/Core/SecurityManager.php`)*
 
 ```php
 /**
  * The ONLY class permitted to read or write tool_configurations.settings
  * and agent_tool_overrides.settings columns.
+ *
+ * The Eloquent models have a guard accessor that throws LogicException on direct
+ * `settings` access — all reads/writes must funnel through this service.
  */
-final class ToolConfigService
+class ToolConfigService
 ```
+*(from `app/Services/ToolConfigService.php`)*
 
 **Why:** Architectural decisions and invariants that affect the entire codebase.
 
@@ -124,18 +125,18 @@ final class ToolConfigService
 
 ### Attributes (PHP)
 
-All attributes in `app/Attributes/` should have docblocks:
+All attributes in `app/Tools/Attributes/` should have docblocks with a usage example:
 
 ```php
 /**
- * Marks a class as a Tool for the agent orchestrator.
+ * Marks a class as a Tool the agent can invoke.
  *
  * Usage:
- *   #[Tool]
+ *   #[Tool(name: 'my_tool', description: 'Does something useful')]
  *   final class MyTool implements ToolInterface { ... }
  */
 #[Attribute(Attribute::TARGET_CLASS)]
-final class Tool extends Attribute { ... }
+final class Tool { ... }
 ```
 
 ### Module-level Documentation (JS/Vue)
@@ -144,11 +145,12 @@ Stores and composables should have JSDoc:
 
 ```typescript
 /**
- * Manages agents, current agent selection, tasks for the active agent,
- * and composer prompt drafts persisted to sessionStorage.
+ * Manages authentication: session init, login, logout, registration,
+ * password/email changes, and CSRF token handling.
  */
-export const useAgentStore = defineStore('agent', () => { ... });
+export const useAuthStore = defineStore('auth', () => { ... });
 ```
+*(from `frontend/src/stores/auth.ts`)*
 
 ---
 

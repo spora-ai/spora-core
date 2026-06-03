@@ -300,8 +300,6 @@ test('enableTool inserts an AgentTool row and returns 201', function (): void {
     expect($response->getStatusCode())->toBe(201);
     $body = json_decode($response->getContent(), true);
     expect($body['data']['tool']['tool_class'])->toBe(TestTool::class);
-    // InputToolInterface tools default to auto_approve = true (read-only, safe to auto-run)
-    expect($body['data']['tool']['auto_approve'])->toBe(true);
 });
 
 test('enableTool is idempotent: second call returns 200 without duplicating', function (): void {
@@ -341,70 +339,6 @@ test('disableTool removes the AgentTool row and returns 204', function (): void 
     $body = json_decode($response->getContent(), true);
     expect($body['data']['deleted'])->toBe(true);
     expect(Capsule::table('agent_tools')->count())->toBe(0);
-});
-
-// ---------------------------------------------------------------------------
-// patchTool
-// ---------------------------------------------------------------------------
-
-test('patchTool sets auto_approve to true', function (): void {
-    clearSession();
-    [$controller, $authService, , , $authMiddleware] = makeAgentController();
-    registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
-
-    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
-    $enableReq->attributes->set('id', $agentId);
-    $enableReq->attributes->set('toolId', 'test_tool');
-    callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
-
-    $patchReq = jsonRequest('PATCH', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool'), ['auto_approve' => true]);
-    $patchReq->attributes->set('id', $agentId);
-    $patchReq->attributes->set('toolId', 'test_tool');
-    $response = callController($controller, 'patchTool', $patchReq, [$authMiddleware]);
-
-    expect($response->getStatusCode())->toBe(200);
-    $body = json_decode($response->getContent(), true);
-    expect($body['data']['tool']['auto_approve'])->toBeTrue();
-});
-
-test('patchTool sets auto_approve back to null', function (): void {
-    clearSession();
-    [$controller, $authService, , , $authMiddleware] = makeAgentController();
-    registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
-
-    $enableReq = jsonRequest('POST', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool') . '/enable');
-    $enableReq->attributes->set('id', $agentId);
-    $enableReq->attributes->set('toolId', 'test_tool');
-    callController($controller, 'enableTool', $enableReq, [$authMiddleware]);
-
-    $patchReq = jsonRequest('PATCH', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool'), ['auto_approve' => true]);
-    $patchReq->attributes->set('id', $agentId);
-    $patchReq->attributes->set('toolId', 'test_tool');
-    callController($controller, 'patchTool', $patchReq, [$authMiddleware]);
-
-    $patchReq2 = jsonRequest('PATCH', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool'), ['auto_approve' => null]);
-    $patchReq2->attributes->set('id', $agentId);
-    $patchReq2->attributes->set('toolId', 'test_tool');
-    $response = callController($controller, 'patchTool', $patchReq2, [$authMiddleware]);
-
-    $body = json_decode($response->getContent(), true);
-    expect($body['data']['tool']['auto_approve'])->toBeNull();
-});
-
-test('patchTool on non-enabled tool returns 404', function (): void {
-    clearSession();
-    [$controller, $authService, , , $authMiddleware] = makeAgentController();
-    registerUser($authService);
-    $agentId = createAgent($controller, 'My Agent', [$authMiddleware]);
-
-    $request = jsonRequest('PATCH', '/api/v1/agents/' . $agentId . '/tools/' . urlencode('test_tool'), ['auto_approve' => true]);
-    $request->attributes->set('id', $agentId);
-    $request->attributes->set('toolId', 'test_tool');
-    $response = callController($controller, 'patchTool', $request, [$authMiddleware]);
-
-    expect($response->getStatusCode())->toBe(404);
 });
 
 // ---------------------------------------------------------------------------
@@ -754,7 +688,6 @@ test('getToolsStatus is_enabled is keyed by tool_class, not tool_name — same t
         'agent_id'   => $agentId,
         'tool_class' => 'Tests\Fixtures\StubOutputTool',
         'tool_name'  => 'test_tool', // same tool_name as TestTool
-        'auto_approve' => null,
         'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),
     ]);

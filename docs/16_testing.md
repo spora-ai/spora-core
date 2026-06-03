@@ -14,9 +14,10 @@ composer test:coverage     # With coverage
 
 ```
 tests/
-├── Unit/
-├── Feature/
-└── TestCase.php
+├── Pest.php            # Pest bootstrap + shared helpers
+├── Unit/               # Unit tests (mirrors app/ subpackages)
+├── Feature/            # HTTP/controller integration tests
+└── Fixtures/           # Test fixtures (plugins, sample data)
 ```
 
 ---
@@ -33,11 +34,17 @@ npm run test:watch    # Watch mode
 
 ```
 frontend/tests/
-├── components/
-├── composables/
-├── stores/
-├── pages/
-└── setup.ts
+├── api/                # HTTP client tests
+├── apps/               # App-shell tests
+├── components/         # Vue component tests
+│   ├── agent/
+│   └── layout/
+├── composables/        # useFoo() composable tests
+├── pages/              # Page-level tests
+├── stores/             # Pinia store tests
+├── unit/               # Misc isolated unit tests
+├── utils/              # Pure utility tests
+└── setup.ts            # Vitest global setup (mocks browser APIs)
 ```
 
 ---
@@ -45,8 +52,8 @@ frontend/tests/
 ## Static Analysis
 
 ```bash
-composer analyse   # PHPStan level 8
-cd frontend && npm run lint   # ESLint + types
+composer analyse   # PHPStan (level 5, with Larastan + Mockery extensions)
+cd frontend && npm run lint   # ESLint (flat config) + vue-tsc
 ```
 
 ---

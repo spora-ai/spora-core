@@ -23,8 +23,11 @@
 | [04_api.md](04_api.md) | REST API reference — endpoints, request/response envelopes, auth |
 | [08_logging.md](08_logging.md) | Log levels, PII policy, what gets logged and where, best practices |
 | [10_error_handling.md](10_error_handling.md) | Error codes, exception handling, toast notification system |
-| [11_agent_loop_async.md](11_agent_loop_async.md) | Worker modes (`sync`/`cron`/`worker`), tick structure, Mercure SSE |
+| [11_agent_loop_async.md](11_agent_loop_async.md) | Worker modes (`sync`/`worker`), tick structure, Mercure SSE |
 | [12_worker_deployment.md](12_worker_deployment.md) | Deployment guide for cron and daemon modes, environment variables |
+| [13_installation.md](13_installation.md) | Installing Spora — requirements, Docker, local dev, verification |
+| [17_env_vars.md](17_env_vars.md) | Canonical reference for every `SPORA_*` environment variable |
+| [15_security.md](15_security.md) | Security overview — credential encryption, API auth, rate limiting, plugin risk |
 
 ## Frontend & UI
 
@@ -38,4 +41,6 @@
 
 | Doc | Description |
 |---|---|
+| [14_code_documentation.md](14_code_documentation.md) | Code comment standards — what to delete, keep, and add (docblocks) |
+| [16_testing.md](16_testing.md) | Testing how-to — Pest (PHP), Vitest (frontend), Playwright (E2E) |
 | [backlog.md](backlog.md) | Feature backlog (prioritized) |

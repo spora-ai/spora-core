@@ -105,6 +105,28 @@ final class Database
         return self::$capsule;
     }
 
+    /**
+     * Read-only access to the resolved config array (defaults merged with
+     * config.php and SPORA_* env vars). Useful for callers that need driver /
+     * host / db_name / etc. without going through Eloquent.
+     *
+     * @return array<string, mixed>
+     */
+    public function getConfig(): array
+    {
+        return $this->config;
+    }
+
+    /**
+     * Path to the schema-stamp cache file. Returns null for `:memory:`
+     * SQLite (tests) where there's no persistent filesystem to cache.
+     */
+    public function getStampPath(): ?string
+    {
+        $dbPath = $this->config['db_path'] ?? null;
+        return ($dbPath === ':memory:') ? null : BASE_PATH . '/storage/.schema_stamp';
+    }
+
     /** Reset the static boot flag (for testing only). */
     public static function resetBootState(): void
     {

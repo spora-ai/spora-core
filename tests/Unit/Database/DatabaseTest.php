@@ -78,9 +78,3 @@ test('tasks table has pending_state column', function (): void {
 
     expect(Capsule::schema()->hasColumn('tasks', 'pending_state'))->toBeTrue();
 });
-
-test('agent_tools table has nullable auto_approve column', function (): void {
-    bootFreshDatabase();
-
-    expect(Capsule::schema()->hasColumn('agent_tools', 'auto_approve'))->toBeTrue();
-});

@@ -21,7 +21,7 @@
 | `webklex/php-imap` | Email reading | IMAP access for `ReadEmailTool` |
 | `chriskonnertz/string-calc` | Math expressions | Evaluating math strings in `CalculatorTool` |
 | `pestphp/pest` | PHP testing | Elegant testing framework |
-| Vue 3 + Vite + Tailwind + shadcn-vue | Frontend | Modern JS stack (shared with Laravel Breeze/Fortify) |
+| Vue 3 + Vite + Tailwind + radix-vue + lucide-vue-next | Frontend | Modern JS stack (shared with Laravel Breeze/Fortify) |
 
 ---
 
@@ -31,13 +31,13 @@
 - `declare(strict_types=1)` on every PHP file
 - `final` on all classes unless inheritance is required
 - No DB calls in constructors — boot explicitly via `Database::bootDatabaseConnectionOnly()`
-- `Database` is `final` — cannot be Mockery-mocked; pass a real instance instead
 - No mocks for integration tests that already boot the DB via `beforeEach`
 - Don't add error handling, fallbacks, or abstractions beyond what the task requires
 
 ### CLI Entry Point
 `bin/spora` is the single CLI entry point:
-- `spora:install` — Initial setup
+- `spora:install` — Initial setup (idempotent migrations)
+- `db:reset` — Wipe the database (SQLite file or MySQL DROP+CREATE) and clear the schema stamp
 - `db:seed` — Seed database with sample data
 - `worker:run` — Run async worker (queued mode)
 - `worker:run --scheduled` — Run scheduled tasks worker
@@ -53,12 +53,15 @@
 - `SPORA_SYNC_MODE` — Worker execution mode: `true` = inline/dev (synchronous), `false` = queued/worker (async)
 - `APP_ENV` — Environment (`dev`, `prod`)
 
+### CI
+GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Jobs: `php-lint` (PHPStan), `php-test` (Pest), `frontend-lint` (ESLint + tsc), `frontend-test` (Vitest), `build-docker`, `push-ghcr`.
+
 > **Architecture deep-dive:** The Orchestrator loop, tick phases, worker modes, and plugin system are documented in [docs/01_architecture.md](docs/01_architecture.md) and [docs/11_agent_loop_async.md](docs/11_agent_loop_async.md).
 
 ### Testing
 - Backend: `composer test` (Pest)
 - Frontend unit: `composer frontend:test` (Vitest)
-- E2E: `composer frontend:test:e2e` (Playwright)
+- E2E: not wired up — no Playwright dep, no `frontend/tests/e2e/` (see [docs/09_frontend.md](docs/09_frontend.md))
 
 ### Code Comments
 See [docs/14_code_documentation.md](docs/14_code_documentation.md) for comment standards (DELETE noise, KEEP rationale, ADD docblocks).
@@ -114,8 +117,9 @@ composer frontend:test  # Frontend unit (Vitest)
 
 ### 4. Database
 - SQLite at `storage/database.sqlite`
-- Run migrations: `bin/spora db:seed` (seeding) or manually via Eloquent
-- Reset: delete `storage/database.sqlite` and re-run `bin/spora db:seed`
+- Run migrations: `bin/spora spora:install` (idempotent; safe to re-run)
+- Seed: `bin/spora db:seed` (skips itself if users/agents already exist)
+- Reset: `php bin/spora db:reset --force` (wipes the file or drops + recreates the MySQL DB; without `--force` it prompts)
 
 ---
 

@@ -194,15 +194,6 @@ export const useAgentStore = defineStore('agent', () => {
     await api.delete(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/enable`)
   }
 
-  async function patchTool(
-    agentId: number,
-    toolName: string,
-    data: { auto_approve?: boolean | null },
-  ): Promise<AgentTool> {
-    const result = await api.patch<{ tool: AgentTool }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}`, data)
-    return result.tool
-  }
-
   async function getOperationOverride(
     agentId: number,
     toolName: string,
@@ -320,7 +311,6 @@ export const useAgentStore = defineStore('agent', () => {
     applySseTaskEvent,
     enableTool,
     disableTool,
-    patchTool,
     getOperationOverride,
     getAllOperationOverrides,
     patchOperationOverride,

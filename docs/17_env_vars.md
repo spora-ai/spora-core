@@ -1,0 +1,108 @@
+# Spora Environment Variables
+
+This is the **canonical reference** for every `SPORA_*` environment variable Spora reads at boot. Both [11_agent_loop_async.md](11_agent_loop_async.md) and [12_worker_deployment.md](12_worker_deployment.md) cross-link to this doc for env-var details.
+
+**Resolution priority:** OS env → `.env` → `config.php` (gitignored) → built-in defaults. `SPORA_*` env vars always take highest priority. See [01_architecture.md](01_architecture.md) for the full config-priority chain.
+
+**Quick links:** [Application](#application) · [Encryption](#encryption) · [Database](#database) · [Worker / Sync Mode](#worker--sync-mode) · [Timeouts](#timeouts) · [Mercure (SSE)](#mercure-sse) · [Logging](#logging) · [Notifications / Mail](#notifications--mail) · [Config path](#config-path)
+
+---
+
+## Application
+
+| Variable | Default | Config key | Description |
+|---|---|---|---|
+| `SPORA_APP_URL` | auto-detected | `app_url` | Full public URL of this instance, including non-standard port. Used for verification / password-reset email links. Falls back to `http://localhost`. |
+| `SPORA_APP_ENV` | `development` | `app_env` | `development` or `production`. Read at `app/Core/container.php:104`. |
+| `SPORA_ALLOW_REGISTRATION` | `true` | `allow_registration` | Whether `POST /api/v1/auth/register` is open. Set to `false` once you have created your account. |
+
+---
+
+## Encryption
+
+| Variable | Default | Config key | Description |
+|---|---|---|---|
+| `SPORA_SECRET_KEY` | — | — | **Base64-encoded 32-byte master key** for libsodium secretbox encryption of tool credentials. Required for production. Generate: `php -r "echo base64_encode(random_bytes(32));"`. Never commit. Losing it means losing access to encrypted settings. |
+| `SPORA_KEY_PATH` | `storage/secret.key` (written by installer) | `key_path` | Alternative: path to a 32-byte binary key file. Overrides the default install path. |
+
+See [15_security.md](15_security.md) for the full key-resolution chain and algorithm.
+
+---
+
+## Database
+
+| Variable | Default | Config key | Description |
+|---|---|---|---|
+| `SPORA_DB_DRIVER` | `sqlite` | `db_driver` | `sqlite` (zero-config) or `mysql`. |
+| `SPORA_DB_HOST` | `127.0.0.1` | `db_host` | MySQL/MariaDB host. |
+| `SPORA_DB_PORT` | `3306` | `db_port` | MySQL/MariaDB port. |
+| `SPORA_DB_NAME` | `spora` | `db_name` | MySQL/MariaDB database name. |
+| `SPORA_DB_USER` | `spora` | `db_user` | MySQL/MariaDB user. |
+| `SPORA_DB_PASSWORD` | — | `db_password` | MySQL/MariaDB password. |
+| `SPORA_SQLITE_BUSY_TIMEOUT` | `5000` | `sqlite_busy_timeout` | SQLite only. Wait time in ms when the database is locked. |
+
+SQLite path is set in `config.php` (defaults to `storage/database.sqlite`).
+
+The DB driver is selected by `SPORA_DB_DRIVER` (`sqlite` or `mysql`) and is also what `php bin/spora db:reset` reads to decide whether to wipe the local SQLite file or run `DROP DATABASE` + `CREATE DATABASE` on the configured MySQL server. See [13_installation.md](13_installation.md) for the destructive `db:reset` flow.
+
+---
+
+## Worker / Sync Mode
+
+| Variable | Default | Config key | Description |
+|---|---|---|---|
+| `SPORA_SYNC_MODE` | `true` | `worker_mode` | Boolean. `true` = Sync (HTTP request blocks until agent completes — dev). `false` = Worker (task is queued, drained by `bin/spora worker:run`). Only two worker modes exist; the legacy tri-valued `SPORA_WORKER_MODE` is not implemented. |
+| `SPORA_WORKER_STALE_MINUTES` | `60` | `worker_stale_minutes` | Minutes before a `RUNNING` task is treated as orphaned (0 = disabled). Should exceed worst-case LLM round-trip time. |
+| `SPORA_MAX_WORKERS` | `0` | `max_workers` | Max concurrent child processes in daemon mode (0 = unlimited). |
+
+See [12_worker_deployment.md](12_worker_deployment.md) for deployment patterns (cron vs daemon vs supervisord) and the `--stale-minutes` / `--workers` CLI flag overrides.
+
+---
+
+## Timeouts
+
+| Variable | Default | Config key | Description |
+|---|---|---|---|
+| `SPORA_LLM_TIMEOUT` | `300` | `llm_timeout` | Seconds for LLM API calls. Reasoning models may need 300+. |
+| `SPORA_TOOL_HTTP_TIMEOUT` | `30` | `tool_http_timeout` | Seconds for tool HTTP requests (web search, calendars, etc.). Per-tool overrides via `core.{tool}.http_timeout` in agent tool settings. |
+
+---
+
+## Mercure (SSE)
+
+| Variable | Default | Config key | Description |
+|---|---|---|---|
+| `SPORA_MERCURE_URL` | — | `mercure_url` | Public Mercure hub URL the browser subscribes to. Omit to disable SSE. |
+| `SPORA_MERCURE_PUBLISH_URL` | falls back to `SPORA_MERCURE_URL` | `mercure_publish_url` | Publisher endpoint. Override when the publisher needs an internal URL (e.g. Docker internal network) different from the public hub URL. |
+| `SPORA_MERCURE_JWT_KEY` | — | `mercure_jwt_key` | HS256 shared secret for Mercure publisher and subscriber tokens. |
+
+When all three are unset, `MercurePublisher::publish()` early-returns and the frontend falls back to polling. See [11_agent_loop_async.md](11_agent_loop_async.md) for the SSE topic model.
+
+---
+
+## Logging
+
+| Variable | Default | Config key | Description |
+|---|---|---|---|
+| `SPORA_LOG_LEVEL` | `warning` | `log_level` | `debug` \| `info` \| `warning` \| `error`. Tool arguments (potentially PII) are logged at `DEBUG` — use `info` or higher in production. |
+| `SPORA_LOG_PATH` | `storage/spora.log` | `log_path` | Path to the log file. `stdout` streams records to the supervisor / container log driver instead of a bind-mounted file. |
+
+Note: `storage/php.log` is **not** produced by Spora's logger. In local dev it is the redirected stdout/stderr of the PHP built-in server started by `bin/dev`. In production Spora does not configure the PHP `error_log` directive; set it via `php.ini` / supervisord / your container entrypoint if needed. See [08_logging.md](08_logging.md).
+
+---
+
+## Notifications / Mail
+
+| Variable | Default | Config key | Description |
+|---|---|---|---|
+| `SPORA_NOTIFICATIONS_EMAIL_ENABLED` | `false` | `notifications_email_enabled` | Send an email when a scheduled run completes. Requires the `SPORA_MAIL_*` block to be configured. |
+
+Mail transport itself is configured through the `SPORA_MAIL_*` env vars (read by `app/Services/SystemMailer.php:183-190` and `app/Http/MailConfigController.php:22-29`). These are **not** in the default `.env.example`; they are only in `docker/.env.local.example`. The full set is `SPORA_MAIL_DRIVER` / `SPORA_MAIL_HOST` / `SPORA_MAIL_PORT` / `SPORA_MAIL_USERNAME` / `SPORA_MAIL_PASSWORD` / `SPORA_MAIL_ENCRYPTION` / `SPORA_MAIL_FROM` / `SPORA_MAIL_FROM_NAME`.
+
+---
+
+## Config path
+
+| Variable | Default | Config key | Description |
+|---|---|---|---|
+| `SPORA_CONFIG_PATH` | (default install path) | `config_path` | Override the location of the `config.php` file. The installer uses this when no `config.php` exists yet. |
