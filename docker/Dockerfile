@@ -16,6 +16,12 @@ FROM composer:2.8 AS deps-builder
 
 WORKDIR /app
 
+# Install the extensions composer.json declares (pdo_mysql, etc.) so the
+# platform check in `composer install` doesn't fail. The runtime stage
+# also installs pdo_mysql; this stage only needs them present to satisfy
+# the platform check while resolving deps.
+RUN docker-php-ext-install pdo_mysql
+
 # Install PHP deps (composer image has ext-zip baked in)
 COPY composer.json composer.lock* ./
 RUN composer install --no-dev --optimize-autoloader --no-interaction
