@@ -9,6 +9,8 @@ use Spora\Models\Memory;
 use Spora\Services\MemoryService;
 use Symfony\Component\HttpFoundation\Response;
 
+const AGENT_MEMORY_REORDER_PATH = '/api/v1/agents/1/memories/reorder';
+
 function makeAgentMemoryController(?AuthService $authService = null): array
 {
     $authService = $authService ?? bootAuthLayer();
@@ -55,7 +57,7 @@ describe('AgentMemoryController::reorder', function (): void {
         [$controller] = makeAgentMemoryController();
         clearSession();
 
-        $request = jsonRequest('PATCH', '/api/v1/agents/1/memories/reorder', ['order' => []]);
+        $request = jsonRequest('PATCH', AGENT_MEMORY_REORDER_PATH, ['order' => []]);
         expect(fn() => $controller->reorder($request))
             ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
     });
@@ -65,7 +67,7 @@ describe('AgentMemoryController::reorder', function (): void {
         bootAuth($authService);
 
         $request = Symfony\Component\HttpFoundation\Request::create(
-            '/api/v1/agents/1/memories/reorder',
+            AGENT_MEMORY_REORDER_PATH,
             'PATCH',
             [],
             [],
@@ -84,7 +86,7 @@ describe('AgentMemoryController::reorder', function (): void {
         [$controller, $authService] = makeAgentMemoryController();
         bootAuth($authService);
 
-        $request = jsonRequest('PATCH', '/api/v1/agents/1/memories/reorder', ['order' => 'not-an-array']);
+        $request = jsonRequest('PATCH', AGENT_MEMORY_REORDER_PATH, ['order' => 'not-an-array']);
         $response = $controller->reorder($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
@@ -105,7 +107,7 @@ describe('AgentMemoryController::reorder', function (): void {
 
     test('reorder() returns 200 with empty array', function (): void {
         [$controller, $authService] = makeAgentMemoryController();
-        [$userId, $agentId] = createMemoryTestUserWithAgents($authService);
+        [, $agentId] = createMemoryTestUserWithAgents($authService);
 
         $request = jsonRequest('PATCH', "/api/v1/agents/{$agentId}/memories/reorder", ['order' => []]);
         $request->attributes->set('agentId', $agentId);
@@ -263,7 +265,7 @@ describe('AgentMemoryController::store', function (): void {
 
     test('store() creates an agent memory and auto-assigns order', function (): void {
         [$controller, $authService] = makeAgentMemoryController();
-        [$userId, $agentId] = createMemoryTestUserWithAgents($authService);
+        [, $agentId] = createMemoryTestUserWithAgents($authService);
 
         $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/memories", [
             'name'    => 'New Agent Memory',
@@ -281,7 +283,7 @@ describe('AgentMemoryController::store', function (): void {
 
     test('store() returns 422 when name is empty', function (): void {
         [$controller, $authService] = makeAgentMemoryController();
-        [$userId, $agentId] = createMemoryTestUserWithAgents($authService);
+        [, $agentId] = createMemoryTestUserWithAgents($authService);
 
         $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/memories", ['name' => '']);
         $request->attributes->set('agentId', $agentId);

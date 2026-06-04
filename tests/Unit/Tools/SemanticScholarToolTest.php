@@ -8,6 +8,11 @@ use Spora\Tools\SemanticScholarTool;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 
+const SCHOLAR_PAPER_ID_REQUIRED = 'paper_id parameter is required';
+const SCHOLAR_TRANSFORMER_TITLE = 'Attention is All You Need';
+const SCHOLAR_TRANSFORMER_AUTHOR = 'Ashish Vaswani';
+const SCHOLAR_TRANSFORMER_DOI = '10.48550/arXiv.1706.03762';
+
 it('returns error if query is empty on paper_search', function () {
     $config = Mockery::mock(ToolConfigService::class);
     $client = Mockery::mock(HttpClientInterface::class);
@@ -25,7 +30,7 @@ it('returns error if paper_id is missing on get_paper', function () {
 
     $result = $tool->execute(['action' => 'get_paper', 'paper_id' => ''], 1);
     expect($result->success)->toBeFalse()
-        ->and($result->content)->toContain('paper_id parameter is required');
+        ->and($result->content)->toContain(SCHOLAR_PAPER_ID_REQUIRED);
 });
 
 it('returns error if paper_id is missing on get_citations', function () {
@@ -35,7 +40,7 @@ it('returns error if paper_id is missing on get_citations', function () {
 
     $result = $tool->execute(['action' => 'get_citations', 'paper_id' => ''], 1);
     expect($result->success)->toBeFalse()
-        ->and($result->content)->toContain('paper_id parameter is required');
+        ->and($result->content)->toContain(SCHOLAR_PAPER_ID_REQUIRED);
 });
 
 it('returns error if paper_id is missing on get_references', function () {
@@ -45,7 +50,7 @@ it('returns error if paper_id is missing on get_references', function () {
 
     $result = $tool->execute(['action' => 'get_references', 'paper_id' => ''], 1);
     expect($result->success)->toBeFalse()
-        ->and($result->content)->toContain('paper_id parameter is required');
+        ->and($result->content)->toContain(SCHOLAR_PAPER_ID_REQUIRED);
 });
 
 it('returns error if paper_id is missing on get_recommendations', function () {
@@ -55,7 +60,7 @@ it('returns error if paper_id is missing on get_recommendations', function () {
 
     $result = $tool->execute(['action' => 'get_recommendations', 'paper_id' => ''], 1);
     expect($result->success)->toBeFalse()
-        ->and($result->content)->toContain('paper_id parameter is required');
+        ->and($result->content)->toContain(SCHOLAR_PAPER_ID_REQUIRED);
 });
 
 it('returns error for unknown action', function () {
@@ -80,14 +85,14 @@ it('paper_search makes correct HTTP request and parses response', function () {
         'total' => 2,
         'data' => [
             [
-                'title' => 'Attention is All You Need',
+                'title' => SCHOLAR_TRANSFORMER_TITLE,
                 'abstract' => 'We propose a new simple network architecture.',
-                'authors' => [['name' => 'Ashish Vaswani', 'authorId' => 'a1']],
+                'authors' => [['name' => SCHOLAR_TRANSFORMER_AUTHOR, 'authorId' => 'a1']],
                 'year' => 2017,
                 'venue' => 'NeurIPS',
                 'citationCount' => 98523,
                 'url' => 'https://arxiv.org/abs/1706.03762',
-                'externalIds' => ['DOI' => '10.48550/arXiv.1706.03762', 'ArXiv' => '1706.03762'],
+                'externalIds' => ['DOI' => SCHOLAR_TRANSFORMER_DOI, 'ArXiv' => '1706.03762'],
                 'openAccessPdf' => ['url' => 'https://arxiv.org/pdf/1706.03762'],
             ],
             [
@@ -115,12 +120,12 @@ it('paper_search makes correct HTTP request and parses response', function () {
     $result = $tool->execute(['action' => 'paper_search', 'query' => 'transformer attention'], 1);
     expect($result->success)->toBeTrue()
         ->and($result->content)->toContain('PAPER SEARCH RESULTS')
-        ->and($result->content)->toContain('Attention is All You Need')
-        ->and($result->content)->toContain('Ashish Vaswani')
+        ->and($result->content)->toContain(SCHOLAR_TRANSFORMER_TITLE)
+        ->and($result->content)->toContain(SCHOLAR_TRANSFORMER_AUTHOR)
         ->and($result->content)->toContain('2017')
         ->and($result->content)->toContain('NeurIPS')
         ->and($result->content)->toContain('98523')
-        ->and($result->content)->toContain('10.48550/arXiv.1706.03762');
+        ->and($result->content)->toContain(SCHOLAR_TRANSFORMER_DOI);
 });
 
 it('paper_search returns empty message when no results', function () {
@@ -151,14 +156,14 @@ it('get_paper fetches paper metadata by ID', function () {
 
     $response->allows('getStatusCode')->andReturn(200);
     $response->allows('toArray')->andReturn([
-        'title' => 'Attention is All You Need',
+        'title' => SCHOLAR_TRANSFORMER_TITLE,
         'abstract' => 'We propose a new simple network architecture.',
-        'authors' => [['name' => 'Ashish Vaswani', 'authorId' => 'a1']],
+        'authors' => [['name' => SCHOLAR_TRANSFORMER_AUTHOR, 'authorId' => 'a1']],
         'year' => 2017,
         'venue' => 'NeurIPS',
         'citationCount' => 98523,
         'url' => 'https://arxiv.org/abs/1706.03762',
-        'externalIds' => ['DOI' => '10.48550/arXiv.1706.03762', 'ArXiv' => '1706.03762'],
+        'externalIds' => ['DOI' => SCHOLAR_TRANSFORMER_DOI, 'ArXiv' => '1706.03762'],
         'openAccessPdf' => ['url' => 'https://arxiv.org/pdf/1706.03762'],
     ]);
 
@@ -171,7 +176,7 @@ it('get_paper fetches paper metadata by ID', function () {
     $result = $tool->execute(['action' => 'get_paper', 'paper_id' => 'ArXiv:1706.03762'], 1);
     expect($result->success)->toBeTrue()
         ->and($result->content)->toContain('PAPER DETAILS')
-        ->and($result->content)->toContain('Attention is All You Need');
+        ->and($result->content)->toContain(SCHOLAR_TRANSFORMER_TITLE);
 });
 
 it('get_citations returns citing papers with pagination', function () {

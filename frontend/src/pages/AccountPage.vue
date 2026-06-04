@@ -124,7 +124,7 @@ async function savePassword(): Promise<void> {
             </button>
           </div>
           <p v-if="displayNameError" role="alert" class="text-xs text-destructive">{{ displayNameError }}</p>
-          <p v-if="displayNameSuccess" role="status" class="text-xs text-green-600">Display name updated.</p>
+          <output v-if="displayNameSuccess" class="text-xs text-green-600">Display name updated.</output>
         </section>
 
         <!-- Change email -->
@@ -146,9 +146,9 @@ async function savePassword(): Promise<void> {
               />
             </div>
             <p v-if="emailError" role="alert" class="text-xs text-destructive">{{ emailError }}</p>
-            <p v-if="emailSuccess" role="status" class="text-xs text-green-600">
+            <output v-if="emailSuccess" class="text-xs text-green-600">
               Confirmation email sent. Please check your new email inbox.
-            </p>
+            </output>
             <button
               type="submit"
               :disabled="emailSaving || !newEmail"
@@ -194,7 +194,7 @@ async function savePassword(): Promise<void> {
               />
             </div>
             <p v-if="passwordError" role="alert" class="text-xs text-destructive">{{ passwordError }}</p>
-            <p v-if="passwordSuccess" role="status" class="text-xs text-green-600">Password updated successfully.</p>
+            <output v-if="passwordSuccess" class="text-xs text-green-600">Password updated successfully.</output>
             <button
               type="submit"
               :disabled="passwordSaving || !currentPassword || !newPassword || !confirmPassword"

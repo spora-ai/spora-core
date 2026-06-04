@@ -27,7 +27,7 @@ const mockApi = api as ReturnType<typeof vi.fn>
 const mockDriver = {
   name: 'openai_compatible',
   display_name: 'OpenAI Compatible',
-  driver_class: 'Spora\\Drivers\\OpenAICompatibleDriver',
+  driver_class: String.raw`Spora\Drivers\OpenAICompatibleDriver`,
   settings_schema: [
     { key: 'api_key', label: 'API Key', type: 'password', description: '', default: null, required: false, scope: 'global', options: null },
     { key: 'model', label: 'Model', type: 'text', description: '', default: 'gpt-4o', required: false, scope: 'global', options: null },
@@ -38,7 +38,7 @@ const mockDriver = {
 const mockConfig = {
   id: 1,
   name: 'My Config',
-  driver_class: 'Spora\\Drivers\\OpenAICompatibleDriver',
+  driver_class: String.raw`Spora\Drivers\OpenAICompatibleDriver`,
   driver_name: 'openai_compatible',
   driver_display_name: 'OpenAI Compatible',
   settings: { api_key: '***', model: 'gpt-4o', base_url: 'https://api.openai.com/v1' },
@@ -106,13 +106,13 @@ describe('useLlmConfigsStore', () => {
       const store = useLlmConfigsStore()
       const result = await store.createConfig({
         name: 'My Config',
-        driver_class: 'Spora\\Drivers\\OpenAICompatibleDriver',
+        driver_class: String.raw`Spora\Drivers\OpenAICompatibleDriver`,
         settings: { api_key: 'sk-xxx', model: 'gpt-4o', base_url: 'https://api.openai.com/v1' },
       })
 
       expect(mockApi.post).toHaveBeenCalledWith('/llm-configs', {
         name: 'My Config',
-        driver_class: 'Spora\\Drivers\\OpenAICompatibleDriver',
+        driver_class: String.raw`Spora\Drivers\OpenAICompatibleDriver`,
         settings: { api_key: 'sk-xxx', model: 'gpt-4o', base_url: 'https://api.openai.com/v1' },
       })
       expect(store.configs).toContainEqual(mockConfig)
@@ -125,7 +125,7 @@ describe('useLlmConfigsStore', () => {
       const store = useLlmConfigsStore()
       await expect(store.createConfig({
         name: '',
-        driver_class: 'Spora\\Drivers\\OpenAICompatibleDriver',
+        driver_class: String.raw`Spora\Drivers\OpenAICompatibleDriver`,
         settings: {},
       })).rejects.toThrow(ApiError)
 
@@ -219,7 +219,7 @@ describe('useLlmConfigsStore', () => {
       const store = useLlmConfigsStore()
       store.drivers = [mockDriver]
 
-      const found = store.driverForClass('Spora\\Drivers\\OpenAICompatibleDriver')
+      const found = store.driverForClass(String.raw`Spora\Drivers\OpenAICompatibleDriver`)
       expect(found).toEqual(mockDriver)
     })
 
@@ -227,7 +227,7 @@ describe('useLlmConfigsStore', () => {
       const store = useLlmConfigsStore()
       store.drivers = []
 
-      const found = store.driverForClass('Unknown\\Class')
+      const found = store.driverForClass(String.raw`Unknown\Class`)
       expect(found).toBeUndefined()
     })
   })

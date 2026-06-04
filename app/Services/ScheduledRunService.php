@@ -23,6 +23,8 @@ use Throwable;
  */
 final class ScheduledRunService implements ScheduledRunServiceInterface
 {
+    private const DB_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
+
     public function __construct(
         private readonly OrchestratorInterface $orchestrator,
         private readonly MercurePublisherInterface $mercure,
@@ -54,7 +56,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         $isRecurring = !empty($data['cron_expression']);
         $nextRunAt = $isRecurring
             ? $this->computeNextRunAt($data['cron_expression'], $data['timezone'] ?? 'UTC')
-            : $this->computeOneShotNextRunAt($data['run_at'] ?? null, $data['timezone'] ?? 'UTC');
+            : $this->computeOneShotNextRunAt($data['run_at'] ?? null);
 
         $id = Capsule::table('scheduled_runs')->insertGetId([
             'agent_id'          => $agentId,
@@ -70,8 +72,8 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             'last_run_at'       => null,
             'next_run_at'       => $nextRunAt,
             'user_id'           => $userId,
-            'created_at'        => date('Y-m-d H:i:s'),
-            'updated_at'        => date('Y-m-d H:i:s'),
+            'created_at'        => date(self::DB_TIMESTAMP_FORMAT),
+            'updated_at'        => date(self::DB_TIMESTAMP_FORMAT),
         ]);
 
         // Insert first PENDING entry into scheduled_runs_next
@@ -80,8 +82,8 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 'scheduled_run_id' => $id,
                 'due_at'           => $nextRunAt,
                 'status'           => ScheduledRunNext::STATUS_PENDING,
-                'created_at'       => date('Y-m-d H:i:s'),
-                'updated_at'       => date('Y-m-d H:i:s'),
+                'created_at'       => date(self::DB_TIMESTAMP_FORMAT),
+                'updated_at'       => date(self::DB_TIMESTAMP_FORMAT),
             ]);
         }
 
@@ -108,12 +110,9 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
     public function updateRun(int $runId, int $agentId, int $userId, array $data): ?array
     {
         $agent = $this->findAgent($agentId, $userId);
-        if ($agent === null) {
-            return null;
-        }
+        $run = $agent !== null ? $this->findRun($runId, $agentId) : null;
 
-        $run = $this->findRun($runId, $agentId);
-        if ($run === null) {
+        if ($agent === null || $run === null) {
             return null;
         }
 
@@ -121,59 +120,82 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         $updateData = array_intersect_key($data, array_flip($allowed));
 
         if ($updateData !== []) {
-            // Normalise booleans and ints
-            if (isset($updateData['is_active'])) {
-                $updateData['is_active'] = $updateData['is_active'] ? 1 : 0;
-            }
-            if (array_key_exists('template_id', $updateData)) {
-                $updateData['template_id'] = $updateData['template_id'] !== null ? (int) $updateData['template_id'] : null;
-            }
-            if (array_key_exists('max_steps_override', $updateData)) {
-                $updateData['max_steps_override'] = $updateData['max_steps_override'] !== null ? (int) $updateData['max_steps_override'] : null;
-            }
-
-            // Recompute next_run_at if scheduling fields change
-            if (array_key_exists('cron_expression', $updateData) || array_key_exists('run_at', $updateData) || array_key_exists('timezone', $updateData)) {
-                $cron = $updateData['cron_expression'] ?? $run->cron_expression;
-
-                if (array_key_exists('run_at', $updateData) && is_string($updateData['run_at'])) {
-                    $updateData['run_at'] = $this->normalizeRunAtToUtc($updateData['run_at']);
-                }
-
-                $runAt = $updateData['run_at'] ?? $run->run_at?->toDateTimeString();
-                $timezone = $updateData['timezone'] ?? $run->timezone;
-                $isRecurring = !empty($cron);
-                $updateData['next_run_at'] = $isRecurring
-                    ? $this->computeNextRunAt($cron, $timezone)
-                    : $this->computeOneShotNextRunAt($runAt, $timezone);
-
-                if ($updateData['next_run_at'] !== null) {
-                    $now = date('Y-m-d H:i:s');
-                    Capsule::table('scheduled_runs_next')
-                        ->where('scheduled_run_id', $run->id)
-                        ->whereIn('status', [ScheduledRunNext::STATUS_PENDING, ScheduledRunNext::STATUS_CLAIMED])
-                        ->update([
-                            'status'       => ScheduledRunNext::STATUS_SKIPPED,
-                            'completed_at' => $now,
-                        ]);
-
-                    Capsule::table('scheduled_runs_next')->insert([
-                        'scheduled_run_id' => $run->id,
-                        'due_at'          => $updateData['next_run_at'],
-                        'status'          => ScheduledRunNext::STATUS_PENDING,
-                        'created_at'      => $now,
-                        'updated_at'      => $now,
-                    ]);
-                }
-            }
+            $this->normalizeUpdateFields($updateData);
+            $this->recomputeNextRunAtIfNeeded($updateData, $run);
 
             Capsule::table('scheduled_runs')
                 ->where('id', $run->id)
-                ->update(array_merge($updateData, ['updated_at' => date('Y-m-d H:i:s')]));
+                ->update(array_merge($updateData, ['updated_at' => date(self::DB_TIMESTAMP_FORMAT)]));
             $run->refresh();
         }
 
         return ['scheduled_run' => $this->resource($run)];
+    }
+
+    /**
+     * @param array<string, mixed> $updateData
+     */
+    private function normalizeUpdateFields(array &$updateData): void
+    {
+        if (isset($updateData['is_active'])) {
+            $updateData['is_active'] = $updateData['is_active'] ? 1 : 0;
+        }
+        if (array_key_exists('template_id', $updateData)) {
+            $updateData['template_id'] = $updateData['template_id'] !== null ? (int) $updateData['template_id'] : null;
+        }
+        if (array_key_exists('max_steps_override', $updateData)) {
+            $updateData['max_steps_override'] = $updateData['max_steps_override'] !== null ? (int) $updateData['max_steps_override'] : null;
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $updateData
+     */
+    private function recomputeNextRunAtIfNeeded(array &$updateData, ScheduledRun $run): void
+    {
+        $scheduleChanged = array_key_exists('cron_expression', $updateData)
+            || array_key_exists('run_at', $updateData)
+            || array_key_exists('timezone', $updateData);
+        if (!$scheduleChanged) {
+            return;
+        }
+
+        $cron = $updateData['cron_expression'] ?? $run->cron_expression;
+
+        if (array_key_exists('run_at', $updateData) && is_string($updateData['run_at'])) {
+            $updateData['run_at'] = $this->normalizeRunAtToUtc($updateData['run_at']);
+        }
+
+        $runAt = $updateData['run_at'] ?? $run->run_at?->toDateTimeString();
+        $timezone = $updateData['timezone'] ?? $run->timezone;
+        $isRecurring = !empty($cron);
+        $updateData['next_run_at'] = $isRecurring
+            ? $this->computeNextRunAt($cron, $timezone)
+            : $this->computeOneShotNextRunAt($runAt);
+
+        if ($updateData['next_run_at'] !== null) {
+            $this->reschedulePendingEntries($run->id, $updateData['next_run_at']);
+        }
+    }
+
+    private function reschedulePendingEntries(int $scheduledRunId, string $nextRunAt): void
+    {
+        $now = date(self::DB_TIMESTAMP_FORMAT);
+        Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $scheduledRunId)
+            ->whereIn('status', [ScheduledRunNext::STATUS_PENDING, ScheduledRunNext::STATUS_CLAIMED])
+            ->update([
+                'status'       => ScheduledRunNext::STATUS_SKIPPED,
+                'completed_at' => $now,
+            ]);
+
+        Capsule::table('scheduled_runs_next')->insert([
+            'scheduled_run_id' => $scheduledRunId,
+            'due_at'          => $nextRunAt,
+            'status'          => ScheduledRunNext::STATUS_PENDING,
+            'created_at'      => $now,
+            'updated_at'      => $now,
+        ]);
     }
 
     public function deleteRun(int $runId, int $agentId, int $userId): bool
@@ -225,14 +247,17 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         }
 
         // Determine max_steps
-        $maxSteps = $run->max_steps_override
-            ?? ($template !== null
-                ? ($template->max_steps ?? $agent->max_steps)
-                : $agent->max_steps);
+        if ($run->max_steps_override !== null) {
+            $maxSteps = $run->max_steps_override;
+        } elseif ($template !== null) {
+            $maxSteps = $template->max_steps ?? $agent->max_steps;
+        } else {
+            $maxSteps = $agent->max_steps;
+        }
 
         $task = $this->orchestrator->start($agent->id, $prompt, (int) $maxSteps);
 
-        $lastRunAt = date('Y-m-d H:i:s');
+        $lastRunAt = date(self::DB_TIMESTAMP_FORMAT);
 
         // Mark the current PENDING entry as DONE
         Capsule::table('scheduled_runs_next')
@@ -254,7 +279,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             $nextDueAt = (new CronExpression($run->cron_expression))
                 ->getNextRunDate($nowInScheduleTz, 0, false, $run->timezone)
                 ->setTimezone(new DateTimeZone('UTC'))
-                ->format('Y-m-d H:i:s');
+                ->format(self::DB_TIMESTAMP_FORMAT);
 
             // Remove any stale PENDING/CLAIMED entry for the same due_at so the INSERT
             // below does not conflict on the unique (scheduled_run_id, due_at) index.
@@ -366,10 +391,10 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         $cron = new CronExpression($cronExpression);
         $now  = new DateTimeImmutable('now', new DateTimeZone($timezone));
 
-        return $cron->getNextRunDate($now, 0, false, $timezone)->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        return $cron->getNextRunDate($now, 0, false, $timezone)->setTimezone(new DateTimeZone('UTC'))->format(self::DB_TIMESTAMP_FORMAT);
     }
 
-    private function computeOneShotNextRunAt(?string $runAt, string $timezone): ?string
+    private function computeOneShotNextRunAt(?string $runAt): ?string
     {
         if ($runAt === null) {
             return null;
@@ -380,7 +405,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             return null;
         }
 
-        return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        return $dt->setTimezone(new DateTimeZone('UTC'))->format(self::DB_TIMESTAMP_FORMAT);
     }
 
     private function normalizeRunAtToUtc(string $runAt): string
@@ -389,7 +414,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         if ($dt === false) {
             return $runAt;
         }
-        return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        return $dt->setTimezone(new DateTimeZone('UTC'))->format(self::DB_TIMESTAMP_FORMAT);
     }
 
     private function parseDateTime(string $value): DateTimeImmutable|false
@@ -417,33 +442,9 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             $key = $m[1];
             $inlineDefault = $m[2] ?? null;
 
-            if ($key === 'current_date' || $key === 'date') {
-                return date('Y-m-d');
-            }
-            if ($key === 'current_time' || $key === 'time') {
-                return date('H:i');
-            }
-            if ($key === 'current_datetime' || $key === 'datetime') {
-                return date('Y-m-d\TH:i');
-            }
-            if ($key === 'agent_name' && $agent !== null) {
-                return $agent->name;
-            }
-            if ($key === 'user_name' && $agent !== null) {
-                $user = User::find($agent->user_id);
-                return $user instanceof User ? ($user->username ?? $key) : $key;
-            }
-            if ($key === 'day_of_week') {
-                return date('l');
-            }
-            if ($key === 'day_of_month') {
-                return date('j');
-            }
-            if ($key === 'month') {
-                return date('F');
-            }
-            if ($key === 'year') {
-                return date('Y');
+            $resolved = $this->resolveBuiltInPlaceholder($key, $agent);
+            if ($resolved !== null) {
+                return $resolved;
             }
 
             if (isset($defaults[$key]) && $defaults[$key] !== '') {
@@ -452,5 +453,43 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
             return $inlineDefault ?? $m[0];
         }, $template);
+    }
+
+    private function resolveBuiltInPlaceholder(string $key, ?Agent $agent): ?string
+    {
+        $dateFormats = [
+            'current_date'    => 'Y-m-d',
+            'date'            => 'Y-m-d',
+            'current_time'    => 'H:i',
+            'time'            => 'H:i',
+            'current_datetime' => 'Y-m-d\TH:i',
+            'datetime'        => 'Y-m-d\TH:i',
+            'day_of_week'     => 'l',
+            'day_of_month'    => 'j',
+            'month'           => 'F',
+            'year'            => 'Y',
+        ];
+        $agentKeys = ['agent_name' => true, 'user_name' => true];
+
+        if (isset($dateFormats[$key])) {
+            $result = date($dateFormats[$key]);
+        } elseif ($agent !== null && isset($agentKeys[$key])) {
+            $result = $this->resolveAgentPlaceholder($key, $agent);
+        } else {
+            $result = null;
+        }
+
+        return $result;
+    }
+
+    private function resolveAgentPlaceholder(string $key, Agent $agent): string
+    {
+        if ($key === 'agent_name') {
+            return $agent->name;
+        }
+
+        // $key === 'user_name'
+        $user = User::find($agent->user_id);
+        return $user instanceof User ? ($user->username ?? $key) : $key;
     }
 }

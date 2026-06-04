@@ -6,6 +6,13 @@ use Spora\Models\Agent;
 use Spora\Models\Memory;
 use Spora\Services\MemoryService;
 
+const AGENT1_EMAIL = 'agent1@test.com';
+const AGENT2_NAME = 'Agent 2';
+const OWNER_EMAIL = 'owner@test.com';
+defined('OTHER_EMAIL') || define('OTHER_EMAIL', 'other@test.com');
+const IT_AGENT_NOT_FOUND = 'returns null when agent does not exist';
+const IT_MEMORY_NOT_FOUND = 'returns null when memory does not exist';
+
 describe('MemoryService', function (): void {
 
     //
@@ -129,7 +136,7 @@ describe('MemoryService', function (): void {
 
     describe('listAgentMemories', function (): void {
 
-        it('returns null when agent does not exist', function (): void {
+        it(IT_AGENT_NOT_FOUND, function (): void {
             [$userId] = createUserWithAgent();
             $service = makeMemoryService();
 
@@ -149,9 +156,9 @@ describe('MemoryService', function (): void {
         });
 
         it('returns only memories for the specified agent', function (): void {
-            [$userId, $agentId1] = createUserWithAgent('agent1@test.com');
+            [$userId, $agentId1] = createUserWithAgent(AGENT1_EMAIL);
             $agentId2 = Agent::create([
-                'user_id' => $userId, 'name' => 'Agent 2', 'llm_provider' => 'mock',
+                'user_id' => $userId, 'name' => AGENT2_NAME, 'llm_provider' => 'mock',
                 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true,
             ])->id;
             $service = makeMemoryService();
@@ -270,7 +277,7 @@ describe('MemoryService', function (): void {
 
     describe('getGlobalMemory', function (): void {
 
-        it('returns null when memory does not exist', function (): void {
+        it(IT_MEMORY_NOT_FOUND, function (): void {
             [$userId] = createUserWithAgent();
             $service = makeMemoryService();
 
@@ -280,8 +287,8 @@ describe('MemoryService', function (): void {
         });
 
         it('returns null when memory belongs to another user', function (): void {
-            [$userId1] = createUserWithAgent('owner@test.com');
-            [$userId2] = createUserWithAgent('other@test.com');
+            [$userId1] = createUserWithAgent(OWNER_EMAIL);
+            [$userId2] = createUserWithAgent(OTHER_EMAIL);
             $service = makeMemoryService();
 
             $memory = Memory::create([
@@ -335,7 +342,7 @@ describe('MemoryService', function (): void {
 
     describe('getAgentMemory', function (): void {
 
-        it('returns null when agent does not exist', function (): void {
+        it(IT_AGENT_NOT_FOUND, function (): void {
             [$userId] = createUserWithAgent();
             $service = makeMemoryService();
 
@@ -344,7 +351,7 @@ describe('MemoryService', function (): void {
             expect($result)->toBeNull();
         });
 
-        it('returns null when memory does not exist', function (): void {
+        it(IT_MEMORY_NOT_FOUND, function (): void {
             [$userId, $agentId] = createUserWithAgent();
             $service = makeMemoryService();
 
@@ -354,9 +361,9 @@ describe('MemoryService', function (): void {
         });
 
         it('returns null when memory belongs to different agent', function (): void {
-            [$userId, $agentId1] = createUserWithAgent('owner@test.com');
+            [$userId, $agentId1] = createUserWithAgent(OWNER_EMAIL);
             $agentId2 = Agent::create([
-                'user_id' => $userId, 'name' => 'Agent 2', 'llm_provider' => 'mock',
+                'user_id' => $userId, 'name' => AGENT2_NAME, 'llm_provider' => 'mock',
                 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true,
             ])->id;
             $service = makeMemoryService();
@@ -395,7 +402,7 @@ describe('MemoryService', function (): void {
 
     describe('updateGlobalMemory', function (): void {
 
-        it('returns null when memory does not exist', function (): void {
+        it(IT_MEMORY_NOT_FOUND, function (): void {
             [$userId] = createUserWithAgent();
             $service = makeMemoryService();
 
@@ -405,8 +412,8 @@ describe('MemoryService', function (): void {
         });
 
         it('returns null when memory belongs to another user', function (): void {
-            [$userId1] = createUserWithAgent('owner@test.com');
-            [$userId2] = createUserWithAgent('other@test.com');
+            [$userId1] = createUserWithAgent(OWNER_EMAIL);
+            [$userId2] = createUserWithAgent(OTHER_EMAIL);
             $service = makeMemoryService();
 
             $memory = Memory::create([
@@ -468,7 +475,7 @@ describe('MemoryService', function (): void {
 
     describe('updateAgentMemory', function (): void {
 
-        it('returns null when agent does not exist', function (): void {
+        it(IT_AGENT_NOT_FOUND, function (): void {
             [$userId] = createUserWithAgent();
             $service = makeMemoryService();
 
@@ -477,7 +484,7 @@ describe('MemoryService', function (): void {
             expect($result)->toBeNull();
         });
 
-        it('returns null when memory does not exist', function (): void {
+        it(IT_MEMORY_NOT_FOUND, function (): void {
             [$userId, $agentId] = createUserWithAgent();
             $service = makeMemoryService();
 
@@ -523,8 +530,8 @@ describe('MemoryService', function (): void {
         });
 
         it('returns false when memory belongs to another user', function (): void {
-            [$userId1] = createUserWithAgent('owner@test.com');
-            [$userId2] = createUserWithAgent('other@test.com');
+            [$userId1] = createUserWithAgent(OWNER_EMAIL);
+            [$userId2] = createUserWithAgent(OTHER_EMAIL);
             $service = makeMemoryService();
 
             $memory = Memory::create([
@@ -597,9 +604,9 @@ describe('MemoryService', function (): void {
         });
 
         it('returns false when memory belongs to different agent', function (): void {
-            [$userId, $agentId1] = createUserWithAgent('owner@test.com');
+            [$userId, $agentId1] = createUserWithAgent(OWNER_EMAIL);
             $agentId2 = Agent::create([
-                'user_id' => $userId, 'name' => 'Agent 2', 'llm_provider' => 'mock',
+                'user_id' => $userId, 'name' => AGENT2_NAME, 'llm_provider' => 'mock',
                 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true,
             ])->id;
             $service = makeMemoryService();
@@ -668,9 +675,9 @@ describe('MemoryService', function (): void {
         });
 
         it('orders memories per-agent independently', function (): void {
-            [$userId, $agentId1] = createUserWithAgent('agent1@test.com');
+            [$userId, $agentId1] = createUserWithAgent(AGENT1_EMAIL);
             $agentId2 = Agent::create([
-                'user_id' => $userId, 'name' => 'Agent 2', 'llm_provider' => 'mock',
+                'user_id' => $userId, 'name' => AGENT2_NAME, 'llm_provider' => 'mock',
                 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true,
             ])->id;
             $service = makeMemoryService();
@@ -728,9 +735,9 @@ describe('MemoryService', function (): void {
     describe('reorderAgentMemories', function (): void {
 
         it('updates order values for the specified agent only', function (): void {
-            [$userId, $agentId1] = createUserWithAgent('agent1@test.com');
+            [$userId, $agentId1] = createUserWithAgent(AGENT1_EMAIL);
             $agentId2 = Agent::create([
-                'user_id' => $userId, 'name' => 'Agent 2', 'llm_provider' => 'mock',
+                'user_id' => $userId, 'name' => AGENT2_NAME, 'llm_provider' => 'mock',
                 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true,
             ])->id;
             $service = makeMemoryService();

@@ -12,6 +12,13 @@ use Spora\Services\TaskServiceInterface;
 
 // Helpers
 
+const TASKS_API = '/api/v1/tasks';
+const TASKS_API_1 = '/api/v1/tasks/1';
+defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
+defined('OTHER_EMAIL') || define('OTHER_EMAIL', 'other@example.com');
+const TASK_NOT_FOUND_MESSAGE = 'Task not found.';
+const RETRY_PROMPT = 'Retry me';
+
 function makeTaskController(?TaskServiceInterface $taskService = null): array
 {
     $authService = bootAuthLayer();
@@ -26,7 +33,7 @@ function makeTaskController(?TaskServiceInterface $taskService = null): array
 
 function seedUserAndAgent(mixed $authService): array
 {
-    $userId = $authService->register('task@example.com', 'Password1!', 'Task');
+    $userId = $authService->register('task@example.com', TEST_PASSWORD, 'Task');
     simulateLoggedInSession($userId, 'task@example.com');
 
     $agent = Agent::create([
@@ -47,7 +54,7 @@ it('unauthenticated index throws UnauthenticatedException', function (): void {
     [$controller, , , $authMiddleware] = makeTaskController();
     clearSession();
 
-    expect(fn() => callController($controller, 'index', jsonRequest('GET', '/api/v1/tasks'), [$authMiddleware]))
+    expect(fn() => callController($controller, 'index', jsonRequest('GET', TASKS_API), [$authMiddleware]))
         ->toThrow(UnauthenticatedException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -55,7 +62,7 @@ it('unauthenticated store throws UnauthenticatedException', function (): void {
     [$controller, , , $authMiddleware] = makeTaskController();
     clearSession();
 
-    expect(fn() => callController($controller, 'store', jsonRequest('POST', '/api/v1/tasks', ['prompt' => 'hi']), [$authMiddleware]))
+    expect(fn() => callController($controller, 'store', jsonRequest('POST', TASKS_API, ['prompt' => 'hi']), [$authMiddleware]))
         ->toThrow(UnauthenticatedException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -65,7 +72,7 @@ it('store returns 422 when prompt is missing', function (): void {
     [$controller, $authService] = makeTaskController();
     seedUserAndAgent($authService);
 
-    $resp = $controller->store(jsonRequest('POST', '/api/v1/tasks', []));
+    $resp = $controller->store(jsonRequest('POST', TASKS_API, []));
     expect($resp->getStatusCode())->toBe(422);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -89,9 +96,9 @@ it('store creates task via orchestrator and returns 201', function (): void {
         ->andReturn($taskResource);
 
     [$controller, $authService] = makeTaskController($taskService);
-    [$userId, $agent] = seedUserAndAgent($authService);
+    [, $agent] = seedUserAndAgent($authService);
 
-    $resp = $controller->store(jsonRequest('POST', '/api/v1/tasks', ['agent_id' => $agent->id, 'prompt' => 'Hello']));
+    $resp = $controller->store(jsonRequest('POST', TASKS_API, ['agent_id' => $agent->id, 'prompt' => 'Hello']));
     expect($resp->getStatusCode())->toBe(201);
 
     $body = json_decode($resp->getContent(), true);
@@ -105,10 +112,10 @@ it('store returns 404 when user has no agent', function (): void {
         ->andThrow(new InvalidArgumentException('Agent not found.'));
 
     [$controller, $authService] = makeTaskController($taskService);
-    $userId = $authService->register('noagent@example.com', 'Password1!', 'Noagent');
+    $userId = $authService->register('noagent@example.com', TEST_PASSWORD, 'Noagent');
     simulateLoggedInSession($userId, 'noagent@example.com');
 
-    $resp = $controller->store(jsonRequest('POST', '/api/v1/tasks', ['agent_id' => 99999, 'prompt' => 'hello']));
+    $resp = $controller->store(jsonRequest('POST', TASKS_API, ['agent_id' => 99999, 'prompt' => 'hello']));
     expect($resp->getStatusCode())->toBe(404);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -132,9 +139,9 @@ it('index returns list of tasks for the authenticated user', function (): void {
         ]]);
 
     [$controller, $authService] = makeTaskController($taskService);
-    [$userId, $agent] = seedUserAndAgent($authService);
+    seedUserAndAgent($authService);
 
-    $resp = $controller->index(jsonRequest('GET', '/api/v1/tasks'));
+    $resp = $controller->index(jsonRequest('GET', TASKS_API));
     expect($resp->getStatusCode())->toBe(200);
 
     $body = json_decode($resp->getContent(), true);
@@ -152,7 +159,7 @@ it('index returns server_time in response envelope', function (): void {
     [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);
 
-    $resp = $controller->index(jsonRequest('GET', '/api/v1/tasks'));
+    $resp = $controller->index(jsonRequest('GET', TASKS_API));
     expect($resp->getStatusCode())->toBe(200);
 
     $body = json_decode($resp->getContent(), true);
@@ -273,9 +280,9 @@ it('show returns task detail with history and tool_calls', function (): void {
         ->andReturn($taskDetail);
 
     [$controller, $authService] = makeTaskController($taskService);
-    [$userId, $agent] = seedUserAndAgent($authService);
+    seedUserAndAgent($authService);
 
-    $req = jsonRequest('GET', '/api/v1/tasks/1');
+    $req = jsonRequest('GET', TASKS_API_1);
     $req->attributes->set('taskId', 1);
 
     $resp = $controller->show($req);
@@ -310,7 +317,7 @@ it('show respects since_sequence to filter task history', function (): void {
         ->andReturn($taskDetail);
 
     [$controller, $authService] = makeTaskController($taskService);
-    [$userId, $agent] = seedUserAndAgent($authService);
+    seedUserAndAgent($authService);
 
     $req = jsonRequest('GET', '/api/v1/tasks/1?since_sequence=1');
     $req->attributes->set('taskId', 1);
@@ -569,7 +576,7 @@ it('destroy throws UnauthenticatedException when not logged in', function (): vo
     [$controller, , , $authMiddleware] = makeTaskController();
     clearSession();
 
-    $req = jsonRequest('DELETE', '/api/v1/tasks/1');
+    $req = jsonRequest('DELETE', TASKS_API_1);
     $req->attributes->set('taskId', 1);
 
     expect(fn() => callController($controller, 'destroy', $req, [$authMiddleware]))
@@ -600,9 +607,9 @@ it('destroy returns 404 for task belonging to another user', function (): void {
         ->with(Mockery::any(), Mockery::any())
         ->andReturn(false);
 
-    [$controller, $authService] = makeTaskController($taskService);
-    $userId = $authService->register('other@example.com', 'Password1!', 'Other');
-    simulateLoggedInSession($userId, 'other@example.com');
+    [, $authService] = makeTaskController($taskService);
+    $userId = $authService->register(OTHER_EMAIL, TEST_PASSWORD, 'Other');
+    simulateLoggedInSession($userId, OTHER_EMAIL);
 
     $otherAgent = Agent::create([
         'user_id'      => $userId,
@@ -738,7 +745,7 @@ it('retry returns 404 for unknown task', function (): void {
     $taskService->expects('retryTask')
         ->once()
         ->with(99999, 1)
-        ->andThrow(new InvalidArgumentException('Task not found.'));
+        ->andThrow(new InvalidArgumentException(TASK_NOT_FOUND_MESSAGE));
 
     [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);
@@ -781,7 +788,7 @@ it('retry calls orchestrator->start() with same agent_id and user_prompt', funct
         'id'          => 2,
         'agent_id'    => 1,
         'status'      => 'RUNNING',
-        'user_prompt' => 'Retry me',
+        'user_prompt' => RETRY_PROMPT,
         'final_response' => null,
         'step_count'  => 0,
         'max_steps'   => 10,
@@ -792,8 +799,7 @@ it('retry calls orchestrator->start() with same agent_id and user_prompt', funct
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('retryTask')
         ->once()
-        ->withArgs(function (int $taskId, int $userId) use (&$capturedTaskId): bool {
-            $capturedTaskId = $taskId;
+        ->withArgs(function (int $taskId, int $userId): bool {
             return $taskId > 0 && $userId === 1;
         })
         ->andReturn($taskResource);
@@ -805,7 +811,7 @@ it('retry calls orchestrator->start() with same agent_id and user_prompt', funct
         'agent_id'    => $agent->id,
         'user_id'     => $userId,
         'status'      => 'FAILED',
-        'user_prompt' => 'Retry me',
+        'user_prompt' => RETRY_PROMPT,
         'step_count'  => 3,
         'max_steps'   => 10,
         'error_code'  => 'SERVER_ERROR',
@@ -824,7 +830,7 @@ it('retry returns 201 with the new task resource', function (): void {
         'id'          => 2,
         'agent_id'    => 1,
         'status'      => 'RUNNING',
-        'user_prompt' => 'Retry me',
+        'user_prompt' => RETRY_PROMPT,
         'final_response' => null,
         'step_count'  => 0,
         'max_steps'   => 10,
@@ -844,7 +850,7 @@ it('retry returns 201 with the new task resource', function (): void {
         'agent_id'    => $agent->id,
         'user_id'     => $userId,
         'status'      => 'FAILED',
-        'user_prompt' => 'Retry me',
+        'user_prompt' => RETRY_PROMPT,
         'step_count'  => 1,
         'max_steps'   => 10,
     ]);
@@ -886,9 +892,9 @@ it('show returns error_code and error_message when set on task', function (): vo
         ->andReturn($taskDetail);
 
     [$controller, $authService] = makeTaskController($taskService);
-    [$userId, $agent] = seedUserAndAgent($authService);
+    seedUserAndAgent($authService);
 
-    $req = jsonRequest('GET', '/api/v1/tasks/1');
+    $req = jsonRequest('GET', TASKS_API_1);
     $req->attributes->set('taskId', 1);
 
     $resp = $controller->show($req);
@@ -1060,7 +1066,7 @@ it('continue returns 404 for unknown task', function (): void {
     $taskService->expects('continueTask')
         ->once()
         ->with(99999, 1, 'test', null)
-        ->andThrow(new InvalidArgumentException('Task not found.'));
+        ->andThrow(new InvalidArgumentException(TASK_NOT_FOUND_MESSAGE));
 
     [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);
@@ -1079,7 +1085,7 @@ it('cancelRetryChain returns 404 for unknown task', function (): void {
     $taskService->expects('cancelRetryChain')
         ->once()
         ->with(99999, 1)
-        ->andThrow(new InvalidArgumentException('Task not found.'));
+        ->andThrow(new InvalidArgumentException(TASK_NOT_FOUND_MESSAGE));
 
     [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);
@@ -1150,7 +1156,7 @@ it('cancelRetryChain returns 204 and cancels chain for valid retry task', functi
         'retry_count'       => 1,
     ]);
 
-    $retry2 = Task::create([
+    Task::create([
         'agent_id'          => $agent->id,
         'user_id'           => $userId,
         'status'            => 'FAILED',
@@ -1178,13 +1184,13 @@ it('cancelRetryChain returns 404 when trying to cancel another users retry chain
     $taskService->expects('cancelRetryChain')
         ->once()
         ->with(Mockery::any(), Mockery::any())
-        ->andThrow(new InvalidArgumentException('Task not found.'));
+        ->andThrow(new InvalidArgumentException(TASK_NOT_FOUND_MESSAGE));
 
     [$controller, $authService] = makeTaskController($taskService);
-    [$userId, $agent] = seedUserAndAgent($authService);
+    [, $agent] = seedUserAndAgent($authService);
 
-    $otherUserId = $authService->register('other@example.com', 'Password1!', 'Other');
-    $otherUser = Spora\Models\User::where('email', 'other@example.com')->first();
+    $authService->register(OTHER_EMAIL, TEST_PASSWORD, 'Other');
+    $otherUser = Spora\Models\User::where('email', OTHER_EMAIL)->first();
 
     $root = Task::create([
         'agent_id'    => $agent->id,

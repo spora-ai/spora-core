@@ -126,9 +126,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
         if ($this->security->looksEncrypted($raw)) {
             // Legacy wholesale-encrypted blob
             $json = $this->security->decrypt(new EncryptedValue($raw));
-            /** @var array<string, mixed> $decoded */
-            $decoded = json_decode($json, true) ?? [];
-            return $decoded;
+            return is_array($decoded = json_decode($json, true)) ? $decoded : [];
         }
 
         // Per-field format: plain JSON, decrypt each password key
@@ -217,24 +215,56 @@ final class LLMConfigService implements LLMConfigServiceInterface
 
     public function createConfiguration(int $userId, array $data, bool $isAdmin): ?LLMDriverConfiguration
     {
+        $validated = $this->validateNewConfigurationInputs($data, $isAdmin);
+        if ($validated === null) {
+            return null;
+        }
+
+        return $this->persistNewConfiguration(
+            $userId,
+            $validated['name'],
+            $validated['driver_class'],
+            $validated['settings'],
+            $validated['is_global'],
+            $data,
+        );
+    }
+
+    /**
+     * @return array{name: string, driver_class: string, settings: array<string, mixed>, is_global: bool}|null
+     */
+    private function validateNewConfigurationInputs(array $data, bool $isAdmin): ?array
+    {
         $name = trim((string) ($data['name'] ?? ''));
-        if ($name === '') {
-            return null;
-        }
-
         $driverClass = trim((string) ($data['driver_class'] ?? ''));
-        if ($driverClass === '' || !class_exists($driverClass)) {
-            return null;
-        }
-
         $rawSettings = $data['settings'] ?? null;
         $settings = is_array($rawSettings) ? $rawSettings : [];
         $isGlobal = !empty($data['is_global']);
 
-        if ($isGlobal && !$isAdmin) {
+        $invalid = $name === ''
+            || $driverClass === '' || !class_exists($driverClass)
+            || ($isGlobal && !$isAdmin);
+
+        if ($invalid) {
             return null;
         }
 
+        return [
+            'name' => $name,
+            'driver_class' => $driverClass,
+            'settings' => $settings,
+            'is_global' => $isGlobal,
+        ];
+    }
+
+    private function persistNewConfiguration(
+        int $userId,
+        string $name,
+        string $driverClass,
+        array $settings,
+        bool $isGlobal,
+        array $data,
+    ): LLMDriverConfiguration {
         $config = new LLMDriverConfiguration();
         $config->user_id = $isGlobal ? null : $userId;
         $config->is_global = $isGlobal;
@@ -258,6 +288,23 @@ final class LLMConfigService implements LLMConfigServiceInterface
 
     public function updateConfiguration(int $configId, int $userId, array $data, bool $isAdmin): ?LLMDriverConfiguration
     {
+        $config = $this->loadEditableConfiguration($configId, $isAdmin);
+        if ($config === null) {
+            return null;
+        }
+
+        $applied = $this->applyConfigurationUpdates($config, $data);
+        if ($applied === null) {
+            return null;
+        }
+
+        $config->save();
+
+        return $config;
+    }
+
+    private function loadEditableConfiguration(int $configId, bool $isAdmin): ?LLMDriverConfiguration
+    {
         $config = LLMDriverConfiguration::find($configId);
         if ($config === null) {
             return null;
@@ -267,6 +314,11 @@ final class LLMConfigService implements LLMConfigServiceInterface
             return null;
         }
 
+        return $config;
+    }
+
+    private function applyConfigurationUpdates(LLMDriverConfiguration $config, array $data): ?bool
+    {
         if (isset($data['name'])) {
             $name = trim((string) $data['name']);
             if ($name === '') {
@@ -288,51 +340,39 @@ final class LLMConfigService implements LLMConfigServiceInterface
             $config->max_tokens_output = (int) $data['max_tokens_output'];
         }
 
-        $config->save();
-
-        return $config;
+        return true;
     }
 
     public function deleteConfiguration(int $configId, int $userId, bool $isAdmin): bool
     {
         $config = LLMDriverConfiguration::find($configId);
-        if ($config === null) {
+        $allowed = $config !== null
+            && ($isAdmin || !$config->is_global)
+            && ($config->is_global || $config->user_id === $userId);
+
+        if (!$allowed) {
             return false;
         }
 
-        if (!$isAdmin && $config->is_global) {
-            return false;
-        }
-
-        // Check if config belongs to another user (only applies to non-global configs)
-        if (!$config->is_global && $config->user_id !== $userId) {
-            return false;
-        }
-
-        // Unset any agents using this config
-        Agent::where('llm_driver_config_id', $configId)->update(['llm_driver_config_id' => null]);
-
-        // Delete any user preferences referencing this config (cascade delete)
-        UserPreference::where('preferred_llm_config_id', $configId)->delete();
-
+        $this->detachConfigurationReferences($configId);
         $config->delete();
 
         return true;
     }
 
+    private function detachConfigurationReferences(int $configId): void
+    {
+        // Unset any agents using this config
+        Agent::where('llm_driver_config_id', $configId)->update(['llm_driver_config_id' => null]);
+
+        // Delete any user preferences referencing this config (cascade delete)
+        UserPreference::where('preferred_llm_config_id', $configId)->delete();
+    }
+
     public function setDefaultConfiguration(int $configId, int $userId, bool $isAdmin): ?LLMDriverConfiguration
     {
-        $config = LLMDriverConfiguration::find($configId);
+        $config = $this->loadDefaultableConfiguration($configId, $isAdmin);
         if ($config === null) {
-            return null;
-        }
-
-        // Restrict to global configs only — personal default is now set via user preferences
-        if (!$config->is_global) {
-            return null;
-        }
-
-        if (!$isAdmin) {
             return null;
         }
 
@@ -340,6 +380,19 @@ final class LLMConfigService implements LLMConfigServiceInterface
 
         $config->is_default = true;
         $config->save();
+
+        return $config;
+    }
+
+    private function loadDefaultableConfiguration(int $configId, bool $isAdmin): ?LLMDriverConfiguration
+    {
+        $config = LLMDriverConfiguration::find($configId);
+        // Restrict to global configs only — personal default is now set via user preferences
+        $eligible = $config !== null && $config->is_global && $isAdmin;
+
+        if (!$eligible) {
+            return null;
+        }
 
         return $config;
     }

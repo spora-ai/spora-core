@@ -18,6 +18,10 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class TaskController
 {
+    private const ERR_TASK_NOT_FOUND = 'Task not found.';
+
+    private const ERR_INVALID_JSON = 'Request body must be valid JSON.';
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly TaskServiceInterface $taskService,
@@ -75,45 +79,43 @@ final class TaskController
             $body = $this->decodeJson($request);
         } catch (JsonException) {
             return new JsonResponse(
-                ['error' => ['code' => 'INVALID_JSON', 'message' => 'Request body must be valid JSON.']],
+                ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON]],
                 Response::HTTP_BAD_REQUEST,
             );
         }
 
         $prompt = trim((string) ($body['prompt'] ?? ''));
-
-        if ($prompt === '') {
-            return new JsonResponse(
-                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'prompt is required.']],
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        }
-
         $agentId = isset($body['agent_id']) ? (int) $body['agent_id'] : null;
-
-        if ($agentId === null) {
-            return new JsonResponse(
-                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'agent_id is required.']],
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        }
-
         $maxSteps = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
         $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
 
-        try {
-            $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId);
-        } catch (InvalidArgumentException $e) {
-            return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => $e->getMessage()]],
-                Response::HTTP_NOT_FOUND,
+        $result = null;
+        if ($prompt === '') {
+            $result = new JsonResponse(
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'prompt is required.']],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
             );
+        } elseif ($agentId === null) {
+            $result = new JsonResponse(
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'agent_id is required.']],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        } else {
+            try {
+                $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId);
+                $result = new JsonResponse(
+                    ['data' => ['task' => $task]],
+                    Response::HTTP_CREATED,
+                );
+            } catch (InvalidArgumentException $e) {
+                $result = new JsonResponse(
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => $e->getMessage()]],
+                    Response::HTTP_NOT_FOUND,
+                );
+            }
         }
 
-        return new JsonResponse(
-            ['data' => ['task' => $task]],
-            Response::HTTP_CREATED,
-        );
+        return $result;
     }
 
     /**
@@ -136,7 +138,7 @@ final class TaskController
 
         if ($task === null) {
             return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
                 Response::HTTP_NOT_FOUND,
             );
         }
@@ -156,60 +158,68 @@ final class TaskController
             $body = $this->decodeJson($request);
         } catch (JsonException) {
             return new JsonResponse(
-                ['error' => ['code' => 'INVALID_JSON', 'message' => 'Request body must be valid JSON.']],
+                ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON]],
                 Response::HTTP_BAD_REQUEST,
             );
         }
 
         // Accept either a modern batch payload { "approvals": [...] }
         // or the legacy single-tool format { "provider_call_id": "...", "arguments": {...} }
+        $result = null;
+        $approvedBatch = [];
         if (isset($body['approvals']) && is_array($body['approvals'])) {
             $approvedBatch = $body['approvals'];
         } else {
             $providerId = trim((string) ($body['provider_call_id'] ?? ''));
             if ($providerId === '') {
-                return new JsonResponse(
+                $result = new JsonResponse(
                     ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required.']],
                     Response::HTTP_UNPROCESSABLE_ENTITY,
                 );
-            }
-            $approvedBatch = [[
-                'provider_call_id' => $providerId,
-                'arguments'        => (array) ($body['arguments'] ?? []),
-            ]];
-        }
-
-        // Normalize arguments: ensure all approved argument objects are arrays,
-        // not stdClass (which can happen when request body is JSON-decoded).
-        foreach ($approvedBatch as &$item) {
-            if (!isset($item['provider_call_id'])) {
-                return new JsonResponse(
-                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required in all approvals.']],
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
-            }
-            if (isset($item['arguments']) && is_object($item['arguments'])) {
-                $item['arguments'] = (array) $item['arguments'];
+            } else {
+                $approvedBatch = [[
+                    'provider_call_id' => $providerId,
+                    'arguments'        => (array) ($body['arguments'] ?? []),
+                ]];
             }
         }
-        unset($item);
 
-        try {
-            $task = $this->taskService->approveTask($taskId, $userId, $approvedBatch);
-        } catch (InvalidArgumentException $e) {
-            if ($e->getMessage() === 'Task not found.') {
-                return new JsonResponse(
-                    ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
-                    Response::HTTP_NOT_FOUND,
-                );
+        if ($result === null) {
+            // Normalize arguments: ensure all approved argument objects are arrays,
+            // not stdClass (which can happen when request body is JSON-decoded).
+            foreach ($approvedBatch as &$item) {
+                if (!isset($item['provider_call_id'])) {
+                    $result = new JsonResponse(
+                        ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required in all approvals.']],
+                        Response::HTTP_UNPROCESSABLE_ENTITY,
+                    );
+                    break;
+                }
+                if (isset($item['arguments']) && is_object($item['arguments'])) {
+                    $item['arguments'] = (array) $item['arguments'];
+                }
             }
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
-                Response::HTTP_CONFLICT,
-            );
+            unset($item);
         }
 
-        return new JsonResponse(['data' => ['task' => $task]]);
+        if ($result === null) {
+            try {
+                $task = $this->taskService->approveTask($taskId, $userId, $approvedBatch);
+                $result = new JsonResponse(['data' => ['task' => $task]]);
+            } catch (InvalidArgumentException $e) {
+                $result = $e->getMessage() === self::ERR_TASK_NOT_FOUND
+                    ? new JsonResponse(
+                        ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
+                        Response::HTTP_NOT_FOUND,
+                    )
+                    : new JsonResponse(
+                        ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
+                        Response::HTTP_CONFLICT,
+                    );
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -224,29 +234,30 @@ final class TaskController
             $body = $this->decodeJson($request);
         } catch (JsonException) {
             return new JsonResponse(
-                ['error' => ['code' => 'INVALID_JSON', 'message' => 'Request body must be valid JSON.']],
+                ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON]],
                 Response::HTTP_BAD_REQUEST,
             );
         }
 
         $reason = trim((string) ($body['reason'] ?? 'No reason provided.'));
 
+        $result = null;
         try {
             $task = $this->taskService->rejectTask($taskId, $userId, $reason);
+            $result = new JsonResponse(['data' => ['task' => $task]]);
         } catch (InvalidArgumentException $e) {
-            if ($e->getMessage() === 'Task not found.') {
-                return new JsonResponse(
-                    ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+            $result = $e->getMessage() === self::ERR_TASK_NOT_FOUND
+                ? new JsonResponse(
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
                     Response::HTTP_NOT_FOUND,
+                )
+                : new JsonResponse(
+                    ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
+                    Response::HTTP_CONFLICT,
                 );
-            }
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
-                Response::HTTP_CONFLICT,
-            );
         }
 
-        return new JsonResponse(['data' => ['task' => $task]]);
+        return $result;
     }
 
     /**
@@ -259,7 +270,7 @@ final class TaskController
 
         if (!$this->taskService->deleteTask($taskId, $userId)) {
             return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
                 Response::HTTP_NOT_FOUND,
             );
         }
@@ -281,9 +292,9 @@ final class TaskController
         try {
             $task = $this->taskService->retryTask($taskId, $userId);
         } catch (InvalidArgumentException $e) {
-            if ($e->getMessage() === 'Task not found.') {
+            if ($e->getMessage() === self::ERR_TASK_NOT_FOUND) {
                 return new JsonResponse(
-                    ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
                     Response::HTTP_NOT_FOUND,
                 );
             }
@@ -313,43 +324,45 @@ final class TaskController
         $body = json_decode($request->getContent(), true) ?? [];
 
         $prompt = $body['prompt'] ?? null;
+        $additionalSteps = null;
+
+        $result = null;
         if (!is_string($prompt) || trim($prompt) === '') {
-            return new JsonResponse(
+            $result = new JsonResponse(
                 ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'prompt is required and must be a non-empty string.']],
                 Response::HTTP_UNPROCESSABLE_ENTITY,
             );
-        }
-
-        $additionalSteps = null;
-        if (isset($body['additional_steps'])) {
-            if (!is_int($body['additional_steps']) || $body['additional_steps'] < 1 || $body['additional_steps'] > 100) {
-                return new JsonResponse(
-                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'additional_steps must be an integer between 1 and 100.']],
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
-            }
-            $additionalSteps = $body['additional_steps'];
-        }
-
-        try {
-            $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps);
-        } catch (InvalidArgumentException $e) {
-            if ($e->getMessage() === 'Task not found.') {
-                return new JsonResponse(
-                    ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
-                    Response::HTTP_NOT_FOUND,
-                );
-            }
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
-                Response::HTTP_CONFLICT,
+        } elseif (isset($body['additional_steps'])
+            && (!is_int($body['additional_steps']) || $body['additional_steps'] < 1 || $body['additional_steps'] > 100)
+        ) {
+            $result = new JsonResponse(
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'additional_steps must be an integer between 1 and 100.']],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
             );
+        } else {
+            if (isset($body['additional_steps'])) {
+                $additionalSteps = $body['additional_steps'];
+            }
+            try {
+                $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps);
+                $result = new JsonResponse(
+                    ['data' => ['task' => $task]],
+                    Response::HTTP_OK,
+                );
+            } catch (InvalidArgumentException $e) {
+                $result = $e->getMessage() === self::ERR_TASK_NOT_FOUND
+                    ? new JsonResponse(
+                        ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
+                        Response::HTTP_NOT_FOUND,
+                    )
+                    : new JsonResponse(
+                        ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
+                        Response::HTTP_CONFLICT,
+                    );
+            }
         }
 
-        return new JsonResponse(
-            ['data' => ['task' => $task]],
-            Response::HTTP_OK,
-        );
+        return $result;
     }
 
     /**
@@ -367,9 +380,9 @@ final class TaskController
         try {
             $this->taskService->cancelRetryChain($taskId, $userId);
         } catch (InvalidArgumentException $e) {
-            if ($e->getMessage() === 'Task not found.') {
+            if ($e->getMessage() === self::ERR_TASK_NOT_FOUND) {
                 return new JsonResponse(
-                    ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
                     Response::HTTP_NOT_FOUND,
                 );
             }

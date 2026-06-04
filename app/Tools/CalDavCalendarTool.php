@@ -7,6 +7,7 @@ namespace Spora\Tools;
 use DateTimeImmutable;
 use DateTimeZone;
 use DOMDocument;
+use DOMNode;
 use DOMXPath;
 use Icalendar\Component\VCalendar;
 use Icalendar\Component\VEvent;
@@ -61,6 +62,13 @@ use Throwable;
 #[ToolParameter(name: 'all_day', type: 'boolean', description: 'If true, start_date and end_date are interpreted as date-only (YYYY-MM-DD) and the event is an all-day event. Optional.', required: false)]
 final class CalDavCalendarTool extends AbstractTool
 {
+    private const ICS_DATETIME_UTC = 'Ymd\THis\Z';
+    private const ICS_DATETIME_LOCAL = 'Ymd\THis';
+    private const ERR_CONFIG_INCOMPLETE = 'CalDAV configuration is incomplete or missing.';
+    private const ERR_EVENT_NOT_FOUND = 'Event not found.';
+    private const ERR_MISSING_EVENT_URI = 'Missing required parameter: event_uri';
+    private const LOG_CALDAV_EXCEPTION = 'CalDAV Exception';
+
     public function __construct(
         private readonly ToolConfigService $configService,
         private readonly HttpClientInterface $httpClient,
@@ -238,8 +246,8 @@ final class CalDavCalendarTool extends AbstractTool
         try {
             $start = new DateTimeImmutable($startDateStr);
             $end   = new DateTimeImmutable($endDateStr);
-            $startFormatted = $start->setTimezone(new DateTimeZone('UTC'))->format("Ymd\THis\Z");
-            $endFormatted   = $end->setTimezone(new DateTimeZone('UTC'))->format("Ymd\THis\Z");
+            $startFormatted = $start->setTimezone(new DateTimeZone('UTC'))->format(self::ICS_DATETIME_UTC);
+            $endFormatted   = $end->setTimezone(new DateTimeZone('UTC'))->format(self::ICS_DATETIME_UTC);
         } catch (Throwable $e) {
             return new ToolResult(false, 'Invalid date format provided. Must be ISO-8601.');
         }
@@ -250,7 +258,7 @@ final class CalDavCalendarTool extends AbstractTool
         $password = $settings['core.caldav.password'] ?? '';
 
         if (empty($url) || empty($username) || empty($password)) {
-            return new ToolResult(false, 'CalDAV configuration is incomplete or missing.');
+            return new ToolResult(false, self::ERR_CONFIG_INCOMPLETE);
         }
 
         $xmlRequest = <<<XML
@@ -298,7 +306,7 @@ XML;
             return $this->parseCalDavResponse($xmlBody);
 
         } catch (Throwable $e) {
-            $this->logger?->error('CalDAV Exception', ['exception' => $e, 'method' => 'REPORT', 'url' => $url]);
+            $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => 'REPORT', 'url' => $url]);
             return new ToolResult(false, 'Failed to fetch CalDAV calendar: ' . $e->getMessage());
         }
     }
@@ -308,7 +316,7 @@ XML;
         $eventUri = trim((string) ($arguments['event_uri'] ?? ''));
 
         if (empty($eventUri)) {
-            return new ToolResult(false, 'Missing required parameter: event_uri');
+            return new ToolResult(false, self::ERR_MISSING_EVENT_URI);
         }
 
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
@@ -317,7 +325,7 @@ XML;
         $baseUrl = rtrim((string) ($settings['core.caldav.url'] ?? ''), '/');
 
         if (empty($username) || empty($password)) {
-            return new ToolResult(false, 'CalDAV configuration is incomplete or missing.');
+            return new ToolResult(false, self::ERR_CONFIG_INCOMPLETE);
         }
 
         $eventUri = $this->resolveEventUri($eventUri, $baseUrl);
@@ -339,7 +347,7 @@ XML;
             $statusCode = $response->getStatusCode();
 
             if ($statusCode === 404) {
-                return new ToolResult(false, 'Event not found.');
+                return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
             }
 
             if ($statusCode >= 400) {
@@ -354,7 +362,7 @@ XML;
             return $this->parseIcsForGet($icsContent, $eventUri, $etag);
 
         } catch (Throwable $e) {
-            $this->logger?->error('CalDAV Exception', ['exception' => $e, 'method' => 'GET', 'url' => $eventUri]);
+            $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => 'GET', 'url' => $eventUri]);
             return new ToolResult(false, 'Failed to fetch CalDAV event: ' . $e->getMessage());
         }
     }
@@ -390,7 +398,7 @@ XML;
         $password = $settings['core.caldav.password'] ?? '';
 
         if (empty($url) || empty($username) || empty($password)) {
-            return new ToolResult(false, 'CalDAV configuration is incomplete or missing.');
+            return new ToolResult(false, self::ERR_CONFIG_INCOMPLETE);
         }
 
         // Generate unique ID and filename
@@ -441,7 +449,7 @@ XML;
             return new ToolResult(true, "Event '{$summary}' created successfully.");
 
         } catch (Throwable $e) {
-            $this->logger?->error('CalDAV Exception', ['exception' => $e, 'method' => 'PUT', 'url' => $eventUri]);
+            $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => 'PUT', 'url' => $eventUri]);
             return new ToolResult(false, 'Failed to create CalDAV event: ' . $e->getMessage());
         }
     }
@@ -452,7 +460,7 @@ XML;
         $etag = $this->normalizeEtag(trim((string) ($arguments['etag'] ?? '')));
 
         if (empty($eventUri)) {
-            return new ToolResult(false, 'Missing required parameter: event_uri');
+            return new ToolResult(false, self::ERR_MISSING_EVENT_URI);
         }
 
         if (empty($etag)) {
@@ -465,7 +473,7 @@ XML;
         $password = $settings['core.caldav.password'] ?? '';
 
         if (empty($url) || empty($username) || empty($password)) {
-            return new ToolResult(false, 'CalDAV configuration is incomplete or missing.');
+            return new ToolResult(false, self::ERR_CONFIG_INCOMPLETE);
         }
 
         $eventUri = $this->resolveEventUri($eventUri, $url);
@@ -486,7 +494,7 @@ XML;
             $this->logHttpResponse('GET', $eventUri, $getResponse->getStatusCode(), $getHeaders);
 
             if ($getResponse->getStatusCode() === 404) {
-                return new ToolResult(false, 'Event not found.');
+                return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
             }
 
             if ($getResponse->getStatusCode() >= 400) {
@@ -497,7 +505,7 @@ XML;
 
             $existingIcs = $getResponse->getContent();
         } catch (Throwable $e) {
-            $this->logger?->error('CalDAV Exception', ['exception' => $e, 'method' => 'GET', 'url' => $eventUri]);
+            $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => 'GET', 'url' => $eventUri]);
             return new ToolResult(false, 'Failed to fetch existing event: ' . $e->getMessage());
         }
 
@@ -566,7 +574,7 @@ XML;
             }
 
             if ($statusCode === 404) {
-                return new ToolResult(false, 'Event not found.');
+                return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
             }
 
             if ($statusCode >= 400) {
@@ -582,7 +590,7 @@ XML;
             ]);
 
         } catch (Throwable $e) {
-            $this->logger?->error('CalDAV Exception', ['exception' => $e, 'method' => 'PUT', 'url' => $eventUri]);
+            $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => 'PUT', 'url' => $eventUri]);
             return new ToolResult(false, 'Failed to update CalDAV event: ' . $e->getMessage());
         }
     }
@@ -593,7 +601,7 @@ XML;
         $etag = $this->normalizeEtag(trim((string) ($arguments['etag'] ?? '')));
 
         if (empty($eventUri)) {
-            return new ToolResult(false, 'Missing required parameter: event_uri');
+            return new ToolResult(false, self::ERR_MISSING_EVENT_URI);
         }
 
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
@@ -602,7 +610,7 @@ XML;
         $baseUrl = rtrim((string) ($settings['core.caldav.url'] ?? ''), '/');
 
         if (empty($username) || empty($password)) {
-            return new ToolResult(false, 'CalDAV configuration is incomplete or missing.');
+            return new ToolResult(false, self::ERR_CONFIG_INCOMPLETE);
         }
 
         $eventUri = $this->resolveEventUri($eventUri, $baseUrl);
@@ -633,7 +641,7 @@ XML;
             }
 
             if ($statusCode === 404) {
-                return new ToolResult(false, 'Event not found.');
+                return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
             }
 
             if ($statusCode >= 400) {
@@ -645,7 +653,7 @@ XML;
             return new ToolResult(true, 'Event deleted successfully.');
 
         } catch (Throwable $e) {
-            $this->logger?->error('CalDAV Exception', ['exception' => $e, 'method' => 'DELETE', 'url' => $eventUri]);
+            $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => 'DELETE', 'url' => $eventUri]);
             return new ToolResult(false, 'Failed to delete CalDAV event: ' . $e->getMessage());
         }
     }
@@ -691,42 +699,13 @@ XML;
                 continue;
             }
 
-            // Walk up to find the parent <d:response> for the href (event URI)
-            $eventUri = null;
-            $responseNode = $calData->parentNode;
-            while ($responseNode !== null) {
-                if ($responseNode->localName === 'response') {
-                    $hrefNode = $xpath->query('d:href', $responseNode)->item(0);
-                    if ($hrefNode !== null) {
-                        $eventUri = trim($hrefNode->textContent);
-                    }
-                    break;
-                }
-                $responseNode = $responseNode->parentNode;
-            }
+            $eventUri = $this->findEventUriForCalData($calData, $xpath);
+            $parsed = $this->parseEventsFromIcs($icsContent, $eventUri);
 
-            // Parse ICS content using the library
-            $icsParser = new Parser(Parser::LENIENT);
-            $calendar = $icsParser->parse($icsContent);
-            $events = array_values($calendar->getComponents('VEVENT'));
-
-            foreach ($events as $event) {
-                /** @var VEvent $event */
-                $summary = $event->getSummary() ?? 'Unknown Event';
-                $dtstart = $event->getDtStart() ?? 'Unknown Start';
-                $dtend = $event->getDtEnd() ?? 'Unknown End';
-                $uid = $event->getUid() ?? '';
-
+            foreach ($parsed as $row) {
                 $eventCount++;
-                $output .= "- Event: {$summary}\n  URI:   {$eventUri}\n  UID:   {$uid}\n  Start: {$dtstart}\n  End:   {$dtend}\n\n";
-
-                $eventData[] = [
-                    'event_uri' => $eventUri,
-                    'uid' => $uid,
-                    'summary' => $summary,
-                    'dtstart' => $dtstart,
-                    'dtend' => $dtend,
-                ];
+                $output .= "- Event: {$row['summary']}\n  URI:   {$row['event_uri']}\n  UID:   {$row['uid']}\n  Start: {$row['dtstart']}\n  End:   {$row['dtend']}\n\n";
+                $eventData[] = $row;
             }
         }
 
@@ -739,6 +718,47 @@ XML;
             "Found {$eventCount} events:\n\n" . trim($output),
             ['events' => $eventData],
         );
+    }
+
+    private function findEventUriForCalData(DOMNode $calData, DOMXPath $xpath): ?string
+    {
+        // Walk up to find the parent <d:response> for the href (event URI)
+        $eventUri = null;
+        $responseNode = $calData->parentNode;
+        while ($responseNode !== null) {
+            if ($responseNode->localName === 'response') {
+                $hrefNode = $xpath->query('d:href', $responseNode)->item(0);
+                if ($hrefNode !== null) {
+                    $eventUri = trim($hrefNode->textContent);
+                }
+                break;
+            }
+            $responseNode = $responseNode->parentNode;
+        }
+        return $eventUri;
+    }
+
+    /**
+     * @return list<array{event_uri: ?string, uid: string, summary: string, dtstart: string, dtend: string}>
+     */
+    private function parseEventsFromIcs(string $icsContent, ?string $eventUri): array
+    {
+        $icsParser = new Parser(Parser::LENIENT);
+        $calendar = $icsParser->parse($icsContent);
+        $events = array_values($calendar->getComponents('VEVENT'));
+
+        $rows = [];
+        foreach ($events as $event) {
+            /** @var VEvent $event */
+            $rows[] = [
+                'event_uri' => $eventUri,
+                'uid' => $event->getUid() ?? '',
+                'summary' => $event->getSummary() ?? 'Unknown Event',
+                'dtstart' => $event->getDtStart() ?? 'Unknown Start',
+                'dtend' => $event->getDtEnd() ?? 'Unknown End',
+            ];
+        }
+        return $rows;
     }
 
     private function parseIcsForGet(string $icsContent, string $eventUri, ?string $etag): ToolResult
@@ -838,7 +858,7 @@ XML;
         }
 
         if (str_ends_with($dateStr, 'Z')) {
-            $parsed = DateTimeImmutable::createFromFormat('Ymd\THis\Z', $dateStr, new DateTimeZone('UTC'));
+            $parsed = DateTimeImmutable::createFromFormat(self::ICS_DATETIME_UTC, $dateStr, new DateTimeZone('UTC'));
 
             return $parsed instanceof DateTimeImmutable
                 ? $parsed->setTimezone(new DateTimeZone('UTC'))
@@ -851,16 +871,16 @@ XML;
             return $parsed instanceof DateTimeImmutable ? $parsed : null;
         }
 
-        if (str_contains($dateStr, ';TZID=')) {
-            if (preg_match('/;TZID=([^:]+):(.+)$/', $dateStr, $m)) {
-                try {
-                    $tz = new DateTimeZone($m[1]);
-                    $datePart = $m[2];
-                    $parsed = DateTimeImmutable::createFromFormat('Ymd\THis', $datePart, $tz);
+        if (str_contains($dateStr, ';TZID=') && preg_match('/;TZID=([^:]+):(.+)$/', $dateStr, $m)) {
+            try {
+                $tz = new DateTimeZone($m[1]);
+                $datePart = $m[2];
+                $parsed = DateTimeImmutable::createFromFormat(self::ICS_DATETIME_LOCAL, $datePart, $tz);
 
-                    return $parsed instanceof DateTimeImmutable ? $parsed->setTimezone($tz) : null;
-                } catch (Throwable) {
-                }
+                return $parsed instanceof DateTimeImmutable ? $parsed->setTimezone($tz) : null;
+            } catch (Throwable) {
+                // Invalid TZID or unparseable date; fall through to the
+                // generic DateTimeImmutable parser below.
             }
         }
 
@@ -891,7 +911,7 @@ XML;
         // DTSTAMP must be UTC (the trailing Z is the RFC 5545 marker); date()
         // would emit the server-local time mislabeled as UTC. gmdate() does
         // the right thing without an extra DateTimeImmutable.
-        $event->setDtStamp(gmdate('Ymd\THis\Z'));
+        $event->setDtStamp(gmdate(self::ICS_DATETIME_UTC));
 
         if ($allDay) {
             // For all-day events, use date-only format YYYYMMDD.
@@ -902,12 +922,12 @@ XML;
             $tz = new DateTimeZone($timezone);
             $localStart = $start->setTimezone($tz);
             $localEnd = $end->setTimezone($tz);
-            $this->setDateWithTimezone($event, 'DTSTART', $localStart->format('Ymd\THis'), $timezone);
-            $this->setDateWithTimezone($event, 'DTEND', $localEnd->format('Ymd\THis'), $timezone);
+            $this->setDateWithTimezone($event, 'DTSTART', $localStart->format(self::ICS_DATETIME_LOCAL), $timezone);
+            $this->setDateWithTimezone($event, 'DTEND', $localEnd->format(self::ICS_DATETIME_LOCAL), $timezone);
         } else {
             // Default: convert to UTC and use Z suffix.
-            $event->setDtStart($start->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z'));
-            $event->setDtEnd($end->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z'));
+            $event->setDtStart($start->setTimezone(new DateTimeZone('UTC'))->format(self::ICS_DATETIME_UTC));
+            $event->setDtEnd($end->setTimezone(new DateTimeZone('UTC'))->format(self::ICS_DATETIME_UTC));
         }
 
         $event->setSummary($summary);

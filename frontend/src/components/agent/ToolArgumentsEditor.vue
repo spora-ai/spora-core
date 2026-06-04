@@ -113,8 +113,9 @@ function copyToClipboard() {
     >
       <!-- Multiline textarea -->
       <template v-if="field.format === 'multiline'">
-        <label class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
+        <label :for="`field-${field.key}`" class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
         <textarea
+          :id="`field-${field.key}`"
           :value="String(field.value ?? '')"
           @input="updateField(field.key, ($event.target as HTMLTextAreaElement).value)"
           rows="4"
@@ -125,9 +126,10 @@ function copyToClipboard() {
 
       <!-- Email field -->
       <template v-else-if="field.format === 'email'">
-        <label class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
+        <label :for="`field-${field.key}`" class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
         <div class="flex items-center gap-2">
           <input
+            :id="`field-${field.key}`"
             type="email"
             :value="String(field.value ?? '')"
             @input="updateField(field.key, ($event.target as HTMLInputElement).value)"
@@ -147,9 +149,10 @@ function copyToClipboard() {
 
       <!-- URL field -->
       <template v-else-if="field.format === 'url'">
-        <label class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
+        <label :for="`field-${field.key}`" class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
         <div class="flex items-center gap-2">
           <input
+            :id="`field-${field.key}`"
             type="url"
             :value="String(field.value ?? '')"
             @input="updateField(field.key, ($event.target as HTMLInputElement).value)"
@@ -169,9 +172,10 @@ function copyToClipboard() {
 
       <!-- Sensitive field -->
       <template v-else-if="field.format === 'sensitive'">
-        <label class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
+        <label :for="`field-${field.key}`" class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
         <div class="flex items-center gap-2">
           <input
+            :id="`field-${field.key}`"
             :type="showSensitive[field.key] ? 'text' : 'password'"
             :value="String(field.value ?? '')"
             @input="updateField(field.key, ($event.target as HTMLInputElement).value)"
@@ -189,16 +193,17 @@ function copyToClipboard() {
 
       <!-- Badge (action, status, type) - read only -->
       <template v-else-if="field.format === 'badge'">
-        <label class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
-        <span class="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300 w-fit capitalize">
+        <label :for="`field-${field.key}`" class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
+        <span :id="`field-${field.key}`" class="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300 w-fit capitalize">
           {{ String(field.value ?? '').replace(/_/g, ' ') }}
         </span>
       </template>
 
       <!-- Boolean toggle -->
       <template v-else-if="field.format === 'boolean'">
-        <label class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
+        <label :for="`field-${field.key}`" class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
         <button
+          :id="`field-${field.key}`"
           type="button"
           @click="updateField(field.key, !field.value)"
           :class="[
@@ -217,8 +222,9 @@ function copyToClipboard() {
 
       <!-- Default: simple text input -->
       <template v-else>
-        <label class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
+        <label :for="`field-${field.key}`" class="text-xs font-medium text-muted-foreground">{{ field.label }}</label>
         <input
+          :id="`field-${field.key}`"
           type="text"
           :value="String(field.value ?? '')"
           @input="updateField(field.key, ($event.target as HTMLInputElement).value)"

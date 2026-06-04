@@ -19,7 +19,7 @@ final class ThrowingTool implements ToolInterface
 
     public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
-        return $this->run($arguments, $agentId);
+        return $this->run();
     }
 
     public function describeAction(array $arguments): string
@@ -27,7 +27,7 @@ final class ThrowingTool implements ToolInterface
         return 'Run throwing tool';
     }
 
-    public function run(array $arguments, int $agentId): ToolResult
+    public function run(): ToolResult
     {
         throw new RuntimeException('Community plugin exploded!');
     }

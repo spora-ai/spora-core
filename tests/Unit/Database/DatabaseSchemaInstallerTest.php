@@ -7,6 +7,10 @@ use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Plugins\PluginLoader;
 
+// Shared stamp path fragments (avoids duplicated string literals across tests).
+const STAMP_BASENAME = '.spora_test_stamp_';
+const PLUGINS_FIXTURE_WITH_MIGRATIONS = '/tests/Fixtures/plugins_with_migrations';
+
 // Helpers
 
 /**
@@ -122,20 +126,20 @@ test('install() skips a component whose stored version is already at code versio
 // Filesystem stamp cache
 
 test('install() writes stamp file after successful run', function (): void {
-    $stamp     = sys_get_temp_dir() . '/.spora_test_stamp_' . uniqid();
+    $stamp     = sys_get_temp_dir() . '/' . STAMP_BASENAME . uniqid();
     $installer = bootInstaller(stampPath: $stamp);
     $installer->install();
 
     expect(is_file($stamp))->toBeTrue();
 })->afterEach(function (): void {
     Database::resetBootState();
-    foreach (glob(sys_get_temp_dir() . '/.spora_test_stamp_*') ?: [] as $f) {
+    foreach (glob(sys_get_temp_dir() . '/' . STAMP_BASENAME . '*') ?: [] as $f) {
         @unlink($f);
     }
 });
 
 test('install() is a zero-query no-op when stamp matches current hash', function (): void {
-    $stamp     = sys_get_temp_dir() . '/.spora_test_stamp_' . uniqid();
+    $stamp     = sys_get_temp_dir() . '/' . STAMP_BASENAME . uniqid();
     $installer = bootInstaller(stampPath: $stamp);
     $installer->install(); // first run — writes stamp + creates tables
 
@@ -150,13 +154,13 @@ test('install() is a zero-query no-op when stamp matches current hash', function
     expect(true)->toBeTrue();
 })->afterEach(function (): void {
     Database::resetBootState();
-    foreach (glob(sys_get_temp_dir() . '/.spora_test_stamp_*') ?: [] as $f) {
+    foreach (glob(sys_get_temp_dir() . '/' . STAMP_BASENAME . '*') ?: [] as $f) {
         @unlink($f);
     }
 });
 
 test('install() runs migrations when stamp file is missing', function (): void {
-    $stamp     = sys_get_temp_dir() . '/.spora_test_stamp_' . uniqid();
+    $stamp     = sys_get_temp_dir() . '/' . STAMP_BASENAME . uniqid();
     $installer = bootInstaller(stampPath: $stamp);
 
     // No stamp file yet — must run migrations.
@@ -165,13 +169,13 @@ test('install() runs migrations when stamp file is missing', function (): void {
     expect(Capsule::schema()->hasTable('users'))->toBeTrue();
 })->afterEach(function (): void {
     Database::resetBootState();
-    foreach (glob(sys_get_temp_dir() . '/.spora_test_stamp_*') ?: [] as $f) {
+    foreach (glob(sys_get_temp_dir() . '/' . STAMP_BASENAME . '*') ?: [] as $f) {
         @unlink($f);
     }
 });
 
 test('install() re-runs migrations when stamp file contains a stale hash', function (): void {
-    $stamp = sys_get_temp_dir() . '/.spora_test_stamp_' . uniqid();
+    $stamp = sys_get_temp_dir() . '/' . STAMP_BASENAME . uniqid();
     file_put_contents($stamp, 'core_v0'); // stale hash
 
     $installer = bootInstaller(stampPath: $stamp);
@@ -182,7 +186,7 @@ test('install() re-runs migrations when stamp file contains a stale hash', funct
     expect(Capsule::schema()->hasTable('users'))->toBeTrue();
 })->afterEach(function (): void {
     Database::resetBootState();
-    foreach (glob(sys_get_temp_dir() . '/.spora_test_stamp_*') ?: [] as $f) {
+    foreach (glob(sys_get_temp_dir() . '/' . STAMP_BASENAME . '*') ?: [] as $f) {
         @unlink($f);
     }
 });
@@ -190,7 +194,7 @@ test('install() re-runs migrations when stamp file contains a stale hash', funct
 // Plugin migrations
 
 test('plugin migrations are run when the plugin declares schemaVersion > 0', function (): void {
-    $loader    = bootLoaderFromFixture(BASE_PATH . '/tests/Fixtures/plugins_with_migrations');
+    $loader    = bootLoaderFromFixture(BASE_PATH . PLUGINS_FIXTURE_WITH_MIGRATIONS);
     $installer = bootInstaller($loader);
     $installer->install();
 
@@ -198,7 +202,7 @@ test('plugin migrations are run when the plugin declares schemaVersion > 0', fun
 })->afterEach(fn() => Database::resetBootState());
 
 test('plugin component row uses slug as key in schema_versions', function (): void {
-    $loader    = bootLoaderFromFixture(BASE_PATH . '/tests/Fixtures/plugins_with_migrations');
+    $loader    = bootLoaderFromFixture(BASE_PATH . PLUGINS_FIXTURE_WITH_MIGRATIONS);
     $installer = bootInstaller($loader);
     $installer->install();
 
@@ -218,7 +222,7 @@ test('plugin with schemaVersion 0 is skipped — no row in schema_versions', fun
 })->afterEach(fn() => Database::resetBootState());
 
 test('plugin migrations are idempotent — running install() twice does not duplicate plugin tables', function (): void {
-    $loader    = bootLoaderFromFixture(BASE_PATH . '/tests/Fixtures/plugins_with_migrations');
+    $loader    = bootLoaderFromFixture(BASE_PATH . PLUGINS_FIXTURE_WITH_MIGRATIONS);
     $installer = bootInstaller($loader);
     $installer->install();
     $installer->install();

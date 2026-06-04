@@ -23,6 +23,103 @@ function saveComposerDrafts(drafts: Record<number, { promptText: string }>): voi
   }
 }
 
+async function enableTool(agentId: number, toolName: string): Promise<AgentTool> {
+  const result = await api.post<{ tool: AgentTool }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/enable`)
+  return result.tool
+}
+
+async function disableTool(agentId: number, toolName: string): Promise<void> {
+  await api.delete(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/enable`)
+}
+
+async function getOperationOverride(
+  agentId: number,
+  toolName: string,
+  operation: string,
+): Promise<{
+  operation: string
+  tool_class: string
+  enabled: boolean | null
+  default_requires_approval: boolean | null
+  effective_enabled: boolean
+  effective_requires_approval: boolean
+}> {
+  const result = await api.get<{
+    enabled: boolean | null
+    default_requires_approval: boolean | null
+    effective_enabled: boolean
+    effective_requires_approval: boolean
+  }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/operations/${encodeURIComponent(operation)}`)
+  return result as any
+}
+
+/**
+ * GET /api/v1/agents/{id}/tools/operations — all operation overrides for all enabled tools.
+ * Returns a flat array; caller transforms it into the nested Record used by the UI.
+ */
+async function getAllOperationOverrides(
+  agentId: number,
+): Promise<Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>>> {
+  const result = await api.get<{
+    operations: Array<{
+      tool_class: string
+      tool_name: string
+      operation: string
+      effective_enabled: boolean
+      effective_requires_approval: boolean
+    }>
+  }>(`/agents/${agentId}/tools/operations`)
+
+  // Re-key by tool_name using the authoritative value from the server.
+  // patchOperationOverride uses tool_name as the URL identifier, so the map must use tool_name keys.
+  const byName: Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>> = {}
+  for (const op of result.operations) {
+    if (!byName[op.tool_name]) {
+      byName[op.tool_name] = {}
+    }
+    byName[op.tool_name][op.operation] = {
+      enabled: op.effective_enabled,
+      requiresApproval: op.effective_requires_approval,
+    }
+  }
+  return byName
+}
+
+async function patchOperationOverride(
+  agentId: number,
+  toolName: string,
+  operation: string,
+  data: { enabled?: boolean | null; default_requires_approval?: boolean | null },
+): Promise<{
+  enabled: boolean | null
+  default_requires_approval: boolean | null
+  effective_enabled: boolean
+  effective_requires_approval: boolean
+}> {
+  const result = await api.patch<{
+    enabled: boolean | null
+    default_requires_approval: boolean | null
+    effective_enabled: boolean
+    effective_requires_approval: boolean
+  }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/operations/${encodeURIComponent(operation)}`, data)
+  return result as any
+}
+
+async function getLLMConfig(agentId: number): Promise<LLMConfigSettings> {
+  const result = await api.get<{ settings: LLMConfigSettings }>(
+    `/agents/${agentId}/tools/${encodeURIComponent('llm_configuration')}/override`,
+  )
+  return result.settings
+}
+
+async function putLLMConfig(agentId: number, settings: LLMConfigSettings): Promise<LLMConfigSettings> {
+  const result = await api.put<{ settings: LLMConfigSettings }>(
+    `/agents/${agentId}/tools/${encodeURIComponent('llm_configuration')}/override`,
+    { settings },
+  )
+  return result.settings
+}
+
 export const useAgentStore = defineStore('agent', () => {
   const agents = ref<Agent[]>([])
   const currentAgent = ref<Agent | null>(null)
@@ -167,121 +264,21 @@ export const useAgentStore = defineStore('agent', () => {
         final_response: (data.final_response as string | null) ?? currentAgentTasks.value[idx].final_response,
         updated_at: (data.updated_at as string) ?? currentAgentTasks.value[idx].updated_at,
       })
-    } else {
-      if (data.status !== undefined) {
-        currentAgentTasks.value.unshift({
-          id: taskId,
-          agent_id: taskAgentId ?? currentAgent.value?.id ?? 0,
-          status: data.status as Task['status'],
-          user_prompt: (data as { user_prompt?: string }).user_prompt ?? '',
-          final_response: (data.final_response as string | null) ?? null,
-          step_count: (data.step_count as number) ?? 0,
-          max_steps: null,
-          updated_at: (data.updated_at as string) ?? new Date().toISOString(),
-          created_at: (data.created_at as string) ?? new Date().toISOString(),
-        })
-      }
+    } else if (data.status !== undefined) {
+      currentAgentTasks.value.unshift({
+        id: taskId,
+        agent_id: taskAgentId ?? currentAgent.value?.id ?? 0,
+        status: data.status as Task['status'],
+        user_prompt: (data as { user_prompt?: string }).user_prompt ?? '',
+        final_response: (data.final_response as string | null) ?? null,
+        step_count: (data.step_count as number) ?? 0,
+        max_steps: null,
+        updated_at: (data.updated_at as string) ?? new Date().toISOString(),
+        created_at: (data.created_at as string) ?? new Date().toISOString(),
+      })
     }
   }
 
-
-  async function enableTool(agentId: number, toolName: string): Promise<AgentTool> {
-    const result = await api.post<{ tool: AgentTool }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/enable`)
-    return result.tool
-  }
-
-  async function disableTool(agentId: number, toolName: string): Promise<void> {
-    await api.delete(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/enable`)
-  }
-
-  async function getOperationOverride(
-    agentId: number,
-    toolName: string,
-    operation: string,
-  ): Promise<{
-    operation: string
-    tool_class: string
-    enabled: boolean | null
-    default_requires_approval: boolean | null
-    effective_enabled: boolean
-    effective_requires_approval: boolean
-  }> {
-    const result = await api.get<{
-      enabled: boolean | null
-      default_requires_approval: boolean | null
-      effective_enabled: boolean
-      effective_requires_approval: boolean
-    }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/operations/${encodeURIComponent(operation)}`)
-    return result as any
-  }
-
-  /**
-   * GET /api/v1/agents/{id}/tools/operations — all operation overrides for all enabled tools.
-   * Returns a flat array; caller transforms it into the nested Record used by the UI.
-   */
-  async function getAllOperationOverrides(
-    agentId: number,
-  ): Promise<Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>>> {
-    const result = await api.get<{
-      operations: Array<{
-        tool_class: string
-        tool_name: string
-        operation: string
-        effective_enabled: boolean
-        effective_requires_approval: boolean
-      }>
-    }>(`/agents/${agentId}/tools/operations`)
-
-    // Re-key by tool_name using the authoritative value from the server.
-    // patchOperationOverride uses tool_name as the URL identifier, so the map must use tool_name keys.
-    const byName: Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>> = {}
-    for (const op of result.operations) {
-      if (!byName[op.tool_name]) {
-        byName[op.tool_name] = {}
-      }
-      byName[op.tool_name][op.operation] = {
-        enabled: op.effective_enabled,
-        requiresApproval: op.effective_requires_approval,
-      }
-    }
-    return byName
-  }
-
-  async function patchOperationOverride(
-    agentId: number,
-    toolName: string,
-    operation: string,
-    data: { enabled?: boolean | null; default_requires_approval?: boolean | null },
-  ): Promise<{
-    enabled: boolean | null
-    default_requires_approval: boolean | null
-    effective_enabled: boolean
-    effective_requires_approval: boolean
-  }> {
-    const result = await api.patch<{
-      enabled: boolean | null
-      default_requires_approval: boolean | null
-      effective_enabled: boolean
-      effective_requires_approval: boolean
-    }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/operations/${encodeURIComponent(operation)}`, data)
-    return result as any
-  }
-
-
-  async function getLLMConfig(agentId: number): Promise<LLMConfigSettings> {
-    const result = await api.get<{ settings: LLMConfigSettings }>(
-      `/agents/${agentId}/tools/${encodeURIComponent('llm_configuration')}/override`,
-    )
-    return result.settings
-  }
-
-  async function putLLMConfig(agentId: number, settings: LLMConfigSettings): Promise<LLMConfigSettings> {
-    const result = await api.put<{ settings: LLMConfigSettings }>(
-      `/agents/${agentId}/tools/${encodeURIComponent('llm_configuration')}/override`,
-      { settings },
-    )
-    return result.settings
-  }
 
   function clearCurrentAgent(): void {
     currentAgent.value = null

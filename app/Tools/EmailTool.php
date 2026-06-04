@@ -83,6 +83,12 @@ final class EmailTool extends AbstractTool
     private const KEY_SMTP_ALLOWED_RECIPIENTS = 'core.smtp.allowed_recipients';
     private const KEY_SMTP_TIMEOUT           = 'core.smtp.timeout';
 
+    // Reused literals
+    private const MSG_IMAP_INCOMPLETE = 'IMAP configuration is incomplete. Please configure IMAP settings.';
+    private const LOG_IMAP_ERROR      = 'IMAP Error';
+    private const PLACEHOLDER_FOLDER  = '[folder]';
+    private const PLACEHOLDER_UID     = '[uid]';
+
     public function __construct(
         private readonly ToolConfigService $configService,
         private readonly ImapClientInterface $imapClient,
@@ -95,7 +101,7 @@ final class EmailTool extends AbstractTool
 
         return match ($operation) {
             'read_inbox'    => $this->readInbox($arguments, $agentId, $userId),
-            'list_folders' => $this->listFolders($arguments, $agentId, $userId),
+            'list_folders' => $this->listFolders($agentId, $userId),
             'read_folder'   => $this->readFolder($arguments, $agentId, $userId),
             'create_draft' => $this->createDraft($arguments, $agentId, $userId),
             'send_email'   => $this->sendEmail($arguments, $agentId, $userId),
@@ -143,7 +149,7 @@ final class EmailTool extends AbstractTool
         $imapSettings = $this->resolveImapSettings($settings);
 
         if ($imapSettings === null) {
-            return new ToolResult(false, 'IMAP configuration is incomplete. Please configure IMAP settings.');
+            return new ToolResult(false, self::MSG_IMAP_INCOMPLETE);
         }
 
         try {
@@ -170,18 +176,18 @@ final class EmailTool extends AbstractTool
 
             return new ToolResult(true, $output);
         } catch (Throwable $e) {
-            $this->logger?->error('IMAP Error', ['exception' => $e]);
+            $this->logger?->error(self::LOG_IMAP_ERROR, ['exception' => $e]);
             return new ToolResult(false, 'Failed to fetch emails: ' . $e->getMessage());
         }
     }
 
-    public function listFolders(array $arguments, int $agentId, ?int $userId): ToolResult
+    public function listFolders(int $agentId, ?int $userId): ToolResult
     {
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $imapSettings = $this->resolveImapSettings($settings);
 
         if ($imapSettings === null) {
-            return new ToolResult(false, 'IMAP configuration is incomplete. Please configure IMAP settings.');
+            return new ToolResult(false, self::MSG_IMAP_INCOMPLETE);
         }
 
         try {
@@ -193,7 +199,7 @@ final class EmailTool extends AbstractTool
 
             return new ToolResult(true, 'Available folders: ' . implode(', ', $names));
         } catch (Throwable $e) {
-            $this->logger?->error('IMAP Error', ['exception' => $e]);
+            $this->logger?->error(self::LOG_IMAP_ERROR, ['exception' => $e]);
             return new ToolResult(false, 'Failed to list folders: ' . $e->getMessage());
         }
     }
@@ -215,7 +221,7 @@ final class EmailTool extends AbstractTool
         $imapSettings = $this->resolveImapSettings($settings);
 
         if ($imapSettings === null) {
-            return new ToolResult(false, 'IMAP configuration is incomplete. Please configure IMAP settings.');
+            return new ToolResult(false, self::MSG_IMAP_INCOMPLETE);
         }
 
         try {
@@ -237,7 +243,7 @@ final class EmailTool extends AbstractTool
 
             return new ToolResult(true, $output);
         } catch (Throwable $e) {
-            $this->logger?->error('IMAP Error', ['exception' => $e]);
+            $this->logger?->error(self::LOG_IMAP_ERROR, ['exception' => $e]);
             return new ToolResult(false, "Failed to read folder '{$folderName}': " . $e->getMessage());
         }
     }
@@ -256,7 +262,7 @@ final class EmailTool extends AbstractTool
         $imapSettings = $this->resolveImapSettings($settings);
 
         if ($imapSettings === null) {
-            return new ToolResult(false, 'IMAP configuration is incomplete. Please configure IMAP settings.');
+            return new ToolResult(false, self::MSG_IMAP_INCOMPLETE);
         }
 
         $from = $settings[self::KEY_SMTP_FROM] ?? '';
@@ -392,35 +398,35 @@ final class EmailTool extends AbstractTool
 
     private function describeRenameFolder(array $arguments): string
     {
-        $from = $arguments['folder'] ?? '[folder]';
+        $from = $arguments['folder'] ?? self::PLACEHOLDER_FOLDER;
         $to = $arguments['new_folder'] ?? '[new name]';
         return "Rename email folder '{$from}' to '{$to}'";
     }
 
     private function describeDeleteFolder(array $arguments): string
     {
-        $name = $arguments['folder'] ?? '[folder]';
+        $name = $arguments['folder'] ?? self::PLACEHOLDER_FOLDER;
         return "Delete email folder '{$name}'";
     }
 
     private function describeMoveEmail(array $arguments): string
     {
-        $uid = $arguments['uid'] ?? '[uid]';
-        $from = $arguments['folder'] ?? '[folder]';
-        $to = $arguments['new_folder'] ?? '[folder]';
+        $uid = $arguments['uid'] ?? self::PLACEHOLDER_UID;
+        $from = $arguments['folder'] ?? self::PLACEHOLDER_FOLDER;
+        $to = $arguments['new_folder'] ?? self::PLACEHOLDER_FOLDER;
         return "Move email UID {$uid} from '{$from}' to '{$to}'";
     }
 
     private function describeDeleteEmail(array $arguments): string
     {
-        $uid = $arguments['uid'] ?? '[uid]';
-        $folder = $arguments['folder'] ?? '[folder]';
+        $uid = $arguments['uid'] ?? self::PLACEHOLDER_UID;
+        $folder = $arguments['folder'] ?? self::PLACEHOLDER_FOLDER;
         return "Delete email UID {$uid} from '{$folder}'";
     }
 
     private function describeMarkEmailRead(array $arguments): string
     {
-        $uid = $arguments['uid'] ?? '[uid]';
+        $uid = $arguments['uid'] ?? self::PLACEHOLDER_UID;
         $read = ($arguments['read'] ?? true) ? 'read' : 'unread';
         return "Mark email UID {$uid} as {$read}";
     }
@@ -437,7 +443,7 @@ final class EmailTool extends AbstractTool
         $imapSettings = $this->resolveImapSettings($settings);
 
         if ($imapSettings === null) {
-            return new ToolResult(false, 'IMAP configuration is incomplete. Please configure IMAP settings.');
+            return new ToolResult(false, self::MSG_IMAP_INCOMPLETE);
         }
 
         try {
@@ -446,7 +452,7 @@ final class EmailTool extends AbstractTool
                 return new ToolResult(true, "Folder '{$name}' already exists.");
             }
         } catch (Throwable $e) {
-            $this->logger?->error('IMAP Error', ['exception' => $e]);
+            $this->logger?->error(self::LOG_IMAP_ERROR, ['exception' => $e]);
             return new ToolResult(false, 'Failed to fetch folders: ' . $e->getMessage());
         }
 
@@ -472,7 +478,7 @@ final class EmailTool extends AbstractTool
         $imapSettings = $this->resolveImapSettings($settings);
 
         if ($imapSettings === null) {
-            return new ToolResult(false, 'IMAP configuration is incomplete. Please configure IMAP settings.');
+            return new ToolResult(false, self::MSG_IMAP_INCOMPLETE);
         }
 
         $success = $this->imapClient->renameFolder($imapSettings, $oldName, $newName);
@@ -496,7 +502,7 @@ final class EmailTool extends AbstractTool
         $imapSettings = $this->resolveImapSettings($settings);
 
         if ($imapSettings === null) {
-            return new ToolResult(false, 'IMAP configuration is incomplete. Please configure IMAP settings.');
+            return new ToolResult(false, self::MSG_IMAP_INCOMPLETE);
         }
 
         try {
@@ -505,7 +511,7 @@ final class EmailTool extends AbstractTool
                 return new ToolResult(true, "Folder '{$name}' does not exist.");
             }
         } catch (Throwable $e) {
-            $this->logger?->error('IMAP Error', ['exception' => $e]);
+            $this->logger?->error(self::LOG_IMAP_ERROR, ['exception' => $e]);
             return new ToolResult(false, 'Failed to fetch folders: ' . $e->getMessage());
         }
 
@@ -535,7 +541,7 @@ final class EmailTool extends AbstractTool
         $imapSettings = $this->resolveImapSettings($settings);
 
         if ($imapSettings === null) {
-            return new ToolResult(false, 'IMAP configuration is incomplete. Please configure IMAP settings.');
+            return new ToolResult(false, self::MSG_IMAP_INCOMPLETE);
         }
 
         $newUid = $this->imapClient->moveEmail($imapSettings, $uid, $fromFolder, $toFolder);
@@ -563,7 +569,7 @@ final class EmailTool extends AbstractTool
         $imapSettings = $this->resolveImapSettings($settings);
 
         if ($imapSettings === null) {
-            return new ToolResult(false, 'IMAP configuration is incomplete. Please configure IMAP settings.');
+            return new ToolResult(false, self::MSG_IMAP_INCOMPLETE);
         }
 
         $success = $this->imapClient->deleteEmail($imapSettings, $uid, $folder);
@@ -592,7 +598,7 @@ final class EmailTool extends AbstractTool
         $imapSettings = $this->resolveImapSettings($settings);
 
         if ($imapSettings === null) {
-            return new ToolResult(false, 'IMAP configuration is incomplete. Please configure IMAP settings.');
+            return new ToolResult(false, self::MSG_IMAP_INCOMPLETE);
         }
 
         $success = $this->imapClient->setEmailFlag($imapSettings, $uid, $folder, 'Seen', $read);

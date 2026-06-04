@@ -3,7 +3,7 @@ import { fetchConfig, isRegistrationEnabled, clearConfigCache } from '@/utils/au
 
 // Create mock fetch using vi.fn()
 const mockFetch = vi.fn()
-global.fetch = mockFetch
+globalThis.fetch = mockFetch
 
 describe('auth utils', () => {
   beforeEach(() => {
@@ -16,7 +16,7 @@ describe('auth utils', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ allow_registration: true }),
-      } as Response)
+      })
 
       const config = await fetchConfig()
 
@@ -28,7 +28,7 @@ describe('auth utils', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ allow_registration: false }),
-      } as Response)
+      })
 
       const config = await fetchConfig()
 
@@ -46,7 +46,7 @@ describe('auth utils', () => {
     it('fails open when response is not ok', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
-      } as Response)
+      })
 
       const config = await fetchConfig()
 
@@ -59,7 +59,7 @@ describe('auth utils', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ allow_registration: true }),
-      } as Response)
+      })
 
       const enabled = await isRegistrationEnabled()
 
@@ -70,7 +70,7 @@ describe('auth utils', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ allow_registration: false }),
-      } as Response)
+      })
 
       const enabled = await isRegistrationEnabled()
 

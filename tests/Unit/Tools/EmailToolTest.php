@@ -8,6 +8,17 @@ use Spora\Services\ImapClientInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\EmailTool;
 
+const EMAIL_FROM = 'alice@example.com';
+const EMAIL_TO_BOB = 'bob@example.com';
+const EMAIL_DATE_SAMPLE = '2025-01-15 10:30:00';
+const EMAIL_BODY_HI_ALICE = 'Hi Alice';
+const EMAIL_ERR_IMAP_INCOMPLETE = 'IMAP configuration is incomplete';
+const EMAIL_NAME_UID_MISSING = 'returns error when uid is missing';
+const EMAIL_NAME_IMAP_INCOMPLETE = 'returns error when IMAP config is incomplete';
+const EMAIL_NAME_IMAP_EXCEPTION = 'returns error when IMAP throws an exception';
+const EMAIL_ALLOWED_BOB = 'alice@example.com, bob@example.com';
+const EMAIL_SECURITY_REJECTION = 'SECURITY REJECTION';
+
 function makeEmailTool(ToolConfigService&MockInterface $config, ImapClientInterface&MockInterface $imap): EmailTool
 {
     return new EmailTool($config, $imap, new NullLogger());
@@ -19,13 +30,13 @@ function allImapSettings(): array
         'core.imap.host'       => 'imap.example.com',
         'core.imap.port'       => '993',
         'core.imap.encryption' => 'ssl',
-        'core.email.username'  => 'alice@example.com',
+        'core.email.username'  => EMAIL_FROM,
         'core.email.password'  => 'secret123',
         'core.imap.timeout'    => '60',
     ];
 }
 
-function allSmtpSettings(string $from = 'alice@example.com', string $allowedTo = ''): array
+function allSmtpSettings(string $from = EMAIL_FROM, string $allowedTo = ''): array
 {
     return [
         'core.smtp.host'               => 'smtp.example.com',
@@ -42,7 +53,7 @@ describe('EmailTool', function () {
     // read_inbox
 
     describe('read_inbox', function () {
-        it('returns error when IMAP config is incomplete', function () {
+        it(EMAIL_NAME_IMAP_INCOMPLETE, function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')->andReturn([]);
             $imap = Mockery::mock(ImapClientInterface::class);
@@ -51,7 +62,7 @@ describe('EmailTool', function () {
             $result = $tool->execute(['action' => 'read_inbox', 'limit' => 5], 1);
 
             expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('IMAP configuration is incomplete');
+                ->and($result->content)->toContain(EMAIL_ERR_IMAP_INCOMPLETE);
         });
 
         it('returns empty message when no recent emails', function () {
@@ -72,8 +83,8 @@ describe('EmailTool', function () {
                 [
                     'uid'     => '123',
                     'subject' => 'Hello',
-                    'from'    => 'bob@example.com',
-                    'date'    => '2025-01-15 10:30:00',
+                    'from'    => EMAIL_TO_BOB,
+                    'date'    => EMAIL_DATE_SAMPLE,
                     'body'    => 'Hi Alice, how are you?',
                 ],
             ];
@@ -88,9 +99,9 @@ describe('EmailTool', function () {
             expect($result->success)->toBeTrue()
                 ->and($result->content)->toContain('UID: 123')
                 ->and($result->content)->toContain('Hello')
-                ->and($result->content)->toContain('bob@example.com')
-                ->and($result->content)->toContain('2025-01-15 10:30:00')
-                ->and($result->content)->toContain('Hi Alice');
+                ->and($result->content)->toContain(EMAIL_TO_BOB)
+                ->and($result->content)->toContain(EMAIL_DATE_SAMPLE)
+                ->and($result->content)->toContain(EMAIL_BODY_HI_ALICE);
         });
 
         it('passes mark_as_read to IMAP client', function () {
@@ -121,7 +132,7 @@ describe('EmailTool', function () {
             expect($result->success)->toBeTrue();
         });
 
-        it('returns error when IMAP throws an exception', function () {
+        it(EMAIL_NAME_IMAP_EXCEPTION, function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')->andReturn(allImapSettings());
             $imap = Mockery::mock(ImapClientInterface::class);
@@ -154,9 +165,9 @@ describe('EmailTool', function () {
                 [
                     'uid'     => '123',
                     'subject' => 'Hello',
-                    'from'    => 'bob@example.com',
-                    'date'    => '2025-01-15 10:30:00',
-                    'body'    => 'Hi Alice',
+                    'from'    => EMAIL_TO_BOB,
+                    'date'    => EMAIL_DATE_SAMPLE,
+                    'body'    => EMAIL_BODY_HI_ALICE,
                 ],
             ];
             $config = Mockery::mock(ToolConfigService::class);
@@ -177,9 +188,9 @@ describe('EmailTool', function () {
                 [
                     'uid'     => '123',
                     'subject' => 'Hello',
-                    'from'    => 'bob@example.com',
-                    'date'    => '2025-01-15 10:30:00',
-                    'body'    => 'Hi Alice',
+                    'from'    => EMAIL_TO_BOB,
+                    'date'    => EMAIL_DATE_SAMPLE,
+                    'body'    => EMAIL_BODY_HI_ALICE,
                 ],
             ];
             $config = Mockery::mock(ToolConfigService::class);
@@ -211,7 +222,7 @@ describe('EmailTool', function () {
     // list_folders
 
     describe('list_folders', function () {
-        it('returns error when IMAP config is incomplete', function () {
+        it(EMAIL_NAME_IMAP_INCOMPLETE, function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')->andReturn([]);
             $imap = Mockery::mock(ImapClientInterface::class);
@@ -220,7 +231,7 @@ describe('EmailTool', function () {
             $result = $tool->execute(['action' => 'list_folders'], 1);
 
             expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('IMAP configuration is incomplete');
+                ->and($result->content)->toContain(EMAIL_ERR_IMAP_INCOMPLETE);
         });
 
         it('returns folder names as comma-separated list', function () {
@@ -252,7 +263,7 @@ describe('EmailTool', function () {
                 ->and($result->content)->toContain('No email folders found');
         });
 
-        it('returns error when IMAP throws an exception', function () {
+        it(EMAIL_NAME_IMAP_EXCEPTION, function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')->andReturn(allImapSettings());
             $imap = Mockery::mock(ImapClientInterface::class);
@@ -281,7 +292,7 @@ describe('EmailTool', function () {
                 ->and($result->content)->toContain('folder name is required');
         });
 
-        it('returns error when IMAP config is incomplete', function () {
+        it(EMAIL_NAME_IMAP_INCOMPLETE, function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')->andReturn([]);
             $imap = Mockery::mock(ImapClientInterface::class);
@@ -290,7 +301,7 @@ describe('EmailTool', function () {
             $result = $tool->execute(['action' => 'read_folder', 'folder' => 'Sent'], 1);
 
             expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('IMAP configuration is incomplete');
+                ->and($result->content)->toContain(EMAIL_ERR_IMAP_INCOMPLETE);
         });
 
         it('formats folder messages correctly', function () {
@@ -333,7 +344,7 @@ describe('EmailTool', function () {
                 ->and($result->content)->toContain("No emails found in folder 'Sent'");
         });
 
-        it('returns error when IMAP throws an exception', function () {
+        it(EMAIL_NAME_IMAP_EXCEPTION, function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')->andReturn(allImapSettings());
             $imap = Mockery::mock(ImapClientInterface::class);
@@ -372,14 +383,14 @@ describe('EmailTool', function () {
 
             $result = $tool->execute([
                 'action'   => 'create_draft',
-                'to'       => 'bob@example.com',
+                'to'       => EMAIL_TO_BOB,
                 'subject'  => 'Weekly Update',
                 'body'     => 'Here is the update...',
             ], 1);
 
             expect($result->success)->toBeTrue()
                 ->and($result->content)->toContain('agent@spora.local')
-                ->and($result->content)->toContain('bob@example.com')
+                ->and($result->content)->toContain(EMAIL_TO_BOB)
                 ->and($result->content)->toContain('Weekly Update')
                 ->and($result->content)->toContain('Here is the update')
                 ->and($result->content)->toContain('Draft saved to Drafts folder');
@@ -395,7 +406,7 @@ describe('EmailTool', function () {
 
             $result = $tool->execute([
                 'action'   => 'create_draft',
-                'to'       => 'bob@example.com',
+                'to'       => EMAIL_TO_BOB,
                 'subject'  => 'Test',
                 'body'     => 'Body',
             ], 1);
@@ -428,7 +439,7 @@ describe('EmailTool', function () {
 
             $result = $tool->execute([
                 'action'  => 'send_email',
-                'to'      => 'bob@example.com',
+                'to'      => EMAIL_TO_BOB,
                 'subject' => 'Test',
                 'body'    => 'Body',
             ], 1);
@@ -441,7 +452,7 @@ describe('EmailTool', function () {
         it('rejects recipient outside allowed list', function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')
-                ->andReturn(allSmtpSettings('alice@example.com', 'alice@example.com, bob@example.com'));
+                ->andReturn(allSmtpSettings(EMAIL_FROM, EMAIL_ALLOWED_BOB));
             $imap = Mockery::mock(ImapClientInterface::class);
             $tool = makeEmailTool($config, $imap);
 
@@ -453,15 +464,15 @@ describe('EmailTool', function () {
             ], 1);
 
             expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('SECURITY REJECTION')
+                ->and($result->content)->toContain(EMAIL_SECURITY_REJECTION)
                 ->and($result->content)->toContain('untrusted@example.com')
-                ->and($result->content)->toContain('alice@example.com, bob@example.com');
+                ->and($result->content)->toContain(EMAIL_ALLOWED_BOB);
         });
 
         it('allows any recipient when allowed_recipients is *', function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')
-                ->andReturn(allSmtpSettings('alice@example.com', '*'));
+                ->andReturn(allSmtpSettings(EMAIL_FROM, '*'));
             $imap = Mockery::mock(ImapClientInterface::class);
             $tool = makeEmailTool($config, $imap);
 
@@ -474,26 +485,26 @@ describe('EmailTool', function () {
 
             // Fails on actual SMTP send (no real server), but NOT security rejection
             expect($result->success)->toBeFalse()
-                ->and($result->content)->not->toContain('SECURITY REJECTION');
+                ->and($result->content)->not->toContain(EMAIL_SECURITY_REJECTION);
         });
 
         it('allows recipient in the allowed list', function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')
-                ->andReturn(allSmtpSettings('alice@example.com', 'alice@example.com, bob@example.com'));
+                ->andReturn(allSmtpSettings(EMAIL_FROM, EMAIL_ALLOWED_BOB));
             $imap = Mockery::mock(ImapClientInterface::class);
             $tool = makeEmailTool($config, $imap);
 
             $result = $tool->execute([
                 'action'  => 'send_email',
-                'to'      => 'bob@example.com',
+                'to'      => EMAIL_TO_BOB,
                 'subject' => 'Test',
                 'body'    => 'Body',
             ], 1);
 
             // Fails on actual SMTP send (no real server), but NOT security rejection
             expect($result->success)->toBeFalse()
-                ->and($result->content)->not->toContain('SECURITY REJECTION');
+                ->and($result->content)->not->toContain(EMAIL_SECURITY_REJECTION);
         });
     });
 
@@ -511,7 +522,7 @@ describe('EmailTool', function () {
                 ->and($result->content)->toContain('new_folder');
         });
 
-        it('returns error when IMAP config is incomplete', function () {
+        it(EMAIL_NAME_IMAP_INCOMPLETE, function () {
             $config = Mockery::mock(ToolConfigService::class);
             $config->allows('getEffectiveSettings')->andReturn([]);
             $imap = Mockery::mock(ImapClientInterface::class);
@@ -520,7 +531,7 @@ describe('EmailTool', function () {
             $result = $tool->execute(['action' => 'create_folder', 'new_folder' => 'MyFolder'], 1);
 
             expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('IMAP configuration is incomplete');
+                ->and($result->content)->toContain(EMAIL_ERR_IMAP_INCOMPLETE);
         });
 
         it('returns success when folder is created', function () {
@@ -639,7 +650,7 @@ describe('EmailTool', function () {
     // move_email
 
     describe('move_email', function () {
-        it('returns error when uid is missing', function () {
+        it(EMAIL_NAME_UID_MISSING, function () {
             $config = Mockery::mock(ToolConfigService::class);
             $imap = Mockery::mock(ImapClientInterface::class);
             $tool = makeEmailTool($config, $imap);
@@ -680,7 +691,7 @@ describe('EmailTool', function () {
     // delete_email
 
     describe('delete_email', function () {
-        it('returns error when uid is missing', function () {
+        it(EMAIL_NAME_UID_MISSING, function () {
             $config = Mockery::mock(ToolConfigService::class);
             $imap = Mockery::mock(ImapClientInterface::class);
             $tool = makeEmailTool($config, $imap);
@@ -719,7 +730,7 @@ describe('EmailTool', function () {
     // mark_email_read
 
     describe('mark_email_read', function () {
-        it('returns error when uid is missing', function () {
+        it(EMAIL_NAME_UID_MISSING, function () {
             $config = Mockery::mock(ToolConfigService::class);
             $imap = Mockery::mock(ImapClientInterface::class);
             $tool = makeEmailTool($config, $imap);
@@ -770,7 +781,7 @@ describe('EmailTool', function () {
             expect($tool->describeAction(['action' => 'list_folders']))->toBe('List all email folders');
             expect($tool->describeAction(['action' => 'read_folder']))->toBe('Read emails from a specific folder');
             expect($tool->describeAction(['action' => 'create_draft']))->toBe('Save an email draft to the Drafts folder');
-            expect($tool->describeAction(['action' => 'send_email', 'to' => 'bob@example.com', 'subject' => 'Hello']))
+            expect($tool->describeAction(['action' => 'send_email', 'to' => EMAIL_TO_BOB, 'subject' => 'Hello']))
                 ->toBe("Sending email to bob@example.com with subject: 'Hello'");
             expect($tool->describeAction(['action' => 'create_folder', 'new_folder' => 'MyFolder']))
                 ->toBe("Create email folder 'MyFolder'");

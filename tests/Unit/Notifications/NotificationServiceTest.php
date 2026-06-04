@@ -12,6 +12,10 @@ use Spora\Security\CsrfTokenService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 
+defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
+defined('TEST_TIMESTAMP_FORMAT') || define('TEST_TIMESTAMP_FORMAT', 'Y-m-d H:i:s');
+const NOTIFICATIONS_API_PATH = '/api/v1/notifications/';
+
 function makeNotificationService(?MercurePublisherInterface $mercureOverride = null): NotificationService
 {
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
@@ -37,7 +41,7 @@ function makeNotificationController(): array
 function seedUserAndAgentForNotification(): array
 {
     $authService = bootAuthLayer();
-    $userId = $authService->register('notify@example.com', 'Password1!', 'Notify');
+    $userId = $authService->register('notify@example.com', TEST_PASSWORD, 'Notify');
     simulateLoggedInSession($userId, 'notify@example.com');
 
     $agent = Agent::create([
@@ -175,13 +179,13 @@ describe('NotificationService', function (): void {
             'user_id'    => $userId,
             'type'       => 'task_completed',
             'title'      => 'First',
-            'created_at' => date('Y-m-d H:i:s', strtotime('-2 hours')),
+            'created_at' => date(TEST_TIMESTAMP_FORMAT, strtotime('-2 hours')),
         ]);
         $newer = Notification::create([
             'user_id'    => $userId,
             'type'       => 'task_failed',
             'title'      => 'Second',
-            'created_at' => date('Y-m-d H:i:s', strtotime('-1 hour')),
+            'created_at' => date(TEST_TIMESTAMP_FORMAT, strtotime('-1 hour')),
         ]);
 
         $all = Notification::where('user_id', $userId)->orderByDesc('created_at')->get();
@@ -213,7 +217,7 @@ describe('NotificationController', function (): void {
 
         Notification::create([
             'user_id' => $userId, 'type' => 'task_completed', 'title' => 'Read',
-            'read_at' => date('Y-m-d H:i:s'),
+            'read_at' => date(TEST_TIMESTAMP_FORMAT),
         ]);
         Notification::create([
             'user_id' => $userId, 'type' => 'task_completed', 'title' => 'Unread',
@@ -237,7 +241,7 @@ describe('NotificationController', function (): void {
         expect($notif->read_at)->toBeNull();
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
-        $request = jsonRequest('POST', '/api/v1/notifications/' . $notif->id . '/read');
+        $request = jsonRequest('POST', NOTIFICATIONS_API_PATH . $notif->id . '/read');
         $request->attributes->set('id', $notif->id);
         $response = $controller->markRead($request);
 
@@ -247,15 +251,15 @@ describe('NotificationController', function (): void {
     });
 
     it('markRead returns 404 for notification belonging to another user', function (): void {
-        [$userId] = seedUserAndAgentForNotification();
-        $otherUserId = bootAuthLayer()->register('other@example.com', 'Password1!', 'Other');
+        seedUserAndAgentForNotification();
+        $otherUserId = bootAuthLayer()->register('other@example.com', TEST_PASSWORD, 'Other');
 
         $notif = Notification::create([
             'user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Other',
         ]);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
-        $request = jsonRequest('POST', '/api/v1/notifications/' . $notif->id . '/read');
+        $request = jsonRequest('POST', NOTIFICATIONS_API_PATH . $notif->id . '/read');
         $response = $controller->markRead($request);
 
         expect($response->getStatusCode())->toBe(404);
@@ -283,7 +287,7 @@ describe('NotificationController', function (): void {
         ]);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
-        $request = jsonRequest('DELETE', '/api/v1/notifications/' . $notif->id);
+        $request = jsonRequest('DELETE', NOTIFICATIONS_API_PATH . $notif->id);
         $request->attributes->set('id', $notif->id);
         $response = $controller->destroy($request);
 
@@ -294,15 +298,15 @@ describe('NotificationController', function (): void {
     });
 
     it('destroy returns 404 for notification belonging to another user', function (): void {
-        [$userId] = seedUserAndAgentForNotification();
-        $otherUserId = bootAuthLayer()->register('other@example.com', 'Password1!', 'Other');
+        seedUserAndAgentForNotification();
+        $otherUserId = bootAuthLayer()->register('other@example.com', TEST_PASSWORD, 'Other');
 
         $notif = Notification::create([
             'user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Other',
         ]);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
-        $request = jsonRequest('DELETE', '/api/v1/notifications/' . $notif->id);
+        $request = jsonRequest('DELETE', NOTIFICATIONS_API_PATH . $notif->id);
         $response = $controller->destroy($request);
 
         expect($response->getStatusCode())->toBe(404);

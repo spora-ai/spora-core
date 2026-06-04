@@ -11,6 +11,12 @@ use Spora\Security\CsrfTokenService;
 use Spora\Services\ToolConfigService;
 use Tests\Fixtures\TestTool;
 
+const TC_API_TOOLS = '/api/v1/tools';
+const TC_TOOL_SETTINGS = '/api/v1/tools/test_tool/settings';
+const TC_USER_EMAIL = 'user@example.com';
+const TC_USER_NAME = 'Test User';
+const TC_USER_PASSWORD = 'Password1!';
+
 // Helpers
 
 /**
@@ -40,7 +46,7 @@ test('unauthenticated request throws UnauthenticatedException', function (): voi
     clearSession();
     [$controller, , , $authMiddleware, $csrfMiddleware] = makeToolController([TestTool::class]);
 
-    expect(fn() => callController($controller, 'index', jsonRequest('GET', '/api/v1/tools'), [$authMiddleware, $csrfMiddleware]))
+    expect(fn() => callController($controller, 'index', jsonRequest('GET', TC_API_TOOLS), [$authMiddleware, $csrfMiddleware]))
         ->toThrow(UnauthenticatedException::class);
 });
 
@@ -49,10 +55,10 @@ test('unauthenticated request throws UnauthenticatedException', function (): voi
 test('index returns schema for registered tool classes', function (): void {
     clearSession();
     [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([TestTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
-    simulateLoggedInSession($userId, 'user@example.com');
+    $userId = $authService->register(TC_USER_EMAIL, TC_USER_PASSWORD, TC_USER_NAME);
+    simulateLoggedInSession($userId, TC_USER_EMAIL);
 
-    $response = callController($controller, 'index', jsonRequest('GET', '/api/v1/tools'), [$authMiddleware, $csrfMiddleware]);
+    $response = callController($controller, 'index', jsonRequest('GET', TC_API_TOOLS), [$authMiddleware, $csrfMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
@@ -67,10 +73,10 @@ test('index returns schema for registered tool classes', function (): void {
 test('index returns correct schema field structure', function (): void {
     clearSession();
     [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([TestTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
-    simulateLoggedInSession($userId, 'user@example.com');
+    $userId = $authService->register(TC_USER_EMAIL, TC_USER_PASSWORD, TC_USER_NAME);
+    simulateLoggedInSession($userId, TC_USER_EMAIL);
 
-    $response = callController($controller, 'index', jsonRequest('GET', '/api/v1/tools'), [$authMiddleware, $csrfMiddleware]);
+    $response = callController($controller, 'index', jsonRequest('GET', TC_API_TOOLS), [$authMiddleware, $csrfMiddleware]);
     $body     = json_decode($response->getContent(), true);
     $schema   = $body['data']['tools'][0]['settings_schema'];
 
@@ -85,10 +91,10 @@ test('index returns correct schema field structure', function (): void {
 test('index returns empty tools list when no classes registered', function (): void {
     clearSession();
     [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([]);
-    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
-    simulateLoggedInSession($userId, 'user@example.com');
+    $userId = $authService->register(TC_USER_EMAIL, TC_USER_PASSWORD, TC_USER_NAME);
+    simulateLoggedInSession($userId, TC_USER_EMAIL);
 
-    $response = callController($controller, 'index', jsonRequest('GET', '/api/v1/tools'), [$authMiddleware, $csrfMiddleware]);
+    $response = callController($controller, 'index', jsonRequest('GET', TC_API_TOOLS), [$authMiddleware, $csrfMiddleware]);
     $body     = json_decode($response->getContent(), true);
 
     expect($body['data']['tools'])->toBe([]);
@@ -99,10 +105,10 @@ test('index returns empty tools list when no classes registered', function (): v
 test('getSettings returns empty array when no settings saved yet', function (): void {
     clearSession();
     [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([TestTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
-    simulateLoggedInSession($userId, 'user@example.com');
+    $userId = $authService->register(TC_USER_EMAIL, TC_USER_PASSWORD, TC_USER_NAME);
+    simulateLoggedInSession($userId, TC_USER_EMAIL);
 
-    $request = jsonRequest('GET', '/api/v1/tools/test_tool/settings');
+    $request = jsonRequest('GET', TC_TOOL_SETTINGS);
     $request->attributes->set('toolId', 'test_tool');
     $response = callController($controller, 'getSettings', $request, [$authMiddleware, $csrfMiddleware]);
 
@@ -114,15 +120,15 @@ test('getSettings returns empty array when no settings saved yet', function (): 
 test('getSettings returns masked password after putSettings', function (): void {
     clearSession();
     [$controller, $authService, , $authMiddleware, $csrfMiddleware, $csrfService] = makeToolController([TestTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
-    simulateLoggedInSession($userId, 'user@example.com');
+    $userId = $authService->register(TC_USER_EMAIL, TC_USER_PASSWORD, TC_USER_NAME);
+    simulateLoggedInSession($userId, TC_USER_EMAIL);
     $csrfService->regenerate();
 
-    $putRequest = jsonRequest('PUT', '/api/v1/tools/test_tool/settings', ['api_key' => 'my-secret']);
+    $putRequest = jsonRequest('PUT', TC_TOOL_SETTINGS, ['api_key' => 'my-secret']);
     $putRequest->attributes->set('toolId', 'test_tool');
     callController($controller, 'putSettings', $putRequest, [$authMiddleware, $csrfMiddleware]);
 
-    $getRequest = jsonRequest('GET', '/api/v1/tools/test_tool/settings');
+    $getRequest = jsonRequest('GET', TC_TOOL_SETTINGS);
     $getRequest->attributes->set('toolId', 'test_tool');
     $response = callController($controller, 'getSettings', $getRequest, [$authMiddleware, $csrfMiddleware]);
 
@@ -135,11 +141,11 @@ test('getSettings returns masked password after putSettings', function (): void 
 test('putSettings saves settings and returns masked result', function (): void {
     clearSession();
     [$controller, $authService, $toolConfig, $authMiddleware, $csrfMiddleware, $csrfService] = makeToolController([TestTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
-    simulateLoggedInSession($userId, 'user@example.com');
+    $userId = $authService->register(TC_USER_EMAIL, TC_USER_PASSWORD, TC_USER_NAME);
+    simulateLoggedInSession($userId, TC_USER_EMAIL);
     $csrfService->regenerate();
 
-    $request = jsonRequest('PUT', '/api/v1/tools/test_tool/settings', [
+    $request = jsonRequest('PUT', TC_TOOL_SETTINGS, [
         'api_key'     => 'secret-value',
         'max_results' => '25',
     ]);
@@ -162,11 +168,11 @@ test('putSettings saves settings and returns masked result', function (): void {
 test('putSettings accepts settings nested under a settings key', function (): void {
     clearSession();
     [$controller, $authService, , $authMiddleware, $csrfMiddleware, $csrfService] = makeToolController([TestTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
-    simulateLoggedInSession($userId, 'user@example.com');
+    $userId = $authService->register(TC_USER_EMAIL, TC_USER_PASSWORD, TC_USER_NAME);
+    simulateLoggedInSession($userId, TC_USER_EMAIL);
     $csrfService->regenerate();
 
-    $request = jsonRequest('PUT', '/api/v1/tools/test_tool/settings', [
+    $request = jsonRequest('PUT', TC_TOOL_SETTINGS, [
         'settings' => ['max_results' => '5'],
     ]);
     $request->attributes->set('toolId', 'test_tool');
@@ -180,8 +186,8 @@ test('putSettings accepts settings nested under a settings key', function (): vo
 test('getSettings resolves tool by name for real tool classes', function (): void {
     clearSession();
     [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([Spora\Tools\ReadUrlTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
-    simulateLoggedInSession($userId, 'user@example.com');
+    $userId = $authService->register(TC_USER_EMAIL, TC_USER_PASSWORD, TC_USER_NAME);
+    simulateLoggedInSession($userId, TC_USER_EMAIL);
 
     $request = jsonRequest('GET', '/api/v1/tools/read_url/settings');
     $request->attributes->set('toolId', 'read_url');
@@ -195,8 +201,8 @@ test('getSettings resolves tool by name for real tool classes', function (): voi
 test('getSettings returns 404 for unknown tool name', function (): void {
     clearSession();
     [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([Spora\Tools\ReadUrlTool::class]);
-    $userId = $authService->register('user@example.com', 'Password1!', 'Test User');
-    simulateLoggedInSession($userId, 'user@example.com');
+    $userId = $authService->register(TC_USER_EMAIL, TC_USER_PASSWORD, TC_USER_NAME);
+    simulateLoggedInSession($userId, TC_USER_EMAIL);
 
     $request = jsonRequest('GET', '/api/v1/tools/nonexistent_tool/settings');
     $request->attributes->set('toolId', 'nonexistent_tool');

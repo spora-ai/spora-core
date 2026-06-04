@@ -6,11 +6,13 @@ use Spora\Core\SecurityManager;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\UserInfoTool;
 
+const USERINFO_TEST_PASSWORD = 'Password1!';
+
 describe('UserInfoTool', function (): void {
 
     it('returns empty strings for null fields', function (): void {
         $authService = bootAuthLayer();
-        $userId = bootAuth($authService, 'userinfo@example.com', 'Password1!');
+        $userId = bootAuth($authService, 'userinfo@example.com', USERINFO_TEST_PASSWORD);
         simulateLoggedInSession($userId, 'userinfo@example.com');
 
         // Ensure user has no name set for this test
@@ -31,7 +33,7 @@ describe('UserInfoTool', function (): void {
 
     it('returns filled fields when user has profile data', function (): void {
         $authService = bootAuthLayer();
-        $userId = bootAuth($authService, 'userinfo2@example.com', 'Password1!');
+        $userId = bootAuth($authService, 'userinfo2@example.com', USERINFO_TEST_PASSWORD);
         simulateLoggedInSession($userId, 'userinfo2@example.com');
 
         $user = Spora\Models\User::find($userId);
@@ -70,7 +72,7 @@ describe('UserInfoTool', function (): void {
 
     it('get_locations returns no locations when none exist', function (): void {
         $authService = bootAuthLayer();
-        $userId = bootAuth($authService, 'userinfo3@example.com', 'Password1!');
+        $userId = bootAuth($authService, 'userinfo3@example.com', USERINFO_TEST_PASSWORD);
         simulateLoggedInSession($userId, 'userinfo3@example.com');
 
         $tool = new UserInfoTool();
@@ -83,7 +85,7 @@ describe('UserInfoTool', function (): void {
 
     it('get_locations returns user locations', function (): void {
         $authService = bootAuthLayer();
-        $userId = bootAuth($authService, 'userinfo4@example.com', 'Password1!');
+        $userId = bootAuth($authService, 'userinfo4@example.com', USERINFO_TEST_PASSWORD);
         simulateLoggedInSession($userId, 'userinfo4@example.com');
 
         Spora\Models\UserLocation::create([
@@ -105,7 +107,7 @@ describe('UserInfoTool', function (): void {
 
     it('get_health_data returns health data for user with health measurements', function (): void {
         $authService = bootAuthLayer();
-        $userId = bootAuth($authService, 'userinfo6@example.com', 'Password1!');
+        $userId = bootAuth($authService, 'userinfo6@example.com', USERINFO_TEST_PASSWORD);
         simulateLoggedInSession($userId, 'userinfo6@example.com');
 
         $user = Spora\Models\User::find($userId);
@@ -123,7 +125,7 @@ describe('UserInfoTool', function (): void {
     });
 
     it('describeAction returns correct descriptions', function (): void {
-        $authService = bootAuthLayer();
+        bootAuthLayer();
         $tool = new UserInfoTool();
 
         expect($tool->describeAction(['action' => 'get_base_data']))->toContain('base profile data');
@@ -133,7 +135,7 @@ describe('UserInfoTool', function (): void {
     });
 
     it('getParametersSchema returns valid schema', function (): void {
-        $authService = bootAuthLayer();
+        bootAuthLayer();
         $tool = new UserInfoTool();
         $schema = $tool->getParametersSchema();
 

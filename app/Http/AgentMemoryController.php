@@ -17,6 +17,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class AgentMemoryController
 {
+    private const INVALID_JSON_MESSAGE = 'Request body must be valid JSON.';
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly MemoryServiceInterface $memoryService,
@@ -50,7 +52,7 @@ final class AgentMemoryController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::INVALID_JSON_MESSAGE, Response::HTTP_BAD_REQUEST);
         }
 
         $name = trim((string) ($body['name'] ?? ''));
@@ -58,6 +60,11 @@ final class AgentMemoryController
             return $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        return $this->createMemoryOrNotFound($agentId, $userId, $body);
+    }
+
+    private function createMemoryOrNotFound(int $agentId, int $userId, array $body): JsonResponse
+    {
         try {
             $result = $this->memoryService->createAgentMemory($agentId, $userId, $body);
             return new JsonResponse(['data' => $result], Response::HTTP_CREATED);
@@ -96,7 +103,7 @@ final class AgentMemoryController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::INVALID_JSON_MESSAGE, Response::HTTP_BAD_REQUEST);
         }
 
         $result = $this->memoryService->updateAgentMemory($memoryId, $agentId, $userId, $body);
@@ -137,7 +144,7 @@ final class AgentMemoryController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::INVALID_JSON_MESSAGE, Response::HTTP_BAD_REQUEST);
         }
 
         $order = $body['order'] ?? [];
@@ -145,8 +152,13 @@ final class AgentMemoryController
             return $this->error('VALIDATION_ERROR', 'order must be an array of memory IDs.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        return $this->reorderMemoriesOrNotFound($agentId, $userId, array_values($order));
+    }
+
+    private function reorderMemoriesOrNotFound(int $agentId, int $userId, array $order): JsonResponse
+    {
         try {
-            $this->memoryService->reorderAgentMemories($agentId, $userId, array_values($order));
+            $this->memoryService->reorderAgentMemories($agentId, $userId, $order);
         } catch (RuntimeException) {
             return $this->notFound();
         }

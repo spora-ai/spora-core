@@ -17,6 +17,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class MemoryController
 {
+    private const ERR_INVALID_JSON_MESSAGE = 'Request body must be valid JSON.';
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly MemoryServiceInterface $memoryService,
@@ -44,7 +46,7 @@ final class MemoryController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::ERR_INVALID_JSON_MESSAGE, Response::HTTP_BAD_REQUEST);
         }
 
         $name = trim((string) ($body['name'] ?? ''));
@@ -54,10 +56,12 @@ final class MemoryController
 
         try {
             $result = $this->memoryService->createGlobalMemory($userId, $body);
-            return new JsonResponse(['data' => $result], Response::HTTP_CREATED);
+            $response = new JsonResponse(['data' => $result], Response::HTTP_CREATED);
         } catch (RuntimeException $e) {
-            return $this->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+            $response = $this->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
+
+        return $response;
     }
 
     /**
@@ -88,7 +92,7 @@ final class MemoryController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::ERR_INVALID_JSON_MESSAGE, Response::HTTP_BAD_REQUEST);
         }
 
         $result = $this->memoryService->updateGlobalMemory($memoryId, $userId, $body);
@@ -127,7 +131,7 @@ final class MemoryController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+            return $this->error('INVALID_JSON', self::ERR_INVALID_JSON_MESSAGE, Response::HTTP_BAD_REQUEST);
         }
 
         $order = $body['order'] ?? [];

@@ -8,6 +8,11 @@ use Spora\Tools\WeatherApiTool;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 
+const WEATHER_LOCATION_REQUIRED = 'Location is required';
+const WEATHER_SUNRISE = '05:12 AM';
+const WEATHER_SUNSET = '06:22 PM';
+const WEATHER_ASTRONOMY_DATE = '2026-04-15';
+
 describe('WeatherApiTool', function (): void {
 
     it('returns error if api key is missing', function (): void {
@@ -31,7 +36,7 @@ describe('WeatherApiTool', function (): void {
 
         $result = $tool->execute(['action' => 'current', 'location' => ''], 1);
         expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('Location is required');
+            ->and($result->content)->toContain(WEATHER_LOCATION_REQUIRED);
     });
 
     it('returns error if query is missing for search', function (): void {
@@ -67,7 +72,7 @@ describe('WeatherApiTool', function (): void {
 
         $result = $tool->execute(['action' => 'forecast', 'location' => ''], 1);
         expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('Location is required');
+            ->and($result->content)->toContain(WEATHER_LOCATION_REQUIRED);
     });
 
     it('returns error if location is missing for astronomy', function (): void {
@@ -79,7 +84,7 @@ describe('WeatherApiTool', function (): void {
 
         $result = $tool->execute(['action' => 'astronomy', 'location' => ''], 1);
         expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('Location is required');
+            ->and($result->content)->toContain(WEATHER_LOCATION_REQUIRED);
     });
 
     it('current operation makes correct HTTP request and parses response', function (): void {
@@ -243,8 +248,8 @@ describe('WeatherApiTool', function (): void {
             'location' => ['name' => 'Tokyo', 'country' => 'Japan'],
             'astronomy' => [
                 'astro' => [
-                    'sunrise' => '05:12 AM',
-                    'sunset' => '06:22 PM',
+                    'sunrise' => WEATHER_SUNRISE,
+                    'sunset' => WEATHER_SUNSET,
                     'moonrise' => '07:45 PM',
                     'moonset' => '06:30 AM',
                     'moon_phase' => 'Waxing Gibbous',
@@ -264,8 +269,8 @@ describe('WeatherApiTool', function (): void {
         expect($result->success)->toBeTrue()
             ->and($result->content)->toContain('Tokyo')
             ->and($result->content)->toContain('Japan')
-            ->and($result->content)->toContain('05:12 AM')
-            ->and($result->content)->toContain('06:22 PM')
+            ->and($result->content)->toContain(WEATHER_SUNRISE)
+            ->and($result->content)->toContain(WEATHER_SUNSET)
             ->and($result->content)->toContain('Waxing Gibbous')
             ->and($result->content)->toContain('78%');
     });
@@ -283,8 +288,8 @@ describe('WeatherApiTool', function (): void {
             'location' => ['name' => 'Tokyo', 'country' => 'Japan'],
             'astronomy' => [
                 'astro' => [
-                    'sunrise' => '05:12 AM',
-                    'sunset' => '06:22 PM',
+                    'sunrise' => WEATHER_SUNRISE,
+                    'sunset' => WEATHER_SUNSET,
                     'moonrise' => '07:45 PM',
                     'moonset' => '06:30 AM',
                     'moon_phase' => 'Full Moon',
@@ -294,14 +299,14 @@ describe('WeatherApiTool', function (): void {
         ]);
 
         $client->expects('request')->with('GET', 'https://api.weatherapi.com/v1/astronomy.json', Mockery::on(function ($options) {
-            return $options['query']['dt'] === '2026-04-15';
+            return $options['query']['dt'] === WEATHER_ASTRONOMY_DATE;
         }))->andReturn($response);
 
         $tool = new WeatherApiTool($config, $client);
-        $result = $tool->execute(['action' => 'astronomy', 'location' => 'Tokyo', 'date' => '2026-04-15'], 1);
+        $result = $tool->execute(['action' => 'astronomy', 'location' => 'Tokyo', 'date' => WEATHER_ASTRONOMY_DATE], 1);
 
         expect($result->success)->toBeTrue()
-            ->and($result->content)->toContain('2026-04-15');
+            ->and($result->content)->toContain(WEATHER_ASTRONOMY_DATE);
     });
 
     it('handles HTTP error codes gracefully', function (): void {

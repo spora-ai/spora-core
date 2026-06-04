@@ -25,13 +25,16 @@ vi.mock('@/components/settings/ToolSettingsForm.vue', () => ({
   },
 }))
 
-const mockUseLlmConfigsStore = useLlmConfigsStore as ReturnType<typeof vi.fn>
+const mockUseLlmConfigsStore = vi.mocked(useLlmConfigsStore)
+
+const OPENAI_DRIVER_CLASS = String.raw`Spora\Drivers\OpenAICompatibleDriver`
+const ANTHROPIC_DRIVER_CLASS = String.raw`Spora\Drivers\AnthropicCompatibleDriver`
 
 const mockDrivers = [
   {
     name: 'openai_compatible',
     display_name: 'OpenAI Compatible',
-    driver_class: 'Spora\\Drivers\\OpenAICompatibleDriver',
+    driver_class: OPENAI_DRIVER_CLASS,
     settings_schema: [
       { key: 'api_key', label: 'API Key', type: 'password', description: '', default: null, required: false, scope: 'global', options: null },
       { key: 'model', label: 'Model', type: 'text', description: '', default: 'gpt-4o', required: false, scope: 'global', options: null },
@@ -40,7 +43,7 @@ const mockDrivers = [
   {
     name: 'anthropic_compatible',
     display_name: 'Anthropic Compatible',
-    driver_class: 'Spora\\Drivers\\AnthropicCompatibleDriver',
+    driver_class: ANTHROPIC_DRIVER_CLASS,
     settings_schema: [
       { key: 'api_key', label: 'API Key', type: 'password', description: '', default: null, required: false, scope: 'global', options: null },
     ],
@@ -122,7 +125,7 @@ describe('AgentLlmConfigModal', () => {
 
       // Select the OpenAI driver
       const select = wrapper.find('select')
-      await select.setValue('Spora\\Drivers\\OpenAICompatibleDriver')
+      await select.setValue(OPENAI_DRIVER_CLASS)
       await wrapper.vm.$nextTick()
 
       // formSettings should now have defaults from the driver's schema
@@ -182,7 +185,7 @@ describe('AgentLlmConfigModal', () => {
       await wrapper.find('input[type="text"]').setValue('My Config')
       // Select driver
       const select = wrapper.find('select')
-      await select.setValue('Spora\\Drivers\\OpenAICompatibleDriver')
+      await select.setValue(OPENAI_DRIVER_CLASS)
       await wrapper.vm.$nextTick()
 
       const createBtn = wrapper.findAll('button').find((b) => b.text() === 'Create')
@@ -195,7 +198,7 @@ describe('AgentLlmConfigModal', () => {
       const createConfig = vi.fn().mockResolvedValue({
         id: 5,
         name: 'My Config',
-        driver_class: 'Spora\\Drivers\\OpenAICompatibleDriver',
+        driver_class: OPENAI_DRIVER_CLASS,
         driver_name: 'openai_compatible',
         driver_display_name: 'OpenAI Compatible',
         settings: { model: 'gpt-4o' },
@@ -213,7 +216,7 @@ describe('AgentLlmConfigModal', () => {
       // Fill name and select driver
       await wrapper.find('input[type="text"]').setValue('My Config')
       const select = wrapper.find('select')
-      await select.setValue('Spora\\Drivers\\OpenAICompatibleDriver')
+      await select.setValue(OPENAI_DRIVER_CLASS)
       await wrapper.vm.$nextTick()
 
       // Click Create
@@ -224,7 +227,7 @@ describe('AgentLlmConfigModal', () => {
 
       expect(createConfig).toHaveBeenCalledWith({
         name: 'My Config',
-        driver_class: 'Spora\\Drivers\\OpenAICompatibleDriver',
+        driver_class: OPENAI_DRIVER_CLASS,
         settings: { model: 'gpt-4o' },
       })
     })
@@ -233,7 +236,7 @@ describe('AgentLlmConfigModal', () => {
       const createConfig = vi.fn().mockResolvedValue({
         id: 5,
         name: 'My Config',
-        driver_class: 'Spora\\Drivers\\OpenAICompatibleDriver',
+        driver_class: OPENAI_DRIVER_CLASS,
         driver_name: 'openai_compatible',
         driver_display_name: 'OpenAI Compatible',
         settings: { model: 'gpt-4o' },
@@ -250,7 +253,7 @@ describe('AgentLlmConfigModal', () => {
 
       await wrapper.find('input[type="text"]').setValue('My Config')
       const select = wrapper.find('select')
-      await select.setValue('Spora\\Drivers\\OpenAICompatibleDriver')
+      await select.setValue(OPENAI_DRIVER_CLASS)
       await wrapper.vm.$nextTick()
 
       const createBtn = wrapper.findAll('button').find((b) => b.text() === 'Create')
@@ -276,7 +279,7 @@ describe('AgentLlmConfigModal', () => {
 
       await wrapper.find('input[type="text"]').setValue('My Config')
       const select = wrapper.find('select')
-      await select.setValue('Spora\\Drivers\\OpenAICompatibleDriver')
+      await select.setValue(OPENAI_DRIVER_CLASS)
       await wrapper.vm.$nextTick()
 
       const createBtn = wrapper.findAll('button').find((b) => b.text() === 'Create')
@@ -308,7 +311,7 @@ describe('AgentLlmConfigModal', () => {
       // Fill in form
       await wrapper.find('input[type="text"]').setValue('My Config')
       const select = wrapper.find('select')
-      await select.setValue('Spora\\Drivers\\OpenAICompatibleDriver')
+      await select.setValue(OPENAI_DRIVER_CLASS)
       await wrapper.vm.$nextTick()
 
       // Reset

@@ -251,6 +251,78 @@ function applyParsedCron(cron: string): void {
 
 // Watchers
 
+function resetToDefaults(): void {
+  mode.value = 'oneshot'
+  frequency.value = 'daily'
+  cronExpression.value = ''
+  runDate.value = ''
+  runTime.value = ''
+  timezone.value = 'UTC'
+  rawPrompt.value = ''
+  templateId.value = null
+  maxStepsOverride.value = null
+  hourlyInterval.value = 1
+  hourlyStartHour.value = 0
+  hourlyEndHour.value = 23
+  hourlyMinute.value = 0
+  dailyInterval.value = 1
+  dailyTime.value = '09:00'
+  weeklyDay.value = 1
+  weeklyTime.value = '09:00'
+  monthlyDay.value = 1
+  monthlyTime.value = '09:00'
+}
+
+function formatRunAtForInput(runAt: string, tz: string): { date: string; time: string } {
+  try {
+    const dt = new Date(runAt)
+    const dFmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+    const tFmt = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' })
+    return { date: dFmt.format(dt), time: tFmt.format(dt).slice(0, 5) }
+  } catch {
+    return { date: '', time: '' }
+  }
+}
+
+function applyInitialData(): void {
+  const data = props.initialData
+  if (!data) return
+
+  mode.value = data.cron_expression ? 'recurring' : 'oneshot'
+  timezone.value = data.timezone ?? 'UTC'
+  templateId.value = data.template_id ?? null
+  rawPrompt.value = data.raw_prompt ?? ''
+  maxStepsOverride.value = data.max_steps_override ?? null
+
+  if (data.run_at) {
+    const { date, time } = formatRunAtForInput(data.run_at, timezone.value)
+    runDate.value = date
+    runTime.value = time
+  }
+
+  if (data.cron_expression) {
+    cronExpression.value = data.cron_expression
+    applyParsedCron(data.cron_expression)
+  }
+
+  // If a template is selected, fill raw_prompt from it (may have been loaded above).
+  if (data.template_id !== null) {
+    const tmpl = promptTemplatesStore.templates.find((t) => t.id === data.template_id)
+    if (tmpl) {
+      rawPrompt.value = tmpl.prompt_template
+    }
+  }
+}
+
+async function loadTemplatesForAgent(): Promise<void> {
+  if (!Number.isFinite(props.agentId)) return
+  try {
+    await promptTemplatesStore.fetchTemplates(props.agentId)
+  } catch {
+    // templates are optional — don't block the form
+  }
+}
+
 watch(() => props.modelValue, async (open) => {
   if (!open) return
   error.value = null
@@ -258,63 +330,12 @@ watch(() => props.modelValue, async (open) => {
   newTemplateName.value = ''
   currentStep.value = 1
 
-  if (Number.isFinite(props.agentId)) {
-    try {
-      await promptTemplatesStore.fetchTemplates(props.agentId)
-    } catch {
-      // templates are optional — don't block the form
-    }
-  }
+  await loadTemplatesForAgent()
 
   if (props.initialData) {
-    mode.value = props.initialData.cron_expression ? 'recurring' : 'oneshot'
-    timezone.value = props.initialData.timezone ?? 'UTC'
-    templateId.value = props.initialData.template_id ?? null
-    rawPrompt.value = props.initialData.raw_prompt ?? ''
-    maxStepsOverride.value = props.initialData.max_steps_override ?? null
-    if (props.initialData.run_at) {
-      try {
-        const dt = new Date(props.initialData.run_at)
-        const dFmt = new Intl.DateTimeFormat('en-CA', { timeZone: timezone.value, year: 'numeric', month: '2-digit', day: '2-digit' })
-        const tFmt = new Intl.DateTimeFormat('en-GB', { timeZone: timezone.value, hour: '2-digit', minute: '2-digit' })
-        runDate.value = dFmt.format(dt)
-        runTime.value = tFmt.format(dt).slice(0, 5)
-      } catch {
-        runDate.value = ''
-        runTime.value = ''
-      }
-    }
-    if (props.initialData.cron_expression) {
-      cronExpression.value = props.initialData.cron_expression
-      applyParsedCron(props.initialData.cron_expression)
-    }
-    // If a template is selected, fill raw_prompt from it (may have been loaded above).
-    if (props.initialData.template_id !== null) {
-      const tmpl = promptTemplatesStore.templates.find((t) => t.id === props.initialData!.template_id)
-      if (tmpl) {
-        rawPrompt.value = tmpl.prompt_template
-      }
-    }
+    applyInitialData()
   } else {
-    mode.value = 'oneshot'
-    frequency.value = 'daily'
-    cronExpression.value = ''
-    runDate.value = ''
-    runTime.value = ''
-    timezone.value = 'UTC'
-    rawPrompt.value = ''
-    templateId.value = null
-    maxStepsOverride.value = null
-    hourlyInterval.value = 1
-    hourlyStartHour.value = 0
-    hourlyEndHour.value = 23
-    hourlyMinute.value = 0
-    dailyInterval.value = 1
-    dailyTime.value = '09:00'
-    weeklyDay.value = 1
-    weeklyTime.value = '09:00'
-    monthlyDay.value = 1
-    monthlyTime.value = '09:00'
+    resetToDefaults()
   }
 })
 
@@ -349,27 +370,76 @@ function prevStep(): void {
 
 // Submit
 
+function buildOneShotRunAt(): string {
+  const [year, month, day] = runDate.value.split('-').map(Number)
+  const [hour, minute] = runTime.value.split(':').map(Number)
+  const utcMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0)
+  const localDt = new Date(utcMs)
+  // Use formatOffset to get ±HH:MM in clean ISO 8601 form, handling half-hour offsets like +05:30
+  const offsetMinutes = getTimezoneOffsetMinutes(timezone.value, localDt)
+  const sign = offsetMinutes >= 0 ? '+' : '-'
+  const abs = Math.abs(offsetMinutes)
+  const tzOffsetStr = `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`
+  return `${runDate.value}T${runTime.value}:00${tzOffsetStr}`
+}
+
+function buildSchedulePayload(): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    timezone: timezone.value,
+    is_active: true,
+  }
+
+  if (maxStepsOverride.value !== null) {
+    payload.max_steps_override = maxStepsOverride.value
+  }
+
+  if (mode.value === 'oneshot') {
+    payload.run_at = buildOneShotRunAt()
+  } else {
+    payload.cron_expression = computedCron.value
+  }
+
+  return payload
+}
+
+async function resolveTemplateId(): Promise<number | null> {
+  let resolvedTemplateId: number | null = templateId.value === -1 ? null : templateId.value
+
+  // If "Create new template…" was selected, create it first
+  if (showCreateTemplate.value && newTemplateName.value.trim()) {
+    const tmpl = await promptTemplatesStore.createTemplate(props.agentId, {
+      name: newTemplateName.value.trim(),
+      prompt_template: rawPrompt.value.trim(),
+    })
+    resolvedTemplateId = tmpl.id
+  }
+
+  return resolvedTemplateId
+}
+
+async function saveSchedule(payload: Record<string, unknown>): Promise<ScheduledRunResource> {
+  if (props.initialData?.id) {
+    const result = await api.put<{ scheduled_run: ScheduledRunResource }>(
+      `/agents/${props.agentId}/scheduled-runs/${props.initialData.id}`,
+      payload,
+    )
+    return result.scheduled_run
+  }
+  const result = await api.post<{ scheduled_run: ScheduledRunResource }>(
+    `/agents/${props.agentId}/scheduled-runs`,
+    payload,
+  )
+  return result.scheduled_run
+}
+
 async function submit(): Promise<void> {
   if (!canSubmit.value) return
   error.value = null
   saving.value = true
 
   try {
-    let resolvedTemplateId: number | null = templateId.value === -1 ? null : templateId.value
-
-    // If "Create new template…" was selected, create it first
-    if (showCreateTemplate.value && newTemplateName.value.trim()) {
-      const tmpl = await promptTemplatesStore.createTemplate(props.agentId, {
-        name: newTemplateName.value.trim(),
-        prompt_template: rawPrompt.value.trim(),
-      })
-      resolvedTemplateId = tmpl.id
-    }
-
-    const payload: Record<string, unknown> = {
-      timezone: timezone.value,
-      is_active: true,
-    }
+    const resolvedTemplateId = await resolveTemplateId()
+    const payload = buildSchedulePayload()
 
     if (resolvedTemplateId !== null) {
       payload.template_id = resolvedTemplateId
@@ -381,40 +451,7 @@ async function submit(): Promise<void> {
       return
     }
 
-    if (maxStepsOverride.value !== null) {
-      payload.max_steps_override = maxStepsOverride.value
-    }
-
-    if (mode.value === 'oneshot') {
-      const [year, month, day] = runDate.value.split('-').map(Number)
-      const [hour, minute] = runTime.value.split(':').map(Number)
-      const utcMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0)
-      const localDt = new Date(utcMs)
-      // Use formatOffset to get ±HH:MM in clean ISO 8601 form, handling half-hour offsets like +05:30
-      const offsetMinutes = getTimezoneOffsetMinutes(timezone.value, localDt)
-      const sign = offsetMinutes >= 0 ? '+' : '-'
-      const abs = Math.abs(offsetMinutes)
-      const tzOffsetStr = `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`
-      payload.run_at = `${runDate.value}T${runTime.value}:00${tzOffsetStr}`
-    } else {
-      payload.cron_expression = computedCron.value
-    }
-
-    let resource: ScheduledRunResource
-    if (props.initialData?.id) {
-      const result = await api.put<{ scheduled_run: ScheduledRunResource }>(
-        `/agents/${props.agentId}/scheduled-runs/${props.initialData.id}`,
-        payload,
-      )
-      resource = result.scheduled_run
-    } else {
-      const result = await api.post<{ scheduled_run: ScheduledRunResource }>(
-        `/agents/${props.agentId}/scheduled-runs`,
-        payload,
-      )
-      resource = result.scheduled_run
-    }
-
+    const resource = await saveSchedule(payload)
     emit('saved', resource)
     emit('update:modelValue', false)
   } catch (e) {
@@ -480,8 +517,9 @@ const stepLabels = ['Template', 'Schedule Type', 'Schedule']
 
         <!-- Template picker -->
         <div class="flex flex-col gap-1.5">
-          <label class="text-sm font-medium">Prompt template</label>
+          <label for="schedule-template" class="text-sm font-medium">Prompt template</label>
           <select
+            id="schedule-template"
             v-model="templateId"
             class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
           >
@@ -519,11 +557,12 @@ const stepLabels = ['Template', 'Schedule Type', 'Schedule']
 
         <!-- Prompt textarea (always editable) -->
         <div class="flex flex-col gap-1.5">
-          <label class="text-sm font-medium flex items-center gap-2">
+          <label for="schedule-prompt" class="text-sm font-medium flex items-center gap-2">
             <span>Prompt</span>
             <span v-if="templateId !== null && templateId !== -1" class="text-xs font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded">from template</span>
           </label>
           <textarea
+            id="schedule-prompt"
             v-model="rawPrompt"
             rows="5"
             :disabled="templateId !== null && templateId !== -1"
@@ -577,16 +616,18 @@ const stepLabels = ['Template', 'Schedule Type', 'Schedule']
             Set the date and time for this one-time run.
           </p>
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">Date</label>
+            <label for="schedule-date" class="text-sm font-medium">Date</label>
             <input
+              id="schedule-date"
               v-model="runDate"
               type="date"
               class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">Time</label>
+            <label for="schedule-time" class="text-sm font-medium">Time</label>
             <input
+              id="schedule-time"
               v-model="runTime"
               type="time"
               class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
@@ -600,8 +641,9 @@ const stepLabels = ['Template', 'Schedule Type', 'Schedule']
             Configure how often this schedule should repeat.
           </p>
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">Frequency</label>
+            <label for="schedule-frequency" class="text-sm font-medium">Frequency</label>
             <select
+              id="schedule-frequency"
               v-model="frequency"
               class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
             >
@@ -727,8 +769,9 @@ const stepLabels = ['Template', 'Schedule Type', 'Schedule']
 
           <!-- Custom cron field -->
           <div v-if="frequency === 'custom'" class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium">Cron expression</label>
+            <label for="schedule-cron" class="text-sm font-medium">Cron expression</label>
             <input
+              id="schedule-cron"
               v-model="cronExpression"
               type="text"
               placeholder="*/15 * * * *"
@@ -755,8 +798,9 @@ const stepLabels = ['Template', 'Schedule Type', 'Schedule']
 
         <!-- Timezone (common to both modes, shown at the end of Step 3) -->
         <div class="flex flex-col gap-1.5">
-          <label class="text-sm font-medium">Timezone</label>
+          <label for="schedule-timezone" class="text-sm font-medium">Timezone</label>
           <select
+            id="schedule-timezone"
             v-model="timezone"
             class="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
           >

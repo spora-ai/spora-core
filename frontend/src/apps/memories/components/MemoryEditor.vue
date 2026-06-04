@@ -56,8 +56,9 @@ async function handleSubmit() {
 
     <form @submit.prevent="handleSubmit" class="space-y-4">
       <div>
-        <label class="block text-sm font-medium mb-1.5">Name <span class="text-destructive">*</span></label>
+        <label for="memory-name" class="block text-sm font-medium mb-1.5">Name <span class="text-destructive">*</span></label>
         <input
+          id="memory-name"
           v-model="name"
           type="text"
           required
@@ -67,8 +68,9 @@ async function handleSubmit() {
       </div>
 
       <div>
-        <label class="block text-sm font-medium mb-1.5">Summary</label>
+        <label for="memory-summary" class="block text-sm font-medium mb-1.5">Summary</label>
         <input
+          id="memory-summary"
           v-model="summary"
           type="text"
           maxlength="500"
@@ -78,8 +80,9 @@ async function handleSubmit() {
       </div>
 
       <div>
-        <label class="block text-sm font-medium mb-1.5">Content <span class="text-muted-foreground text-xs">(Markdown)</span></label>
+        <label for="memory-content" class="block text-sm font-medium mb-1.5">Content <span class="text-muted-foreground text-xs">(Markdown)</span></label>
         <textarea
+          id="memory-content"
           v-model="content"
           rows="12"
           placeholder="Memory content in Markdown format..."

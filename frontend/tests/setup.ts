@@ -1,8 +1,8 @@
 // Vitest global setup - mocks for browser APIs not available in happy-dom
-global.EventSource = class EventSource {
-  static CONNECTING = 0
-  static OPEN = 1
-  static CLOSED = 3
+globalThis.EventSource = class EventSource {
+  static readonly CONNECTING = 0
+  static readonly OPEN = 1
+  static readonly CLOSED = 3
 
   url: string
   readyState = EventSource.CONNECTING

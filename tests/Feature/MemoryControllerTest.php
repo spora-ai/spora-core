@@ -9,6 +9,9 @@ use Spora\Models\Memory;
 use Spora\Services\MemoryService;
 use Symfony\Component\HttpFoundation\Response;
 
+const REORDER_ENDPOINT = '/api/v1/memories/reorder';
+const MEMORIES_ENDPOINT = '/api/v1/memories';
+
 function makeMemoryController(?AuthService $authService = null): array
 {
     $authService = $authService ?? bootAuthLayer();
@@ -46,7 +49,7 @@ describe('MemoryController::reorder', function (): void {
         clearSession();
         [$controller] = makeMemoryController();
 
-        expect(fn() => $controller->reorder(jsonRequest('PATCH', '/api/v1/memories/reorder', ['order' => []])))
+        expect(fn() => $controller->reorder(jsonRequest('PATCH', REORDER_ENDPOINT, ['order' => []])))
             ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
     });
 
@@ -55,7 +58,7 @@ describe('MemoryController::reorder', function (): void {
         createMemoryTestUser($authService);
 
         $request = Symfony\Component\HttpFoundation\Request::create(
-            '/api/v1/memories/reorder',
+            REORDER_ENDPOINT,
             'PATCH',
             [],
             [],
@@ -74,7 +77,7 @@ describe('MemoryController::reorder', function (): void {
         [$controller, $authService] = makeMemoryController();
         createMemoryTestUser($authService);
 
-        $request = jsonRequest('PATCH', '/api/v1/memories/reorder', ['order' => 'not-an-array']);
+        $request = jsonRequest('PATCH', REORDER_ENDPOINT, ['order' => 'not-an-array']);
         $response = $controller->reorder($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
@@ -87,7 +90,7 @@ describe('MemoryController::reorder', function (): void {
         [$controller, $authService] = makeMemoryController();
         createMemoryTestUser($authService);
 
-        $request = jsonRequest('PATCH', '/api/v1/memories/reorder', ['order' => '123']);
+        $request = jsonRequest('PATCH', REORDER_ENDPOINT, ['order' => '123']);
         $response = $controller->reorder($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
@@ -97,7 +100,7 @@ describe('MemoryController::reorder', function (): void {
         [$controller, $authService] = makeMemoryController();
         createMemoryTestUser($authService);
 
-        $request = jsonRequest('PATCH', '/api/v1/memories/reorder', ['order' => []]);
+        $request = jsonRequest('PATCH', REORDER_ENDPOINT, ['order' => []]);
         $response = $controller->reorder($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
@@ -114,7 +117,7 @@ describe('MemoryController::reorder', function (): void {
         $m2 = Memory::create(['user_id' => $userId, 'agent_id' => null, 'name' => 'second', 'order' => 2]);
         $m3 = Memory::create(['user_id' => $userId, 'agent_id' => null, 'name' => 'third', 'order' => 3]);
 
-        $request = jsonRequest('PATCH', '/api/v1/memories/reorder', [
+        $request = jsonRequest('PATCH', REORDER_ENDPOINT, [
             'order' => [$m3->id, $m1->id, $m2->id],
         ]);
         $response = $controller->reorder($request);
@@ -133,14 +136,14 @@ describe('MemoryController::reorder', function (): void {
     test('reorder() only affects the current user\'s memories', function (): void {
         [$controllerA, $authServiceA] = makeMemoryController();
         [$userIdA] = createMemoryTestUser($authServiceA, 'user1@reorder.com');
-        [$controllerB, $authServiceB] = makeMemoryController();
+        [, $authServiceB] = makeMemoryController();
         [$userIdB] = createMemoryTestUser($authServiceB, 'user2@reorder.com');
 
         $u1m = Memory::create(['user_id' => $userIdA, 'agent_id' => null, 'name' => 'u1_memory', 'order' => 1]);
         Memory::create(['user_id' => $userIdB, 'agent_id' => null, 'name' => 'u2_memory', 'order' => 1]);
 
         // User A tries to reorder with user B's memory ID (service filters by user)
-        $request = jsonRequest('PATCH', '/api/v1/memories/reorder', [
+        $request = jsonRequest('PATCH', REORDER_ENDPOINT, [
             'order' => [$u1m->id],
         ]);
         $controllerA->reorder($request);
@@ -156,7 +159,7 @@ describe('MemoryController::reorder', function (): void {
 
         $m1 = Memory::create(['user_id' => $userId, 'agent_id' => null, 'name' => 'only', 'order' => 1]);
 
-        $request = jsonRequest('PATCH', '/api/v1/memories/reorder', [
+        $request = jsonRequest('PATCH', REORDER_ENDPOINT, [
             'order' => [$m1->id],
             'unknown_field' => 'should be ignored',
         ]);
@@ -200,15 +203,15 @@ describe('MemoryController::store', function (): void {
         clearSession();
         [$controller] = makeMemoryController();
 
-        expect(fn() => $controller->store(jsonRequest('POST', '/api/v1/memories', ['name' => 'test'])))
+        expect(fn() => $controller->store(jsonRequest('POST', MEMORIES_ENDPOINT, ['name' => 'test'])))
             ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
     });
 
     test('store() creates a global memory and auto-assigns order', function (): void {
         [$controller, $authService] = makeMemoryController();
-        [$userId] = createMemoryTestUser($authService);
+        createMemoryTestUser($authService);
 
-        $request = jsonRequest('POST', '/api/v1/memories', [
+        $request = jsonRequest('POST', MEMORIES_ENDPOINT, [
             'name'    => 'New Memory',
             'summary' => 'A brief summary',
             'content' => 'Full content here',
@@ -226,7 +229,7 @@ describe('MemoryController::store', function (): void {
         [$controller, $authService] = makeMemoryController();
         createMemoryTestUser($authService);
 
-        $request = jsonRequest('POST', '/api/v1/memories', ['name' => '']);
+        $request = jsonRequest('POST', MEMORIES_ENDPOINT, ['name' => '']);
         $response = $controller->store($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);

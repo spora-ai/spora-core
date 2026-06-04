@@ -27,6 +27,14 @@ use Tests\Fixtures\StubOutputTool;
 use Tests\Fixtures\StubOutputToolWithSchema;
 use Tests\Fixtures\ThrowingTool;
 
+defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
+const OPENAI_COMPATIBLE_DRIVER = 'Spora\Drivers\OpenAICompatibleDriver';
+const USER_PREFERRED_CONFIG_NAME = 'User Preferred Config';
+const PROMPT_ORIGINAL = 'Original prompt';
+const PROMPT_CONTINUED = 'Continued prompt';
+const VALIDATION_ERROR = 'Validation Error';
+const PROMPT_HELLO = 'Hello!';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -76,7 +84,7 @@ function mockDriverFactory(LLMDriverInterface $driver): DriverFactory
 function seedAgent(): array
 {
     $authService = bootAuthLayer();
-    $userId      = $authService->register('orch@example.com', 'Password1!', 'Orch');
+    $userId      = $authService->register('orch@example.com', TEST_PASSWORD, 'Orch');
 
     // Create a global LLM config as default (tests mock the DriverFactory, so credentials don't matter)
     $config = LLMDriverConfiguration::create([
@@ -133,15 +141,15 @@ it('start creates a RUNNING Task and seeds user history row', function (): void 
     ));
 
     $orch = makeOrchestrator(mockDriverFactory($llm));
-    $task = $orch->start($agentId, 'Hello!', maxSteps: 5);
+    $task = $orch->start($agentId, PROMPT_HELLO, maxSteps: 5);
 
     expect($task->status)->toBe('COMPLETED')      // tick ran synchronously
-        ->and($task->user_prompt)->toBe('Hello!')
+        ->and($task->user_prompt)->toBe(PROMPT_HELLO)
         ->and($task->max_steps)->toBe(5);
 
     $history = TaskHistory::where('task_id', $task->id)->orderBy('sequence')->get();
     expect($history->first()->role)->toBe('user')
-        ->and($history->first()->content)->toBe('Hello!');
+        ->and($history->first()->content)->toBe(PROMPT_HELLO);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -622,7 +630,7 @@ it('resume throws InvalidArgumentException when approved arguments fail schema v
 
     $toolCall = ToolCallModel::where('provider_call_id', 'call_schema')->first();
     expect($toolCall->status)->toBe('APPROVED')
-        ->and($toolCall->result_content)->toContain('Validation Error');
+        ->and($toolCall->result_content)->toContain(VALIDATION_ERROR);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -843,7 +851,7 @@ it('handleToolCalls schema validation failure writes both ToolCall and history r
     $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
     expect($toolCallRecord)->not()->toBeNull()
         ->and($toolCallRecord->status)->toBe('APPROVED')
-        ->and($toolCallRecord->result_content)->toContain('Validation Error');
+        ->and($toolCallRecord->result_content)->toContain(VALIDATION_ERROR);
 
     // A history row for this tool call must also exist (atomically written with the record above)
     $toolHistory = TaskHistory::where('task_id', $task->id)
@@ -851,7 +859,7 @@ it('handleToolCalls schema validation failure writes both ToolCall and history r
         ->where('tool_call_id', 'call_schema_fail')
         ->first();
     expect($toolHistory)->not()->toBeNull()
-        ->and($toolHistory->content)->toContain('Validation Error');
+        ->and($toolHistory->content)->toContain(VALIDATION_ERROR);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('handleToolCalls schema validation failure does not pause for approval', function (): void {
@@ -1108,7 +1116,7 @@ it('buildMessages skips multiple summary ranges and only includes post-summary r
 
 test('resolveLlmConfig throws when no config exists at any level', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('non-config@example.com', 'Password1!', 'Nonconfig');
+    $userId = $authService->register('non-config@example.com', TEST_PASSWORD, 'Nonconfig');
 
     // Create agent WITHOUT any config AND without a global default existing
     $agent = Agent::create([
@@ -1132,8 +1140,8 @@ test('resolveLlmConfig uses user preference when agent has no llm_driver_config_
     // Create a config and set it as user preference
     $config = LLMDriverConfiguration::create([
         'user_id' => $userId,
-        'name' => 'User Preferred Config',
-        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'name' => USER_PREFERRED_CONFIG_NAME,
+        'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-test', 'model' => 'gpt-4o']),
         'is_global' => false,
     ]);
@@ -1165,7 +1173,7 @@ test('resolveLlmConfig prefers user preference over global default', function ()
     $globalConfig = LLMDriverConfiguration::create([
         'user_id' => null,
         'name' => 'Global Default Config',
-        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-global', 'model' => 'gpt-4o']),
         'is_global' => true,
         'is_default' => true,
@@ -1177,8 +1185,8 @@ test('resolveLlmConfig prefers user preference over global default', function ()
     // Create a user preference config
     $prefConfig = LLMDriverConfiguration::create([
         'user_id' => $userId,
-        'name' => 'User Preferred Config',
-        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'name' => USER_PREFERRED_CONFIG_NAME,
+        'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-pref', 'model' => 'gpt-4o']),
         'is_global' => false,
     ]);
@@ -1209,8 +1217,8 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
     // Create user preference config
     $prefConfig = LLMDriverConfiguration::create([
         'user_id' => $userId,
-        'name' => 'User Preferred Config',
-        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'name' => USER_PREFERRED_CONFIG_NAME,
+        'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-pref', 'model' => 'gpt-4o']),
         'is_global' => false,
     ]);
@@ -1227,7 +1235,7 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
     $agentConfig = LLMDriverConfiguration::create([
         'user_id' => $userId,
         'name' => 'Agent Config',
-        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-agent', 'model' => 'gpt-4o']),
         'is_global' => false,
     ]);
@@ -1258,14 +1266,14 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     // user context. Each user only sees their own preference, not another user's.
     $authService = bootAuthLayer();
 
-    $userA = $authService->register('user-a-iso@example.com', 'Password1!', 'UseraIso');
-    $userB = $authService->register('user-b-iso@example.com', 'Password1!', 'UserbIso');
+    $userA = $authService->register('user-a-iso@example.com', TEST_PASSWORD, 'UseraIso');
+    $userB = $authService->register('user-b-iso@example.com', TEST_PASSWORD, 'UserbIso');
 
     // User A creates their own config
     $configA = LLMDriverConfiguration::create([
         'user_id' => $userA,
         'name' => 'User A Config',
-        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-usera', 'model' => 'gpt-4o']),
         'is_global' => false,
         'context_window' => 64000,
@@ -1282,7 +1290,7 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     $configB = LLMDriverConfiguration::create([
         'user_id' => $userB,
         'name' => 'User B Config',
-        'driver_class' => 'Spora\Drivers\OpenAICompatibleDriver',
+        'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-userb', 'model' => 'gpt-4o']),
         'is_global' => false,
         'context_window' => 32000,
@@ -1471,7 +1479,7 @@ it('publishes intermediate state when tools require approval', function (): void
 
 test('tick sets NO_LLM_CONFIGURATION error code and message when resolveLlmConfig throws', function (): void {
     $authService = bootAuthLayer();
-    $userId = $authService->register('no-config@example.com', 'Password1!', 'Noconfig');
+    $userId = $authService->register('no-config@example.com', TEST_PASSWORD, 'Noconfig');
 
     // Agent with no LLM config and no global default — resolveLlmConfig() will throw.
     $agent = Agent::create([
@@ -1514,7 +1522,7 @@ it('continue() updates Task.user_prompt to the new prompt', function (): void {
         'agent_id'    => $agentId,
         'user_id'     => Agent::find($agentId)->user_id,
         'status'      => 'COMPLETED',
-        'user_prompt' => 'Original prompt',
+        'user_prompt' => PROMPT_ORIGINAL,
         'step_count'  => 1,
         'max_steps'   => 10,
     ]);
@@ -1522,14 +1530,14 @@ it('continue() updates Task.user_prompt to the new prompt', function (): void {
     TaskHistory::create([
         'task_id'  => $task->id,
         'role'     => 'user',
-        'content'  => 'Original prompt',
+        'content'  => PROMPT_ORIGINAL,
         'sequence' => 0,
     ]);
 
-    $continuedTask = $orch->continue($task->id, 'Continued prompt');
+    $continuedTask = $orch->continue($task->id, PROMPT_CONTINUED);
 
     // user_prompt MUST be updated to the new prompt (the bug this tests)
-    expect($continuedTask->user_prompt)->toBe('Continued prompt');
+    expect($continuedTask->user_prompt)->toBe(PROMPT_CONTINUED);
 
     // History should contain the new continuation prompt as the last user message
     $userEntries = TaskHistory::where('task_id', $task->id)
@@ -1538,8 +1546,8 @@ it('continue() updates Task.user_prompt to the new prompt', function (): void {
         ->get();
 
     expect($userEntries->count())->toBe(2)
-        ->and($userEntries->first()->content)->toBe('Original prompt')
-        ->and($userEntries->last()->content)->toBe('Continued prompt');
+        ->and($userEntries->first()->content)->toBe(PROMPT_ORIGINAL)
+        ->and($userEntries->last()->content)->toBe(PROMPT_CONTINUED);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('buildToolDefinitions only queries operation overrides for enabled tool classes', function (): void {

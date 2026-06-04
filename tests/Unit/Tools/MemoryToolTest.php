@@ -8,6 +8,10 @@ use Spora\Tools\AgentMemoryTool;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\GlobalMemoryTool;
 
+const MEM_TEST_PASSWORD = 'Password1!';
+const MEM_ERR_NAME_REQUIRED = 'name is required';
+const MEM_ERR_NOT_FOUND = 'not found';
+
 describe('Memory Tools', function (): void {
 
     // Shared helpers
@@ -20,7 +24,7 @@ describe('Memory Tools', function (): void {
         static $seq = 0;
         $seq++;
         $authService = bootAuthLayer();
-        $userId = bootAuth($authService, "{$seq}{$email}", 'Password1!');
+        $userId = bootAuth($authService, "{$seq}{$email}", MEM_TEST_PASSWORD);
 
         $agentId = Agent::create([
             'user_id'      => $userId,
@@ -108,7 +112,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('save creates a new memory', function (): void {
-            [$userId, $agentId] = createMemoryToolTestUser();
+            [, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute([
@@ -158,7 +162,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('save auto-derives summary from content when not provided', function (): void {
-            [$userId, $agentId] = createMemoryToolTestUser();
+            [, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $longContent = '<p>This is a <strong>long</strong> content that should have a summary auto-derived from it.</p>';
@@ -175,7 +179,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('save returns error when name is missing', function (): void {
-            [$userId, $agentId] = createMemoryToolTestUser();
+            [, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute([
@@ -184,7 +188,7 @@ describe('Memory Tools', function (): void {
             ], $agentId);
 
             expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('name is required');
+                ->and($result->content)->toContain(MEM_ERR_NAME_REQUIRED);
         });
 
         it('get retrieves a memory by name', function (): void {
@@ -211,17 +215,17 @@ describe('Memory Tools', function (): void {
         });
 
         it('get returns error when name is missing', function (): void {
-            [$userId, $agentId] = createMemoryToolTestUser();
+            [, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute(['action' => 'get'], $agentId);
 
             expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('name is required');
+                ->and($result->content)->toContain(MEM_ERR_NAME_REQUIRED);
         });
 
         it('get returns error when memory not found', function (): void {
-            [$userId, $agentId] = createMemoryToolTestUser();
+            [, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute([
@@ -230,7 +234,7 @@ describe('Memory Tools', function (): void {
             ], $agentId);
 
             expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('not found');
+                ->and($result->content)->toContain(MEM_ERR_NOT_FOUND);
         });
 
         it('delete removes a memory by name', function (): void {
@@ -256,17 +260,17 @@ describe('Memory Tools', function (): void {
         });
 
         it('delete returns error when name is missing', function (): void {
-            [$userId, $agentId] = createMemoryToolTestUser();
+            [, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute(['action' => 'delete'], $agentId);
 
             expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('name is required');
+                ->and($result->content)->toContain(MEM_ERR_NAME_REQUIRED);
         });
 
         it('delete returns error when memory not found', function (): void {
-            [$userId, $agentId] = createMemoryToolTestUser();
+            [, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute([
@@ -275,11 +279,11 @@ describe('Memory Tools', function (): void {
             ], $agentId);
 
             expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('not found');
+                ->and($result->content)->toContain(MEM_ERR_NOT_FOUND);
         });
 
         it('returns error for invalid action', function (): void {
-            [$userId, $agentId] = createMemoryToolTestUser();
+            [, $agentId] = createMemoryToolTestUser();
             $tool = new AgentMemoryTool();
 
             $result = $tool->execute(['action' => 'invalid_action'], $agentId);
@@ -309,7 +313,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('list returns empty message when no global memories exist', function (): void {
-            [$userId, $agentId] = createMemoryToolTestUser();
+            [, $agentId] = createMemoryToolTestUser();
             $tool = new GlobalMemoryTool();
 
             $result = $tool->execute(['action' => 'list'], $agentId);
@@ -429,7 +433,7 @@ describe('Memory Tools', function (): void {
             ], $agentId);
 
             expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('not found');
+                ->and($result->content)->toContain(MEM_ERR_NOT_FOUND);
         });
 
         it('delete removes a global memory by name', function (): void {
@@ -478,7 +482,7 @@ describe('Memory Tools', function (): void {
         });
 
         it('returns error for invalid action', function (): void {
-            [$userId, $agentId] = createMemoryToolTestUser();
+            [, $agentId] = createMemoryToolTestUser();
             $tool = new GlobalMemoryTool();
 
             $result = $tool->execute(['action' => 'hack'], $agentId);
@@ -494,14 +498,14 @@ describe('Memory Tools', function (): void {
 
         it('users cannot see each others global memories', function (): void {
             $authService1 = bootAuthLayer();
-            $userId1 = bootAuth($authService1, 'user1@example.com', 'Password1!');
-            $agentId1 = Agent::create([
+            $userId1 = bootAuth($authService1, 'user1@example.com', MEM_TEST_PASSWORD);
+            Agent::create([
                 'user_id' => $userId1, 'name' => 'Agent 1', 'llm_provider' => 'mock',
                 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true,
-            ])->id;
+            ]);
 
             $authService2 = bootAuthLayer();
-            $userId2 = bootAuth($authService2, 'user2@example.com', 'Password1!');
+            $userId2 = bootAuth($authService2, 'user2@example.com', MEM_TEST_PASSWORD);
             $agentId2 = Agent::create([
                 'user_id' => $userId2, 'name' => 'Agent 2', 'llm_provider' => 'mock',
                 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true,
@@ -522,14 +526,14 @@ describe('Memory Tools', function (): void {
 
         it('users cannot see each others agent memories', function (): void {
             $authService1 = bootAuthLayer();
-            $userId1 = bootAuth($authService1, 'user3@example.com', 'Password1!');
+            $userId1 = bootAuth($authService1, 'user3@example.com', MEM_TEST_PASSWORD);
             $agentId1 = Agent::create([
                 'user_id' => $userId1, 'name' => 'Agent 1', 'llm_provider' => 'mock',
                 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true,
             ])->id;
 
             $authService2 = bootAuthLayer();
-            $userId2 = bootAuth($authService2, 'user4@example.com', 'Password1!');
+            $userId2 = bootAuth($authService2, 'user4@example.com', MEM_TEST_PASSWORD);
             $agentId2 = Agent::create([
                 'user_id' => $userId2, 'name' => 'Agent 2', 'llm_provider' => 'mock',
                 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true,

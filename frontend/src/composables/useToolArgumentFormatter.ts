@@ -66,12 +66,28 @@ function maskSensitive(value: string): string {
   return value.slice(0, 2) + '••••••••' + value.slice(-2)
 }
 
+/**
+ * Stringify a value of unknown type. Plain objects/arrays are JSON-serialised so
+ * we never render the useless "[object Object]" default — primitives keep their
+ * existing String() behavior so tests and downstream consumers don't change.
+ */
+function stringifyValue(value: unknown): string {
+  if (typeof value === 'object' && value !== null) {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return Object.prototype.toString.call(value)
+    }
+  }
+  return String(value)
+}
+
 function formatDisplayValue(value: unknown, format: FieldFormat): string {
   if (value === null || value === undefined) return '—'
-  if (format === 'sensitive') return maskSensitive(String(value))
-  if (format === 'badge') return String(value).replace(/_/g, ' ')
-  if (format === 'boolean') return String(value)
-  return String(value)
+  if (format === 'sensitive') return maskSensitive(stringifyValue(value))
+  if (format === 'badge') return stringifyValue(value).replace(/_/g, ' ')
+  if (format === 'boolean') return stringifyValue(value)
+  return stringifyValue(value)
 }
 
 /**

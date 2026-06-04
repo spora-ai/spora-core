@@ -16,11 +16,13 @@ use Throwable;
  */
 final class MailTemplateController
 {
+    private const ERR_MAIL_TEMPLATE_NOT_FOUND = 'Mail template not found.';
+
     public function __construct(
         private readonly MailTemplateServiceInterface $mailTemplateService,
     ) {}
 
-    public function index(Request $request, array $vars = []): JsonResponse
+    public function index(): JsonResponse
     {
 
         $templates = $this->mailTemplateService->getAllTemplates();
@@ -30,7 +32,7 @@ final class MailTemplateController
         ], Response::HTTP_OK);
     }
 
-    public function store(Request $request, array $vars = []): JsonResponse
+    public function store(Request $request): JsonResponse
     {
 
         try {
@@ -56,7 +58,7 @@ final class MailTemplateController
         $result = $this->mailTemplateService->getTemplate($id);
 
         if ($result === null) {
-            return $this->error('NOT_FOUND', 'Mail template not found.', Response::HTTP_NOT_FOUND);
+            return $this->error('NOT_FOUND', self::ERR_MAIL_TEMPLATE_NOT_FOUND, Response::HTTP_NOT_FOUND);
         }
 
         return new JsonResponse([
@@ -76,7 +78,7 @@ final class MailTemplateController
         $result = $this->mailTemplateService->updateTemplate($id, $body);
 
         if ($result === null) {
-            return $this->error('NOT_FOUND', 'Mail template not found.', Response::HTTP_NOT_FOUND);
+            return $this->error('NOT_FOUND', self::ERR_MAIL_TEMPLATE_NOT_FOUND, Response::HTTP_NOT_FOUND);
         }
 
         return new JsonResponse([
@@ -100,7 +102,7 @@ final class MailTemplateController
         $deleted = $this->mailTemplateService->deleteTemplate($id);
 
         if (!$deleted) {
-            return $this->error('NOT_FOUND', 'Mail template not found.', Response::HTTP_NOT_FOUND);
+            return $this->error('NOT_FOUND', self::ERR_MAIL_TEMPLATE_NOT_FOUND, Response::HTTP_NOT_FOUND);
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);
@@ -118,7 +120,7 @@ final class MailTemplateController
         try {
             $result = $this->mailTemplateService->previewTemplate($name, $variables);
         } catch (Throwable) {
-            return $this->error('NOT_FOUND', 'Mail template not found.', Response::HTTP_NOT_FOUND);
+            return $this->error('NOT_FOUND', self::ERR_MAIL_TEMPLATE_NOT_FOUND, Response::HTTP_NOT_FOUND);
         }
 
         return new JsonResponse([
