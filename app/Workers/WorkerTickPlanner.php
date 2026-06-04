@@ -69,28 +69,31 @@ final class WorkerTickPlanner
             return false;
         }
         $status = (string) ($task['status'] ?? '');
-        if (in_array($status, self::TERMINAL_STATUSES, true)) {
-            return false;
-        }
-        if ($status !== 'RUNNING') {
-            return false;
-        }
-
-        $updatedAt = $task['updated_at'] ?? null;
-        if ($updatedAt === null) {
-            return false;
-        }
-
         $now ??= new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        $updated = self::parseUpdatedAt($task['updated_at'] ?? null);
+        return !in_array($status, self::TERMINAL_STATUSES, true)
+            && $status === 'RUNNING'
+            && $updated !== null
+            && ($now->getTimestamp() - $updated->getTimestamp()) >= $maxAgeSeconds;
+    }
+
+    /**
+     * Best-effort parse of a task's `updated_at` field into a UTC
+     * DateTimeImmutable. Returns null for null input, unparseable strings,
+     * or any other error — the caller treats null as "not orphan-able".
+     */
+    private static function parseUpdatedAt(mixed $updatedAt): ?DateTimeImmutable
+    {
+        if ($updatedAt === null) {
+            return null;
+        }
         try {
-            $updated = $updatedAt instanceof DateTimeInterface
+            return $updatedAt instanceof DateTimeInterface
                 ? DateTimeImmutable::createFromInterface($updatedAt)
                 : new DateTimeImmutable((string) $updatedAt, new DateTimeZone('UTC'));
         } catch (Throwable) {
-            return false;
+            return null;
         }
-
-        return ($now->getTimestamp() - $updated->getTimestamp()) >= $maxAgeSeconds;
     }
 
     /**
@@ -111,20 +114,25 @@ final class WorkerTickPlanner
         if ($lastScheduled === null) {
             return true;
         }
-
         $cronExpr = trim($cronExpr);
         if ($cronExpr === '' || !CronExpression::isValidExpression($cronExpr)) {
             return false;
         }
-
         $now ??= new DateTimeImmutable('now', new DateTimeZone('UTC'));
-        try {
-            $cron = new CronExpression($cronExpr);
-            $previousDue = $cron->getPreviousRunDate($now);
-        } catch (Throwable) {
-            return false;
-        }
+        $previousDue = self::computePreviousDue($cronExpr, $now);
+        return $previousDue !== null && $lastScheduled < $previousDue;
+    }
 
-        return $lastScheduled < $previousDue;
+    /**
+     * Most recent cron occurrence strictly before $now. Returns null on any
+     * parse / expression error — the caller treats null as "not due".
+     */
+    private static function computePreviousDue(string $cronExpr, DateTimeImmutable $now): ?DateTimeInterface
+    {
+        try {
+            return (new CronExpression($cronExpr))->getPreviousRunDate($now);
+        } catch (Throwable) {
+            return null;
+        }
     }
 }

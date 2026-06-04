@@ -53,10 +53,10 @@ export function partitionTimezones(
 ): CommonTimezoneSet {
   const common = allTimezones
     .filter((tz) => commonZoneValues.has(tz))
-    .sort()
+    .sort((a, b) => a.localeCompare(b))
   const rest = allTimezones
     .filter((tz) => !commonZoneValues.has(tz))
-    .sort()
+    .sort((a, b) => a.localeCompare(b))
   return { common, rest }
 }
 

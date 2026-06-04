@@ -49,7 +49,8 @@ export function formatScheduleName(run: ScheduledRunResource): string {
 
 /** Pluralized header label. */
 export function formatRunCountLabel(count: number): string {
-  return `${count} scheduled run${count !== 1 ? 's' : ''}`
+  if (count === 1) return `${count} scheduled run`
+  return `${count} scheduled runs`
 }
 
 /** Replace the row matching `saved.id` in `runs`, or prepend it. */
@@ -63,7 +64,7 @@ export function upsertScheduledRun(
     return [saved as ScheduledRunResource, ...runs]
   }
   const next = runs.slice()
-  next[idx] = { ...runs[idx], ...saved } as ScheduledRunResource
+  next[idx] = { ...runs[idx], ...saved }
   return next
 }
 

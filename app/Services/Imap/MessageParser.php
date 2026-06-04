@@ -13,6 +13,10 @@ namespace Spora\Services\Imap;
  */
 final class MessageParser
 {
+    private const HTML_TYPE = 'text/html';
+    private const PLAIN_TYPE = 'text/plain';
+
+
     /**
      * Parse an RFC 5322 address-list string into a list of [name, email] pairs.
      *
@@ -45,78 +49,13 @@ final class MessageParser
                 break;
             }
 
-            $name = null;
-            $email = null;
-
             if ($raw[$i] === '"') {
-                // Quoted display name.
-                $i++;
-                $nameBuf = '';
-                while ($i < $len && $raw[$i] !== '"') {
-                    if ($raw[$i] === '\\' && $i + 1 < $len) {
-                        $nameBuf .= $raw[$i + 1];
-                        $i += 2;
-                        continue;
-                    }
-                    $nameBuf .= $raw[$i];
-                    $i++;
-                }
-                if ($i < $len) {
-                    $i++;
-                }
-                $name = $nameBuf !== '' ? $nameBuf : null;
-
-                // Skip whitespace and the following "<email>" part.
-                while ($i < $len && ($raw[$i] === ' ' || $raw[$i] === "\t")) {
-                    $i++;
-                }
-                if ($i < $len && $raw[$i] === '<') {
-                    $i++;
-                    $emailBuf = '';
-                    while ($i < $len && $raw[$i] !== '>') {
-                        $emailBuf .= $raw[$i];
-                        $i++;
-                    }
-                    if ($i < $len) {
-                        $i++;
-                    }
-                    $email = $emailBuf;
-                }
+                [$name, $email] = self::readQuotedAddress($raw, $i, $len);
             } elseif ($raw[$i] === '<') {
-                // <email> only.
-                $i++;
-                $emailBuf = '';
-                while ($i < $len && $raw[$i] !== '>') {
-                    $emailBuf .= $raw[$i];
-                    $i++;
-                }
-                if ($i < $len) {
-                    $i++;
-                }
-                $email = $emailBuf;
+                $name = null;
+                $email = self::readAngleAddress($raw, $i, $len);
             } else {
-                // Unquoted: either "Name <email>" or "email".
-                $buf = '';
-                while ($i < $len && $raw[$i] !== ',' && $raw[$i] !== '<') {
-                    $buf .= $raw[$i];
-                    $i++;
-                }
-                $buf = trim($buf);
-                if ($i < $len && $raw[$i] === '<') {
-                    $name = $buf !== '' ? $buf : null;
-                    $i++;
-                    $emailBuf = '';
-                    while ($i < $len && $raw[$i] !== '>') {
-                        $emailBuf .= $raw[$i];
-                        $i++;
-                    }
-                    if ($i < $len) {
-                        $i++;
-                    }
-                    $email = $emailBuf;
-                } else {
-                    $email = $buf !== '' ? $buf : null;
-                }
+                [$name, $email] = self::readUnquotedAddress($raw, $i, $len);
             }
 
             if ($email !== null || $name !== null) {
@@ -125,6 +64,74 @@ final class MessageParser
         }
 
         return $result;
+    }
+
+    /**
+     * Parse a `"Display Name" <email>` pair. Advances $i past the closing `>`.
+     *
+     * @return array{0: ?string, 1: ?string} [name, email]
+     */
+    private static function readQuotedAddress(string $raw, int &$i, int $len): array
+    {
+        $i++; // skip opening quote
+        $nameBuf = '';
+        while ($i < $len && $raw[$i] !== '"') {
+            if ($raw[$i] === '\\' && $i + 1 < $len) {
+                $nameBuf .= $raw[$i + 1];
+                $i += 2;
+                continue;
+            }
+            $nameBuf .= $raw[$i];
+            $i++;
+        }
+        if ($i < $len) {
+            $i++;
+        }
+        $name = $nameBuf !== '' ? $nameBuf : null;
+
+        while ($i < $len && ($raw[$i] === ' ' || $raw[$i] === "\t")) {
+            $i++;
+        }
+        $email = ($i < $len && $raw[$i] === '<') ? self::readAngleAddress($raw, $i, $len) : null;
+
+        return [$name, $email];
+    }
+
+    /**
+     * Read the contents of `<...>`, advancing $i past the closing `>`.
+     */
+    private static function readAngleAddress(string $raw, int &$i, int $len): string
+    {
+        $i++; // skip opening '<'
+        $buf = '';
+        while ($i < $len && $raw[$i] !== '>') {
+            $buf .= $raw[$i];
+            $i++;
+        }
+        if ($i < $len) {
+            $i++;
+        }
+        return $buf;
+    }
+
+    /**
+     * Parse an unquoted `Name <email>` or bare `email`. Advances $i past the
+     * closing `>` when an angle address follows, otherwise to the next `,`.
+     *
+     * @return array{0: ?string, 1: ?string} [name, email]
+     */
+    private static function readUnquotedAddress(string $raw, int &$i, int $len): array
+    {
+        $buf = '';
+        while ($i < $len && $raw[$i] !== ',' && $raw[$i] !== '<') {
+            $buf .= $raw[$i];
+            $i++;
+        }
+        $buf = trim($buf);
+        if ($i < $len && $raw[$i] === '<') {
+            return [$buf !== '' ? $buf : null, self::readAngleAddress($raw, $i, $len)];
+        }
+        return [null, $buf !== '' ? $buf : null];
     }
 
     /**
@@ -170,52 +177,70 @@ final class MessageParser
      */
     public static function parseHeaders(array $headers): array
     {
-        $get = static function (array $headers, string $key): mixed {
-            if (array_key_exists($key, $headers)) {
-                return $headers[$key];
-            }
-            $lower = strtolower($key);
-            foreach ($headers as $k => $v) {
-                if (strtolower((string) $k) === $lower) {
-                    return $v;
-                }
-            }
-            return null;
-        };
-
-        $render = static function (mixed $raw): ?string {
-            if ($raw === null || $raw === '' || $raw === []) {
-                return null;
-            }
-            if (is_string($raw)) {
-                return $raw;
-            }
-            $entries = is_array($raw) ? $raw : [$raw];
-            $parts = [];
-            foreach ($entries as $entry) {
-                if (is_object($entry)) {
-                    $name  = (string) ($entry->name ?? $entry->personal ?? '');
-                    $email = (string) ($entry->mail ?? $entry->address ?? $entry->email ?? '');
-                } elseif (is_array($entry)) {
-                    $name  = (string) ($entry['name'] ?? $entry['personal'] ?? '');
-                    $email = (string) ($entry['mail'] ?? $entry['address'] ?? $entry['email'] ?? '');
-                } else {
-                    $email = (string) $entry;
-                    $name = '';
-                }
-                $parts[] = $name !== '' ? "{$name} <{$email}>" : $email;
-            }
-            return implode(', ', $parts);
-        };
-
+        $subject = self::findHeader($headers, 'subject');
+        $date    = self::findHeader($headers, 'date');
         return [
-            'from'    => $render($get($headers, 'from')),
-            'to'      => $render($get($headers, 'to')),
-            'subject' => ($v = $get($headers, 'subject')) !== null ? (string) $v : null,
-            'date'    => ($v = $get($headers, 'date'))    !== null ? (string) $v : null,
-            'cc'      => $render($get($headers, 'cc')),
-            'bcc'     => $render($get($headers, 'bcc')),
+            'from'    => self::renderHeader(self::findHeader($headers, 'from')),
+            'to'      => self::renderHeader(self::findHeader($headers, 'to')),
+            'subject' => $subject !== null ? (string) $subject : null,
+            'date'    => $date !== null ? (string) $date : null,
+            'cc'      => self::renderHeader(self::findHeader($headers, 'cc')),
+            'bcc'     => self::renderHeader(self::findHeader($headers, 'bcc')),
         ];
+    }
+
+    /**
+     * Case-insensitive header lookup. Webklex sometimes returns keys in their
+     * original casing (`From`) and sometimes lowercased (`from`); the bag
+     * this method receives is normalized upstream but the case-insensitive
+     * search is preserved for safety.
+     *
+     * @param array<string, mixed> $headers
+     */
+    private static function findHeader(array $headers, string $key): mixed
+    {
+        if (array_key_exists($key, $headers)) {
+            return $headers[$key];
+        }
+        $lower = strtolower($key);
+        foreach ($headers as $k => $v) {
+            if (strtolower((string) $k) === $lower) {
+                return $v;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Render a header value as a `Name <email>` string. Accepts:
+     *   - null / '' / [] → null
+     *   - string         → returned verbatim
+     *   - object / array / scalar → joined list of rendered entries
+     */
+    private static function renderHeader(mixed $raw): ?string
+    {
+        if ($raw === null || $raw === '' || $raw === []) {
+            return null;
+        }
+        if (is_string($raw)) {
+            return $raw;
+        }
+        $entries = is_array($raw) ? $raw : [$raw];
+        $parts = [];
+        foreach ($entries as $entry) {
+            if (is_object($entry)) {
+                $name  = (string) ($entry->name ?? $entry->personal ?? '');
+                $email = (string) ($entry->mail ?? $entry->address ?? $entry->email ?? '');
+            } elseif (is_array($entry)) {
+                $name  = (string) ($entry['name'] ?? $entry['personal'] ?? '');
+                $email = (string) ($entry['mail'] ?? $entry['address'] ?? $entry['email'] ?? '');
+            } else {
+                $name  = '';
+                $email = (string) $entry;
+            }
+            $parts[] = $name !== '' ? "{$name} <{$email}>" : $email;
+        }
+        return implode(', ', $parts);
     }
 
     /**
@@ -258,21 +283,16 @@ final class MessageParser
     public static function decodeBase64(string $s): string
     {
         $cleaned = preg_replace('/\s+/', '', $s) ?? $s;
-        if ($cleaned === '') {
-            return '';
-        }
-        // Strict mode: validate the entire string is base64 before decoding.
-        if (preg_match('/^[A-Za-z0-9+\/]+={0,2}$/', $cleaned) !== 1) {
+        if ($cleaned === '' || preg_match('/^[A-Za-z0-9+\/]+={0,2}$/', $cleaned) !== 1) {
             return '';
         }
         $decoded = base64_decode($cleaned, true);
         if ($decoded === false) {
             return '';
         }
-        if (!mb_check_encoding($decoded, 'UTF-8')) {
-            $decoded = mb_convert_encoding($decoded, 'UTF-8', 'UTF-8');
-        }
-        return $decoded;
+        return mb_check_encoding($decoded, 'UTF-8')
+            ? $decoded
+            : mb_convert_encoding($decoded, 'UTF-8', 'UTF-8');
     }
 
     /**
@@ -288,39 +308,50 @@ final class MessageParser
     {
         $lower = strtolower($contentType);
 
-        // Multipart: walk the boundary.
         if (str_contains($lower, 'multipart/')) {
-            $boundary = self::extractBoundary($contentType);
-            if ($boundary === null) {
-                return ['text' => null, 'html' => null];
-            }
-            $parts = self::splitMultipart($body, $boundary);
-            $text = null;
-            $html = null;
-            foreach ($parts as $part) {
-                $partCt = strtolower($part['content-type']);
-                $disp   = strtolower($part['content-disposition'] ?? '');
-                if (str_contains($disp, 'attachment')) {
-                    continue;
-                }
-                $decoded = self::decodeTransferEncoding($part['body'], $part['transfer-encoding'] ?? '7bit');
-                if (str_contains($partCt, 'text/html') && $html === null) {
-                    $html = $decoded;
-                } elseif (str_contains($partCt, 'text/plain') && $text === null) {
-                    $text = $decoded;
-                }
-            }
-            return ['text' => $text, 'html' => $html];
+            return self::parseMultipartBody($body, $contentType);
         }
+        $filled = $body !== '' ? $body : null;
+        $isHtml = str_contains($lower, self::HTML_TYPE);
+        $isText = str_contains($lower, self::PLAIN_TYPE);
+        return [
+            'text' => $isText ? $filled : null,
+            'html' => $isHtml ? $filled : null,
+        ];
+    }
 
-        if (str_contains($lower, 'text/html')) {
-            return ['text' => null, 'html' => $body !== '' ? $body : null];
+    /**
+     * Multipart branch of parseBody. Extracts the boundary, splits the body
+     * into parts, then collects the first non-attachment plain and html parts.
+     *
+     * @return array{text: ?string, html: ?string}
+     */
+    private static function parseMultipartBody(string $body, string $contentType): array
+    {
+        $boundary = self::extractBoundary($contentType);
+        if ($boundary === null) {
+            return ['text' => null, 'html' => null];
         }
-        if (str_contains($lower, 'text/plain')) {
-            return ['text' => $body !== '' ? $body : null, 'html' => null];
+        $text = null;
+        $html = null;
+        foreach (self::splitMultipart($body, $boundary) as $part) {
+            $ctLower = strtolower($part['content-type']);
+            $dispLower = strtolower($part['content-disposition']);
+            $isHtml = str_contains($ctLower, self::HTML_TYPE);
+            $isText = str_contains($ctLower, self::PLAIN_TYPE);
+            $slotTaken = ($isHtml && $html !== null) || (!$isHtml && $isText && $text !== null);
+            $isAttachment = str_contains($dispLower, 'attachment');
+            if ($isAttachment || (!$isHtml && !$isText) || $slotTaken) {
+                continue;
+            }
+            $decoded = self::decodeTransferEncoding($part['body'], $part['transfer-encoding']);
+            if ($isHtml) {
+                $html = $decoded;
+            } else {
+                $text = $decoded;
+            }
         }
-
-        return ['text' => null, 'html' => null];
+        return ['text' => $text, 'html' => $html];
     }
 
     /**
@@ -365,20 +396,23 @@ final class MessageParser
                 continue;
             }
 
-            $filename = null;
-            if (preg_match('/filename\s*=\s*"?([^";]+)"?/i', $disp, $m)) {
-                $filename = $m[1];
-            } elseif (preg_match('/name\s*=\s*"?([^";]+)"?/i', $ct, $m)) {
-                $filename = $m[1];
-            }
+            // filename precedence: Content-Disposition's filename= is the
+            // RFC-correct source; Content-Type's name= is the fallback. The
+            // two regexes are intentionally separate branches so the priority
+            // is visible — they are not duplicates.
+            $filename = self::extractFilename($disp, $ct);
 
             $body = (string) ($part['body'] ?? '');
-            $contentId = null;
-            if (isset($headers['content-id'])) {
-                $contentId = trim((string) $headers['content-id'], '<>');
-            } elseif (isset($headers['Content-ID'])) {
-                $contentId = trim((string) $headers['Content-ID'], '<>');
+            $rawContentId = $headers['content-id'] ?? null;
+            if ($rawContentId === null) {
+                foreach ($headers as $k => $v) {
+                    if (strtolower((string) $k) === 'content-id') {
+                        $rawContentId = $v;
+                        break;
+                    }
+                }
             }
+            $contentId = $rawContentId !== null ? trim((string) $rawContentId, '<>') : null;
 
             $out[] = [
                 'filename'     => $filename,
@@ -403,6 +437,24 @@ final class MessageParser
     }
 
     /**
+     * Pull the filename from a Content-Disposition or Content-Type header.
+     * Disposition's `filename=` is authoritative; type's `name=` is fallback.
+     *
+     * @param string $disp Already-lowercased Content-Disposition.
+     * @param string $ct   Already-lowercased Content-Type.
+     */
+    private static function extractFilename(string $disp, string $ct): ?string
+    {
+        if (preg_match('/filename\s*=\s*"?([^";]+)"?/i', $disp, $m)) {
+            return $m[1];
+        }
+        if (preg_match('/name\s*=\s*"?([^";]+)"?/i', $ct, $m)) {
+            return $m[1];
+        }
+        return null;
+    }
+
+    /**
      * Split a multipart body into parts, each with their headers and body.
      *
      * @return list<array{content-type: ?string, content-disposition: ?string, transfer-encoding: ?string, body: string}>
@@ -410,36 +462,49 @@ final class MessageParser
     private static function splitMultipart(string $body, string $boundary): array
     {
         $delimiter = '--' . $boundary;
-        $sections = explode($delimiter, $body);
         $parts = [];
-        foreach ($sections as $section) {
-            if ($section === '' || $section === "--\r\n" || $section === "--\n" || $section === '--') {
-                continue;
+        foreach (explode($delimiter, $body) as $section) {
+            $parsed = self::parsePartSection($section);
+            if ($parsed !== null) {
+                $parts[] = $parsed;
             }
-            // Strip leading CRLF after boundary marker.
-            $section = ltrim($section, "\r\n");
-            if ($section === '') {
-                continue;
-            }
-            $split = preg_split("/\r?\n\r?\n/", $section, 2);
-            if ($split === false || count($split) < 2) {
-                continue;
-            }
-            [$headerBlock, $partBody] = $split;
-            $headers = [];
-            foreach (preg_split("/\r?\n/", $headerBlock) ?: [] as $headerLine) {
-                if (str_contains($headerLine, ':')) {
-                    [$k, $v] = array_pad(explode(':', $headerLine, 2), 2, '');
-                    $headers[strtolower(trim($k))] = trim($v);
-                }
-            }
-            $parts[] = [
-                'content-type'        => $headers['content-type'] ?? '',
-                'content-disposition' => $headers['content-disposition'] ?? '',
-                'transfer-encoding'   => $headers['content-transfer-encoding'] ?? '7bit',
-                'body'                => $partBody,
-            ];
         }
         return $parts;
+    }
+
+    /**
+     * Parse one section of a multipart body into the part tuple, or null
+     * for the boundary preamble / malformed sections.
+     *
+     * @return ?array{content-type: ?string, content-disposition: ?string, transfer-encoding: ?string, body: string}
+     */
+    private static function parsePartSection(string $section): ?array
+    {
+        $preambles = ['', "--\r\n", "--\n", '--'];
+        if (in_array($section, $preambles, true)) {
+            return null;
+        }
+        $section = ltrim($section, "\r\n");
+        if ($section === '') {
+            return null;
+        }
+        $split = preg_split("/\r?\n\r?\n/", $section, 2);
+        if ($split === false || count($split) < 2) {
+            return null;
+        }
+        [$headerBlock, $partBody] = $split;
+        $headers = [];
+        foreach (preg_split("/\r?\n/", $headerBlock) ?: [] as $line) {
+            if (str_contains($line, ':')) {
+                [$k, $v] = array_pad(explode(':', $line, 2), 2, '');
+                $headers[strtolower(trim($k))] = trim($v);
+            }
+        }
+        return [
+            'content-type'        => $headers['content-type'] ?? '',
+            'content-disposition' => $headers['content-disposition'] ?? '',
+            'transfer-encoding'   => $headers['content-transfer-encoding'] ?? '7bit',
+            'body'                => $partBody,
+        ];
     }
 }

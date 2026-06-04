@@ -88,7 +88,7 @@ export function getSource(
 export function maskPasswordValue(value: unknown, isPassword: boolean): string {
   if (value === null || value === undefined) return '—'
   if (isPassword) return '••••••••'
-  return String(value)
+  return typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 
 /** Tailwind class string for a source badge. */
