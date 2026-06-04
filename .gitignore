@@ -50,6 +50,8 @@ docker/storage/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+# Vitest coverage output (lcov.info + HTML report); produced by `npm run test:coverage`
+frontend/coverage/
 
 # Vite build output (produced by `make dev` / `composer frontend:build`)
 public/dist/

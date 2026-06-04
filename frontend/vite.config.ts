@@ -32,5 +32,10 @@ export default defineConfig({
     include: ['tests/**/*.spec.{ts,tsx}'],
     exclude: ['tests/e2e/**'],
     setupFiles: ['tests/setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['lcov', 'text'],
+      reportsDirectory: './coverage',
+    },
   },
 })
