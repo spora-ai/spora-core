@@ -5,8 +5,16 @@ import Icon from '@/components/ui/Icon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMailTemplatesStore } from '@/stores/mailTemplates'
 import { useToast } from '@/composables/useToast'
-
-const SYSTEM_TEMPLATES = ['email_verification', 'password_reset', 'welcome']
+import {
+  MAIL_TEMPLATE_PLACEHOLDERS,
+  isSystemTemplate as checkIsSystemTemplate,
+  formatPlaceholder as formatPlaceholderChip,
+  insertPlaceholderInto,
+  buildUpdatePayload,
+  buildCreatePayload,
+  validateCreateTemplate,
+  emptyCreateDraft,
+} from '@/composables/useMailTemplates'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -40,7 +48,7 @@ const previewLoading = ref(false)
 // Computed
 
 const isSystemTemplate = computed(() =>
-  mailTemplates.currentTemplate ? SYSTEM_TEMPLATES.includes(mailTemplates.currentTemplate.name) : false,
+  mailTemplates.currentTemplate ? checkIsSystemTemplate(mailTemplates.currentTemplate.name) : false,
 )
 
 async function selectTemplate(template: { id: number }): Promise<void> {
@@ -66,11 +74,10 @@ function goBack(): void {
 async function saveTemplate(): Promise<void> {
   if (!mailTemplates.currentTemplate) return
   try {
-    const updated = await mailTemplates.update(mailTemplates.currentTemplate.id, {
-      subject: editorForm.value.subject,
-      body_text: editorForm.value.body_text || null,
-      body_html: editorForm.value.body_html || null,
-    })
+    const updated = await mailTemplates.update(
+      mailTemplates.currentTemplate.id,
+      buildUpdatePayload(editorForm.value),
+    )
     editorForm.value.name = updated.name
     toast.success('Template saved.')
   } catch (e) {
@@ -94,16 +101,15 @@ async function deleteTemplate(): Promise<void> {
 // Create
 
 async function createTemplate(): Promise<void> {
-  if (!createForm.value.name.trim() || !createForm.value.subject.trim()) return
+  const err = validateCreateTemplate(createForm.value)
+  if (err !== null) {
+    toast.error(err)
+    return
+  }
   try {
-    const created = await mailTemplates.create({
-      name: createForm.value.name.trim(),
-      subject: createForm.value.subject.trim(),
-      body_text: createForm.value.body_text || null,
-      body_html: createForm.value.body_html || null,
-    })
+    const created = await mailTemplates.create(buildCreatePayload(createForm.value))
     showCreateModal.value = false
-    createForm.value = { name: '', subject: '', body_text: '', body_html: '' }
+    createForm.value = emptyCreateDraft()
     await selectTemplate(created)
     toast.success('Template created.')
   } catch (e) {
@@ -136,15 +142,16 @@ async function runPreview(): Promise<void> {
 
 // Placeholder chips
 
-const PLACEHOLDERS = ['user_name', 'email', 'verification_link', 'reset_link', 'site_name']
+const PLACEHOLDERS = MAIL_TEMPLATE_PLACEHOLDERS
 
 function formatPlaceholder(ph: string): string {
-  return `{{${ph}}}`
+  return formatPlaceholderChip(ph)
 }
 
 function insertPlaceholder(ph: string): void {
-  editorForm.value.body_text += `{{${ph}}}`
-  editorForm.value.body_html += `{{${ph}}}`
+  const inserted = insertPlaceholderInto(editorForm.value.body_text, editorForm.value.body_html, ph)
+  editorForm.value.body_text = inserted.body_text
+  editorForm.value.body_html = inserted.body_html
 }
 </script>
 
@@ -188,7 +195,7 @@ function insertPlaceholder(ph: string): void {
               <div class="flex items-center gap-2">
                 <span class="text-sm font-medium">{{ t.name }}</span>
                 <span
-                  v-if="SYSTEM_TEMPLATES.includes(t.name)"
+                  v-if="checkIsSystemTemplate(t.name)"
                   class="text-xs rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 px-1.5 py-0.5"
                 >
                   System

@@ -5,6 +5,16 @@ import { useAgentStore } from '@/stores/agent'
 import { useLlmConfigsStore } from '@/stores/llmConfigs'
 import { useLlmPreferencesStore } from '@/stores/llmPreferencesStore'
 import { useToolSettings } from '@/composables/useToolSettings'
+import {
+  categoryLabel,
+  groupToolsByCategory,
+  sortCategoryKeys,
+  formatLlmConfigLabel,
+  buildInitialIdentityForm,
+  buildInitialLlmSettings,
+  buildIdentityPayload,
+  buildLlmSettingsPayload,
+} from '@/composables/useAgentSettingsForm'
 import AgentLayout from '@/components/layout/AgentLayout.vue'
 import type { ToolSchema, ToolStatus } from '@/composables/useToolSettings'
 import AgentLlmConfigModal from '@/components/agent/AgentLlmConfigModal.vue'
@@ -60,7 +70,7 @@ function onLlmCreated(config: LLMConfigResource): void {
 }
 
 function configLabel(config: LLMConfigResource): string {
-  return config.is_global ? `${config.name} (${config.driver_display_name}) — Global` : `${config.name} (${config.driver_display_name})`
+  return formatLlmConfigLabel(config)
 }
 
 
@@ -101,22 +111,12 @@ const collapsedCategories = ref<Record<string, boolean>>({})
 
 
 function toLabel(cat: string): string {
-  return cat.charAt(0).toUpperCase() + cat.slice(1)
+  return categoryLabel(cat)
 }
 
-const toolsByCategory = computed(() => {
-  const groups: Record<string, ToolSchema[]> = {}
-  for (const tool of toolRegistry.value) {
-    const cat = (tool as any).category ?? 'general'
-    if (!groups[cat]) groups[cat] = []
-    groups[cat].push(tool)
-  }
-  return groups
-})
+const toolsByCategory = computed(() => groupToolsByCategory(toolRegistry.value))
 
-const sortedCategories = computed(() =>
-  Object.keys(toolsByCategory.value).sort((a, b) => toLabel(a).localeCompare(toLabel(b))),
-)
+const sortedCategories = computed(() => sortCategoryKeys(toolsByCategory.value))
 
 function showEnableWarning(toolName: string): void {
   pendingEnableTool.value = toolName
@@ -140,18 +140,8 @@ onMounted(async () => {
   ])
 
   const agent = agentStore.currentAgent!
-  identityForm.value = {
-    name: agent.name,
-    description: agent.description ?? '',
-    system_prompt: agent.system_prompt ?? '',
-    max_steps: agent.max_steps ?? 10,
-    allow_continuation: agent.allow_continuation !== false,
-    retry_after_minutes: agent.retry_after_minutes ?? 0,
-    max_retries: agent.max_retries ?? 0,
-  }
-  llmSettingsForm.value = {
-    llm_driver_config_id: agent.llm_driver_config_id ?? null,
-  }
+  identityForm.value = buildInitialIdentityForm(agent)
+  llmSettingsForm.value = buildInitialLlmSettings(agent)
 
   // Seed enabled tools state
   enabledToolNames.value = new Set(agent.tools.map((t) => t.tool_name))
@@ -194,15 +184,7 @@ async function saveIdentity(): Promise<void> {
   identitySaved.value = false
   savingIdentity.value = true
   try {
-    await agentStore.updateAgent(agentId.value, {
-      name: identityForm.value.name,
-      description: identityForm.value.description || null,
-      system_prompt: identityForm.value.system_prompt || null,
-      max_steps: identityForm.value.max_steps,
-      allow_continuation: identityForm.value.allow_continuation,
-      retry_after_minutes: identityForm.value.retry_after_minutes,
-      max_retries: identityForm.value.max_retries,
-    })
+    await agentStore.updateAgent(agentId.value, buildIdentityPayload(identityForm.value))
     identitySaved.value = true
     setTimeout(() => { identitySaved.value = false }, 2000)
   } catch (e) {
@@ -218,9 +200,7 @@ async function saveLlmSettings(): Promise<void> {
   llmSettingsSaved.value = false
   savingLlmSettings.value = true
   try {
-    await agentStore.updateAgent(agentId.value, {
-      llm_driver_config_id: llmSettingsForm.value.llm_driver_config_id,
-    })
+    await agentStore.updateAgent(agentId.value, buildLlmSettingsPayload(llmSettingsForm.value))
     llmSettingsSaved.value = true
     setTimeout(() => { llmSettingsSaved.value = false }, 2000)
   } catch (e) {

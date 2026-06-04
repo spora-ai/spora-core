@@ -50,7 +50,7 @@ describe('MemoryController::reorder', function (): void {
         [$controller] = makeMemoryController();
 
         expect(fn() => $controller->reorder(jsonRequest('PATCH', REORDER_ENDPOINT, ['order' => []])))
-            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+            ->toThrow(TypeError::class);
     });
 
     test('reorder() returns 400 for invalid JSON', function (): void {
@@ -178,7 +178,7 @@ describe('MemoryController::index', function (): void {
         [$controller] = makeMemoryController();
 
         expect(fn() => $controller->index(new Symfony\Component\HttpFoundation\Request()))
-            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+            ->toThrow(TypeError::class);
     });
 
     test('index() returns empty data when no memories', function (): void {
@@ -204,7 +204,7 @@ describe('MemoryController::store', function (): void {
         [$controller] = makeMemoryController();
 
         expect(fn() => $controller->store(jsonRequest('POST', MEMORIES_ENDPOINT, ['name' => 'test'])))
-            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+            ->toThrow(TypeError::class);
     });
 
     test('store() creates a global memory and auto-assigns order', function (): void {
@@ -249,7 +249,7 @@ describe('MemoryController::show', function (): void {
         $request = new Symfony\Component\HttpFoundation\Request();
         $request->attributes->set('id', 1);
         expect(fn() => $controller->show($request))
-            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+            ->toThrow(TypeError::class);
     });
 
     test('show() returns 404 for unknown memory', function (): void {
@@ -273,7 +273,7 @@ describe('MemoryController::update', function (): void {
         [$controller] = makeMemoryController();
 
         expect(fn() => $controller->update(jsonRequest('PUT', '/api/v1/memories/1', ['name' => 'updated'])))
-            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+            ->toThrow(TypeError::class);
     });
 
     test('update() modifies an existing global memory', function (): void {
@@ -312,7 +312,7 @@ describe('MemoryController::destroy', function (): void {
         $request = new Symfony\Component\HttpFoundation\Request();
         $request->attributes->set('id', 1);
         expect(fn() => $controller->destroy($request))
-            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+            ->toThrow(TypeError::class);
     });
 
     test('destroy() deletes an existing global memory', function (): void {

@@ -11,6 +11,14 @@ import type { ScheduledRunResource } from '@/types/scheduledRun'
 import AgentLayout from '@/components/layout/AgentLayout.vue'
 import SharedScheduleEditor from '@/components/shared/SharedScheduleEditor.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import {
+  formatScheduleSummary,
+  formatRunTimestamp,
+  formatScheduleName,
+  formatRunCountLabel,
+  upsertScheduledRun,
+  removeScheduledRun,
+} from '@/composables/useScheduledRunsTable'
 import Toggle from '@/components/ui/Toggle.vue'
 import Icon from '@/components/ui/Icon.vue'
 
@@ -67,26 +75,11 @@ async function loadData(): Promise<void> {
 // Formatting helpers
 
 function formatSchedule(run: ScheduledRunResource): string {
-  if (run.cron_expression) {
-    return `Recurring: ${run.cron_expression}`
-  }
-  if (run.run_at) {
-    try {
-      return `One-shot: ${new Date(run.run_at).toLocaleString(undefined, { timeZone: run.timezone })}`
-    } catch {
-      return 'One-shot'
-    }
-  }
-  return 'Unknown'
+  return formatScheduleSummary(run)
 }
 
 function formatTs(iso: string | null, tz: string): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleString(undefined, { timeZone: tz })
-  } catch {
-    return iso
-  }
+  return formatRunTimestamp(iso, tz)
 }
 
 // Actions
@@ -108,7 +101,7 @@ async function deleteRun(run: ScheduledRunResource): Promise<void> {
   if (!await confirm(`Delete scheduled run "${scheduleName(run)}"?`)) return
   try {
     await api.delete(`/agents/${agentId.value}/scheduled-runs/${run.id}`)
-    runs.value = runs.value.filter((r) => r.id !== run.id)
+    runs.value = removeScheduledRun(runs.value, run.id)
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Failed to delete scheduled run.'
   }
@@ -137,24 +130,13 @@ function openEdit(run: ScheduledRunResource): void {
 
 function onSaved(saved: Partial<ScheduledRunResource>): void {
   if (!saved.id) return
-  const idx = runs.value.findIndex((r) => r.id === saved.id)
-  if (idx !== -1) {
-    runs.value[idx] = saved as ScheduledRunResource
-  } else {
-    runs.value.unshift(saved as ScheduledRunResource)
-  }
+  runs.value = upsertScheduledRun(runs.value, saved as ScheduledRunResource)
   showEditor.value = false
   editingRun.value = null
 }
 
 function scheduleName(run: ScheduledRunResource): string {
-  if (run.template_name) return run.template_name
-  if (run.template_id) return `Template #${run.template_id}`
-  if (run.raw_prompt) {
-    const snippet = run.raw_prompt.length > 40 ? run.raw_prompt.slice(0, 40) + '…' : run.raw_prompt
-    return `Custom: ${snippet}`
-  }
-  return 'Scheduled run'
+  return formatScheduleName(run)
 }
 </script>
 
@@ -198,7 +180,7 @@ function scheduleName(run: ScheduledRunResource): string {
 
       <!-- Table header -->
       <div class="px-6 py-3 flex items-center justify-between border-b border-border shrink-0">
-        <h2 class="text-sm font-semibold">{{ runs.length }} scheduled run{{ runs.length !== 1 ? 's' : '' }}</h2>
+        <h2 class="text-sm font-semibold">{{ formatRunCountLabel(runs.length) }}</h2>
         <button
           data-testid="open-schedule-editor-header"
           @click="openCreate"

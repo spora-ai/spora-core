@@ -3,31 +3,18 @@ import { ref, onMounted } from 'vue'
 import GlobalNavbar from '@/components/GlobalNavbar.vue'
 import { ApiError, api } from '@/api/client'
 import Icon from '@/components/ui/Icon.vue'
-
-interface UserProfile {
-  name: string | null
-  date_of_birth: string | null
-  about_me: string | null
-  height_cm: number | null
-  weight_kg: number | null
-}
-
-interface UserLocation {
-  id: number
-  name: string
-  address: string
-  is_default: boolean
-}
+import {
+  emptyProfile,
+  emptyLocationForm,
+  validateLocationForm,
+  firstLocationError,
+  type UserProfile,
+  type UserLocation,
+} from '@/composables/useProfileSettings'
 
 // Profile form
 
-const profile = ref<UserProfile>({
-  name: null,
-  date_of_birth: null,
-  about_me: null,
-  height_cm: null,
-  weight_kg: null,
-})
+const profile = ref<UserProfile>(emptyProfile())
 const profileLoading = ref(false)
 const profileSaving = ref(false)
 const profileError = ref<string | null>(null)
@@ -43,16 +30,12 @@ const locationsError = ref<string | null>(null)
 const showLocationForm = ref(false)
 const editingLocation = ref<number | null>(null)
 
-const locationForm = ref({
-  name: '',
-  address: '',
-  is_default: false,
-})
+const locationForm = ref(emptyLocationForm())
 const locationFormError = ref<string | null>(null)
 const locationFormSaving = ref(false)
 
 function openAddLocation(): void {
-  locationForm.value = { name: '', address: '', is_default: false }
+  locationForm.value = emptyLocationForm()
   editingLocation.value = null
   showLocationForm.value = true
 }
@@ -74,12 +57,9 @@ function closeLocationForm(): void {
 }
 
 async function saveLocation(): Promise<void> {
-  if (!locationForm.value.name.trim()) {
-    locationFormError.value = 'Name is required.'
-    return
-  }
-  if (!locationForm.value.address.trim()) {
-    locationFormError.value = 'Address is required.'
+  const err = firstLocationError(validateLocationForm(locationForm.value))
+  if (err !== null) {
+    locationFormError.value = err
     return
   }
   locationFormSaving.value = true
