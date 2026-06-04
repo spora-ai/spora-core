@@ -57,7 +57,13 @@ export function isUrl(value: unknown): boolean {
   return typeof value === 'string' && /^https?:\/\//.test(value)
 }
 
-/** Whether the value looks like a simple email address. */
+// Bounded quantifiers + 254-char pre-check prevent the ReDoS that
+// `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` allowed via unbounded backtracking.
+const MAX_EMAIL_LENGTH = 254
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@.]{1,64}(?:\.[^\s@.]{1,64})+$/
+
 export function isEmail(value: unknown): boolean {
-  return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  if (typeof value !== 'string') return false
+  if (value.length === 0 || value.length > MAX_EMAIL_LENGTH) return false
+  return EMAIL_RE.test(value)
 }

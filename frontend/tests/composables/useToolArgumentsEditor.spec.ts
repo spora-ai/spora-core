@@ -113,10 +113,42 @@ describe('useToolArgumentsEditor helpers', () => {
       expect(isEmail('a@b.co')).toBe(true)
     })
 
+    it('matches addresses with multiple subdomains', () => {
+      expect(isEmail('user@mail.example.co.uk')).toBe(true)
+    })
+
+    it('matches addresses with dots and plus tags in the local part', () => {
+      expect(isEmail('first.last+tag@example.com')).toBe(true)
+    })
+
     it('rejects invalid addresses', () => {
       expect(isEmail('not-an-email')).toBe(false)
       expect(isEmail('a@b')).toBe(false)
+      expect(isEmail('a@b.')).toBe(false)
+      expect(isEmail('@b.co')).toBe(false)
+      expect(isEmail('a@.co')).toBe(false)
+      expect(isEmail('a b@c.co')).toBe(false)
       expect(isEmail(null)).toBe(false)
+      expect(isEmail(123)).toBe(false)
+    })
+
+    it('rejects empty and oversized strings (RFC 5321 cap)', () => {
+      expect(isEmail('')).toBe(false)
+      expect(isEmail('a'.repeat(255) + '@b.co')).toBe(false)
+      expect(isEmail('a'.repeat(65) + '@b.co')).toBe(false)
+    })
+
+    // ReDoS regression: the unbounded `[^\s@]+` segments in the old pattern
+    // could be exploited for super-linear backtracking. Bounded quantifiers
+    // make matching linear in input length.
+    it('returns in linear time on adversarial input', () => {
+      const adversarial = 'a'.repeat(5000)
+      const start = performance.now()
+      const result = isEmail(adversarial)
+      const elapsed = performance.now() - start
+
+      expect(result).toBe(false)
+      expect(elapsed).toBeLessThan(5)
     })
   })
 })
