@@ -260,3 +260,182 @@ test('complete throws LLMRetryableException on HTTP 500', function (): void {
 
     expect(fn() => $driver->complete(makeAnthropicRequest()))->toThrow(LLMRetryableException::class);
 });
+
+// Temperature and thinking_budget are forwarded to the request body
+
+test('temperature and thinking_budget are forwarded to the request body when set', function (): void {
+    $capturedBody = null;
+
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$capturedBody): MockResponse {
+        $capturedBody = json_decode($options['body'], true);
+
+        return new MockResponse(json_encode([
+            'id'          => 'msg_4',
+            'stop_reason' => 'end_turn',
+            'content'     => [['type' => 'text', 'text' => 'ok']],
+            'usage'       => ['input_tokens' => 1, 'output_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test-key',
+        model: 'claude-3-7-sonnet-20250219',
+        baseUrl: 'https://api.anthropic.com/v1/messages',
+        httpClient: $client,
+        temperature: 0.3,
+        thinkingBudget: 2048,
+    );
+
+    $driver->complete(makeAnthropicRequest());
+
+    expect($capturedBody)->toHaveKey('temperature');
+    expect($capturedBody['temperature'])->toBe(0.3);
+    expect($capturedBody)->toHaveKey('thinking');
+    expect($capturedBody['thinking'])->toBe([
+        'type'          => 'enabled',
+        'budget_tokens' => 2048,
+    ]);
+});
+
+test('skips tool_use blocks in stop_reason=tool_use that are not actually tool_use', function (): void {
+    // When stop_reason=tool_use but content blocks are mixed (e.g. text), the text
+    // blocks must be skipped when extracting tool calls.
+    $payload = json_encode([
+        'id'          => 'msg_mixed',
+        'stop_reason' => 'tool_use',
+        'content'     => [
+            ['type' => 'text', 'text' => 'Some thinking'],
+            ['type' => 'tool_use', 'id' => 'toolu_x', 'name' => 'do_thing', 'input' => []],
+        ],
+        'usage' => ['input_tokens' => 1, 'output_tokens' => 1],
+    ]);
+
+    $client = new MockHttpClient(new MockResponse($payload, ['http_code' => 200]));
+    $driver = makeAnthropicDriver($client);
+
+    $response = $driver->complete(makeAnthropicRequest());
+
+    expect($response->toolCalls)->toHaveCount(1);
+    expect($response->toolCalls[0]->providerCallId)->toBe('toolu_x');
+});
+
+// Message conversion: tool-call flush boundaries, list arguments, plain user/assistant messages
+
+test('plain user message without tool_calls is forwarded as role+content', function (): void {
+    $capturedBody = null;
+
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$capturedBody): MockResponse {
+        $capturedBody = json_decode($options['body'], true);
+
+        return new MockResponse(json_encode([
+            'id' => 'msg_5', 'stop_reason' => 'end_turn',
+            'content' => [['type' => 'text', 'text' => 'ok']],
+            'usage' => ['input_tokens' => 1, 'output_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    $driver = makeAnthropicDriver($client);
+    $request = makeAnthropicRequest([
+        ['role' => 'user', 'content' => 'hello world'],
+    ]);
+
+    $driver->complete($request);
+
+    expect($capturedBody['messages'])->toHaveCount(1);
+    expect($capturedBody['messages'][0])->toBe(['role' => 'user', 'content' => 'hello world']);
+});
+
+test('trailing tool results are flushed even if no non-tool message follows', function (): void {
+    $capturedBody = null;
+
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$capturedBody): MockResponse {
+        $capturedBody = json_decode($options['body'], true);
+
+        return new MockResponse(json_encode([
+            'id' => 'msg_6', 'stop_reason' => 'end_turn',
+            'content' => [['type' => 'text', 'text' => 'ok']],
+            'usage' => ['input_tokens' => 1, 'output_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    $driver = makeAnthropicDriver($client);
+    $request = makeAnthropicRequest([
+        ['role' => 'user', 'content' => 'first'],
+        ['role' => 'tool', 'tool_call_id' => 'c1', 'name' => 'foo', 'content' => 'r1'],
+        // No non-tool message after the tool result — must still flush
+        ['role' => 'tool', 'tool_call_id' => 'c2', 'name' => 'bar', 'content' => 'r2'],
+    ]);
+
+    $driver->complete($request);
+
+    expect($capturedBody['messages'])->toHaveCount(2);
+    // The trailing flush becomes the second user message with both tool results
+    expect($capturedBody['messages'][1]['role'])->toBe('user');
+    expect($capturedBody['messages'][1]['content'])->toHaveCount(2);
+});
+
+test('non-function tool definitions are skipped', function (): void {
+    $capturedBody = null;
+
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$capturedBody): MockResponse {
+        $capturedBody = json_decode($options['body'], true);
+
+        return new MockResponse(json_encode([
+            'id' => 'msg_7', 'stop_reason' => 'end_turn',
+            'content' => [['type' => 'text', 'text' => 'ok']],
+            'usage' => ['input_tokens' => 1, 'output_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    $driver = makeAnthropicDriver($client);
+    $request = makeAnthropicRequest(
+        messages: [],
+        tools: [
+            ['type' => 'not_function', 'function' => ['name' => 'skip_me']],
+            ['type' => 'function', 'function' => [
+                'name' => 'keep_me',
+                'description' => 'kept',
+                'parameters' => ['type' => 'object', 'properties' => []],
+            ]],
+        ],
+    );
+
+    $driver->complete($request);
+
+    expect($capturedBody['tools'])->toHaveCount(1);
+    expect($capturedBody['tools'][0]['name'])->toBe('keep_me');
+});
+
+test('list-shaped assistant tool_call arguments are wrapped as object', function (): void {
+    $rawBody = null;
+
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$rawBody): MockResponse {
+        $rawBody = $options['body'];
+
+        return new MockResponse(json_encode([
+            'id' => 'msg_8', 'stop_reason' => 'end_turn',
+            'content' => [['type' => 'text', 'text' => 'ok']],
+            'usage' => ['input_tokens' => 1, 'output_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    $driver = makeAnthropicDriver($client);
+    $request = makeAnthropicRequest([
+        [
+            'role'       => 'assistant',
+            'content'    => null,
+            'tool_calls' => [[
+                'id'       => 'call_list',
+                'type'     => 'function',
+                'function' => ['name' => 'list_tool', 'arguments' => '["a","b","c"]'],
+            ]],
+        ],
+    ]);
+
+    $driver->complete($request);
+
+    // List arguments must be sent as object — Anthropic rejects bare arrays.
+    // The (object) cast turns ["a","b","c"] into {"0":"a","1":"b","2":"c"} in JSON.
+    expect($rawBody)->not->toContain('"input":["a","b","c"]');
+    expect($rawBody)->toContain('"input":{"0":"a","1":"b","2":"c"}');
+});

@@ -658,3 +658,312 @@ describe('WorkerRunCommand --reap-only', function (): void {
         expect($orphanedTask->error_code)->toBe('ORPHANED');
     });
 });
+
+describe('WorkerRunCommand mode flag validation', function (): void {
+
+    it('rejects --daemon combined with --once', function (): void {
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $mercure      = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+        $notification = Mockery::mock(NotificationService::class);
+        $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+
+        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification);
+
+        $input  = new ArrayInput(['--daemon' => true, '--once' => true], $command->getDefinition());
+        $output = new NullOutput();
+
+        $ref = new ReflectionMethod($command, 'execute');
+        $exitCode = $ref->invoke($command, $input, $output);
+
+        expect($exitCode)->toBe(1);
+    });
+
+    it('rejects --daemon combined with --reap-only', function (): void {
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $mercure      = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+        $notification = Mockery::mock(NotificationService::class);
+        $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+
+        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification);
+
+        $input  = new ArrayInput(['--daemon' => true, '--reap-only' => true], $command->getDefinition());
+        $output = new NullOutput();
+
+        $ref = new ReflectionMethod($command, 'execute');
+        $exitCode = $ref->invoke($command, $input, $output);
+
+        expect($exitCode)->toBe(1);
+    });
+
+    it('rejects --once combined with --reap-only', function (): void {
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $mercure      = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+        $notification = Mockery::mock(NotificationService::class);
+        $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+
+        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification);
+
+        $input  = new ArrayInput(['--once' => true, '--reap-only' => true], $command->getDefinition());
+        $output = new NullOutput();
+
+        $ref = new ReflectionMethod($command, 'execute');
+        $exitCode = $ref->invoke($command, $input, $output);
+
+        expect($exitCode)->toBe(1);
+    });
+});
+
+describe('WorkerRunCommand substituteVariables', function (): void {
+    /**
+     * Invoke the private substituteVariables() method via reflection.
+     * Uses the already-booted DB (do NOT reset/boot here — that would discard
+     * the caller-side Agent/User data).
+     */
+    function invokeSubstituteVariables(string $template, array $variables, ?Agent $agent = null): string
+    {
+        // Make sure DB is booted (it's already booted by the test's beforeEach).
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
+
+        $orchestrator   = Mockery::mock(OrchestratorInterface::class);
+        $mercure        = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+        $notification   = Mockery::mock(NotificationService::class);
+        $container      = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+
+        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification);
+        $ref = new ReflectionMethod($command, 'substituteVariables');
+        $ref->setAccessible(true);
+
+        return $ref->invoke($command, $template, $variables, $agent);
+    }
+
+    it('substitutes {{current_date}} with today\'s date', function (): void {
+        $result = invokeSubstituteVariables('Today is {{current_date}}', []);
+        expect($result)->toBe('Today is ' . date('Y-m-d'));
+    });
+
+    it('substitutes {{date}} alias for current_date', function (): void {
+        $result = invokeSubstituteVariables('Date: {{date}}', []);
+        expect($result)->toBe('Date: ' . date('Y-m-d'));
+    });
+
+    it('substitutes {{current_time}} with HH:MM', function (): void {
+        $result = invokeSubstituteVariables('Time: {{current_time}}', []);
+        expect($result)->toMatch('/^Time: \d{2}:\d{2}$/');
+    });
+
+    it('substitutes {{current_datetime}} with ISO local time', function (): void {
+        $result = invokeSubstituteVariables('Now: {{current_datetime}}', []);
+        expect($result)->toMatch('/^Now: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/');
+    });
+
+    it('substitutes {{agent_name}} when an agent is provided', function (): void {
+        [$command] = makeWorkerRunCommand();
+        [, $agentId] = registerAgentInWorkerDb();
+        $agent = Agent::find($agentId);
+
+        $ref = new ReflectionMethod($command, 'substituteVariables');
+        $ref->setAccessible(true);
+        $result = $ref->invoke($command, 'Hello {{agent_name}}', [], $agent);
+
+        expect($result)->toBe('Hello WorkerTestAgent');
+    });
+
+    it('substitutes {{user_name}} with the agent owner\'s username', function (): void {
+        [$command] = makeWorkerRunCommand();
+        [$userId, $agentId] = registerAgentInWorkerDb();
+        // The user record must have its `username` column set for the substitution
+        // to find it — delight-im/auth only sets email + status.
+        \Spora\Models\User::where('id', $userId)->update(['username' => 'WorkerTestUser']);
+        $agent = Agent::find($agentId);
+
+        $ref = new ReflectionMethod($command, 'substituteVariables');
+        $ref->setAccessible(true);
+        $result = $ref->invoke($command, 'Owner: {{user_name}}', [], $agent);
+
+        expect($result)->toBe('Owner: WorkerTestUser');
+    });
+
+    it('falls back to the placeholder when the owner has no username', function (): void {
+        [$command] = makeWorkerRunCommand();
+        [, $agentId] = registerAgentInWorkerDb();
+        $agent = Agent::find($agentId);
+
+        $ref = new ReflectionMethod($command, 'substituteVariables');
+        $ref->setAccessible(true);
+        $result = $ref->invoke($command, 'Owner: {{user_name}}', [], $agent);
+
+        expect($result)->toBe('Owner: user_name');
+    });
+
+    it('substitutes day_of_week, day_of_month, month, year', function (): void {
+        $result = invokeSubstituteVariables(
+            '{{day_of_week}} {{day_of_month}} {{month}} {{year}}',
+            [],
+        );
+        expect($result)->toBe(date('l') . ' ' . (int) date('j') . ' ' . date('F') . ' ' . date('Y'));
+    });
+
+    it('substitutes custom variables from the variable list', function (): void {
+        $result = invokeSubstituteVariables(
+            'Hello {{name}}, your city is {{city}}',
+            [
+                ['key' => 'name', 'default_value' => 'World'],
+                ['key' => 'city', 'default_value' => 'Berlin'],
+            ],
+        );
+        expect($result)->toBe('Hello World, your city is Berlin');
+    });
+
+    it('falls back to inline default when no variable is defined', function (): void {
+        $result = invokeSubstituteVariables('Hi {{name:stranger}}', []);
+        expect($result)->toBe('Hi stranger');
+    });
+
+    it('keeps the literal placeholder when no default is found', function (): void {
+        $result = invokeSubstituteVariables('Hello {{unknown_var}}', []);
+        expect($result)->toBe('Hello {{unknown_var}}');
+    });
+});
+
+describe('WorkerRunCommand processRetryQueue', function (): void {
+    /**
+     * Invoke processRetryQueue via reflection.
+     */
+    function invokeProcessRetryQueue(WorkerRunCommand $command): void
+    {
+        $ref = new ReflectionMethod($command, 'processRetryQueue');
+        $ref->setAccessible(true);
+        $ref->invoke($command);
+    }
+
+    it('does nothing when no retry tasks are due', function (): void {
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->shouldNotReceive('tick');
+
+        $mercure      = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+        $notification = Mockery::mock(NotificationService::class);
+        $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+
+        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification);
+
+        invokeProcessRetryQueue($command);
+    });
+
+    it('skips retries whose original task is CANCELLED', function (): void {
+        [$command] = makeWorkerRunCommand();
+        [$userId, $agentId] = registerAgentInWorkerDb();
+
+        $original = Task::create([
+            'user_id' => $userId, 'agent_id' => $agentId, 'status' => 'CANCELLED',
+            'user_prompt' => 'orig', 'max_steps' => 5,
+        ]);
+        $retry = Task::create([
+            'user_id'        => $userId,
+            'agent_id'       => $agentId,
+            'status'         => 'QUEUED',
+            'user_prompt'    => 'retry-1',
+            'max_steps'      => 5,
+            'retry_of_task_id' => $original->id,
+            'retry_count'    => 1,
+        ]);
+        // retry_after is a TIMESTAMP column; set it via raw SQL to avoid Eloquent's
+        // date-cast pitfalls in tests.
+        Capsule::table('tasks')
+            ->where('id', $retry->id)
+            ->update(['retry_after' => '2020-01-01 00:00:00']);
+
+        $ref = new ReflectionMethod($command, 'processRetryQueue');
+        $ref->setAccessible(true);
+        $ref->invoke($command);
+
+        // Retry stays QUEUED — orchestrator.tick must not have been called
+        $retry->refresh();
+        expect($retry->status)->toBe('QUEUED');
+    });
+
+    it('processes a due retry and ticks the orchestrator for it', function (): void {
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
+
+        $auth = bootAuthLayer();
+        $userId = $auth->register('retry-ok2@example.com', WORKER_TEST_PASSWORD, 'RetryOk2');
+        $agent = Agent::create([
+            'user_id' => $userId, 'name' => 'RetryOk2Agent',
+            'max_steps' => 5, 'max_retries' => 3, 'is_active' => true,
+        ]);
+        $original = Task::create([
+            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'user_prompt' => 'orig', 'max_steps' => 5,
+        ]);
+        $retry = Task::create([
+            'user_id'        => $userId,
+            'agent_id'       => $agent->id,
+            'status'         => 'QUEUED',
+            'user_prompt'    => 'retry-1',
+            'max_steps'      => 5,
+            'retry_of_task_id' => $original->id,
+            'retry_count'    => 1,
+        ]);
+        Capsule::table('tasks')
+            ->where('id', $retry->id)
+            ->update(['retry_after' => '2020-01-01 00:00:00']);
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->shouldReceive('tick')->once()->with($retry->id);
+
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+
+        $notification = Mockery::mock(NotificationService::class);
+        $notification->allows('notifyTaskRetrying')->andReturnNull();
+
+        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+
+        $command = new WorkerRunCommand(
+            $db,
+            $orchestrator,
+            new NullLogger(),
+            $container,
+            $mercure,
+            $notification,
+        );
+
+        $ref = new ReflectionMethod($command, 'processRetryQueue');
+        $ref->setAccessible(true);
+        $ref->invoke($command);
+
+        // Retry moved from QUEUED to RUNNING
+        $retry->refresh();
+        expect($retry->status)->toBe('RUNNING');
+    });
+});

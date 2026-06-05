@@ -161,3 +161,41 @@ test('parse extracts Anthropic thinking from response01.txt and preserves conten
     // Content should be the simple answer
     expect(trim($response['content']))->toBe("6 × 7 = **42**");
 });
+
+test('parse skips non-array blocks mixed into a block array', function (): void {
+    $raw = [
+        'not-an-array', // scalar — should be ignored, not crash
+        ['type' => 'text', 'text' => 'Hello.'],
+        null, // also non-array
+        ['type' => 'text', 'text' => ' World.'],
+    ];
+
+    $response = LLMContentParser::parse($raw);
+
+    expect($response['content'])->toBe('Hello. World.')
+        ->and($response['reasoning'])->toBeNull();
+});
+
+test('parse falls back to empty text when a text block has no text key', function (): void {
+    $raw = [
+        ['type' => 'text'], // missing 'text' key
+        ['type' => 'text', 'text' => 'after'],
+    ];
+
+    $response = LLMContentParser::parse($raw);
+
+    expect($response['content'])->toBe('after')
+        ->and($response['reasoning'])->toBeNull();
+});
+
+test('parse falls back to empty string when a thinking block has no thinking key', function (): void {
+    $raw = [
+        ['type' => 'thinking'], // missing 'thinking' key
+        ['type' => 'text', 'text' => 'answer'],
+    ];
+
+    $response = LLMContentParser::parse($raw);
+
+    expect($response['content'])->toBe('answer')
+        ->and($response['reasoning'])->toBe('');
+});
