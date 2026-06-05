@@ -370,94 +370,16 @@ final class MessageParser
     }
 
     /**
-     * Extract attachment metadata from a list of parsed MIME parts.
-     *
-     * Each part is expected to have:
-     *   - 'headers' : array<string, string> containing content-type and
-     *                 content-disposition
-     *   - 'body'    : string
+     * @deprecated Use {@see AttachmentExtractor::extract()} directly.
+     *             Kept as a thin shim for callers that still use
+     *             MessageParser::extractAttachments().
      *
      * @param list<array{headers?: array<string, string>, body?: string}> $parts
      * @return list<array{filename: ?string, content_type: string, size: int, content_id: ?string, disposition: string}>
      */
     public static function extractAttachments(array $parts): array
     {
-        $out = [];
-        foreach ($parts as $part) {
-            $record = self::extractAttachmentRecord($part);
-            if ($record !== null) {
-                $out[] = $record;
-            }
-        }
-        return $out;
-    }
-
-    /**
-     * Build one attachment metadata record, or null when the part is not an
-     * attachment (missing disposition, or text/* content).
-     *
-     * @param array{headers?: array<string, string>, body?: string} $part
-     * @return ?array{filename: ?string, content_type: string, size: int, content_id: ?string, disposition: string}
-     */
-    private static function extractAttachmentRecord(array $part): ?array
-    {
-        $headers = $part['headers'] ?? [];
-        $ct      = self::headerString($headers, 'content-type');
-        $disp    = self::headerString($headers, 'content-disposition');
-        $isAttachment = str_contains($disp, 'attachment');
-        $isText       = str_contains($ct, 'text/');
-        if (!$isAttachment || $isText) {
-            return null;
-        }
-        $body = (string) ($part['body'] ?? '');
-        return [
-            'filename'     => self::extractFilename($disp, $ct),
-            'content_type' => $ct,
-            'size'         => strlen($body),
-            'content_id'   => self::extractContentId($headers),
-            'disposition'  => 'attachment',
-        ];
-    }
-
-    /**
-     * Return the lowercased value of a header from a header bag, looking
-     * up the key case-insensitively. Empty string when absent.
-     *
-     * @param array<string, string> $headers
-     */
-    private static function headerString(array $headers, string $name): string
-    {
-        if (isset($headers[$name])) {
-            return strtolower((string) $headers[$name]);
-        }
-        $lower = strtolower($name);
-        foreach ($headers as $k => $v) {
-            if (strtolower((string) $k) === $lower) {
-                return strtolower((string) $v);
-            }
-        }
-        return '';
-    }
-
-    /**
-     * Look up `content-id` in a case-insensitive way (keys may arrive as
-     * `content-id` or `Content-ID` depending on the parser upstream),
-     * then strip the surrounding angle brackets.
-     *
-     * @param array<string, string> $headers
-     */
-    private static function extractContentId(array $headers): ?string
-    {
-        $raw = $headers['content-id'] ?? null;
-        if ($raw === null) {
-            foreach ($headers as $k => $v) {
-                if (strtolower((string) $k) === 'content-id') {
-                    $raw = (string) $v;
-                    break;
-                }
-            }
-        }
-        return $raw !== null ? trim((string) $raw, '<>') : null;
+        return AttachmentExtractor::extract($parts);
     }
 
     /**
@@ -466,24 +388,6 @@ final class MessageParser
     private static function extractBoundary(string $contentType): ?string
     {
         if (preg_match('/boundary\s*=\s*"?([^";\s]+)"?/i', $contentType, $m)) {
-            return $m[1];
-        }
-        return null;
-    }
-
-    /**
-     * Pull the filename from a Content-Disposition or Content-Type header.
-     * Disposition's `filename=` is authoritative; type's `name=` is fallback.
-     *
-     * @param string $disp Already-lowercased Content-Disposition.
-     * @param string $ct   Already-lowercased Content-Type.
-     */
-    private static function extractFilename(string $disp, string $ct): ?string
-    {
-        if (preg_match('/filename\s*=\s*"?([^";]+)"?/i', $disp, $m)) {
-            return $m[1];
-        }
-        if (preg_match('/name\s*=\s*"?([^";]+)"?/i', $ct, $m)) {
             return $m[1];
         }
         return null;
