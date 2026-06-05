@@ -33,6 +33,7 @@
 - No DB calls in constructors — boot explicitly via `Database::bootDatabaseConnectionOnly()`
 - No mocks for integration tests that already boot the DB via `beforeEach`
 - Don't add error handling, fallbacks, or abstractions beyond what the task requires
+- **Never commit or push directly to `main`.** Every change goes through a feature branch and a pull request — even single-commit fixes. Branch naming: `<scope>/<phase-or-feature>` (e.g. `coverage/phase-1.4-orchestrator-and-controllers`, `feat/tool-authooring-dx`, `fix/logout`). Local `main` may be fast-forwarded via `git pull --ff-only` but never receives a direct push. SonarQube's `new_coverage` metric is calculated per PR, so bypassing the PR flow breaks the quality-gate signal.
 
 ### CLI Entry Point
 `bin/spora` is the single CLI entry point:
