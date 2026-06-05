@@ -76,11 +76,12 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout(): Promise<void> {
+    // Post first so the X-CSRF-Token header can still be injected from the store.
+    await api.post('/auth/logout').catch(() => {})
     user.value = null
     csrfToken.value = null
     initPromise = null
     initialized.value = false
-    await api.post('/auth/logout').catch(() => {})
   }
 
   async function changePassword(current: string, next: string): Promise<void> {
