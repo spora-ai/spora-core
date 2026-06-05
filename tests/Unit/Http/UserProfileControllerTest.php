@@ -364,3 +364,204 @@ test('deleteLocation rejects unauthenticated requests', function (): void {
     expect(fn() => callController($controller, 'deleteLocation', $request, [$authMiddleware]))
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
+
+test('getProfile returns 404 when user no longer exists', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'missing@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'missing@example.com');
+
+    User::where('id', $userId)->delete();
+
+    $request = jsonRequest('GET', USERPROFILE_GET_PROFILE_PATH);
+    $response = callController($controller, 'getProfile', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(404);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('NOT_FOUND');
+    expect($body['error']['message'])->toBe('User not found.');
+});
+
+test('putProfile returns 400 on invalid JSON', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'badjsonprofile@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'badjsonprofile@example.com');
+
+    $request = Symfony\Component\HttpFoundation\Request::create(
+        USERPROFILE_GET_PROFILE_PATH,
+        'PUT',
+        [],
+        [],
+        [],
+        ['CONTENT_TYPE' => 'application/json'],
+        '{ this is not valid json',
+    );
+    $response = callController($controller, 'putProfile', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(400);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('INVALID_JSON');
+    expect($body['error']['message'])->toBe('Request body must be valid JSON.');
+});
+
+test('putProfile handles empty request body', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'emptybodyprofile@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'emptybodyprofile@example.com');
+    User::where('id', $userId)->update(['name' => 'Keep Me']);
+
+    $request = jsonRequest('PUT', USERPROFILE_GET_PROFILE_PATH);
+    $response = callController($controller, 'putProfile', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(200);
+    $data = json_decode($response->getContent(), true)['data'];
+    expect($data['name'])->toBe('Keep Me');
+});
+
+test('postLocation returns 400 on invalid JSON', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'badjsonloc@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'badjsonloc@example.com');
+
+    $request = Symfony\Component\HttpFoundation\Request::create(
+        USERPROFILE_LOCATIONS_PATH,
+        'POST',
+        [],
+        [],
+        [],
+        ['CONTENT_TYPE' => 'application/json'],
+        '{ not json',
+    );
+    $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(400);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('INVALID_JSON');
+    expect($body['error']['message'])->toBe('Request body must be valid JSON.');
+});
+
+test('postLocation returns 422 when name is empty string', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'emptynameloc@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'emptynameloc@example.com');
+
+    $request = jsonRequest('POST', USERPROFILE_LOCATIONS_PATH, [
+        'name'    => '',
+        'address' => USERPROFILE_ADDRESS_HOME,
+    ]);
+    $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(422);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+    expect($body['error']['message'])->toBe('name is required.');
+    expect(UserLocation::where('user_id', $userId)->count())->toBe(0);
+});
+
+test('postLocation returns 422 when name is whitespace only', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'spacename@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'spacename@example.com');
+
+    $request = jsonRequest('POST', USERPROFILE_LOCATIONS_PATH, [
+        'name'    => '   ',
+        'address' => USERPROFILE_ADDRESS_HOME,
+    ]);
+    $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(422);
+    expect($response->getContent())->toContain('name is required');
+});
+
+test('postLocation returns 422 when address is empty string', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'emptyaddrloc@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'emptyaddrloc@example.com');
+
+    $request = jsonRequest('POST', USERPROFILE_LOCATIONS_PATH, [
+        'name'    => 'Home',
+        'address' => '',
+    ]);
+    $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(422);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+    expect($body['error']['message'])->toBe('address is required.');
+    expect(UserLocation::where('user_id', $userId)->count())->toBe(0);
+});
+
+test('putLocation returns 400 on invalid JSON', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'badjsonputloc@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'badjsonputloc@example.com');
+
+    $loc = UserLocation::create([
+        'user_id' => $userId,
+        'name'    => 'Home',
+        'address' => USERPROFILE_ADDRESS_HOME,
+    ]);
+
+    $request = Symfony\Component\HttpFoundation\Request::create(
+        "/me/locations/{$loc->id}",
+        'PUT',
+        [],
+        [],
+        [],
+        ['CONTENT_TYPE' => 'application/json'],
+        '{ broken',
+    );
+    $request->attributes->set('id', $loc->id);
+    $response = callController($controller, 'putLocation', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(400);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('INVALID_JSON');
+});
+
+test('putLocation returns 422 when name is empty string', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'emptynameput@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'emptynameput@example.com');
+
+    $loc = UserLocation::create([
+        'user_id' => $userId,
+        'name'    => 'Original',
+        'address' => USERPROFILE_ADDRESS_HOME,
+    ]);
+
+    $request = jsonRequest('PUT', "/me/locations/{$loc->id}", ['name' => '']);
+    $request->attributes->set('id', $loc->id);
+    $response = callController($controller, 'putLocation', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(422);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+    expect($body['error']['message'])->toBe('name is required and cannot be empty.');
+
+    $loc->refresh();
+    expect($loc->name)->toBe('Original');
+});
+
+test('putLocation returns 422 when address is empty string', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'emptyaddrput@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'emptyaddrput@example.com');
+
+    $loc = UserLocation::create([
+        'user_id' => $userId,
+        'name'    => 'Original',
+        'address' => USERPROFILE_ADDRESS_HOME,
+    ]);
+
+    $request = jsonRequest('PUT', "/me/locations/{$loc->id}", ['address' => '']);
+    $request->attributes->set('id', $loc->id);
+    $response = callController($controller, 'putLocation', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(422);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+    expect($body['error']['message'])->toBe('address is required and cannot be empty.');
+
+    $loc->refresh();
+    expect($loc->address)->toBe(USERPROFILE_ADDRESS_HOME);
+});
