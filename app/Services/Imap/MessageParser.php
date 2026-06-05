@@ -384,45 +384,80 @@ final class MessageParser
     {
         $out = [];
         foreach ($parts as $part) {
-            $headers = $part['headers'] ?? [];
-            $ct      = strtolower((string) ($headers['content-type'] ?? $headers['Content-Type'] ?? ''));
-            $disp    = strtolower((string) ($headers['content-disposition'] ?? $headers['Content-Disposition'] ?? ''));
-
-            if (!str_contains($disp, 'attachment')) {
-                continue;
+            $record = self::extractAttachmentRecord($part);
+            if ($record !== null) {
+                $out[] = $record;
             }
-            // Skip text/* parts even if they have name= or are flagged.
-            if (str_contains($ct, 'text/')) {
-                continue;
-            }
-
-            // filename precedence: Content-Disposition's filename= is the
-            // RFC-correct source; Content-Type's name= is the fallback. The
-            // two regexes are intentionally separate branches so the priority
-            // is visible — they are not duplicates.
-            $filename = self::extractFilename($disp, $ct);
-
-            $body = (string) ($part['body'] ?? '');
-            $rawContentId = $headers['content-id'] ?? null;
-            if ($rawContentId === null) {
-                foreach ($headers as $k => $v) {
-                    if (strtolower((string) $k) === 'content-id') {
-                        $rawContentId = $v;
-                        break;
-                    }
-                }
-            }
-            $contentId = $rawContentId !== null ? trim((string) $rawContentId, '<>') : null;
-
-            $out[] = [
-                'filename'     => $filename,
-                'content_type' => $ct,
-                'size'         => strlen($body),
-                'content_id'   => $contentId,
-                'disposition'  => 'attachment',
-            ];
         }
         return $out;
+    }
+
+    /**
+     * Build one attachment metadata record, or null when the part is not an
+     * attachment (missing disposition, or text/* content).
+     *
+     * @param array{headers?: array<string, string>, body?: string} $part
+     * @return ?array{filename: ?string, content_type: string, size: int, content_id: ?string, disposition: string}
+     */
+    private static function extractAttachmentRecord(array $part): ?array
+    {
+        $headers = $part['headers'] ?? [];
+        $ct      = self::headerString($headers, 'content-type');
+        $disp    = self::headerString($headers, 'content-disposition');
+        $isAttachment = str_contains($disp, 'attachment');
+        $isText       = str_contains($ct, 'text/');
+        if (!$isAttachment || $isText) {
+            return null;
+        }
+        $body = (string) ($part['body'] ?? '');
+        return [
+            'filename'     => self::extractFilename($disp, $ct),
+            'content_type' => $ct,
+            'size'         => strlen($body),
+            'content_id'   => self::extractContentId($headers),
+            'disposition'  => 'attachment',
+        ];
+    }
+
+    /**
+     * Return the lowercased value of a header from a header bag, looking
+     * up the key case-insensitively. Empty string when absent.
+     *
+     * @param array<string, string> $headers
+     */
+    private static function headerString(array $headers, string $name): string
+    {
+        if (isset($headers[$name])) {
+            return strtolower((string) $headers[$name]);
+        }
+        $lower = strtolower($name);
+        foreach ($headers as $k => $v) {
+            if (strtolower((string) $k) === $lower) {
+                return strtolower((string) $v);
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Look up `content-id` in a case-insensitive way (keys may arrive as
+     * `content-id` or `Content-ID` depending on the parser upstream),
+     * then strip the surrounding angle brackets.
+     *
+     * @param array<string, string> $headers
+     */
+    private static function extractContentId(array $headers): ?string
+    {
+        $raw = $headers['content-id'] ?? null;
+        if ($raw === null) {
+            foreach ($headers as $k => $v) {
+                if (strtolower((string) $k) === 'content-id') {
+                    $raw = (string) $v;
+                    break;
+                }
+            }
+        }
+        return $raw !== null ? trim((string) $raw, '<>') : null;
     }
 
     /**
@@ -481,15 +516,13 @@ final class MessageParser
     private static function parsePartSection(string $section): ?array
     {
         $preambles = ['', "--\r\n", "--\n", '--'];
-        if (in_array($section, $preambles, true)) {
-            return null;
-        }
         $section = ltrim($section, "\r\n");
-        if ($section === '') {
-            return null;
-        }
         $split = preg_split("/\r?\n\r?\n/", $section, 2);
-        if ($split === false || count($split) < 2) {
+        $isJunk = in_array($section, $preambles, true)
+            || $section === ''
+            || $split === false
+            || count($split) < 2;
+        if ($isJunk) {
             return null;
         }
         [$headerBlock, $partBody] = $split;

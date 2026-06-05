@@ -317,4 +317,65 @@ describe('MessageParser::extractAttachments', function (): void {
         expect($atts)->toHaveCount(2);
         expect(array_column($atts, 'filename'))->toBe(['a.png', 'b.pdf']);
     });
+
+    it('handles capitalized header keys (Content-Type, Content-Disposition)', function (): void {
+        $parts = [
+            [
+                'headers' => [
+                    'Content-Type'        => 'image/jpeg',
+                    'Content-Disposition' => 'attachment; filename="pic.jpg"',
+                ],
+                'body' => 'jpeg-bytes',
+            ],
+        ];
+        $atts = MessageParser::extractAttachments($parts);
+        expect($atts)->toHaveCount(1);
+        expect($atts[0]['filename'])->toBe('pic.jpg');
+        expect($atts[0]['content_type'])->toBe('image/jpeg');
+    });
+
+    it('strips angle brackets from Content-ID (capitalized)', function (): void {
+        $parts = [
+            [
+                'headers' => [
+                    'content-type'        => 'image/png',
+                    'content-disposition' => 'attachment; filename="img.png"',
+                    'Content-ID'          => '<img-42@example.com>',
+                ],
+                'body' => 'bytes',
+            ],
+        ];
+        $atts = MessageParser::extractAttachments($parts);
+        expect($atts[0]['content_id'])->toBe('img-42@example.com');
+    });
+
+    it('falls back to name= in content-type when filename= is absent', function (): void {
+        $png = 'image/png; name="fallback.png"';
+        $parts = [
+            [
+                'headers' => [
+                    'content-type'        => $png,
+                    'content-disposition' => 'attachment',
+                ],
+                'body' => 'bytes',
+            ],
+        ];
+        $atts = MessageParser::extractAttachments($parts);
+        expect($atts[0]['filename'])->toBe('fallback.png');
+    });
+
+    it('returns null filename when neither filename= nor name= is set', function (): void {
+        $png = 'image/png';
+        $parts = [
+            [
+                'headers' => [
+                    'content-type'        => $png,
+                    'content-disposition' => 'attachment',
+                ],
+                'body' => 'bytes',
+            ],
+        ];
+        $atts = MessageParser::extractAttachments($parts);
+        expect($atts[0]['filename'])->toBeNull();
+    });
 });

@@ -92,6 +92,12 @@ describe('useAgentToolConfig — extended exports', () => {
     it('returns the stringified value when not a password', () => {
       expect(maskPasswordValue('plain', false)).toBe('plain')
       expect(maskPasswordValue(42, false)).toBe('42')
+      expect(maskPasswordValue(true, false)).toBe('true')
+    })
+
+    it('JSON-stringifies arrays and objects (no [object Object])', () => {
+      expect(maskPasswordValue(['a', 'b'], false)).toBe('["a","b"]')
+      expect(maskPasswordValue({ foo: 1 }, false)).toBe('{"foo":1}')
     })
   })
 
