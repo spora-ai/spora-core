@@ -100,6 +100,50 @@ describe('useAuthStore', () => {
       expect(mockApi.post).toHaveBeenCalledTimes(1)
       expect(mockApi.post.mock.calls[0][0]).toBe('/auth/logout')
     })
+
+    it('keeps user and csrfToken in store while the API call is in flight, then clears them', async () => {
+      // Regression: token is read by injectCsrfIfNeeded at request time.
+      const store = useAuthStore()
+      store.user = { id: 1, email: 'test@example.com' }
+      store.csrfToken = 'live-csrf-token'
+      store.initialized = true
+
+      let capturedUser: unknown
+      let capturedCsrf: unknown
+      mockApi.post.mockImplementationOnce(async () => {
+        // Snapshot the store at the moment the request fires.
+        capturedUser = store.user
+        capturedCsrf = store.csrfToken
+        return undefined
+      })
+
+      await store.logout()
+
+      expect(mockApi.post).toHaveBeenCalledTimes(1)
+      expect(mockApi.post.mock.calls[0][0]).toBe('/auth/logout')
+      // Token + user must still be present so the API client can attach the header.
+      expect(capturedUser).toEqual({ id: 1, email: 'test@example.com' })
+      expect(capturedCsrf).toBe('live-csrf-token')
+      // ...and cleared afterwards.
+      expect(store.user).toBe(null)
+      expect(store.csrfToken).toBe(null)
+      expect(store.initialized).toBe(false)
+    })
+
+    it('clears user state even if the API call rejects', async () => {
+      const store = useAuthStore()
+      store.user = { id: 1, email: 'test@example.com' }
+      store.csrfToken = 'live-csrf-token'
+      store.initialized = true
+
+      mockApi.post.mockRejectedValueOnce(new Error('network down'))
+
+      await store.logout()
+
+      expect(store.user).toBe(null)
+      expect(store.csrfToken).toBe(null)
+      expect(store.initialized).toBe(false)
+    })
   })
 
   describe('register', () => {
