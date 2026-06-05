@@ -5,7 +5,17 @@ import Modal from '@/components/Modal.vue'
 import ToolSettingField from '@/components/settings/ToolSettingField.vue'
 import type { ToolSchema, SettingsWithSource } from '@/composables/useToolSettings'
 import { useToolSettings } from '@/composables/useToolSettings'
-import { buildAgentOverridePayload, initFormFromSettingsWithSource } from '@/composables/useAgentToolConfig'
+import {
+  resolveInitialForm,
+  buildSubmitPayload,
+  diffAgainst,
+  getSource as resolveSource,
+  getSourceBadgeClass,
+  getSourceLabel,
+  hasAnyEffectiveSettings as checkAnyEffective,
+  isPasswordField as checkPasswordField,
+  maskPasswordValue,
+} from '@/composables/useAgentToolConfig'
 import { ApiError, api } from '@/api/client'
 import { useRouter } from 'vue-router'
 
@@ -46,11 +56,9 @@ const llmExposedFields = computed(() =>
   (props.tool?.settings_schema ?? []).filter((f) => f.expose_to_llm),
 )
 
-const hasAnyEffectiveSettings = computed(() => {
-  return Object.values(settingsWithSource.value).some((item) => item.source !== 'default')
-})
+const hasAnyEffectiveSettings = computed(() => checkAnyEffective(settingsWithSource.value))
 
-const agentOverridesExist = computed(() => Object.keys(rawOverride.value).length > 0)
+const agentOverridesExist = computed(() => diffAgainst(rawOverride.value).agentOverridesExist)
 
 async function loadSettings(toolName: string): Promise<void> {
   loadingSettings.value = true
@@ -99,7 +107,7 @@ async function loadSettings(toolName: string): Promise<void> {
   }
 
   // Initialize form with agent-specific override values (only fields where source === 'agent')
-  form.value = initFormFromSettingsWithSource(settingsWithSource.value)
+  form.value = resolveInitialForm(settingsWithSource.value)
 
   loadingSettings.value = false
 }
@@ -113,36 +121,16 @@ watch(
 )
 
 function getSource(key: string): string {
-  return settingsWithSource.value[key]?.source ?? 'default'
+  return resolveSource(settingsWithSource.value, key)
 }
 
 function isPasswordField(key: string): boolean {
-  return props.tool?.settings_schema.find((f) => f.key === key)?.type === 'password' || false
+  return checkPasswordField(props.tool, key)
 }
 
 function getMaskedValue(key: string): string {
   const item = settingsWithSource.value[key]
-  if (!item || item.value === null || item.value === undefined) return '—'
-  if (isPasswordField(key)) return '••••••••'
-  return String(item.value)
-}
-
-function getSourceBadgeClass(source: string): string {
-  switch (source) {
-    case 'agent': return 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
-    case 'user': return 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300'
-    case 'global': return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-    default: return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
-  }
-}
-
-function getSourceLabel(source: string): string {
-  switch (source) {
-    case 'agent': return 'Agent'
-    case 'user': return 'User'
-    case 'global': return 'Global'
-    default: return 'Default'
-  }
+  return maskPasswordValue(item?.value, isPasswordField(key))
 }
 
 async function onSave(): Promise<void> {
@@ -152,11 +140,11 @@ async function onSave(): Promise<void> {
   saving.value = true
   error.value = null
   try {
-    const toSave = buildAgentOverridePayload(props.tool!, form.value)
+    const body = buildSubmitPayload(props.tool, form.value)
 
     await api.put(
       `/agents/${props.agentId}/tools/${encodeURIComponent(props.toolName!)}/override`,
-      { settings: toSave },
+      body,
     )
 
     emit('saved', props.toolName!)

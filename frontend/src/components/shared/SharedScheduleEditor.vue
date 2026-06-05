@@ -22,33 +22,29 @@ import Icon from '@/components/ui/Icon.vue'
 import { api, ApiError } from '@/api/client'
 import type { ScheduledRunResource } from '@/types/scheduledRun'
 import { usePromptTemplatesStore } from '@/stores/promptTemplates'
-import {
-  buildHourlyCron,
-  buildDailyCron,
-  buildWeeklyCron,
-  buildMonthlyCron,
-  parseCron,
-  DAY_OF_WEEK_OPTIONS,
-  getTimezoneOffsetMinutes,
-  type Frequency,
-} from '@/utils/cron'
+import { parseCron, DAY_OF_WEEK_OPTIONS, type Frequency } from '@/utils/cron'
 import CronExpression from 'cron-parser'
+import {
+  SCHEDULE_TOTAL_STEPS,
+  SCHEDULE_STEP_LABELS,
+  SCHEDULE_FREQUENCY_OPTIONS,
+  SCHEDULE_PROMPT_VARIABLES,
+  buildTimezoneList,
+  defaultTimezone,
+  wrapPromptVariable,
+  canProceedFromStep1 as checkCanProceedFromStep1,
+  buildComputedCron,
+  canSubmitFromStep3 as checkCanSubmitFromStep3,
+  formatRunAtForInput,
+  projectCronToFields,
+  buildSchedulePayload,
+  isRecurring,
+} from '@/composables/useScheduleWizard'
 
-/** Pre-defined variables available in prompt templates, substituted at runtime by the orchestrator. */
-const PROMPT_VARIABLES = [
-  { token: 'current_date', description: 'ISO date, e.g. 2026-04-15' },
-  { token: 'current_time', description: 'ISO time, e.g. 14:30' },
-  { token: 'current_datetime', description: 'ISO datetime, e.g. 2026-04-15T14:30' },
-  { token: 'agent_name', description: 'Agent display name' },
-  { token: 'user_name', description: 'Authenticated user name' },
-  { token: 'day_of_week', description: 'Day name, e.g. Wednesday' },
-  { token: 'day_of_month', description: 'Day of month, e.g. 15' },
-  { token: 'month', description: 'Month name, e.g. April' },
-  { token: 'year', description: 'Full year, e.g. 2026' },
-] as const
+const PROMPT_VARIABLES = SCHEDULE_PROMPT_VARIABLES
 
 function varToken(token: string): string {
-  return `{{${token}}}`
+  return wrapPromptVariable(token)
 }
 
 // Props / Emits
@@ -67,7 +63,7 @@ const emit = defineEmits<{
 
 // Wizard state
 
-const TOTAL_STEPS = 3
+const TOTAL_STEPS = SCHEDULE_TOTAL_STEPS
 const currentStep = ref(1)
 
 // Timezone list (all IANA zones via Intl, common ones sorted first)
@@ -91,25 +87,9 @@ const commonZoneValues = new Set([
   'Australia/Sydney',
 ])
 
-const timezones = computed((): { value: string; label: string }[] => {
-  const common = allTimezones
-    .filter((tz) => commonZoneValues.has(tz))
-    .sort()
-    .map((tz) => ({ value: tz, label: tz }))
-  const rest = allTimezones
-    .filter((tz) => !commonZoneValues.has(tz))
-    .sort()
-    .map((tz) => ({ value: tz, label: tz }))
-  return [...common, ...rest]
-})
+const timezones = computed(() => buildTimezoneList(allTimezones, commonZoneValues))
 
-const FREQUENCY_OPTIONS: { value: Frequency; label: string }[] = [
-  { value: 'hourly', label: 'Hourly' },
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' },
-  { value: 'monthly', label: 'Monthly' },
-  { value: 'custom', label: 'Custom cron' },
-]
+const FREQUENCY_OPTIONS = SCHEDULE_FREQUENCY_OPTIONS
 
 // Form state
 
@@ -118,7 +98,7 @@ const frequency = ref<Frequency>('daily')
 const cronExpression = ref('')
 const runDate = ref('')
 const runTime = ref('')
-const timezone = ref(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
+const timezone = ref(defaultTimezone())
 const rawPrompt = ref('')
 const templateId = ref<number | null>(null)
 const maxStepsOverride = ref<number | null>(null)
@@ -148,52 +128,15 @@ const newTemplateName = ref('')
 
 // Step 1 validation
 
-const canProceedFromStep1 = computed(() => {
-  if (templateId.value === null) return false
-  if (templateId.value === -1) {
-    // Creating new template requires a name
-    return newTemplateName.value.trim() !== ''
-  }
-  return true
-})
+const canProceedFromStep1 = computed(() => canProceedFromStep1Check(templateId.value, newTemplateName.value))
 
 // Step 2: nothing extra to validate beyond mode selection
 
 // Step 3 validation
 
-const computedCron = computed((): string => {
-  if (mode.value === 'oneshot') return ''
-  if (frequency.value === 'custom') return cronExpression.value.trim()
+const computedCron = computed(() => buildComputedCronCheck())
 
-  if (frequency.value === 'hourly') {
-    return buildHourlyCron({
-      interval: hourlyInterval.value,
-      startHour: hourlyStartHour.value,
-      endHour: hourlyEndHour.value,
-      minute: hourlyMinute.value,
-    })
-  }
-  if (frequency.value === 'daily') {
-    const [h, m] = dailyTime.value.split(':').map(Number)
-    return buildDailyCron({ interval: dailyInterval.value, hour: h, minute: m })
-  }
-  if (frequency.value === 'weekly') {
-    const [h, m] = weeklyTime.value.split(':').map(Number)
-    return buildWeeklyCron({ day: weeklyDay.value, hour: h, minute: m })
-  }
-  if (frequency.value === 'monthly') {
-    const [h, m] = monthlyTime.value.split(':').map(Number)
-    return buildMonthlyCron({ day: monthlyDay.value, hour: h, minute: m })
-  }
-  return ''
-})
-
-const canProceedFromStep3 = computed(() => {
-  if (mode.value === 'oneshot') {
-    return !!(runDate.value && runTime.value)
-  }
-  return !!computedCron.value
-})
+const canProceedFromStep3 = computed(() => canSubmitFromStep3Check())
 
 const canSubmit = computed(() => {
   return canProceedFromStep1.value && canProceedFromStep3.value
@@ -228,24 +171,21 @@ function applyParsedCron(cron: string): void {
 
   if (result.fields === null) return
 
-  if (result.frequency === 'hourly') {
-    const f = result.fields as import('@/utils/cron').HourlyFields
-    hourlyMinute.value = f.minute
-    hourlyStartHour.value = f.startHour
-    hourlyEndHour.value = f.endHour
-    hourlyInterval.value = f.interval
-  } else if (result.frequency === 'daily') {
-    const f = result.fields as import('@/utils/cron').DailyFields
-    dailyInterval.value = f.interval
-    dailyTime.value = `${String(f.hour).padStart(2, '0')}:${String(f.minute).padStart(2, '0')}`
-  } else if (result.frequency === 'weekly') {
-    const f = result.fields as import('@/utils/cron').WeeklyFields
-    weeklyDay.value = f.day
-    weeklyTime.value = `${String(f.hour).padStart(2, '0')}:${String(f.minute).padStart(2, '0')}`
-  } else if (result.frequency === 'monthly') {
-    const f = result.fields as import('@/utils/cron').MonthlyFields
-    monthlyDay.value = f.day
-    monthlyTime.value = `${String(f.hour).padStart(2, '0')}:${String(f.minute).padStart(2, '0')}`
+  const fields = projectCronToFields(cron)
+  if (fields.hourly) {
+    hourlyMinute.value = fields.hourly.minute
+    hourlyStartHour.value = fields.hourly.startHour
+    hourlyEndHour.value = fields.hourly.endHour
+    hourlyInterval.value = fields.hourly.interval
+  } else if (fields.daily) {
+    dailyInterval.value = fields.daily.interval
+    dailyTime.value = fields.daily.time
+  } else if (fields.weekly) {
+    weeklyDay.value = fields.weekly.day
+    weeklyTime.value = fields.weekly.time
+  } else if (fields.monthly) {
+    monthlyDay.value = fields.monthly.day
+    monthlyTime.value = fields.monthly.time
   }
 }
 
@@ -273,29 +213,22 @@ function resetToDefaults(): void {
   monthlyTime.value = '09:00'
 }
 
-function formatRunAtForInput(runAt: string, tz: string): { date: string; time: string } {
-  try {
-    const dt = new Date(runAt)
-    const dFmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
-    const tFmt = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' })
-    return { date: dFmt.format(dt), time: tFmt.format(dt).slice(0, 5) }
-  } catch {
-    return { date: '', time: '' }
-  }
+function formatRunAtForInputLocal(runAt: string, tz: string): { date: string; time: string } {
+  return formatRunAtForInput(runAt, tz)
 }
 
 function applyInitialData(): void {
   const data = props.initialData
   if (!data) return
 
-  mode.value = data.cron_expression ? 'recurring' : 'oneshot'
+  mode.value = isRecurring(data) ? 'recurring' : 'oneshot'
   timezone.value = data.timezone ?? 'UTC'
   templateId.value = data.template_id ?? null
   rawPrompt.value = data.raw_prompt ?? ''
   maxStepsOverride.value = data.max_steps_override ?? null
 
   if (data.run_at) {
-    const { date, time } = formatRunAtForInput(data.run_at, timezone.value)
+    const { date, time } = formatRunAtForInputLocal(data.run_at, timezone.value)
     runDate.value = date
     runTime.value = time
   }
@@ -370,36 +303,15 @@ function prevStep(): void {
 
 // Submit
 
-function buildOneShotRunAt(): string {
-  const [year, month, day] = runDate.value.split('-').map(Number)
-  const [hour, minute] = runTime.value.split(':').map(Number)
-  const utcMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0)
-  const localDt = new Date(utcMs)
-  // Use formatOffset to get ±HH:MM in clean ISO 8601 form, handling half-hour offsets like +05:30
-  const offsetMinutes = getTimezoneOffsetMinutes(timezone.value, localDt)
-  const sign = offsetMinutes >= 0 ? '+' : '-'
-  const abs = Math.abs(offsetMinutes)
-  const tzOffsetStr = `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`
-  return `${runDate.value}T${runTime.value}:00${tzOffsetStr}`
-}
-
-function buildSchedulePayload(): Record<string, unknown> {
-  const payload: Record<string, unknown> = {
+function buildSchedulePayloadLocal(): Record<string, unknown> {
+  return buildSchedulePayload({
     timezone: timezone.value,
-    is_active: true,
-  }
-
-  if (maxStepsOverride.value !== null) {
-    payload.max_steps_override = maxStepsOverride.value
-  }
-
-  if (mode.value === 'oneshot') {
-    payload.run_at = buildOneShotRunAt()
-  } else {
-    payload.cron_expression = computedCron.value
-  }
-
-  return payload
+    maxStepsOverride: maxStepsOverride.value,
+    mode: mode.value,
+    runDate: runDate.value,
+    runTime: runTime.value,
+    computedCron: computedCron.value,
+  })
 }
 
 async function resolveTemplateId(): Promise<number | null> {
@@ -439,7 +351,7 @@ async function submit(): Promise<void> {
 
   try {
     const resolvedTemplateId = await resolveTemplateId()
-    const payload = buildSchedulePayload()
+    const payload = buildSchedulePayloadLocal()
 
     if (resolvedTemplateId !== null) {
       payload.template_id = resolvedTemplateId
@@ -471,7 +383,39 @@ function close(): void {
 const isEditing = computed(() => !!props.initialData?.id)
 const modalTitle = computed(() => isEditing.value ? 'Edit Schedule' : 'Schedule Run')
 
-const stepLabels = ['Template', 'Schedule Type', 'Schedule']
+const stepLabels = SCHEDULE_STEP_LABELS as unknown as string[]
+
+// Wrapper computeds that pass the wizard state to the pure helpers.
+
+function canProceedFromStep1Check(tid: number | null, name: string): boolean {
+  return checkCanProceedFromStep1(tid, name)
+}
+
+function buildComputedCronCheck(): string {
+  return buildComputedCron({
+    mode: mode.value,
+    frequency: frequency.value,
+    cronExpression: cronExpression.value,
+    hourly: {
+      interval: hourlyInterval.value,
+      startHour: hourlyStartHour.value,
+      endHour: hourlyEndHour.value,
+      minute: hourlyMinute.value,
+    },
+    daily: { interval: dailyInterval.value, time: dailyTime.value },
+    weekly: { day: weeklyDay.value, time: weeklyTime.value },
+    monthly: { day: monthlyDay.value, time: monthlyTime.value },
+  })
+}
+
+function canSubmitFromStep3Check(): boolean {
+  return checkCanSubmitFromStep3({
+    mode: mode.value,
+    runDate: runDate.value,
+    runTime: runTime.value,
+    computedCron: computedCron.value,
+  })
+}
 </script>
 
 <template>

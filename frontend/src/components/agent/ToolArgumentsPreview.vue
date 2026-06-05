@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import hljs from 'highlight.js'
 import { formatToolArguments, isFlatArguments, parseArguments } from '@/composables/useToolArgumentFormatter'
+import { isUrl, isEmail } from '@/composables/useToolArgumentsEditor'
 
 const props = defineProps<{
   arguments: Record<string, unknown> | string | null
@@ -30,14 +31,6 @@ const highlightedJson = computed(() => {
 
 function toggleSensitive(key: string) {
   showSensitive.value[key] = !showSensitive.value[key]
-}
-
-function isUrl(value: unknown): boolean {
-  return typeof value === 'string' && /^https?:\/\//.test(value)
-}
-
-function isEmail(value: unknown): boolean {
-  return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
 
 function copyToClipboard() {

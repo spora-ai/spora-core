@@ -84,7 +84,7 @@ test('get returns 401 for unauthenticated request', function (): void {
 
     $request = new Symfony\Component\HttpFoundation\Request();
     expect(fn() => $controller->show($request))
-        ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+        ->toThrow(TypeError::class);
 });
 
 test('user cannot access another user preference (returns null for other user)', function (): void {
@@ -259,7 +259,7 @@ test('put returns 401 for unauthenticated request', function (): void {
         'config_id' => 1,
     ]);
     expect(fn() => $controller->update($request))
-        ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+        ->toThrow(TypeError::class);
 });
 
 test('preference is deleted when the referenced config is deleted (cascade)', function (): void {

@@ -7,6 +7,13 @@ import {
   parseArguments,
   type FormattedField,
 } from '@/composables/useToolArgumentFormatter'
+import {
+  getParameterOrder,
+  emitArgumentsJson,
+  findFieldByKey,
+  isUrl as checkIsUrl,
+  isEmail as checkIsEmail,
+} from '@/composables/useToolArgumentsEditor'
 import type { ParameterSchema } from '@/types/task'
 
 const props = defineProps<{
@@ -37,9 +44,7 @@ const flat = computed(() => isFlatArguments(parsedArgs.value))
 
 // Canonical declaration order from the backend-supplied schema; empty when no
 // schema is available so the formatter keeps its legacy sort.
-const parameterOrder = computed<string[]>(() =>
-  props.parameterSchema?.properties ? Object.keys(props.parameterSchema.properties) : [],
-)
+const parameterOrder = computed<string[]>(() => getParameterOrder(props.parameterSchema))
 
 // Initialize local fields when props change
 watch(
@@ -57,15 +62,11 @@ watch(
 
 // Emit updated arguments as JSON string
 function emitUpdate() {
-  const result: Record<string, unknown> = {}
-  for (const field of localFields.value) {
-    result[field.key] = field.value
-  }
-  emit('update:arguments', JSON.stringify(result))
+  emit('update:arguments', emitArgumentsJson(localFields.value))
 }
 
 function updateField(key: string, value: unknown) {
-  const field = localFields.value.find(f => f.key === key)
+  const field = findFieldByKey(localFields.value, key)
   if (field) {
     field.value = value
     emitUpdate()
@@ -77,11 +78,11 @@ function toggleSensitive(key: string) {
 }
 
 function isUrl(value: unknown): boolean {
-  return typeof value === 'string' && /^https?:\/\//.test(value)
+  return checkIsUrl(value)
 }
 
 function isEmail(value: unknown): boolean {
-  return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  return checkIsEmail(value)
 }
 
 // Syntax-highlighted JSON for nested/non-flat args

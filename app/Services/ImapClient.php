@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Psr\Log\LoggerInterface;
+use Spora\Services\Imap\MessageParser;
 use Symfony\Component\Mime\Email;
 use Throwable;
 use Webklex\PHPIMAP\Client;
@@ -241,52 +242,76 @@ final class ImapClient implements ImapClientInterface
     {
         try {
             $client = $this->connect($settings);
-            if (!$client) {
+            if ($client === null) {
                 return [];
             }
 
-            $mailFolder = $client->getFolder($folder);
-
-            $query = $mailFolder->messages()->all()->fetchOrderDesc();
-            if ($unreadOnly) {
-                $query = $query->unseen();
-            }
-
-            $messages = $query->limit($limit)->get();
-
-            if ($messages->isEmpty()) {
-                $client->disconnect();
-                return [];
-            }
-
-            $results = [];
-            foreach ($messages as $message) {
-                $from = $message->getFrom()[0]->mail ?? 'Unknown';
-                $date = $message->getDate()?->toDate()?->format('Y-m-d H:i:s') ?? 'Unknown Date';
-                $body = $message->getTextBody();
-                if (empty($body)) {
-                    $body = strip_tags($message->getHTMLBody() ?? '');
-                }
-
-                $results[] = [
-                    'uid'     => (string) $message->getUid(),
-                    'subject' => (string) $message->getSubject(),
-                    'from'    => $from,
-                    'date'    => $date,
-                    'body'    => $body,
-                ];
-
-                if ($markAsRead) {
-                    $message->setFlag('Seen');
-                }
-            }
-
+            $results = $this->collectMessages($client, $folder, $limit, $markAsRead, $unreadOnly);
             $client->disconnect();
-
             return $results;
         } catch (Throwable $e) {
             $this->logger?->error('IMAP fetch messages error', ['folder' => $folder, 'exception' => $e]);
             return [];
         }
+    }
+
+    /**
+     * @return list<array{uid: string, subject: string, from: string, date: string, body: string}>
+     */
+    private function collectMessages(Client $client, string $folder, int $limit, bool $markAsRead, bool $unreadOnly): array
+    {
+        $mailFolder = $client->getFolder($folder);
+
+        $query = $mailFolder->messages()->all()->fetchOrderDesc();
+        if ($unreadOnly) {
+            $query = $query->unseen();
+        }
+
+        $messages = $query->limit($limit)->get();
+        if ($messages->isEmpty()) {
+            return [];
+        }
+
+        $results = [];
+        foreach ($messages as $message) {
+            $results[] = $this->mapMessage($message);
+            if ($markAsRead) {
+                $message->setFlag('Seen');
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Map a webklex message object into the normalized summary shape.
+     *
+     * @return array{uid: string, subject: string, from: string, date: string, body: string}
+     */
+    private function mapMessage(object $message): array
+    {
+        $headers = MessageParser::parseHeaders([
+            'from'    => $message->getFrom(),
+            'to'      => $message->getTo(),
+            'cc'      => $message->getCc(),
+            'bcc'     => $message->getBcc(),
+            'subject' => $message->getSubject(),
+            'date'    => $message->getDate()?->toDate()?->format('Y-m-d H:i:s') ?? 'Unknown Date',
+        ]);
+
+        $fromAddresses = MessageParser::parseAddressList((string) ($headers['from'] ?? ''));
+        $from = $fromAddresses[0]['email'] ?? 'Unknown';
+
+        $text = (string) $message->getTextBody();
+        $html = (string) ($message->getHTMLBody() ?? '');
+        $body = $text !== '' ? $text : strip_tags($html);
+
+        return [
+            'uid'     => (string) $message->getUid(),
+            'subject' => (string) $message->getSubject(),
+            'from'    => $from,
+            'date'    => $headers['date'],
+            'body'    => $body,
+        ];
     }
 }

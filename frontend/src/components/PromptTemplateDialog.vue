@@ -10,6 +10,7 @@ import { ref, computed, watch } from 'vue'
 import Modal from '@/components/Modal.vue'
 import { usePromptTemplatesStore } from '@/stores/promptTemplates'
 import { ApiError } from '@/api/client'
+import { detectVariables, buildTemplatePayload, seedSystemVariableValues } from '@/composables/usePromptTemplateVars'
 
 const props = defineProps<{
   modelValue: boolean
@@ -28,34 +29,6 @@ const emit = defineEmits<{
 
 const promptTemplatesStore = usePromptTemplatesStore()
 
-// Variable detection
-
-const SYSTEM_VARS = ['current_time', 'current_date', 'current_datetime'] as const
-
-interface DetectedVariable {
-  key: string
-  defaultValue: string
-  isSystem: boolean
-}
-
-function detectVariables(template: string): DetectedVariable[] {
-  const seen = new Set<string>()
-  const vars: DetectedVariable[] = []
-  const re = /\{\{(\w+)(?::([^}]*))?\}\}/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(template)) !== null) {
-    const key = m[1]
-    if (seen.has(key)) continue
-    seen.add(key)
-    vars.push({
-      key,
-      defaultValue: m[2] ?? '',
-      isSystem: (SYSTEM_VARS as readonly string[]).includes(key),
-    })
-  }
-  return vars
-}
-
 // Form state
 
 const formName = ref('')
@@ -64,7 +37,7 @@ const variableValues = ref<Record<string, string>>({})
 const saving = ref(false)
 const saveError = ref<string | null>(null)
 
-const detectedVars = computed<DetectedVariable[]>(() => detectVariables(formPrompt.value))
+const detectedVars = computed(() => detectVariables(formPrompt.value))
 
 watch(
   () => props.modelValue,
@@ -80,10 +53,7 @@ watch(
       variableValues.value = {}
       saveError.value = null
       // Auto-fill system variables
-      const now = new Date()
-      variableValues.value['current_date'] = now.toISOString().split('T')[0]
-      variableValues.value['current_time'] = now.toTimeString().slice(0, 5)
-      variableValues.value['current_datetime'] = now.toISOString().slice(0, 16)
+      Object.assign(variableValues.value, seedSystemVariableValues())
     }
   },
 )
@@ -97,17 +67,12 @@ async function save(overwrite: boolean = false): Promise<void> {
   saving.value = true
   saveError.value = null
   try {
-    const payload = {
-      name: formName.value.trim(),
-      prompt_template: formPrompt.value,
-      variables: detectedVars.value
-        .filter((v) => !v.isSystem)
-        .map((v) => ({ 
-          key: v.key, 
-          label: v.key, 
-          default_value: variableValues.value[v.key] || v.defaultValue || undefined
-        })),
-    }
+    const payload = buildTemplatePayload({
+      name: formName.value,
+      promptTemplate: formPrompt.value,
+      variables: detectedVars.value,
+      values: variableValues.value,
+    })
 
     let template;
     if (overwrite && props.existingTemplateId) {

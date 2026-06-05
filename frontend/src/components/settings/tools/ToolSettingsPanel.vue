@@ -6,6 +6,14 @@ import ToolSettingsForm from '@/components/settings/ToolSettingsForm.vue'
 import AlertBanner from '@/components/ui/AlertBanner.vue'
 import Icon from '@/components/ui/Icon.vue'
 import type { ToolSchema } from '@/composables/useToolSettings'
+import {
+  displayValue as formatDisplayValue,
+  diffFromGlobalDefaults,
+  hasExistingSettings as checkHasExisting,
+  countNonEmptySettings as countNonEmpty,
+  llmExposedFields as filterLlmExposed,
+  resolveMode,
+} from '@/composables/useToolSettingsPanel'
 
 const props = defineProps<{
   tool: ToolSchema
@@ -21,7 +29,7 @@ const emit = defineEmits<{
 
 const { getGlobalSettings, getUserSettings, putUserSettings, putSettings, deleteSettings, deleteUserSettings } = useToolSettings()
 
-const mode = computed(() => props.mode ?? 'global')
+const mode = computed(() => resolveMode(props.mode))
 
 const serverSettings = ref<Record<string, string>>({ ...props.initialSettings })
 const saving = ref(false)
@@ -33,17 +41,11 @@ let savedTimer: ReturnType<typeof setTimeout> | null = null
 let clearedTimer: ReturnType<typeof setTimeout> | null = null
 onUnmounted(() => { if (savedTimer) clearTimeout(savedTimer); if (clearedTimer) clearTimeout(clearedTimer) })
 
-const hasExistingSettings = computed(() =>
-  Object.values(serverSettings.value).some((v) => v !== '' && v !== null),
-)
+const hasExistingSettings = computed(() => checkHasExisting(serverSettings.value))
 
-const llmExposedFields = computed(() =>
-  props.tool.settings_schema.filter((f) => f.expose_to_llm),
-)
+const llmExposedFields = computed(() => filterLlmExposed(props.tool))
 
-const settingsCount = computed(() =>
-  Object.values(serverSettings.value).filter((v) => v !== '' && v !== null).length,
-)
+const settingsCount = computed(() => countNonEmpty(serverSettings.value))
 
 async function loadSettings(): Promise<void> {
   const id = ++loadId
@@ -69,13 +71,7 @@ async function onSave(settings: Record<string, string>): Promise<void> {
   try {
     if (mode.value === 'user') {
       // Diff against global defaults: only send values that differ from global
-      const toSave: Record<string, string> = {}
-      for (const [key, value] of Object.entries(settings)) {
-        const globalVal = props.globalDefaults?.[key] ?? ''
-        if (value !== globalVal) {
-          toSave[key] = value
-        }
-      }
+      const toSave = diffFromGlobalDefaults(settings, props.globalDefaults)
       serverSettings.value = await putUserSettings(props.tool.tool_name, toSave)
     } else {
       serverSettings.value = await putSettings(props.tool.tool_name, settings, serverSettings.value)
@@ -113,14 +109,8 @@ async function onClearToGlobal(): Promise<void> {
   }
 }
 
-function isPasswordField(key: string): boolean {
-  return props.tool.settings_schema.find((f) => f.key === key)?.type === 'password' || false
-}
-
 function displayValue(key: string, value: string): string {
-  if (value === '' || value === null) return '—'
-  if (isPasswordField(key)) return '••••••••'
-  return value
+  return formatDisplayValue(props.tool, key, value)
 }
 </script>
 

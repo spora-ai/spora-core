@@ -11,6 +11,12 @@
 import { ref, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import ToolApprovalCard from '@/components/agent/ToolApprovalCard.vue'
+import {
+  buildBulkApprovals,
+  pruneEditedArgs,
+  inFlightFlag,
+  REJECT_ALL_DEFAULT_REASON,
+} from '@/composables/useToolApproval'
 import type { ToolCall } from '@/types/task'
 
 const props = defineProps<{
@@ -40,10 +46,7 @@ const editedArgs = ref<Record<string, Record<string, unknown>>>({})
 watch(
   () => props.pending.map(tc => tc.provider_call_id),
   (ids) => {
-    const allowed = new Set(ids)
-    for (const id of Object.keys(editedArgs.value)) {
-      if (!allowed.has(id)) delete editedArgs.value[id]
-    }
+    editedArgs.value = pruneEditedArgs(editedArgs.value, ids)
   },
 )
 
@@ -55,22 +58,12 @@ function onApproveAll(): void {
   // Fall back to the proposed_arguments only when no card has emitted an
   // update yet (e.g. user clicked Approve All before any edit). This keeps
   // edited values intact even when only some cards were touched.
-  const approvals = props.pending.map((tc) => {
-    const edited = editedArgs.value[tc.provider_call_id]
-    if (edited !== undefined) {
-      return { providerCallId: tc.provider_call_id, arguments: edited }
-    }
-    const proposed = tc.proposed_arguments
-    const args = (typeof proposed === 'object' && proposed !== null
-      ? (proposed as Record<string, unknown>)
-      : {})
-    return { providerCallId: tc.provider_call_id, arguments: args }
-  })
+  const approvals = buildBulkApprovals(props.pending, editedArgs.value)
   emit('approve-all', { approvals })
 }
 
 function onRejectAllConfirm(): void {
-  emit('reject-all', { reason: rejectReason.value || 'No reason provided.' })
+  emit('reject-all', { reason: rejectReason.value || REJECT_ALL_DEFAULT_REASON })
   rejectReason.value = ''
   showRejectInput.value = false
 }
@@ -81,11 +74,11 @@ function onRejectAllCancel(): void {
 }
 
 function isApproving(id: number): boolean {
-  return props.perToolApproving?.[id] ?? false
+  return inFlightFlag(props.perToolApproving, id)
 }
 
 function isRejecting(id: number): boolean {
-  return props.perToolRejecting?.[id] ?? false
+  return inFlightFlag(props.perToolRejecting, id)
 }
 </script>
 
