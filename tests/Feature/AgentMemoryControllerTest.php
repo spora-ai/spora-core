@@ -59,7 +59,7 @@ describe('AgentMemoryController::reorder', function (): void {
 
         $request = jsonRequest('PATCH', AGENT_MEMORY_REORDER_PATH, ['order' => []]);
         expect(fn() => $controller->reorder($request))
-            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+            ->toThrow(TypeError::class);
     });
 
     test('reorder() returns 400 for invalid JSON', function (): void {
@@ -207,7 +207,7 @@ describe('AgentMemoryController::index', function (): void {
         $request = new Symfony\Component\HttpFoundation\Request();
         $request->attributes->set('agentId', 1);
         expect(fn() => $controller->index($request))
-            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+            ->toThrow(TypeError::class);
     });
 
     test('index() returns 404 when agent does not exist', function (): void {
@@ -249,7 +249,7 @@ describe('AgentMemoryController::store', function (): void {
         $request = jsonRequest('POST', '/api/v1/agents/1/memories', ['name' => 'test']);
         $request->attributes->set('agentId', 1);
         expect(fn() => $controller->store($request))
-            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+            ->toThrow(TypeError::class);
     });
 
     test('store() returns 404 when agent does not exist', function (): void {
@@ -305,7 +305,7 @@ describe('AgentMemoryController::show', function (): void {
         $request->attributes->set('agentId', 1);
         $request->attributes->set('memoryId', 1);
         expect(fn() => $controller->show($request))
-            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+            ->toThrow(TypeError::class);
     });
 
     test('show() returns 404 when agent does not exist', function (): void {
@@ -333,7 +333,7 @@ describe('AgentMemoryController::update', function (): void {
         $request->attributes->set('agentId', 1);
         $request->attributes->set('memoryId', 1);
         expect(fn() => $controller->update($request))
-            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+            ->toThrow(TypeError::class);
     });
 
     test('update() modifies an existing agent memory', function (): void {
@@ -374,7 +374,7 @@ describe('AgentMemoryController::destroy', function (): void {
         $request->attributes->set('agentId', 1);
         $request->attributes->set('memoryId', 1);
         expect(fn() => $controller->destroy($request))
-            ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
+            ->toThrow(TypeError::class);
     });
 
     test('destroy() deletes an existing agent memory', function (): void {

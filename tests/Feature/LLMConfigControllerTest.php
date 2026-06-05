@@ -75,7 +75,9 @@ function createTestConfig(string $name, string $driverClass, array $settings, bo
 // Tests
 
 test('drivers() returns all registered drivers with schemas', function (): void {
-    [$controller, , , , $authMiddleware] = makeLLMConfigController();
+    [$controller, $authService, , , $authMiddleware] = makeLLMConfigController();
+    $userId = $authService->register('drivers@example.com', 'Password1!', 'Drivers User');
+    simulateLoggedInSession($userId, 'drivers@example.com');
 
     $request = new Symfony\Component\HttpFoundation\Request();
     $response = callController($controller, 'drivers', $request, [$authMiddleware]);

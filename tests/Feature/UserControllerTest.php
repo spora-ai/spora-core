@@ -22,9 +22,28 @@ function makeUserController(): array
 /**
  * Grant admin role to a user.
  */
-function makeAdmin(AuthService $authService, int $userId): void
+if (! function_exists('makeAdmin')) {
+    function makeAdmin(AuthService $authService, int $userId): void
+    {
+        $authService->grantRole($userId, Role::ADMIN);
+    }
+}
+
+/**
+ * Register a user with a display name. Returns the user ID.
+ */
+function makeUser(AuthService $authService, string $email, string $name = 'Test User'): int
 {
-    $authService->grantRole($userId, Role::ADMIN);
+    return $authService->register($email, 'Password1!', $name);
+}
+
+/**
+ * Register a user with the default password and the email as the display name.
+ * Convenient for tests that don't care about the display name.
+ */
+function regUser(AuthService $authService, string $email): int
+{
+    return $authService->register($email, 'Password1!', $email);
 }
 
 // Tests
@@ -32,7 +51,7 @@ function makeAdmin(AuthService $authService, int $userId): void
 test('updateUser can set name field', function (): void {
     [$controller, $authService] = makeUserController();
 
-    $userId = $authService->register('alice@example.com', 'Password1!');
+    $userId = regUser($authService, 'alice@example.com');
     makeAdmin($authService, $userId);
     simulateLoggedInSession($userId, 'alice@example.com');
 
@@ -50,7 +69,7 @@ test('updateUser can set name field', function (): void {
 test('updateUser can clear name field with empty string', function (): void {
     [$controller, $authService] = makeUserController();
 
-    $userId = $authService->register('bob@example.com', 'Password1!');
+    $userId = regUser($authService, 'bob@example.com');
     makeAdmin($authService, $userId);
     simulateLoggedInSession($userId, 'bob@example.com');
 
@@ -70,7 +89,7 @@ test('updateUser can clear name field with empty string', function (): void {
 test('updateUser can set verified field to true', function (): void {
     [$controller, $authService] = makeUserController();
 
-    $userId = $authService->register('carol@example.com', 'Password1!');
+    $userId = regUser($authService, 'carol@example.com');
     makeAdmin($authService, $userId);
     simulateLoggedInSession($userId, 'carol@example.com');
 
@@ -88,7 +107,7 @@ test('updateUser can set verified field to true', function (): void {
 test('updateUser can set verified field to false', function (): void {
     [$controller, $authService] = makeUserController();
 
-    $userId = $authService->register('dave@example.com', 'Password1!');
+    $userId = regUser($authService, 'dave@example.com');
     makeAdmin($authService, $userId);
     simulateLoggedInSession($userId, 'dave@example.com');
 
@@ -110,7 +129,7 @@ test('updateUser can set verified field to false', function (): void {
 test('serializeUser includes name and verified fields', function (): void {
     [$controller, $authService] = makeUserController();
 
-    $userId = $authService->register('eve@example.com', 'Password1!');
+    $userId = regUser($authService, 'eve@example.com');
     makeAdmin($authService, $userId);
     simulateLoggedInSession($userId, 'eve@example.com');
 
@@ -121,7 +140,7 @@ test('serializeUser includes name and verified fields', function (): void {
     ]), $userId);
 
     // Fetch via getUser
-    $response = $controller->show(jsonRequest('GET', "/api/v1/users/{$userId}"), $userId);
+    $response = $controller->show($userId);
 
     expect($response->getStatusCode())->toBe(200);
 
@@ -135,8 +154,8 @@ test('serializeUser includes name and verified fields', function (): void {
 test('getUsers includes name and verified for each user', function (): void {
     [$controller, $authService] = makeUserController();
 
-    $userId1 = $authService->register('user1@example.com', 'Password1!');
-    $userId2 = $authService->register('user2@example.com', 'Password1!');
+    $userId1 = regUser($authService, 'user1@example.com');
+    $userId2 = regUser($authService, 'user2@example.com');
     makeAdmin($authService, $userId1);
     simulateLoggedInSession($userId1, 'user1@example.com');
 
@@ -176,7 +195,7 @@ test('getUsers includes name and verified for each user', function (): void {
 test('updateUser returns 404 for non-existent user', function (): void {
     [$controller, $authService] = makeUserController();
 
-    $userId = $authService->register('frank@example.com', 'Password1!');
+    $userId = regUser($authService, 'frank@example.com');
     makeAdmin($authService, $userId);
     simulateLoggedInSession($userId, 'frank@example.com');
 
@@ -184,6 +203,214 @@ test('updateUser returns 404 for non-existent user', function (): void {
         'name' => 'Ghost',
     ]);
     $response = $controller->update($request, 99999);
+
+    expect($response->getStatusCode())->toBe(404);
+});
+
+// Admin user management
+
+test('index() returns paginated list of users', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-index@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-index@example.com');
+
+    $response = $controller->index(new Symfony\Component\HttpFoundation\Request());
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data'])->toBeArray();
+    expect($body['meta'])->toHaveKey('total');
+});
+
+test('show() returns a user by id', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-show@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-show@example.com');
+
+    $targetId = regUser($authService, 'target@example.com');
+
+    $response = $controller->show($targetId);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['user']['id'])->toBe($targetId);
+});
+
+test('show() returns 404 for unknown id', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-show404@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-show404@example.com');
+
+    $response = $controller->show(999999);
+
+    expect($response->getStatusCode())->toBe(404);
+});
+
+test('store() creates a new user', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-store@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-store@example.com');
+
+    $request = jsonRequest('POST', '/api/v1/users', [
+        'email'    => 'newuser@example.com',
+        'password' => 'Password1!',
+    ]);
+    $response = $controller->store($request);
+
+    expect($response->getStatusCode())->toBe(201);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['user']['email'])->toBe('newuser@example.com');
+});
+
+test('store() returns 422 when required fields are missing', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-store422@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-store422@example.com');
+
+    $request = jsonRequest('POST', '/api/v1/users', []);
+    $response = $controller->store($request);
+
+    expect($response->getStatusCode())->toBe(422);
+});
+
+test('store() returns 409 when email is taken', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-taken@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-taken@example.com');
+
+    regUser($authService, 'existing@example.com');
+
+    $request = jsonRequest('POST', '/api/v1/users', [
+        'email'    => 'existing@example.com',
+        'password' => 'Password1!',
+    ]);
+    $response = $controller->store($request);
+
+    expect($response->getStatusCode())->toBe(409);
+});
+
+test('destroy() deletes a user', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-del@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-del@example.com');
+
+    $targetId = regUser($authService, 'to-delete@example.com');
+
+    $response = $controller->destroy($targetId);
+
+    expect($response->getStatusCode())->toBe(200);
+    expect(Spora\Models\User::find($targetId))->toBeNull();
+});
+
+test('destroy() returns 409 when admin tries to delete themselves', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-selfdel@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-selfdel@example.com');
+
+    $response = $controller->destroy($adminId);
+
+    expect($response->getStatusCode())->toBe(409);
+});
+
+test('destroy() returns 404 for unknown id', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-del404@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-del404@example.com');
+
+    $response = $controller->destroy(999999);
+
+    expect($response->getStatusCode())->toBe(404);
+});
+
+test('grantRole() assigns a role to a user', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-grant@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-grant@example.com');
+
+    $targetId = regUser($authService, 'grantee@example.com');
+
+    $request = jsonRequest('POST', "/api/v1/users/{$targetId}/roles", ['role' => 'ADMIN']);
+    $response = $controller->grantRole($request, $targetId);
+
+    expect($response->getStatusCode())->toBe(200);
+    expect($authService->userHasRole($targetId, Role::ADMIN))->toBeTrue();
+});
+
+test('grantRole() returns 422 for invalid role', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-grantbad@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-grantbad@example.com');
+
+    $targetId = regUser($authService, 'grantee2@example.com');
+
+    $request = jsonRequest('POST', "/api/v1/users/{$targetId}/roles", ['role' => 'NOT_A_ROLE']);
+    $response = $controller->grantRole($request, $targetId);
+
+    expect($response->getStatusCode())->toBe(422);
+});
+
+test('revokeRole() removes a role from a user', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-revoke@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-revoke@example.com');
+
+    $targetId = regUser($authService, 'revokee@example.com');
+    $authService->grantRole($targetId, Role::ADMIN);
+
+    $response = $controller->revokeRole($targetId, 'admin');
+
+    expect($response->getStatusCode())->toBe(200);
+    expect($authService->userHasRole($targetId, Role::ADMIN))->toBeFalse();
+});
+
+test('revokeRole() returns 422 for invalid role', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-revokebad@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-revokebad@example.com');
+
+    $targetId = regUser($authService, 'revokee2@example.com');
+
+    $response = $controller->revokeRole($targetId, 'NOT_A_ROLE');
+
+    expect($response->getStatusCode())->toBe(422);
+});
+
+test('listRoles() returns a list of role names for a user', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-listroles@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-listroles@example.com');
+
+    $targetId = regUser($authService, 'rolelist@example.com');
+    $authService->grantRole($targetId, Role::AUTHOR);
+
+    $response = $controller->listRoles($targetId);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['roles'])->toContain('AUTHOR');
+});
+
+test('listRoles() returns 404 for unknown id', function (): void {
+    [$controller, $authService] = makeUserController();
+    $adminId = regUser($authService, 'admin-listroles404@example.com');
+    makeAdmin($authService, $adminId);
+    simulateLoggedInSession($adminId, 'admin-listroles404@example.com');
+
+    $response = $controller->listRoles(999999);
 
     expect($response->getStatusCode())->toBe(404);
 });

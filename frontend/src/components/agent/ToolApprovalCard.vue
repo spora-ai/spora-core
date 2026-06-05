@@ -9,6 +9,12 @@
  */
 import { ref, computed, watch } from 'vue'
 import ToolArgumentsEditor from '@/components/agent/ToolArgumentsEditor.vue'
+import {
+  tryParseArgsObject,
+  normalizeProposedArgs,
+  prettyPrintArgs,
+  REJECT_ONE_DEFAULT_REASON,
+} from '@/composables/useToolApproval'
 import type { ToolCall } from '@/types/task'
 
 const props = defineProps<{
@@ -34,30 +40,13 @@ const showRejectInput = ref(false)
 const rejectReason = ref('')
 
 const parsedProposedArgs = computed<Record<string, unknown>>(() => {
-  const args = props.toolCall.proposed_arguments
-  if (!args) return {}
-  if (typeof args === 'object') return args as Record<string, unknown>
-  if (typeof args === 'string') {
-    try {
-      const parsed = JSON.parse(args)
-      if (typeof parsed === 'object' && parsed !== null) return parsed
-    } catch { /* fall through */ }
-  }
-  return {}
+  return normalizeProposedArgs(props.toolCall.proposed_arguments)
 })
 
 function emitCurrentArgs(): void {
-  const parsed = tryParseArgs(argsJson.value)
+  const parsed = tryParseArgsObject(argsJson.value)
   if (parsed === null) return
   emit('update:arguments', { providerCallId: props.toolCall.provider_call_id, arguments: parsed })
-}
-
-function tryParseArgs(json: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(json) as unknown
-    if (typeof parsed === 'object' && parsed !== null) return parsed as Record<string, unknown>
-  } catch { /* fall through */ }
-  return null
 }
 
 // Seed the editable JSON when the underlying proposed arguments change
@@ -66,7 +55,7 @@ function tryParseArgs(json: string): Record<string, unknown> | null {
 watch(
   () => props.toolCall.id,
   () => {
-    argsJson.value = JSON.stringify(parsedProposedArgs.value, null, 2)
+    argsJson.value = prettyPrintArgs(parsedProposedArgs.value)
     showRejectInput.value = false
     rejectReason.value = ''
     emitCurrentArgs()
@@ -80,10 +69,8 @@ function onArgumentsUpdated(json: string): void {
 }
 
 function onApproveClick(): void {
-  let parsed: Record<string, unknown>
-  try {
-    parsed = JSON.parse(argsJson.value) as Record<string, unknown>
-  } catch {
+  const parsed = tryParseArgsObject(argsJson.value)
+  if (parsed === null) {
     // Parent surfaces the toast; we just refuse to emit an invalid payload.
     return
   }
@@ -93,7 +80,7 @@ function onApproveClick(): void {
 function onRejectClick(): void {
   emit('reject', {
     providerCallId: props.toolCall.provider_call_id,
-    reason: rejectReason.value || 'User rejected',
+    reason: rejectReason.value || REJECT_ONE_DEFAULT_REASON,
   })
 }
 </script>

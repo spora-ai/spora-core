@@ -19,6 +19,7 @@ use Spora\Models\ScheduledRunNext;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Workers\WorkerTickPlanner;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -563,12 +564,25 @@ final class WorkerRunCommand extends Command
             return;
         }
 
-        $cutoff = date(self::DB_DATETIME_FORMAT, time() - $staleMinutes * 60);
+        $maxAgeSeconds = $staleMinutes * 60;
+        $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
 
-        $orphanedIds = Task::where('status', 'RUNNING')
-            ->where('updated_at', '<', $cutoff)
-            ->pluck('id')
-            ->toArray();
+        $candidates = Task::where('status', 'RUNNING')
+            ->get(['id', 'status', 'updated_at']);
+
+        $orphanedIds = [];
+        foreach ($candidates as $candidate) {
+            $payload = [
+                'id'         => $candidate->id,
+                'status'     => $candidate->status,
+                'updated_at' => $candidate->updated_at !== null
+                    ? $candidate->updated_at->format(self::DB_DATETIME_FORMAT)
+                    : null,
+            ];
+            if (WorkerTickPlanner::isOrphan($payload, $maxAgeSeconds, $now)) {
+                $orphanedIds[] = $candidate->id;
+            }
+        }
 
         if ($orphanedIds === []) {
             return;

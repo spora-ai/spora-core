@@ -14,6 +14,7 @@ import { ApiError } from '@/api/client'
 import SharedScheduleEditor from '@/components/shared/SharedScheduleEditor.vue'
 import PromptTemplateDialog from '@/components/PromptTemplateDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import { buildPromptFromTemplate, isSubmitKeystroke } from '@/composables/useComposerInput'
 import Icon from '@/components/ui/Icon.vue'
 
 const props = defineProps<{
@@ -74,23 +75,7 @@ function onTemplateChange(templateId: number | null): void {
   const tmpl = promptTemplatesStore.templates.find((t) => t.id === templateId)
   if (!tmpl) return
 
-  let text = tmpl.prompt_template
-  const now = new Date()
-  const sysVars: Record<string, string> = {
-    current_date: now.toISOString().split('T')[0],
-    current_time: now.toTimeString().slice(0, 5),
-    current_datetime: now.toISOString().slice(0, 16),
-  }
-
-  text = text.replace(/\{\{(\w+)(?::([^}]*))?\}\}/g, (match: string, key: string, defaultVal?: string) => {
-    if (sysVars[key] !== undefined) return sysVars[key]
-    const v = tmpl.variables?.find(v => v.key === key)
-    if (v?.default_value) return v.default_value
-    if (defaultVal !== undefined) return defaultVal
-    return match
-  })
-
-  promptText.value = text
+  promptText.value = buildPromptFromTemplate(tmpl.prompt_template, tmpl.variables)
 }
 
 async function deleteSelectedTemplate(): Promise<void> {
@@ -124,7 +109,7 @@ function onScheduleSaved(): void {
 // Submission
 
 function onComposerKeydown(e: KeyboardEvent): void {
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+  if (isSubmitKeystroke(e)) {
     e.preventDefault()
     submitPrompt()
   }

@@ -10,12 +10,19 @@ import { useAgentStore } from '@/stores/agent'
 import { ApiError } from '@/api/client'
 import { renderMarkdown } from '@/composables/useMarkdown'
 import { useToast } from '@/composables/useToast'
+import {
+  formatCountdown,
+  truncateText,
+  isTruncated,
+  computeRetryState,
+  buildChatMessages,
+  findFinalReasoning,
+} from '@/composables/useTaskChat'
 import AgentLayout from '@/components/layout/AgentLayout.vue'
 import TaskStatusBadge from '@/components/TaskStatusBadge.vue'
 import Icon from '@/components/ui/Icon.vue'
 import ToolApprovalBar from '@/components/agent/ToolApprovalBar.vue'
 import TaskFailedBanner from '@/components/agent/TaskFailedBanner.vue'
-import type { HistoryEntry } from '@/types/task'
 
 const route = useRoute()
 const router = useRouter()
@@ -118,44 +125,20 @@ const showCountdown = computed(() =>
   task.value?.status === 'FAILED' && task.value.retry_after !== null
 )
 
-const countdown = computed(() => {
-  if (!task.value?.retry_after) return ''
-  const ms = Math.max(0, new Date(task.value.retry_after).getTime() - Date.now())
-  if (ms <= 0) return '0:00'
-  const m = Math.floor(ms / 60000)
-  const s = Math.floor((ms % 60000) / 1000)
-  return `${m}:${s.toString().padStart(2, '0')}`
-})
+const countdown = computed(() => formatCountdown(task.value?.retry_after))
 
-// Whether the task is inside a retry chain (is itself a retry task)
-const isRetryTask = computed(() => task.value?.retry_of_task_id !== null)
-
-// max_retries > 0 means auto-retry is configured on the agent
-const autoRetryConfigured = computed(() =>
-  !isRetryTask.value && (task.value?.max_retries ?? 0) > 0
-)
-
-// Attempt counter (1-indexed, matching backend retry_count semantics)
-// retry_count=0 on a root task means no retries attempted yet
-const retryAttempt = computed(() => (task.value?.retry_count ?? 0) + 1)
-const maxRetryAttempts = computed(() => task.value?.max_retries ?? 0)
-
-// True when retry_after is set AND we still have retries left
-const canAutoRetry = computed(() =>
-  autoRetryConfigured.value &&
-  (task.value?.retry_count ?? 0) < (task.value?.max_retries ?? 0)
-)
-
-// True when retry_after is set AND retries are exhausted
-const retriesExhausted = computed(() =>
-  autoRetryConfigured.value &&
-  (task.value?.retry_count ?? 0) >= (task.value?.max_retries ?? 0)
-)
-
-// True when retry_after is set AND max_retries is 0 (will never fire)
-const autoRetryDisabled = computed(() =>
-  !isRetryTask.value && (task.value?.max_retries ?? 0) === 0 && (task.value?.retry_after !== null)
-)
+// Aggregate retry-related derived state. Recomputed from the task snapshot.
+const retryState = computed(() => computeRetryState(
+  task.value?.retry_of_task_id,
+  task.value?.max_retries,
+  task.value?.retry_count,
+))
+const autoRetryConfigured = computed(() => retryState.value.autoRetryConfigured)
+const retryAttempt = computed(() => retryState.value.retryAttempt)
+const maxRetryAttempts = computed(() => retryState.value.maxRetryAttempts)
+const canAutoRetry = computed(() => retryState.value.canAutoRetry)
+const retriesExhausted = computed(() => retryState.value.retriesExhausted)
+const autoRetryDisabled = computed(() => retryState.value.autoRetryDisabled)
 
 const cancelling = ref(false)
 
@@ -228,51 +211,15 @@ function scrollToBottom(): void {
 
 // Chat rendering helpers
 
-type ChatMessage =
-  | { kind: 'user'; entry: HistoryEntry }
-  | { kind: 'assistant'; entry: HistoryEntry }
-  | { kind: 'tool-result'; entry: HistoryEntry }
-
 // Reasoning from the last assistant message (before deduplication) - shown even when content is hidden
 const finalReasoning = computed((): string | null => {
-  if (!task.value?.history?.length || !task.value.final_response) return null
-  const last = task.value.history[task.value.history.length - 1]
-  if (last?.role === 'assistant' && last.reasoning && last.content?.trim() === task.value.final_response.trim()) {
-    return last.reasoning
-  }
-  return null
+  return findFinalReasoning(task.value?.history, task.value?.final_response)
 })
 
-const chatMessages = computed((): ChatMessage[] => {
-  if (!task.value) return []
-  const result: ChatMessage[] = []
-  for (const entry of task.value.history) {
-    if (entry.role === 'user') {
-      result.push({ kind: 'user', entry })
-    } else if (entry.role === 'assistant' && (entry.content || entry.reasoning)) {
-      result.push({ kind: 'assistant', entry })
-    } else if (entry.role === 'tool') {
-      result.push({ kind: 'tool-result', entry })
-    }
-  }
-  const last = result[result.length - 1]
-  if (
-    last?.kind === 'assistant' &&
-    task.value.final_response !== null &&
-    last.entry.content?.trim() === task.value.final_response.trim()
-  ) {
-    result.pop()
-  }
-  return result
-})
+const chatMessages = computed(() => buildChatMessages(task.value?.history, task.value?.final_response))
 
 function truncate(text: string | null, max = 300): string {
-  if (!text) return '(empty)'
-  return text.length <= max ? text : text.slice(0, max) + '…'
-}
-
-function isTruncated(text: string | null, max = 300): boolean {
-  return text !== null && text.length > max
+  return truncateText(text, max)
 }
 
 function toggleExpanded(toolId: number): void {
