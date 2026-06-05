@@ -20,6 +20,7 @@ use Spora\Models\ScheduledRun;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\ScheduledRunService;
+use Symfony\Component\HttpFoundation\Request;
 
 function makeScheduledRunController(): array
 {
@@ -616,5 +617,193 @@ describe('ScheduledRunController', function (): void {
         // next_run_at should reflect the PENDING entry's due_at (UTC 09:00 next day = ISO8601)
         $parsed = new DateTimeImmutable($body['data']['scheduled_run']['next_run_at']);
         expect((int) $parsed->format('H'))->toBe(9);
+    });
+
+    it('store returns 400 when request body is not valid JSON', function (): void {
+        [, $agentId] = registerAndGetAgentForScheduledRun();
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = Request::create(
+            "/api/v1/agents/{$agentId}/scheduled-runs",
+            'POST',
+            [],
+            [],
+            [],
+            ['CONTENT_TYPE' => 'application/json'],
+            'this is not valid json',
+        );
+        $request->attributes->set('id', $agentId);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(400);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('INVALID_JSON');
+    });
+
+    it('store returns 404 when the agent does not exist (service throws RuntimeException)', function (): void {
+        registerAndGetAgentForScheduledRun();
+        $missingAgentId = 99999;
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$missingAgentId}/scheduled-runs", [
+            'raw_prompt'      => 'Test prompt',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
+        ], ['id' => $missingAgentId]);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(404);
+    });
+
+    it('store returns 422 when neither cron_expression nor run_at is provided', function (): void {
+        [, $agentId] = registerAndGetAgentForScheduledRun();
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
+            'raw_prompt' => 'No schedule specified',
+        ], ['id' => $agentId]);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(422);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+        expect($body['error']['message'])->toContain('cron_expression');
+        expect($body['error']['message'])->toContain('run_at');
+    });
+
+    it('store returns 422 when run_at is not a valid datetime', function (): void {
+        [, $agentId] = registerAndGetAgentForScheduledRun();
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
+            'raw_prompt' => 'Test',
+            'run_at'     => 'definitely-not-a-datetime',
+        ], ['id' => $agentId]);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(422);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+        expect($body['error']['message'])->toContain('run_at');
+        expect($body['error']['message'])->toContain('ISO 8601');
+    });
+
+    it('store returns 422 when body is empty (decodeJson returns empty array)', function (): void {
+        [, $agentId] = registerAndGetAgentForScheduledRun();
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = jsonRequest('POST', "/api/v1/agents/{$agentId}/scheduled-runs", []);
+        $request->attributes->set('id', $agentId);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(422);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+    });
+
+    it('update returns 400 when request body is not valid JSON', function (): void {
+        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+        $run = ScheduledRun::create([
+            'agent_id'      => $agentId,
+            'user_id'       => $userId,
+            'raw_prompt'    => 'Test',
+            'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
+            'timezone'      => 'UTC',
+            'is_active'     => true,
+            'next_run_at'   => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_DAY)),
+        ]);
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = Request::create(
+            "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}",
+            'PUT',
+            [],
+            [],
+            [],
+            ['CONTENT_TYPE' => 'application/json'],
+            'not-valid-json',
+        );
+        $request->attributes->set('id', $agentId);
+        $request->attributes->set('runId', $run->id);
+        $response = callController($controller, 'update', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(400);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('INVALID_JSON');
+    });
+
+    it('update returns 404 when the scheduled run does not exist', function (): void {
+        [, $agentId] = registerAndGetAgentForScheduledRun();
+        $missingRunId = 99999;
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('PUT', "/api/v1/agents/{$agentId}/scheduled-runs/{$missingRunId}", [
+            'raw_prompt' => 'Updated',
+        ], ['id' => $agentId, 'runId' => $missingRunId]);
+        $response = callController($controller, 'update', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(404);
+    });
+
+    it('destroy returns 404 when the scheduled run does not exist', function (): void {
+        [, $agentId] = registerAndGetAgentForScheduledRun();
+        $missingRunId = 99999;
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('DELETE', "/api/v1/agents/{$agentId}/scheduled-runs/{$missingRunId}", [], ['id' => $agentId, 'runId' => $missingRunId]);
+        $response = callController($controller, 'destroy', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(404);
+    });
+
+    it('trigger returns 404 when the scheduled run does not exist', function (): void {
+        [, $agentId] = registerAndGetAgentForScheduledRun();
+        $missingRunId = 99999;
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$missingRunId}/trigger", [], ['id' => $agentId, 'runId' => $missingRunId]);
+        $response = callController($controller, 'trigger', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(404);
+    });
+
+    it('trigger returns 500 ORCHESTRATOR_ERROR when orchestrator throws a non-not-found exception', function (): void {
+        [$userId, $agentId] = registerAndGetAgentForScheduledRun();
+
+        $run = ScheduledRun::create([
+            'agent_id'      => $agentId,
+            'user_id'       => $userId,
+            'raw_prompt'    => 'Trigger me',
+            'cron_expression' => null,
+            'run_at'        => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
+            'timezone'      => 'UTC',
+            'is_active'     => true,
+            'next_run_at'   => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
+        ]);
+
+        Capsule::table('scheduled_runs_next')->insert([
+            'scheduled_run_id' => $run->id,
+            'due_at'          => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
+            'status'          => 'PENDING',
+            'created_at'      => date(SCHEDULED_TIMESTAMP_FORMAT),
+            'updated_at'      => date(SCHEDULED_TIMESTAMP_FORMAT),
+        ]);
+
+        // Custom orchestrator that throws a non-not-found RuntimeException
+        $authService = bootAuthLayer();
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->allows('start')->andThrow(new RuntimeException('Orchestrator crashed unexpectedly'));
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+        $scheduledRunService = new ScheduledRunService($orchestrator, $mercure);
+        $controller = new ScheduledRunController($authService, $scheduledRunService);
+        $authMiddleware = new AuthMiddleware($authService);
+
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs/{$run->id}/trigger", [], ['id' => $agentId, 'runId' => $run->id]);
+        $response = callController($controller, 'trigger', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(500);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('ORCHESTRATOR_ERROR');
+        expect($body['error']['message'])->toContain('Orchestrator crashed');
     });
 });
