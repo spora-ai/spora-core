@@ -17,7 +17,7 @@ final class SystemMailerCapturingLogger extends AbstractLogger
     /** @var list<array{level: mixed, message: string, context: array<string, mixed>}> */
     public array $records = [];
 
-    public function log($level, string|\Stringable $message, array $context = []): void
+    public function log($level, string|Stringable $message, array $context = []): void
     {
         $this->records[] = [
             'level'   => $level,
@@ -51,7 +51,7 @@ test('SystemMailer with log driver and real logger injected returns a Mailer', f
     $mailer = new SystemMailer(['mail_driver' => 'log'], $logger);
 
     $builtMailer = $mailer->buildMailer();
-    expect($builtMailer)->toBeInstanceOf(Symfony\Component\Mailer\Mailer::class);
+    expect($builtMailer)->toBeInstanceOf(Mailer::class);
 });
 
 test('buildMailer with smtp driver and valid host returns a Mailer', function (): void {

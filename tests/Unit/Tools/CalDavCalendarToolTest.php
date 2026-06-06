@@ -985,7 +985,7 @@ it('edit_event returns Precondition Failed when server returns HTTP 412', functi
     $getResponse->allows('getStatusCode')->andReturn(200);
     $getResponse->allows('getHeaders')->andReturn([]);
     $getResponse->allows('getContent')->andReturn(
-        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:edit-412\r\nSUMMARY:Old\r\nDTSTART:20260601T100000Z\r\nDTEND:20260601T110000Z\r\nEND:VEVENT\r\nEND:VCALENDAR"
+        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:edit-412\r\nSUMMARY:Old\r\nDTSTART:20260601T100000Z\r\nDTEND:20260601T110000Z\r\nEND:VEVENT\r\nEND:VCALENDAR",
     );
 
     // Then the PUT to commit the change — server says "Precondition Failed"
@@ -1022,7 +1022,7 @@ it('edit_event returns Event not found when server returns HTTP 404 on PUT', fun
     $getResponse->allows('getStatusCode')->andReturn(200);
     $getResponse->allows('getHeaders')->andReturn([]);
     $getResponse->allows('getContent')->andReturn(
-        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:edit-404\r\nSUMMARY:Old\r\nDTSTART:20260601T100000Z\r\nDTEND:20260601T110000Z\r\nEND:VEVENT\r\nEND:VCALENDAR"
+        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:edit-404\r\nSUMMARY:Old\r\nDTSTART:20260601T100000Z\r\nDTEND:20260601T110000Z\r\nEND:VEVENT\r\nEND:VCALENDAR",
     );
 
     $putResponse = Mockery::mock(ResponseInterface::class);
@@ -1058,7 +1058,7 @@ it('edit_event catches Throwable during PUT and returns error', function () {
     $getResponse->allows('getStatusCode')->andReturn(200);
     $getResponse->allows('getHeaders')->andReturn([]);
     $getResponse->allows('getContent')->andReturn(
-        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:edit-throw\r\nSUMMARY:Old\r\nDTSTART:20260601T100000Z\r\nDTEND:20260601T110000Z\r\nEND:VEVENT\r\nEND:VCALENDAR"
+        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:edit-throw\r\nSUMMARY:Old\r\nDTSTART:20260601T100000Z\r\nDTEND:20260601T110000Z\r\nEND:VEVENT\r\nEND:VCALENDAR",
     );
 
     $client->expects('request')->with('GET', Mockery::any(), Mockery::any())->andReturn($getResponse);

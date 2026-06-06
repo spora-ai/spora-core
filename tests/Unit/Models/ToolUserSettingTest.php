@@ -2,10 +2,9 @@
 
 declare(strict_types=1);
 
-use LogicException;
+use Spora\Models\ToolUserSetting;
 
 const TOOL_USER_SETTING_TEST_PASSWORD = 'Password1!';
-use Spora\Models\ToolUserSetting;
 
 it('uses the tool_user_settings table', function (): void {
     $setting = new ToolUserSetting();

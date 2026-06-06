@@ -156,7 +156,7 @@ describe('SseController::generateSubscriberJwt defensive check', function (): vo
 
         $method = new ReflectionMethod($controller, 'generateSubscriberJwt');
 
-        expect(fn () => $method->invoke($controller, 1))
+        expect(fn() => $method->invoke($controller, 1))
             ->toThrow(RuntimeException::class, 'Mercure JWT key is not configured. Set SPORA_MERCURE_JWT_KEY.');
     });
 });

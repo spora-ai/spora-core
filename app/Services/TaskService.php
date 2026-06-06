@@ -19,6 +19,8 @@ use Throwable;
  */
 final class TaskService implements TaskServiceInterface
 {
+    private const ERR_TASK_NOT_FOUND = 'Task not found.';
+
     public function __construct(
         private readonly OrchestratorInterface $orchestrator,
         private readonly MercurePublisherInterface $mercure,
@@ -120,7 +122,7 @@ final class TaskService implements TaskServiceInterface
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
-            throw new InvalidArgumentException('Task not found.');
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
 
         if ($task->status !== 'PENDING_APPROVAL') {
@@ -143,7 +145,7 @@ final class TaskService implements TaskServiceInterface
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
-            throw new InvalidArgumentException('Task not found.');
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
 
         if ($task->status !== 'PENDING_APPROVAL') {
@@ -166,7 +168,7 @@ final class TaskService implements TaskServiceInterface
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
-            throw new InvalidArgumentException('Task not found.');
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
 
         if ($task->status !== 'FAILED') {
@@ -188,7 +190,7 @@ final class TaskService implements TaskServiceInterface
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
-            throw new InvalidArgumentException('Task not found.');
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
 
         if (!in_array($task->status, ['COMPLETED', 'FAILED'], true)) {
@@ -275,6 +277,30 @@ final class TaskService implements TaskServiceInterface
      */
     private function taskResource(Task $task): array
     {
+        $resource = $this->buildBaseTaskResource($task);
+
+        $serializer = $this->toolCallSerializer ?? new ToolCallSerializer();
+        $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => $serializer->toArray($tc))->all();
+
+        $resource['history'] = $task->taskHistory()->orderBy('sequence')->get()->map(fn(TaskHistory $h) => [
+            'sequence'     => $h->sequence,
+            'role'         => $h->role,
+            'content'      => $h->content,
+            'reasoning'    => $h->reasoning,
+            'tool_call_id' => $h->tool_call_id,
+            'tool_name'    => $h->tool_name,
+        ])->all();
+
+        return $resource;
+    }
+
+    /**
+     * Build the common task fields used by both the detail and list resource views.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildBaseTaskResource(Task $task): array
+    {
         $resource = [
             'id'             => $task->id,
             'agent_id'       => $task->agent_id,
@@ -300,26 +326,13 @@ final class TaskService implements TaskServiceInterface
             $resource['retry_of_task_id'] = $task->retry_of_task_id;
             $resource['retry_count'] = $task->retry_count;
         } else {
-            $agent = Agent::find($task->agent_id);
-            $resource['max_retries'] = $agent->max_retries ?? 0;
-            $resource['retry_after_minutes'] = $agent->retry_after_minutes ?? 0;
+            $resource['max_retries'] = $task->agent->max_retries ?? 0;
+            $resource['retry_after_minutes'] = $task->agent->retry_after_minutes ?? 0;
         }
 
         if ($task->retry_after !== null) {
             $resource['retry_after'] = $task->retry_after->toIso8601String();
         }
-
-        $serializer = $this->toolCallSerializer ?? new ToolCallSerializer();
-        $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => $serializer->toArray($tc))->all();
-
-        $resource['history'] = $task->taskHistory()->orderBy('sequence')->get()->map(fn(TaskHistory $h) => [
-            'sequence'     => $h->sequence,
-            'role'         => $h->role,
-            'content'      => $h->content,
-            'reasoning'    => $h->reasoning,
-            'tool_call_id' => $h->tool_call_id,
-            'tool_name'    => $h->tool_name,
-        ])->all();
 
         return $resource;
     }
@@ -350,41 +363,7 @@ final class TaskService implements TaskServiceInterface
      */
     private function taskListResource(Task $task): array
     {
-        $resource = [
-            'id'             => $task->id,
-            'agent_id'       => $task->agent_id,
-            'status'         => $task->status,
-            'user_prompt'    => $task->user_prompt,
-            'final_response' => $task->final_response,
-            'step_count'     => $task->step_count,
-            'max_steps'      => $task->max_steps,
-            'created_at'     => $task->created_at?->toIso8601String(),
-            'updated_at'     => $task->updated_at?->toIso8601String(),
-        ];
-
-        if ($task->parent_task_id !== null) {
-            $resource['parent_task_id'] = $task->parent_task_id;
-        }
-
-        if ($task->error_code !== null) {
-            $resource['error_code'] = $task->error_code;
-            $resource['error_message'] = $task->error_message;
-        }
-
-        if ($task->retry_of_task_id !== null) {
-            $resource['retry_of_task_id'] = $task->retry_of_task_id;
-            $resource['retry_count'] = $task->retry_count;
-        } else {
-            // Use eager-loaded agent relation to avoid a per-task query
-            $resource['max_retries'] = $task->agent->max_retries ?? 0;
-            $resource['retry_after_minutes'] = $task->agent->retry_after_minutes ?? 0;
-        }
-
-        if ($task->retry_after !== null) {
-            $resource['retry_after'] = $task->retry_after->toIso8601String();
-        }
-
-        return $resource;
+        return $this->buildBaseTaskResource($task);
     }
 
     /**

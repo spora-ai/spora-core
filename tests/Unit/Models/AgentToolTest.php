@@ -2,10 +2,11 @@
 
 declare(strict_types=1);
 
-const AGENT_TOOL_TEST_PASSWORD = 'Password1!';
-const STUB_OUTPUT_TOOL_CLASS = 'Spora\\Tools\\StubOutputTool';
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
+
+const AGENT_TOOL_TEST_PASSWORD = 'Password1!';
+defined('STUB_OUTPUT_TOOL_CLASS') || define('STUB_OUTPUT_TOOL_CLASS', 'Spora\\Tools\\StubOutputTool');
 
 it('uses the agent_tools table', function (): void {
     $tool = new AgentTool();

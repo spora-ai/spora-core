@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Illuminate\Support\Carbon;
 use Monolog\Handler\TestHandler;
-use Monolog\Level;
 use Monolog\Logger;
 use Spora\Models\Agent;
 use Spora\Models\MailTemplate;

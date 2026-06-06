@@ -478,13 +478,13 @@ describe('TaskService — getTaskWithHistory', function (): void {
             'user_prompt' => 'with history',
             'max_steps'   => 5,
         ]);
-        \Spora\Models\TaskHistory::create([
+        Spora\Models\TaskHistory::create([
             'task_id'  => $task->id,
             'sequence' => 1,
             'role'     => 'user',
             'content'  => 'first',
         ]);
-        \Spora\Models\TaskHistory::create([
+        Spora\Models\TaskHistory::create([
             'task_id'    => $task->id,
             'sequence'   => 2,
             'role'       => 'assistant',
@@ -518,7 +518,7 @@ describe('TaskService — getTaskWithHistory', function (): void {
             'max_steps'   => 5,
         ]);
         foreach ([1, 2, 3] as $seq) {
-            \Spora\Models\TaskHistory::create([
+            Spora\Models\TaskHistory::create([
                 'task_id'  => $task->id,
                 'sequence' => $seq,
                 'role'     => 'user',
@@ -833,14 +833,14 @@ describe('TaskService — deleteTask', function (): void {
             'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
-        \Spora\Models\TaskHistory::create([
+        Spora\Models\TaskHistory::create([
             'task_id' => $task->id, 'sequence' => 1, 'role' => 'user', 'content' => 'x',
         ]);
 
         $service = makeTaskService();
         expect($service->deleteTask($task->id, $userId))->toBeTrue();
         expect(Task::find($task->id))->toBeNull();
-        expect(\Spora\Models\TaskHistory::where('task_id', $task->id)->count())->toBe(0);
+        expect(Spora\Models\TaskHistory::where('task_id', $task->id)->count())->toBe(0);
     });
 
     it('cascades delete to retry children when the task is a parent', function (): void {

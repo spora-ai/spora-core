@@ -18,7 +18,7 @@ function makeSeedTester(): CommandTester
     $db->bootDatabaseConnectionOnly(); // no-op: already booted
 
     $templateLoader = new EmailTemplateLoader();
-    $authFactory = static fn (): AuthService => bootAuthLayer();
+    $authFactory = static fn(): AuthService => bootAuthLayer();
 
     $command = new SeedCommand($db, $authFactory, $templateLoader);
     $command->setName('db:seed');
@@ -27,7 +27,7 @@ function makeSeedTester(): CommandTester
 }
 
 it('runs the seeder and reports success', function (): void {
-    \Spora\Models\User::where('email', 'admin@spora.local')->delete();
+    Spora\Models\User::where('email', 'admin@spora.local')->delete();
 
     $tester = makeSeedTester();
     $tester->execute([]);
@@ -37,5 +37,5 @@ it('runs the seeder and reports success', function (): void {
         ->toContain('Starting database seeder...')
         ->toContain('Seeding finished successfully.');
     // Side effect: the admin user was created.
-    expect(\Spora\Models\User::where('email', 'admin@spora.local')->exists())->toBeTrue();
+    expect(Spora\Models\User::where('email', 'admin@spora.local')->exists())->toBeTrue();
 });

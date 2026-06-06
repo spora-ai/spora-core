@@ -239,6 +239,7 @@ describe('useTaskStore', () => {
       const store = useTaskStore()
       // Should not throw
       store.applyTaskUpdate(999, { error_code: 'SERVER_ERROR' })
+      expect(store.activeTask).toBeNull()
     })
 
     it('does nothing when taskId does not match activeTask', () => {

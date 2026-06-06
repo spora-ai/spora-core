@@ -65,7 +65,7 @@ function registerAndGetAgentForScheduledRun(): array
     return [$userId, $agent->id, $authService];
 }
 
-function makeJsonRequestWithAttrs(string $method, string $path, array $body, array $attrs): Symfony\Component\HttpFoundation\Request
+function makeJsonRequestWithAttrs(string $method, string $path, array $body, array $attrs): Request
 {
     $request = jsonRequest($method, $path, $body);
     foreach ($attrs as $k => $v) {
