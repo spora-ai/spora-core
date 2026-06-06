@@ -2,12 +2,11 @@
 
 declare(strict_types=1);
 
-use LogicException;
-
-const AGENT_TOOL_OVERRIDE_TEST_PASSWORD = 'Password1!';
-const STUB_OUTPUT_TOOL_CLASS = 'Spora\\Tools\\StubOutputTool';
 use Spora\Models\Agent;
 use Spora\Models\AgentToolOverride;
+
+const AGENT_TOOL_OVERRIDE_TEST_PASSWORD = 'Password1!';
+defined('STUB_OUTPUT_TOOL_CLASS') || define('STUB_OUTPUT_TOOL_CLASS', 'Spora\\Tools\\StubOutputTool');
 
 it('uses the agent_tool_overrides table', function (): void {
     $override = new AgentToolOverride();

@@ -5,7 +5,7 @@ declare(strict_types=1);
 use Spora\Models\Agent;
 
 const AGENT_TOOL_OPERATION_OVERRIDE_TEST_PASSWORD = 'Password1!';
-const STUB_OUTPUT_TOOL_CLASS = 'Spora\\Tools\\StubOutputTool';
+defined('STUB_OUTPUT_TOOL_CLASS') || define('STUB_OUTPUT_TOOL_CLASS', 'Spora\\Tools\\StubOutputTool');
 use Spora\Models\AgentToolOperationOverride;
 
 it('uses the agent_tool_operation_overrides table', function (): void {

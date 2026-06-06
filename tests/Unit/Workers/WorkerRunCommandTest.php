@@ -795,7 +795,7 @@ describe('WorkerRunCommand substituteVariables', function (): void {
         [$userId, $agentId] = registerAgentInWorkerDb();
         // The user record must have its `username` column set for the substitution
         // to find it — delight-im/auth only sets email + status.
-        \Spora\Models\User::where('id', $userId)->update(['username' => 'WorkerTestUser']);
+        Spora\Models\User::where('id', $userId)->update(['username' => 'WorkerTestUser']);
         $agent = Agent::find($agentId);
 
         $ref = new ReflectionMethod($command, 'substituteVariables');

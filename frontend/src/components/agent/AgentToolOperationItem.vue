@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
 import Toggle from '@/components/ui/Toggle.vue'
 import Icon from '@/components/ui/Icon.vue'
 
@@ -17,6 +17,7 @@ const emit = defineEmits<{
 }>()
 
 const isAutoApprove = computed(() => !props.requiresApproval)
+const autoApproveToggleId = useId()
 </script>
 <template>
   <div class="flex items-start gap-3 pl-4 pr-5 py-3 border-t border-border/50">
@@ -45,10 +46,12 @@ const isAutoApprove = computed(() => !props.requiresApproval)
       <!-- Auto-approve toggle (only when enabled) -->
       <label
         v-if="enabled"
+        :for="autoApproveToggleId"
         class="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer"
         :title="isAutoApprove ? 'Auto-approve is on — click to require approval' : 'Auto-approve is off — click to enable'"
       >
         <Toggle
+          :id="autoApproveToggleId"
           size="sm"
           :model-value="isAutoApprove"
           :disabled="saving"

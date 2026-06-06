@@ -19,6 +19,8 @@ use Throwable;
  */
 final class TaskService implements TaskServiceInterface
 {
+    private const ERR_TASK_NOT_FOUND = 'Task not found.';
+
     public function __construct(
         private readonly OrchestratorInterface $orchestrator,
         private readonly MercurePublisherInterface $mercure,
@@ -120,7 +122,7 @@ final class TaskService implements TaskServiceInterface
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
-            throw new InvalidArgumentException('Task not found.');
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
 
         if ($task->status !== 'PENDING_APPROVAL') {
@@ -143,7 +145,7 @@ final class TaskService implements TaskServiceInterface
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
-            throw new InvalidArgumentException('Task not found.');
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
 
         if ($task->status !== 'PENDING_APPROVAL') {
@@ -166,7 +168,7 @@ final class TaskService implements TaskServiceInterface
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
-            throw new InvalidArgumentException('Task not found.');
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
 
         if ($task->status !== 'FAILED') {
@@ -188,7 +190,7 @@ final class TaskService implements TaskServiceInterface
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
-            throw new InvalidArgumentException('Task not found.');
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
 
         if (!in_array($task->status, ['COMPLETED', 'FAILED'], true)) {

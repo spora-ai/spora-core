@@ -6,6 +6,7 @@ namespace Tests\Unit\Http;
 
 use Delight\Auth\Role;
 use Illuminate\Database\Capsule\Manager as DB;
+use Mockery;
 use Spora\Auth\AuthService;
 use Spora\Http\AuthController;
 use Spora\Models\User;
@@ -45,7 +46,7 @@ function makeAuthController(
  */
 function mockUserService(): UserServiceInterface
 {
-    return \Mockery::mock(UserServiceInterface::class);
+    return Mockery::mock(UserServiceInterface::class);
 }
 
 beforeEach(function (): void {
@@ -54,7 +55,7 @@ beforeEach(function (): void {
 });
 
 afterEach(function (): void {
-    \Mockery::close();
+    Mockery::close();
 });
 
 // ---------------------------------------------------------------------------
@@ -308,7 +309,7 @@ describe('AuthController::login', function (): void {
         $authService->register('no-profile@example.com', AUTHCTL_TEST_PASSWORD, 'No Profile');
         User::where('email', 'no-profile@example.com')->update(['verified' => 1]);
 
-        $userService = \Mockery::mock(UserServiceInterface::class);
+        $userService = Mockery::mock(UserServiceInterface::class);
         $userService->shouldReceive('getUser')->andReturn(null);
         $controller = new AuthController($authService, $userService, new CsrfTokenService());
 

@@ -8,7 +8,7 @@
  * The parent (TaskChatPage) supplies the pending list and reacts to events
  * by calling the task store. This component is purely presentational.
  */
-import { ref, watch } from 'vue'
+import { ref, useId, watch } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import ToolApprovalCard from '@/components/agent/ToolApprovalCard.vue'
 import {
@@ -37,6 +37,7 @@ const emit = defineEmits<{
 
 const showRejectInput = ref(false)
 const rejectReason = ref('')
+const rejectAllReasonId = useId()
 
 // Snapshot of the most recent arguments each card emitted via update:arguments.
 // Keyed by provider_call_id so it survives reordering and prunes naturally
@@ -128,8 +129,9 @@ function isRejecting(id: number): boolean {
       </div>
 
       <div v-if="showRejectInput && pending.length > 1" class="flex flex-col gap-1.5">
-        <label class="text-xs font-medium text-muted-foreground">Reason for rejecting all tools</label>
+        <label :for="rejectAllReasonId" class="text-xs font-medium text-muted-foreground">Reason for rejecting all tools</label>
         <input
+          :id="rejectAllReasonId"
           v-model="rejectReason"
           type="text"
           placeholder="Explain why you're rejecting all actions…"

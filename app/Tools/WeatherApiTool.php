@@ -68,6 +68,11 @@ final class WeatherApiTool extends AbstractTool
 {
     private const DEFAULT_BASE_URL = 'https://api.weatherapi.com/v1';
 
+    private const LOG_HTTP_REQUEST = 'WeatherApiTool: HTTP request';
+    private const LOG_HTTP_RESPONSE = 'WeatherApiTool: HTTP response';
+    private const ERR_MISSING_API_KEY = 'WeatherAPI.com key is not configured. Please add it in agent tool settings.';
+    private const LOG_TOOL_ERROR_PREFIX = 'Weather tool error: ';
+
     public function __construct(
         private readonly ToolConfigService $configService,
         private readonly HttpClientInterface $httpClient,
@@ -111,14 +116,14 @@ final class WeatherApiTool extends AbstractTool
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.weatherapi.api_key'] ?? '';
         if (empty($apiKey)) {
-            return new ToolResult(false, 'WeatherAPI.com key is not configured. Please add it in agent tool settings.');
+            return new ToolResult(false, self::ERR_MISSING_API_KEY);
         }
 
         $baseUrl = $this->effectiveBaseUrl($settings);
         $timeout = $this->effectiveTimeout($settings);
 
         try {
-            $this->logger?->debug('WeatherApiTool: HTTP request', [
+            $this->logger?->debug(self::LOG_HTTP_REQUEST, [
                 'method' => 'GET',
                 'url' => "{$baseUrl}/current.json",
                 'query' => ['key' => '***', 'q' => $location],
@@ -134,7 +139,7 @@ final class WeatherApiTool extends AbstractTool
             ]);
 
             $statusCode = $response->getStatusCode();
-            $this->logger?->debug('WeatherApiTool: HTTP response', [
+            $this->logger?->debug(self::LOG_HTTP_RESPONSE, [
                 'status_code' => $statusCode,
                 'url' => "{$baseUrl}/current.json",
             ]);
@@ -185,7 +190,7 @@ final class WeatherApiTool extends AbstractTool
             return new ToolResult(true, $output);
         } catch (Throwable $e) {
             $this->logger?->error('WeatherAPI current exception', ['exception' => $e]);
-            return new ToolResult(false, "Weather tool error: " . $e->getMessage());
+            return new ToolResult(false, self::LOG_TOOL_ERROR_PREFIX . $e->getMessage());
         }
     }
 
@@ -199,7 +204,7 @@ final class WeatherApiTool extends AbstractTool
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.weatherapi.api_key'] ?? '';
         if (empty($apiKey)) {
-            return new ToolResult(false, 'WeatherAPI.com key is not configured. Please add it in agent tool settings.');
+            return new ToolResult(false, self::ERR_MISSING_API_KEY);
         }
 
         $baseUrl = $this->effectiveBaseUrl($settings);
@@ -212,7 +217,7 @@ final class WeatherApiTool extends AbstractTool
         $units = $this->effectiveUnits($settings);
 
         try {
-            $this->logger?->debug('WeatherApiTool: HTTP request', [
+            $this->logger?->debug(self::LOG_HTTP_REQUEST, [
                 'method' => 'GET',
                 'url' => "{$baseUrl}/forecast.json",
                 'query' => ['key' => '***', 'q' => $location, 'days' => $days],
@@ -229,7 +234,7 @@ final class WeatherApiTool extends AbstractTool
             ]);
 
             $statusCode = $response->getStatusCode();
-            $this->logger?->debug('WeatherApiTool: HTTP response', [
+            $this->logger?->debug(self::LOG_HTTP_RESPONSE, [
                 'status_code' => $statusCode,
                 'url' => "{$baseUrl}/forecast.json",
             ]);
@@ -273,7 +278,7 @@ final class WeatherApiTool extends AbstractTool
             return new ToolResult(true, $output);
         } catch (Throwable $e) {
             $this->logger?->error('WeatherAPI forecast exception', ['exception' => $e]);
-            return new ToolResult(false, "Weather tool error: " . $e->getMessage());
+            return new ToolResult(false, self::LOG_TOOL_ERROR_PREFIX . $e->getMessage());
         }
     }
 
@@ -290,14 +295,14 @@ final class WeatherApiTool extends AbstractTool
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.weatherapi.api_key'] ?? '';
         if (empty($apiKey)) {
-            return new ToolResult(false, 'WeatherAPI.com key is not configured. Please add it in agent tool settings.');
+            return new ToolResult(false, self::ERR_MISSING_API_KEY);
         }
 
         $baseUrl = $this->effectiveBaseUrl($settings);
         $timeout = $this->effectiveTimeout($settings);
 
         try {
-            $this->logger?->debug('WeatherApiTool: HTTP request', [
+            $this->logger?->debug(self::LOG_HTTP_REQUEST, [
                 'method' => 'GET',
                 'url' => "{$baseUrl}/search.json",
                 'query' => ['key' => '***', 'q' => $query],
@@ -313,7 +318,7 @@ final class WeatherApiTool extends AbstractTool
             ]);
 
             $statusCode = $response->getStatusCode();
-            $this->logger?->debug('WeatherApiTool: HTTP response', [
+            $this->logger?->debug(self::LOG_HTTP_RESPONSE, [
                 'status_code' => $statusCode,
                 'url' => "{$baseUrl}/search.json",
             ]);
@@ -355,7 +360,7 @@ final class WeatherApiTool extends AbstractTool
             return new ToolResult(true, $output);
         } catch (Throwable $e) {
             $this->logger?->error('WeatherAPI search exception', ['exception' => $e]);
-            return new ToolResult(false, "Weather tool error: " . $e->getMessage());
+            return new ToolResult(false, self::LOG_TOOL_ERROR_PREFIX . $e->getMessage());
         }
     }
 
@@ -369,7 +374,7 @@ final class WeatherApiTool extends AbstractTool
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.weatherapi.api_key'] ?? '';
         if (empty($apiKey)) {
-            return new ToolResult(false, 'WeatherAPI.com key is not configured. Please add it in agent tool settings.');
+            return new ToolResult(false, self::ERR_MISSING_API_KEY);
         }
 
         $baseUrl = $this->effectiveBaseUrl($settings);
@@ -385,7 +390,7 @@ final class WeatherApiTool extends AbstractTool
         }
 
         try {
-            $this->logger?->debug('WeatherApiTool: HTTP request', [
+            $this->logger?->debug(self::LOG_HTTP_REQUEST, [
                 'method' => 'GET',
                 'url' => "{$baseUrl}/astronomy.json",
                 'query' => ['key' => '***', 'q' => $location, 'dt' => $date ?: null],
@@ -398,7 +403,7 @@ final class WeatherApiTool extends AbstractTool
             ]);
 
             $statusCode = $response->getStatusCode();
-            $this->logger?->debug('WeatherApiTool: HTTP response', [
+            $this->logger?->debug(self::LOG_HTTP_RESPONSE, [
                 'status_code' => $statusCode,
                 'url' => "{$baseUrl}/astronomy.json",
             ]);
@@ -433,7 +438,7 @@ final class WeatherApiTool extends AbstractTool
             return new ToolResult(true, $output);
         } catch (Throwable $e) {
             $this->logger?->error('WeatherAPI astronomy exception', ['exception' => $e]);
-            return new ToolResult(false, "Weather tool error: " . $e->getMessage());
+            return new ToolResult(false, self::LOG_TOOL_ERROR_PREFIX . $e->getMessage());
         }
     }
 

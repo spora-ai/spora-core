@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use LogicException;
 use Spora\Models\ToolConfiguration;
 
 it('uses the tool_configurations table', function (): void {

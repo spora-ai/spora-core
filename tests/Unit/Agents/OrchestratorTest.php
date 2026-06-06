@@ -24,7 +24,6 @@ use Spora\Models\UserPreference;
 use Spora\Plugins\PluginInterface;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\MercurePublisherInterface;
-use Spora\Services\NotificationService;
 use Spora\Services\ToolCallSerializer;
 use Spora\Tools\AgentMemoryTool;
 use Spora\Tools\Attributes\Tool;
@@ -555,22 +554,22 @@ it('keeps the task status as PENDING_APPROVAL during tool execution to prevent a
 
     // Create an inline diagnostic tool that checks the Task's status directly from the DB mid-execution
     $checkerTool = new
-    #[Spora\Tools\Attributes\Tool(name: 'race_condition_checker_tool', description: 'Checks task status')]
-    #[Spora\Tools\Attributes\ToolOperation(name: 'default', description: 'Run check', enabledByDefault: true, requiresApprovalByDefault: true)]
-    class implements Spora\Tools\ToolInterface {
-        use Spora\Tools\Traits\HasOperations;
+    #[Tool(name: 'race_condition_checker_tool', description: 'Checks task status')]
+    #[ToolOperation(name: 'default', description: 'Run check', enabledByDefault: true, requiresApprovalByDefault: true)]
+    class implements ToolInterface {
+        use HasOperations;
         public ?string $statusInsideTool = null;
         public ?int $taskId = null;
         public function getParametersSchema(): array
         {
             return ['type' => 'object', 'properties' => [], 'required' => []];
         }
-        public function execute(array $arguments, int $agentId, ?int $userId = null): Spora\Tools\ValueObjects\ToolResult
+        public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
         {
             // Task status should still be PENDING_APPROVAL while the tool is heavily executing
             $task = Task::find($this->taskId);
             $this->statusInsideTool = $task->status;
-            return new Spora\Tools\ValueObjects\ToolResult(true, 'Checked.');
+            return new ToolResult(true, 'Checked.');
         }
         public function describeAction(array $arguments): string
         {

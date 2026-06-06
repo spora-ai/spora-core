@@ -113,10 +113,13 @@ function resolveOptionLabel(options: Record<string, string> | string[] | null | 
     <!-- toggle -->
     <label
       v-else-if="field.type === 'toggle'"
+      :for="field.key"
       class="relative inline-flex items-center cursor-pointer gap-3"
       :class="disabled ? 'opacity-50 cursor-not-allowed' : ''"
     >
       <Toggle
+        :id="field.key"
+        :aria-label="field.label"
         :model-value="!!modelValue"
         :disabled="disabled"
         @update:model-value="!disabled && emit('update:modelValue', !modelValue)"

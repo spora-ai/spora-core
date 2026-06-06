@@ -7,7 +7,7 @@
  * Emits approve / reject events with the data the parent needs to call the
  * store. The parent owns the HTTP path and toasts.
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, useId, watch } from 'vue'
 import ToolArgumentsEditor from '@/components/agent/ToolArgumentsEditor.vue'
 import {
   tryParseArgsObject,
@@ -38,6 +38,7 @@ const emit = defineEmits<{
 const argsJson = ref('')
 const showRejectInput = ref(false)
 const rejectReason = ref('')
+const rejectOneReasonId = useId()
 
 const parsedProposedArgs = computed<Record<string, unknown>>(() => {
   return normalizeProposedArgs(props.toolCall.proposed_arguments)
@@ -122,8 +123,9 @@ function onRejectClick(): void {
     />
 
     <div v-if="showRejectInput" class="flex flex-col gap-1">
-      <label class="text-xs font-medium text-muted-foreground">Reason for rejecting "{{ toolCall.tool_name }}"</label>
+      <label :for="rejectOneReasonId" class="text-xs font-medium text-muted-foreground">Reason for rejecting "{{ toolCall.tool_name }}"</label>
       <input
+        :id="rejectOneReasonId"
         v-model="rejectReason"
         type="text"
         :placeholder="`Explain why you're rejecting ${toolCall.tool_name}…`"

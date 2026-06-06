@@ -13,7 +13,7 @@ final class MercurePublisherCapturingLogger extends AbstractLogger
     /** @var list<array{level: mixed, message: string, context: array<string, mixed>}> */
     public array $records = [];
 
-    public function log($level, string|\Stringable $message, array $context = []): void
+    public function log($level, string|Stringable $message, array $context = []): void
     {
         $this->records[] = [
             'level'   => $level,
