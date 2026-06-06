@@ -245,23 +245,18 @@ final class IcsParser
         if ($dateStr === null || $dateStr === '') {
             return null;
         }
-        if (str_ends_with($dateStr, 'Z')) {
-            return $this->parseIcsDateUtc($dateStr);
-        }
-        if (strlen($dateStr) === 8) {
-            return $this->parseIcsDateAllDay($dateStr);
+        if (strlen($dateStr) === 8 || str_ends_with($dateStr, 'Z')) {
+            return $this->parseIcsDateVariant($dateStr);
         }
         return $this->parseIcsDateWithTimezone($dateStr) ?? $this->parseIcsDateGeneric($dateStr);
     }
 
-    private function parseIcsDateUtc(string $dateStr): ?DateTimeImmutable
+    private function parseIcsDateVariant(string $dateStr): ?DateTimeImmutable
     {
-        $parsed = DateTimeImmutable::createFromFormat(self::ICS_DATETIME_UTC, $dateStr, new DateTimeZone('UTC'));
-        return $parsed instanceof DateTimeImmutable ? $parsed->setTimezone(new DateTimeZone('UTC')) : null;
-    }
-
-    private function parseIcsDateAllDay(string $dateStr): ?DateTimeImmutable
-    {
+        if (str_ends_with($dateStr, 'Z')) {
+            $parsed = DateTimeImmutable::createFromFormat(self::ICS_DATETIME_UTC, $dateStr, new DateTimeZone('UTC'));
+            return $parsed instanceof DateTimeImmutable ? $parsed->setTimezone(new DateTimeZone('UTC')) : null;
+        }
         $parsed = DateTimeImmutable::createFromFormat('!Ymd', $dateStr);
         return $parsed instanceof DateTimeImmutable ? $parsed : null;
     }
