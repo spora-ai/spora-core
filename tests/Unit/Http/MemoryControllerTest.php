@@ -38,7 +38,7 @@ describe('MemoryController::index', function (): void {
         $memoryService->createGlobalMemory($userId, ['name' => 'Mem 1', 'content' => 'x']);
         $memoryService->createGlobalMemory($userId, ['name' => 'Mem 2', 'content' => 'y']);
 
-        $response = $controller->index(new Request());
+        $response = $controller->index();
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
@@ -49,7 +49,7 @@ describe('MemoryController::index', function (): void {
         [$controller, $authService] = makeMemController();
         createMemUser($authService, 'empty@example.com');
 
-        $response = $controller->index(new Request());
+        $response = $controller->index();
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);

@@ -226,11 +226,23 @@ return [
     Spora\Http\AuthController::class => static function (ContainerInterface $c): Spora\Http\AuthController {
         return new Spora\Http\AuthController(
             $c->get(AuthService::class),
-            $c->get(UserServiceInterface::class),
             $c->get(Spora\Security\CsrfTokenService::class),
+            $c->get(Spora\Services\AuthValidator::class),
+            $c->get(Spora\Services\AuthWorkflow::class),
             $c->get('config'),
         );
     },
+
+    Spora\Services\AuthWorkflow::class => static function (ContainerInterface $c): Spora\Services\AuthWorkflow {
+        return new Spora\Services\AuthWorkflow(
+            $c->get(AuthService::class),
+            $c->get(UserServiceInterface::class),
+            $c->get(Spora\Security\CsrfTokenService::class),
+            $c->get(Spora\Services\AuthValidator::class),
+        );
+    },
+
+    Spora\Services\AuthValidator::class => static fn(): Spora\Services\AuthValidator => new Spora\Services\AuthValidator(),
 
     ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
         return new ToolConfigService(
@@ -295,6 +307,13 @@ return [
     Spora\Http\LLMConfigController::class => static function (ContainerInterface $c): Spora\Http\LLMConfigController {
         return new Spora\Http\LLMConfigController(
             $c->get(AuthService::class),
+            $c->get(Spora\Services\LLMConfigServiceInterface::class),
+            $c->get(Spora\Services\LlmConfigValidator::class),
+        );
+    },
+
+    Spora\Services\LlmConfigValidator::class => static function (ContainerInterface $c): Spora\Services\LlmConfigValidator {
+        return new Spora\Services\LlmConfigValidator(
             $c->get(Spora\Services\LLMConfigServiceInterface::class),
         );
     },

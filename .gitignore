@@ -84,3 +84,6 @@ Thumbs.db
 
 /coverage
 /node_modules
+
+# Local Codex agent artifacts (plans, scratch notes) — not for the project repo
+.agents/plans/

@@ -11,13 +11,6 @@ use FastRoute\RouteCollector;
  */
 final class MiddlewareRouteCollector extends RouteCollector
 {
-    public function __construct(
-        \FastRoute\RouteParser $parser,
-        \FastRoute\DataGenerator $dataGenerator,
-    ) {
-        parent::__construct($parser, $dataGenerator);
-    }
-
     public function addRoute($httpMethod, $route, $handler, array $middleware = []): void
     {
         parent::addRoute($httpMethod, $route, ['handler' => $handler, 'middleware' => $middleware]);

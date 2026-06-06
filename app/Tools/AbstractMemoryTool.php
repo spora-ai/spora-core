@@ -144,9 +144,7 @@ abstract class AbstractMemoryTool extends AbstractTool
             'order'    => $order,
         ];
 
-        if ($scope === 'global' && $userId !== null) {
-            $createData['user_id'] = $userId;
-        } elseif ($scope === 'agent') {
+        if (($scope === 'global' && $userId !== null) || $scope === 'agent') {
             $createData['user_id'] = $userId;
         }
 

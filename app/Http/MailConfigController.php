@@ -104,7 +104,7 @@ final class MailConfigController
         ], Response::HTTP_OK);
     }
 
-    public function test(Request $request): JsonResponse
+    public function test(): JsonResponse
     {
         $currentUserEmail = $this->authService->currentUserEmail();
 

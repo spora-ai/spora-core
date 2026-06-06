@@ -102,8 +102,7 @@ test('show() returns 200 with the template by id', function (): void {
         'body_text' => 'Hello',
     ]);
 
-    $request = jsonRequest('GET', "/api/v1/mail-templates/{$template->id}");
-    $response = $controller->show($request, $template->id);
+    $response = $controller->show($template->id);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
     $body = json_decode($response->getContent(), true);
@@ -113,8 +112,7 @@ test('show() returns 200 with the template by id', function (): void {
 test('show() returns 404 for unknown id', function (): void {
     [$controller] = makeMailTemplateController();
 
-    $request = jsonRequest('GET', '/api/v1/mail-templates/99999');
-    $response = $controller->show($request, 99999);
+    $response = $controller->show(99999);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
 });
@@ -174,8 +172,7 @@ test('destroy() returns 200 for non-system template', function (): void {
     [$controller] = makeMailTemplateController();
     $template = MailTemplate::create(['name' => 'custom_delete', 'subject' => 'x']);
 
-    $request = jsonRequest('DELETE', "/api/v1/mail-templates/{$template->id}");
-    $response = $controller->destroy($request, $template->id);
+    $response = $controller->destroy($template->id);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
     expect(MailTemplate::find($template->id))->toBeNull();
@@ -185,8 +182,7 @@ test('destroy() returns 409 for email_verification system template', function ()
     [$controller] = makeMailTemplateController();
     $template = MailTemplate::create(['name' => 'email_verification', 'subject' => 'x']);
 
-    $request = jsonRequest('DELETE', "/api/v1/mail-templates/{$template->id}");
-    $response = $controller->destroy($request, $template->id);
+    $response = $controller->destroy($template->id);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_CONFLICT);
     $body = json_decode($response->getContent(), true);
@@ -197,8 +193,7 @@ test('destroy() returns 409 for password_reset system template', function (): vo
     [$controller] = makeMailTemplateController();
     $template = MailTemplate::create(['name' => 'password_reset', 'subject' => 'x']);
 
-    $request = jsonRequest('DELETE', "/api/v1/mail-templates/{$template->id}");
-    $response = $controller->destroy($request, $template->id);
+    $response = $controller->destroy($template->id);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_CONFLICT);
 });
@@ -207,8 +202,7 @@ test('destroy() returns 409 for welcome system template', function (): void {
     [$controller] = makeMailTemplateController();
     $template = MailTemplate::create(['name' => 'welcome', 'subject' => 'x']);
 
-    $request = jsonRequest('DELETE', "/api/v1/mail-templates/{$template->id}");
-    $response = $controller->destroy($request, $template->id);
+    $response = $controller->destroy($template->id);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_CONFLICT);
 });
@@ -216,8 +210,7 @@ test('destroy() returns 409 for welcome system template', function (): void {
 test('destroy() returns 404 for unknown id', function (): void {
     [$controller] = makeMailTemplateController();
 
-    $request = jsonRequest('DELETE', '/api/v1/mail-templates/99999');
-    $response = $controller->destroy($request, 99999);
+    $response = $controller->destroy(99999);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
 });

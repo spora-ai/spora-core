@@ -76,6 +76,23 @@ final class ReadUrlTool extends AbstractTool
     {
         $url = trim((string) ($arguments['url'] ?? ''));
 
+        $validation = $this->validateUrl($url);
+        if ($validation instanceof ToolResult) {
+            return $validation;
+        }
+
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
+
+        try {
+            return $this->processFetchedContent($url, $settings);
+        } catch (Throwable $e) {
+            $this->logger?->error('ReadUrlTool Exception', ['url' => $url, 'exception' => $e]);
+            return new ToolResult(false, 'Failed to read URL: ' . $e->getMessage());
+        }
+    }
+
+    private function validateUrl(string $url): ?ToolResult
+    {
         if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL)) {
             return new ToolResult(false, 'A valid absolute URL is required.');
         }
@@ -87,70 +104,75 @@ final class ReadUrlTool extends AbstractTool
             return new ToolResult(false, 'Only http:// and https:// URLs are supported.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
+        return null;
+    }
 
-        try {
-            $this->logger?->debug('ReadUrlTool: HTTP request', [
-                'method' => 'GET',
-                'url' => $url,
-                'headers' => [
-                    'User-Agent' => 'Spora Agent/1.0 (+https://github.com/spora/spora)',
-                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8',
-                ],
-                'timeout' => $this->effectiveTimeout($settings),
-            ]);
+    /**
+     * @param array<string, mixed> $settings
+     */
+    private function processFetchedContent(string $url, array $settings): ToolResult
+    {
+        $timeout = $this->effectiveTimeout($settings);
+        $headers = [
+            'User-Agent' => 'Spora Agent/1.0 (+https://github.com/spora/spora)',
+            'Accept'     => 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8',
+        ];
 
-            $response = $this->httpClient->request('GET', $url, [
-                'timeout' => $this->effectiveTimeout($settings),
-                'headers' => [
-                    'User-Agent' => 'Spora Agent/1.0 (+https://github.com/spora/spora)',
-                    'Accept'     => 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8',
-                ],
-            ]);
+        $this->logger?->debug('ReadUrlTool: HTTP request', [
+            'method'  => 'GET',
+            'url'     => $url,
+            'headers' => $headers,
+            'timeout' => $timeout,
+        ]);
 
-            $statusCode = $response->getStatusCode();
-            $this->logger?->debug('ReadUrlTool: HTTP response', [
-                'status_code' => $statusCode,
-                'url' => $url,
-                'content_type' => $response->getHeaders()['content-type'][0] ?? 'unknown',
-            ]);
+        $response = $this->httpClient->request('GET', $url, [
+            'timeout' => $timeout,
+            'headers' => $headers,
+        ]);
 
-            if ($statusCode >= 400) {
-                return new ToolResult(false, "Failed to fetch URL. HTTP Status: {$statusCode}");
-            }
+        $statusCode = $response->getStatusCode();
+        $this->logger?->debug('ReadUrlTool: HTTP response', [
+            'status_code'  => $statusCode,
+            'url'          => $url,
+            'content_type' => $response->getHeaders()['content-type'][0] ?? 'unknown',
+        ]);
 
-            $contentType = strtolower($response->getHeaders()['content-type'][0] ?? 'text/plain');
-            $content     = $response->getContent(false);
-
-            // Handle XML / RSS
-            if (str_contains($contentType, 'xml') || str_contains($contentType, 'rss')) {
-                return new ToolResult(true, "Fetched XML/RSS Content:\n\n" . $this->truncate($content));
-            }
-
-            // Handle JSON
-            if (str_contains($contentType, 'json')) {
-                return new ToolResult(true, "Fetched JSON Content:\n\n" . $this->truncate($content));
-            }
-
-            // Fallback: Assume HTML and convert to Markdown
-            $converter = new HtmlConverter([
-                'strip_tags'   => true,
-                'remove_nodes' => 'script style nav footer header iframe',
-            ]);
-
-            $markdown = trim($converter->convert($content));
-
-            if ($markdown === '') {
-                return new ToolResult(false, 'URL was fetched successfully but no readable text content was found.');
-            }
-
-            // #5 Size guard: cap output so large pages don't saturate the context window.
-            return new ToolResult(true, "Fetched URL Content (Markdown):\n\n" . $this->truncate($markdown));
-
-        } catch (Throwable $e) {
-            $this->logger?->error('ReadUrlTool Exception', ['url' => $url, 'exception' => $e]);
-            return new ToolResult(false, "Failed to read URL: " . $e->getMessage());
+        if ($statusCode >= 400) {
+            return new ToolResult(false, "Failed to fetch URL. HTTP Status: {$statusCode}");
         }
+
+        $contentType = strtolower($response->getHeaders()['content-type'][0] ?? 'text/plain');
+        $content     = $response->getContent(false);
+
+        return $this->buildContentResult($contentType, $content);
+    }
+
+    private function buildContentResult(string $contentType, string $content): ToolResult
+    {
+        if (str_contains($contentType, 'xml') || str_contains($contentType, 'rss')) {
+            return new ToolResult(true, "Fetched XML/RSS Content:\n\n" . $this->truncate($content));
+        }
+        if (str_contains($contentType, 'json')) {
+            return new ToolResult(true, "Fetched JSON Content:\n\n" . $this->truncate($content));
+        }
+        return $this->convertHtmlToMarkdownResult($content);
+    }
+
+    private function convertHtmlToMarkdownResult(string $content): ToolResult
+    {
+        $converter = new HtmlConverter([
+            'strip_tags'   => true,
+            'remove_nodes' => 'script style nav footer header iframe',
+        ]);
+
+        $markdown = trim($converter->convert($content));
+
+        if ($markdown === '') {
+            return new ToolResult(false, 'URL was fetched successfully but no readable text content was found.');
+        }
+
+        // #5 Size guard: cap output so large pages don't saturate the context window.
+        return new ToolResult(true, "Fetched URL Content (Markdown):\n\n" . $this->truncate($markdown));
     }
 
     private function truncate(string $text): string

@@ -52,7 +52,7 @@ final class MailTemplateController
         ], Response::HTTP_CREATED);
     }
 
-    public function show(Request $request, int $id): JsonResponse
+    public function show(int $id): JsonResponse
     {
 
         $result = $this->mailTemplateService->getTemplate($id);
@@ -86,7 +86,7 @@ final class MailTemplateController
         ], Response::HTTP_OK);
     }
 
-    public function destroy(Request $request, int $id): JsonResponse
+    public function destroy(int $id): JsonResponse
     {
 
         // Check if it's a system template first

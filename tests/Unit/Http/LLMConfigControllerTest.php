@@ -11,6 +11,7 @@ use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Http\LLMConfigController;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\LLMConfigService;
+use Spora\Services\LlmConfigValidator;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -20,7 +21,8 @@ function makeLLMConfigController(): array
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new SecurityManager($key);
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class]);
-    $controller = new LLMConfigController($authService, $service);
+    $validator = new LlmConfigValidator($service);
+    $controller = new LLMConfigController($authService, $service, $validator);
 
     return [$controller, $authService, $service, $key];
 }

@@ -199,16 +199,12 @@ final class WorldNewsApiTool extends AbstractTool
 
     private function validateTopNewsArguments(string $country, string $language, string $apiKey): ?ToolResult
     {
-        if ($country === '') {
-            return new ToolResult(false, 'source-country is required for top-news.');
-        }
-        if ($language === '') {
-            return new ToolResult(false, 'language is required for top-news.');
-        }
-        if (empty($apiKey)) {
-            return new ToolResult(false, 'WorldNewsAPI key is not configured for this agent.');
-        }
-        return null;
+        return match (true) {
+            $country === ''   => new ToolResult(false, 'source-country is required for top-news.'),
+            $language === ''  => new ToolResult(false, 'language is required for top-news.'),
+            empty($apiKey)    => new ToolResult(false, 'WorldNewsAPI key is not configured for this agent.'),
+            default           => null,
+        };
     }
 
     private function performTopNewsRequest(string $country, string $language, string $apiKey, array $settings): ToolResult

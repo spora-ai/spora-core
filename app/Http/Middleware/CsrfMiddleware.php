@@ -29,12 +29,18 @@ final class CsrfMiddleware implements MiddlewareInterface
 
         $token = $request->headers->get('X-CSRF-Token', '');
 
+        $rejection = $this->validateCsrfToken($token, $request);
+        if ($rejection instanceof JsonResponse) {
+            return $rejection;
+        }
+
+        return $next($request);
+    }
+
+    private function validateCsrfToken(string $token, Request $request): ?JsonResponse
+    {
         if ($token === '') {
-            $this->logger->warning('CSRF token missing for request', [
-                'method' => $request->getMethod(),
-                'path' => $request->getPathInfo(),
-                'ip' => $request->getClientIp(),
-            ]);
+            $this->logCsrfRejection('CSRF token missing for request', $request);
             return new JsonResponse(
                 ['error' => ['code' => 'CSRF_TOKEN_MISSING', 'message' => 'CSRF token is required.']],
                 Response::HTTP_FORBIDDEN,
@@ -42,17 +48,22 @@ final class CsrfMiddleware implements MiddlewareInterface
         }
 
         if (!$this->csrfService->validate($token)) {
-            $this->logger->warning('CSRF token invalid for request', [
-                'method' => $request->getMethod(),
-                'path' => $request->getPathInfo(),
-                'ip' => $request->getClientIp(),
-            ]);
+            $this->logCsrfRejection('CSRF token invalid for request', $request);
             return new JsonResponse(
                 ['error' => ['code' => 'CSRF_INVALID', 'message' => 'CSRF token is invalid.']],
                 Response::HTTP_FORBIDDEN,
             );
         }
 
-        return $next($request);
+        return null;
+    }
+
+    private function logCsrfRejection(string $message, Request $request): void
+    {
+        $this->logger->warning($message, [
+            'method' => $request->getMethod(),
+            'path'   => $request->getPathInfo(),
+            'ip'     => $request->getClientIp(),
+        ]);
     }
 }

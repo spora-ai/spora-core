@@ -99,16 +99,21 @@ final class Router
 
         // Resolve method parameters using reflection so scalars are coerced to their
         // declared types (e.g. string "42" → int 42 for (Request $request, int $id)).
-        // Path variables are matched by name; parameters with no matching variable use
-        // their default value (or null if none).
+        // A parameter typed as Request receives the incoming request; everything else
+        // is matched by name against path variables (or falls back to its default).
         $params = (new ReflectionMethod($controllerClass, $method))->getParameters();
         $args = [];
-        foreach ($params as $i => $param) {
-            if ($i === 0) {
+        foreach ($params as $param) {
+            $type = $param->getType();
+
+            // Request-typed parameters get the live request; this lets controllers
+            // omit Request entirely when they don't read from it.
+            if ($type instanceof ReflectionNamedType && $type->getName() === Request::class) {
                 $args[] = $request;
                 continue;
             }
-            // Only pass arguments that correspond to actual path variables.
+
+            // Anything else is a path variable matched by name.
             if (!array_key_exists($param->getName(), $vars)) {
                 if (!$param->isOptional()) {
                     throw new LogicException(
@@ -123,7 +128,6 @@ final class Router
                 continue; // let the default value be used
             }
             $value = $vars[$param->getName()];
-            $type = $param->getType();
             if ($type instanceof ReflectionNamedType && $type->getName() === 'int') {
                 $args[] = (int) $value;
             } else {

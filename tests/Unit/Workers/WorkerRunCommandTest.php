@@ -7,6 +7,8 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\NullLogger;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Console\Commands\WorkerRunCommand;
+use Spora\Console\Worker\ScheduledRunProcessor;
+use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Core\Database;
 use Spora\Models\Agent;
 use Spora\Models\ScheduledRun;
@@ -93,14 +95,18 @@ function registerAgentInWorkerDb(): array
 }
 
 /**
- * Invoke processScheduledRuns via reflection, passing $processed by reference.
+ * Invoke ScheduledRunProcessor::process via reflection, mirroring the old
+ * WorkerRunCommand::processScheduledRuns helper for the test suite.
  */
 function runProcessScheduledRuns(WorkerRunCommand $command): int
 {
-    $command->lastScheduledProcessed = 0;
-    $ref = new ReflectionMethod($command, 'processScheduledRuns');
-    $ref->invoke($command, new NullOutput());
-    return $command->lastScheduledProcessed;
+    $ref = new ReflectionClass($command);
+    $processorProp = $ref->getProperty('scheduledRunProcessor');
+    /** @var ScheduledRunProcessor $processor */
+    $processor = $processorProp->getValue($command);
+    $processor->lastProcessed = 0;
+    $processor->process(new NullOutput());
+    return $processor->lastProcessed;
 }
 
 describe('WorkerRunCommand processScheduledRuns', function (): void {
@@ -454,7 +460,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
     });
 });
 
-describe('WorkerRunCommand processQueuedTaskSync', function (): void {
+describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
     it('marks task FAILED when orchestrator->tick() throws an exception', function (): void {
         Database::resetBootState();
         $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
@@ -483,14 +489,9 @@ describe('WorkerRunCommand processQueuedTaskSync', function (): void {
         $notificationService->allows('notifyScheduledRunCompleted')->andReturnNull();
         $notificationService->allows('sendEmailForScheduledRun')->andReturnNull();
 
-        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
-        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
-
-        $command = new WorkerRunCommand(
-            $db,
+        $processor = new WorkerQueueProcessor(
             $orchestrator,
             new NullLogger(),
-            $container,
             $mercure,
             $notificationService,
         );
@@ -519,8 +520,8 @@ describe('WorkerRunCommand processQueuedTaskSync', function (): void {
         $processed = 0;
 
         // Invoke processQueuedTaskSync via reflection (must use invokeArgs with array to preserve reference)
-        $ref = new ReflectionMethod($command, 'processQueuedTaskSync');
-        $ref->invokeArgs($command, [$output, 1000, &$processed]);
+        $ref = new ReflectionMethod($processor, 'processQueuedTaskSync');
+        $ref->invokeArgs($processor, [$output, 1000, &$processed]);
 
         // Task must be FAILED, not RUNNING
         $task->refresh();
@@ -731,7 +732,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
     });
 });
 
-describe('WorkerRunCommand substituteVariables', function (): void {
+describe('ScheduledRunProcessor substituteVariables', function (): void {
     /**
      * Invoke the private substituteVariables() method via reflection.
      * Uses the already-booted DB (do NOT reset/boot here — that would discard
@@ -744,18 +745,21 @@ describe('WorkerRunCommand substituteVariables', function (): void {
         $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
         $db->boot();
 
-        $orchestrator   = Mockery::mock(OrchestratorInterface::class);
-        $mercure        = Mockery::mock(MercurePublisherInterface::class);
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $mercure      = Mockery::mock(MercurePublisherInterface::class);
         $mercure->allows('publish')->andReturn(true);
-        $notification   = Mockery::mock(NotificationService::class);
-        $container      = Mockery::mock(Psr\Container\ContainerInterface::class);
-        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+        $notification = Mockery::mock(NotificationService::class);
 
-        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification);
-        $ref = new ReflectionMethod($command, 'substituteVariables');
+        $processor = new ScheduledRunProcessor(
+            $orchestrator,
+            new NullLogger(),
+            $mercure,
+            $notification,
+        );
+        $ref = new ReflectionMethod($processor, 'substituteVariables');
         $ref->setAccessible(true);
 
-        return $ref->invoke($command, $template, $variables, $agent);
+        return $ref->invoke($processor, $template, $variables, $agent);
     }
 
     it('substitutes {{current_date}} with today\'s date', function (): void {
@@ -779,40 +783,76 @@ describe('WorkerRunCommand substituteVariables', function (): void {
     });
 
     it('substitutes {{agent_name}} when an agent is provided', function (): void {
-        [$command] = makeWorkerRunCommand();
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
         [, $agentId] = registerAgentInWorkerDb();
         $agent = Agent::find($agentId);
 
-        $ref = new ReflectionMethod($command, 'substituteVariables');
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $mercure      = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+        $notification = Mockery::mock(NotificationService::class);
+        $processor = new ScheduledRunProcessor(
+            $orchestrator,
+            new NullLogger(),
+            $mercure,
+            $notification,
+        );
+        $ref = new ReflectionMethod($processor, 'substituteVariables');
         $ref->setAccessible(true);
-        $result = $ref->invoke($command, 'Hello {{agent_name}}', [], $agent);
+        $result = $ref->invoke($processor, 'Hello {{agent_name}}', [], $agent);
 
         expect($result)->toBe('Hello WorkerTestAgent');
     });
 
     it('substitutes {{user_name}} with the agent owner\'s username', function (): void {
-        [$command] = makeWorkerRunCommand();
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
         [$userId, $agentId] = registerAgentInWorkerDb();
         // The user record must have its `username` column set for the substitution
         // to find it — delight-im/auth only sets email + status.
         Spora\Models\User::where('id', $userId)->update(['username' => 'WorkerTestUser']);
         $agent = Agent::find($agentId);
 
-        $ref = new ReflectionMethod($command, 'substituteVariables');
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $mercure      = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+        $notification = Mockery::mock(NotificationService::class);
+        $processor = new ScheduledRunProcessor(
+            $orchestrator,
+            new NullLogger(),
+            $mercure,
+            $notification,
+        );
+        $ref = new ReflectionMethod($processor, 'substituteVariables');
         $ref->setAccessible(true);
-        $result = $ref->invoke($command, 'Owner: {{user_name}}', [], $agent);
+        $result = $ref->invoke($processor, 'Owner: {{user_name}}', [], $agent);
 
         expect($result)->toBe('Owner: WorkerTestUser');
     });
 
     it('falls back to the placeholder when the owner has no username', function (): void {
-        [$command] = makeWorkerRunCommand();
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
         [, $agentId] = registerAgentInWorkerDb();
         $agent = Agent::find($agentId);
 
-        $ref = new ReflectionMethod($command, 'substituteVariables');
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $mercure      = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+        $notification = Mockery::mock(NotificationService::class);
+        $processor = new ScheduledRunProcessor(
+            $orchestrator,
+            new NullLogger(),
+            $mercure,
+            $notification,
+        );
+        $ref = new ReflectionMethod($processor, 'substituteVariables');
         $ref->setAccessible(true);
-        $result = $ref->invoke($command, 'Owner: {{user_name}}', [], $agent);
+        $result = $ref->invoke($processor, 'Owner: {{user_name}}', [], $agent);
 
         expect($result)->toBe('Owner: user_name');
     });
@@ -847,15 +887,27 @@ describe('WorkerRunCommand substituteVariables', function (): void {
     });
 });
 
-describe('WorkerRunCommand processRetryQueue', function (): void {
+describe('WorkerQueueProcessor processRetryQueue', function (): void {
     /**
      * Invoke processRetryQueue via reflection.
      */
-    function invokeProcessRetryQueue(WorkerRunCommand $command): void
+    function invokeProcessRetryQueue(WorkerQueueProcessor $processor): void
     {
-        $ref = new ReflectionMethod($command, 'processRetryQueue');
+        $ref = new ReflectionMethod($processor, 'processRetryQueue');
         $ref->setAccessible(true);
-        $ref->invoke($command);
+        $ref->invoke($processor);
+    }
+
+    function makeProcessor(OrchestratorInterface $orch, ?NotificationService $notification = null): WorkerQueueProcessor
+    {
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+        return new WorkerQueueProcessor(
+            $orch,
+            new NullLogger(),
+            $mercure,
+            $notification ?? Mockery::mock(NotificationService::class),
+        );
     }
 
     it('does nothing when no retry tasks are due', function (): void {
@@ -866,28 +918,28 @@ describe('WorkerRunCommand processRetryQueue', function (): void {
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
         $orchestrator->shouldNotReceive('tick');
 
-        $mercure      = Mockery::mock(MercurePublisherInterface::class);
-        $mercure->allows('publish')->andReturn(true);
-        $notification = Mockery::mock(NotificationService::class);
-        $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
-        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
-
-        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification);
-
-        invokeProcessRetryQueue($command);
+        invokeProcessRetryQueue(makeProcessor($orchestrator));
     });
 
     it('skips retries whose original task is CANCELLED', function (): void {
-        [$command] = makeWorkerRunCommand();
-        [$userId, $agentId] = registerAgentInWorkerDb();
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
+
+        $auth = bootAuthLayer();
+        $userId = $auth->register('retry-skip@example.com', WORKER_TEST_PASSWORD, 'RetrySkip');
+        $agent = Agent::create([
+            'user_id' => $userId, 'name' => 'RetrySkipAgent',
+            'max_steps' => 5, 'is_active' => true,
+        ]);
 
         $original = Task::create([
-            'user_id' => $userId, 'agent_id' => $agentId, 'status' => 'CANCELLED',
+            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'CANCELLED',
             'user_prompt' => 'orig', 'max_steps' => 5,
         ]);
         $retry = Task::create([
             'user_id'        => $userId,
-            'agent_id'       => $agentId,
+            'agent_id'       => $agent->id,
             'status'         => 'QUEUED',
             'user_prompt'    => 'retry-1',
             'max_steps'      => 5,
@@ -900,9 +952,10 @@ describe('WorkerRunCommand processRetryQueue', function (): void {
             ->where('id', $retry->id)
             ->update(['retry_after' => '2020-01-01 00:00:00']);
 
-        $ref = new ReflectionMethod($command, 'processRetryQueue');
-        $ref->setAccessible(true);
-        $ref->invoke($command);
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->shouldNotReceive('tick');
+
+        invokeProcessRetryQueue(makeProcessor($orchestrator));
 
         // Retry stays QUEUED — orchestrator.tick must not have been called
         $retry->refresh();
@@ -940,27 +993,10 @@ describe('WorkerRunCommand processRetryQueue', function (): void {
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
         $orchestrator->shouldReceive('tick')->once()->with($retry->id);
 
-        $mercure = Mockery::mock(MercurePublisherInterface::class);
-        $mercure->allows('publish')->andReturn(true);
-
         $notification = Mockery::mock(NotificationService::class);
         $notification->allows('notifyTaskRetrying')->andReturnNull();
 
-        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
-        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
-
-        $command = new WorkerRunCommand(
-            $db,
-            $orchestrator,
-            new NullLogger(),
-            $container,
-            $mercure,
-            $notification,
-        );
-
-        $ref = new ReflectionMethod($command, 'processRetryQueue');
-        $ref->setAccessible(true);
-        $ref->invoke($command);
+        invokeProcessRetryQueue(makeProcessor($orchestrator, $notification));
 
         // Retry moved from QUEUED to RUNNING
         $retry->refresh();

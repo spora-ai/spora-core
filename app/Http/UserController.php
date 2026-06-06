@@ -86,6 +86,11 @@ final class UserController
             return $this->error('VALIDATION_ERROR', 'The fields "email" and "password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        return $this->attemptRegister($body);
+    }
+
+    private function attemptRegister(array $body): JsonResponse|int
+    {
         try {
             return $this->authService->register((string) $body['email'], (string) $body['password'], (string) $body['email']);
         } catch (EmailTakenException) {
@@ -148,12 +153,9 @@ final class UserController
             return $this->error('INVALID_JSON', self::ERR_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
-        if (empty($body['role'])) {
-            return $this->error('VALIDATION_ERROR', 'The field "role" is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        if (!isset(self::ROLE_MAP[strtoupper((string) $body['role'])])) {
-            return $this->error('VALIDATION_ERROR', 'Invalid role.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        $roleValidation = $this->validateGrantRolePayload($body);
+        if ($roleValidation instanceof JsonResponse) {
+            return $roleValidation;
         }
 
         $result = $this->userService->grantRole($id, (string) $body['role']);
@@ -163,6 +165,19 @@ final class UserController
         }
 
         return $result;
+    }
+
+    private function validateGrantRolePayload(array $body): ?JsonResponse
+    {
+        if (empty($body['role'])) {
+            return $this->error('VALIDATION_ERROR', 'The field "role" is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        if (!isset(self::ROLE_MAP[strtoupper((string) $body['role'])])) {
+            return $this->error('VALIDATION_ERROR', 'Invalid role.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        return null;
     }
 
     public function revokeRole(int $id, string $role): JsonResponse
