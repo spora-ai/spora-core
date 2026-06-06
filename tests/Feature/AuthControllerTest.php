@@ -33,7 +33,9 @@ function makeAuthControllerWithMocks(): array
     $userService = Mockery::mock(UserServiceInterface::class);
     $userService->allows('getUser')->andReturn(null)->byDefault();
     $csrfService = new Spora\Security\CsrfTokenService();
-    $controller = new AuthController($authService, $userService, $csrfService, new Spora\Services\AuthValidator(), ['allow_registration' => true]);
+    $validator = new Spora\Services\AuthValidator();
+    $workflow = new Spora\Services\AuthWorkflow($authService, $userService, $csrfService, $validator);
+    $controller = new AuthController($authService, $csrfService, $validator, $workflow, ['allow_registration' => true]);
 
     return [$controller, $authService];
 }
@@ -48,7 +50,9 @@ function makeAuthControllerWithUserService(): array
         return ['user' => ['id' => $userId, 'username' => $data['username'] ?? null]];
     })->byDefault();
     $csrfService = new Spora\Security\CsrfTokenService();
-    $controller = new AuthController($authService, $userService, $csrfService, new Spora\Services\AuthValidator(), ['allow_registration' => true]);
+    $validator = new Spora\Services\AuthValidator();
+    $workflow = new Spora\Services\AuthWorkflow($authService, $userService, $csrfService, $validator);
+    $controller = new AuthController($authService, $csrfService, $validator, $workflow, ['allow_registration' => true]);
 
     return [$controller, $authService, $userService];
 }

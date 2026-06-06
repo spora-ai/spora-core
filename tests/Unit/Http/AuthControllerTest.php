@@ -12,6 +12,7 @@ use Spora\Http\AuthController;
 use Spora\Models\User;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AuthValidator;
+use Spora\Services\AuthWorkflow;
 use Spora\Services\RateLimiter;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
@@ -37,8 +38,9 @@ function makeAuthController(
     $userService ??= new UserService();
     $csrfService ??= new CsrfTokenService();
     $validator ??= new AuthValidator();
+    $workflow = new AuthWorkflow($authService, $userService, $csrfService, $validator);
 
-    $controller = new AuthController($authService, $userService, $csrfService, $validator, $config);
+    $controller = new AuthController($authService, $csrfService, $validator, $workflow, $config);
 
     return [$controller, $authService, $userService, $csrfService];
 }
@@ -314,7 +316,10 @@ describe('AuthController::login', function (): void {
 
         $userService = Mockery::mock(UserServiceInterface::class);
         $userService->shouldReceive('getUser')->andReturn(null);
-        $controller = new AuthController($authService, $userService, new CsrfTokenService(), new AuthValidator());
+        $csrfService = new CsrfTokenService();
+        $validator = new AuthValidator();
+        $workflow = new AuthWorkflow($authService, $userService, $csrfService, $validator);
+        $controller = new AuthController($authService, $csrfService, $validator, $workflow);
 
         $request = jsonRequest('POST', '/api/v1/auth/login', [
             'email'    => 'no-profile@example.com',

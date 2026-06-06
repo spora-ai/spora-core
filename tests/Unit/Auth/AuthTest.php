@@ -37,7 +37,9 @@ function makeAuthController(array $configOverrides = [], ?callable $userServiceS
         $userServiceSetup($userService);
     }
     $csrfService = new Spora\Security\CsrfTokenService();
-    $controller = new AuthController($service, $userService, $csrfService, new Spora\Services\AuthValidator(), $config);
+    $validator = new Spora\Services\AuthValidator();
+    $workflow = new Spora\Services\AuthWorkflow($service, $userService, $csrfService, $validator);
+    $controller = new AuthController($service, $csrfService, $validator, $workflow, $config);
 
     return [$controller, $service, $userService, $csrfService];
 }

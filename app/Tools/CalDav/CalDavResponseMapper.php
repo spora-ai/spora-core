@@ -45,7 +45,20 @@ final class CalDavResponseMapper
             $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => $method, 'url' => $url]);
             return new ToolResult(false, "{$errorPrefix}: {$e->getMessage()}");
         }
+        return $this->handleResponse($response, $method, $url, $onSuccess, $onHttpError);
+    }
 
+    /**
+     * @param Closure(ResponseInterface): ToolResult $onSuccess
+     * @param Closure(ResponseInterface, int): ToolResult|null $onHttpError
+     */
+    private function handleResponse(
+        ResponseInterface $response,
+        string $method,
+        string $url,
+        Closure $onSuccess,
+        ?Closure $onHttpError,
+    ): ToolResult {
         $statusCode = $response->getStatusCode();
         if ($statusCode >= 400) {
             $errorMsg = $this->safeResponseContent($response);

@@ -226,10 +226,19 @@ return [
     Spora\Http\AuthController::class => static function (ContainerInterface $c): Spora\Http\AuthController {
         return new Spora\Http\AuthController(
             $c->get(AuthService::class),
+            $c->get(Spora\Security\CsrfTokenService::class),
+            $c->get(Spora\Services\AuthValidator::class),
+            $c->get(Spora\Services\AuthWorkflow::class),
+            $c->get('config'),
+        );
+    },
+
+    Spora\Services\AuthWorkflow::class => static function (ContainerInterface $c): Spora\Services\AuthWorkflow {
+        return new Spora\Services\AuthWorkflow(
+            $c->get(AuthService::class),
             $c->get(UserServiceInterface::class),
             $c->get(Spora\Security\CsrfTokenService::class),
             $c->get(Spora\Services\AuthValidator::class),
-            $c->get('config'),
         );
     },
 

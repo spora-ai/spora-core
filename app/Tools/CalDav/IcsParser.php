@@ -143,13 +143,12 @@ final class IcsParser
 
     private function firstVEvent(string $icsContent): ?VEvent
     {
+        /** @var list<VEvent> $events */
         $events = array_values((new Parser(Parser::LENIENT))->parse($icsContent)->getComponents('VEVENT'));
         if ($events === []) {
             return null;
         }
-        /** @var VEvent $first */
-        $first = $events[0];
-        return $first;
+        return $events[0];
     }
 
     private function makeXPath(DOMDocument $parser): DOMXPath
@@ -246,18 +245,25 @@ final class IcsParser
         if ($dateStr === null || $dateStr === '') {
             return null;
         }
-
         if (str_ends_with($dateStr, 'Z')) {
-            $parsed = DateTimeImmutable::createFromFormat(self::ICS_DATETIME_UTC, $dateStr, new DateTimeZone('UTC'));
-            return $parsed instanceof DateTimeImmutable ? $parsed->setTimezone(new DateTimeZone('UTC')) : null;
+            return $this->parseIcsDateUtc($dateStr);
         }
-
         if (strlen($dateStr) === 8) {
-            $parsed = DateTimeImmutable::createFromFormat('!Ymd', $dateStr);
-            return $parsed instanceof DateTimeImmutable ? $parsed : null;
+            return $this->parseIcsDateAllDay($dateStr);
         }
-
         return $this->parseIcsDateWithTimezone($dateStr) ?? $this->parseIcsDateGeneric($dateStr);
+    }
+
+    private function parseIcsDateUtc(string $dateStr): ?DateTimeImmutable
+    {
+        $parsed = DateTimeImmutable::createFromFormat(self::ICS_DATETIME_UTC, $dateStr, new DateTimeZone('UTC'));
+        return $parsed instanceof DateTimeImmutable ? $parsed->setTimezone(new DateTimeZone('UTC')) : null;
+    }
+
+    private function parseIcsDateAllDay(string $dateStr): ?DateTimeImmutable
+    {
+        $parsed = DateTimeImmutable::createFromFormat('!Ymd', $dateStr);
+        return $parsed instanceof DateTimeImmutable ? $parsed : null;
     }
 
     /**
