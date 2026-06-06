@@ -216,8 +216,46 @@ Located in `frontend/tests/`. Run with `npm test` (or `composer frontend:test`).
 - `composables/useRealtime.spec.ts` — Mercure status check + auth + polling fallback
 - `composables/useToast.spec.ts`, `composables/useToolSettings.spec.ts`, `composables/useToolArgumentFormatter.spec.ts`
 - `pages/ProfileSettingsPage.spec.ts`, `pages/ResetPasswordPage.spec.ts`, `pages/SettingsToolsPage.spec.ts`
+- `pages/AccountPage.spec.ts`, `pages/AgentPage.spec.ts`, `pages/LoginPage.spec.ts`, `pages/RegisterPage.spec.ts`
+- `pages/ForgotPasswordPage.spec.ts`, `pages/VerifyEmailPage.spec.ts`, `pages/DashboardPage.spec.ts`
+- `pages/SettingsOverviewPage.spec.ts`, `pages/SettingsLLMPage.spec.ts`, `pages/ScheduledRunsPage.spec.ts`
+- `pages/TaskChatPage.spec.ts` — layout shell
+- `pages/admin/{Users,MailSettings,MailTemplates,DriversSettings,GlobalSettings,ToolsSettings}Page.spec.ts`
+- `pages/apps/memories/pages/{Global,Agent}MemoriesPage.spec.ts`
+- `components/layout/AppsLayout.spec.ts`
+- `components/admin/{EditUser,DeleteUser,AdminLLM,AdminTool,AdminSection,AdminForbidden}.spec.ts`
+- `components/agent/TaskChat/{TaskChatBanners,TaskChatFollowup,TaskChatMessageList}.spec.ts` — sub-components extracted from `TaskChatPage.vue` in Phase 5b.2
+- `components/agent/settings/{AgentIdentitySection,AgentLlmSection,AgentToolsSection,AgentDangerZone}.spec.ts` — sub-components extracted from `AgentSettingsPage.vue` in Phase 5b.3
+- `components/shared/ScheduleEditor/*` — folder split of the old monolithic schedule editor (Phase 5b.1)
+- `components/{Toast,ui/ToastContainer,lib/utils}.spec.ts`
 
 There is no `frontend/tests/e2e/` directory and no Playwright dependency in `frontend/package.json` — E2E coverage is not currently wired up.
+
+## Coverage
+
+- **SonarQube quality gate** is configured per-PR (`new_coverage >= 80%`). The "new code" window is the diff of the PR, not the whole repo — legacy untouched files (`LoginPage.vue`, etc.) are excluded from the gate.
+- **Whole-repo coverage** is reported as a secondary signal. After Phase 5 it sits at ~67% (up from ~44% pre-cleanup). The biggest gains came from:
+    - **Phase 5b.2/5b.3** — extracted sub-components have their own specs (`tests/components/agent/TaskChat/`, `tests/components/agent/settings/`), lifting the previously-untestable 729/600-line SFCs.
+    - **Phase 5c** — page SFC tests for the previously-0% auth, dashboard, and settings pages.
+    - **Phase 5d** — admin pages, memory app, and small UI components.
+- **Composables & stores** sit at ~89% / ~85% line coverage; new logic in `useTaskChatRetry/Approvals/Followup`, `useScheduleForm/Payload/FormState`, `useComposerDrafts`, `useAgentToolOverrides`, and `utils/toolCategories` is well-tested.
+
+## Sub-component architecture
+
+Two of the largest SFCs have been split into focused sub-components with their own specs:
+
+- **`TaskChatPage.vue`** (was 729 lines → 206 lines) now delegates to:
+    - `TaskChatBanners.vue` — retry / non-retryable / countdown / max-steps variants
+    - `TaskChatFollowup.vue` — the bottom follow-up input bar
+    - `TaskChatMessageList.vue` — the scrollable chat history (user/assistant/tool bubbles + reasoning foldout + final-response pill)
+    - The page itself is a thin shell that wires the task store to the three composables (`useTaskChatRetry`, `useTaskChatApprovals`, `useTaskChatFollowup`) and the sub-components.
+- **`AgentSettingsPage.vue`** (was 600 lines → 54 lines) now delegates to:
+    - `AgentIdentitySection.vue` — name, description, system prompt, max steps, auto-retry
+    - `AgentLlmSection.vue` — LLM config dropdown + "Create" modal
+    - `AgentToolsSection.vue` — categorized tool list + enable/disable + config + operation overrides
+    - `AgentDangerZone.vue` — delete confirmation
+
+The schedule editor was already split into `components/shared/ScheduleEditor/` in Phase 5b.1.
 
 ---
 
@@ -246,7 +284,7 @@ The `AgentPage.vue` composer (`components/ComposerInput.vue`) supports:
 - **Prompt templates** — select from saved templates (loaded via `usePromptTemplatesStore`), fill `{{var}}` placeholders, submit
 - **Save as template** — `components/PromptTemplateDialog.vue` to save current prompt as a reusable template
 - **Follow-up questions** — after a task completes, a follow-up input bar appears above the composer to continue the conversation (calls `POST /api/v1/tasks/{id}/continue`)
-- **Schedule** — `components/shared/SharedScheduleEditor.vue` modal for one-shot or cron scheduled runs
+- **Schedule** — `components/shared/ScheduleEditor/` (folder) one-shot or cron scheduled runs. Replaces the legacy `components/shared/SharedScheduleEditor.vue` (removed in Phase 5b.1).
 
 ## E2E Tests
 

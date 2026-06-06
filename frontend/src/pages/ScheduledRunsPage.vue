@@ -9,7 +9,7 @@ import { api, ApiError } from '@/api/client'
 import { useAgentStore } from '@/stores/agent'
 import type { ScheduledRunResource } from '@/types/scheduledRun'
 import AgentLayout from '@/components/layout/AgentLayout.vue'
-import SharedScheduleEditor from '@/components/shared/SharedScheduleEditor.vue'
+import SharedScheduleEditor from '@/components/shared/ScheduleEditor/index.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import {
   formatScheduleSummary,

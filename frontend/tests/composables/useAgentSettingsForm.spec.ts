@@ -3,15 +3,17 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
-  categoryLabel,
-  groupToolsByCategory,
-  sortCategoryKeys,
   formatLlmConfigLabel,
   buildInitialIdentityForm,
   buildInitialLlmSettings,
   buildIdentityPayload,
   buildLlmSettingsPayload,
 } from '@/composables/useAgentSettingsForm'
+import {
+  categoryLabel,
+  groupToolsByCategory,
+  sortCategoryKeys,
+} from '@/utils/toolCategories'
 
 describe('useAgentSettingsForm', () => {
   describe('categoryLabel', () => {

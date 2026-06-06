@@ -1,11 +1,10 @@
 /**
  * useAgentSettingsForm — pure helpers for AgentSettingsPage.
  *
- * Splits tools into categories, formats tool group labels, and exposes the
- * identity/LLM/tool-toggle flow as pure functions so the SFC can keep only
- * template wiring and store dispatch.
+ * Owns the identity/LLM form initialization, payload building, and label
+ * formatting. Tool-category grouping lives in `@/utils/toolCategories` since
+ * it's a pure utility shared with other features.
  */
-import type { ToolSchema } from '@/composables/useToolSettings'
 
 export interface IdentityForm {
   name: string
@@ -19,31 +18,6 @@ export interface IdentityForm {
 
 export interface LlmSettingsForm {
   llm_driver_config_id: number | null
-}
-
-/** Capitalize a category key (e.g. "communication" → "Communication"). */
-export function categoryLabel(cat: string): string {
-  return cat.charAt(0).toUpperCase() + cat.slice(1)
-}
-
-/** Group tools by their `category` field, defaulting to "general". */
-export function groupToolsByCategory(
-  tools: ToolSchema[],
-): Record<string, ToolSchema[]> {
-  const groups: Record<string, ToolSchema[]> = {}
-  for (const tool of tools) {
-    const cat = (tool as unknown as { category?: string }).category ?? 'general'
-    if (!groups[cat]) groups[cat] = []
-    groups[cat].push(tool)
-  }
-  return groups
-}
-
-/** Return category keys sorted alphabetically by their human label. */
-export function sortCategoryKeys(categories: Record<string, unknown>): string[] {
-  return Object.keys(categories).sort((a, b) =>
-    categoryLabel(a).localeCompare(categoryLabel(b)),
-  )
 }
 
 /** Format the human label for an LLM config row in the dropdown. */

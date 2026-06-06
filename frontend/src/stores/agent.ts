@@ -1,125 +1,27 @@
 import { defineStore } from 'pinia'
 import { ref, reactive, watch } from 'vue'
 import { api } from '@/api/client'
-import type { Agent, AgentTool, LLMConfigSettings } from '@/types/agent'
+import type { Agent } from '@/types/agent'
 import type { Task } from '@/types/task'
-
-const COMPOSER_DRAFTS_KEY = 'spora:composer-drafts'
-
-function loadComposerDrafts(): Record<number, { promptText: string }> {
-  try {
-    const stored = sessionStorage.getItem(COMPOSER_DRAFTS_KEY)
-    return stored ? JSON.parse(stored) : {}
-  } catch {
-    return {}
-  }
-}
-
-function saveComposerDrafts(drafts: Record<number, { promptText: string }>): void {
-  try {
-    sessionStorage.setItem(COMPOSER_DRAFTS_KEY, JSON.stringify(drafts))
-  } catch {
-    // sessionStorage may be unavailable (e.g., private browsing)
-  }
-}
-
-async function enableTool(agentId: number, toolName: string): Promise<AgentTool> {
-  const result = await api.post<{ tool: AgentTool }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/enable`)
-  return result.tool
-}
-
-async function disableTool(agentId: number, toolName: string): Promise<void> {
-  await api.delete(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/enable`)
-}
-
-async function getOperationOverride(
-  agentId: number,
-  toolName: string,
-  operation: string,
-): Promise<{
-  operation: string
-  tool_class: string
-  enabled: boolean | null
-  default_requires_approval: boolean | null
-  effective_enabled: boolean
-  effective_requires_approval: boolean
-}> {
-  const result = await api.get<{
-    enabled: boolean | null
-    default_requires_approval: boolean | null
-    effective_enabled: boolean
-    effective_requires_approval: boolean
-  }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/operations/${encodeURIComponent(operation)}`)
-  return result as any
-}
+import { loadComposerDrafts, saveComposerDrafts } from '@/composables/useComposerDrafts'
+import {
+  enableTool,
+  disableTool,
+  getOperationOverride,
+  getAllOperationOverrides,
+  patchOperationOverride,
+  getLLMConfig,
+  putLLMConfig,
+} from '@/composables/useAgentToolOverrides'
 
 /**
- * GET /api/v1/agents/{id}/tools/operations — all operation overrides for all enabled tools.
- * Returns a flat array; caller transforms it into the nested Record used by the UI.
+ * Pinia store: agent list, current agent, per-agent task list, composer drafts.
+ *
+ * Tool enable/disable + operation-override HTTP calls live in
+ * `@/composables/useAgentToolOverrides`; composer-draft sessionStorage
+ * round-trip lives in `@/composables/useComposerDrafts`. The store re-exports
+ * those helpers so callers keep using `useAgentStore().enableTool(...)` etc.
  */
-async function getAllOperationOverrides(
-  agentId: number,
-): Promise<Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>>> {
-  const result = await api.get<{
-    operations: Array<{
-      tool_class: string
-      tool_name: string
-      operation: string
-      effective_enabled: boolean
-      effective_requires_approval: boolean
-    }>
-  }>(`/agents/${agentId}/tools/operations`)
-
-  // Re-key by tool_name using the authoritative value from the server.
-  // patchOperationOverride uses tool_name as the URL identifier, so the map must use tool_name keys.
-  const byName: Record<string, Record<string, { enabled: boolean; requiresApproval: boolean }>> = {}
-  for (const op of result.operations) {
-    if (!byName[op.tool_name]) {
-      byName[op.tool_name] = {}
-    }
-    byName[op.tool_name][op.operation] = {
-      enabled: op.effective_enabled,
-      requiresApproval: op.effective_requires_approval,
-    }
-  }
-  return byName
-}
-
-async function patchOperationOverride(
-  agentId: number,
-  toolName: string,
-  operation: string,
-  data: { enabled?: boolean | null; default_requires_approval?: boolean | null },
-): Promise<{
-  enabled: boolean | null
-  default_requires_approval: boolean | null
-  effective_enabled: boolean
-  effective_requires_approval: boolean
-}> {
-  const result = await api.patch<{
-    enabled: boolean | null
-    default_requires_approval: boolean | null
-    effective_enabled: boolean
-    effective_requires_approval: boolean
-  }>(`/agents/${agentId}/tools/${encodeURIComponent(toolName)}/operations/${encodeURIComponent(operation)}`, data)
-  return result as any
-}
-
-async function getLLMConfig(agentId: number): Promise<LLMConfigSettings> {
-  const result = await api.get<{ settings: LLMConfigSettings }>(
-    `/agents/${agentId}/tools/${encodeURIComponent('llm_configuration')}/override`,
-  )
-  return result.settings
-}
-
-async function putLLMConfig(agentId: number, settings: LLMConfigSettings): Promise<LLMConfigSettings> {
-  const result = await api.put<{ settings: LLMConfigSettings }>(
-    `/agents/${agentId}/tools/${encodeURIComponent('llm_configuration')}/override`,
-    { settings },
-  )
-  return result.settings
-}
-
 export const useAgentStore = defineStore('agent', () => {
   const agents = ref<Agent[]>([])
   const currentAgent = ref<Agent | null>(null)
@@ -127,9 +29,10 @@ export const useAgentStore = defineStore('agent', () => {
   const tasksCurrentPage = ref(1)
   const tasksHasMore = ref(false)
   const tasksTotal = ref(0)
+  const tasksLoading = ref(false)
   const composerDrafts = reactive<Record<number, { promptText: string }>>(loadComposerDrafts())
 
-  // Auto-persist drafts to sessionStorage
+  // Auto-persist drafts to sessionStorage on any mutation.
   watch(composerDrafts, (drafts) => {
     saveComposerDrafts(drafts)
   }, { deep: true })
@@ -146,7 +49,6 @@ export const useAgentStore = defineStore('agent', () => {
       composerDrafts[agentId].promptText = ''
     }
   }
-
 
   async function fetchAgents(): Promise<void> {
     const result = await api.get<{ agents: Agent[] }>('/agents')
@@ -200,11 +102,13 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
-
   async function fetchAgentTasks(agentId: number, options?: { page?: number }): Promise<void> {
     const page = options?.page ?? 1
     const params = new URLSearchParams({ agent_id: String(agentId), page: String(page) })
-    const result = await api.get<{ tasks: Task[]; meta?: { current_page: number; last_page: number; per_page: number; total: number } }>(`/tasks?${params}`)
+    const result = await api.get<{
+      tasks: Task[]
+      meta?: { current_page: number; last_page: number; per_page: number; total: number }
+    }>(`/tasks?${params}`)
     if (page === 1) {
       currentAgentTasks.value = result.tasks
     } else {
@@ -216,8 +120,6 @@ export const useAgentStore = defineStore('agent', () => {
       tasksTotal.value = result.meta.total
     }
   }
-
-  const tasksLoading = ref(false)
 
   async function loadMoreTasks(): Promise<void> {
     if (!tasksHasMore.value) return
@@ -237,12 +139,8 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   /**
-   * Called by useRealtime when a SSE task event arrives.
-   * Updates an existing task in currentAgentTasks or prepends a new one.
-   */
-  /**
-   * Called by useRealtime when a SSE task event arrives.
-   * Also called during SSE fallback polling to keep currentAgentTasks in sync.
+   * Apply an SSE task event to currentAgentTasks. Called by `useRealtime`
+   * (real-time path) and the dashboard polling fallback (SSE-off path).
    * Only applies updates for tasks belonging to the currentAgent.
    */
   function applySseTaskEvent(data: Record<string, unknown>): void {
@@ -250,8 +148,6 @@ export const useAgentStore = defineStore('agent', () => {
     if (taskId === undefined) return
 
     const taskAgentId = (data as { agent_id?: number }).agent_id
-
-    // If we know which agent this task belongs to and it's not the current one, skip it
     if (currentAgent.value !== null && taskAgentId !== undefined && taskAgentId !== currentAgent.value.id) {
       return
     }
@@ -278,7 +174,6 @@ export const useAgentStore = defineStore('agent', () => {
       })
     }
   }
-
 
   function clearCurrentAgent(): void {
     currentAgent.value = null
