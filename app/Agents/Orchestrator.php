@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Agents;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Support\Collection;
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use ReflectionClass;
@@ -16,6 +17,7 @@ use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\ValueObjects\LLMRequest;
+use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
@@ -128,9 +130,33 @@ final class Orchestrator implements OrchestratorInterface
 
     public function tick(int $taskId): void
     {
-        $context = null;
+        $task = $this->lockRunningTaskForTick($taskId);
+        if ($task === null) {
+            return;
+        }
 
-        Capsule::connection()->transaction(function () use ($taskId, &$context): void {
+        try {
+            $context = $this->prepareTickContext($task);
+        } catch (RuntimeException $e) {
+            $this->markTaskNoLlmConfiguration($taskId, $e);
+            throw $e;
+        }
+
+        Task::where('id', $taskId)->increment('step_count');
+
+        try {
+            $response = $this->dispatchLlmRequest($context);
+            $this->handleTickLlmResponse($context, $response);
+        } catch (Throwable $e) {
+            $this->handleTickFailure($taskId, $context, $e);
+        }
+    }
+
+    private function lockRunningTaskForTick(int $taskId): ?Task
+    {
+        $taskRef = null;
+
+        Capsule::connection()->transaction(function () use ($taskId, &$taskRef): void {
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
             if ($task->status !== 'RUNNING') {
@@ -144,153 +170,205 @@ final class Orchestrator implements OrchestratorInterface
                 return;
             }
 
-            $context = ['task' => $task];
+            $taskRef = $task;
         });
 
-        if ($context === null) {
+        return $taskRef;
+    }
+
+    /**
+     * @return array{
+     *   task: Task,
+     *   agent: Agent,
+     *   enabledClasses: list<string>,
+     *   contextWindow: int,
+     *   maxTokensOutput: int,
+     *   request: LLMRequest
+     * }
+     */
+    private function prepareTickContext(Task $task): array
+    {
+        $agent = Agent::findOrFail($task->agent_id);
+        $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->toArray();
+
+        $llmConfig = $this->resolveLlmConfig($agent);
+
+        $request = new LLMRequest(
+            systemPrompt: $this->resolveSystemPrompt($agent),
+            messages: $this->buildMessages($task->id),
+            tools: $this->buildToolDefinitions($enabledClasses, $agent->id, $agent->user_id),
+            contextWindow: $llmConfig['context_window'],
+            maxTokens: $llmConfig['max_tokens_output'],
+            temperature: $llmConfig['temperature'],
+        );
+
+        return [
+            'task'            => $task,
+            'agent'           => $agent,
+            'enabledClasses'  => $enabledClasses,
+            'contextWindow'   => $llmConfig['context_window'],
+            'maxTokensOutput' => $llmConfig['max_tokens_output'],
+            'request'         => $request,
+        ];
+    }
+
+    private function resolveSystemPrompt(Agent $agent): string
+    {
+        return ($agent->system_prompt !== null && $agent->system_prompt !== '')
+            ? $agent->system_prompt
+            : 'You are a helpful AI assistant.';
+    }
+
+    private function markTaskNoLlmConfiguration(int $taskId, RuntimeException $e): void
+    {
+        if (!str_contains($e->getMessage(), 'No LLM configuration')) {
             return;
         }
 
-        try {
-            $task = $context['task'];
-            $agent          = Agent::findOrFail($task->agent_id);
-            $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->toArray();
+        Task::where('id', $taskId)->update([
+            'status'         => 'FAILED',
+            'failure_reason' => $e->getMessage(),
+            'error_code'     => 'NO_LLM_CONFIGURATION',
+            'error_message'  => 'No LLM configuration set. Please configure an LLM driver or set a global default.',
+        ]);
+    }
 
-            $systemPrompt = ($agent->system_prompt !== null && $agent->system_prompt !== '')
-                ? $agent->system_prompt
-                : 'You are a helpful AI assistant.';
+    private function dispatchLlmRequest(array $context): LLMResponse
+    {
+        return $this->driverFactory
+            ->makeFromAgent($context['agent'])
+            ->complete($context['request']);
+    }
 
-            $llmConfig = $this->resolveLlmConfig($agent);
-            $contextWindow = $llmConfig['context_window'];
-            $maxTokensOutput = $llmConfig['max_tokens_output'];
-            $temperature = $llmConfig['temperature'];
+    /**
+     * @param array{
+     *   task: Task,
+     *   agent: Agent,
+     *   enabledClasses: list<string>
+     * } $context
+     */
+    private function handleTickLlmResponse(array $context, LLMResponse $response): void
+    {
+        $task           = $context['task'];
+        $agent          = $context['agent'];
+        $enabledClasses = $context['enabledClasses'];
 
-            $context = [
-                'task'           => $task,
-                'agent'          => $agent,
-                'enabledClasses' => $enabledClasses,
-                'contextWindow'  => $contextWindow,
-                'maxTokensOutput' => $maxTokensOutput,
-                'request'        => new LLMRequest(
-                    systemPrompt: $systemPrompt,
-                    messages: $this->buildMessages($taskId),
-                    tools: $this->buildToolDefinitions($enabledClasses, $agent->id, $agent->user_id),
-                    contextWindow: $contextWindow,
-                    maxTokens: $maxTokensOutput,
-                    temperature: $temperature,
-                ),
-            ];
-        } catch (RuntimeException $e) {
-            if (str_contains($e->getMessage(), 'No LLM configuration')) {
-                Task::where('id', $taskId)->update([
-                    'status'         => 'FAILED',
-                    'failure_reason' => $e->getMessage(),
-                    'error_code'     => 'NO_LLM_CONFIGURATION',
-                    'error_message'  => 'No LLM configuration set. Please configure an LLM driver or set a global default.',
-                ]);
-            }
-            throw $e;
+        if ($response->hasToolCalls()) {
+            $this->recordAssistantToolCallBatch($task, $response);
+            $this->handleToolCalls($task, $agent, $response->toolCalls, $enabledClasses);
+            return;
         }
 
-        Task::where('id', $taskId)->increment('step_count');
+        $this->completeTaskWithResponse($task, $response);
+    }
+
+    private function recordAssistantToolCallBatch(Task $task, LLMResponse $response): void
+    {
+        $this->appendHistory(
+            taskId: $task->id,
+            role: 'assistant',
+            content: null,
+            toolCallPayload: json_encode(
+                array_map(static fn(DriverToolCall $tc) => [
+                    'id'       => $tc->providerCallId,
+                    'type'     => 'function',
+                    'function' => [
+                        'name'      => $tc->toolName,
+                        // Normalize empty array [] to {} for strict providers
+                        'arguments' => empty($tc->arguments) ? '{}' : json_encode($tc->arguments, JSON_THROW_ON_ERROR),
+                    ],
+                ], $response->toolCalls),
+                JSON_THROW_ON_ERROR,
+            ),
+            inputTokens: $response->inputTokens,
+            outputTokens: $response->outputTokens,
+            reasoning: $response->reasoning,
+        );
+    }
+
+    private function completeTaskWithResponse(Task $task, LLMResponse $response): void
+    {
+        $this->appendHistory(
+            taskId: $task->id,
+            role: 'assistant',
+            content: $response->content,
+            inputTokens: $response->inputTokens,
+            outputTokens: $response->outputTokens,
+            reasoning: $response->reasoning,
+        );
+
+        $task->status         = 'COMPLETED';
+        $task->final_response = $response->content;
+        $task->save();
+
+        if (!isset($task->data['run_id'])) {
+            $this->notificationService?->notifyTaskCompleted($task);
+        }
+    }
+
+    /**
+     * @param array{
+     *   task: Task,
+     *   agent: Agent
+     * } $context
+     */
+    private function handleTickFailure(int $taskId, array $context, Throwable $e): void
+    {
+        $this->logger?->error('tick() failed', [
+            'task_id'         => $taskId,
+            'exception_class' => get_class($e),
+            'message'         => $e->getMessage(),
+        ]);
+
+        if ($this->isContextWindowError($e)) {
+            $this->tryCompactionAndRetry($context['task'], $context['agent'], $e);
+            return;
+        }
+
+        $errorCode = $this->classifyError($e);
+        $friendlyMsg = $this->friendlyMessageForError($e, $errorCode);
 
         try {
-            $response = $this->driverFactory->makeFromAgent($context['agent'])->complete($context['request']);
+            $updated = Task::where('id', $taskId)
+                ->where('status', 'RUNNING')
+                ->update([
+                    'status'         => 'FAILED',
+                    'failure_reason' => $e->getMessage(),
+                    'error_code'     => $errorCode,
+                    'error_message'  => $friendlyMsg,
+                ]);
 
-            $task           = $context['task'];
-            $agent          = $context['agent'];
-            $enabledClasses = $context['enabledClasses'];
-
-            if ($response->hasToolCalls()) {
-                $this->appendHistory(
-                    taskId: $task->id,
-                    role: 'assistant',
-                    content: null,
-                    toolCallPayload: json_encode(
-                        array_map(static fn(DriverToolCall $tc) => [
-                            'id'       => $tc->providerCallId,
-                            'type'     => 'function',
-                            'function' => [
-                                'name'      => $tc->toolName,
-                                // Normalize empty array [] to {} for strict providers
-                                'arguments' => empty($tc->arguments) ? '{}' : json_encode($tc->arguments, JSON_THROW_ON_ERROR),
-                            ],
-                        ], $response->toolCalls),
-                        JSON_THROW_ON_ERROR,
-                    ),
-                    inputTokens: $response->inputTokens,
-                    outputTokens: $response->outputTokens,
-                    reasoning: $response->reasoning,
-                );
-
-                $this->handleToolCalls($task, $agent, $response->toolCalls, $enabledClasses);
-            } else {
-                $this->appendHistory(
-                    taskId: $task->id,
-                    role: 'assistant',
-                    content: $response->content,
-                    inputTokens: $response->inputTokens,
-                    outputTokens: $response->outputTokens,
-                    reasoning: $response->reasoning,
-                );
-
-                $task->status         = 'COMPLETED';
-                $task->final_response = $response->content;
-                $task->save();
-
-                if (! isset($task->data['run_id'])) {
-                    $this->notificationService?->notifyTaskCompleted($task);
+            if ($updated > 0) {
+                $failedTask = Task::where('id', $taskId)->first();
+                if ($failedTask !== null) {
+                    $this->notifyFailedAndScheduleRetry($failedTask, $errorCode);
                 }
             }
+        } catch (Throwable) {
+            // Ignore failure — DB itself may be unavailable.
+        }
+
+        throw $e;
+    }
+
+    private function notifyFailedAndScheduleRetry(Task $failedTask, string $errorCode): void
+    {
+        try {
+            $this->notificationService?->notifyTaskFailed($failedTask);
         } catch (Throwable $e) {
-            $this->logger?->error('tick() failed', [
-                'task_id'         => $taskId,
-                'exception_class' => get_class($e),
-                'message'         => $e->getMessage(),
+            $this->logger?->warning('Notification failed', [
+                'task_id'   => $failedTask->id,
+                'exception' => $e->getMessage(),
             ]);
+        }
 
-            $task = $context['task'];
-            $agent = $context['agent'];
-
-            if ($this->isContextWindowError($e)) {
-                $this->tryCompactionAndRetry($task, $agent, $e);
-                return;
-            }
-
-            $errorCode = $this->classifyError($e);
-            $friendlyMsg = $this->friendlyMessageForError($e, $errorCode);
-
-            try {
-                $updated = Task::where('id', $taskId)
-                    ->where('status', 'RUNNING')
-                    ->update([
-                        'status'         => 'FAILED',
-                        'failure_reason' => $e->getMessage(),
-                        'error_code'     => $errorCode,
-                        'error_message' => $friendlyMsg,
-                    ]);
-
-                if ($updated > 0) {
-                    $failedTask = Task::where('id', $taskId)->first();
-                    if ($failedTask !== null) {
-                        try {
-                            $this->notificationService?->notifyTaskFailed($failedTask);
-                        } catch (Throwable $e) {
-                            $this->logger?->warning('Notification failed', ['task_id' => $failedTask->id, 'exception' => $e->getMessage()]);
-                        }
-
-                        try {
-                            $this->scheduleAutoRetry($failedTask, $errorCode);
-                        } catch (Throwable $e) {
-                            $this->logger?->warning('Auto-retry scheduling failed', ['task_id' => $failedTask->id, 'exception' => $e->getMessage()]);
-                        }
-                    }
-                }
-            } catch (Throwable) {
-                // Ignore failure — DB itself may be unavailable.
-            }
-
-            throw $e;
+        try {
+            $this->scheduleAutoRetry($failedTask, $errorCode);
+        } catch (Throwable $e) {
+            $this->logger?->warning('Auto-retry scheduling failed', [
+                'task_id'   => $failedTask->id,
+                'exception' => $e->getMessage(),
+            ]);
         }
     }
 
@@ -479,6 +557,33 @@ final class Orchestrator implements OrchestratorInterface
      */
     public function resume(int $taskId, array $approvedBatch): void
     {
+        [$task, $state] = $this->loadTaskAndStateForResume($taskId);
+
+        try {
+            $this->logger?->info('Task resumed after approval', [
+                'task_id' => $task->id,
+                'approved_count' => count($approvedBatch),
+            ]);
+
+            $approvedMap = $this->indexApprovedBatch($approvedBatch);
+
+            foreach ($state->pendingToolCalls as $pendingToolCall) {
+                $this->executeApprovedToolCall($pendingToolCall, $approvedMap, $task, $state, $taskId);
+            }
+
+            $this->cleanupStrandedApprovals($task, $taskId);
+            $this->completeResume($taskId);
+        } catch (Throwable $e) {
+            $this->markResumeFailed($taskId, $e);
+            throw $e;
+        }
+    }
+
+    /**
+     * @return array{0: Task, 1: AgentState}
+     */
+    private function loadTaskAndStateForResume(int $taskId): array
+    {
         $task = null;
         $state = null;
 
@@ -489,117 +594,162 @@ final class Orchestrator implements OrchestratorInterface
             if ($task->status !== 'PENDING_APPROVAL') {
                 throw new InvalidArgumentException("Task {$taskId} is not awaiting approval.");
             }
-            if ($task->pending_state === null) {
-                $state = new AgentState(taskId: $task->id, agentId: $task->agent_id, pendingToolCalls: [], messageSnapshot: [], stepCount: $task->step_count, maxSteps: $task->max_steps, pausedAt: date('Y-m-d\\TH:i:s\\Z'));
 
-            } else {
-                $state = AgentState::fromJson($task->pending_state);
-            }
+            $state = $task->pending_state === null
+                ? $this->emptyAgentStateFor($task)
+                : AgentState::fromJson($task->pending_state);
 
             $task->pending_state = null;
             $task->save();
         });
 
-        try {
-            if (!$task instanceof Task || !$state instanceof AgentState) {
-                throw new RuntimeException('Failed to resolve task or state during resume.');
-            }
-
-            $this->logger?->info('Task resumed after approval', [
-                'task_id' => $task->id,
-                'approved_count' => count($approvedBatch),
-            ]);
-
-            $approvedMap = [];
-            foreach ($approvedBatch as $item) {
-                $approvedMap[$item['provider_call_id']] = $item['arguments'];
-            }
-
-            foreach ($state->pendingToolCalls as $pendingToolCall) {
-                $approvedArgs = $approvedMap[$pendingToolCall->providerCallId] ?? $pendingToolCall->arguments;
-
-                $toolInstance = $this->resolveToolByName($pendingToolCall->toolName);
-
-                try {
-                    SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema());
-                } catch (Throwable $e) {
-                    $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
-                    $this->appendHistory(
-                        taskId: $task->id,
-                        role: 'tool',
-                        content: $result->content,
-                        toolCallId: $pendingToolCall->providerCallId,
-                        toolName: $pendingToolCall->toolName,
-                    );
-                    ToolCallModel::where('task_id', $taskId)
-                        ->where('provider_call_id', $pendingToolCall->providerCallId)
-                        ->update([
-                            'status'         => 'APPROVED',
-                            'result_content' => $result->content,
-                            'executed_at'    => date(self::DB_TIMESTAMP_FORMAT),
-                        ]);
-                    continue;
-                }
-
-                $result = $this->safeExecute($toolInstance, $approvedArgs, $state->agentId, $taskId, $task->user_id);
-
-                ToolCallModel::where('task_id', $taskId)
-                    ->where('provider_call_id', $pendingToolCall->providerCallId)
-                    ->update([
-                        'status'             => 'APPROVED',
-                        'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
-                        'result_content'     => $result->content,
-                        'result_data'        => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                        'executed_at'        => date(self::DB_TIMESTAMP_FORMAT),
-                    ]);
-
-                // Append the tool result into history so the LLM sees it on the next tick.
-                $this->appendHistory(
-                    taskId: $task->id,
-                    role: 'tool',
-                    content: $result->content,
-                    toolCallId: $pendingToolCall->providerCallId,
-                    toolName: $pendingToolCall->toolName,
-                );
-            }
-
-            // Clean up any stranded PENDING_APPROVAL records from concurrency bugs.
-            $danglingTools = ToolCallModel::where('task_id', $taskId)
-                ->where('status', 'PENDING_APPROVAL')
-                ->get();
-
-            foreach ($danglingTools as $danglingTool) {
-                $this->appendHistory(
-                    taskId: $task->id,
-                    role: 'tool',
-                    content: 'Action discarded (state mismatch/timeout)',
-                    toolCallId: $danglingTool->provider_call_id,
-                    toolName: $danglingTool->tool_name,
-                );
-            }
-
-            ToolCallModel::where('task_id', $taskId)
-                ->where('status', 'PENDING_APPROVAL')
-                ->update(['status' => 'REJECTED']);
-
-            $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
-            Task::where('id', $taskId)->update(['status' => $taskStatus]);
-
-            if ($this->workerMode === WorkerMode::Sync) {
-                // Tick is called after the transaction commits so the LLM round-trip
-                // does not hold the lockForUpdate open for its full duration.
-                $this->tick($taskId);
-            }
-
-        } catch (Throwable $e) {
-            Task::where('id', $taskId)->update([
-                'status'         => 'FAILED',
-                'error_code'     => 'RESUME_FAILED',
-                'error_message'  => 'Task resume failed: ' . $e->getMessage(),
-                'failure_reason' => $e->getMessage(),
-            ]);
-            throw $e;
+        if (!$task instanceof Task || !$state instanceof AgentState) {
+            throw new RuntimeException('Failed to resolve task or state during resume.');
         }
+
+        return [$task, $state];
+    }
+
+    private function emptyAgentStateFor(Task $task): AgentState
+    {
+        return new AgentState(
+            taskId: $task->id,
+            agentId: $task->agent_id,
+            pendingToolCalls: [],
+            messageSnapshot: [],
+            stepCount: $task->step_count,
+            maxSteps: $task->max_steps,
+            pausedAt: date('Y-m-d\TH:i:s\Z'),
+        );
+    }
+
+    /**
+     * @return array<string, array>
+     */
+    private function indexApprovedBatch(array $approvedBatch): array
+    {
+        $approvedMap = [];
+        foreach ($approvedBatch as $item) {
+            $approvedMap[$item['provider_call_id']] = $item['arguments'];
+        }
+        return $approvedMap;
+    }
+
+    private function executeApprovedToolCall(
+        DriverToolCall $pendingToolCall,
+        array $approvedMap,
+        Task $task,
+        AgentState $state,
+        int $taskId,
+    ): void {
+        $approvedArgs = $approvedMap[$pendingToolCall->providerCallId] ?? $pendingToolCall->arguments;
+        $toolInstance = $this->resolveToolByName($pendingToolCall->toolName);
+
+        try {
+            SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema());
+        } catch (Throwable $e) {
+            $this->recordResumeValidationFailure($task, $taskId, $pendingToolCall, $e);
+            return;
+        }
+
+        $result = $this->safeExecute($toolInstance, $approvedArgs, $state->agentId, $taskId, $task->user_id);
+        $this->recordResumeExecutionResult($task, $taskId, $pendingToolCall, $approvedArgs, $result);
+    }
+
+    private function recordResumeValidationFailure(
+        Task $task,
+        int $taskId,
+        DriverToolCall $pendingToolCall,
+        Throwable $e,
+    ): void {
+        $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
+
+        $this->appendHistory(
+            taskId: $task->id,
+            role: 'tool',
+            content: $result->content,
+            toolCallId: $pendingToolCall->providerCallId,
+            toolName: $pendingToolCall->toolName,
+        );
+
+        ToolCallModel::where('task_id', $taskId)
+            ->where('provider_call_id', $pendingToolCall->providerCallId)
+            ->update([
+                'status'         => 'APPROVED',
+                'result_content' => $result->content,
+                'executed_at'    => date(self::DB_TIMESTAMP_FORMAT),
+            ]);
+    }
+
+    private function recordResumeExecutionResult(
+        Task $task,
+        int $taskId,
+        DriverToolCall $pendingToolCall,
+        array $approvedArgs,
+        ToolResult $result,
+    ): void {
+        ToolCallModel::where('task_id', $taskId)
+            ->where('provider_call_id', $pendingToolCall->providerCallId)
+            ->update([
+                'status'             => 'APPROVED',
+                'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
+                'result_content'     => $result->content,
+                'result_data'        => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
+                'executed_at'        => date(self::DB_TIMESTAMP_FORMAT),
+            ]);
+
+        // Append the tool result into history so the LLM sees it on the next tick.
+        $this->appendHistory(
+            taskId: $task->id,
+            role: 'tool',
+            content: $result->content,
+            toolCallId: $pendingToolCall->providerCallId,
+            toolName: $pendingToolCall->toolName,
+        );
+    }
+
+    private function cleanupStrandedApprovals(Task $task, int $taskId): void
+    {
+        // Clean up any stranded PENDING_APPROVAL records from concurrency bugs.
+        $danglingTools = ToolCallModel::where('task_id', $taskId)
+            ->where('status', 'PENDING_APPROVAL')
+            ->get();
+
+        foreach ($danglingTools as $danglingTool) {
+            $this->appendHistory(
+                taskId: $task->id,
+                role: 'tool',
+                content: 'Action discarded (state mismatch/timeout)',
+                toolCallId: $danglingTool->provider_call_id,
+                toolName: $danglingTool->tool_name,
+            );
+        }
+
+        ToolCallModel::where('task_id', $taskId)
+            ->where('status', 'PENDING_APPROVAL')
+            ->update(['status' => 'REJECTED']);
+    }
+
+    private function completeResume(int $taskId): void
+    {
+        $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
+        Task::where('id', $taskId)->update(['status' => $taskStatus]);
+
+        if ($this->workerMode === WorkerMode::Sync) {
+            // Tick is called after the transaction commits so the LLM round-trip
+            // does not hold the lockForUpdate open for its full duration.
+            $this->tick($taskId);
+        }
+    }
+
+    private function markResumeFailed(int $taskId, Throwable $e): void
+    {
+        Task::where('id', $taskId)->update([
+            'status'         => 'FAILED',
+            'error_code'     => 'RESUME_FAILED',
+            'error_message'  => 'Task resume failed: ' . $e->getMessage(),
+            'failure_reason' => $e->getMessage(),
+        ]);
     }
 
     public function reject(int $taskId, string $reason): void
@@ -1043,12 +1193,7 @@ final class Orchestrator implements OrchestratorInterface
     private function buildToolDefinitions(array $enabledClasses, int $agentId, ?int $userId = null): array
     {
         $defs = [];
-
-        // Fetch operation overrides for this agent's enabled tools in one query.
-        $overrides = AgentToolOperationOverride::where('agent_id', $agentId)
-            ->whereIn('tool_class', $enabledClasses)
-            ->get()
-            ->keyBy(fn($row) => $row->tool_class . '::' . $row->operation);
+        $overrides = $this->loadOperationOverrides($agentId, $enabledClasses);
 
         foreach ($this->toolInstances as $instance) {
             $toolClass = get_class($instance);
@@ -1057,84 +1202,135 @@ final class Orchestrator implements OrchestratorInterface
                 continue;
             }
 
-            $ref   = new ReflectionClass($instance);
-            $attrs = $ref->getAttributes(Tool::class);
-
-            if ($attrs === []) {
+            $toolAttr = $this->extractToolAttribute($instance);
+            if ($toolAttr === null) {
                 continue;
             }
 
-            /** @var Tool $toolAttr */
-            $toolAttr = $attrs[0]->newInstance();
+            $def = $this->usesOperationsTrait($toolClass)
+                ? $this->buildOperationToolDefinition($instance, $toolClass, $toolAttr, $overrides, $agentId, $userId)
+                : $this->buildSimpleToolDefinition($instance, $toolClass, $toolAttr, $agentId, $userId);
 
-            $qualifiedName = $this->qualifiedToolName($toolClass, $toolAttr->name);
-
-            $usesOperations = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
-
-            if ($usesOperations) {
-                $schema = $instance->getParametersSchema();
-                $allowedOps = [];
-
-                foreach ($instance->getOperations() as $op) {
-                    $key = $toolClass . '::' . $op->name;
-                    $row = $overrides->get($key);
-
-                    if ($row !== null && $row->enabled === 0) {
-                        continue;
-                    }
-                    if ($row !== null && $row->enabled === 1) {
-                        $allowedOps[] = $op->name;
-                        continue;
-                    }
-                    if ($op->enabledByDefault) {
-                        $allowedOps[] = $op->name;
-                    }
-                }
-
-                if ($allowedOps === []) {
-                    continue;
-                }
-
-                $discriminatorKey = $instance->getOperations()[0]->discriminatorKey ?? 'action';
-                $filteredSchema = OperationSchemaFilter::filter($schema, $allowedOps, $discriminatorKey);
-
-                $llmSettings = $this->toolConfigService !== null
-                    ? $this->toolConfigService->getLlmToolSettings($toolClass, $agentId, $userId)
-                    : [];
-                $configBlock = $this->buildLlmConfigBlock($llmSettings);
-
-                $defs[] = [
-                    'type'     => 'function',
-                    'function' => [
-                        'name'        => $qualifiedName,
-                        'description' => $toolAttr->description . $configBlock,
-                        'parameters'  => $filteredSchema,
-                    ],
-                ];
-            } else {
-                $schema = $instance->getParametersSchema();
-
-                if (isset($schema['properties']) && $schema['properties'] === []) {
-                    $schema['properties'] = (object) [];
-                }
-
-                $llmSettings = $this->toolConfigService !== null
-                    ? $this->toolConfigService->getLlmToolSettings($toolClass, $agentId, $userId)
-                    : [];
-                $configBlock = $this->buildLlmConfigBlock($llmSettings);
-
-                $defs[] = [
-                    'type'     => 'function',
-                    'function' => [
-                        'name'        => $qualifiedName,
-                        'description' => $toolAttr->description . $configBlock,
-                        'parameters'  => $schema,
-                    ],
-                ];
+            if ($def !== null) {
+                $defs[] = $def;
             }
         }
 
         return $defs;
+    }
+
+    private function loadOperationOverrides(int $agentId, array $enabledClasses): Collection
+    {
+        return AgentToolOperationOverride::where('agent_id', $agentId)
+            ->whereIn('tool_class', $enabledClasses)
+            ->get()
+            ->keyBy(fn($row) => $row->tool_class . '::' . $row->operation);
+    }
+
+    private function extractToolAttribute(object $instance): ?Tool
+    {
+        $ref = new ReflectionClass($instance);
+        $attrs = $ref->getAttributes(Tool::class);
+
+        if ($attrs === []) {
+            return null;
+        }
+
+        return $attrs[0]->newInstance();
+    }
+
+    private function usesOperationsTrait(string $toolClass): bool
+    {
+        return in_array(HasOperations::class, class_uses_recursive($toolClass), true);
+    }
+
+    private function buildOperationToolDefinition(
+        object $instance,
+        string $toolClass,
+        Tool $toolAttr,
+        Collection $overrides,
+        int $agentId,
+        ?int $userId,
+    ): ?array {
+        $allowedOps = $this->resolveAllowedOperations($instance, $toolClass, $overrides);
+        if ($allowedOps === []) {
+            return null;
+        }
+
+        $schema = $instance->getParametersSchema();
+        $operations = $instance->getOperations();
+        $discriminatorKey = $operations[0]->discriminatorKey ?? 'action';
+        $filteredSchema = OperationSchemaFilter::filter($schema, $allowedOps, $discriminatorKey);
+
+        return [
+            'type'     => 'function',
+            'function' => [
+                'name'        => $this->qualifiedToolName($toolClass, $toolAttr->name),
+                'description' => $toolAttr->description . $this->buildConfigBlockFor($toolClass, $agentId, $userId),
+                'parameters'  => $filteredSchema,
+            ],
+        ];
+    }
+
+    private function buildSimpleToolDefinition(
+        object $instance,
+        string $toolClass,
+        Tool $toolAttr,
+        int $agentId,
+        ?int $userId,
+    ): array {
+        $schema = $instance->getParametersSchema();
+
+        if (isset($schema['properties']) && $schema['properties'] === []) {
+            $schema['properties'] = (object) [];
+        }
+
+        return [
+            'type'     => 'function',
+            'function' => [
+                'name'        => $this->qualifiedToolName($toolClass, $toolAttr->name),
+                'description' => $toolAttr->description . $this->buildConfigBlockFor($toolClass, $agentId, $userId),
+                'parameters'  => $schema,
+            ],
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function resolveAllowedOperations(object $instance, string $toolClass, Collection $overrides): array
+    {
+        $allowedOps = [];
+
+        foreach ($instance->getOperations() as $op) {
+            $key = $toolClass . '::' . $op->name;
+            $row = $overrides->get($key);
+
+            if ($row !== null) {
+                if ($row->enabled === 0) {
+                    continue;
+                }
+                if ($row->enabled === 1) {
+                    $allowedOps[] = $op->name;
+                    continue;
+                }
+            }
+
+            if ($op->enabledByDefault) {
+                $allowedOps[] = $op->name;
+            }
+        }
+
+        return $allowedOps;
+    }
+
+    private function buildConfigBlockFor(string $toolClass, int $agentId, ?int $userId): string
+    {
+        $llmSettings = $this->toolConfigService !== null
+            ? $this->toolConfigService->getLlmToolSettings($toolClass, $agentId, $userId)
+            : [];
+
+        return $this->buildLlmConfigBlock($llmSettings);
     }
 
     private function callTraitMethod(object $object, string $method, array $args): mixed
