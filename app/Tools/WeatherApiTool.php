@@ -113,85 +113,46 @@ final class WeatherApiTool extends AbstractTool
             return new ToolResult(false, 'Location is required for current weather.');
         }
 
+        $data = $this->fetchWeatherData('current.json', $location, [], $agentId, $userId, 'current');
+        if ($data instanceof ToolResult) {
+            return $data;
+        }
+
+        $current = $data['current'] ?? [];
+        $condition = $current['condition'] ?? [];
+        $locationData = $data['location'] ?? [];
+
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey = $settings['core.weatherapi.api_key'] ?? '';
-        if (empty($apiKey)) {
-            return new ToolResult(false, self::ERR_MISSING_API_KEY);
+        $units = $this->effectiveUnits($settings);
+        $tempKey = $units === 'imperial' ? 'temp_f' : 'temp_c';
+        $feelslikeKey = $units === 'imperial' ? 'feelslike_f' : 'feelslike_c';
+        $windKey = $units === 'imperial' ? 'wind_mph' : 'wind_kph';
+
+        $output = "Current Weather for {$locationData['name']}, {$locationData['country']}:\n";
+        $output .= "Condition: {$condition['text']} ({$condition['code']})\n";
+        $output .= "Temperature: {$current[$tempKey]}°" . ($units === 'imperial' ? 'F' : 'C') . "\n";
+        $output .= "Feels Like: {$current[$feelslikeKey]}°" . ($units === 'imperial' ? 'F' : 'C') . "\n";
+        $output .= "Wind: {$current[$windKey]} " . ($units === 'imperial' ? 'mph' : 'kph') . "\n";
+        $output .= "Humidity: {$current['humidity']}%\n";
+        $output .= "Cloud Cover: {$current['cloud']}%\n";
+        $output .= "UV Index: {$current['uv']}\n";
+
+        if (isset($current['precip_mm']) && $current['precip_mm'] > 0) {
+            $output .= "Precipitation: {$current['precip_mm']} mm\n";
+        }
+        if (isset($current['gust_mph'])) {
+            $gustKey = $units === 'imperial' ? 'gust_mph' : 'gust_kph';
+            $output .= "Wind Gusts: {$current[$gustKey]} " . ($units === 'imperial' ? 'mph' : 'kph') . "\n";
+        }
+        if (isset($current['pressure_mb'])) {
+            $output .= "Pressure: {$current['pressure_mb']} mb\n";
         }
 
-        $baseUrl = $this->effectiveBaseUrl($settings);
-        $timeout = $this->effectiveTimeout($settings);
+        $isDay = ($current['is_day'] ?? 0) === 1 ? 'Day' : 'Night';
+        $output .= "Time of Day: {$isDay}\n";
+        $output .= "Local Time: {$locationData['localtime']}\n";
 
-        try {
-            $this->logger?->debug(self::LOG_HTTP_REQUEST, [
-                'method' => 'GET',
-                'url' => "{$baseUrl}/current.json",
-                'query' => ['key' => '***', 'q' => $location],
-                'timeout' => $timeout,
-            ]);
-
-            $response = $this->httpClient->request('GET', "{$baseUrl}/current.json", [
-                'query' => [
-                    'key' => $apiKey,
-                    'q'   => $location,
-                ],
-                'timeout' => $timeout,
-            ]);
-
-            $statusCode = $response->getStatusCode();
-            $this->logger?->debug(self::LOG_HTTP_RESPONSE, [
-                'status_code' => $statusCode,
-                'url' => "{$baseUrl}/current.json",
-            ]);
-
-            if ($statusCode >= 400) {
-                $errorBody = $response->getContent(false);
-                $this->logger?->error('WeatherAPI current error', [
-                    'status' => $statusCode,
-                    'body'   => $errorBody,
-                ]);
-                return new ToolResult(false, "WeatherAPI error (HTTP {$statusCode})");
-            }
-
-            $data = $response->toArray(false);
-            $current = $data['current'] ?? [];
-            $condition = $current['condition'] ?? [];
-            $locationData = $data['location'] ?? [];
-
-            $units = $this->effectiveUnits($settings);
-            $tempKey = $units === 'imperial' ? 'temp_f' : 'temp_c';
-            $feelslikeKey = $units === 'imperial' ? 'feelslike_f' : 'feelslike_c';
-            $windKey = $units === 'imperial' ? 'wind_mph' : 'wind_kph';
-
-            $output = "Current Weather for {$locationData['name']}, {$locationData['country']}:\n";
-            $output .= "Condition: {$condition['text']} ({$condition['code']})\n";
-            $output .= "Temperature: {$current[$tempKey]}°" . ($units === 'imperial' ? 'F' : 'C') . "\n";
-            $output .= "Feels Like: {$current[$feelslikeKey]}°" . ($units === 'imperial' ? 'F' : 'C') . "\n";
-            $output .= "Wind: {$current[$windKey]} " . ($units === 'imperial' ? 'mph' : 'kph') . "\n";
-            $output .= "Humidity: {$current['humidity']}%\n";
-            $output .= "Cloud Cover: {$current['cloud']}%\n";
-            $output .= "UV Index: {$current['uv']}\n";
-
-            if (isset($current['precip_mm']) && $current['precip_mm'] > 0) {
-                $output .= "Precipitation: {$current['precip_mm']} mm\n";
-            }
-            if (isset($current['gust_mph'])) {
-                $gustKey = $units === 'imperial' ? 'gust_mph' : 'gust_kph';
-                $output .= "Wind Gusts: {$current[$gustKey]} " . ($units === 'imperial' ? 'mph' : 'kph') . "\n";
-            }
-            if (isset($current['pressure_mb'])) {
-                $output .= "Pressure: {$current['pressure_mb']} mb\n";
-            }
-
-            $isDay = ($current['is_day'] ?? 0) === 1 ? 'Day' : 'Night';
-            $output .= "Time of Day: {$isDay}\n";
-            $output .= "Local Time: {$locationData['localtime']}\n";
-
-            return new ToolResult(true, $output);
-        } catch (Throwable $e) {
-            $this->logger?->error('WeatherAPI current exception', ['exception' => $e]);
-            return new ToolResult(false, self::LOG_TOOL_ERROR_PREFIX . $e->getMessage());
-        }
+        return new ToolResult(true, $output);
     }
 
     private function forecast(array $arguments, int $agentId, ?int $userId): ToolResult
@@ -202,84 +163,44 @@ final class WeatherApiTool extends AbstractTool
         }
 
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey = $settings['core.weatherapi.api_key'] ?? '';
-        if (empty($apiKey)) {
-            return new ToolResult(false, self::ERR_MISSING_API_KEY);
-        }
-
-        $baseUrl = $this->effectiveBaseUrl($settings);
-        $timeout = $this->effectiveTimeout($settings);
         $defaultDays = (int) ($settings['core.weatherapi.default_days'] ?? 3);
         $defaultDays = max(1, min(3, $defaultDays));
         $days = (int) ($arguments['days'] ?? $defaultDays);
         $days = max(1, min(3, $days));
 
-        $units = $this->effectiveUnits($settings);
-
-        try {
-            $this->logger?->debug(self::LOG_HTTP_REQUEST, [
-                'method' => 'GET',
-                'url' => "{$baseUrl}/forecast.json",
-                'query' => ['key' => '***', 'q' => $location, 'days' => $days],
-                'timeout' => $timeout,
-            ]);
-
-            $response = $this->httpClient->request('GET', "{$baseUrl}/forecast.json", [
-                'query' => [
-                    'key' => $apiKey,
-                    'q'   => $location,
-                    'days' => $days,
-                ],
-                'timeout' => $timeout,
-            ]);
-
-            $statusCode = $response->getStatusCode();
-            $this->logger?->debug(self::LOG_HTTP_RESPONSE, [
-                'status_code' => $statusCode,
-                'url' => "{$baseUrl}/forecast.json",
-            ]);
-
-            if ($statusCode >= 400) {
-                $errorBody = $response->getContent(false);
-                $this->logger?->error('WeatherAPI forecast error', [
-                    'status' => $statusCode,
-                    'body'   => $errorBody,
-                ]);
-                return new ToolResult(false, "WeatherAPI error (HTTP {$statusCode})");
-            }
-
-            $data = $response->toArray(false);
-            $locationData = $data['location'] ?? [];
-            $forecastDays = $data['forecast']['forecastday'] ?? [];
-
-            $tempKey = $units === 'imperial' ? 'avgtemp_f' : 'avgtemp_c';
-            $maxtempKey = $units === 'imperial' ? 'maxtemp_f' : 'maxtemp_c';
-            $mintempKey = $units === 'imperial' ? 'mintemp_f' : 'mintemp_c';
-            $windKey = $units === 'imperial' ? 'maxwind_mph' : 'maxwind_kph';
-            $unitLabel = $units === 'imperial' ? 'F' : 'C';
-            $windLabel = $units === 'imperial' ? 'mph' : 'kph';
-
-            $output = "{$days}-Day Weather Forecast for {$locationData['name']}, {$locationData['country']}:\n\n";
-
-            foreach ($forecastDays as $day) {
-                $date = $day['date'] ?? '';
-                $dayData = $day['day'] ?? [];
-                $condition = $dayData['condition'] ?? [];
-
-                $output .= "📅 {$date}\n";
-                $output .= "   Condition: {$condition['text']}\n";
-                $output .= "   Avg Temp: {$dayData[$tempKey]}°{$unitLabel}\n";
-                $output .= "   High/Low: {$dayData[$maxtempKey]}°{$unitLabel} / {$dayData[$mintempKey]}°{$unitLabel}\n";
-                $output .= "   Max Wind: {$dayData[$windKey]} {$windLabel}\n";
-                $output .= "   Chance of Rain: {$dayData['daily_chance_of_rain']}%\n";
-                $output .= "   UV Index: {$dayData['uv']}\n\n";
-            }
-
-            return new ToolResult(true, $output);
-        } catch (Throwable $e) {
-            $this->logger?->error('WeatherAPI forecast exception', ['exception' => $e]);
-            return new ToolResult(false, self::LOG_TOOL_ERROR_PREFIX . $e->getMessage());
+        $data = $this->fetchWeatherData('forecast.json', $location, ['days' => $days], $agentId, $userId, 'forecast');
+        if ($data instanceof ToolResult) {
+            return $data;
         }
+
+        $locationData = $data['location'] ?? [];
+        $forecastDays = $data['forecast']['forecastday'] ?? [];
+
+        $units = $this->effectiveUnits($settings);
+        $tempKey = $units === 'imperial' ? 'avgtemp_f' : 'avgtemp_c';
+        $maxtempKey = $units === 'imperial' ? 'maxtemp_f' : 'maxtemp_c';
+        $mintempKey = $units === 'imperial' ? 'mintemp_f' : 'mintemp_c';
+        $windKey = $units === 'imperial' ? 'maxwind_mph' : 'maxwind_kph';
+        $unitLabel = $units === 'imperial' ? 'F' : 'C';
+        $windLabel = $units === 'imperial' ? 'mph' : 'kph';
+
+        $output = "{$days}-Day Weather Forecast for {$locationData['name']}, {$locationData['country']}:\n\n";
+
+        foreach ($forecastDays as $day) {
+            $date = $day['date'] ?? '';
+            $dayData = $day['day'] ?? [];
+            $condition = $dayData['condition'] ?? [];
+
+            $output .= "📅 {$date}\n";
+            $output .= "   Condition: {$condition['text']}\n";
+            $output .= "   Avg Temp: {$dayData[$tempKey]}°{$unitLabel}\n";
+            $output .= "   High/Low: {$dayData[$maxtempKey]}°{$unitLabel} / {$dayData[$mintempKey]}°{$unitLabel}\n";
+            $output .= "   Max Wind: {$dayData[$windKey]} {$windLabel}\n";
+            $output .= "   Chance of Rain: {$dayData['daily_chance_of_rain']}%\n";
+            $output .= "   UV Index: {$dayData['uv']}\n\n";
+        }
+
+        return new ToolResult(true, $output);
     }
 
     private function search(array $arguments, int $agentId, ?int $userId): ToolResult
@@ -292,76 +213,37 @@ final class WeatherApiTool extends AbstractTool
             return new ToolResult(false, 'Search query must be at least 2 characters.');
         }
 
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey = $settings['core.weatherapi.api_key'] ?? '';
-        if (empty($apiKey)) {
-            return new ToolResult(false, self::ERR_MISSING_API_KEY);
+        $data = $this->fetchWeatherData('search.json', $query, [], $agentId, $userId, 'search');
+        if ($data instanceof ToolResult) {
+            return $data;
         }
 
-        $baseUrl = $this->effectiveBaseUrl($settings);
-        $timeout = $this->effectiveTimeout($settings);
+        $results = $data;
 
-        try {
-            $this->logger?->debug(self::LOG_HTTP_REQUEST, [
-                'method' => 'GET',
-                'url' => "{$baseUrl}/search.json",
-                'query' => ['key' => '***', 'q' => $query],
-                'timeout' => $timeout,
-            ]);
-
-            $response = $this->httpClient->request('GET', "{$baseUrl}/search.json", [
-                'query' => [
-                    'key' => $apiKey,
-                    'q'   => $query,
-                ],
-                'timeout' => $timeout,
-            ]);
-
-            $statusCode = $response->getStatusCode();
-            $this->logger?->debug(self::LOG_HTTP_RESPONSE, [
-                'status_code' => $statusCode,
-                'url' => "{$baseUrl}/search.json",
-            ]);
-
-            if ($statusCode >= 400) {
-                $errorBody = $response->getContent(false);
-                $this->logger?->error('WeatherAPI search error', [
-                    'status' => $statusCode,
-                    'body'   => $errorBody,
-                ]);
-                return new ToolResult(false, "WeatherAPI error (HTTP {$statusCode})");
-            }
-
-            $results = $response->toArray(false);
-
-            if (empty($results)) {
-                return new ToolResult(true, "No locations found for '{$query}'.");
-            }
-
-            $output = "Location Search Results for '{$query}':\n\n";
-            foreach ($results as $i => $location) {
-                $num = $i + 1;
-                $name = $location['name'] ?? 'Unknown';
-                $region = $location['region'] ?? '';
-                $country = $location['country'] ?? '';
-                $lat = $location['lat'] ?? '';
-                $lon = $location['lon'] ?? '';
-                $localtime = $location['localtime'] ?? '';
-
-                $output .= "[{$num}] {$name}";
-                if ($region) {
-                    $output .= ", {$region}";
-                }
-                $output .= ", {$country}\n";
-                $output .= "    Coordinates: {$lat}, {$lon}\n";
-                $output .= "    Local Time: {$localtime}\n\n";
-            }
-
-            return new ToolResult(true, $output);
-        } catch (Throwable $e) {
-            $this->logger?->error('WeatherAPI search exception', ['exception' => $e]);
-            return new ToolResult(false, self::LOG_TOOL_ERROR_PREFIX . $e->getMessage());
+        if (empty($results)) {
+            return new ToolResult(true, "No locations found for '{$query}'.");
         }
+
+        $output = "Location Search Results for '{$query}':\n\n";
+        foreach ($results as $i => $location) {
+            $num = (int) $i + 1;
+            $name = $location['name'] ?? 'Unknown';
+            $region = $location['region'] ?? '';
+            $country = $location['country'] ?? '';
+            $lat = $location['lat'] ?? '';
+            $lon = $location['lon'] ?? '';
+            $localtime = $location['localtime'] ?? '';
+
+            $output .= "[{$num}] {$name}";
+            if ($region) {
+                $output .= ", {$region}";
+            }
+            $output .= ", {$country}\n";
+            $output .= "    Coordinates: {$lat}, {$lon}\n";
+            $output .= "    Local Time: {$localtime}\n\n";
+        }
+
+        return new ToolResult(true, $output);
     }
 
     private function astronomy(array $arguments, int $agentId, ?int $userId): ToolResult
@@ -371,6 +253,48 @@ final class WeatherApiTool extends AbstractTool
             return new ToolResult(false, 'Location is required for astronomy data.');
         }
 
+        $date = trim((string) ($arguments['date'] ?? ''));
+        $extraQuery = $date !== '' ? ['dt' => $date] : [];
+
+        $data = $this->fetchWeatherData('astronomy.json', $location, $extraQuery, $agentId, $userId, 'astronomy');
+        if ($data instanceof ToolResult) {
+            return $data;
+        }
+
+        $locationData = $data['location'] ?? [];
+        $astro = $data['astronomy']['astro'] ?? [];
+
+        $output = "Astronomy Data for {$locationData['name']}, {$locationData['country']}";
+        if ($date) {
+            $output .= " on {$date}";
+        } else {
+            $output .= " (today)";
+        }
+        $output .= "\n\n";
+        $output .= "🌅 Sunrise: {$astro['sunrise']}\n";
+        $output .= "🌇 Sunset: {$astro['sunset']}\n";
+        $output .= "🌙 Moonrise: {$astro['moonrise']}\n";
+        $output .= "🌒 Moonset: {$astro['moonset']}\n";
+        $output .= "🌝 Moon Phase: {$astro['moon_phase']}\n";
+        $output .= "💡 Moon Illumination: {$astro['moon_illumination']}%\n";
+
+        return new ToolResult(true, $output);
+    }
+
+    /**
+     * Resolve settings, perform the HTTP request, and parse the JSON response.
+     *
+     * @param array<string, scalar|null> $extraQuery Additional query parameters to merge (excluding the API key)
+     * @return ToolResult|array<string, mixed> ToolResult on error, parsed response data on success
+     */
+    private function fetchWeatherData(
+        string $endpoint,
+        string $location,
+        array $extraQuery,
+        int $agentId,
+        ?int $userId,
+        string $logContext,
+    ): ToolResult|array {
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $apiKey = $settings['core.weatherapi.api_key'] ?? '';
         if (empty($apiKey)) {
@@ -379,65 +303,41 @@ final class WeatherApiTool extends AbstractTool
 
         $baseUrl = $this->effectiveBaseUrl($settings);
         $timeout = $this->effectiveTimeout($settings);
-        $date = trim((string) ($arguments['date'] ?? ''));
 
-        $queryParams = [
-            'key' => $apiKey,
-            'q'   => $location,
-        ];
-        if ($date !== '') {
-            $queryParams['dt'] = $date;
-        }
+        $query = array_merge(['key' => $apiKey, 'q' => $location], $extraQuery);
+        $logQuery = array_merge(['key' => '***', 'q' => $location], $extraQuery);
 
         try {
             $this->logger?->debug(self::LOG_HTTP_REQUEST, [
                 'method' => 'GET',
-                'url' => "{$baseUrl}/astronomy.json",
-                'query' => ['key' => '***', 'q' => $location, 'dt' => $date ?: null],
+                'url' => "{$baseUrl}/{$endpoint}",
+                'query' => $logQuery,
                 'timeout' => $timeout,
             ]);
 
-            $response = $this->httpClient->request('GET', "{$baseUrl}/astronomy.json", [
-                'query' => $queryParams,
+            $response = $this->httpClient->request('GET', "{$baseUrl}/{$endpoint}", [
+                'query' => $query,
                 'timeout' => $timeout,
             ]);
 
             $statusCode = $response->getStatusCode();
             $this->logger?->debug(self::LOG_HTTP_RESPONSE, [
                 'status_code' => $statusCode,
-                'url' => "{$baseUrl}/astronomy.json",
+                'url' => "{$baseUrl}/{$endpoint}",
             ]);
 
             if ($statusCode >= 400) {
                 $errorBody = $response->getContent(false);
-                $this->logger?->error('WeatherAPI astronomy error', [
+                $this->logger?->error("WeatherAPI {$logContext} error", [
                     'status' => $statusCode,
                     'body'   => $errorBody,
                 ]);
                 return new ToolResult(false, "WeatherAPI error (HTTP {$statusCode})");
             }
 
-            $data = $response->toArray(false);
-            $locationData = $data['location'] ?? [];
-            $astro = $data['astronomy']['astro'] ?? [];
-
-            $output = "Astronomy Data for {$locationData['name']}, {$locationData['country']}";
-            if ($date) {
-                $output .= " on {$date}";
-            } else {
-                $output .= " (today)";
-            }
-            $output .= "\n\n";
-            $output .= "🌅 Sunrise: {$astro['sunrise']}\n";
-            $output .= "🌇 Sunset: {$astro['sunset']}\n";
-            $output .= "🌙 Moonrise: {$astro['moonrise']}\n";
-            $output .= "🌒 Moonset: {$astro['moonset']}\n";
-            $output .= "🌝 Moon Phase: {$astro['moon_phase']}\n";
-            $output .= "💡 Moon Illumination: {$astro['moon_illumination']}%\n";
-
-            return new ToolResult(true, $output);
+            return $response->toArray(false);
         } catch (Throwable $e) {
-            $this->logger?->error('WeatherAPI astronomy exception', ['exception' => $e]);
+            $this->logger?->error("WeatherAPI {$logContext} exception", ['exception' => $e]);
             return new ToolResult(false, self::LOG_TOOL_ERROR_PREFIX . $e->getMessage());
         }
     }
