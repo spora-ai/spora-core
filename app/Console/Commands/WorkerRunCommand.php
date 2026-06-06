@@ -220,40 +220,97 @@ final class WorkerRunCommand extends Command
         $lastReapAt = time();
         $useChildProcesses = $isDaemon;
 
-        while (!$this->shouldQuit && ($limit === 0 || $processed < $limit)) {
-            if ($isDaemon && (time() - $lastReapAt) >= self::REAP_INTERVAL_SECONDS) {
-                $this->reapStaleTasks($output, $staleMinutes);
-                $lastReapAt = time();
-            }
+        while (!$this->shouldQuit && $this->canProcessMore($limit, $processed)) {
+            $lastReapAt = $this->runLoopIteration(
+                $isDaemon,
+                $isOnce,
+                $includeQueue,
+                $useChildProcesses,
+                $maxWorkers,
+                $sleep,
+                $staleMinutes,
+                $output,
+                $lastReapAt,
+                $processed,
+            );
 
-            // Always process due scheduled runs in daemon mode and --once mode.
-            if ($isDaemon || $isOnce) {
-                $this->processScheduledRuns($output);
-            }
-
-            $this->reapChildren();
-
-            $shouldProcessQueue = $isDaemon || ($isOnce && $includeQueue);
-            if ($shouldProcessQueue) {
-                $this->processRetryQueue();
-
-                if ($useChildProcesses) {
-                    $this->processQueuedTaskWithChild($output, $maxWorkers, $processed);
-                } else {
-                    $this->processQueuedTaskSync($output, $sleep, $processed);
-                }
-            }
-
-            if ($isOnce) {
+            if ($this->endOfIteration($isDaemon, $isOnce, $sleep)) {
                 break;
-            }
-
-            if ($isDaemon) {
-                usleep($sleep);
             }
 
             gc_collect_cycles();
         }
+    }
+
+    private function canProcessMore(int $limit, int $processed): bool
+    {
+        return $limit === 0 || $processed < $limit;
+    }
+
+    private function isReapDue(int $lastReapAt): bool
+    {
+        return (time() - $lastReapAt) >= self::REAP_INTERVAL_SECONDS;
+    }
+
+    private function shouldProcessQueue(bool $isDaemon, bool $isOnce, bool $includeQueue): bool
+    {
+        return $isDaemon || ($isOnce && $includeQueue);
+    }
+
+    /**
+     * Perform one tick of the worker loop: optional reap, scheduled runs,
+     * child reaping, then queue processing. Returns the updated reap marker.
+     */
+    private function runLoopIteration(
+        bool $isDaemon,
+        bool $isOnce,
+        bool $includeQueue,
+        bool $useChildProcesses,
+        int $maxWorkers,
+        int $sleep,
+        int $staleMinutes,
+        OutputInterface $output,
+        int $lastReapAt,
+        int &$processed,
+    ): int {
+        if ($isDaemon && $this->isReapDue($lastReapAt)) {
+            $this->reapStaleTasks($output, $staleMinutes);
+            $lastReapAt = time();
+        }
+
+        // Always process due scheduled runs in daemon mode and --once mode.
+        if ($isDaemon || $isOnce) {
+            $this->processScheduledRuns($output);
+        }
+
+        $this->reapChildren();
+
+        if ($this->shouldProcessQueue($isDaemon, $isOnce, $includeQueue)) {
+            $this->processRetryQueue();
+
+            if ($useChildProcesses) {
+                $this->processQueuedTaskWithChild($output, $maxWorkers, $processed);
+            } else {
+                $this->processQueuedTaskSync($output, $sleep, $processed);
+            }
+        }
+
+        return $lastReapAt;
+    }
+
+    /**
+     * Handle the tail of each loop iteration: sleep in daemon mode, signal
+     * break in --once mode. Returns true when the caller should exit the loop.
+     */
+    private function endOfIteration(bool $isDaemon, bool $isOnce, int $sleep): bool
+    {
+        if ($isOnce) {
+            return true;
+        }
+        if ($isDaemon) {
+            usleep($sleep);
+        }
+        return false;
     }
 
     /**
