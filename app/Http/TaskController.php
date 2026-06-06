@@ -157,69 +157,106 @@ final class TaskController
         try {
             $body = $this->decodeJson($request);
         } catch (JsonException) {
+            return $this->invalidJsonResponse();
+        }
+
+        $batch = $this->extractApprovalBatch($body);
+        if ($batch instanceof JsonResponse) {
+            return $batch;
+        }
+
+        $validation = $this->validateAndNormalizeApprovalBatch($batch);
+        if ($validation instanceof JsonResponse) {
+            return $validation;
+        }
+
+        return $this->performApproval($taskId, $userId, $batch);
+    }
+
+    private function invalidJsonResponse(): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON]],
+            Response::HTTP_BAD_REQUEST,
+        );
+    }
+
+    /**
+     * Accept either a modern batch payload { "approvals": [...] }
+     * or the legacy single-tool format { "provider_call_id": "...", "arguments": {...} }.
+     *
+     * @return list<array<string, mixed>>|JsonResponse
+     */
+    private function extractApprovalBatch(array $body): array|JsonResponse
+    {
+        if (isset($body['approvals']) && is_array($body['approvals'])) {
+            return $body['approvals'];
+        }
+
+        $providerId = trim((string) ($body['provider_call_id'] ?? ''));
+        if ($providerId === '') {
             return new JsonResponse(
-                ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON]],
-                Response::HTTP_BAD_REQUEST,
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required.']],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
             );
         }
 
-        // Accept either a modern batch payload { "approvals": [...] }
-        // or the legacy single-tool format { "provider_call_id": "...", "arguments": {...} }
-        $result = null;
-        $approvedBatch = [];
-        if (isset($body['approvals']) && is_array($body['approvals'])) {
-            $approvedBatch = $body['approvals'];
-        } else {
-            $providerId = trim((string) ($body['provider_call_id'] ?? ''));
-            if ($providerId === '') {
-                $result = new JsonResponse(
-                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required.']],
+        return [[
+            'provider_call_id' => $providerId,
+            'arguments'        => (array) ($body['arguments'] ?? []),
+        ]];
+    }
+
+    /**
+     * Validate each batch entry has a provider_call_id and normalize object arguments
+     * to arrays (stdClass can leak in from JSON-decoded request bodies).
+     *
+     * @param list<array<string, mixed>> $batch
+     */
+    private function validateAndNormalizeApprovalBatch(array &$batch): ?JsonResponse
+    {
+        foreach ($batch as $item) {
+            if (!isset($item['provider_call_id'])) {
+                return new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required in all approvals.']],
                     Response::HTTP_UNPROCESSABLE_ENTITY,
                 );
-            } else {
-                $approvedBatch = [[
-                    'provider_call_id' => $providerId,
-                    'arguments'        => (array) ($body['arguments'] ?? []),
-                ]];
             }
         }
-
-        if ($result === null) {
-            // Normalize arguments: ensure all approved argument objects are arrays,
-            // not stdClass (which can happen when request body is JSON-decoded).
-            foreach ($approvedBatch as &$item) {
-                if (!isset($item['provider_call_id'])) {
-                    $result = new JsonResponse(
-                        ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required in all approvals.']],
-                        Response::HTTP_UNPROCESSABLE_ENTITY,
-                    );
-                    break;
-                }
-                if (isset($item['arguments']) && is_object($item['arguments'])) {
-                    $item['arguments'] = (array) $item['arguments'];
-                }
-            }
-            unset($item);
-        }
-
-        if ($result === null) {
-            try {
-                $task = $this->taskService->approveTask($taskId, $userId, $approvedBatch);
-                $result = new JsonResponse(['data' => ['task' => $task]]);
-            } catch (InvalidArgumentException $e) {
-                $result = $e->getMessage() === self::ERR_TASK_NOT_FOUND
-                    ? new JsonResponse(
-                        ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
-                        Response::HTTP_NOT_FOUND,
-                    )
-                    : new JsonResponse(
-                        ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
-                        Response::HTTP_CONFLICT,
-                    );
+        foreach ($batch as &$item) {
+            if (isset($item['arguments']) && is_object($item['arguments'])) {
+                $item['arguments'] = (array) $item['arguments'];
             }
         }
+        unset($item);
+        return null;
+    }
 
-        return $result;
+    /**
+     * @param list<array<string, mixed>> $batch
+     */
+    private function performApproval(int $taskId, int $userId, array $batch): JsonResponse
+    {
+        try {
+            $task = $this->taskService->approveTask($taskId, $userId, $batch);
+            return new JsonResponse(['data' => ['task' => $task]]);
+        } catch (InvalidArgumentException $e) {
+            return $this->approvalErrorResponse($e);
+        }
+    }
+
+    private function approvalErrorResponse(InvalidArgumentException $e): JsonResponse
+    {
+        if ($e->getMessage() === self::ERR_TASK_NOT_FOUND) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+        return new JsonResponse(
+            ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
+            Response::HTTP_CONFLICT,
+        );
     }
 
     /**
