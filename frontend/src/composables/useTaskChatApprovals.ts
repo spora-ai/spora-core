@@ -36,7 +36,7 @@ export function useTaskChatApprovals(taskId: { value: number }, onAfterMutation:
       taskStore.startDetailPolling(taskId.value)
       onAfterMutation()
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Approval failed.'
+      const msg = e instanceof Error ? e.message : 'Approval failed.'
       toast.error(msg)
       approveError.value = msg
     } finally {

@@ -123,4 +123,137 @@ describe('TaskChatPage', () => {
       },
     })).not.toThrow()
   })
+
+  it('shows the chat layout when the task is loaded', async () => {
+    activeTaskRef.value = {
+      id: 1,
+      agent_id: 7,
+      user_prompt: 'hello',
+      status: 'RUNNING',
+      step_count: 1,
+      history: [],
+      final_response: null,
+    }
+    const wrapper = mount(TaskChatPage, {
+      global: {
+        stubs: {
+          AgentLayout: AgentLayoutStub,
+          TaskStatusBadge: TaskStatusBadgeStub,
+          TaskChatBanners: TaskChatBannersStub,
+          TaskChatMessageList: TaskChatMessageListStub,
+          TaskChatFollowup: TaskChatFollowupStub,
+          ToolApprovalBar: ToolApprovalBarStub,
+        },
+      },
+    })
+    expect(wrapper.find('.banners-stub').exists()).toBe(true)
+    expect(wrapper.find('.message-list-stub').exists()).toBe(true)
+    expect(wrapper.find('.followup-stub').exists()).toBe(true)
+  })
+
+  it('hides the ToolApprovalBar when the task is not pending approval', () => {
+    activeTaskRef.value = {
+      id: 1,
+      agent_id: 7,
+      user_prompt: 'hello',
+      status: 'RUNNING',
+      step_count: 1,
+      history: [],
+      final_response: null,
+    }
+    const wrapper = mount(TaskChatPage, {
+      global: {
+        stubs: {
+          AgentLayout: AgentLayoutStub,
+          TaskStatusBadge: TaskStatusBadgeStub,
+          TaskChatBanners: TaskChatBannersStub,
+          TaskChatMessageList: TaskChatMessageListStub,
+          TaskChatFollowup: TaskChatFollowupStub,
+          ToolApprovalBar: { name: 'ToolApprovalBar', template: '<div class="approval-bar-stub" />' },
+        },
+      },
+    })
+    expect(wrapper.find('.approval-bar-stub').exists()).toBe(false)
+  })
+
+  it('shows the ToolApprovalBar when the task is PENDING_APPROVAL with pending tool calls', () => {
+    activeTaskRef.value = {
+      id: 1,
+      agent_id: 7,
+      user_prompt: 'hello',
+      status: 'PENDING_APPROVAL',
+      step_count: 1,
+      history: [],
+      final_response: null,
+    }
+    pendingToolCallsRef.value = [{ id: 1, tool_name: 'web_search' }]
+    const wrapper = mount(TaskChatPage, {
+      global: {
+        stubs: {
+          AgentLayout: AgentLayoutStub,
+          TaskStatusBadge: TaskStatusBadgeStub,
+          TaskChatBanners: TaskChatBannersStub,
+          TaskChatMessageList: TaskChatMessageListStub,
+          TaskChatFollowup: TaskChatFollowupStub,
+          ToolApprovalBar: { name: 'ToolApprovalBar', template: '<div class="approval-bar-stub" />' },
+        },
+      },
+    })
+    expect(wrapper.find('.approval-bar-stub').exists()).toBe(true)
+  })
+
+  it('navigates back to the agent when the Back button is clicked', async () => {
+    activeTaskRef.value = {
+      id: 1,
+      agent_id: 7,
+      user_prompt: 'hello',
+      status: 'RUNNING',
+      step_count: 1,
+      history: [],
+      final_response: null,
+    }
+    const wrapper = mount(TaskChatPage, {
+      global: {
+        stubs: {
+          AgentLayout: AgentLayoutStub,
+          TaskStatusBadge: TaskStatusBadgeStub,
+          TaskChatBanners: TaskChatBannersStub,
+          TaskChatMessageList: TaskChatMessageListStub,
+          TaskChatFollowup: TaskChatFollowupStub,
+          ToolApprovalBar: ToolApprovalBarStub,
+        },
+      },
+    })
+    const back = wrapper.find('button[aria-label="Back"]')
+    expect(back.exists()).toBe(true)
+    await back.trigger('click')
+    expect(pushMock).toHaveBeenCalledWith({ name: 'agent', params: { id: 7 } })
+  })
+
+  it('navigates back to the dashboard when the task has no agent_id', async () => {
+    activeTaskRef.value = {
+      id: 1,
+      agent_id: null,
+      user_prompt: 'hello',
+      status: 'RUNNING',
+      step_count: 1,
+      history: [],
+      final_response: null,
+    }
+    const wrapper = mount(TaskChatPage, {
+      global: {
+        stubs: {
+          AgentLayout: AgentLayoutStub,
+          TaskStatusBadge: TaskStatusBadgeStub,
+          TaskChatBanners: TaskChatBannersStub,
+          TaskChatMessageList: TaskChatMessageListStub,
+          TaskChatFollowup: TaskChatFollowupStub,
+          ToolApprovalBar: ToolApprovalBarStub,
+        },
+      },
+    })
+    const back = wrapper.find('button[aria-label="Back"]')
+    await back.trigger('click')
+    expect(pushMock).toHaveBeenCalledWith({ name: 'dashboard' })
+  })
 })

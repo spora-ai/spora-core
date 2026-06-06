@@ -178,6 +178,7 @@ onUnmounted(() => {
         :task="currentTask"
         :chat-messages="chatMessages"
         :final-reasoning="finalReasoning"
+        :expanded-tools="expandedTools"
         @toggle-expanded="toggleExpanded"
       />
 

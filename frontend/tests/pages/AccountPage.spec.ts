@@ -102,6 +102,80 @@ describe('AccountPage', () => {
     expect(wrapper.text()).toContain('taken')
   })
 
+  it('includes a hidden username field in the password form for password managers', () => {
+    const wrapper = mount(AccountPage, {
+      global: { stubs: { GlobalNavbar: GlobalNavbarStub } },
+    })
+    const forms = wrapper.findAll('form')
+    const passwordForm = forms[1]
+    const usernameInput = passwordForm.find('input[autocomplete="username"]')
+    expect(usernameInput.exists()).toBe(true)
+    expect((usernameInput.element as HTMLInputElement).type).toBe('email')
+    expect((usernameInput.element as HTMLInputElement).value).toBe('me@example.com')
+    expect(usernameInput.attributes('tabindex')).toBe('-1')
+    expect(usernameInput.attributes('aria-hidden')).toBe('true')
+  })
+
+  it('submits the password form with current + new password and clears inputs on success', async () => {
+    const wrapper = mount(AccountPage, {
+      global: { stubs: { GlobalNavbar: GlobalNavbarStub } },
+    })
+    const forms = wrapper.findAll('form')
+    const passwordForm = forms[1]
+    await passwordForm.find('#current-pw').setValue('OldSecret1!')
+    await passwordForm.find('#new-pw').setValue('NewSecret1!')
+    await passwordForm.find('#confirm-pw').setValue('NewSecret1!')
+    await passwordForm.trigger('submit.prevent')
+    await flushPromises()
+    expect(changePasswordMock).toHaveBeenCalledWith('OldSecret1!', 'NewSecret1!')
+  })
+
+  it('rejects mismatched new passwords without calling the store', async () => {
+    const wrapper = mount(AccountPage, {
+      global: { stubs: { GlobalNavbar: GlobalNavbarStub } },
+    })
+    const forms = wrapper.findAll('form')
+    const passwordForm = forms[1]
+    await passwordForm.find('#current-pw').setValue('OldSecret1!')
+    await passwordForm.find('#new-pw').setValue('NewSecret1!')
+    await passwordForm.find('#confirm-pw').setValue('Different1!')
+    await passwordForm.trigger('submit.prevent')
+    await flushPromises()
+    expect(changePasswordMock).not.toHaveBeenCalled()
+    expect(wrapper.text()).toMatch(/do not match/i)
+  })
+
+  it('rejects new passwords shorter than 8 characters', async () => {
+    const wrapper = mount(AccountPage, {
+      global: { stubs: { GlobalNavbar: GlobalNavbarStub } },
+    })
+    const forms = wrapper.findAll('form')
+    const passwordForm = forms[1]
+    await passwordForm.find('#current-pw').setValue('OldSecret1!')
+    await passwordForm.find('#new-pw').setValue('short')
+    await passwordForm.find('#confirm-pw').setValue('short')
+    await passwordForm.trigger('submit.prevent')
+    await flushPromises()
+    expect(changePasswordMock).not.toHaveBeenCalled()
+    expect(wrapper.text()).toMatch(/at least 8 characters/i)
+  })
+
+  it('surfaces an ApiError message on password change failure', async () => {
+    const { ApiError } = await import('@/api/client')
+    changePasswordMock.mockRejectedValueOnce(new ApiError('wrong password'))
+    const wrapper = mount(AccountPage, {
+      global: { stubs: { GlobalNavbar: GlobalNavbarStub } },
+    })
+    const forms = wrapper.findAll('form')
+    const passwordForm = forms[1]
+    await passwordForm.find('#current-pw').setValue('OldSecret1!')
+    await passwordForm.find('#new-pw').setValue('NewSecret1!')
+    await passwordForm.find('#confirm-pw').setValue('NewSecret1!')
+    await passwordForm.trigger('submit.prevent')
+    await flushPromises()
+    expect(wrapper.text()).toContain('wrong password')
+  })
+
   it('calls changeEmail and clears the input on success', async () => {
     const wrapper = mount(AccountPage, {
       global: { stubs: { GlobalNavbar: GlobalNavbarStub } },

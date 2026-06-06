@@ -19,9 +19,13 @@ interface Props {
   task: TaskDetail
   chatMessages: ChatMessage[]
   finalReasoning: string | null
+  /** Per-sequence expanded flag; owned by the page so it survives remounts. */
+  expandedTools?: Record<number, boolean>
 }
 
-defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  expandedTools: () => ({}),
+})
 
 const emit = defineEmits<{
   toggleExpanded: [sequence: number]
@@ -70,7 +74,6 @@ defineExpose({ scrollToBottom })
               AI
             </div>
             <div class="rounded-2xl rounded-tl-sm border border-border bg-card px-4 py-2.5 text-sm">
-              <!-- eslint-disable-next-line vue/no-v-html -->
               <div class="chat-bubble-content" v-html="renderMarkdown(msg.entry.content ?? '')" />
             </div>
           </div>
@@ -87,12 +90,12 @@ defineExpose({ scrollToBottom })
           <div class="px-3 py-2 border-t border-border chat-bubble-content text-muted-foreground break-all whitespace-pre-wrap">
             <template v-if="isTruncated(msg.entry.content)">
               <div class="flex flex-col gap-2">
-                <div v-html="renderMarkdown(truncate(msg.entry.content))" />
+                <div v-html="renderMarkdown(props.expandedTools[msg.entry.sequence] ? msg.entry.content ?? '' : truncate(msg.entry.content))" />
                 <button
                   @click.stop="emit('toggleExpanded', msg.entry.sequence)"
                   class="mt-1 inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors border border-transparent hover:border-border"
                 >
-                  ▼ more
+                  {{ props.expandedTools[msg.entry.sequence] ? '▲ less' : '▼ more' }}
                 </button>
               </div>
             </template>

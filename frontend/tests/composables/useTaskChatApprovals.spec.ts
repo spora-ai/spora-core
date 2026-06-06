@@ -79,6 +79,14 @@ describe('useTaskChatApprovals', () => {
       expect(c.approvingAll.value).toBe(false)
     })
 
+    it('falls back to a generic message when the rejection is not an Error', async () => {
+      taskStoreMock.approveTask.mockRejectedValueOnce('plain string error')
+      const c = useTaskChatApprovals(taskId, onAfterMutation)
+      await c.onApproveAll({ approvals: [] })
+      expect(toastMock.error).toHaveBeenCalledWith('Approval failed.')
+      expect(c.approveError.value).toBe('Approval failed.')
+    })
+
     it('clears approveError at the start of the call', async () => {
       const c = useTaskChatApprovals(taskId, onAfterMutation)
       c.approveError.value = 'old error'

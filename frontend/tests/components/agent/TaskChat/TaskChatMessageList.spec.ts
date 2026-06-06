@@ -103,9 +103,59 @@ describe('TaskChatMessageList', () => {
     })
     const button = wrapper.find('button')
     expect(button.exists()).toBe(true)
+    expect(button.text()).toBe('▼ more')
     await button.trigger('click')
     expect(wrapper.emitted('toggleExpanded')).toBeTruthy()
     expect(wrapper.emitted('toggleExpanded')![0]).toEqual([5])
+  })
+
+  it('renders the full content and flips the label to "less" when expandedTools[seq] is true', () => {
+    const longContent = 'x'.repeat(400) + 'TAIL_MARKER'
+    const messages: ChatMessage[] = [
+      { kind: 'tool-result', entry: makeEntry('tool', { sequence: 5, content: longContent, tool_name: 'web_search' }) },
+    ]
+    const wrapper = mount(TaskChatMessageList, {
+      props: {
+        task: baseTask,
+        chatMessages: messages,
+        finalReasoning: null,
+        expandedTools: { 5: true },
+      },
+    })
+    expect(wrapper.text()).toContain('TAIL_MARKER')
+    expect(wrapper.find('button').text()).toBe('▲ less')
+  })
+
+  it('keeps the truncated preview when expandedTools[seq] is false', () => {
+    const longContent = 'x'.repeat(400) + 'TAIL_MARKER'
+    const messages: ChatMessage[] = [
+      { kind: 'tool-result', entry: makeEntry('tool', { sequence: 5, content: longContent, tool_name: 'web_search' }) },
+    ]
+    const wrapper = mount(TaskChatMessageList, {
+      props: {
+        task: baseTask,
+        chatMessages: messages,
+        finalReasoning: null,
+        expandedTools: { 5: false },
+      },
+    })
+    expect(wrapper.text()).not.toContain('TAIL_MARKER')
+    expect(wrapper.find('button').text()).toBe('▼ more')
+  })
+
+  it('flips from "more" to "less" when the parent updates expandedTools in response to the emit', async () => {
+    const longContent = 'x'.repeat(400) + 'TAIL_MARKER'
+    const messages: ChatMessage[] = [
+      { kind: 'tool-result', entry: makeEntry('tool', { sequence: 5, content: longContent, tool_name: 'web_search' }) },
+    ]
+    const wrapper = mount(TaskChatMessageList, {
+      props: { task: baseTask, chatMessages: messages, finalReasoning: null, expandedTools: { 5: false } },
+    })
+    expect(wrapper.find('button').text()).toBe('▼ more')
+    await wrapper.find('button').trigger('click')
+    await wrapper.setProps({ expandedTools: { 5: true } })
+    expect(wrapper.find('button').text()).toBe('▲ less')
+    expect(wrapper.text()).toContain('TAIL_MARKER')
   })
 
   it('exposes scrollToBottom via defineExpose', () => {

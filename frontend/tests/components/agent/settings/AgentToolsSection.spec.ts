@@ -197,4 +197,49 @@ describe('AgentToolsSection', () => {
     await flushPromises()
     expect(wrapper.find('.config-modal-stub').exists()).toBe(true)
   })
+
+  it('renders the EnableWarningModal when pendingEnableTool is set', async () => {
+    toolSettingsMock.getAllToolStatuses.mockResolvedValue({
+      web_search: { is_enabled: false, can_enable: false, missing_required: ['api_key'] },
+    })
+    const wrapper = mount(AgentToolsSection, {
+      props: { agent: baseAgent, agentId: 1 },
+      global: {
+        stubs: {
+          AgentToolListItem: ListItemStub,
+          AgentToolConfigModal: ConfigModalStub,
+          EnableWarningModal: WarningModalStub,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.find('[data-tool-name="web_search"]').find('.toggle').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.warning-modal-stub').exists()).toBe(true)
+  })
+
+  it('refreshes the tool status after the config modal emits "saved"', async () => {
+    toolSettingsMock.getToolStatus.mockResolvedValueOnce({ is_enabled: true, can_enable: true, missing_required: [] })
+    const wrapper = mount(AgentToolsSection, {
+      props: { agent: baseAgent, agentId: 1 },
+      global: {
+        stubs: {
+          AgentToolListItem: ListItemStub,
+          AgentToolConfigModal: {
+            name: 'AgentToolConfigModal',
+            props: ['toolName', 'tool', 'agentId'],
+            emits: ['saved', 'close'],
+            template: '<div v-if="toolName" class="config-modal-stub"><button @click="$emit(\'saved\', toolName)">Save</button></div>',
+          },
+          EnableWarningModal: WarningModalStub,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.find('[data-tool-name="web_search"]').find('.config').trigger('click')
+    await flushPromises()
+    await wrapper.find('.config-modal-stub button').trigger('click')
+    await flushPromises()
+    expect(toolSettingsMock.getToolStatus).toHaveBeenCalledWith('web_search')
+  })
 })
