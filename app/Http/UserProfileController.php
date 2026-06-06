@@ -165,14 +165,14 @@ final class UserProfileController
      */
     private function validateLocationField(string $field, array $body, bool $requireBoth): ?JsonResponse
     {
-        if (!isset($body[$field])) {
-            if (!$requireBoth) {
-                return null;
-            }
-            return new JsonResponse(
-                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $field . ' is required.']],
-                422,
-            );
+        $isMissing = !isset($body[$field]);
+        if ($isMissing) {
+            return $requireBoth
+                ? new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $field . ' is required.']],
+                    422,
+                )
+                : null;
         }
 
         $value = trim((string) $body[$field]);

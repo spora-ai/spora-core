@@ -46,6 +46,9 @@ final class Orchestrator implements OrchestratorInterface
     /** Format used when writing UTC wall-clock timestamps to the DB. */
     private const DB_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
 
+    /** ISO 8601 / RFC 3339 format used for the AgentState `pausedAt` field. */
+    private const ISO8601_UTC = 'Y-m-d\TH:i:s\Z';
+
     /** Error codes that qualify for auto-retry. */
     private const RETRYABLE_ERROR_CODES = [
         'RATE_LIMIT',
@@ -619,7 +622,7 @@ final class Orchestrator implements OrchestratorInterface
             messageSnapshot: [],
             stepCount: $task->step_count,
             maxSteps: $task->max_steps,
-            pausedAt: date('Y-m-d\TH:i:s\Z'),
+            pausedAt: date(self::ISO8601_UTC),
         );
     }
 
@@ -765,7 +768,7 @@ final class Orchestrator implements OrchestratorInterface
                 throw new InvalidArgumentException("Task {$taskId} is not awaiting approval.");
             }
             if ($task->pending_state === null) {
-                $state = new AgentState(taskId: $task->id, agentId: $task->agent_id, pendingToolCalls: [], messageSnapshot: [], stepCount: $task->step_count, maxSteps: $task->max_steps, pausedAt: date('Y-m-d\TH:i:s\Z'));
+                $state = new AgentState(taskId: $task->id, agentId: $task->agent_id, pendingToolCalls: [], messageSnapshot: [], stepCount: $task->step_count, maxSteps: $task->max_steps, pausedAt: date(self::ISO8601_UTC));
             } else {
                 $state = AgentState::fromJson($task->pending_state);
             }
@@ -945,7 +948,7 @@ final class Orchestrator implements OrchestratorInterface
                 messageSnapshot: $this->buildMessages($task->id),
                 stepCount: $task->step_count,
                 maxSteps: $task->max_steps,
-                pausedAt: date('Y-m-d\TH:i:s\Z'),
+                pausedAt: date(self::ISO8601_UTC),
             );
 
             $task->status        = 'PENDING_APPROVAL';

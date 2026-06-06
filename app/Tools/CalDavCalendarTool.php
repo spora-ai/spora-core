@@ -23,6 +23,7 @@ use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\HttpClient\ResponseInterface;
 use Throwable;
 
 /**
@@ -555,27 +556,31 @@ XML;
             ];
 
             $this->logHttpRequest('GET', $eventUri, $getRequestOptions);
-
             $getResponse = $this->httpClient->request('GET', $eventUri, $getRequestOptions);
 
-            $getHeaders = $getResponse->getHeaders(false);
-            $this->logHttpResponse('GET', $eventUri, $getResponse->getStatusCode(), $getHeaders);
-
-            $statusCode = $getResponse->getStatusCode();
-            if ($statusCode === 404) {
-                return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
-            }
-            if ($statusCode >= 400) {
-                $errorMsg = $getResponse->getContent(false);
-                $this->logHttpError('GET', $eventUri, $statusCode, $errorMsg, $getHeaders);
-                return new ToolResult(false, 'Failed to fetch existing event: HTTP ' . $statusCode);
-            }
-
-            return $getResponse->getContent();
+            return $this->mapGetResponseToContent($eventUri, $getResponse);
         } catch (Throwable $e) {
             $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => 'GET', 'url' => $eventUri]);
             return new ToolResult(false, 'Failed to fetch existing event: ' . $e->getMessage());
         }
+    }
+
+    private function mapGetResponseToContent(string $eventUri, ResponseInterface $getResponse): string|ToolResult
+    {
+        $getHeaders = $getResponse->getHeaders(false);
+        $this->logHttpResponse('GET', $eventUri, $getResponse->getStatusCode(), $getHeaders);
+
+        $statusCode = $getResponse->getStatusCode();
+        if ($statusCode === 404) {
+            return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
+        }
+        if ($statusCode >= 400) {
+            $errorMsg = $getResponse->getContent(false);
+            $this->logHttpError('GET', $eventUri, $statusCode, $errorMsg, $getHeaders);
+            return new ToolResult(false, 'Failed to fetch existing event: HTTP ' . $statusCode);
+        }
+
+        return $getResponse->getContent();
     }
 
     /**
@@ -584,7 +589,20 @@ XML;
      */
     private function buildEditUpdates(array $arguments, array $existingData, string $timezone, bool $allDay): array|ToolResult
     {
-        $summary = !empty($arguments['summary']) ? trim($arguments['summary']) : $existingData['summary'];
+        $dates = $this->parseEditDates($arguments, $existingData, $timezone, $allDay);
+        if ($dates instanceof ToolResult) {
+            return $dates;
+        }
+
+        return $this->composeEditedEvent($arguments, $existingData, $dates['start'], $dates['end']);
+    }
+
+    /**
+     * @param array{uid: ?string, summary: string, dtstart: ?DateTimeImmutable, dtend: ?DateTimeImmutable, description: string, location: string} $existingData
+     * @return array{start: DateTimeImmutable, end: DateTimeImmutable}|ToolResult
+     */
+    private function parseEditDates(array $arguments, array $existingData, string $timezone, bool $allDay): array|ToolResult
+    {
         $startDateStr = $arguments['start_date'] ?? null;
         $endDateStr = $arguments['end_date'] ?? null;
 
@@ -602,6 +620,16 @@ XML;
             return new ToolResult(false, 'end_date must be after start_date.');
         }
 
+        return ['start' => $start, 'end' => $end];
+    }
+
+    /**
+     * @param array{uid: ?string, summary: string, dtstart: ?DateTimeImmutable, dtend: ?DateTimeImmutable, description: string, location: string} $existingData
+     * @return array{uid: ?string, summary: string, start: DateTimeImmutable, end: DateTimeImmutable, description: string, location: string}
+     */
+    private function composeEditedEvent(array $arguments, array $existingData, DateTimeImmutable $start, DateTimeImmutable $end): array
+    {
+        $summary = !empty($arguments['summary']) ? trim($arguments['summary']) : $existingData['summary'];
         $description = !empty($arguments['description']) ? trim($arguments['description']) : $existingData['description'];
         $location = !empty($arguments['location']) ? trim($arguments['location']) : $existingData['location'];
 
@@ -634,33 +662,37 @@ XML;
 
         try {
             $response = $this->httpClient->request('PUT', $eventUri, $requestOptions);
-
-            $headers = $response->getHeaders(false);
-            $this->logHttpResponse('PUT', $eventUri, $response->getStatusCode(), $headers);
-
-            $statusCode = $response->getStatusCode();
-
-            if ($statusCode === 412) {
-                return new ToolResult(false, 'Precondition Failed: The event has been modified since you fetched it. Please fetch the latest version and try again.');
-            }
-            if ($statusCode === 404) {
-                return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
-            }
-            if ($statusCode >= 400) {
-                $errorMsg = $response->getContent(false);
-                $this->logHttpError('PUT', $eventUri, $statusCode, $errorMsg, $headers);
-                return new ToolResult(false, "CalDAV server returned HTTP {$statusCode}");
-            }
-
-            $newEtag = $headers['etag'][0] ?? null;
-            return new ToolResult(true, "Event '{$summary}' updated successfully.", [
-                'event_uri' => $eventUri,
-                'etag' => $newEtag,
-            ]);
+            return $this->mapPutResponseToResult($eventUri, $response, $summary);
         } catch (Throwable $e) {
             $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => 'PUT', 'url' => $eventUri]);
             return new ToolResult(false, 'Failed to update CalDAV event: ' . $e->getMessage());
         }
+    }
+
+    private function mapPutResponseToResult(string $eventUri, ResponseInterface $response, string $summary): ToolResult
+    {
+        $headers = $response->getHeaders(false);
+        $this->logHttpResponse('PUT', $eventUri, $response->getStatusCode(), $headers);
+
+        $statusCode = $response->getStatusCode();
+
+        if ($statusCode === 412) {
+            return new ToolResult(false, 'Precondition Failed: The event has been modified since you fetched it. Please fetch the latest version and try again.');
+        }
+        if ($statusCode === 404) {
+            return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
+        }
+        if ($statusCode >= 400) {
+            $errorMsg = $response->getContent(false);
+            $this->logHttpError('PUT', $eventUri, $statusCode, $errorMsg, $headers);
+            return new ToolResult(false, "CalDAV server returned HTTP {$statusCode}");
+        }
+
+        $newEtag = $headers['etag'][0] ?? null;
+        return new ToolResult(true, "Event '{$summary}' updated successfully.", [
+            'event_uri' => $eventUri,
+            'etag' => $newEtag,
+        ]);
     }
 
     public function deleteEvent(array $arguments, int $agentId, ?int $userId): ToolResult

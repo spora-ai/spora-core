@@ -243,10 +243,9 @@ final class AgentService implements AgentServiceInterface
         if ($toolClass === 'llm_configuration') {
             return $this->resolveLlmConfigurationOverride($agent);
         }
-        if ($rawOnly) {
-            return $this->resolveRawOverride($agentId, $toolClass);
-        }
-        return $this->resolveAnnotatedOverride($agentId, $toolClass);
+        return $rawOnly
+            ? $this->resolveRawOverride($agentId, $toolClass)
+            : $this->resolveAnnotatedOverride($agentId, $toolClass);
     }
 
     private function resolveLlmConfigurationOverride(Agent $agent): array

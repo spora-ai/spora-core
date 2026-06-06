@@ -160,14 +160,9 @@ final class TaskController
             return $this->invalidJsonResponse();
         }
 
-        $batch = $this->extractApprovalBatch($body);
+        $batch = $this->parseAndValidateApprovalBatch($body);
         if ($batch instanceof JsonResponse) {
             return $batch;
-        }
-
-        $validation = $this->validateAndNormalizeApprovalBatch($batch);
-        if ($validation instanceof JsonResponse) {
-            return $validation;
         }
 
         return $this->performApproval($taskId, $userId, $batch);
@@ -183,11 +178,27 @@ final class TaskController
 
     /**
      * Accept either a modern batch payload { "approvals": [...] }
-     * or the legacy single-tool format { "provider_call_id": "...", "arguments": {...} }.
+     * or the legacy single-tool format { "provider_call_id": "...", "arguments": {...} },
+     * then validate each entry has a provider_call_id and normalize object
+     * arguments to arrays (stdClass can leak in from JSON-decoded request bodies).
      *
      * @return list<array<string, mixed>>|JsonResponse
      */
-    private function extractApprovalBatch(array $body): array|JsonResponse
+    private function parseAndValidateApprovalBatch(array $body): array|JsonResponse
+    {
+        $batch = $this->extractApprovalBatchItems($body);
+        if ($batch instanceof JsonResponse) {
+            return $batch;
+        }
+
+        $validation = $this->validateAndNormalizeApprovalBatch($batch);
+        return $validation ?? $batch;
+    }
+
+    /**
+     * @return list<array<string, mixed>>|JsonResponse
+     */
+    private function extractApprovalBatchItems(array $body): array|JsonResponse
     {
         if (isset($body['approvals']) && is_array($body['approvals'])) {
             return $body['approvals'];
@@ -208,9 +219,6 @@ final class TaskController
     }
 
     /**
-     * Validate each batch entry has a provider_call_id and normalize object arguments
-     * to arrays (stdClass can leak in from JSON-decoded request bodies).
-     *
      * @param list<array<string, mixed>> $batch
      */
     private function validateAndNormalizeApprovalBatch(array &$batch): ?JsonResponse

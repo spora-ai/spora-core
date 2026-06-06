@@ -11,6 +11,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Console\WorkerLoopOptions;
 use Spora\Core\Database;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
@@ -219,16 +220,19 @@ final class WorkerRunCommand extends Command
     ): void {
         $lastReapAt = time();
         $useChildProcesses = $isDaemon;
+        $loopOptions = new WorkerLoopOptions(
+            isDaemon: $isDaemon,
+            isOnce: $isOnce,
+            includeQueue: $includeQueue,
+            useChildProcesses: $useChildProcesses,
+            maxWorkers: $maxWorkers,
+            sleep: $sleep,
+            staleMinutes: $staleMinutes,
+        );
 
         while (!$this->shouldQuit && $this->canProcessMore($limit, $processed)) {
             $lastReapAt = $this->runLoopIteration(
-                $isDaemon,
-                $isOnce,
-                $includeQueue,
-                $useChildProcesses,
-                $maxWorkers,
-                $sleep,
-                $staleMinutes,
+                $loopOptions,
                 $output,
                 $lastReapAt,
                 $processed,
@@ -262,36 +266,30 @@ final class WorkerRunCommand extends Command
      * child reaping, then queue processing. Returns the updated reap marker.
      */
     private function runLoopIteration(
-        bool $isDaemon,
-        bool $isOnce,
-        bool $includeQueue,
-        bool $useChildProcesses,
-        int $maxWorkers,
-        int $sleep,
-        int $staleMinutes,
+        WorkerLoopOptions $options,
         OutputInterface $output,
         int $lastReapAt,
         int &$processed,
     ): int {
-        if ($isDaemon && $this->isReapDue($lastReapAt)) {
-            $this->reapStaleTasks($output, $staleMinutes);
+        if ($options->isDaemon && $this->isReapDue($lastReapAt)) {
+            $this->reapStaleTasks($output, $options->staleMinutes);
             $lastReapAt = time();
         }
 
         // Always process due scheduled runs in daemon mode and --once mode.
-        if ($isDaemon || $isOnce) {
+        if ($options->isDaemon || $options->isOnce) {
             $this->processScheduledRuns($output);
         }
 
         $this->reapChildren();
 
-        if ($this->shouldProcessQueue($isDaemon, $isOnce, $includeQueue)) {
+        if ($this->shouldProcessQueue($options->isDaemon, $options->isOnce, $options->includeQueue)) {
             $this->processRetryQueue();
 
-            if ($useChildProcesses) {
-                $this->processQueuedTaskWithChild($output, $maxWorkers, $processed);
+            if ($options->useChildProcesses) {
+                $this->processQueuedTaskWithChild($output, $options->maxWorkers, $processed);
             } else {
-                $this->processQueuedTaskSync($output, $sleep, $processed);
+                $this->processQueuedTaskSync($output, $options->sleep, $processed);
             }
         }
 
