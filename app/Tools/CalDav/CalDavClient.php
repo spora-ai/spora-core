@@ -62,25 +62,34 @@ final class CalDavClient
      */
     public function resolveEventUri(string $eventUri, string $baseUrl): string
     {
-        if (str_starts_with($eventUri, 'http://') || str_starts_with($eventUri, 'https://')) {
+        if ($this->isAbsoluteHttpUrl($eventUri) || $baseUrl === '') {
             return $eventUri;
         }
 
-        if ($baseUrl === '') {
+        $origin = $this->extractOrigin($baseUrl);
+        if ($origin === null) {
             return $eventUri;
         }
 
+        return $origin . '/' . ltrim($eventUri, '/');
+    }
+
+    private function isAbsoluteHttpUrl(string $uri): bool
+    {
+        return str_starts_with($uri, 'http://') || str_starts_with($uri, 'https://');
+    }
+
+    private function extractOrigin(string $baseUrl): ?string
+    {
         $parsed = parse_url($baseUrl);
         if ($parsed === false || !isset($parsed['scheme'], $parsed['host'])) {
-            return $eventUri;
+            return null;
         }
-
-        $origin = $parsed['scheme'] . '://' . $parsed['host']
-            . (isset($parsed['port']) ? ':' . $parsed['port'] : '');
-
-        $path = '/' . ltrim($eventUri, '/');
-
-        return $origin . $path;
+        $origin = $parsed['scheme'] . '://' . $parsed['host'];
+        if (isset($parsed['port'])) {
+            $origin .= ':' . $parsed['port'];
+        }
+        return $origin;
     }
 
     /**

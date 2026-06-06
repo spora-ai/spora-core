@@ -114,16 +114,10 @@ final class ToolCallSerializer
      */
     private function isInstantiableToolClass(ReflectionClass $ref): bool
     {
-        if (!$ref->isInstantiable()) {
-            return false;
-        }
-        if ($ref->getAttributes(Tool::class) === []) {
-            return false;
-        }
-        if (!$ref->implementsInterface(ToolInterface::class)) {
-            return false;
-        }
-        $constructor = $ref->getConstructor();
-        return $constructor === null || $constructor->getNumberOfRequiredParameters() === 0;
+        $ctor = $ref->getConstructor();
+        return $ref->isInstantiable()
+            && $ref->getAttributes(Tool::class) !== []
+            && $ref->implementsInterface(ToolInterface::class)
+            && ($ctor === null || $ctor->getNumberOfRequiredParameters() === 0);
     }
 }

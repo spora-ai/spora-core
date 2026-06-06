@@ -87,7 +87,7 @@ final class EmailTool extends AbstractTool
     private readonly EmailMessageFormatter $messageFormatter;
 
     public function __construct(
-        private readonly ToolConfigService $configService,
+        ToolConfigService $configService,
         private readonly ImapClientInterface $imapClient,
         private readonly ?LoggerInterface $logger = null,
         private readonly EmailActionDescriber $actionDescriber = new EmailActionDescriber(),

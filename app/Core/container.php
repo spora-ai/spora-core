@@ -228,9 +228,12 @@ return [
             $c->get(AuthService::class),
             $c->get(UserServiceInterface::class),
             $c->get(Spora\Security\CsrfTokenService::class),
+            $c->get(Spora\Services\AuthValidator::class),
             $c->get('config'),
         );
     },
+
+    Spora\Services\AuthValidator::class => static fn(): Spora\Services\AuthValidator => new Spora\Services\AuthValidator(),
 
     ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
         return new ToolConfigService(

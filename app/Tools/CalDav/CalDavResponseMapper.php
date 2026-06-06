@@ -41,9 +41,6 @@ final class CalDavResponseMapper
     ): ToolResult {
         try {
             $response = $this->client->request($method, $url, $requestOptions);
-        } catch (CalDavException $e) {
-            $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => $method, 'url' => $url]);
-            return new ToolResult(false, "{$errorPrefix}: {$e->getMessage()}");
         } catch (Throwable $e) {
             $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => $method, 'url' => $url]);
             return new ToolResult(false, "{$errorPrefix}: {$e->getMessage()}");
@@ -119,17 +116,6 @@ final class CalDavResponseMapper
     public function handleDeleteResponse(): ToolResult
     {
         return new ToolResult(true, 'Event deleted successfully.');
-    }
-
-    public function handleDeleteError(int $statusCode): ToolResult
-    {
-        if ($statusCode === 412) {
-            return new ToolResult(false, 'Precondition Failed: The event has been modified since you fetched it. Please fetch the latest version and try again.');
-        }
-        if ($statusCode === 404) {
-            return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
-        }
-        return new ToolResult(false, "CalDAV server returned HTTP {$statusCode}");
     }
 
     /**

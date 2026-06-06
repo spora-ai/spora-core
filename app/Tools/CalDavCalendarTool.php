@@ -14,6 +14,7 @@ use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\CalDav\CalDavClient;
 use Spora\Tools\CalDav\CalDavResponseMapper;
+use Spora\Tools\CalDav\EventDateRange;
 use Spora\Tools\CalDav\IcsBuilder;
 use Spora\Tools\CalDav\IcsParser;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -68,9 +69,9 @@ final class CalDavCalendarTool extends AbstractTool
 
     public function __construct(
         private readonly ToolConfigService $configService,
-        private readonly \Symfony\Contracts\HttpClient\HttpClientInterface $httpClient,
-        private readonly ?LoggerInterface $logger = null,
-        private readonly array $appConfig = [],
+        \Symfony\Contracts\HttpClient\HttpClientInterface $httpClient,
+        ?LoggerInterface $logger = null,
+        array $appConfig = [],
     ) {
         $this->client = new CalDavClient($httpClient, $logger);
         $this->builder = new IcsBuilder($appConfig);
@@ -200,12 +201,14 @@ final class CalDavCalendarTool extends AbstractTool
         $icsContent = $this->builder->buildIcs(
             $this->builder->generateUid($agentId),
             $inputs['summary'],
-            $dates['start'],
-            $dates['end'],
             $inputs['description'],
             $inputs['location'],
-            $inputs['timezone'],
-            $inputs['allDay'],
+            new EventDateRange(
+                start: $dates['start'],
+                end: $dates['end'],
+                timezone: $inputs['timezone'],
+                allDay: $inputs['allDay'],
+            ),
         );
 
         $requestOptions = [
@@ -251,12 +254,14 @@ final class CalDavCalendarTool extends AbstractTool
         $icsContent = $this->builder->buildIcs(
             $updates['uid'] ?? $this->builder->generateUid($agentId),
             $updates['summary'],
-            $updates['start'],
-            $updates['end'],
             $updates['description'],
             $updates['location'],
-            $inputs['timezone'],
-            $inputs['allDay'],
+            new EventDateRange(
+                start: $updates['start'],
+                end: $updates['end'],
+                timezone: $inputs['timezone'],
+                allDay: $inputs['allDay'],
+            ),
         );
 
         $requestOptions = [
@@ -310,7 +315,7 @@ final class CalDavCalendarTool extends AbstractTool
             $requestOptions,
             fn(ResponseInterface $r) => $this->mapper->handleDeleteResponse(),
             'Failed to delete CalDAV event',
-            fn(ResponseInterface $r, int $code) => $this->mapper->handleDeleteError($code),
+            fn(ResponseInterface $r, int $code) => $this->mapper->handlePutError($code),
         );
     }
 
@@ -469,6 +474,32 @@ XML;
      */
     private function buildEditUpdates(array $arguments, array $existingData, string $timezone, bool $allDay): array|ToolResult
     {
+        $dates = $this->resolveEditDates($arguments, $existingData, $timezone, $allDay);
+        if ($dates instanceof ToolResult) {
+            return $dates;
+        }
+
+        if ($dates['end'] <= $dates['start']) {
+            return new ToolResult(false, 'end_date must be after start_date.');
+        }
+
+        return [
+            'uid'         => $existingData['uid'] ?: null,
+            'summary'     => !empty($arguments['summary']) ? trim((string) $arguments['summary']) : (string) $existingData['summary'],
+            'start'       => $dates['start'],
+            'end'         => $dates['end'],
+            'description' => !empty($arguments['description']) ? trim((string) $arguments['description']) : (string) $existingData['description'],
+            'location'    => !empty($arguments['location']) ? trim((string) $arguments['location']) : (string) $existingData['location'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     * @param array<string, mixed> $existingData
+     * @return array{start: DateTimeImmutable, end: DateTimeImmutable}|ToolResult
+     */
+    private function resolveEditDates(array $arguments, array $existingData, string $timezone, bool $allDay): array|ToolResult
+    {
         try {
             $start = !empty($arguments['start_date'])
                 ? $this->builder->parseEventDate((string) $arguments['start_date'], $timezone, $allDay)
@@ -483,17 +514,6 @@ XML;
         if (!$start instanceof DateTimeImmutable || !$end instanceof DateTimeImmutable) {
             return new ToolResult(false, 'Failed to parse existing event dates. Fetch the latest event details and verify DTSTART/DTEND are present.');
         }
-        if ($end <= $start) {
-            return new ToolResult(false, 'end_date must be after start_date.');
-        }
-
-        return [
-            'uid'         => $existingData['uid'] ?: null,
-            'summary'     => !empty($arguments['summary']) ? trim((string) $arguments['summary']) : (string) $existingData['summary'],
-            'start'       => $start,
-            'end'         => $end,
-            'description' => !empty($arguments['description']) ? trim((string) $arguments['description']) : (string) $existingData['description'],
-            'location'    => !empty($arguments['location']) ? trim((string) $arguments['location']) : (string) $existingData['location'],
-        ];
+        return ['start' => $start, 'end' => $end];
     }
 }

@@ -29,17 +29,14 @@ final class IcsBuilder
     public function buildIcs(
         string $uid,
         string $summary,
-        DateTimeImmutable $start,
-        DateTimeImmutable $end,
         string $description,
         string $location,
-        string $timezone,
-        bool $allDay,
+        EventDateRange $dates,
     ): string {
         $calendar = $this->makeCalendar();
         $event    = $this->makeEvent($uid, $summary, $description, $location);
 
-        $this->applyDates($event, $start, $end, $timezone, $allDay);
+        $this->applyDates($event, $dates->start, $dates->end, $dates->timezone, $dates->allDay);
 
         $calendar->addComponent($event);
         return (new Writer())->write($calendar);

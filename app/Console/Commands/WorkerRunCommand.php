@@ -46,11 +46,11 @@ final class WorkerRunCommand extends Command
 
     public function __construct(
         private readonly Database            $database,
-        private readonly OrchestratorInterface  $orchestrator,
+        OrchestratorInterface                $orchestrator,
         private readonly LoggerInterface        $logger,
         private readonly ContainerInterface     $container,
-        private readonly MercurePublisherInterface $mercure,
-        private readonly NotificationService $notificationService,
+        MercurePublisherInterface            $mercure,
+        NotificationService                  $notificationService,
     ) {
         $this->reaper = new WorkerReaper($logger, $notificationService);
         $this->queueProcessor = new WorkerQueueProcessor(

@@ -43,18 +43,10 @@ final class IcsParser
         }
 
         if ($loaded === false) {
-            $firstError = $loadErrors[0] ?? null;
-            $detail = $firstError instanceof LibXMLError ? trim($firstError->message) : 'malformed XML';
-            return new ToolResult(false, "CalDAV response could not be parsed: {$detail}");
+            return $this->malformedXmlResult($loadErrors);
         }
 
-        $xpath = $this->makeXPath($parser);
-        $calendarDataNodes = $xpath->query('//c:calendar-data');
-        if ($calendarDataNodes === false || $calendarDataNodes->length === 0) {
-            return new ToolResult(true, 'No events found in the specified time range.');
-        }
-
-        $eventData = $this->collectEvents($calendarDataNodes, $xpath);
+        $eventData = $this->collectEventsFromMultistatus($parser);
         if ($eventData === []) {
             return new ToolResult(true, 'No events found in the specified time range.');
         }
@@ -76,30 +68,23 @@ final class IcsParser
             return new ToolResult(false, 'No VEVENT found in the calendar data.');
         }
 
-        $uid         = $event->getUid();
-        $summary     = $event->getSummary();
-        $dtstart     = $event->getDtStart();
-        $dtend       = $event->getDtEnd();
-        $description = $event->getDescription();
-        $location    = $event->getLocation();
+        $details = new EventDetails(
+            uid: $event->getUid(),
+            summary: $event->getSummary(),
+            dtstart: $event->getDtStart(),
+            dtend: $event->getDtEnd(),
+            description: $event->getDescription(),
+            location: $event->getLocation(),
+        );
 
-        return new ToolResult(true, $this->formatGetEventOutput(
-            $eventUri,
-            $uid,
-            $summary,
-            $dtstart,
-            $dtend,
-            $description,
-            $location,
-            $etag,
-        ), [
+        return new ToolResult(true, $this->formatGetEventOutput($eventUri, $etag, $details), [
             'event_uri'   => $eventUri,
-            'uid'         => $uid,
-            'summary'     => $summary,
-            'dtstart'     => $dtstart,
-            'dtend'       => $dtend,
-            'description' => $description,
-            'location'    => $location,
+            'uid'         => $details->uid,
+            'summary'     => $details->summary,
+            'dtstart'     => $details->dtstart,
+            'dtend'       => $details->dtend,
+            'description' => $details->description,
+            'location'    => $details->location,
             'etag'        => $etag,
         ]);
     }
@@ -162,9 +147,9 @@ final class IcsParser
         if ($events === []) {
             return null;
         }
-        /** @var VEvent $event */
-        $event = $events[0];
-        return $event;
+        /** @var VEvent $first */
+        $first = $events[0];
+        return $first;
     }
 
     private function makeXPath(DOMDocument $parser): DOMXPath
@@ -209,33 +194,28 @@ final class IcsParser
 
     private function formatGetEventOutput(
         string $eventUri,
-        ?string $uid,
-        ?string $summary,
-        ?string $dtstart,
-        ?string $dtend,
-        ?string $description,
-        ?string $location,
         ?string $etag,
+        EventDetails $details,
     ): string {
         $output  = "Event Details:\n";
         $output .= "- URI: {$eventUri}\n";
-        if ($uid) {
-            $output .= "- UID: {$uid}\n";
+        if ($details->uid) {
+            $output .= "- UID: {$details->uid}\n";
         }
-        if ($summary) {
-            $output .= "- Summary: {$summary}\n";
+        if ($details->summary) {
+            $output .= "- Summary: {$details->summary}\n";
         }
-        if ($dtstart) {
-            $output .= "- Start: {$dtstart}\n";
+        if ($details->dtstart) {
+            $output .= "- Start: {$details->dtstart}\n";
         }
-        if ($dtend) {
-            $output .= "- End: {$dtend}\n";
+        if ($details->dtend) {
+            $output .= "- End: {$details->dtend}\n";
         }
-        if ($description) {
-            $output .= "- Description: {$description}\n";
+        if ($details->description) {
+            $output .= "- Description: {$details->description}\n";
         }
-        if ($location) {
-            $output .= "- Location: {$location}\n";
+        if ($details->location) {
+            $output .= "- Location: {$details->location}\n";
         }
         if ($etag) {
             $output .= "- ETag: {$etag}\n";
@@ -277,22 +257,62 @@ final class IcsParser
             return $parsed instanceof DateTimeImmutable ? $parsed : null;
         }
 
-        if (str_contains($dateStr, ';TZID=') && preg_match('/;TZID=([^:]+):(.+)$/', $dateStr, $m)) {
-            try {
-                $tz = new DateTimeZone($m[1]);
-                $datePart = $m[2];
-                $parsed = DateTimeImmutable::createFromFormat(self::ICS_DATETIME_LOCAL, $datePart, $tz);
-                return $parsed instanceof DateTimeImmutable ? $parsed->setTimezone($tz) : null;
-            } catch (Throwable) {
-                // Invalid TZID or unparseable date; fall through to the
-                // generic DateTimeImmutable parser below.
-            }
-        }
+        return $this->parseIcsDateWithTimezone($dateStr) ?? $this->parseIcsDateGeneric($dateStr);
+    }
 
+    /**
+     * Parse an iCalendar date with an explicit TZID parameter
+     * (e.g. "DTSTART;TZID=Europe/Berlin:20260601T100000"). Returns null if
+     * the input lacks a recognisable TZID or the date fails to parse.
+     */
+    private function parseIcsDateWithTimezone(string $dateStr): ?DateTimeImmutable
+    {
+        if (!str_contains($dateStr, ';TZID=') || !preg_match('/;TZID=([^:]+):(.+)$/', $dateStr, $m)) {
+            return null;
+        }
+        try {
+            $tz = new DateTimeZone($m[1]);
+            $parsed = DateTimeImmutable::createFromFormat(self::ICS_DATETIME_LOCAL, $m[2], $tz);
+        } catch (Throwable) {
+            // Invalid TZID — fall back to the generic parser in the caller.
+            return null;
+        }
+        return $parsed instanceof DateTimeImmutable ? $parsed->setTimezone($tz) : null;
+    }
+
+    /**
+     * Last-resort parser that hands the string to DateTimeImmutable's
+     * native constructor. Returns null on parse failure.
+     */
+    private function parseIcsDateGeneric(string $dateStr): ?DateTimeImmutable
+    {
         try {
             return new DateTimeImmutable($dateStr);
         } catch (Throwable) {
             return null;
         }
+    }
+
+    /**
+     * @param list<LibXMLError> $loadErrors
+     */
+    private function malformedXmlResult(array $loadErrors): ToolResult
+    {
+        $firstError = $loadErrors[0] ?? null;
+        $detail = $firstError instanceof LibXMLError ? trim($firstError->message) : 'malformed XML';
+        return new ToolResult(false, "CalDAV response could not be parsed: {$detail}");
+    }
+
+    /**
+     * @return list<array{event_uri: ?string, uid: string, summary: string, dtstart: string, dtend: string}>
+     */
+    private function collectEventsFromMultistatus(DOMDocument $parser): array
+    {
+        $xpath = $this->makeXPath($parser);
+        $calendarDataNodes = $xpath->query('//c:calendar-data');
+        if ($calendarDataNodes === false || $calendarDataNodes->length === 0) {
+            return [];
+        }
+        return $this->collectEvents($calendarDataNodes, $xpath);
     }
 }

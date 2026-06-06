@@ -284,9 +284,27 @@ final class ScheduledRunProcessor
         $key = $match[1];
         $inlineDefault = $match[2] ?? null;
 
-        $builtin = match (true) {
-            $key === 'current_date' || $key === 'date'     => date('Y-m-d'),
-            $key === 'current_time' || $key === 'time'     => date('H:i'),
+        $builtin = $this->resolveBuiltinDateVariable($key);
+        if ($builtin !== null) {
+            return $builtin;
+        }
+
+        if ($agent !== null && ($key === 'agent_name' || $key === 'user_name')) {
+            return $key === 'agent_name'
+                ? $agent->name
+                : $this->resolveUserName($agent, $key);
+        }
+
+        return (isset($defaults[$key]) && $defaults[$key] !== '' ? (string) $defaults[$key] : null)
+            ?? $inlineDefault
+            ?? $match[0];
+    }
+
+    private function resolveBuiltinDateVariable(string $key): ?string
+    {
+        return match (true) {
+            $key === 'current_date' || $key === 'date'        => date('Y-m-d'),
+            $key === 'current_time' || $key === 'time'        => date('H:i'),
             $key === 'current_datetime' || $key === 'datetime' => date('Y-m-d\TH:i'),
             $key === 'day_of_week'    => date('l'),
             $key === 'day_of_month'   => date('j'),
@@ -294,23 +312,11 @@ final class ScheduledRunProcessor
             $key === 'year'           => date('Y'),
             default                   => null,
         };
-        if ($builtin !== null) {
-            return $builtin;
-        }
+    }
 
-        if ($key === 'agent_name' && $agent !== null) {
-            return $agent->name;
-        }
-
-        if ($key === 'user_name' && $agent !== null) {
-            $user = \Spora\Models\User::find($agent->user_id);
-            return $user instanceof \Spora\Models\User ? ($user->username ?? $key) : $key;
-        }
-
-        if (isset($defaults[$key]) && $defaults[$key] !== '') {
-            return (string) $defaults[$key];
-        }
-
-        return $inlineDefault ?? $match[0];
+    private function resolveUserName(Agent $agent, string $key): string
+    {
+        $user = \Spora\Models\User::find($agent->user_id);
+        return $user instanceof \Spora\Models\User ? ($user->username ?? $key) : $key;
     }
 }

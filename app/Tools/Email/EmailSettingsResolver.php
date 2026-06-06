@@ -79,7 +79,6 @@ final class EmailSettingsResolver
      */
     public function validateSmtpSettings(array $settings, string $to): ?ToolResult
     {
-        $host = $settings[self::KEY_SMTP_FROM] ?? '';
         $from = $settings[self::KEY_SMTP_FROM] ?? '';
         $smtpHost = $settings['core.smtp.host'] ?? '';
 
@@ -88,14 +87,19 @@ final class EmailSettingsResolver
         }
 
         $allowed = $settings[self::KEY_SMTP_ALLOWED_RECIPIENTS] ?? '';
-        if (empty($allowed) || trim($allowed) === '*') {
+        if ($allowed === '' || trim($allowed) === '*') {
             return null;
         }
 
+        return $this->checkAllowedRecipients($allowed, $to);
+    }
+
+    private function checkAllowedRecipients(string $allowed, string $to): ?ToolResult
+    {
         $allowedList = array_map('trim', explode(',', $allowed));
-        if (!in_array($to, $allowedList, true)) {
-            return new ToolResult(false, "SECURITY REJECTION: The agent is only permitted to send emails to: {$allowed}. Cannot send to {$to}");
+        if (in_array($to, $allowedList, true)) {
+            return null;
         }
-        return null;
+        return new ToolResult(false, "SECURITY REJECTION: The agent is only permitted to send emails to: {$allowed}. Cannot send to {$to}");
     }
 }

@@ -144,14 +144,17 @@ final class ReadUrlTool extends AbstractTool
         $contentType = strtolower($response->getHeaders()['content-type'][0] ?? 'text/plain');
         $content     = $response->getContent(false);
 
+        return $this->buildContentResult($contentType, $content);
+    }
+
+    private function buildContentResult(string $contentType, string $content): ToolResult
+    {
         if (str_contains($contentType, 'xml') || str_contains($contentType, 'rss')) {
             return new ToolResult(true, "Fetched XML/RSS Content:\n\n" . $this->truncate($content));
         }
-
         if (str_contains($contentType, 'json')) {
             return new ToolResult(true, "Fetched JSON Content:\n\n" . $this->truncate($content));
         }
-
         return $this->convertHtmlToMarkdownResult($content);
     }
 

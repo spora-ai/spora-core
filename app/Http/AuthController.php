@@ -13,6 +13,7 @@ use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
 use Spora\Security\CsrfTokenService;
+use Spora\Services\AuthValidator;
 use Spora\Services\RateLimiter;
 use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -27,20 +28,22 @@ use Symfony\Component\HttpFoundation\Response;
  * field-level validation, then delegates to a private helper that owns the try/catch
  * block mapping delight-im exceptions to JSON responses. This keeps every method to
  * at most three `return` statements to satisfy SonarQube S1142.
+ *
+ * JSON decoding, field validation, and exception → JsonResponse mapping live in
+ * {@see AuthValidator} so the controller stays under the S1448 (≤20 methods) limit.
  */
 final class AuthController
 {
     private const RATE_LIMIT_MAX_ATTEMPTS = 5;
     private const RATE_LIMIT_WINDOW_SECONDS = 60;
 
-    private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
-    private const MSG_AUTHENTICATION_REQUIRED = 'Authentication required.';
     private const MSG_EMAIL_REQUIRED = 'The field "email" is required.';
 
     public function __construct(
         private readonly AuthService $authService,
         private readonly UserServiceInterface $userService,
         private readonly CsrfTokenService $csrfService,
+        private readonly AuthValidator $validator,
         private readonly array $config = [],
     ) {}
 
@@ -53,7 +56,7 @@ final class AuthController
         }
 
         if (!($this->config['allow_registration'] ?? true)) {
-            return $this->error('REGISTRATION_DISABLED', 'Registration is currently disabled.', Response::HTTP_FORBIDDEN);
+            return $this->validator->error('REGISTRATION_DISABLED', 'Registration is currently disabled.', Response::HTTP_FORBIDDEN);
         }
 
         return $this->handleRegister($request, $clientIp);
@@ -86,7 +89,7 @@ final class AuthController
         $userId = $this->authService->currentUserId();
 
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
+            return $this->validator->unauthenticated();
         }
 
         return $this->buildMeResponse($userId);
@@ -96,17 +99,25 @@ final class AuthController
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
+            return $this->validator->unauthenticated();
+        }
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->validator->invalidJson();
+        }
+        if ($this->validator->missingFields($body, ['current_password', 'new_password'])) {
+            return $this->validator->error('VALIDATION_ERROR', 'The fields "current_password" and "new_password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        return $this->changePasswordAndRespond($request);
+        return $this->performPasswordChange($body);
     }
 
     public function account(Request $request): JsonResponse
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
+            return $this->validator->unauthenticated();
         }
 
         return $this->updateAccountAndRespond($userId, $request);
@@ -117,7 +128,7 @@ final class AuthController
         $token = $request->query->get('token', '');
 
         if ($selector === '' || $token === '') {
-            return $this->error('VALIDATION_ERROR', 'The selector and token are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->validator->error('VALIDATION_ERROR', 'The selector and token are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         return $this->performEmailVerification($selector, $token);
@@ -136,13 +147,13 @@ final class AuthController
 
     public function resetPassword(Request $request): JsonResponse
     {
-        $body = $this->decodeBodyOrFail($request);
+        $body = $this->validator->decodeBodyOrFail($request);
         if ($body instanceof JsonResponse) {
             return $body;
         }
 
-        if ($this->missingFields($body, ['selector', 'token', 'password'])) {
-            return $this->error('VALIDATION_ERROR', 'The fields "selector", "token", and "password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        if ($this->validator->missingFields($body, ['selector', 'token', 'password'])) {
+            return $this->validator->error('VALIDATION_ERROR', 'The fields "selector", "token", and "password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         return $this->performPasswordReset($body);
@@ -163,7 +174,7 @@ final class AuthController
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
+            return $this->validator->unauthenticated();
         }
 
         return $this->handleEmailChangeRequest($request);
@@ -171,13 +182,13 @@ final class AuthController
 
     public function confirmEmailChange(Request $request): JsonResponse
     {
-        $body = $this->decodeBodyOrFail($request);
+        $body = $this->validator->decodeBodyOrFail($request);
         if ($body instanceof JsonResponse) {
             return $body;
         }
 
-        if ($this->missingFields($body, ['selector', 'token'])) {
-            return $this->error('VALIDATION_ERROR', 'The selector and token are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        if ($this->validator->missingFields($body, ['selector', 'token'])) {
+            return $this->validator->error('VALIDATION_ERROR', 'The selector and token are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         return $this->performEmailChangeConfirmation($body);
@@ -195,7 +206,7 @@ final class AuthController
      */
     private function handleRegister(Request $request, string $clientIp): JsonResponse
     {
-        $body = $this->decodeBodyOrFail($request);
+        $body = $this->validator->decodeBodyOrFail($request);
         if ($body instanceof JsonResponse) {
             return $body;
         }
@@ -213,12 +224,12 @@ final class AuthController
      */
     private function validateRegisterFields(array $body): ?JsonResponse
     {
-        if ($this->missingFields($body, ['email', 'password', 'display_name', 'confirm_password'])) {
-            return $this->error('VALIDATION_ERROR', 'The fields "email", "password", "display_name", and "confirm_password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        if ($this->validator->missingFields($body, ['email', 'password', 'display_name', 'confirm_password'])) {
+            return $this->validator->error('VALIDATION_ERROR', 'The fields "email", "password", "display_name", and "confirm_password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         if ($body['password'] !== $body['confirm_password']) {
-            return $this->error('VALIDATION_ERROR', 'Passwords do not match.', Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->validator->error('VALIDATION_ERROR', 'Passwords do not match.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         return null;
@@ -234,9 +245,9 @@ final class AuthController
         } catch (EmailTakenException) {
             RateLimiter::clear($clientIp);
 
-            return $this->error('EMAIL_TAKEN', 'A user with that email address already exists.', Response::HTTP_CONFLICT);
+            return $this->validator->error('EMAIL_TAKEN', 'A user with that email address already exists.', Response::HTTP_CONFLICT);
         } catch (InvalidArgumentException $e) {
-            return $this->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->validator->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         return $this->withRateLimitHeaders(
@@ -253,13 +264,13 @@ final class AuthController
 
     private function handleLogin(Request $request, string $clientIp): JsonResponse
     {
-        $body = $this->decodeBodyOrFail($request);
+        $body = $this->validator->decodeBodyOrFail($request);
         if ($body instanceof JsonResponse) {
             return $body;
         }
 
-        if ($this->missingFields($body, ['email', 'password'])) {
-            return $this->error('VALIDATION_ERROR', 'The fields "email" and "password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        if ($this->validator->missingFields($body, ['email', 'password'])) {
+            return $this->validator->error('VALIDATION_ERROR', 'The fields "email" and "password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         return $this->performLogin($body, $clientIp);
@@ -274,9 +285,9 @@ final class AuthController
             $this->authService->login((string) $body['email'], (string) $body['password'], (bool) ($body['remember_me'] ?? false));
             RateLimiter::clear($clientIp);
         } catch (InvalidCredentialsException) {
-            return $this->error('INVALID_CREDENTIALS', 'The email address or password is incorrect.', Response::HTTP_UNAUTHORIZED);
+            return $this->validator->error('INVALID_CREDENTIALS', 'The email address or password is incorrect.', Response::HTTP_UNAUTHORIZED);
         } catch (AccountUnverifiedException) {
-            return $this->error('ACCOUNT_UNVERIFIED', 'Please verify your email address before logging in.', Response::HTTP_FORBIDDEN);
+            return $this->validator->error('ACCOUNT_UNVERIFIED', 'Please verify your email address before logging in.', Response::HTTP_FORBIDDEN);
         }
 
         $userId = $this->authService->currentUserId();
@@ -300,7 +311,7 @@ final class AuthController
         $result = $this->userService->getUser($userId);
 
         if ($result === null) {
-            return $this->error('NOT_FOUND', 'User not found.', Response::HTTP_NOT_FOUND);
+            return $this->validator->error('NOT_FOUND', 'User not found.', Response::HTTP_NOT_FOUND);
         }
 
         $user = $result['user'];
@@ -320,20 +331,6 @@ final class AuthController
         );
     }
 
-    private function changePasswordAndRespond(Request $request): JsonResponse
-    {
-        $body = $this->decodeBodyOrFail($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-
-        if ($this->missingFields($body, ['current_password', 'new_password'])) {
-            return $this->error('VALIDATION_ERROR', 'The fields "current_password" and "new_password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        return $this->performPasswordChange($body);
-    }
-
     /**
      * @param array<string, mixed> $body
      */
@@ -341,12 +338,8 @@ final class AuthController
     {
         try {
             $this->authService->changePassword((string) $body['current_password'], (string) $body['new_password']);
-        } catch (\Delight\Auth\NotLoggedInException) {
-            return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
-        } catch (\Delight\Auth\InvalidPasswordException) {
-            return $this->error('INVALID_PASSWORD', 'The new password does not meet the minimum requirements.', Response::HTTP_UNPROCESSABLE_ENTITY);
-        } catch (\Delight\Auth\AuthError) {
-            return $this->error('WRONG_PASSWORD', 'The current password is incorrect.', Response::HTTP_UNAUTHORIZED);
+        } catch (AuthException $e) {
+            return $this->validator->mapPasswordChangeError($e);
         }
 
         return new JsonResponse(['message' => 'Password updated'], Response::HTTP_OK);
@@ -354,14 +347,14 @@ final class AuthController
 
     private function updateAccountAndRespond(int $userId, Request $request): JsonResponse
     {
-        $body = $this->decodeBodyOrFail($request);
+        $body = $this->validator->decodeBodyOrFail($request);
         if ($body instanceof JsonResponse) {
             return $body;
         }
 
         $result = $this->userService->updateUser($userId, $body);
         if ($result === null) {
-            return $this->error('NOT_FOUND', 'User not found.', Response::HTTP_NOT_FOUND);
+            return $this->validator->error('NOT_FOUND', 'User not found.', Response::HTTP_NOT_FOUND);
         }
 
         return new JsonResponse(
@@ -375,32 +368,21 @@ final class AuthController
         try {
             $this->authService->confirmEmail($selector, $token);
         } catch (AuthException $e) {
-            return $this->mapEmailVerificationError($e);
+            return $this->validator->mapEmailVerificationError($e);
         }
 
         return new JsonResponse(['message' => 'Email verified successfully.'], Response::HTTP_OK);
     }
 
-    private function mapEmailVerificationError(AuthException $e): JsonResponse
-    {
-        return match (true) {
-            $e instanceof \Delight\Auth\InvalidSelectorTokenPairException => $this->error('INVALID_TOKEN', 'The confirmation link is invalid.', Response::HTTP_BAD_REQUEST),
-            $e instanceof \Delight\Auth\TokenExpiredException => $this->error('TOKEN_EXPIRED', 'The confirmation link has expired.', Response::HTTP_BAD_REQUEST),
-            $e instanceof \Delight\Auth\UserAlreadyExistsException => $this->error('EMAIL_TAKEN', 'That email address is already in use.', Response::HTTP_CONFLICT),
-            $e instanceof \Delight\Auth\TooManyRequestsException => $this->error('TOO_MANY_REQUESTS', 'Too many requests.', Response::HTTP_TOO_MANY_REQUESTS),
-            default => throw $e,
-        };
-    }
-
     private function handleForgotPassword(Request $request, string $clientIp): JsonResponse
     {
-        $body = $this->decodeBodyOrFail($request);
+        $body = $this->validator->decodeBodyOrFail($request);
         if ($body instanceof JsonResponse) {
             return $body;
         }
 
-        if ($this->missingFields($body, ['email'])) {
-            return $this->error('VALIDATION_ERROR', self::MSG_EMAIL_REQUIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
+        if ($this->validator->missingFields($body, ['email'])) {
+            return $this->validator->error('VALIDATION_ERROR', self::MSG_EMAIL_REQUIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         $this->authService->forgotPassword((string) $body['email']);
@@ -419,32 +401,21 @@ final class AuthController
         try {
             $this->authService->resetPassword((string) $body['selector'], (string) $body['token'], (string) $body['password']);
         } catch (AuthException $e) {
-            return $this->mapPasswordResetError($e);
+            return $this->validator->mapPasswordResetError($e);
         }
 
         return new JsonResponse(['message' => 'Password reset successfully.'], Response::HTTP_OK);
     }
 
-    private function mapPasswordResetError(AuthException $e): JsonResponse
-    {
-        return match (true) {
-            $e instanceof \Delight\Auth\InvalidSelectorTokenPairException => $this->error('INVALID_TOKEN', 'The selector or token is invalid.', Response::HTTP_BAD_REQUEST),
-            $e instanceof \Delight\Auth\TokenExpiredException => $this->error('INVALID_TOKEN', 'The token is invalid or has expired.', Response::HTTP_BAD_REQUEST),
-            $e instanceof \Delight\Auth\ResetDisabledException => $this->error('RESET_DISABLED', 'Password reset is disabled.', Response::HTTP_FORBIDDEN),
-            $e instanceof \Delight\Auth\InvalidPasswordException => $this->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY),
-            default => $this->error('AUTH_ERROR', 'An authentication error occurred.', Response::HTTP_INTERNAL_SERVER_ERROR),
-        };
-    }
-
     private function handleResendVerification(Request $request, string $clientIp): JsonResponse
     {
-        $body = $this->decodeBodyOrFail($request);
+        $body = $this->validator->decodeBodyOrFail($request);
         if ($body instanceof JsonResponse) {
             return $body;
         }
 
-        if ($this->missingFields($body, ['email'])) {
-            return $this->error('VALIDATION_ERROR', self::MSG_EMAIL_REQUIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
+        if ($this->validator->missingFields($body, ['email'])) {
+            return $this->validator->error('VALIDATION_ERROR', self::MSG_EMAIL_REQUIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         try {
@@ -462,13 +433,13 @@ final class AuthController
 
     private function handleEmailChangeRequest(Request $request): JsonResponse
     {
-        $body = $this->decodeBodyOrFail($request);
+        $body = $this->validator->decodeBodyOrFail($request);
         if ($body instanceof JsonResponse) {
             return $body;
         }
 
-        if ($this->missingFields($body, ['email'])) {
-            return $this->error('VALIDATION_ERROR', self::MSG_EMAIL_REQUIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
+        if ($this->validator->missingFields($body, ['email'])) {
+            return $this->validator->error('VALIDATION_ERROR', self::MSG_EMAIL_REQUIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         return $this->performEmailChangeRequest($body);
@@ -482,21 +453,10 @@ final class AuthController
         try {
             $this->authService->changeEmail((string) $body['email']);
         } catch (AuthException $e) {
-            return $this->mapEmailChangeRequestError($e);
+            return $this->validator->mapEmailChangeRequestError($e);
         }
 
         return new JsonResponse(['message' => 'A confirmation email has been sent to your new email address.'], Response::HTTP_OK);
-    }
-
-    private function mapEmailChangeRequestError(AuthException $e): JsonResponse
-    {
-        return match (true) {
-            $e instanceof \Delight\Auth\InvalidEmailException => $this->error('VALIDATION_ERROR', 'The provided email address is invalid.', Response::HTTP_UNPROCESSABLE_ENTITY),
-            $e instanceof \Delight\Auth\UserAlreadyExistsException => $this->error('EMAIL_TAKEN', 'A user with that email address already exists.', Response::HTTP_CONFLICT),
-            $e instanceof \Delight\Auth\EmailNotVerifiedException => $this->error('EMAIL_NOT_VERIFIED', 'You must verify your current email address before changing it.', Response::HTTP_FORBIDDEN),
-            $e instanceof \Delight\Auth\NotLoggedInException => $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED),
-            default => $this->error('AUTH_ERROR', 'An authentication error occurred.', Response::HTTP_INTERNAL_SERVER_ERROR),
-        };
     }
 
     /**
@@ -507,38 +467,16 @@ final class AuthController
         try {
             $this->authService->confirmEmail((string) $body['selector'], (string) $body['token']);
         } catch (AuthException $e) {
-            return $this->mapEmailChangeConfirmationError($e);
+            return $this->validator->mapEmailChangeConfirmationError($e);
         }
 
         return new JsonResponse(['message' => 'Email address changed successfully.'], Response::HTTP_OK);
     }
 
-    private function mapEmailChangeConfirmationError(AuthException $e): JsonResponse
-    {
-        return match (true) {
-            $e instanceof \Delight\Auth\InvalidSelectorTokenPairException => $this->error('INVALID_TOKEN', 'The confirmation link is invalid.', Response::HTTP_BAD_REQUEST),
-            $e instanceof \Delight\Auth\TokenExpiredException => $this->error('TOKEN_EXPIRED', 'The confirmation link has expired.', Response::HTTP_BAD_REQUEST),
-            $e instanceof \Delight\Auth\UserAlreadyExistsException => $this->error('EMAIL_TAKEN', 'That email address is already in use.', Response::HTTP_CONFLICT),
-            $e instanceof \Delight\Auth\TooManyRequestsException => $this->error('TOO_MANY_REQUESTS', 'Too many requests.', Response::HTTP_TOO_MANY_REQUESTS),
-            default => $this->error('AUTH_ERROR', 'An error occurred confirming email change.', Response::HTTP_INTERNAL_SERVER_ERROR),
-        };
-    }
-
-    /**
-     * Decode the JSON body, returning a 400 JsonResponse on failure.
-     * Lets callers write `if ($body instanceof JsonResponse) return $body;`
-     * instead of nesting a try/catch in every public method.
-     *
-     * @return array<string, mixed>|JsonResponse
-     */
-    private function decodeBodyOrFail(Request $request): array|JsonResponse
-    {
-        try {
-            return $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
-        }
-    }
+    // ---------------------------------------------------------------------
+    // HTTP-layer helpers — kept here because they own request-header and
+    // client-IP concerns that don't belong in the validator.
+    // ---------------------------------------------------------------------
 
     private function getClientIp(Request $request): string
     {
@@ -584,6 +522,9 @@ final class AuthController
         return $response;
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     private function decodeJson(Request $request): array
     {
         $content = $request->getContent();
@@ -592,21 +533,5 @@ final class AuthController
         }
 
         return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
-    }
-
-    private function missingFields(array $body, array $fields): bool
-    {
-        foreach ($fields as $field) {
-            if (($body[$field] ?? '') === '') {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function error(string $code, string $message, int $status): JsonResponse
-    {
-        return new JsonResponse(['error' => ['code' => $code, 'message' => $message]], $status);
     }
 }
