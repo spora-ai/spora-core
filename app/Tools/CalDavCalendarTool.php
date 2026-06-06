@@ -603,24 +603,30 @@ XML;
      */
     private function parseEditDates(array $arguments, array $existingData, string $timezone, bool $allDay): array|ToolResult
     {
-        $startDateStr = $arguments['start_date'] ?? null;
-        $endDateStr = $arguments['end_date'] ?? null;
-
         try {
-            $start = $startDateStr ? $this->parseEventDate($startDateStr, $timezone, $allDay) : $existingData['dtstart'];
-            $end = $endDateStr ? $this->parseEventDate($endDateStr, $timezone, $allDay) : $existingData['dtend'];
+            $start = !empty($arguments['start_date']) ? $this->parseEventDate((string) $arguments['start_date'], $timezone, $allDay) : $existingData['dtstart'];
+            $end = !empty($arguments['end_date']) ? $this->parseEventDate((string) $arguments['end_date'], $timezone, $allDay) : $existingData['dtend'];
         } catch (Throwable $e) {
             return new ToolResult(false, 'Invalid date format: ' . $e->getMessage());
         }
 
+        $validation = $this->validateEditedDates($start, $end);
+        if ($validation instanceof ToolResult) {
+            return $validation;
+        }
+
+        return ['start' => $start, 'end' => $end];
+    }
+
+    private function validateEditedDates(mixed $start, mixed $end): ?ToolResult
+    {
         if (!$start instanceof DateTimeImmutable || !$end instanceof DateTimeImmutable) {
             return new ToolResult(false, 'Failed to parse existing event dates. Fetch the latest event details and verify DTSTART/DTEND are present.');
         }
         if ($end <= $start) {
             return new ToolResult(false, 'end_date must be after start_date.');
         }
-
-        return ['start' => $start, 'end' => $end];
+        return null;
     }
 
     /**
@@ -676,16 +682,8 @@ XML;
 
         $statusCode = $response->getStatusCode();
 
-        if ($statusCode === 412) {
-            return new ToolResult(false, 'Precondition Failed: The event has been modified since you fetched it. Please fetch the latest version and try again.');
-        }
-        if ($statusCode === 404) {
-            return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
-        }
         if ($statusCode >= 400) {
-            $errorMsg = $response->getContent(false);
-            $this->logHttpError('PUT', $eventUri, $statusCode, $errorMsg, $headers);
-            return new ToolResult(false, "CalDAV server returned HTTP {$statusCode}");
+            return $this->putErrorResult($eventUri, $response, $statusCode, $headers);
         }
 
         $newEtag = $headers['etag'][0] ?? null;
@@ -693,6 +691,23 @@ XML;
             'event_uri' => $eventUri,
             'etag' => $newEtag,
         ]);
+    }
+
+    /**
+     * @param array<string, array<int, string>> $headers
+     */
+    private function putErrorResult(string $eventUri, ResponseInterface $response, int $statusCode, array $headers): ToolResult
+    {
+        if ($statusCode === 412) {
+            return new ToolResult(false, 'Precondition Failed: The event has been modified since you fetched it. Please fetch the latest version and try again.');
+        }
+        if ($statusCode === 404) {
+            return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
+        }
+
+        $errorMsg = $response->getContent(false);
+        $this->logHttpError('PUT', $eventUri, $statusCode, $errorMsg, $headers);
+        return new ToolResult(false, "CalDAV server returned HTTP {$statusCode}");
     }
 
     public function deleteEvent(array $arguments, int $agentId, ?int $userId): ToolResult
