@@ -27,7 +27,7 @@ final class MemoryController
     /**
      * GET /api/v1/memories
      */
-    public function index(Request $request): JsonResponse
+    public function index(): JsonResponse
     {
         $userId = $this->authService->currentUserId();
 

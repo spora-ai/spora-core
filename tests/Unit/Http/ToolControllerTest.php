@@ -199,8 +199,7 @@ describe('ToolController::deleteUserSettings', function (): void {
         [$controller, $authService] = makeToolController();
         $userId = bootAuth($authService, 'deluser@example.com');
 
-        $request = new Request();
-        $response = $controller->deleteUserSettings($request, 'calculator');
+        $response = $controller->deleteUserSettings('calculator');
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
@@ -211,8 +210,7 @@ describe('ToolController::deleteUserSettings', function (): void {
         [$controller, $authService] = makeToolController();
         bootAuth($authService, 'deluser404@example.com');
 
-        $request = new Request();
-        $response = $controller->deleteUserSettings($request, 'unknown');
+        $response = $controller->deleteUserSettings('unknown');
 
         expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
     });

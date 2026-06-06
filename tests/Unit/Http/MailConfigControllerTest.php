@@ -132,7 +132,7 @@ test('test() returns 401 when no user is authenticated', function (): void {
     ]);
     clearSession();
 
-    $response = $controller->test(new Request());
+    $response = $controller->test();
 
     expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
     $body = json_decode($response->getContent(), true);
@@ -146,7 +146,7 @@ test('test() returns 200 when log driver sends successfully', function (): void 
     ]);
     bootAuth($authService, 'mailtest@example.com');
 
-    $response = $controller->test(new Request());
+    $response = $controller->test();
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
     $body = json_decode($response->getContent(), true);
@@ -160,7 +160,7 @@ test('test() returns 500 when mail driver is invalid', function (): void {
     ]);
     bootAuth($authService, 'badmail@example.com');
 
-    $response = $controller->test(new Request());
+    $response = $controller->test();
 
     expect($response->getStatusCode())->toBe(Response::HTTP_INTERNAL_SERVER_ERROR);
     $body = json_decode($response->getContent(), true);

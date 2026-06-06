@@ -95,60 +95,71 @@ final class TavilySearchTool extends AbstractTool
         }
 
         try {
-            $url = 'https://api.tavily.com/search';
-            $payload = [
-                'api_key'      => $apiKey,
-                'query'        => $query,
-                'search_depth' => $searchDepth,
-                'include_answer' => true,
-            ];
-
-            $this->logger?->debug('TavilySearchTool: HTTP request', [
-                'method' => 'POST',
-                'url' => $url,
-                'headers' => ['Content-Type' => 'application/json'],
-                'payload' => ['api_key' => '***', 'query' => $query, 'search_depth' => $searchDepth, 'include_answer' => true],
-                'timeout' => $this->effectiveTimeout($settings),
-            ]);
-
-            $response = $this->httpClient->request('POST', $url, [
-                'headers' => [
-                    'Content-Type' => 'application/json',
-                ],
-                'json' => $payload,
-                'timeout' => $this->effectiveTimeout($settings),
-            ]);
-
-            $statusCode = $response->getStatusCode();
-            $this->logger?->debug('TavilySearchTool: HTTP response', [
-                'status_code' => $statusCode,
-                'url' => $url,
-            ]);
-
-            if ($statusCode >= 400) {
-                $errorBody = $response->getContent(false);
-                $this->logger?->error('Tavily Search API Error', ['status' => $statusCode, 'body' => $errorBody]);
-                return new ToolResult(false, "Web search failed with HTTP {$statusCode}");
-            }
-
-            $data = $response->toArray(false);
-
-            $output = "Search Results for '{$query}':\n\n";
-            if (!empty($data['answer'])) {
-                $output .= "Summary: {$data['answer']}\n\n";
-            }
-
-            foreach (($data['results'] ?? []) as $i => $result) {
-                $num = $i + 1;
-                $output .= "[{$num}] {$result['title']}\n";
-                $output .= "URL: {$result['url']}\n";
-                $output .= "{$result['content']}\n\n";
-            }
-
-            return new ToolResult(true, $output);
+            return $this->performTavilySearch($query, $searchDepth, $apiKey, $this->effectiveTimeout($settings));
         } catch (Throwable $e) {
             $this->logger?->error('Tavily API Exception', ['exception' => $e]);
-            return new ToolResult(false, "Search tool error: " . $e->getMessage());
+            return new ToolResult(false, 'Search tool error: ' . $e->getMessage());
         }
+    }
+
+    private function performTavilySearch(string $query, string $searchDepth, string $apiKey, int $timeout): ToolResult
+    {
+        $url = 'https://api.tavily.com/search';
+        $payload = [
+            'api_key'        => $apiKey,
+            'query'          => $query,
+            'search_depth'   => $searchDepth,
+            'include_answer' => true,
+        ];
+
+        $this->logger?->debug('TavilySearchTool: HTTP request', [
+            'method'  => 'POST',
+            'url'     => $url,
+            'headers' => ['Content-Type' => 'application/json'],
+            'payload' => ['api_key' => '***', 'query' => $query, 'search_depth' => $searchDepth, 'include_answer' => true],
+            'timeout' => $timeout,
+        ]);
+
+        $response = $this->httpClient->request('POST', $url, [
+            'headers' => ['Content-Type' => 'application/json'],
+            'json'    => $payload,
+            'timeout' => $timeout,
+        ]);
+
+        $statusCode = $response->getStatusCode();
+        $this->logger?->debug('TavilySearchTool: HTTP response', [
+            'status_code' => $statusCode,
+            'url'         => $url,
+        ]);
+
+        if ($statusCode >= 400) {
+            $this->logger?->error('Tavily Search API Error', [
+                'status' => $statusCode,
+                'body'   => $response->getContent(false),
+            ]);
+            return new ToolResult(false, "Web search failed with HTTP {$statusCode}");
+        }
+
+        return new ToolResult(true, $this->formatTavilyResults($query, $response->toArray(false)));
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function formatTavilyResults(string $query, array $data): string
+    {
+        $output = "Search Results for '{$query}':\n\n";
+        if (!empty($data['answer'])) {
+            $output .= "Summary: {$data['answer']}\n\n";
+        }
+
+        foreach (($data['results'] ?? []) as $i => $result) {
+            $num = $i + 1;
+            $output .= "[{$num}] {$result['title']}\n";
+            $output .= "URL: {$result['url']}\n";
+            $output .= "{$result['content']}\n\n";
+        }
+
+        return $output;
     }
 }

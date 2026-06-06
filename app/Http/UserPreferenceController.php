@@ -26,7 +26,7 @@ final class UserPreferenceController
      *
      * Returns the authenticated user's preferred LLM configuration.
      */
-    public function show(Request $request): JsonResponse
+    public function show(): JsonResponse
     {
         $userId = $this->authService->currentUserId();
 

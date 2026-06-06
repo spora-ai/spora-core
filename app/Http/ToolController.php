@@ -137,7 +137,7 @@ final class ToolController
         return new JsonResponse(['data' => ['settings' => $masked]]);
     }
 
-    public function deleteUserSettings(Request $request, string $toolId): Response
+    public function deleteUserSettings(string $toolId): Response
     {
         $userId = $this->authService->currentUserId();
         $toolClass = $this->toolConfigService->resolveToolClass($toolId);

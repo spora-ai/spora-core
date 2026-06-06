@@ -296,6 +296,13 @@ return [
         return new Spora\Http\LLMConfigController(
             $c->get(AuthService::class),
             $c->get(Spora\Services\LLMConfigServiceInterface::class),
+            $c->get(Spora\Services\LlmConfigValidator::class),
+        );
+    },
+
+    Spora\Services\LlmConfigValidator::class => static function (ContainerInterface $c): Spora\Services\LlmConfigValidator {
+        return new Spora\Services\LlmConfigValidator(
+            $c->get(Spora\Services\LLMConfigServiceInterface::class),
         );
     },
 

@@ -82,30 +82,20 @@ final class ToolCallSerializer
         // wasn't registered (defensive — keeps history rendering robust when
         // a plugin tool isn't currently loaded but the class is still
         // autoloadable).
+        return $this->resolveSchemaViaReflection($toolClass);
+    }
+
+    /**
+     * @return array{type: string, properties: object|array<string, mixed>, required: list<string>}|null
+     */
+    private function resolveSchemaViaReflection(string $toolClass): ?array
+    {
         if (!class_exists($toolClass)) {
             return null;
         }
 
         $ref = new ReflectionClass($toolClass);
-        if (!$ref->isInstantiable()) {
-            return null;
-        }
-
-        // Guard before any instantiation: the class must both carry the #[Tool]
-        // attribute and implement ToolInterface. A persisted tool_class that no
-        // longer resolves to a real tool (renamed plugin, type confusion, etc.)
-        // must NOT cause a fatal here — history rendering has to stay robust.
-        if ($ref->getAttributes(Tool::class) === []) {
-            return null;
-        }
-        if (!$ref->implementsInterface(ToolInterface::class)) {
-            return null;
-        }
-
-        // Only safe to instantiate without args if the constructor has zero
-        // required parameters — anything else risks calling tool DI.
-        $constructor = $ref->getConstructor();
-        if ($constructor !== null && $constructor->getNumberOfRequiredParameters() > 0) {
+        if (!$this->isInstantiableToolClass($ref)) {
             return null;
         }
 
@@ -113,5 +103,27 @@ final class ToolCallSerializer
         $instance = $ref->newInstance();
 
         return $instance->getParametersSchema();
+    }
+
+    /**
+     * Guard before any instantiation: the class must both carry the #[Tool]
+     * attribute and implement ToolInterface, and have a no-arg constructor.
+     * A persisted tool_class that no longer resolves to a real tool (renamed
+     * plugin, type confusion, etc.) must NOT cause a fatal here — history
+     * rendering has to stay robust.
+     */
+    private function isInstantiableToolClass(ReflectionClass $ref): bool
+    {
+        if (!$ref->isInstantiable()) {
+            return false;
+        }
+        if ($ref->getAttributes(Tool::class) === []) {
+            return false;
+        }
+        if (!$ref->implementsInterface(ToolInterface::class)) {
+            return false;
+        }
+        $constructor = $ref->getConstructor();
+        return $constructor === null || $constructor->getNumberOfRequiredParameters() === 0;
     }
 }

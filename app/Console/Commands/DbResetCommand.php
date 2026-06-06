@@ -175,16 +175,8 @@ HELP);
             return Command::FAILURE;
         }
 
-        if (!$force) {
-            $io->writeln("About to <error>DROP DATABASE</error> `{$name}` on {$host}:{$port} and recreate it empty.");
-            $io->writeln('This is irreversible.');
-            // ask() returns the default ('') in non-interactive mode, so non-TTY
-            // runs already fail closed at the `!== 'yes'` check below.
-            $answer = $io->ask('Type "yes" to continue, anything else to abort', '');
-            if ($answer !== 'yes') {
-                $io->writeln('Aborted. No changes made. (Pass --force to skip the prompt in non-interactive runs.)');
-                return Command::FAILURE;
-            }
+        if (!$force && !$this->confirmMysqlReset($io, $name, $host, $port)) {
+            return Command::FAILURE;
         }
 
         // Skip booting the Eloquent connection — it targets the user's DB and
@@ -208,5 +200,19 @@ HELP);
         $io->writeln("Created database {$quoted} (utf8mb4 / utf8mb4_unicode_ci).");
 
         return Command::SUCCESS;
+    }
+
+    private function confirmMysqlReset(SymfonyStyle $io, string $name, ?string $host, int $port): bool
+    {
+        $io->writeln("About to <error>DROP DATABASE</error> `{$name}` on {$host}:{$port} and recreate it empty.");
+        $io->writeln('This is irreversible.');
+        // ask() returns the default ('') in non-interactive mode, so non-TTY
+        // runs already fail closed at the `!== 'yes'` check below.
+        $answer = $io->ask('Type "yes" to continue, anything else to abort', '');
+        if ($answer === 'yes') {
+            return true;
+        }
+        $io->writeln('Aborted. No changes made. (Pass --force to skip the prompt in non-interactive runs.)');
+        return false;
     }
 }
