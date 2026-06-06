@@ -152,37 +152,40 @@ final class UserProfileController
      */
     private function validateLocationFields(array $body, bool $requireBoth): ?JsonResponse
     {
-        $result = null;
-        if (isset($body['name'])) {
-            $name = trim((string) $body['name']);
-            if ($name === '') {
-                $result = new JsonResponse(
-                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $requireBoth ? 'name is required.' : 'name is required and cannot be empty.']],
-                    422,
-                );
-            }
-        } elseif ($requireBoth) {
-            $result = new JsonResponse(
-                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'name is required.']],
-                422,
-            );
+        $result = $this->validateLocationField('name', $body, $requireBoth);
+        if ($result !== null) {
+            return $result;
         }
 
-        if ($result === null && isset($body['address'])) {
-            $address = trim((string) $body['address']);
-            if ($address === '') {
-                $result = new JsonResponse(
-                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $requireBoth ? 'address is required.' : 'address is required and cannot be empty.']],
+        return $this->validateLocationField('address', $body, $requireBoth);
+    }
+
+    /**
+     * Validate a single location field. Returns a JsonResponse on violation, or null if valid.
+     */
+    private function validateLocationField(string $field, array $body, bool $requireBoth): ?JsonResponse
+    {
+        $isMissing = !isset($body[$field]);
+        if ($isMissing) {
+            return $requireBoth
+                ? new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $field . ' is required.']],
                     422,
-                );
-            }
-        } elseif ($result === null && $requireBoth) {
-            $result = new JsonResponse(
-                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'address is required.']],
-                422,
-            );
+                )
+                : null;
         }
 
-        return $result;
+        $value = trim((string) $body[$field]);
+        if ($value !== '') {
+            return null;
+        }
+
+        $message = $requireBoth
+            ? $field . ' is required.'
+            : $field . ' is required and cannot be empty.';
+        return new JsonResponse(
+            ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $message]],
+            422,
+        );
     }
 }

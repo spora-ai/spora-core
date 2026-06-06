@@ -236,32 +236,50 @@ final class AgentService implements AgentServiceInterface
     public function getOverride(int $agentId, int $userId, string $toolClass, bool $rawOnly = false): array
     {
         $agent = $this->getAgent($agentId, $userId);
-        $result = [];
-        if ($agent !== null) {
-            // llm_configuration is a special case — no registered tool class
-            if ($toolClass === 'llm_configuration') {
-                $config = $this->llmConfig->getEffectiveConfigForAgent($agent);
-                $result = $config !== null ? $this->maskLlmConfig($config) : [];
-            } elseif ($rawOnly) {
-                $settings = $this->toolConfig->getRawAgentOverride($toolClass, $agentId);
-                $result = $this->toolConfig->maskForApi($settings, $toolClass);
-            } else {
-                $annotated = $this->toolConfig->getEffectiveSettingsWithSource($toolClass, $agentId);
-                $passwordKeys = $this->getToolPasswordKeys($toolClass);
-                foreach ($annotated as $key => $item) {
-                    $value = $item['value'];
-                    if ($value !== null && $value !== '' && in_array($key, $passwordKeys, true)) {
-                        $value = '***';
-                    }
-                    $result[$key] = [
-                        'value'  => $value,
-                        'source' => $item['source'],
-                    ];
-                }
-            }
+        if ($agent === null) {
+            return [];
         }
+        // llm_configuration is a special case — no registered tool class
+        if ($toolClass === 'llm_configuration') {
+            return $this->resolveLlmConfigurationOverride($agent);
+        }
+        return $rawOnly
+            ? $this->resolveRawOverride($agentId, $toolClass)
+            : $this->resolveAnnotatedOverride($agentId, $toolClass);
+    }
 
+    private function resolveLlmConfigurationOverride(Agent $agent): array
+    {
+        $config = $this->llmConfig->getEffectiveConfigForAgent($agent);
+        return $config !== null ? $this->maskLlmConfig($config) : [];
+    }
+
+    private function resolveRawOverride(int $agentId, string $toolClass): array
+    {
+        $settings = $this->toolConfig->getRawAgentOverride($toolClass, $agentId);
+        return $this->toolConfig->maskForApi($settings, $toolClass);
+    }
+
+    private function resolveAnnotatedOverride(int $agentId, string $toolClass): array
+    {
+        $annotated = $this->toolConfig->getEffectiveSettingsWithSource($toolClass, $agentId);
+        $passwordKeys = $this->getToolPasswordKeys($toolClass);
+        $result = [];
+        foreach ($annotated as $key => $item) {
+            $result[$key] = [
+                'value'  => $this->maskAnnotatedValueIfPassword($key, $item['value'], $passwordKeys),
+                'source' => $item['source'],
+            ];
+        }
         return $result;
+    }
+
+    private function maskAnnotatedValueIfPassword(string $key, mixed $value, array $passwordKeys): mixed
+    {
+        if ($value !== null && $value !== '' && in_array($key, $passwordKeys, true)) {
+            return '***';
+        }
+        return $value;
     }
 
     public function putOverride(int $agentId, int $userId, string $toolClass, array $settings): array

@@ -11,6 +11,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Console\WorkerLoopOptions;
 use Spora\Core\Database;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
@@ -219,41 +220,95 @@ final class WorkerRunCommand extends Command
     ): void {
         $lastReapAt = time();
         $useChildProcesses = $isDaemon;
+        $loopOptions = new WorkerLoopOptions(
+            isDaemon: $isDaemon,
+            isOnce: $isOnce,
+            includeQueue: $includeQueue,
+            useChildProcesses: $useChildProcesses,
+            maxWorkers: $maxWorkers,
+            sleep: $sleep,
+            staleMinutes: $staleMinutes,
+        );
 
-        while (!$this->shouldQuit && ($limit === 0 || $processed < $limit)) {
-            if ($isDaemon && (time() - $lastReapAt) >= self::REAP_INTERVAL_SECONDS) {
-                $this->reapStaleTasks($output, $staleMinutes);
-                $lastReapAt = time();
-            }
+        while (!$this->shouldQuit && $this->canProcessMore($limit, $processed)) {
+            $lastReapAt = $this->runLoopIteration(
+                $loopOptions,
+                $output,
+                $lastReapAt,
+                $processed,
+            );
 
-            // Always process due scheduled runs in daemon mode and --once mode.
-            if ($isDaemon || $isOnce) {
-                $this->processScheduledRuns($output);
-            }
-
-            $this->reapChildren();
-
-            $shouldProcessQueue = $isDaemon || ($isOnce && $includeQueue);
-            if ($shouldProcessQueue) {
-                $this->processRetryQueue();
-
-                if ($useChildProcesses) {
-                    $this->processQueuedTaskWithChild($output, $maxWorkers, $processed);
-                } else {
-                    $this->processQueuedTaskSync($output, $sleep, $processed);
-                }
-            }
-
-            if ($isOnce) {
+            if ($this->endOfIteration($isDaemon, $isOnce, $sleep)) {
                 break;
-            }
-
-            if ($isDaemon) {
-                usleep($sleep);
             }
 
             gc_collect_cycles();
         }
+    }
+
+    private function canProcessMore(int $limit, int $processed): bool
+    {
+        return $limit === 0 || $processed < $limit;
+    }
+
+    private function isReapDue(int $lastReapAt): bool
+    {
+        return (time() - $lastReapAt) >= self::REAP_INTERVAL_SECONDS;
+    }
+
+    private function shouldProcessQueue(bool $isDaemon, bool $isOnce, bool $includeQueue): bool
+    {
+        return $isDaemon || ($isOnce && $includeQueue);
+    }
+
+    /**
+     * Perform one tick of the worker loop: optional reap, scheduled runs,
+     * child reaping, then queue processing. Returns the updated reap marker.
+     */
+    private function runLoopIteration(
+        WorkerLoopOptions $options,
+        OutputInterface $output,
+        int $lastReapAt,
+        int &$processed,
+    ): int {
+        if ($options->isDaemon && $this->isReapDue($lastReapAt)) {
+            $this->reapStaleTasks($output, $options->staleMinutes);
+            $lastReapAt = time();
+        }
+
+        // Always process due scheduled runs in daemon mode and --once mode.
+        if ($options->isDaemon || $options->isOnce) {
+            $this->processScheduledRuns($output);
+        }
+
+        $this->reapChildren();
+
+        if ($this->shouldProcessQueue($options->isDaemon, $options->isOnce, $options->includeQueue)) {
+            $this->processRetryQueue();
+
+            if ($options->useChildProcesses) {
+                $this->processQueuedTaskWithChild($output, $options->maxWorkers, $processed);
+            } else {
+                $this->processQueuedTaskSync($output, $options->sleep, $processed);
+            }
+        }
+
+        return $lastReapAt;
+    }
+
+    /**
+     * Handle the tail of each loop iteration: sleep in daemon mode, signal
+     * break in --once mode. Returns true when the caller should exit the loop.
+     */
+    private function endOfIteration(bool $isDaemon, bool $isOnce, int $sleep): bool
+    {
+        if ($isOnce) {
+            return true;
+        }
+        if ($isDaemon) {
+            usleep($sleep);
+        }
+        return false;
     }
 
     /**

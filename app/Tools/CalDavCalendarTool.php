@@ -23,6 +23,7 @@ use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\HttpClient\ResponseInterface;
 use Throwable;
 
 /**
@@ -456,17 +457,75 @@ XML;
 
     public function editEvent(array $arguments, int $agentId, ?int $userId): ToolResult
     {
-        $eventUri = trim((string) ($arguments['event_uri'] ?? ''));
-        $etag = $this->normalizeEtag(trim((string) ($arguments['etag'] ?? '')));
+        $inputs = $this->parseEditInputs($arguments);
+        if ($inputs instanceof ToolResult) {
+            return $inputs;
+        }
 
+        $config = $this->loadEditConfig($agentId, $userId);
+        if ($config instanceof ToolResult) {
+            return $config;
+        }
+
+        $eventUri = $this->resolveEventUri($inputs['eventUri'], $config['url']);
+
+        $existingIcs = $this->fetchExistingIcs($eventUri, $config);
+        if ($existingIcs instanceof ToolResult) {
+            return $existingIcs;
+        }
+
+        $updates = $this->buildEditUpdates(
+            $arguments,
+            $this->parseIcsForEdit($existingIcs),
+            $inputs['timezone'],
+            $inputs['allDay'],
+        );
+        if ($updates instanceof ToolResult) {
+            return $updates;
+        }
+
+        $icsContent = $this->generateIcsContent(
+            $updates['uid'],
+            $updates['summary'],
+            $updates['start'],
+            $updates['end'],
+            $updates['description'],
+            $updates['location'],
+            $inputs['timezone'],
+            $inputs['allDay'],
+        );
+
+        return $this->putUpdatedEvent($eventUri, $icsContent, $inputs['etag'], $config, $updates['summary']);
+    }
+
+    /**
+     * @return array{eventUri: string, etag: string, timezone: string, allDay: bool}|ToolResult
+     */
+    private function parseEditInputs(array $arguments): array|ToolResult
+    {
+        $eventUri = trim((string) ($arguments['event_uri'] ?? ''));
         if (empty($eventUri)) {
             return new ToolResult(false, self::ERR_MISSING_EVENT_URI);
         }
 
+        $etag = $this->normalizeEtag(trim((string) ($arguments['etag'] ?? '')));
         if (empty($etag)) {
             return new ToolResult(false, 'Missing required parameter: etag (required for safe updates)');
         }
 
+        return [
+            'eventUri' => $eventUri,
+            'etag'     => $etag,
+            'timezone' => trim((string) ($arguments['timezone'] ?? '')),
+            'allDay'   => (bool) ($arguments['all_day'] ?? false),
+        ];
+    }
+
+    /**
+     * @return array{url: string, username: string, password: string, settings: array<string, mixed>}|ToolResult
+     */
+    private function loadEditConfig(int $agentId, ?int $userId): array|ToolResult
+    {
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
         $url      = rtrim((string) ($settings['core.caldav.url'] ?? ''), '/');
         $username = $settings['core.caldav.username'] ?? '';
@@ -476,123 +535,179 @@ XML;
             return new ToolResult(false, self::ERR_CONFIG_INCOMPLETE);
         }
 
-        $eventUri = $this->resolveEventUri($eventUri, $url);
+        return [
+            'url'      => $url,
+            'username' => $username,
+            'password' => $password,
+            'settings' => $settings,
+        ];
+    }
 
-        // First, fetch the existing event to get current data
+    /**
+     * @param array{url: string, username: string, password: string, settings: array<string, mixed>} $config
+     */
+    private function fetchExistingIcs(string $eventUri, array $config): string|ToolResult
+    {
         try {
             $getRequestOptions = [
                 'headers' => ['Accept' => 'text/calendar'],
-                'auth_basic' => [$username, $password],
-                'timeout'    => $this->effectiveTimeout($settings),
+                'auth_basic' => [$config['username'], $config['password']],
+                'timeout'    => $this->effectiveTimeout($config['settings']),
             ];
 
             $this->logHttpRequest('GET', $eventUri, $getRequestOptions);
-
             $getResponse = $this->httpClient->request('GET', $eventUri, $getRequestOptions);
 
-            $getHeaders = $getResponse->getHeaders(false);
-            $this->logHttpResponse('GET', $eventUri, $getResponse->getStatusCode(), $getHeaders);
-
-            if ($getResponse->getStatusCode() === 404) {
-                return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
-            }
-
-            if ($getResponse->getStatusCode() >= 400) {
-                $errorMsg = $getResponse->getContent(false);
-                $this->logHttpError('GET', $eventUri, $getResponse->getStatusCode(), $errorMsg, $getHeaders);
-                return new ToolResult(false, 'Failed to fetch existing event: HTTP ' . $getResponse->getStatusCode());
-            }
-
-            $existingIcs = $getResponse->getContent();
+            return $this->mapGetResponseToContent($eventUri, $getResponse);
         } catch (Throwable $e) {
             $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => 'GET', 'url' => $eventUri]);
             return new ToolResult(false, 'Failed to fetch existing event: ' . $e->getMessage());
         }
+    }
 
-        // Parse existing event to get UID and merge changes
-        $existingData = $this->parseIcsForEdit($existingIcs);
+    private function mapGetResponseToContent(string $eventUri, ResponseInterface $getResponse): string|ToolResult
+    {
+        $getHeaders = $getResponse->getHeaders(false);
+        $this->logHttpResponse('GET', $eventUri, $getResponse->getStatusCode(), $getHeaders);
 
-        // Apply updates
-        $summary = !empty($arguments['summary']) ? trim($arguments['summary']) : $existingData['summary'];
-        $startDateStr = $arguments['start_date'] ?? null;
-        $endDateStr = $arguments['end_date'] ?? null;
-        $timezone = trim((string) ($arguments['timezone'] ?? ''));
-        $allDay = (bool) ($arguments['all_day'] ?? false);
+        $statusCode = $getResponse->getStatusCode();
+        if ($statusCode === 404) {
+            return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
+        }
+        if ($statusCode >= 400) {
+            $errorMsg = $getResponse->getContent(false);
+            $this->logHttpError('GET', $eventUri, $statusCode, $errorMsg, $getHeaders);
+            return new ToolResult(false, 'Failed to fetch existing event: HTTP ' . $statusCode);
+        }
 
+        return $getResponse->getContent();
+    }
+
+    /**
+     * @param array{uid: ?string, summary: string, dtstart: ?DateTimeImmutable, dtend: ?DateTimeImmutable, description: string, location: string} $existingData
+     * @return array{uid: ?string, summary: string, start: DateTimeImmutable, end: DateTimeImmutable, description: string, location: string}|ToolResult
+     */
+    private function buildEditUpdates(array $arguments, array $existingData, string $timezone, bool $allDay): array|ToolResult
+    {
+        $dates = $this->parseEditDates($arguments, $existingData, $timezone, $allDay);
+        if ($dates instanceof ToolResult) {
+            return $dates;
+        }
+
+        return $this->composeEditedEvent($arguments, $existingData, $dates['start'], $dates['end']);
+    }
+
+    /**
+     * @param array{uid: ?string, summary: string, dtstart: ?DateTimeImmutable, dtend: ?DateTimeImmutable, description: string, location: string} $existingData
+     * @return array{start: DateTimeImmutable, end: DateTimeImmutable}|ToolResult
+     */
+    private function parseEditDates(array $arguments, array $existingData, string $timezone, bool $allDay): array|ToolResult
+    {
         try {
-            $start = $startDateStr ? $this->parseEventDate($startDateStr, $timezone, $allDay) : $existingData['dtstart'];
-            $end = $endDateStr ? $this->parseEventDate($endDateStr, $timezone, $allDay) : $existingData['dtend'];
+            $start = !empty($arguments['start_date']) ? $this->parseEventDate((string) $arguments['start_date'], $timezone, $allDay) : $existingData['dtstart'];
+            $end = !empty($arguments['end_date']) ? $this->parseEventDate((string) $arguments['end_date'], $timezone, $allDay) : $existingData['dtend'];
         } catch (Throwable $e) {
             return new ToolResult(false, 'Invalid date format: ' . $e->getMessage());
         }
 
+        $validation = $this->validateEditedDates($start, $end);
+        if ($validation instanceof ToolResult) {
+            return $validation;
+        }
+
+        return ['start' => $start, 'end' => $end];
+    }
+
+    private function validateEditedDates(mixed $start, mixed $end): ?ToolResult
+    {
         if (!$start instanceof DateTimeImmutable || !$end instanceof DateTimeImmutable) {
             return new ToolResult(false, 'Failed to parse existing event dates. Fetch the latest event details and verify DTSTART/DTEND are present.');
         }
-
         if ($end <= $start) {
             return new ToolResult(false, 'end_date must be after start_date.');
         }
+        return null;
+    }
 
+    /**
+     * @param array{uid: ?string, summary: string, dtstart: ?DateTimeImmutable, dtend: ?DateTimeImmutable, description: string, location: string} $existingData
+     * @return array{uid: ?string, summary: string, start: DateTimeImmutable, end: DateTimeImmutable, description: string, location: string}
+     */
+    private function composeEditedEvent(array $arguments, array $existingData, DateTimeImmutable $start, DateTimeImmutable $end): array
+    {
+        $summary = !empty($arguments['summary']) ? trim($arguments['summary']) : $existingData['summary'];
         $description = !empty($arguments['description']) ? trim($arguments['description']) : $existingData['description'];
         $location = !empty($arguments['location']) ? trim($arguments['location']) : $existingData['location'];
 
-        // Generate updated ICS content
-        $icsContent = $this->generateIcsContent(
-            $existingData['uid'],
-            $summary,
-            $start,
-            $end,
-            $description,
-            $location,
-            $timezone,
-            $allDay,
-        );
+        return [
+            'uid'         => $existingData['uid'],
+            'summary'     => $summary,
+            'start'       => $start,
+            'end'         => $end,
+            'description' => $description,
+            'location'    => $location,
+        ];
+    }
+
+    /**
+     * @param array{url: string, username: string, password: string, settings: array<string, mixed>} $config
+     */
+    private function putUpdatedEvent(string $eventUri, string $icsContent, string $etag, array $config, string $summary): ToolResult
+    {
+        $requestOptions = [
+            'headers' => [
+                'Content-Type' => 'text/calendar; charset=utf-8',
+                'If-Match'    => $etag,
+            ],
+            'auth_basic' => [$config['username'], $config['password']],
+            'body'       => $icsContent,
+            'timeout'    => $this->effectiveTimeout($config['settings']),
+        ];
+
+        $this->logHttpRequest('PUT', $eventUri, $requestOptions);
 
         try {
-            $requestOptions = [
-                'headers' => [
-                    'Content-Type' => 'text/calendar; charset=utf-8',
-                    'If-Match'    => $etag,
-                ],
-                'auth_basic' => [$username, $password],
-                'body'       => $icsContent,
-                'timeout'    => $this->effectiveTimeout($settings),
-            ];
-
-            $this->logHttpRequest('PUT', $eventUri, $requestOptions);
-
             $response = $this->httpClient->request('PUT', $eventUri, $requestOptions);
-
-            $headers = $response->getHeaders(false);
-            $this->logHttpResponse('PUT', $eventUri, $response->getStatusCode(), $headers);
-
-            $statusCode = $response->getStatusCode();
-
-            if ($statusCode === 412) {
-                return new ToolResult(false, 'Precondition Failed: The event has been modified since you fetched it. Please fetch the latest version and try again.');
-            }
-
-            if ($statusCode === 404) {
-                return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
-            }
-
-            if ($statusCode >= 400) {
-                $errorMsg = $response->getContent(false);
-                $this->logHttpError('PUT', $eventUri, $statusCode, $errorMsg, $headers);
-                return new ToolResult(false, "CalDAV server returned HTTP {$statusCode}");
-            }
-
-            $newEtag = $headers['etag'][0] ?? null;
-            return new ToolResult(true, "Event '{$summary}' updated successfully.", [
-                'event_uri' => $eventUri,
-                'etag' => $newEtag,
-            ]);
-
+            return $this->mapPutResponseToResult($eventUri, $response, $summary);
         } catch (Throwable $e) {
             $this->logger?->error(self::LOG_CALDAV_EXCEPTION, ['exception' => $e, 'method' => 'PUT', 'url' => $eventUri]);
             return new ToolResult(false, 'Failed to update CalDAV event: ' . $e->getMessage());
         }
+    }
+
+    private function mapPutResponseToResult(string $eventUri, ResponseInterface $response, string $summary): ToolResult
+    {
+        $headers = $response->getHeaders(false);
+        $this->logHttpResponse('PUT', $eventUri, $response->getStatusCode(), $headers);
+
+        $statusCode = $response->getStatusCode();
+
+        if ($statusCode >= 400) {
+            return $this->putErrorResult($eventUri, $response, $statusCode, $headers);
+        }
+
+        $newEtag = $headers['etag'][0] ?? null;
+        return new ToolResult(true, "Event '{$summary}' updated successfully.", [
+            'event_uri' => $eventUri,
+            'etag' => $newEtag,
+        ]);
+    }
+
+    /**
+     * @param array<string, array<int, string>> $headers
+     */
+    private function putErrorResult(string $eventUri, ResponseInterface $response, int $statusCode, array $headers): ToolResult
+    {
+        if ($statusCode === 412) {
+            return new ToolResult(false, 'Precondition Failed: The event has been modified since you fetched it. Please fetch the latest version and try again.');
+        }
+        if ($statusCode === 404) {
+            return new ToolResult(false, self::ERR_EVENT_NOT_FOUND);
+        }
+
+        $errorMsg = $response->getContent(false);
+        $this->logHttpError('PUT', $eventUri, $statusCode, $errorMsg, $headers);
+        return new ToolResult(false, "CalDAV server returned HTTP {$statusCode}");
     }
 
     public function deleteEvent(array $arguments, int $agentId, ?int $userId): ToolResult
