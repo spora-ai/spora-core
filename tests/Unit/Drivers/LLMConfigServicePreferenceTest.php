@@ -300,3 +300,43 @@ test('unsetUserPreferredConfig does nothing when no preference exists', function
     $pref = UserPreference::where('user_id', $userId)->first();
     expect($pref)->toBeNull();
 });
+
+test('setUserPreferredConfig with the same config twice does not duplicate the preference row', function (): void {
+    [$service] = makePreferenceService();
+    $authService = bootAuthLayer();
+    $userId = $authService->register('setpref-twice@example.com', PREF_TEST_USER_PASSWORD, 'SetprefTwice');
+
+    $config = createConfigForService($service, 'Double Set Config', $userId);
+
+    $first = $service->setUserPreferredConfig($userId, (int) $config->getKey());
+    $second = $service->setUserPreferredConfig($userId, (int) $config->getKey());
+
+    expect($first)->toBeTrue()
+        ->and($second)->toBeTrue()
+        ->and(UserPreference::where('user_id', $userId)->count())->toBe(1);
+
+    $pref = UserPreference::where('user_id', $userId)->first();
+    expect($pref->preferred_llm_config_id)->toBe((int) $config->getKey());
+});
+
+test('unsetUserPreferredConfig is a no-op when called for a non-preferred user', function (): void {
+    [$service] = makePreferenceService();
+    $authService = bootAuthLayer();
+    $userId = $authService->register('unsetpref-noop@example.com', PREF_TEST_USER_PASSWORD, 'UnsetprefNoop');
+
+    // A different user has a preference — the no-op call must not affect it
+    $otherUser = $authService->register('unsetpref-other@example.com', PREF_TEST_USER_PASSWORD, 'UnsetprefOther');
+    $otherConfig = createConfigForService($service, 'Other User Config', $otherUser);
+    UserPreference::create([
+        'user_id' => $otherUser,
+        'preferred_llm_config_id' => (int) $otherConfig->getKey(),
+    ]);
+
+    // Should not throw and should not delete the other user's preference
+    $service->unsetUserPreferredConfig($userId);
+
+    expect(UserPreference::where('user_id', $userId)->first())->toBeNull()
+        ->and(UserPreference::where('user_id', $otherUser)->first())->not->toBeNull()
+        ->and(UserPreference::where('user_id', $otherUser)->first()->preferred_llm_config_id)
+        ->toBe((int) $otherConfig->getKey());
+});
