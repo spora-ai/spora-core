@@ -31,4 +31,21 @@ describe('ScheduleTypeStep', () => {
     await buttons[1].trigger('click')
     expect(form.mode.value).toBe('recurring')
   })
+
+  it('clicking the oneshot button updates form.mode', async () => {
+    const form = makeForm()
+    form.mode.value = 'recurring'
+    const wrapper = mount(ScheduleTypeStep, { props: { form } })
+    const buttons = wrapper.findAll('button')
+    await buttons[0].trigger('click')
+    expect(form.mode.value).toBe('oneshot')
+  })
+
+  it('highlights the active mode button', async () => {
+    const form = makeForm()
+    form.mode.value = 'recurring'
+    const wrapper = mount(ScheduleTypeStep, { props: { form } })
+    const buttons = wrapper.findAll('button')
+    expect(buttons[1].classes().join(' ')).toMatch(/bg-primary/)
+  })
 })

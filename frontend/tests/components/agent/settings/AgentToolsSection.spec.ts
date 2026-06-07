@@ -242,4 +242,172 @@ describe('AgentToolsSection', () => {
     await flushPromises()
     expect(toolSettingsMock.getToolStatus).toHaveBeenCalledWith('web_search')
   })
+
+  it('enables a tool when toggle is pressed on a can_enable=true tool', async () => {
+    toolSettingsMock.getAllToolStatuses.mockResolvedValue({
+      web_search: { is_enabled: false, can_enable: true, missing_required: [] },
+    })
+    toolSettingsMock.getToolStatus.mockResolvedValueOnce({ is_enabled: true, can_enable: true, missing_required: [] })
+    const wrapper = mount(AgentToolsSection, {
+      props: { agent: baseAgent, agentId: 1 },
+      global: {
+        stubs: {
+          AgentToolListItem: ListItemStub,
+          AgentToolConfigModal: ConfigModalStub,
+          EnableWarningModal: WarningModalStub,
+        },
+      },
+    })
+    await flushPromises()
+    const item = wrapper.find('[data-tool-name="web_search"]')
+    expect(item.attributes('data-enabled')).toBe('false')
+    await item.find('.toggle').trigger('click')
+    await flushPromises()
+    expect(agentStoreMock.enableTool).toHaveBeenCalledWith(1, 'web_search')
+    expect(item.attributes('data-enabled')).toBe('true')
+  })
+
+  it('shows enable warning when re-fetched status reports can_enable=false', async () => {
+    toolSettingsMock.getAllToolStatuses.mockResolvedValue({
+      web_search: { is_enabled: false, can_enable: true, missing_required: [] },
+    })
+    // First call (from onMounted) returns can_enable=true; second (after enable) returns can_enable=false.
+    toolSettingsMock.getToolStatus.mockResolvedValueOnce({ is_enabled: false, can_enable: false, missing_required: ['api_key'] })
+    const wrapper = mount(AgentToolsSection, {
+      props: { agent: baseAgent, agentId: 1 },
+      global: {
+        stubs: {
+          AgentToolListItem: ListItemStub,
+          AgentToolConfigModal: ConfigModalStub,
+          EnableWarningModal: WarningModalStub,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.find('[data-tool-name="web_search"]').find('.toggle').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.warning-modal-stub').exists()).toBe(true)
+  })
+
+  it('falls back to a generic error message when toggle fails with a non-ApiError', async () => {
+    agentStoreMock.disableTool.mockRejectedValueOnce(new Error('boom'))
+    const wrapper = mount(AgentToolsSection, {
+      props: { agent: { id: 1, tools: [{ tool_name: 'web_search' }] }, agentId: 1 },
+      global: {
+        stubs: {
+          AgentToolListItem: ListItemStub,
+          AgentToolConfigModal: ConfigModalStub,
+          EnableWarningModal: WarningModalStub,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.find('[data-tool-name="web_search"]').find('.toggle').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="tools-error"]').text()).toBe('Failed to update tool.')
+  })
+
+  it('toggles an operation enabled flag and stores the override', async () => {
+    const wrapper = mount(AgentToolsSection, {
+      props: { agent: { id: 1, tools: [{ tool_name: 'web_search' }] }, agentId: 1 },
+      global: {
+        stubs: {
+          AgentToolListItem: ListItemStub,
+          AgentToolConfigModal: ConfigModalStub,
+          EnableWarningModal: WarningModalStub,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.find('[data-tool-name="web_search"]').find('.op-enabled').trigger('click')
+    await flushPromises()
+    expect(agentStoreMock.patchOperationOverride).toHaveBeenCalledWith(1, 'web_search', 'op1', { enabled: true })
+  })
+
+  it('restores the previous operation state on patch failure', async () => {
+    const { ApiError } = await import('@/api/client')
+    agentStoreMock.patchOperationOverride.mockRejectedValueOnce(new ApiError('denied'))
+    const wrapper = mount(AgentToolsSection, {
+      props: { agent: { id: 1, tools: [{ tool_name: 'web_search' }] }, agentId: 1 },
+      global: {
+        stubs: {
+          AgentToolListItem: ListItemStub,
+          AgentToolConfigModal: ConfigModalStub,
+          EnableWarningModal: WarningModalStub,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.find('[data-tool-name="web_search"]').find('.op-enabled').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="tools-error"]').text()).toBe('denied')
+  })
+
+  it('falls back to a generic error on operation patch failure when not an ApiError', async () => {
+    agentStoreMock.patchOperationOverride.mockRejectedValueOnce(new Error('boom'))
+    const wrapper = mount(AgentToolsSection, {
+      props: { agent: { id: 1, tools: [{ tool_name: 'web_search' }] }, agentId: 1 },
+      global: {
+        stubs: {
+          AgentToolListItem: ListItemStub,
+          AgentToolConfigModal: ConfigModalStub,
+          EnableWarningModal: WarningModalStub,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.find('[data-tool-name="web_search"]').find('.op-enabled').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="tools-error"]').text()).toBe('Failed to update operation.')
+  })
+
+  it('toggles an operation auto-approve flag and stores the override', async () => {
+    const wrapper = mount(AgentToolsSection, {
+      props: { agent: { id: 1, tools: [{ tool_name: 'web_search' }] }, agentId: 1 },
+      global: {
+        stubs: {
+          AgentToolListItem: ListItemStub,
+          AgentToolConfigModal: ConfigModalStub,
+          EnableWarningModal: WarningModalStub,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.find('[data-tool-name="web_search"]').find('.op-auto').trigger('click')
+    await flushPromises()
+    expect(agentStoreMock.patchOperationOverride).toHaveBeenCalledWith(1, 'web_search', 'op1', { default_requires_approval: false })
+  })
+
+  it('falls back to a generic error on auto-approve patch failure when not an ApiError', async () => {
+    agentStoreMock.patchOperationOverride.mockRejectedValueOnce(new Error('boom'))
+    const wrapper = mount(AgentToolsSection, {
+      props: { agent: { id: 1, tools: [{ tool_name: 'web_search' }] }, agentId: 1 },
+      global: {
+        stubs: {
+          AgentToolListItem: ListItemStub,
+          AgentToolConfigModal: ConfigModalStub,
+          EnableWarningModal: WarningModalStub,
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.find('[data-tool-name="web_search"]').find('.op-auto').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="tools-error"]').text()).toBe('Failed to update operation auto-approve.')
+  })
+
+  it('does not collapse the category by default (items are visible)', async () => {
+    const wrapper = mount(AgentToolsSection, {
+      props: { agent: baseAgent, agentId: 1 },
+      global: {
+        stubs: {
+          AgentToolListItem: ListItemStub,
+          AgentToolConfigModal: ConfigModalStub,
+          EnableWarningModal: WarningModalStub,
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.findAll('.tool-item').length).toBe(2)
+  })
 })

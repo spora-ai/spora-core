@@ -97,4 +97,92 @@ describe('useScheduleForm', () => {
     // call and confirming no error is thrown when the store rejects.
     await expect(f.onOpen(() => null, () => 42)).resolves.toBeUndefined()
   })
+
+  it('applyInitialData projects run_at ISO into the date + time inputs', async () => {
+    const f = useScheduleForm()
+    await f.onOpen(
+      () => ({
+        id: 1,
+        run_at: '2026-04-15T14:30:00Z',
+        timezone: 'UTC',
+        template_id: null,
+        cron_expression: null,
+        raw_prompt: '',
+      }),
+      () => 1,
+    )
+    expect(f.runDate.value).toBe('2026-04-15')
+    expect(f.runTime.value).toBe('14:30')
+  })
+
+  it('applyInitialData projects a weekly cron onto the weekly sub-fields', async () => {
+    const f = useScheduleForm()
+    await f.onOpen(
+      () => ({
+        id: 1,
+        cron_expression: '0 9 * * 1',
+        timezone: 'UTC',
+        template_id: null,
+        run_at: null,
+        raw_prompt: '',
+      }),
+      () => 1,
+    )
+    expect(f.cronExpression.value).toBe('0 9 * * 1')
+    expect(f.frequency.value).toBe('weekly')
+    expect(f.weekly.value).toEqual({ day: 1, time: '09:00' })
+  })
+
+  it('applyInitialData copies the template prompt when template_id matches a known template', async () => {
+    // Set up the store with a known template; Pinia state is shared.
+    const { setActivePinia, createPinia } = await import('pinia')
+    setActivePinia(createPinia())
+    const { usePromptTemplatesStore } = await import('@/stores/promptTemplates')
+    const store = usePromptTemplatesStore()
+    store.templates = [{ id: 5, name: 'Daily', prompt_template: 'tmpl-body' } as never]
+
+    const f = useScheduleForm()
+    await f.onOpen(
+      () => ({
+        id: 1,
+        template_id: 5,
+        raw_prompt: 'will be overwritten',
+        timezone: 'UTC',
+        run_at: null,
+        cron_expression: null,
+      }),
+      () => 1,
+    )
+    expect(f.rawPrompt.value).toBe('tmpl-body')
+  })
+
+  it('does not switch to recurring mode when only a run_at is set (no cron_expression)', async () => {
+    const f = useScheduleForm()
+    await f.onOpen(
+      () => ({
+        id: 1,
+        run_at: '2026-04-15T14:30:00Z',
+        timezone: 'UTC',
+        template_id: null,
+        cron_expression: null,
+        raw_prompt: '',
+      }),
+      () => 1,
+    )
+    expect(f.mode.value).toBe('oneshot')
+  })
+
+  it('applyParsedCron sets frequency and projects weekly fields', () => {
+    const f = useScheduleForm()
+    f.applyParsedCron('0 9 * * 1')
+    expect(f.frequency.value).toBe('weekly')
+    expect(f.weekly.value).toEqual({ day: 1, time: '09:00' })
+  })
+
+  it('applyParsedCron early-returns for unparseable cron (no fields projection)', () => {
+    const f = useScheduleForm()
+    f.weekly.value = { day: 5, time: '11:11' }
+    f.applyParsedCron('not a cron')
+    expect(f.weekly.value).toEqual({ day: 5, time: '11:11' })
+  })
 })

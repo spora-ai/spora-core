@@ -186,4 +186,29 @@ describe('AccountPage', () => {
     await flushPromises()
     expect(changeEmailMock).toHaveBeenCalledWith('new@example.com')
   })
+
+  it('surfaces an ApiError message on email change failure', async () => {
+    const { ApiError } = await import('@/api/client')
+    changeEmailMock.mockRejectedValueOnce(new ApiError('email taken'))
+    const wrapper = mount(AccountPage, {
+      global: { stubs: { GlobalNavbar: GlobalNavbarStub } },
+    })
+    const emailForm = wrapper.find('form')
+    await emailForm.find('input#new-email').setValue('new@example.com')
+    await emailForm.trigger('submit.prevent')
+    await flushPromises()
+    expect(wrapper.text()).toContain('email taken')
+  })
+
+  it('falls back to a generic message for non-ApiError email change failures', async () => {
+    changeEmailMock.mockRejectedValueOnce(new Error('boom'))
+    const wrapper = mount(AccountPage, {
+      global: { stubs: { GlobalNavbar: GlobalNavbarStub } },
+    })
+    const emailForm = wrapper.find('form')
+    await emailForm.find('input#new-email').setValue('new@example.com')
+    await emailForm.trigger('submit.prevent')
+    await flushPromises()
+    expect(wrapper.text()).toMatch(/Failed to request email change/i)
+  })
 })
