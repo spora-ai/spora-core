@@ -1,19 +1,20 @@
 /**
  * AgentPage — agent detail with composer + task history.
- *
- * Smoke test: mounts the page with stubbed stores and asserts the composer
- * is rendered. A full interaction test would require extensive stubs (the
- * page reads from agent store, prompt templates, llm configs, etc.).
  */
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 
-const agents = [{ id: 1, name: 'Test', description: '', tools: [] }]
-const currentAgent = agents[0]
-const fetchAgentsMock = vi.fn()
-const fetchAgentMock = vi.fn()
-const fetchAgentTasksMock = vi.fn()
+const fetchAgentsMock = vi.fn().mockResolvedValue(undefined)
+const fetchAgentMock = vi.fn().mockResolvedValue(undefined)
+const fetchAgentTasksMock = vi.fn().mockResolvedValue(undefined)
+const deleteTaskMock = vi.fn().mockResolvedValue(undefined)
+const clearCurrentAgentMock = vi.fn()
+const loadMoreTasksMock = vi.fn().mockResolvedValue(undefined)
+
+const currentAgentTasksRef = (globalThis as { __tasks?: unknown[] }).__tasks ?? []
+const tasksLoadingRef = (globalThis as { __tasksLoading?: boolean }).__tasksLoading ?? false
+const tasksHasMoreRef = (globalThis as { __tasksHasMore?: boolean }).__tasksHasMore ?? false
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { id: '1' } }),
@@ -21,19 +22,25 @@ vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', template: '<a><slot /></a>' },
 }))
 
+const { apiGetMock } = vi.hoisted(() => ({ apiGetMock: vi.fn() }))
+vi.mock('@/api/client', () => ({
+  api: { get: apiGetMock },
+  ApiError: class ApiError extends Error { constructor(public m: string) { super(m) } },
+}))
+
 vi.mock('@/stores/agent', () => ({
   useAgentStore: () => ({
-    agents,
-    currentAgent,
-    currentAgentTasks: [],
-    tasksLoading: false,
-    tasksHasMore: false,
+    get agents() { return [{ id: 1, name: 'Test', description: '', tools: [] }] },
+    get currentAgent() { return { id: 1, name: 'Test', description: '', tools: [], llm_config: { provider: 'openai' } } },
+    get currentAgentTasks() { return currentAgentTasksRef },
+    get tasksLoading() { return tasksLoadingRef },
+    get tasksHasMore() { return tasksHasMoreRef },
     fetchAgents: fetchAgentsMock,
     fetchAgent: fetchAgentMock,
     fetchAgentTasks: fetchAgentTasksMock,
-    loadMoreTasks: vi.fn(),
-    deleteTask: vi.fn(),
-    clearCurrentAgent: vi.fn(),
+    loadMoreTasks: loadMoreTasksMock,
+    deleteTask: deleteTaskMock,
+    clearCurrentAgent: clearCurrentAgentMock,
   }),
 }))
 
@@ -61,33 +68,77 @@ import AgentPage from '@/pages/AgentPage.vue'
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  apiGetMock.mockResolvedValue({ llm_config: { provider: 'openai' } })
+  currentAgentTasksRef.length = 0
 })
 
-describe('AgentPage', () => {
-  it('mounts without throwing', () => {
-    const wrapper = mount(AgentPage, {
-      global: {
-        stubs: { AgentLayout: AgentLayoutStub, ComposerInput: ComposerInputStub, RouterLink: true, TaskStatusBadge: true },
-      },
-    })
-    expect(wrapper.find('.agent-layout-stub').exists()).toBe(true)
+function mountPage() {
+  return mount(AgentPage, {
+    global: {
+      stubs: { AgentLayout: AgentLayoutStub, ComposerInput: ComposerInputStub, RouterLink: true, TaskStatusBadge: true, Icon: true },
+    },
   })
+}
 
-  it('renders the composer input', () => {
-    const wrapper = mount(AgentPage, {
-      global: {
-        stubs: { AgentLayout: AgentLayoutStub, ComposerInput: ComposerInputStub, RouterLink: true, TaskStatusBadge: true },
-      },
-    })
+describe('AgentPage', () => {
+  it('mounts and renders the agent layout and composer', () => {
+    const wrapper = mountPage()
+    expect(wrapper.find('.agent-layout-stub').exists()).toBe(true)
     expect(wrapper.find('.composer-stub').exists()).toBe(true)
   })
 
   it('shows an empty-state when the agent has no tasks', () => {
-    const wrapper = mount(AgentPage, {
-      global: {
-        stubs: { AgentLayout: AgentLayoutStub, ComposerInput: ComposerInputStub, RouterLink: true, TaskStatusBadge: true },
-      },
-    })
+    const wrapper = mountPage()
     expect(wrapper.text()).toMatch(/no messages yet|start a conversation/i)
+  })
+
+  it('fetches agent data on mount', async () => {
+    mountPage()
+    await flushPromises()
+    expect(fetchAgentsMock).toHaveBeenCalled()
+    expect(fetchAgentMock).toHaveBeenCalledWith(1)
+    expect(fetchAgentTasksMock).toHaveBeenCalled()
+  })
+
+  it('renders a task row with status badge for existing tasks', async () => {
+    currentAgentTasksRef.push(
+      { id: 7, status: 'COMPLETED', user_prompt: 'Hello world', updated_at: new Date().toISOString(), step_count: 2 },
+      { id: 8, status: 'RUNNING', user_prompt: 'In progress', updated_at: new Date().toISOString(), step_count: 0 },
+    )
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Hello world')
+    expect(wrapper.text()).toContain('In progress')
+  })
+
+  it('shows the trash button for each task', async () => {
+    currentAgentTasksRef.push({ id: 7, status: 'COMPLETED', user_prompt: 'X', updated_at: new Date().toISOString(), step_count: 0 })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('button[title="Delete conversation"]').exists()).toBe(true)
+  })
+
+  it('opens inline delete confirmation and cancels', async () => {
+    currentAgentTasksRef.push({ id: 7, status: 'COMPLETED', user_prompt: 'X', updated_at: new Date().toISOString(), step_count: 0 })
+    const wrapper = mountPage()
+    await flushPromises()
+    const trash = wrapper.find('button[title="Delete conversation"]')
+    await trash.trigger('click')
+    expect(wrapper.text()).toContain('Delete this conversation')
+    const cancel = wrapper.findAll('button').find((b) => (b.text() ?? '').trim() === 'Cancel')
+    await cancel!.trigger('click')
+    expect(wrapper.text()).not.toContain('Delete this conversation')
+  })
+
+  it('confirms delete by calling agentStore.deleteTask', async () => {
+    currentAgentTasksRef.push({ id: 7, status: 'COMPLETED', user_prompt: 'X', updated_at: new Date().toISOString(), step_count: 0 })
+    const wrapper = mountPage()
+    await flushPromises()
+    const trash = wrapper.find('button[title="Delete conversation"]')
+    await trash.trigger('click')
+    const confirmBtn = wrapper.findAll('button').find((b) => (b.text() ?? '').trim() === 'Delete')
+    await confirmBtn!.trigger('click')
+    await flushPromises()
+    expect(deleteTaskMock).toHaveBeenCalledWith(7)
   })
 })

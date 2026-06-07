@@ -6,7 +6,11 @@ vi.mock('@/api/client', () => ({
   api: {
     get: vi.fn(),
     post: vi.fn(),
+    delete: vi.fn(),
+    patch: vi.fn(),
+    put: vi.fn(),
   },
+  ApiError: class ApiError extends Error { constructor(public m: string) { super(m) } },
 }))
 
 import { api } from '@/api/client'
@@ -469,5 +473,20 @@ describe('useTaskStore', () => {
       // Only one fetch should have occurred from the second polling session
       expect(mockApi.get).toHaveBeenCalledTimes(2)
     })
+  })
+})
+
+describe('additional tasks store coverage', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  it('cancelRetryChain calls DELETE /tasks/{id}/retry-chain', async () => {
+    mockApi.delete.mockResolvedValueOnce(undefined)
+    const { useTaskStore } = await import('@/stores/tasks')
+    const store = useTaskStore()
+    await store.cancelRetryChain(99)
+    expect(mockApi.delete).toHaveBeenCalledWith('/tasks/99/retry-chain')
   })
 })
