@@ -173,4 +173,26 @@ describe('TaskChatMessageList', () => {
     expect(wrapper.text()).toContain('because reasons')
     expect(wrapper.text()).toContain('Reasoning')
   })
+
+  // Regression: the "more" button lives inside a <details>. Without
+  // .prevent the native <details> toggle swallows the click and the
+  // user sees nothing happen.
+  it('emits toggleExpanded without closing the parent <details>', async () => {
+    const longContent = 'x'.repeat(400)
+    const messages: ChatMessage[] = [
+      { kind: 'tool-result', entry: makeEntry('tool', { sequence: 7, content: longContent, tool_name: 'web_search' }) },
+    ]
+    const wrapper = mount(TaskChatMessageList, {
+      props: { task: baseTask, chatMessages: messages, finalReasoning: null },
+    })
+    const details = wrapper.find('details')
+    expect(details.exists()).toBe(true)
+    details.element.setAttribute('open', '')
+    expect((details.element as HTMLDetailsElement).open).toBe(true)
+    const button = wrapper.find('button')
+    expect(button.text()).toBe('▼ more')
+    await button.trigger('click')
+    expect(wrapper.emitted('toggleExpanded')).toBeTruthy()
+    expect((details.element as HTMLDetailsElement).open).toBe(true)
+  })
 })
