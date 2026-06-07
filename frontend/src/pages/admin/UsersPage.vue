@@ -112,7 +112,7 @@ async function toggleVerified(user: User): Promise<void> {
   togglingVerified.value = user.id
   try {
     await usersStore.setVerified(user.id, !user.verified)
-    toast.success(!user.verified ? 'User marked as unverified.' : 'User marked as verified.')
+    toast.success(user.verified ? 'User marked as verified.' : 'User marked as unverified.')
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : 'Failed to update verification status.')
   } finally {

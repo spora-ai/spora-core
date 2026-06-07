@@ -20,11 +20,11 @@ export const useUsersStore = defineStore('users', () => {
         data: User[]
         meta: { current_page: number; last_page: number; per_page: number; total: number }
       }>(`/users?page=${page}`)
-      const result = raw.data ?? raw
-      users.value = result as User[]
+      const result = raw.data
+      users.value = result
       const meta = raw.meta ?? { current_page: 1, last_page: 1, per_page: 20, total: 0 }
       return {
-        users: result as User[],
+        users: result,
         current_page: meta.current_page,
         last_page: meta.last_page,
         per_page: meta.per_page,

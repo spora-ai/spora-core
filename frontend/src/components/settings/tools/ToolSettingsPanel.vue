@@ -39,7 +39,10 @@ const savedFlash = ref(false)
 const clearedFlash = ref(false)
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 let clearedTimer: ReturnType<typeof setTimeout> | null = null
-onUnmounted(() => { if (savedTimer) clearTimeout(savedTimer); if (clearedTimer) clearTimeout(clearedTimer) })
+onUnmounted(() => {
+  if (savedTimer) clearTimeout(savedTimer)
+  if (clearedTimer) clearTimeout(clearedTimer)
+})
 
 const hasExistingSettings = computed(() => checkHasExisting(serverSettings.value))
 

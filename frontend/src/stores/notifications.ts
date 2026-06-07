@@ -28,7 +28,7 @@ export const useNotificationStore = defineStore('notifications', () => {
   async function markRead(id: number): Promise<void> {
     await api.post(`/notifications/${id}/read`)
     const n = notifications.value.find(n => n.id === id)
-    if (n && n.read_at === null) {
+    if (n?.read_at === null) {
       n.read_at = new Date().toISOString()
     }
   }

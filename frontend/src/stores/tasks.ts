@@ -91,17 +91,7 @@ export const useTaskStore = defineStore('tasks', () => {
     }
     const incoming = result.task
 
-    if (activeTask.value?.id !== taskId) {
-      // First load — replace entirely, then apply any pending SSE update for this task
-      activeTask.value = incoming
-      lastSequence = Math.max(...incoming.history.map((h) => h.sequence), 0)
-      // Apply pending SSE update if we have one for this task (handles race where SSE
-      // event arrived before fetchTaskDetail completed)
-      if (pendingSseUpdate !== null && pendingSseUpdate.taskId === taskId) {
-        applyTaskUpdate(taskId, pendingSseUpdate.data)
-        pendingSseUpdate = null
-      }
-    } else {
+    if (activeTask.value?.id === taskId) {
       // Incremental update: merge new history entries and refresh scalar fields
       activeTask.value.status = incoming.status
       activeTask.value.final_response = incoming.final_response
@@ -118,6 +108,16 @@ export const useTaskStore = defineStore('tasks', () => {
       }
       // Refresh tool_calls on every poll (status may change on resume)
       activeTask.value.tool_calls = incoming.tool_calls
+    } else {
+      // First load — replace entirely, then apply any pending SSE update for this task
+      activeTask.value = incoming
+      lastSequence = Math.max(...incoming.history.map((h) => h.sequence), 0)
+      // Apply pending SSE update if we have one for this task (handles race where SSE
+      // event arrived before fetchTaskDetail completed)
+      if (pendingSseUpdate !== null && pendingSseUpdate.taskId === taskId) {
+        applyTaskUpdate(taskId, pendingSseUpdate.data)
+        pendingSseUpdate = null
+      }
     }
     return true
   }

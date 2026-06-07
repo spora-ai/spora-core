@@ -21,7 +21,7 @@ defineProps<{
   onDismiss: (id: string) => void // eslint-disable-line no-unused-vars -- called via onDismiss(toast.id) in template
 }>()
 
-const isMobile = computed(() => typeof window !== 'undefined' && window.innerWidth < 640)
+const isMobile = computed(() => typeof globalThis.window !== 'undefined' && globalThis.window.innerWidth < 640)
 </script>
 
 <template>

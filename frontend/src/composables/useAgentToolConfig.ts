@@ -33,13 +33,13 @@ export function buildAgentOverridePayload(
  * Returns the form values with source = 'agent' pre-filled.
  */
 export function initFormFromSettingsWithSource(
-  settingsWithSource: Record<string, { value: unknown; source: string }>,
+  settingsWithSource: SettingsWithSource,
 ): Record<string, string> {
   const form: Record<string, string> = {}
 
   for (const [key, item] of Object.entries(settingsWithSource)) {
     if (item.source === 'agent') {
-      form[key] = String(item.value ?? '')
+      form[key] = item.value == null ? '' : String(item.value)
     }
   }
 

@@ -108,7 +108,6 @@ describe('SettingsToolsPage', () => {
   it('selects a tool and renders the settings panel', async () => {
     const wrapper = mountPage()
     const newsRow = wrapper.findAll('div').find((d) => d.text().includes('News API') && d.classes().includes('cursor-pointer'))
-    expect(newsRow).toBeDefined()
     await newsRow!.trigger('click')
     await flushPromises()
     expect(getGlobalSettingsMock).toHaveBeenCalledWith('news_api')
@@ -147,7 +146,6 @@ describe('SettingsToolsPage', () => {
   it('toggles category collapse when a category header is clicked', async () => {
     const wrapper = mountPage()
     const generalHeader = wrapper.findAll('div').find((d) => d.text().includes('General') && d.classes().includes('cursor-pointer'))
-    expect(generalHeader).toBeDefined()
     await generalHeader!.trigger('click')
     // After collapsing, Calculator should no longer be visible
     expect(wrapper.text()).not.toContain('Calculator')
