@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 use Psr\Log\NullLogger;
 use Spora\Core\SecurityManager;
+use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
+use Spora\Models\AgentToolOperationOverride;
+use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\AgentService;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
@@ -33,6 +36,32 @@ function makeAgentServiceWithUser(): array
     static $seq = 0;
     $seq++;
     $email = "agent-service-{$seq}@example.com";
+    $userId = bootAuth($auth, $email, AGENT_TEST_PASSWORD);
+
+    return [$service, $userId];
+}
+
+/**
+ * @return array{0: AgentService, 1: int}
+ */
+function makeAgentServiceWithLlmDriver(): array
+{
+    // Same as makeAgentServiceWithUser() but with an LLMConfigService that
+    // knows about the OpenAI driver so getOverride('llm_configuration', …)
+    // can resolve a settings schema and apply password masking.
+    $key = str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new SecurityManager($key);
+    $logger   = new NullLogger();
+
+    $toolConfig = new ToolConfigService($security, $logger, [CalculatorTool::class]);
+    $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+
+    $service = new AgentService($toolConfig, $llmConfig);
+
+    $auth = bootAuthLayer();
+    static $seq = 0;
+    $seq++;
+    $email = "agent-svc-llm-{$seq}@example.com";
     $userId = bootAuth($auth, $email, AGENT_TEST_PASSWORD);
 
     return [$service, $userId];
@@ -275,6 +304,54 @@ describe('AgentService::getOverride', function (): void {
         // No LLM driver config assigned → empty result
         expect($result)->toBe([]);
     });
+
+    it('returns a masked LLM configuration array when the agent has one assigned', function (): void {
+        // Uses the LLM-driver-enabled service so maskLlmConfig can resolve
+        // the settings schema (and therefore mask the api_key password field).
+        [$service, $userId] = makeAgentServiceWithLlmDriver();
+
+        $config = LLMDriverConfiguration::create([
+            'user_id'      => null,
+            'name'         => 'Global default',
+            'driver_class' => OpenAICompatibleDriver::class,
+            'settings'     => json_encode([
+                'api_key'  => 'plain-secret',
+                'model'    => 'gpt-4o',
+                'base_url' => 'https://api.openai.com/v1',
+            ]),
+            'is_global'  => true,
+            'is_default' => true,
+        ]);
+
+        $agent = $service->createAgent($userId, [
+            'name'                 => 'LlmAgent',
+            'llm_driver_config_id' => (int) $config->getKey(),
+        ]);
+
+        $result = $service->getOverride($agent->id, $userId, 'llm_configuration');
+
+        expect($result)->toBeArray();
+        // api_key is a password field → must be masked
+        expect($result)->toHaveKey('api_key');
+        expect($result['api_key'])->toBe('***');
+        // Non-password fields pass through unchanged
+        expect($result['model'])->toBe('gpt-4o');
+        expect($result['base_url'])->toBe('https://api.openai.com/v1');
+    });
+
+    it('returns the tool override (array) for an enabled tool with no row stored', function (): void {
+        // getOverride for a registered tool class (not 'llm_configuration')
+        // returns the agent override even when no row exists — it should be
+        // an array, possibly empty if there are no settings for that tool.
+        [$service, $userId] = makeAgentServiceWithUser();
+        $agent = $service->createAgent($userId, ['name' => 'ToolNoOverride']);
+        $service->enableTool($agent->id, $userId, CalculatorTool::class);
+
+        $raw = $service->getOverride($agent->id, $userId, CalculatorTool::class, rawOnly: true);
+        expect($raw)->toBeArray();
+        // CalculatorTool has no schema-default settings; raw agent override is empty.
+        expect($raw)->not->toHaveKey('calculator.expression');
+    });
 });
 
 describe('AgentService::putOverride / deleteOverride', function (): void {
@@ -406,5 +483,151 @@ describe('AgentService::getToolsOperations / getOperationOverride / patchOperati
         [$service, $userId] = makeAgentServiceWithUser();
         expect($service->patchOperationOverride(9999, $userId, CalculatorTool::class, 'eval', ['enabled' => true]))
             ->toBe([]);
+    });
+});
+
+describe('AgentService private helpers via reflection', function (): void {
+
+    it('extractOverrideFlag returns null when the row is null', function (): void {
+        [$service] = makeAgentServiceWithUser();
+        $ref  = new ReflectionClass(AgentService::class);
+        $meth = $ref->getMethod('extractOverrideFlag');
+
+        expect($meth->invoke($service, null, 'enabled'))->toBeNull();
+    });
+
+    it('extractOverrideFlag returns 1 when the raw value is 1 and 0 otherwise', function (): void {
+        [$service, $userId] = makeAgentServiceWithUser();
+        $agent = $service->createAgent($userId, ['name' => 'ExtractFlag']);
+
+        $ref  = new ReflectionClass(AgentService::class);
+        $meth = $ref->getMethod('extractOverrideFlag');
+
+        // Persisted row with enabled=1 → expect 1
+        $rowOn = AgentToolOperationOverride::create([
+            'agent_id'   => (int) $agent->getKey(),
+            'tool_class' => CalculatorTool::class,
+            'operation'  => 'eval',
+            'enabled'    => 1,
+        ]);
+        expect($meth->invoke($service, $rowOn, 'enabled'))->toBe(1);
+
+        // Persisted row with enabled=0 → expect 0
+        $rowOff = AgentToolOperationOverride::create([
+            'agent_id'   => (int) $agent->getKey(),
+            'tool_class' => CalculatorTool::class,
+            'operation'  => 'send',
+            'enabled'    => 0,
+        ]);
+        expect($meth->invoke($service, $rowOff, 'enabled'))->toBe(0);
+
+        // Field that wasn't set on the row → expect null
+        expect($meth->invoke($service, $rowOn, 'default_requires_approval'))->toBeNull();
+    });
+
+    it('parseOverrideFlag accepts boolean, integer, and string forms; null when missing', function (): void {
+        [$service] = makeAgentServiceWithUser();
+        $ref  = new ReflectionClass(AgentService::class);
+        $meth = $ref->getMethod('parseOverrideFlag');
+
+        // PHP booleans
+        expect($meth->invoke($service, ['enabled' => true], 'enabled'))->toBe(1);
+        expect($meth->invoke($service, ['enabled' => false], 'enabled'))->toBe(0);
+
+        // Integers (1 / 0)
+        expect($meth->invoke($service, ['enabled' => 1], 'enabled'))->toBe(1);
+        expect($meth->invoke($service, ['enabled' => 0], 'enabled'))->toBe(0);
+
+        // Boolean strings (filter_var uses FILTER_VALIDATE_BOOLEAN)
+        expect($meth->invoke($service, ['enabled' => 'true'], 'enabled'))->toBe(1);
+        expect($meth->invoke($service, ['enabled' => 'false'], 'enabled'))->toBe(0);
+        expect($meth->invoke($service, ['enabled' => '1'], 'enabled'))->toBe(1);
+        expect($meth->invoke($service, ['enabled' => '0'], 'enabled'))->toBe(0);
+
+        // Explicit null → null
+        expect($meth->invoke($service, ['enabled' => null], 'enabled'))->toBeNull();
+
+        // Key absent → null
+        expect($meth->invoke($service, [], 'enabled'))->toBeNull();
+    });
+
+    it('resolveToolInstance returns an instance for a known tool and null for an unknown class', function (): void {
+        [$service] = makeAgentServiceWithUser();
+        $ref  = new ReflectionClass(AgentService::class);
+        $meth = $ref->getMethod('resolveToolInstance');
+
+        $instance = $meth->invoke($service, CalculatorTool::class);
+        expect($instance)->not->toBeNull();
+        expect($instance)->toBeInstanceOf(CalculatorTool::class);
+
+        // Unknown class → null, not a thrown Throwable
+        expect($meth->invoke($service, 'Spora\\Tools\\NotARealTool'))->toBeNull();
+    });
+
+    it('maskLlmConfig masks password keys and leaves other settings untouched', function (): void {
+        // Use the LLM-driver-enabled service so the schema can resolve.
+        [$service] = makeAgentServiceWithLlmDriver();
+        $ref  = new ReflectionClass(AgentService::class);
+        $meth = $ref->getMethod('maskLlmConfig');
+
+        $config = LLMDriverConfiguration::create([
+            'user_id'      => null,
+            'name'         => 'Mask target',
+            'driver_class' => OpenAICompatibleDriver::class,
+            // Plain JSON, NOT a wholesale-encrypted blob, so decodeSettings
+            // takes the per-field branch.
+            'settings'     => json_encode([
+                'api_key'  => 'plain-secret',
+                'model'    => 'gpt-4o',
+                'base_url' => 'https://api.openai.com/v1',
+            ]),
+            'is_global'  => true,
+            'is_default' => true,
+        ]);
+
+        $result = $meth->invoke($service, $config);
+
+        expect($result)->toBeArray();
+        // api_key is a password field → masked
+        expect($result)->toHaveKey('api_key');
+        expect($result['api_key'])->toBe('***');
+        // Non-password fields pass through
+        expect($result['model'])->toBe('gpt-4o');
+        expect($result['base_url'])->toBe('https://api.openai.com/v1');
+    });
+});
+
+describe('AgentService::maskLlmConfig via public API', function (): void {
+
+    it('exposes a masked password field through getOverride(llm_configuration)', function (): void {
+        // End-to-end check: the public getOverride('llm_configuration') path
+        // ultimately calls maskLlmConfig, so verifying it via the public API
+        // covers the integration too. The password must surface as '***'.
+        [$service, $userId] = makeAgentServiceWithLlmDriver();
+
+        $config = LLMDriverConfiguration::create([
+            'user_id'      => null,
+            'name'         => 'Public API mask',
+            'driver_class' => OpenAICompatibleDriver::class,
+            'settings'     => json_encode([
+                'api_key'  => 'plain-secret',
+                'model'    => 'gpt-4o-mini',
+            ]),
+            'is_global'  => true,
+            'is_default' => true,
+        ]);
+
+        $agent = $service->createAgent($userId, [
+            'name'                 => 'PublicMaskAgent',
+            'llm_driver_config_id' => (int) $config->getKey(),
+        ]);
+
+        $result = $service->getOverride((int) $agent->getKey(), $userId, 'llm_configuration');
+
+        expect($result)->toBeArray();
+        // Password field is masked through the public surface
+        expect($result['api_key'])->toBe('***');
+        // Non-password field is plain
+        expect($result['model'])->toBe('gpt-4o-mini');
     });
 });
