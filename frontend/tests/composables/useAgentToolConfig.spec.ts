@@ -47,19 +47,20 @@ describe('useAgentToolConfig — extended exports', () => {
   describe('initFormFromSettingsWithSource', () => {
     it('serialises non-string agent-sourced values via String()', () => {
       // Regression for typescript:S6551: was `String(item.value ?? '')` which
-      // would have stringified an object via its default toString. Now uses
-      // `item.value == null ? '' : String(item.value)` so an object value is
-      // a TypeError from String() rather than a silent [object Object].
+      // had a misleading nullish-coalesce that obscured the intent. Now uses
+      // `item.value == null ? '' : String(item.value)` so null/undefined are
+      // converted to '' and every other value goes through String() (number,
+      // boolean, bigint, symbol — the caller's responsibility to ensure the
+      // settings value is a primitive before storing it).
       const settings: SettingsWithSource = {
         max_tokens: { value: 42, source: 'agent' },
         enabled: { value: true, source: 'agent' },
-        // @ts-expect-error - intentionally non-string to exercise the String() path
-        raw: { value: { nested: 'obj' }, source: 'agent' },
+        count: { value: 0, source: 'agent' }, // falsy primitive — must still serialize
       }
       const form = initFormFromSettingsWithSource(settings)
       expect(form.max_tokens).toBe('42')
       expect(form.enabled).toBe('true')
-      expect(() => form.raw).not.toBe('[object Object]')
+      expect(form.count).toBe('0')
     })
 
     it('returns empty string for null/undefined agent-sourced values', () => {
