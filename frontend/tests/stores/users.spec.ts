@@ -180,3 +180,52 @@ describe('useUsersStore', () => {
     })
   })
 })
+
+describe('additional users store coverage', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  it('setVerified patches the user and updates the list', async () => {
+    const verified = { ...mockUser, verified: true }
+    mockApi.patch.mockResolvedValueOnce({ user: verified })
+
+    const store = useUsersStore()
+    store.users = [mockUser]
+
+    const result = await store.setVerified(1, true)
+
+    expect(mockApi.patch).toHaveBeenCalledWith('/users/1', { verified: true })
+    expect(store.users[0].verified).toBe(true)
+    expect(result.verified).toBe(true)
+  })
+
+  it('setVerified sets error and rethrows on failure', async () => {
+    mockApi.patch.mockRejectedValueOnce(new ApiError('ERR', 'Cannot verify', 400))
+
+    const store = useUsersStore()
+
+    await expect(store.setVerified(1, true)).rejects.toThrow(ApiError)
+    expect(store.error).toBe('Cannot verify')
+  })
+
+  it('updateUser sets error and rethrows on non-ApiError', async () => {
+    mockApi.patch.mockRejectedValueOnce(new Error('boom'))
+
+    const store = useUsersStore()
+
+    await expect(store.updateUser(1, { username: 'x' })).rejects.toThrow()
+    expect(store.error).toBe('Failed to update user.')
+  })
+
+  it('deleteUser sets error and rethrows on failure', async () => {
+    mockApi.delete.mockRejectedValueOnce(new ApiError('ERR', 'Cannot delete', 500))
+
+    const store = useUsersStore()
+    store.users = [mockUser]
+
+    await expect(store.deleteUser(1)).rejects.toThrow(ApiError)
+    expect(store.error).toBe('Cannot delete')
+  })
+})

@@ -44,6 +44,7 @@ export function insertPlaceholderInto(
 }
 
 export interface MailTemplateDraft {
+  name: string
   subject: string
   body_text: string
   body_html: string

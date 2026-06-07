@@ -92,7 +92,7 @@ defineExpose({ scrollToBottom })
               <div class="flex flex-col gap-2">
                 <div v-html="renderMarkdown(props.expandedTools[msg.entry.sequence] ? msg.entry.content ?? '' : truncate(msg.entry.content))" />
                 <button
-                  @click.stop="emit('toggleExpanded', msg.entry.sequence)"
+                  @click.stop.prevent="emit('toggleExpanded', msg.entry.sequence)"
                   class="mt-1 inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors border border-transparent hover:border-border"
                 >
                   {{ props.expandedTools[msg.entry.sequence] ? '▲ less' : '▼ more' }}

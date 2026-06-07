@@ -9,6 +9,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.0--alpha-red?style=flat-square)](https://github.com/spora-ai/Spora)
 [![PHP 8.4+](https://img.shields.io/badge/PHP-8.4%2B-777BB4?style=flat-square&logo=php&logoColor=white)](https://www.php.net/releases/8.4/en.php)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=spora-ai_Spora&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=spora-ai_Spora)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=spora-ai_Spora&metric=coverage)](https://sonarcloud.io/summary/new_code?id=spora-ai_Spora)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=spora-ai_Spora&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=spora-ai_Spora)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=spora-ai_Spora&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=spora-ai_Spora)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=spora-ai_Spora&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=spora-ai_Spora)
 
 </p>
 
