@@ -163,6 +163,16 @@ async function savePassword(): Promise<void> {
         <section class="space-y-4">
           <h2 class="text-sm font-semibold text-foreground">Change Password</h2>
           <form @submit.prevent="savePassword" class="space-y-3">
+            <!-- Required a11y signal: a form with type=password must have a (possibly hidden) username field. Also lets password managers prefill. -->
+            <input
+              type="email"
+              name="email"
+              :value="auth.user?.email ?? ''"
+              autocomplete="username"
+              tabindex="-1"
+              aria-hidden="true"
+              style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;"
+            />
             <div class="space-y-2">
               <label for="current-pw" class="text-sm font-medium">Current Password</label>
               <input
