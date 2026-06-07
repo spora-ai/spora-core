@@ -237,7 +237,9 @@ final class AuthService
             // a callback to fire, but we explicitly don't want to send a
             // verification email. An empty closure is the documented way to
             // skip that step without disabling the change itself.
-            $this->auth->changeEmail($newEmail, static function (): void {});
+            $this->auth->changeEmail($newEmail, static function (): void {
+                // intentionally empty — see comment above
+            });
             return;
         }
 

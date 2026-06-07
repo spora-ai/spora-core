@@ -35,10 +35,7 @@ final class UserInfoTool extends AbstractTool
         /** @var Agent|null $agent */
         $agent = Agent::find($agentId);
 
-        /** @var User|null $user */
-        $user = $agent?->user;
-
-        return $user;
+        return $agent?->user;
     }
 
     public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult

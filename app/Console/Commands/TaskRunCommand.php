@@ -58,7 +58,7 @@ final class TaskRunCommand extends Command
 
         // No separate log file — stdout/stderr go to parent's inherited file descriptors
         // so the process manager (systemd/supervisord) captures all child output centrally.
-        $orchestrator = $this->buildOrchestrator($output);
+        $orchestrator = $this->buildOrchestrator();
 
         // Claim the task (QUEUED → RUNNING) inside a lock-safe transaction.
         $task = Capsule::connection()->transaction(function () use ($taskId): ?Task {
@@ -119,9 +119,8 @@ final class TaskRunCommand extends Command
         return $finalStatus === 'COMPLETED' ? Command::SUCCESS : Command::FAILURE;
     }
 
-    private function buildOrchestrator(OutputInterface $output): OrchestratorInterface
+    private function buildOrchestrator(): OrchestratorInterface
     {
-        $config = $this->container->get('config');
         return new Orchestrator(
             driverFactory: $this->container->get(DriverFactory::class),
             llmConfigService: $this->container->get(LLMConfigService::class),

@@ -45,7 +45,6 @@ final class DatabaseSeeder
         $user = User::where('email', 'admin@spora.local')->first();
         if ($user === null) {
             $userId = $this->authService->register('admin@spora.local', 'password', 'Admin');
-            $user   = User::findOrFail($userId);
             echo "Created Admin User: admin@spora.local / password\n";
         } else {
             echo "Admin user already exists.\n";

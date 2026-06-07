@@ -11,6 +11,7 @@ use Psr\Log\LoggerInterface;
 use ReflectionClass;
 use RuntimeException;
 use Spora\Agents\ValueObjects\AgentState;
+use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\Exceptions\LLMProviderException;
@@ -271,21 +272,23 @@ final class Orchestrator implements OrchestratorInterface
             taskId: $task->id,
             role: 'assistant',
             content: null,
-            toolCallPayload: json_encode(
-                array_map(static fn(DriverToolCall $tc) => [
-                    'id'       => $tc->providerCallId,
-                    'type'     => 'function',
-                    'function' => [
-                        'name'      => $tc->toolName,
-                        // Normalize empty array [] to {} for strict providers
-                        'arguments' => empty($tc->arguments) ? '{}' : json_encode($tc->arguments, JSON_THROW_ON_ERROR),
-                    ],
-                ], $response->toolCalls),
-                JSON_THROW_ON_ERROR,
+            context: new HistoryMessageContext(
+                toolCallPayload: json_encode(
+                    array_map(static fn(DriverToolCall $tc) => [
+                        'id'       => $tc->providerCallId,
+                        'type'     => 'function',
+                        'function' => [
+                            'name'      => $tc->toolName,
+                            // Normalize empty array [] to {} for strict providers
+                            'arguments' => empty($tc->arguments) ? '{}' : json_encode($tc->arguments, JSON_THROW_ON_ERROR),
+                        ],
+                    ], $response->toolCalls),
+                    JSON_THROW_ON_ERROR,
+                ),
+                inputTokens: $response->inputTokens,
+                outputTokens: $response->outputTokens,
+                reasoning: $response->reasoning,
             ),
-            inputTokens: $response->inputTokens,
-            outputTokens: $response->outputTokens,
-            reasoning: $response->reasoning,
         );
     }
 
@@ -295,9 +298,11 @@ final class Orchestrator implements OrchestratorInterface
             taskId: $task->id,
             role: 'assistant',
             content: $response->content,
-            inputTokens: $response->inputTokens,
-            outputTokens: $response->outputTokens,
-            reasoning: $response->reasoning,
+            context: new HistoryMessageContext(
+                inputTokens: $response->inputTokens,
+                outputTokens: $response->outputTokens,
+                reasoning: $response->reasoning,
+            ),
         );
 
         $task->status         = 'COMPLETED';
@@ -671,8 +676,10 @@ final class Orchestrator implements OrchestratorInterface
             taskId: $task->id,
             role: 'tool',
             content: $result->content,
-            toolCallId: $pendingToolCall->providerCallId,
-            toolName: $pendingToolCall->toolName,
+            context: new HistoryMessageContext(
+                toolCallId: $pendingToolCall->providerCallId,
+                toolName: $pendingToolCall->toolName,
+            ),
         );
 
         ToolCallModel::where('task_id', $taskId)
@@ -706,8 +713,10 @@ final class Orchestrator implements OrchestratorInterface
             taskId: $task->id,
             role: 'tool',
             content: $result->content,
-            toolCallId: $pendingToolCall->providerCallId,
-            toolName: $pendingToolCall->toolName,
+            context: new HistoryMessageContext(
+                toolCallId: $pendingToolCall->providerCallId,
+                toolName: $pendingToolCall->toolName,
+            ),
         );
     }
 
@@ -723,8 +732,10 @@ final class Orchestrator implements OrchestratorInterface
                 taskId: $task->id,
                 role: 'tool',
                 content: 'Action discarded (state mismatch/timeout)',
-                toolCallId: $danglingTool->provider_call_id,
-                toolName: $danglingTool->tool_name,
+                context: new HistoryMessageContext(
+                    toolCallId: $danglingTool->provider_call_id,
+                    toolName: $danglingTool->tool_name,
+                ),
             );
         }
 
@@ -795,8 +806,10 @@ final class Orchestrator implements OrchestratorInterface
                     taskId: $task->id,
                     role: 'tool',
                     content: "Action rejected by user: {$reason}",
-                    toolCallId: $model->provider_call_id,
-                    toolName: $model->tool_name,
+                    context: new HistoryMessageContext(
+                        toolCallId: $model->provider_call_id,
+                        toolName: $model->tool_name,
+                    ),
                 );
             }
 
@@ -861,8 +874,10 @@ final class Orchestrator implements OrchestratorInterface
                             taskId: $task->id,
                             role: 'tool',
                             content: "Operation '{$operationName}' is disabled for this agent.",
-                            toolCallId: $toolCall->providerCallId,
-                            toolName: $toolCall->toolName,
+                            context: new HistoryMessageContext(
+                                toolCallId: $toolCall->providerCallId,
+                                toolName: $toolCall->toolName,
+                            ),
                         );
                         continue;
                     }
@@ -898,8 +913,10 @@ final class Orchestrator implements OrchestratorInterface
                             taskId: $task->id,
                             role: 'tool',
                             content: $result->content,
-                            toolCallId: $toolCall->providerCallId,
-                            toolName: $toolCall->toolName,
+                            context: new HistoryMessageContext(
+                                toolCallId: $toolCall->providerCallId,
+                                toolName: $toolCall->toolName,
+                            ),
                         );
                     });
                     continue;
@@ -919,8 +936,10 @@ final class Orchestrator implements OrchestratorInterface
                             taskId: $task->id,
                             role: 'tool',
                             content: $result->content,
-                            toolCallId: $toolCall->providerCallId,
-                            toolName: $toolCall->toolName,
+                            context: new HistoryMessageContext(
+                                toolCallId: $toolCall->providerCallId,
+                                toolName: $toolCall->toolName,
+                            ),
                         );
                     });
                 } else {
@@ -931,8 +950,10 @@ final class Orchestrator implements OrchestratorInterface
                     taskId: $task->id,
                     role: 'tool',
                     content: 'System Error: ' . $e->getMessage(),
-                    toolCallId: $toolCall->providerCallId,
-                    toolName: $toolCall->toolName,
+                    context: new HistoryMessageContext(
+                        toolCallId: $toolCall->providerCallId,
+                        toolName: $toolCall->toolName,
+                    ),
                 );
             }
         }
@@ -1384,30 +1405,27 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     private function appendHistory(
-        int     $taskId,
-        string  $role,
-        ?string $content,
-        ?string $toolCallId      = null,
-        ?string $toolName        = null,
-        ?string $toolCallPayload = null,
-        int     $inputTokens     = 0,
-        int     $outputTokens    = 0,
-        ?string $reasoning       = null,
+        int                       $taskId,
+        string                    $role,
+        ?string                   $content,
+        ?HistoryMessageContext    $context = null,
     ): void {
+        $context ??= new HistoryMessageContext();
+
         $row = [
             'task_id'           => $taskId,
             'role'              => $role,
             'content'           => $content,
-            'tool_call_id'      => $toolCallId,
-            'tool_name'         => $toolName,
-            'tool_call_payload' => $toolCallPayload,
-            'input_tokens'      => $inputTokens,
-            'output_tokens'     => $outputTokens,
+            'tool_call_id'      => $context->toolCallId,
+            'tool_name'         => $context->toolName,
+            'tool_call_payload' => $context->toolCallPayload,
+            'input_tokens'      => $context->inputTokens,
+            'output_tokens'     => $context->outputTokens,
         ];
 
         // Write reasoning unconditionally as the column is now part of the base schema
-        if ($reasoning !== null) {
-            $row['reasoning'] = $reasoning;
+        if ($context->reasoning !== null) {
+            $row['reasoning'] = $context->reasoning;
         }
 
         Capsule::connection()->transaction(function () use ($taskId, $row) {
