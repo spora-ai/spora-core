@@ -418,3 +418,24 @@ test('deleteUserSettings requires userId to target correct user', function (): v
     $user1Settings = $service->getUserSettings(TestTool::class, $user1);
     expect($user1Settings)->toBe(['max_results' => 'user1-value']);
 })->afterEach(fn() => Database::resetBootState());
+
+// Facade wiring (php:S1448 split)
+
+test('facade wires the schema, crypto, and name-resolver collaborators', function (): void {
+    $authService = bootAuthLayer();
+    $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new SecurityManager($key);
+    $logger   = new Monolog\Logger('test');
+
+    // Register TestTool so the NameResolver can resolve it.
+    $service = new ToolConfigService($security, $logger, [TestTool::class]);
+    $agentId = makeAgent($authService);
+
+    // If a collaborator were null, every public method below would fail
+    // (maskForApi, resolveToolClass, getEffectiveSettings). This is the
+    // "smoke" assertion that the constructor actually wired them.
+    expect($service->maskForApi(['api_key' => 'x', 'max_results' => '10'], TestTool::class))
+        ->toBe(['api_key' => '***', 'max_results' => '10']);
+    expect($service->resolveToolClass('test_tool'))->toBe(TestTool::class);
+    expect($service->getEffectiveSettings(TestTool::class, $agentId))->toBe(['max_results' => '10']);
+})->afterEach(fn() => Database::resetBootState());
