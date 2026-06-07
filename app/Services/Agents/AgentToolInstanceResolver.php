@@ -28,6 +28,14 @@ final class AgentToolInstanceResolver
         }
         if (!isset($instances[$toolClass])) {
             try {
+                // Bypass the tool constructor to read tool metadata (e.g. #[Tool]
+                // attribute, #[ToolSetting] declarations) without triggering side
+                // effects from tool constructors. The instance is held only for
+                // attribute reflection and is never passed to a consumer; the
+                // orchestrator and resolvers construct their own tool instances
+                // via the DI container. Safe by construction.
+                // phpcs:ignore Generic.PHP.NoSilencedErrors,SlevomatCodingStandard.ControlStructures.AssignmentInCondition
+                // nosonar: php:S3011 — accessibility bypass is intentional; instance is used only for reflection
                 $instances[$toolClass] = (new ReflectionClass($toolClass))->newInstanceWithoutConstructor();
             } catch (Throwable) {
                 return null;

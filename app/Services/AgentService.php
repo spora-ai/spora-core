@@ -32,7 +32,7 @@ final class AgentService implements AgentServiceInterface
 
     public function __construct(
         private readonly ToolConfigService $toolConfig,
-        private readonly LLMConfigService $llmConfig,
+        LLMConfigService $llmConfig,
     ) {
         $this->instanceResolver    = new AgentToolInstanceResolver();
         $this->overrideResolver    = new AgentToolOverrideResolver($toolConfig, $llmConfig, $this->instanceResolver);
