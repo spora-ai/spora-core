@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * @property int $id
  * @property int|null $user_id
+ * @property-read User|null $user
  * @property string $name
  * @property string|null $description
  * @property string|null $recipe_id

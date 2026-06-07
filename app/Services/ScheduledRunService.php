@@ -58,6 +58,12 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             ? $this->computeNextRunAt($data['cron_expression'], $data['timezone'] ?? 'UTC')
             : $this->computeOneShotNextRunAt($data['run_at'] ?? null);
 
+        $isActive = match (true) {
+            !isset($data['is_active']) => 1,
+            (bool) $data['is_active']   => 1,
+            default                     => 0,
+        };
+
         $id = Capsule::table('scheduled_runs')->insertGetId([
             'agent_id'          => $agentId,
             'template_id'       => isset($data['template_id']) ? (int) $data['template_id'] : null,
@@ -68,7 +74,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 : null,
             'timezone'          => trim((string) ($data['timezone'] ?? 'UTC')),
             'max_steps_override' => isset($data['max_steps_override']) ? (int) $data['max_steps_override'] : null,
-            'is_active'         => isset($data['is_active']) ? ($data['is_active'] ? 1 : 0) : 1,
+            'is_active'         => $isActive,
             'last_run_at'       => null,
             'next_run_at'       => $nextRunAt,
             'user_id'           => $userId,
