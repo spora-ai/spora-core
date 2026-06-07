@@ -4,13 +4,14 @@
  */
 import Icon from '@/components/ui/Icon.vue'
 import { formatPlaceholder } from '@/composables/useMailTemplates'
+import type { PreviewPayload } from '@/types/mailTemplate'
 
 defineProps<{
   modelValue: boolean
   paramKeys: string[]
   params: Record<string, string>
   loading: boolean
-  result: { subject: string; body_text: string; body_html: string } | null
+  result: PreviewPayload | null
 }>()
 
 const emit = defineEmits<{

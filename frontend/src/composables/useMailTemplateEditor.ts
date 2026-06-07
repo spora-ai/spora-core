@@ -20,6 +20,7 @@ import {
   type MailTemplateCreateDraft,
   type MailTemplateDraft,
 } from '@/composables/useMailTemplates'
+import type { PreviewPayload } from '@/types/mailTemplate'
 
 export function useMailTemplateEditor() {
   const store = useMailTemplatesStore()
