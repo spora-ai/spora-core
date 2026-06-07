@@ -2628,3 +2628,491 @@ it('tick uses the agent-provided system_prompt when set', function (): void {
     expect($capturedRequest)->not->toBeNull()
         ->and($capturedRequest->systemPrompt)->toBe('You are the test agent. Always answer with "OK".');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ============================================================================
+// PR 2.4 — coverage augmentation for Orchestrator::handleToolCalls and
+// ::buildMessages (safety net for Phase 3.6a/3.6b split and Phase 6.4/6.5
+// refactor). These tests pin the contract of the two highest-complexity
+// methods in the codebase.
+// ============================================================================
+
+describe('Orchestrator::handleToolCalls — happy path', function (): void {
+    it('executes an auto-approved tool inline, writes the APPROVED ToolCall, history row, and publishes intermediate state once', function (): void {
+        [$agentId] = seedAgent();
+
+        $publishCount = 0;
+        $mockMercure  = Mockery::mock(MercurePublisherInterface::class);
+        $mockMercure->allows('publish')->andReturnUsing(static function () use (&$publishCount): bool {
+            $publishCount++;
+
+            return true;
+        });
+
+        $callCount = 0;
+        $mock      = Mockery::mock(LLMDriverInterface::class);
+        $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+            $callCount++;
+            if ($callCount === 1) {
+                return new LLMResponse(null, [new DriverToolCall('call_happy', 'stub_input', [])], 5, 3, 'cmp_1');
+            }
+
+            return new LLMResponse('Done.', [], 5, 3, 'cmp_2');
+        });
+
+        $tools = [new StubInputTool()];
+        enableToolsForAgent($agentId, $tools);
+        $orch = new Orchestrator(
+            driverFactory: mockDriverFactory($mock),
+            toolInstances: $tools,
+            mercure: $mockMercure,
+        );
+        $task = $orch->start($agentId, 'Happy path test', maxSteps: 10);
+
+        $task->refresh();
+        // Auto-approved → no PENDING_APPROVAL, loop completes in 2 turns.
+        expect($task->status)->toBe('COMPLETED')
+            ->and($task->step_count)->toBe(2);
+
+        $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
+        expect($toolCallRecord)->not()->toBeNull()
+            ->and($toolCallRecord->status)->toBe('APPROVED')
+            ->and($toolCallRecord->tool_type)->toBe('input')
+            ->and($toolCallRecord->result_content)->toBe('input_result');
+
+        // The history row carries the tool result for the LLM's next turn.
+        $toolHistory = TaskHistory::where('task_id', $task->id)
+            ->where('role', 'tool')
+            ->where('tool_call_id', 'call_happy')
+            ->first();
+        expect($toolHistory)->not()->toBeNull()
+            ->and($toolHistory->content)->toBe('input_result');
+
+        // publishIntermediateState is called exactly once after handleToolCalls
+        // (not again on the final tick) — confirms no duplicate publish bug.
+        expect($publishCount)->toBe(1);
+    })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+    it('queues a tool that requires approval into pendingApproval, sets PENDING_APPROVAL, and does not execute', function (): void {
+        [$agentId] = seedAgent();
+
+        $mock = Mockery::mock(LLMDriverInterface::class);
+        $mock->allows('complete')->once()->andReturn(
+            new LLMResponse(null, [new DriverToolCall('call_approval', 'stub_output', ['x' => 1])], 5, 3, 'cmp_1'),
+        );
+
+        $tools = [new StubOutputTool()];
+        enableToolsForAgent($agentId, $tools);
+        $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+        $task = $orch->start($agentId, 'Approval queue test', maxSteps: 10);
+
+        $task->refresh();
+        // Approval is required → orchestrator pauses, tick() is NOT recursed.
+        expect($task->status)->toBe('PENDING_APPROVAL')
+            ->and($task->pending_state)->not->toBeNull();
+
+        // No execution happened → no APPROVED ToolCall records.
+        $approvedCount = ToolCallModel::where('task_id', $task->id)
+            ->where('status', 'APPROVED')
+            ->count();
+        expect($approvedCount)->toBe(0);
+
+        $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
+        expect($toolCallRecord->status)->toBe('PENDING_APPROVAL')
+            ->and($toolCallRecord->proposed_arguments)->not->toBeNull()
+            ->and($toolCallRecord->proposed_arguments)->not->toBeEmpty();
+
+        $state = AgentState::fromJson($task->pending_state);
+        expect($state->pendingToolCalls)->toHaveCount(1)
+            ->and($state->pendingToolCalls[0]->toolName)->toBe('stub_output')
+            ->and($state->pendingToolCalls[0]->arguments)->toBe(['x' => 1]);
+    })->afterEach(fn() => Spora\Core\Database::resetBootState());
+});
+
+describe('Orchestrator::handleToolCalls — disabled tool', function (): void {
+    it('writes a System Error history row when the LLM calls a tool not enabled for the agent', function (): void {
+        [$agentId] = seedAgent();
+
+        $callCount = 0;
+        $mock      = Mockery::mock(LLMDriverInterface::class);
+        $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+            $callCount++;
+            if ($callCount === 1) {
+                return new LLMResponse(null, [new DriverToolCall('call_unauth', 'stub_input', [])], 5, 3, 'cmp_1');
+            }
+
+            return new LLMResponse('Recovered.', [], 5, 3, 'cmp_2');
+        });
+
+        // Note: enableToolsForAgent is intentionally NOT called for the agent.
+        $orch = makeOrchestrator(mockDriverFactory($mock), [new StubInputTool()]);
+        $task = $orch->start($agentId, 'Disabled tool test', maxSteps: 10);
+
+        $task->refresh();
+        // The error is fed back to the LLM and the loop recovers.
+        expect($task->status)->toBe('COMPLETED');
+
+        // The error message is recorded in a tool history row.
+        $errorRow = TaskHistory::where('task_id', $task->id)
+            ->where('role', 'tool')
+            ->where('tool_call_id', 'call_unauth')
+            ->first();
+        expect($errorRow)->not()->toBeNull()
+            ->and($errorRow->content)->toContain('System Error')
+            ->and($errorRow->content)->toContain('not enabled');
+    })->afterEach(fn() => Spora\Core\Database::resetBootState());
+});
+
+describe('Orchestrator::handleToolCalls — validation failure', function (): void {
+    it('wraps SchemaValidator exception in a Validation Error ToolResult, persists it, and does not throw or execute', function (): void {
+        [$agentId] = seedAgent();
+
+        $callCount = 0;
+        $mock      = Mockery::mock(LLMDriverInterface::class);
+        $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+            $callCount++;
+            if ($callCount === 1) {
+                // LLM forgets the required 'recipient' field.
+                return new LLMResponse(null, [new DriverToolCall('call_vfail', 'stub_output_with_schema', [])], 5, 3, 'cmp_1');
+            }
+
+            return new LLMResponse('Let me try again.', [], 5, 3, 'cmp_2');
+        });
+
+        $tools = [new StubOutputToolWithSchema()];
+        enableToolsForAgent($agentId, $tools);
+        $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+        $task = $orch->start($agentId, 'Validation failure test', maxSteps: 10);
+
+        $task->refresh();
+        // Validation failure is recoverable — the LLM is given a second chance.
+        expect($task->status)->toBe('COMPLETED');
+
+        // ToolCall row is APPROVED (not PENDING_APPROVAL) and carries the
+        // validation error message in result_content.
+        $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
+        expect($toolCallRecord)->not()->toBeNull()
+            ->and($toolCallRecord->status)->toBe('APPROVED')
+            ->and($toolCallRecord->result_content)->toContain(VALIDATION_ERROR)
+            ->and($toolCallRecord->result_content)->toContain('recipient');
+
+        // A tool history row mirrors the validation error so the LLM sees it.
+        $toolHistory = TaskHistory::where('task_id', $task->id)
+            ->where('role', 'tool')
+            ->where('tool_call_id', 'call_vfail')
+            ->first();
+        expect($toolHistory)->not()->toBeNull()
+            ->and($toolHistory->content)->toContain(VALIDATION_ERROR);
+    })->afterEach(fn() => Spora\Core\Database::resetBootState());
+});
+
+describe('Orchestrator::handleToolCalls — safeExecute catches throwable', function (): void {
+    it('catches the throwable from the tool, encodes it as a System Error ToolResult, and the loop continues', function (): void {
+        [$agentId] = seedAgent();
+
+        $callCount = 0;
+        $mock      = Mockery::mock(LLMDriverInterface::class);
+        $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+            $callCount++;
+            if ($callCount === 1) {
+                return new LLMResponse(null, [new DriverToolCall('call_throw', 'throwing_tool', [])], 5, 3, 'cmp_1');
+            }
+
+            return new LLMResponse('Recovered.', [], 5, 3, 'cmp_2');
+        });
+
+        $tools = [new ThrowingTool()];
+        enableToolsForAgent($agentId, $tools);
+        $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+        $task = $orch->start($agentId, 'Throw recovery test', maxSteps: 10);
+
+        $task->refresh();
+        // The throwable is caught; the loop survives.
+        expect($task->status)->toBe('COMPLETED');
+
+        $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
+        expect($toolCallRecord->status)->toBe('APPROVED')
+            ->and($toolCallRecord->result_content)->toContain('System Error')
+            ->and($toolCallRecord->result_content)->toContain('fatal exception');
+
+        // A tool history row carries the same message back to the LLM.
+        $toolHistory = TaskHistory::where('task_id', $task->id)
+            ->where('role', 'tool')
+            ->where('tool_call_id', 'call_throw')
+            ->first();
+        expect($toolHistory)->not()->toBeNull()
+            ->and($toolHistory->content)->toContain('System Error');
+    })->afterEach(fn() => Spora\Core\Database::resetBootState());
+});
+
+describe('Orchestrator::handleToolCalls — HasOperations operation disabled', function (): void {
+    it('records a DISABLED ToolCall with tool_type=operation and writes a tool history row explaining the disabled state', function (): void {
+        [$agentId] = seedAgent();
+
+        // Disable the 'default' operation of StubInputTool for this agent.
+        AgentToolOperationOverride::create([
+            'agent_id'                  => $agentId,
+            'tool_class'                => StubInputTool::class,
+            'operation'                 => 'default',
+            'enabled'                   => 0,
+            'default_requires_approval' => null,
+        ]);
+
+        $callCount = 0;
+        $mock      = Mockery::mock(LLMDriverInterface::class);
+        $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
+            $callCount++;
+            if ($callCount === 1) {
+                return new LLMResponse(null, [new DriverToolCall('call_op_disabled', 'stub_input', [])], 5, 3, 'cmp_1');
+            }
+
+            return new LLMResponse('Recovered.', [], 5, 3, 'cmp_2');
+        });
+
+        $tools = [new StubInputTool()];
+        enableToolsForAgent($agentId, $tools);
+        $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+        $task = $orch->start($agentId, 'Operation disabled test', maxSteps: 10);
+
+        $task->refresh();
+        expect($task->status)->toBe('COMPLETED');
+
+        // The ToolCall record is persisted with DISABLED status and operation
+        // tool_type (not input/output — the LLM's call was structurally
+        // well-formed but the agent has disabled this operation).
+        $toolCall = ToolCallModel::where('task_id', $task->id)->first();
+        expect($toolCall)->not()->toBeNull()
+            ->and($toolCall->status)->toBe('DISABLED')
+            ->and($toolCall->tool_type)->toBe('operation')
+            ->and($toolCall->operation)->toBe('default');
+
+        // The history row tells the LLM the operation is disabled.
+        $toolHistory = TaskHistory::where('task_id', $task->id)
+            ->where('role', 'tool')
+            ->where('tool_call_id', 'call_op_disabled')
+            ->first();
+        expect($toolHistory)->not()->toBeNull()
+            ->and($toolHistory->content)->toContain("Operation 'default' is disabled");
+    })->afterEach(fn() => Spora\Core\Database::resetBootState());
+});
+
+describe('Orchestrator::buildMessages — empty history', function (): void {
+    it('returns an empty messages array when no history rows exist', function (): void {
+        [$agentId] = seedAgent();
+
+        $task = Task::create([
+            'agent_id'    => $agentId,
+            'user_id'     => Agent::find($agentId)->user_id,
+            'status'      => 'RUNNING',
+            'user_prompt' => 'No history',
+            'step_count'  => 0,
+            'max_steps'   => 10,
+        ]);
+
+        $capturedMessages = null;
+        $mock             = Mockery::mock(LLMDriverInterface::class);
+        $mock->allows('complete')->once()->andReturnUsing(static function (LLMRequest $request) use (&$capturedMessages) {
+            $capturedMessages = $request->messages;
+
+            return new LLMResponse('ok', [], 5, 3, 'cmp_1');
+        });
+
+        $orch = makeOrchestrator(mockDriverFactory($mock));
+        $orch->tick($task->id);
+
+        // No history rows → no projected messages. The system prompt is
+        // still passed via $request->systemPrompt, but $request->messages
+        // must be an empty list.
+        expect($capturedMessages)->toBe([]);
+    })->afterEach(fn() => Spora\Core\Database::resetBootState());
+});
+
+describe('Orchestrator::buildMessages — summary substitution', function (): void {
+    it('excludes the rows covered by the summary range, includes the summary row, and includes later rows', function (): void {
+        [$agentId] = seedAgent();
+
+        $task = Task::create([
+            'agent_id'    => $agentId,
+            'user_id'     => Agent::find($agentId)->user_id,
+            'status'      => 'RUNNING',
+            'user_prompt' => 'Summary test',
+            'step_count'  => 0,
+            'max_steps'   => 10,
+        ]);
+
+        // Pre-summary: sequences 0-2 (will be absorbed by the summary)
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Q1']);
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'A1']);
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 2, 'role' => 'user', 'content' => 'Q2']);
+        // Summary at sequence 3 covering 0-2
+        TaskHistory::create([
+            'task_id'                   => $task->id,
+            'sequence'                  => 3,
+            'role'                      => 'summary',
+            'content'                   => 'Compacted first two turns.',
+            'summarized_sequence_range' => '0-2',
+        ]);
+        // Post-summary: sequence 4
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 4, 'role' => 'user', 'content' => 'Q3']);
+
+        $capturedMessages = null;
+        $mock             = Mockery::mock(LLMDriverInterface::class);
+        $mock->allows('complete')->once()->andReturnUsing(static function (LLMRequest $request) use (&$capturedMessages) {
+            $capturedMessages = $request->messages;
+
+            return new LLMResponse('Done', [], 5, 3, 'cmp_1');
+        });
+
+        $orch = makeOrchestrator(mockDriverFactory($mock));
+        $orch->tick($task->id);
+
+        // buildMessages removes sequences in the range, keeps the summary
+        // row, and includes rows with sequence > rangeEnd. So we expect:
+        //   [0] = summary row
+        //   [1] = Q3 (post-summary user message)
+        expect($capturedMessages)->toHaveCount(2);
+        expect($capturedMessages[0])->toMatchArray([
+            'role'    => 'summary',
+            'content' => 'Compacted first two turns.',
+        ]);
+        expect($capturedMessages[1])->toMatchArray([
+            'role'    => 'user',
+            'content' => 'Q3',
+        ]);
+    })->afterEach(fn() => Spora\Core\Database::resetBootState());
+});
+
+describe('Orchestrator::buildMessages — assistant tool_call payload', function (): void {
+    it('normalizes empty arguments array to "{}" before sending to the LLM', function (): void {
+        [$agentId] = seedAgent();
+
+        $task = Task::create([
+            'agent_id'    => $agentId,
+            'user_id'     => Agent::find($agentId)->user_id,
+            'status'      => 'RUNNING',
+            'user_prompt' => 'Empty args test',
+            'step_count'  => 0,
+            'max_steps'   => 10,
+        ]);
+
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Hello']);
+        // arguments = [] (empty array literal). buildMessages must rewrite
+        // this to '{}' so strict providers (OpenAI, MiniMax, LM Studio) accept it.
+        TaskHistory::create([
+            'task_id'           => $task->id,
+            'sequence'          => 1,
+            'role'              => 'assistant',
+            'content'           => null,
+            'tool_call_payload' => json_encode([
+                ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'stub_input', 'arguments' => []]],
+            ]),
+        ]);
+
+        $capturedMessages = null;
+        $mock             = Mockery::mock(LLMDriverInterface::class);
+        $mock->allows('complete')->once()->andReturnUsing(static function (LLMRequest $request) use (&$capturedMessages) {
+            $capturedMessages = $request->messages;
+
+            return new LLMResponse('Done', [], 5, 3, 'cmp_1');
+        });
+
+        $orch = makeOrchestrator(mockDriverFactory($mock));
+        $orch->tick($task->id);
+
+        // The assistant message is at index 1.
+        expect($capturedMessages[1]['role'])->toBe('assistant')
+            ->and($capturedMessages[1]['tool_calls'][0]['function']['arguments'])->toBe('{}');
+    })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+    it('preserves non-empty arguments unchanged', function (): void {
+        [$agentId] = seedAgent();
+
+        $task = Task::create([
+            'agent_id'    => $agentId,
+            'user_id'     => Agent::find($agentId)->user_id,
+            'status'      => 'RUNNING',
+            'user_prompt' => 'Non-empty args test',
+            'step_count'  => 0,
+            'max_steps'   => 10,
+        ]);
+
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Hello']);
+        // arguments = non-empty object — must be passed through unchanged.
+        $originalArgs = ['recipient' => 'a@b.com', 'subject' => 'Hello'];
+        TaskHistory::create([
+            'task_id'           => $task->id,
+            'sequence'          => 1,
+            'role'              => 'assistant',
+            'content'           => null,
+            'tool_call_payload' => json_encode([
+                ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'send_email', 'arguments' => $originalArgs]],
+            ]),
+        ]);
+
+        $capturedMessages = null;
+        $mock             = Mockery::mock(LLMDriverInterface::class);
+        $mock->allows('complete')->once()->andReturnUsing(static function (LLMRequest $request) use (&$capturedMessages) {
+            $capturedMessages = $request->messages;
+
+            return new LLMResponse('Done', [], 5, 3, 'cmp_1');
+        });
+
+        $orch = makeOrchestrator(mockDriverFactory($mock));
+        $orch->tick($task->id);
+
+        $args = $capturedMessages[1]['tool_calls'][0]['function']['arguments'];
+        $decoded = is_string($args) ? json_decode($args, true) : $args;
+        expect($decoded)->toBe($originalArgs);
+    })->afterEach(fn() => Spora\Core\Database::resetBootState());
+});
+
+describe('Orchestrator::buildMessages — tool role', function (): void {
+    it('emits {role: tool, tool_call_id, name, content} and strips the _seq scaffolding key from every message', function (): void {
+        [$agentId] = seedAgent();
+
+        $task = Task::create([
+            'agent_id'    => $agentId,
+            'user_id'     => Agent::find($agentId)->user_id,
+            'status'      => 'RUNNING',
+            'user_prompt' => 'Tool role test',
+            'step_count'  => 0,
+            'max_steps'   => 10,
+        ]);
+
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Hello']);
+        TaskHistory::create([
+            'task_id'      => $task->id,
+            'sequence'     => 1,
+            'role'         => 'tool',
+            'content'      => 'tool output content',
+            'tool_call_id' => 'call_xyz',
+            'tool_name'    => 'stub_input',
+        ]);
+
+        $capturedMessages = null;
+        $mock             = Mockery::mock(LLMDriverInterface::class);
+        $mock->allows('complete')->once()->andReturnUsing(static function (LLMRequest $request) use (&$capturedMessages) {
+            $capturedMessages = $request->messages;
+
+            return new LLMResponse('Done', [], 5, 3, 'cmp_1');
+        });
+
+        $orch = makeOrchestrator(mockDriverFactory($mock));
+        $orch->tick($task->id);
+
+        // Expect 2 messages: user + tool.
+        expect($capturedMessages)->toHaveCount(2);
+
+        // The tool message has the OpenAI-compatible shape.
+        $toolMsg = $capturedMessages[1];
+        expect($toolMsg)->toMatchArray([
+            'role'         => 'tool',
+            'tool_call_id' => 'call_xyz',
+            'name'         => 'stub_input',
+            'content'      => 'tool output content',
+        ]);
+
+        // The _seq scaffolding key must NOT leak into the final output.
+        expect($toolMsg)->not->toHaveKey('_seq');
+        expect($capturedMessages[0])->not->toHaveKey('_seq');
+    })->afterEach(fn() => Spora\Core\Database::resetBootState());
+});
