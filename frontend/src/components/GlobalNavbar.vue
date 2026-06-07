@@ -88,6 +88,7 @@ function navigateToApp(app: AppInfo): void {
       to="/settings"
       class="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
       title="Settings"
+      aria-label="Settings"
     >
       <Icon name="settings" />
     </RouterLink>
@@ -97,6 +98,7 @@ function navigateToApp(app: AppInfo): void {
       @click="openNotifications"
       class="relative flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
       title="Notifications"
+      aria-label="Notifications"
     >
       <Icon name="bell" />
       <span
@@ -112,6 +114,7 @@ function navigateToApp(app: AppInfo): void {
       @click="theme.toggle()"
       class="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
       :title="theme.isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+      :aria-label="theme.isDark ? 'Switch to light mode' : 'Switch to dark mode'"
     >
       <Icon v-if="theme.isDark" name="sun" />
       <Icon v-else name="moon" />
@@ -123,6 +126,7 @@ function navigateToApp(app: AppInfo): void {
         @click="toggleAppsDropdown"
         class="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         title="Apps"
+        aria-label="Apps"
       >
         <Icon name="grid" />
       </button>
@@ -165,6 +169,7 @@ function navigateToApp(app: AppInfo): void {
       @click="userMenuOpen = !userMenuOpen"
       class="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
       title="Account menu"
+      aria-label="Account menu"
     >
       <Icon name="user" />
     </button>

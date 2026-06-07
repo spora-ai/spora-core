@@ -134,6 +134,33 @@ describe('ProfileSettingsPage', () => {
       wrapper.unmount()
     })
 
+    it('PUTs edited location to /me/locations/{id} (inverted if/else branch)', async () => {
+      // Covers the `else` branch in saveLocation() — was previously inside an
+      // `if (editingLocation.value !== null) { ... } else { POST }` block. The
+      // inversion (SonarQube S7735) flipped the branches; this test guards
+      // the PUT path.
+      mockApi.put.mockResolvedValueOnce({ id: 1, name: 'Home Sweet Home', address: '789 New St', is_default: true })
+
+      const { wrapper } = await mountPage()
+
+      // The per-row edit button is an icon-only button with the pencil SVG.
+      // Match by the unique path prefix (the trash icon uses 'M19 7l-.867').
+      const editBtn = wrapper.findAll('button').find(w => w.html().includes('M11 5H6'))
+      expect(editBtn).toBeDefined()
+      await editBtn!.trigger('click')
+      await flushPromises()
+
+      // The form should now be pre-filled. Mutate and save.
+      await wrapper.find('[id="loc-name"]').setValue('Home Sweet Home')
+      await wrapper.find('[id="loc-address"]').setValue('789 New St')
+      await wrapper.findAll('button').find(b => b.text().includes('Save Location'))!.trigger('click')
+      await flushPromises()
+
+      expect(mockApi.put).toHaveBeenCalledWith('/me/locations/1', expect.objectContaining({ name: 'Home Sweet Home' }))
+      expect(mockApi.post).not.toHaveBeenCalledWith('/me/locations', expect.anything())
+      wrapper.unmount()
+    })
+
     it('calls delete API when delete button is clicked', async () => {
       mockApi.delete.mockResolvedValueOnce({} as any)
 

@@ -6,6 +6,13 @@ import { ref } from 'vue'
 import { api, ApiError } from '@/api/client'
 import type { MailTemplate, CreateTemplatePayload, UpdateTemplatePayload, PreviewPayload } from '@/types/mailTemplate'
 
+// Hoisted to module scope: doesn't depend on store state (SonarQube typescript:S7721).
+async function preview(name: string, variables: Record<string, string>): Promise<PreviewPayload> {
+  const query = new URLSearchParams(variables).toString()
+  const result = await api.get<PreviewPayload>(`/mail-templates/${name}/preview?${query}`)
+  return result
+}
+
 export const useMailTemplatesStore = defineStore('mailTemplates', () => {
   const templates = ref<MailTemplate[]>([])
   const currentTemplate = ref<MailTemplate | null>(null)
@@ -90,12 +97,6 @@ export const useMailTemplatesStore = defineStore('mailTemplates', () => {
     } finally {
       saving.value = false
     }
-  }
-
-  async function preview(name: string, variables: Record<string, string>): Promise<PreviewPayload> {
-    const query = new URLSearchParams(variables).toString()
-    const result = await api.get<PreviewPayload>(`/mail-templates/${name}/preview?${query}`)
-    return result
   }
 
   return {

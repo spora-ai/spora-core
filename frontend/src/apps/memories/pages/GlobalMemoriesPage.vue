@@ -6,8 +6,7 @@ import { useMemoriesStore } from '../stores/memories'
 import MemoryListItem from '../components/MemoryListItem.vue'
 import MemoryEditor from '../components/MemoryEditor.vue'
 import AlertBanner from '@/components/ui/AlertBanner.vue'
-import type { MemoryResource } from '../types/memory'
-import type { CreateMemoryDto, UpdateMemoryDto } from '../types/memory'
+import type { MemoryResource, CreateMemoryDto, UpdateMemoryDto } from '../types/memory'
 
 const route = useRoute()
 const router = useRouter()

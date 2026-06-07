@@ -65,15 +65,15 @@ async function saveLocation(): Promise<void> {
   locationFormSaving.value = true
   locationFormError.value = null
   try {
-    if (editingLocation.value !== null) {
+    if (editingLocation.value === null) {
+      const res = await api.post<UserLocation>('/me/locations', locationForm.value)
+      locations.value.push(res)
+    } else {
       const res = await api.put<UserLocation>(`/me/locations/${editingLocation.value}`, locationForm.value)
       const idx = locations.value.findIndex((l) => l.id === editingLocation.value)
       if (idx !== -1) {
         locations.value[idx] = res
       }
-    } else {
-      const res = await api.post<UserLocation>('/me/locations', locationForm.value)
-      locations.value.push(res)
     }
     closeLocationForm()
   } catch (e: any) {

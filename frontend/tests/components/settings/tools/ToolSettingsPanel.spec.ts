@@ -69,4 +69,26 @@ describe('ToolSettingsPanel', () => {
     })
     expect(wrapper.html()).toBeTruthy()
   })
+
+  it('clears pending timers on unmount (SonarQube S2681: expanded onUnmounted body)', async () => {
+    // Previously the onUnmounted was a one-liner with two statements that
+    // only the first executed conditionally. After the fix it's a multi-line
+    // block that always runs both clearTimeout calls. This test exercises
+    // unmount and asserts no thrown errors from the cleanup hooks.
+    const wrapper = mount(ToolSettingsPanel, {
+      props: {
+        tool: {
+          tool_class: 'SendEmail',
+          tool_name: 'send_email',
+          display_name: 'Send Email',
+          category: 'communication',
+          settings_schema: [],
+          operations: [],
+        },
+        settings: {},
+      },
+      global,
+    })
+    expect(() => wrapper.unmount()).not.toThrow()
+  })
 })

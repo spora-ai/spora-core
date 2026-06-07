@@ -74,7 +74,7 @@
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
     --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
+    --muted-foreground: 240 4% 38%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5.9% 10%;
@@ -232,9 +232,6 @@
   background: hsl(var(--primary) / 0.15);
   color: var(--foreground);
   border-color: var(--primary);
-}
-.chat-bubble-content .code-block-copy.copied .code-block-copy-icon {
-  display: none;
 }
 .chat-bubble-content .code-block-copy.copied .code-block-copy-icon {
   display: none;

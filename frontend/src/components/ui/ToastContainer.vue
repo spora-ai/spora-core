@@ -21,7 +21,10 @@ defineProps<{
   onDismiss: (id: string) => void // eslint-disable-line no-unused-vars -- called via onDismiss(toast.id) in template
 }>()
 
-const isMobile = computed(() => typeof window !== 'undefined' && window.innerWidth < 640)
+// globalThis.window is the browser window (Window) or undefined in SSR.
+// Direct undefined comparison satisfies typescript:S7741; the SSR guard is
+// defensive — this component is only ever mounted in the browser via Teleport.
+const isMobile = computed(() => globalThis.window !== undefined && globalThis.window.innerWidth < 640)
 </script>
 
 <template>

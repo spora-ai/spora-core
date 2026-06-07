@@ -147,9 +147,9 @@ async function resendVerification(): Promise<void> {
           </p>
 
           <p v-if="resendError" role="alert" class="text-sm text-destructive">{{ resendError }}</p>
-          <p v-if="resendSuccess" role="status" class="text-sm text-green-600 dark:text-green-400">
+          <output v-if="resendSuccess" class="text-sm text-green-600 dark:text-green-400">
             Verification email resent!
-          </p>
+          </output>
 
           <button
             type="button"

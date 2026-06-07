@@ -19,13 +19,12 @@ renderer.code = ({ text, lang }: { text: string; lang?: string }) => {
 }
 marked.use({ renderer })
 
-export function renderMarkdown(src: string): string {
-  const raw = src ?? ''
+export function renderMarkdown(src: string = ''): string {
   let html: string
   try {
-    html = marked.parse(raw) as string
+    html = marked.parse(src) as string
   } catch {
-    return raw
+    return src
   }
   const clean = DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [

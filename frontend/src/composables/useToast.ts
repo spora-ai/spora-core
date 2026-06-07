@@ -35,10 +35,10 @@ function generateId(): string {
 }
 
 class ToastManager {
-  private toasts = reactive<ToastItem[]>([])
+  private readonly toasts = reactive<ToastItem[]>([])
 
   get list(): readonly ToastItem[] {
-    return readonly(this.toasts) as unknown as readonly ToastItem[]
+    return readonly(this.toasts) as readonly ToastItem[]
   }
 
   private add(severity: ToastItem['severity'], message: string, options?: ToastOptions): string {

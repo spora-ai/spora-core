@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useNotificationStore } from '@/stores/notifications'
-import type { Notification } from '@/stores/notifications'
+import { useNotificationStore, type Notification } from '@/stores/notifications'
 import Icon from '@/components/ui/Icon.vue'
 
 const router = useRouter()
@@ -82,11 +81,10 @@ defineExpose({ open: openPanel })
   <!-- Slide-in panel triggered by bell icon in navbar -->
   <Teleport to="body">
     <Transition name="notification-panel">
-      <div
+      <dialog
         v-if="open"
         class="fixed inset-0 z-50 flex"
         aria-modal="true"
-        role="dialog"
       >
         <!-- Backdrop -->
         <div
@@ -175,7 +173,7 @@ defineExpose({ open: openPanel })
             </div>
           </div>
         </div>
-      </div>
+      </dialog>
     </Transition>
   </Teleport>
 </template>
