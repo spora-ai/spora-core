@@ -68,6 +68,12 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('')).toBe('')
   })
 
+  it('accepts a missing argument via the default parameter (SonarQube S7760)', () => {
+    // Replaces the previous `const raw = src ?? ''` reassignment with a true
+    // default parameter. The behaviour must be identical for the empty case.
+    expect(renderMarkdown()).toBe('')
+  })
+
   it('renders unordered and ordered lists', () => {
     const html = renderMarkdown('- a\n- b\n\n1. one\n2. two')
     expect(html).toContain('<ul>')

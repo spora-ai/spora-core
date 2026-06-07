@@ -157,4 +157,32 @@ describe('GlobalNavbar', () => {
     expect(logoutMock).toHaveBeenCalled()
     expect(pushMock).toHaveBeenCalledWith({ name: 'login' })
   })
+
+  it('user menu "My Account" item navigates to account route', async () => {
+    const wrapper = mount(GlobalNavbar, {
+      global: { stubs: { RouterLink: true, NotificationCenter: NotificationCenterStub } },
+    })
+    const userBtn = wrapper.findAll('button').find((b) => b.attributes('title') === 'Account menu')!
+    await userBtn.trigger('click')
+    await flushPromises()
+    const myAccountBtn = Array.from(document.body.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('My Account'))! as HTMLButtonElement
+    expect(myAccountBtn).toBeDefined()
+    myAccountBtn.click()
+    await flushPromises()
+    expect(pushMock).toHaveBeenCalledWith({ name: 'account' })
+  })
+
+  it('user menu "Profile" item navigates to profile route', async () => {
+    const wrapper = mount(GlobalNavbar, {
+      global: { stubs: { RouterLink: true, NotificationCenter: NotificationCenterStub } },
+    })
+    const userBtn = wrapper.findAll('button').find((b) => b.attributes('title') === 'Account menu')!
+    await userBtn.trigger('click')
+    await flushPromises()
+    const profileBtn = Array.from(document.body.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Profile')! as HTMLButtonElement
+    expect(profileBtn).toBeDefined()
+    profileBtn.click()
+    await flushPromises()
+    expect(pushMock).toHaveBeenCalledWith({ name: 'profile' })
+  })
 })

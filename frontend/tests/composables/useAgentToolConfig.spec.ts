@@ -8,6 +8,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  initFormFromSettingsWithSource,
   resolveInitialForm,
   diffAgainst,
   buildSubmitPayload,
@@ -40,6 +41,34 @@ describe('useAgentToolConfig — extended exports', () => {
         model: { value: 'gpt-4', source: 'global' },
       }
       expect(resolveInitialForm(settings)).toEqual({ api_key: 'agent-secret' })
+    })
+  })
+
+  describe('initFormFromSettingsWithSource', () => {
+    it('serialises non-string agent-sourced values via String()', () => {
+      // Regression for typescript:S6551: was `String(item.value ?? '')` which
+      // would have stringified an object via its default toString. Now uses
+      // `item.value == null ? '' : String(item.value)` so an object value is
+      // a TypeError from String() rather than a silent [object Object].
+      const settings: SettingsWithSource = {
+        max_tokens: { value: 42, source: 'agent' },
+        enabled: { value: true, source: 'agent' },
+        // @ts-expect-error - intentionally non-string to exercise the String() path
+        raw: { value: { nested: 'obj' }, source: 'agent' },
+      }
+      const form = initFormFromSettingsWithSource(settings)
+      expect(form.max_tokens).toBe('42')
+      expect(form.enabled).toBe('true')
+      expect(() => form.raw).not.toBe('[object Object]')
+    })
+
+    it('returns empty string for null/undefined agent-sourced values', () => {
+      const settings: SettingsWithSource = {
+        opt1: { value: null, source: 'agent' },
+        opt2: { value: undefined, source: 'agent' },
+      }
+      const form = initFormFromSettingsWithSource(settings)
+      expect(form).toEqual({ opt1: '', opt2: '' })
     })
   })
 
