@@ -4,156 +4,86 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-use ReflectionClass;
-use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\SecurityManagerInterface;
-use Spora\Core\ValueObjects\EncryptedValue;
-use Spora\Drivers\LLMDriverConfigInterface;
-use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
-use Spora\Models\UserPreference;
-use Spora\Tools\Attributes\ToolSetting;
 
 /**
  * Service for managing LLM driver configurations.
  *
- * Handles:
- * - Discovery of registered driver classes (implementing LLMDriverConfigInterface)
- * - Encryption/decryption of settings JSON
- * - CRUD operations via Eloquent
+ * Thin facade that keeps the public API stable while delegating the
+ * heavy lifting to three focused collaborators:
+ *  - {@see LLMConfigSchemaInspector} for driver discovery and schema introspection
+ *  - {@see LLMConfigPersistence} for CRUD with per-field encryption
+ *  - {@see LLMConfigPreferences} for the three-tier default-resolution path
  *
- * Settings are encrypted using SecurityManager before being stored in the DB.
+ * Public method signatures are preserved so the DI container wiring,
+ * existing controllers, and tests remain unchanged.
  */
 final class LLMConfigService implements LLMConfigServiceInterface
 {
+    private readonly LLMConfigSchemaInspector $schemaInspector;
+    private readonly LLMConfigPersistence $persistence;
+    private readonly LLMConfigPreferences $preferences;
+
     /**
-     * @param list<class-string<LLMDriverConfigInterface>> $driverClasses
+     * @param list<class-string<\Spora\Drivers\LLMDriverConfigInterface>> $driverClasses
+     *        Driver classes to register with the schema inspector when the
+     *        collaborator is not provided explicitly.
      */
     public function __construct(
         private readonly SecurityManagerInterface $security,
-        private readonly array $driverClasses = [],
-    ) {}
+        array $driverClasses = [],
+        ?LLMConfigSchemaInspector $schemaInspector = null,
+        ?LLMConfigPersistence $persistence = null,
+        ?LLMConfigPreferences $preferences = null,
+    ) {
+        $this->schemaInspector = $schemaInspector ?? new LLMConfigSchemaInspector($driverClasses);
+        $this->persistence = $persistence ?? new LLMConfigPersistence($security, $this->schemaInspector);
+        $this->preferences = $preferences ?? new LLMConfigPreferences();
+    }
+
+    // ---------------------------------------------------------------------
+    // Schema / driver discovery (delegated to SchemaInspector)
+    // ---------------------------------------------------------------------
 
     /**
-     * Returns all registered driver classes with their resolved schemas.
-     *
-     * @return list<array{name: string, display_name: string, driver_class: string, settings_schema: list<array>} >
+     * @return list<array{name: string, display_name: string, driver_class: string, settings_schema: list<array>}>
      */
     public function getDrivers(): array
     {
-        $drivers = [];
-
-        foreach ($this->driverClasses as $class) {
-            if (! class_exists($class)) {
-                continue;
-            }
-
-            $name = $class::getName();
-            $displayName = $class::getDisplayName();
-            $settingsSchema = $this->buildSchemaFromClass($class);
-
-            $drivers[] = [
-                'name' => $name,
-                'display_name' => $displayName,
-                'driver_class' => $class,
-                'settings_schema' => $settingsSchema,
-            ];
-        }
-
-        return $drivers;
+        return $this->schemaInspector->getDrivers();
     }
 
-    /**
-     * @return list<array{key: string, label: string, type: string, description: string, default: mixed, required: bool, options: array|null}>
-     */
-    private function buildSchemaFromClass(string $class): array
-    {
-        $ref = new ReflectionClass($class);
-
-        $schema = [];
-        foreach ($ref->getAttributes(ToolSetting::class) as $attr) {
-            $setting = $attr->newInstance();
-            $schema[] = [
-                'key' => $setting->key,
-                'label' => $setting->label,
-                'type' => $setting->type,
-                'description' => $setting->description,
-                'default' => $setting->default,
-                'required' => $setting->required,
-                'options' => $setting->options,
-            ];
-        }
-
-        return $schema;
-    }
+    // ---------------------------------------------------------------------
+    // Settings encode / decode / mask (delegated to Persistence)
+    // ---------------------------------------------------------------------
 
     /**
-     * Encode settings: encrypt password fields per-field, store others as plain JSON.
-     * Returns an array ready for json_encode — NOT an encrypted blob.
-     *
      * @param array<string, mixed> $settings
      * @return array<string, mixed>
      */
     public function encodeSettings(string $driverClass, array $settings): array
     {
-        $passwordKeys = $this->getPasswordKeys($driverClass);
-        $encoded = [];
-
-        foreach ($settings as $key => $value) {
-            if (in_array($key, $passwordKeys, true) && $value !== null && $value !== '') {
-                $encrypted = $this->security->encrypt((string) $value);
-                $encoded[$key] = $encrypted->toStorageString();
-            } else {
-                $encoded[$key] = $value;
-            }
-        }
-
-        return $encoded;
+        return $this->persistence->encodeSettings($driverClass, $settings);
     }
 
     /**
-     * Decode a JSON string or legacy encrypted blob back to a plain settings array.
-     * Handles both per-field encoded JSON (new) and wholesale encrypted blobs (legacy).
-     *
      * @return array<string, mixed>
      */
     public function decodeSettings(string $driverClass, ?string $raw): array
     {
-        if ($raw === null || $raw === '') {
-            return [];
-        }
-
-        if ($this->security->looksEncrypted($raw)) {
-            // Legacy wholesale-encrypted blob
-            $json = $this->security->decrypt(new EncryptedValue($raw));
-            return is_array($decoded = json_decode($json, true)) ? $decoded : [];
-        }
-
-        // Per-field format: plain JSON, decrypt each password key
-        $data = json_decode($raw, true) ?: [];
-        $passwordKeys = $this->getPasswordKeys($driverClass);
-
-        foreach ($passwordKeys as $key) {
-            if (isset($data[$key]) && $data[$key] !== '' && is_string($data[$key])) {
-                try {
-                    $data[$key] = $this->security->decrypt(new EncryptedValue($data[$key]));
-                } catch (DecryptionFailedException) {
-                    $data[$key] = null;
-                }
-            }
-        }
-
-        return $data;
+        return $this->persistence->decodeSettings($driverClass, $raw);
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     public function decryptSettings(string $driverClass, ?string $raw): array
     {
         return $this->decodeSettings($driverClass, $raw);
     }
 
     /**
-     * Mask a settings array for API responses — replace password fields with "***".
-     *
      * @param array<string, mixed> $settings
      * @param list<array> $schema
      * @return array<string, mixed>
@@ -178,6 +108,10 @@ final class LLMConfigService implements LLMConfigServiceInterface
 
         return $masked;
     }
+
+    // ---------------------------------------------------------------------
+    // Configuration listing / lookup (read paths; no collaborator needed)
+    // ---------------------------------------------------------------------
 
     /**
      * @return list<array>
@@ -213,281 +147,62 @@ final class LLMConfigService implements LLMConfigServiceInterface
         return LLMDriverConfiguration::find($configId);
     }
 
+    // ---------------------------------------------------------------------
+    // Configuration mutations (delegated to Persistence)
+    // ---------------------------------------------------------------------
+
     public function createConfiguration(int $userId, array $data, bool $isAdmin): ?LLMDriverConfiguration
     {
-        $validated = $this->validateNewConfigurationInputs($data, $isAdmin);
-        if ($validated === null) {
-            return null;
-        }
-
-        return $this->persistNewConfiguration(
-            $userId,
-            $validated['name'],
-            $validated['driver_class'],
-            $validated['settings'],
-            $validated['is_global'],
-            $data,
-        );
-    }
-
-    /**
-     * @return array{name: string, driver_class: string, settings: array<string, mixed>, is_global: bool}|null
-     */
-    private function validateNewConfigurationInputs(array $data, bool $isAdmin): ?array
-    {
-        $name = trim((string) ($data['name'] ?? ''));
-        $driverClass = trim((string) ($data['driver_class'] ?? ''));
-        $rawSettings = $data['settings'] ?? null;
-        $settings = is_array($rawSettings) ? $rawSettings : [];
-        $isGlobal = !empty($data['is_global']);
-
-        $invalid = $name === ''
-            || $driverClass === '' || !class_exists($driverClass)
-            || ($isGlobal && !$isAdmin);
-
-        if ($invalid) {
-            return null;
-        }
-
-        return [
-            'name' => $name,
-            'driver_class' => $driverClass,
-            'settings' => $settings,
-            'is_global' => $isGlobal,
-        ];
-    }
-
-    private function persistNewConfiguration(
-        int $userId,
-        string $name,
-        string $driverClass,
-        array $settings,
-        bool $isGlobal,
-        array $data,
-    ): LLMDriverConfiguration {
-        $config = new LLMDriverConfiguration();
-        $config->user_id = $isGlobal ? null : $userId;
-        $config->is_global = $isGlobal;
-        $config->name = $name;
-        $config->driver_class = $driverClass;
-        $config->settings = json_encode($this->encodeSettings($driverClass, $settings));
-        $config->is_default = !empty($data['is_default']);
-        if ($config->is_default) {
-            if ($isGlobal) {
-                LLMDriverConfiguration::where('is_global', true)->where('is_default', true)->update(['is_default' => false]);
-            } else {
-                LLMDriverConfiguration::where('user_id', $userId)->where('is_default', true)->update(['is_default' => false]);
-            }
-        }
-        $config->context_window = isset($data['context_window']) ? (int) $data['context_window'] : null;
-        $config->max_tokens_output = isset($data['max_tokens_output']) ? (int) $data['max_tokens_output'] : null;
-        $config->save();
-
-        return $config;
+        return $this->persistence->createConfiguration($userId, $data, $isAdmin);
     }
 
     public function updateConfiguration(int $configId, int $userId, array $data, bool $isAdmin): ?LLMDriverConfiguration
     {
-        $config = $this->loadEditableConfiguration($configId, $isAdmin);
-        if ($config === null) {
-            return null;
-        }
-
-        $applied = $this->applyConfigurationUpdates($config, $data);
-        if ($applied === null) {
-            return null;
-        }
-
-        $config->save();
-
-        return $config;
-    }
-
-    private function loadEditableConfiguration(int $configId, bool $isAdmin): ?LLMDriverConfiguration
-    {
-        $config = LLMDriverConfiguration::find($configId);
-        if ($config === null) {
-            return null;
-        }
-
-        if (!$isAdmin && $config->is_global) {
-            return null;
-        }
-
-        return $config;
-    }
-
-    private function applyConfigurationUpdates(LLMDriverConfiguration $config, array $data): ?bool
-    {
-        if (isset($data['name'])) {
-            $name = trim((string) $data['name']);
-            if ($name === '') {
-                return null;
-            }
-            $config->name = $name;
-        }
-
-        if (isset($data['settings']) && is_array($data['settings']) && !array_is_list($data['settings'])) {
-            $existing = $this->decodeSettings($config->driver_class, $config->getRawOriginal('settings') ?? '');
-            $merged = array_merge($existing, $data['settings']);
-            $config->settings = json_encode($this->encodeSettings($config->driver_class, $merged));
-        }
-
-        if (isset($data['context_window'])) {
-            $config->context_window = (int) $data['context_window'];
-        }
-        if (isset($data['max_tokens_output'])) {
-            $config->max_tokens_output = (int) $data['max_tokens_output'];
-        }
-
-        return true;
+        return $this->persistence->updateConfiguration($configId, $userId, $data, $isAdmin);
     }
 
     public function deleteConfiguration(int $configId, int $userId, bool $isAdmin): bool
     {
-        $config = LLMDriverConfiguration::find($configId);
-        $allowed = $config !== null
-            && ($isAdmin || !$config->is_global)
-            && ($config->is_global || $config->user_id === $userId);
-
-        if (!$allowed) {
-            return false;
-        }
-
-        $this->detachConfigurationReferences($configId);
-        $config->delete();
-
-        return true;
+        return $this->persistence->deleteConfiguration($configId, $userId, $isAdmin);
     }
 
-    private function detachConfigurationReferences(int $configId): void
-    {
-        // Unset any agents using this config
-        Agent::where('llm_driver_config_id', $configId)->update(['llm_driver_config_id' => null]);
-
-        // Delete any user preferences referencing this config (cascade delete)
-        UserPreference::where('preferred_llm_config_id', $configId)->delete();
-    }
+    // ---------------------------------------------------------------------
+    // Default + preference resolution (delegated to Preferences)
+    // ---------------------------------------------------------------------
 
     public function setDefaultConfiguration(int $configId, int $userId, bool $isAdmin): ?LLMDriverConfiguration
     {
-        $config = $this->loadDefaultableConfiguration($configId, $isAdmin);
-        if ($config === null) {
-            return null;
-        }
-
-        LLMDriverConfiguration::where('is_global', true)->where('is_default', true)->update(['is_default' => false]);
-
-        $config->is_default = true;
-        $config->save();
-
-        return $config;
+        return $this->preferences->setDefaultConfiguration($configId, $userId, $isAdmin);
     }
 
-    private function loadDefaultableConfiguration(int $configId, bool $isAdmin): ?LLMDriverConfiguration
-    {
-        $config = LLMDriverConfiguration::find($configId);
-        // Restrict to global configs only — personal default is now set via user preferences
-        $eligible = $config !== null && $config->is_global && $isAdmin;
-
-        if (!$eligible) {
-            return null;
-        }
-
-        return $config;
-    }
-
-    /**
-     * Returns the default LLMDriverConfiguration (is_default = true).
-     */
     public function getDefaultConfiguration(int $userId): ?LLMDriverConfiguration
     {
-        return $this->getUserPreferredConfig($userId);
+        return $this->preferences->getDefaultConfiguration($userId);
     }
 
-    /**
-     * Resolves the effective LLMDriverConfiguration for an agent using three-tier fallback.
-     *
-     * Tier 1: Agent-specific config     (agent.llm_driver_config_id)
-     * Tier 2: User's preferred config   (user_preferences.preferred_llm_config_id)
-     * Tier 3: Global default           (is_global=true, is_default=true)
-     */
-    public function getEffectiveConfigForAgent(Agent $agent): ?LLMDriverConfiguration
+    public function getEffectiveConfigForAgent(\Spora\Models\Agent $agent): ?LLMDriverConfiguration
     {
-        // Tier 1: agent-specific
-        if ($agent->llm_driver_config_id !== null) {
-            $config = LLMDriverConfiguration::find($agent->llm_driver_config_id);
-            if ($config !== null) {
-                return $config;
-            }
-        }
-
-        // Tier 2: user preferred config (via user_preferences)
-        if ($agent->user_id !== null) {
-            $config = $this->getUserPreferredConfig($agent->user_id);
-            if ($config !== null) {
-                return $config;
-            }
-        }
-
-        // Tier 3: global default
-        return LLMDriverConfiguration::where('is_global', true)
-            ->where('is_default', true)
-            ->first();
+        return $this->preferences->getEffectiveConfigForAgent($agent);
     }
 
     public function getUserPreferredConfig(int $userId): ?LLMDriverConfiguration
     {
-        $preference = UserPreference::where('user_id', $userId)->first();
-        if ($preference === null || $preference->preferred_llm_config_id === null) {
-            return null;
-        }
-
-        return LLMDriverConfiguration::find($preference->preferred_llm_config_id);
+        return $this->preferences->getUserPreferredConfig($userId);
     }
 
     public function setUserPreferredConfig(int $userId, int $configId): bool
     {
-        $config = LLMDriverConfiguration::find($configId);
-        if ($config === null) {
-            return false;
-        }
-
-        // Config must belong to user OR be global
-        if (!$config->is_global && $config->user_id !== $userId) {
-            return false;
-        }
-
-        $preference = UserPreference::firstOrCreate(['user_id' => $userId]);
-        $preference->preferred_llm_config_id = $configId;
-        $preference->save();
-
-        return true;
+        return $this->preferences->setUserPreferredConfig($userId, $configId);
     }
 
     public function unsetUserPreferredConfig(int $userId): void
     {
-        UserPreference::where('user_id', $userId)->delete();
+        $this->preferences->unsetUserPreferredConfig($userId);
     }
 
-    /**
-     * @return list<string>
-     */
-    private function getPasswordKeys(string $driverClass): array
-    {
-        $reflection = new ReflectionClass($driverClass);
-        $keys = [];
-
-        foreach ($reflection->getAttributes(ToolSetting::class) as $attribute) {
-            /** @var ToolSetting $instance */
-            $instance = $attribute->newInstance();
-            if ($instance->type === 'password') {
-                $keys[] = $instance->key;
-            }
-        }
-
-        return $keys;
-    }
+    // ---------------------------------------------------------------------
+    // Resource DTO (composes schema + decode + mask; stays on the facade)
+    // ---------------------------------------------------------------------
 
     /**
      * @return array<string, mixed>
@@ -495,15 +210,15 @@ final class LLMConfigService implements LLMConfigServiceInterface
     public function configResource(LLMDriverConfiguration $config): array
     {
         $settings = $this->decodeSettings($config->driver_class, $config->getRawOriginal('settings'));
-        $schema = $this->getSchemaForDriver($config->driver_class);
+        $schema = $this->schemaInspector->getSchemaForDriver($config->driver_class);
         $masked = $this->maskForApi($settings, $schema);
 
         return [
             'id' => $config->id,
             'name' => $config->name,
             'driver_class' => $config->driver_class,
-            'driver_name' => $this->getDriverName($config->driver_class),
-            'driver_display_name' => $this->getDriverDisplayName($config->driver_class),
+            'driver_name' => $this->schemaInspector->getDriverName($config->driver_class),
+            'driver_display_name' => $this->schemaInspector->getDriverDisplayName($config->driver_class),
             'settings' => $masked,
             'context_window' => $config->context_window,
             'max_tokens_output' => $config->max_tokens_output,
@@ -513,47 +228,5 @@ final class LLMConfigService implements LLMConfigServiceInterface
             'created_at' => $config->created_at->toIso8601String(),
             'updated_at' => $config->updated_at->toIso8601String(),
         ];
-    }
-
-    /**
-     * @return list<array>
-     */
-    private function getSchemaForDriver(string $driverClass): array
-    {
-        if (!class_exists($driverClass)) {
-            return [];
-        }
-
-        $schema = [];
-        foreach ((new ReflectionClass($driverClass))->getAttributes(ToolSetting::class) as $attr) {
-            /** @var ToolSetting $setting */
-            $setting = $attr->newInstance();
-            $schema[] = [
-                'key' => $setting->key,
-                'label' => $setting->label,
-                'type' => $setting->type,
-                'description' => $setting->description,
-                'default' => $setting->default,
-                'required' => $setting->required,
-                'options' => $setting->options,
-            ];
-        }
-        return $schema;
-    }
-
-    private function getDriverName(string $driverClass): string
-    {
-        if (!class_exists($driverClass)) {
-            return $driverClass;
-        }
-        return $driverClass::getName();
-    }
-
-    private function getDriverDisplayName(string $driverClass): string
-    {
-        if (!class_exists($driverClass)) {
-            return $driverClass;
-        }
-        return $driverClass::getDisplayName();
     }
 }
