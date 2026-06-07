@@ -33,6 +33,13 @@ const auth = useAuthStore()
 
 const isAdmin = computed(() => auth.user?.roles?.includes('ADMIN') ?? false)
 
+const adminLinks: { name: string; label: string }[] = [
+  { name: 'settings-admin-users', label: 'Users' },
+  { name: 'settings-admin-drivers', label: 'LLM Drivers' },
+  { name: 'settings-admin-tools', label: 'Tool Defaults' },
+  { name: 'settings-admin-mail-templates', label: 'Mail Templates' },
+]
+
 function configurableTools(): ToolSchema[] {
   return props.allTools.filter((t) => t.settings_schema.length > 0)
 }
@@ -197,12 +204,7 @@ function closeSidebar(): void {
 
       <SettingsNavGroup v-if="isAdmin" title="Administration">
         <ul class="flex flex-col gap-0.5">
-          <li v-for="link in [
-            { name: 'settings-admin-users', label: 'Users' },
-            { name: 'settings-admin-drivers', label: 'LLM Drivers' },
-            { name: 'settings-admin-tools', label: 'Tool Defaults' },
-            { name: 'settings-admin-mail-templates', label: 'Mail Templates' },
-          ]" :key="link.name">
+          <li v-for="link in adminLinks" :key="link.name">
             <button
               @click="router.push({ name: link.name }); closeSidebar()"
               class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"

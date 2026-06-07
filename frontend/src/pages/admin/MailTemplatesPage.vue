@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 /**
  * MailTemplatesPage — admin mail template editor.
  * Route: /admin/mail-templates
@@ -8,7 +7,7 @@ import { computed } from 'vue'
  * between list / editor / create / preview. All state and actions live
  * in `useMailTemplateEditor`.
  */
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useMailTemplateEditor } from '@/composables/useMailTemplateEditor'
@@ -24,16 +23,8 @@ const auth = useAuthStore()
 const toast = useToast()
 const editor = useMailTemplateEditor()
 
-// Vue templates auto-unwrap refs from the composable. The bindings below
-// give vue-tsc a concrete (non-ref) type for the prop bindings.
-// Vue templates auto-unwrap refs from the composable. The bindings below
-// give vue-tsc a concrete (non-ref) type for the prop bindings.
-const editorForm = computed(() => editor.editorForm.value)
-const createForm = computed(() => editor.createForm.value)
-const previewParams = computed(() => editor.previewParams.value)
-const previewLoading = computed(() => editor.previewLoading.value)
-const previewResult = computed(() => editor.previewResult.value)
-// Writable computeds for v-model on the modal components.
+// Writable computeds let the v-model on the modals round-trip through
+// the composable's refs.
 const showCreateModal = computed({
   get: () => editor.showCreateModal.value,
   set: (v: boolean) => { editor.showCreateModal.value = v },
@@ -42,7 +33,6 @@ const showPreview = computed({
   get: () => editor.showPreview.value,
   set: (v: boolean) => { editor.showPreview.value = v },
 })
-void editorForm; void createForm; void previewParams; void previewLoading; void previewResult
 
 onMounted(async () => {
   if (!auth.user?.roles?.includes('ADMIN')) {
@@ -87,7 +77,7 @@ onMounted(async () => {
 
         <MailTemplateEditorView
           v-else
-          :form="editorForm"
+          :form="editor.editorForm.value"
           :placeholders="editor.placeholders"
           :is-system="editor.isSystemTemplate.value"
           :saving="editor.store.saving"
@@ -106,7 +96,7 @@ onMounted(async () => {
 
     <MailTemplateCreateModal
 v-model="showCreateModal"
-      :form="createForm"
+      :form="editor.createForm.value"
       :saving="editor.store.saving"
       @update:name="(v) => (editor.createForm.value.name = v)"
       @update:subject="(v) => (editor.createForm.value.subject = v)"
@@ -117,9 +107,9 @@ v-model="showCreateModal"
 
     <MailTemplatePreviewModal
 v-model="showPreview"
-      :params="previewParams"
-      :loading="previewLoading"
-      :result="previewResult"
+      :params="editor.previewParams.value"
+      :loading="editor.previewLoading.value"
+      :result="editor.previewResult.value"
       :param-keys="['user_name', 'email', 'site_name', 'verification_link', 'reset_link']"
       @update:param="(key, v) => (editor.previewParams.value[key] = v)"
       @generate="editor.runPreview"

@@ -64,7 +64,7 @@ describe('useMailTemplateEditor', () => {
       fetchOneMock.mockRejectedValueOnce(new Error('boom'))
       const ed = useMailTemplateEditor()
       await ed.selectTemplate({ id: 5 })
-      expect(toastMock.error).toHaveBeenCalledWith('Failed to load template.')
+      expect(toastMock.error).toHaveBeenCalledWith('boom')
     })
   })
 

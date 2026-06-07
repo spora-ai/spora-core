@@ -49,6 +49,12 @@ export function useMailTemplateEditor() {
     store.currentTemplate ? checkIsSystemTemplate(store.currentTemplate.name) : false,
   )
 
+  // Surface the actual exception message when available, otherwise
+  // fall back to an action-specific string.
+  function reportError(e: unknown, fallback: string): void {
+    toast.error(e instanceof Error ? e.message : fallback)
+  }
+
   async function selectTemplate(template: { id: number }): Promise<void> {
     try {
       const loaded = await store.fetchOne(template.id)
@@ -58,8 +64,8 @@ export function useMailTemplateEditor() {
         body_text: loaded.body_text ?? '',
         body_html: loaded.body_html ?? '',
       }
-    } catch {
-      toast.error('Failed to load template.')
+    } catch (e) {
+      reportError(e, 'Failed to load template.')
     }
   }
 
@@ -77,7 +83,7 @@ export function useMailTemplateEditor() {
       editorForm.value.name = updated.name
       toast.success('Template saved.')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to save template.')
+      reportError(e, 'Failed to save template.')
     }
   }
 
@@ -88,7 +94,7 @@ export function useMailTemplateEditor() {
       toast.success('Template deleted.')
       store.currentTemplate = null
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to delete template.')
+      reportError(e, 'Failed to delete template.')
     }
   }
 
@@ -105,7 +111,7 @@ export function useMailTemplateEditor() {
       await selectTemplate(created)
       toast.success('Template created.')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to create template.')
+      reportError(e, 'Failed to create template.')
     }
   }
 
@@ -124,7 +130,7 @@ export function useMailTemplateEditor() {
       )
       previewResult.value = result as { subject: string; body_text: string; body_html: string }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to generate preview.')
+      reportError(e, 'Failed to generate preview.')
     } finally {
       previewLoading.value = false
     }
