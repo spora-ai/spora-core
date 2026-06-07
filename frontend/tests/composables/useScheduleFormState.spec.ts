@@ -52,6 +52,48 @@ describe('useScheduleFormState', () => {
       const updates = projectCronToFields('this-is-not-cron')
       expect(updates.frequency).toBeDefined()
     })
+
+    it('returns just frequency when fields are null (custom expression)', () => {
+      // 6 fields → "custom" frequency with null fields; only frequency is set.
+      const updates = projectCronToFields('0 9 * * 1,3,5 *')
+      expect(updates.frequency).toBe('custom')
+      expect(updates.hourly).toBeUndefined()
+      expect(updates.daily).toBeUndefined()
+      expect(updates.weekly).toBeUndefined()
+      expect(updates.monthly).toBeUndefined()
+    })
+
+    it('projects weekly cron into weekly fields', () => {
+      // 0 9 * * 1 = Mondays at 09:00
+      const updates = projectCronToFields('0 9 * * 1')
+      expect(updates.frequency).toBe('weekly')
+      expect(updates.weekly?.day).toBe(1)
+      expect(updates.weekly?.time).toBe('09:00')
+    })
+
+    it('projects weekly cron with non-zero minute and pads the time', () => {
+      // 5 14 * * 5 = Fridays at 14:05
+      const updates = projectCronToFields('5 14 * * 5')
+      expect(updates.frequency).toBe('weekly')
+      expect(updates.weekly?.day).toBe(5)
+      expect(updates.weekly?.time).toBe('14:05')
+    })
+
+    it('projects monthly cron into monthly fields', () => {
+      // 0 9 15 * * = 15th of the month at 09:00
+      const updates = projectCronToFields('0 9 15 * *')
+      expect(updates.frequency).toBe('monthly')
+      expect(updates.monthly?.day).toBe(15)
+      expect(updates.monthly?.time).toBe('09:00')
+    })
+
+    it('projects monthly cron with non-zero minute and pads the time', () => {
+      // 30 23 1 * * = 1st of the month at 23:30
+      const updates = projectCronToFields('30 23 1 * *')
+      expect(updates.frequency).toBe('monthly')
+      expect(updates.monthly?.day).toBe(1)
+      expect(updates.monthly?.time).toBe('23:30')
+    })
   })
 
   describe('isRecurring', () => {

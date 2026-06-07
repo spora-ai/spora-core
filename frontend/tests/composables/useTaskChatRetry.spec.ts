@@ -121,6 +121,51 @@ describe('useTaskChatRetry', () => {
       expect(c.showNonRetryableErrorBanner.value).toBe(false)
     })
 
+    it('shows retry banner when retry_after is set but auto-retry is disabled (max_retries=0)', () => {
+      setAgent(true)
+      setActiveTask({
+        status: 'FAILED',
+        error_code: 'RATE_LIMIT',
+        retry_after: new Date(Date.now() + 60_000).toISOString(),
+        max_retries: 0,
+        retry_count: 0,
+      })
+      const c = useTaskChatRetry()
+      expect(c.autoRetryDisabled.value).toBe(true)
+      expect(c.showRetryBanner.value).toBe(true)
+    })
+
+    it('hides retry banner when retry_after is set, auto-retry configured, and retries not exhausted', () => {
+      setAgent(true)
+      setActiveTask({
+        status: 'FAILED',
+        error_code: 'RATE_LIMIT',
+        retry_after: new Date(Date.now() + 60_000).toISOString(),
+        max_retries: 3,
+        retry_count: 0,
+        retry_of_task_id: null,
+      })
+      const c = useTaskChatRetry()
+      expect(c.autoRetryConfigured.value).toBe(true)
+      expect(c.canAutoRetry.value).toBe(true)
+      expect(c.showRetryBanner.value).toBe(false)
+    })
+
+    it('hides retry banner for a retry task (retry_of_task_id set) even when retry_after is set', () => {
+      setAgent(true)
+      setActiveTask({
+        status: 'FAILED',
+        error_code: 'RATE_LIMIT',
+        retry_after: new Date(Date.now() + 60_000).toISOString(),
+        retry_of_task_id: 42,
+        max_retries: 3,
+        retry_count: 0,
+      })
+      const c = useTaskChatRetry()
+      expect(c.autoRetryConfigured.value).toBe(false)
+      expect(c.showRetryBanner.value).toBe(false)
+    })
+
     it('hides retry banner for non-retryable codes (NO_LLM_CONFIGURATION, UNKNOWN)', () => {
       setAgent(true)
       setActiveTask({ status: 'FAILED', error_code: 'NO_LLM_CONFIGURATION' })

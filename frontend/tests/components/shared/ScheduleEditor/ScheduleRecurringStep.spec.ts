@@ -11,12 +11,15 @@ import { ref, computed } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 
 // Mocks the cron-parser default export so `previewRuns` returns a stable list.
+// vi.hoisted runs before vi.mock factories, which are themselves hoisted to the
+// top of the file, so we keep the impl in hoisted() and mutate it in tests.
+const { cronParseImpl } = vi.hoisted(() => ({
+  cronParseImpl: () => ({
+    next: () => ({ toDate: () => new Date('2026-01-01T09:00:00Z') }),
+  }),
+}))
 vi.mock('cron-parser', () => ({
-  default: {
-    parse: () => ({
-      next: () => ({ toDate: () => new Date('2026-01-01T09:00:00Z') }),
-    }),
-  },
+  default: { parse: cronParseImpl },
 }))
 
 vi.mock('@/stores/promptTemplates', () => ({
@@ -185,5 +188,47 @@ describe('ScheduleRecurringStep', () => {
     const form = makeForm({ computedCron: computed(() => '') })
     const wrapper = mount(ScheduleRecurringStep, { props: { form } })
     expect(wrapper.text()).not.toMatch(/next 3 runs/i)
+  })
+
+  it('shows the cron-parse error message when computedCron is set but unparseable', async () => {
+    // The composable calls CronExpression.parse(cron) and catches — make it throw.
+    const mod = await import('cron-parser')
+    const original = (mod.default as { parse: () => unknown }).parse
+    ;(mod.default as { parse: () => unknown }).parse = () => { throw new Error('bad cron') }
+    try {
+      const form = makeForm({ computedCron: computed(() => 'invalid-cron') })
+      const wrapper = mount(ScheduleRecurringStep, { props: { form } })
+      expect(wrapper.text()).toMatch(/Could not parse cron expression/i)
+    } finally {
+      ;(mod.default as { parse: () => unknown }).parse = original
+    }
+  })
+
+  it('writes hourly interval, startHour, endHour, minute back to form.hourly', async () => {
+    const form = makeForm()
+    form.frequency.value = 'hourly'
+    const wrapper = mount(ScheduleRecurringStep, { props: { form } })
+    await flushPromises()
+    const numbers = wrapper.findAll('input[type="number"]')
+    expect(numbers.length).toBe(4)
+    await numbers[0]!.setValue('2')
+    await numbers[1]!.setValue('8')
+    await numbers[2]!.setValue('18')
+    await numbers[3]!.setValue('30')
+    expect(form.hourly.value).toEqual({ interval: 2, startHour: 8, endHour: 18, minute: 30 })
+  })
+
+  it('writes weekly day and time back to form.weekly', async () => {
+    const form = makeForm()
+    form.frequency.value = 'weekly'
+    const wrapper = mount(ScheduleRecurringStep, { props: { form } })
+    await flushPromises()
+    const selects = wrapper.findAll('select')
+    const daySelect = selects.find((s) => s.attributes('id') !== 'schedule-frequency' && s.attributes('id') !== 'schedule-timezone')!
+    await daySelect.setValue('3')
+    expect(form.weekly.value.day).toBe(3)
+    const timeInput = wrapper.find('input[type="time"]')
+    await timeInput.setValue('11:15')
+    expect(form.weekly.value.time).toBe('11:15')
   })
 })

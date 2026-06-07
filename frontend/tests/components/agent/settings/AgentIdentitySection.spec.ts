@@ -114,4 +114,55 @@ describe('AgentIdentitySection', () => {
       system_prompt: null,
     }))
   })
+
+  it('renders retry_after_minutes and max_retries with their initial values', () => {
+    const wrapper = mount(AgentIdentitySection, {
+      props: {
+        agent: { ...baseAgent, retry_after_minutes: 5, max_retries: 3 },
+        agentId: 1,
+      },
+    })
+    expect((wrapper.find('#retry-after-minutes').element as HTMLInputElement).value).toBe('5')
+    expect((wrapper.find('#max-retries').element as HTMLInputElement).value).toBe('3')
+  })
+
+  it('writes retry_after_minutes and max_retries changes to the PATCH payload', async () => {
+    const wrapper = mount(AgentIdentitySection, {
+      props: { agent: baseAgent, agentId: 1 },
+    })
+    await wrapper.find('#retry-after-minutes').setValue('10')
+    await wrapper.find('#max-retries').setValue('2')
+    await wrapper.find('[data-testid="save-identity"]').trigger('click')
+    await flushPromises()
+    expect(patchMock).toHaveBeenCalledWith('/agents/1', expect.objectContaining({
+      retry_after_minutes: 10,
+      max_retries: 2,
+    }))
+  })
+
+  it('rebuilds the form when the agent prop changes', async () => {
+    const wrapper = mount(AgentIdentitySection, {
+      props: { agent: baseAgent, agentId: 1 },
+    })
+    await wrapper.setProps({
+      agent: { ...baseAgent, name: 'Renamed Agent', max_steps: 25 },
+      agentId: 1,
+    })
+    expect((wrapper.find('#agent-name').element as HTMLInputElement).value).toBe('Renamed Agent')
+    expect((wrapper.find('#max-steps').element as HTMLInputElement).value).toBe('25')
+  })
+
+  it('toggles allow_continuation via the checkbox', async () => {
+    const wrapper = mount(AgentIdentitySection, {
+      props: { agent: baseAgent, agentId: 1 },
+    })
+    const checkbox = wrapper.find('#allow-continuation').element as HTMLInputElement
+    expect(checkbox.checked).toBe(true)
+    await wrapper.find('#allow-continuation').setValue(false)
+    await wrapper.find('[data-testid="save-identity"]').trigger('click')
+    await flushPromises()
+    expect(patchMock).toHaveBeenCalledWith('/agents/1', expect.objectContaining({
+      allow_continuation: false,
+    }))
+  })
 })
