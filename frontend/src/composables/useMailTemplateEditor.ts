@@ -42,7 +42,7 @@ export function useMailTemplateEditor() {
     reset_link: '',
   })
   const previewLoading = ref(false)
-  const previewResult = ref<{ subject: string; body_text: string; body_html: string } | null>(null)
+  const previewResult = ref<PreviewPayload | null>(null)
 
   const placeholders = MAIL_TEMPLATE_PLACEHOLDERS
   const isSystemTemplate = computed(() =>
@@ -124,11 +124,10 @@ export function useMailTemplateEditor() {
     if (!store.currentTemplate) return
     previewLoading.value = true
     try {
-      const result = await store.preview(
+      previewResult.value = await store.preview(
         store.currentTemplate.name,
-        previewParams.value as Record<string, string>,
+        previewParams.value,
       )
-      previewResult.value = result as { subject: string; body_text: string; body_html: string }
     } catch (e) {
       reportError(e, 'Failed to generate preview.')
     } finally {

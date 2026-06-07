@@ -349,8 +349,12 @@ describe('AgentToolConfigModal — additional actions', () => {
     if (inputs.length > 0) {
       await inputs[0].setValue('new value')
       await flushPromises()
+      // The override form's first input (API key) should reflect the typed value.
+      expect((inputs[0].element as HTMLInputElement).value).toBe('new value')
+    } else {
+      // Schema rendered no input fields — confirm the form is still mounted.
+      expect(wrapper.find('form').exists()).toBe(true)
     }
-    expect(true).toBe(true)
   })
 
   it('emits close when the Cancel button is clicked (covers line 208)', async () => {

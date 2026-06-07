@@ -94,8 +94,8 @@ describe('MailTemplatesPage', () => {
     // empty-roles test in useMailTemplateEditor.spec.ts.
     mount(MailTemplatesPage, { global: { stubs: { RouterLink: true } } })
     await flushPromises()
-    // Default mock has ADMIN role → no redirect
-    expect(true).toBe(true)
+    // Default mock has ADMIN role → no redirect → fetchAll runs
+    expect(fetchAllMock).toHaveBeenCalled()
   })
 
   it('shows a toast when fetchAll fails', async () => {
@@ -208,6 +208,10 @@ describe('MailTemplatesPage — v-if switching', () => {
     const previewModal = wrapper.findComponent(MailTemplatePreviewModal)
     previewModal.vm.$emit('update:param', 'user_name', 'Alice')
     await flushPromises()
+    // The page routes update:param into the editor's previewParams ref;
+    // the modal input should now reflect the new value.
+    const userNameInput = document.body.querySelector<HTMLInputElement>('#preview-user_name')
+    expect(userNameInput?.value).toBe('Alice')
     wrapper.unmount()
   })
 
@@ -305,8 +309,8 @@ describe('MailTemplatesPage — v-if switching', () => {
     const { default: PageNonAdmin } = await import('@/pages/admin/MailTemplatesPage.vue')
     mount(PageNonAdmin, { global: { stubs: { RouterLink: true } } })
     await flushPromises()
-    // No error from the redirect path.
-    expect(true).toBe(true)
+    // Non-admin role → redirect path → fetchAll is NOT called
+    expect(fetchAllMock).not.toHaveBeenCalled()
     vi.doUnmock('@/stores/auth')
   })
 })

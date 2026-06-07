@@ -8,7 +8,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 vi.mock('@/components/Modal.vue', () => ({
   default: {
     name: 'Modal',
-    template: '<div class=\"modal-stub\"><slot /><template v-if=\"$slots.footer\"><div class=\"footer-stub\"><slot name=\"footer\" /></div></template></div>',
+    template: '<div class=\"modal-stub\"><h2 class=\"title-stub\">{{ title }}</h2><slot /><template v-if=\"$slots.footer\"><div class=\"footer-stub\"><slot name=\"footer\" /></div></template></div>',
     props: ['modelValue', 'title', 'size', 'backdropClosable'],
   },
 }))
@@ -34,7 +34,7 @@ describe('ConfirmDialog', () => {
     await expect(promise).resolves.toBe(false)
   })
 
-  it.skip('uses the supplied title and confirm label', async () => {
+  it('uses the supplied title and confirm label', async () => {
     const wrapper = mount(ConfirmDialog)
     const promise = wrapper.vm.open('msg', 'My Title', 'OK')
     await flushPromises()
