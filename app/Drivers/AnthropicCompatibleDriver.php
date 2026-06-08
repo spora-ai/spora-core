@@ -24,29 +24,32 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 #[ToolSetting(key: 'context_window', label: 'Context Window', type: 'text', description: 'Total context window size for this model (input + output combined, e.g. 200000).', required: false, default: '200000')]
 #[ToolSetting(key: 'thinking_budget', label: 'Thinking Budget (tokens)', type: 'text', description: 'Maximum tokens for extended thinking (Claude 3.7+).', required: false, validation: '/^[1-9][0-9]*$/')]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
-final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface
+final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 {
     private const API_VERSION = '2023-06-01';
 
+    private readonly ?float $temperature;
+
+    private readonly ?int $thinkingBudget;
+
     public function __construct(
-        private readonly string              $apiKey,
-        private readonly string              $model,
-        private readonly string              $baseUrl,
-        private readonly HttpClientInterface $httpClient,
-        private readonly ?LoggerInterface    $logger = null,
-        private readonly ?int                $timeout = null,
-        private readonly ?float             $temperature = null,
-        private readonly ?int                $thinkingBudget = null,
-    ) {}
+        string              $apiKey,
+        string              $model,
+        string              $baseUrl,
+        HttpClientInterface $httpClient,
+        ?LoggerInterface    $logger = null,
+        ?int                $timeout = null,
+        ?float              $temperature = null,
+        ?int                $thinkingBudget = null,
+    ) {
+        parent::__construct($apiKey, $model, $baseUrl, $httpClient, $logger, $timeout);
+        $this->temperature    = $temperature;
+        $this->thinkingBudget = $thinkingBudget;
+    }
 
     public function getProviderName(): string
     {
         return 'anthropic_compatible';
-    }
-
-    public function getModelName(): string
-    {
-        return $this->model;
     }
 
     public function complete(LLMRequest $request): LLMResponse
@@ -345,11 +348,5 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
     public static function getDisplayName(): string
     {
         return 'Anthropic Compatible';
-    }
-
-    /** @return list<class-string> */
-    public static function getDefaultTools(): array
-    {
-        return [];
     }
 }
