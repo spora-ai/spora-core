@@ -24,7 +24,7 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class AgentOverrideController
 {
-    use AgentControllerJsonHelpers;
+    use JsonControllerHelpers;
     use AgentControllerToolHelpers;
 
     private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
@@ -50,7 +50,7 @@ final class AgentOverrideController
             : $this->toolConfigService->resolveToolClass($toolId);
 
         if ($toolClass === null) {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
         }
 
         $settings = $this->agentService->getOverride($agentId, $userId, $toolClass, $rawOnly);
@@ -68,7 +68,7 @@ final class AgentOverrideController
         $toolClass = $this->resolveToolClassFromRequest($request);
 
         if ($toolClass === null) {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
         }
 
         try {
@@ -94,7 +94,7 @@ final class AgentOverrideController
         $toolClass = $this->resolveToolClassFromRequest($request);
 
         if ($toolClass === null) {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
         }
 
         $this->agentService->deleteOverride($agentId, $userId, $toolClass);
@@ -113,7 +113,7 @@ final class AgentOverrideController
         $operation  = (string) $request->attributes->get('operation', '');
 
         if ($toolClass === null || $operation === '') {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
         }
 
         $result = $this->agentService->getOperationOverride($agentId, $userId, $toolClass, $operation);
@@ -132,7 +132,7 @@ final class AgentOverrideController
         $operation  = (string) $request->attributes->get('operation', '');
 
         if ($toolClass === null || $operation === '') {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
         }
 
         try {

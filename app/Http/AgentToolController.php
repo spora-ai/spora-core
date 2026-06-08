@@ -23,7 +23,7 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class AgentToolController
 {
-    use AgentControllerJsonHelpers;
+    use JsonControllerHelpers;
     use AgentControllerToolHelpers;
 
     public function __construct(
@@ -48,7 +48,7 @@ final class AgentToolController
         $result = $this->agentService->enableTool($agentId, $userId, $toolClass);
 
         if (array_key_exists('error', $result)) {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
         }
 
         $isIdempotent = array_key_exists('is_idempotent', $result);
@@ -69,7 +69,7 @@ final class AgentToolController
         $toolClass = $this->resolveToolClassFromRequest($request);
 
         if ($toolClass === null) {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
         }
 
         $this->agentService->disableTool($agentId, $userId, $toolClass);
@@ -88,13 +88,13 @@ final class AgentToolController
         $toolClass = $this->toolConfigService->resolveToolClass($toolId);
 
         if ($toolClass === null) {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
         }
 
         $status = $this->agentService->getToolStatus($agentId, $userId, $toolClass);
 
         if ($status === null) {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
         }
 
         return new JsonResponse(['data' => $status]);
@@ -111,7 +111,7 @@ final class AgentToolController
         $statuses = $this->agentService->getAllToolsStatus($agentId, $userId);
 
         if ($statuses === null) {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
         }
 
         return new JsonResponse(['data' => ['statuses' => $statuses]]);
@@ -128,7 +128,7 @@ final class AgentToolController
         $operations = $this->agentService->getToolsOperations($agentId, $userId);
 
         if ($operations === null) {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
         }
 
         return new JsonResponse(['data' => ['operations' => $operations]]);

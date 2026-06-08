@@ -30,6 +30,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class AuthController
 {
+    use JsonControllerHelpers;
+
     private const RATE_LIMIT_MAX_ATTEMPTS = 5;
     private const RATE_LIMIT_WINDOW_SECONDS = 60;
 
@@ -241,18 +243,5 @@ final class AuthController
         ));
 
         return $response;
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function decodeJson(Request $request): array
-    {
-        $content = $request->getContent();
-        if ($content === '') {
-            return [];
-        }
-
-        return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
     }
 }
