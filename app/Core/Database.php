@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Spora\Core;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use RuntimeException;
+use Spora\Core\Exceptions\DatabaseNotBootedException;
 use Spora\Plugins\PluginLoader;
 
 final class Database
@@ -100,7 +100,7 @@ final class Database
     public static function getCapsule(): Capsule
     {
         if (self::$capsule === null) {
-            throw new RuntimeException('Database not booted yet.');
+            throw new DatabaseNotBootedException('Database not booted yet.');
         }
         return self::$capsule;
     }
