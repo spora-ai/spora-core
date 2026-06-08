@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Drivers;
 
-use Psr\Log\LoggerInterface;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
@@ -13,7 +12,6 @@ use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
 use Spora\Tools\Attributes\ToolSetting;
-use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', description: 'API key for the OpenAI-compatible endpoint. Leave empty for local models.', required: false, )]
 #[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.openai.com/v1).', required: false, default: 'https://api.openai.com/v1')]
@@ -22,25 +20,11 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 #[ToolSetting(key: 'max_tokens_output', label: 'Max Output Tokens', type: 'text', description: 'Maximum number of tokens to generate (output buffer).', required: false, default: '4096')]
 #[ToolSetting(key: 'context_window', label: 'Context Window', type: 'text', description: 'Total context window size for this model (input + output combined, e.g. 128000).', required: false, default: '128000')]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
-final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface
+final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 {
-    public function __construct(
-        private readonly string              $apiKey,
-        private readonly string              $model,
-        private readonly string              $baseUrl,
-        private readonly HttpClientInterface $httpClient,
-        private readonly ?LoggerInterface    $logger = null,
-        private readonly ?int                $timeout = null,
-    ) {}
-
     public function getProviderName(): string
     {
         return 'openai_compatible';
-    }
-
-    public function getModelName(): string
-    {
-        return $this->model;
     }
 
     public function complete(LLMRequest $request): LLMResponse
@@ -150,11 +134,5 @@ final class OpenAICompatibleDriver implements LLMDriverInterface, LLMDriverConfi
     public static function getDisplayName(): string
     {
         return 'OpenAI Compatible';
-    }
-
-    /** @return list<class-string> */
-    public static function getDefaultTools(): array
-    {
-        return [];
     }
 }

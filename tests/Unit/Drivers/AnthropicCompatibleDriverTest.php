@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Drivers\AnthropicCompatibleDriver;
+use Spora\Drivers\AnthropicDriverOptions;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
@@ -282,8 +283,10 @@ test('temperature and thinking_budget are forwarded to the request body when set
         model: 'claude-3-7-sonnet-20250219',
         baseUrl: 'https://api.anthropic.com/v1/messages',
         httpClient: $client,
-        temperature: 0.3,
-        thinkingBudget: 2048,
+        options: new AnthropicDriverOptions(
+            temperature: 0.3,
+            thinkingBudget: 2048,
+        ),
     );
 
     $driver->complete(makeAnthropicRequest());

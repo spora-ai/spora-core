@@ -82,8 +82,7 @@ class DriverFactory
         ];
 
         if ($driverClass === AnthropicCompatibleDriver::class) {
-            return new AnthropicCompatibleDriver(
-                ...$commonArgs,
+            $options = new AnthropicDriverOptions(
                 temperature: isset($settings['temperature']) && $settings['temperature'] !== ''
                     ? (float) $settings['temperature']
                     : null,
@@ -91,6 +90,7 @@ class DriverFactory
                     ? (int) $settings['thinking_budget']
                     : null,
             );
+            return new AnthropicCompatibleDriver(...$commonArgs, options: $options);
         }
 
         return new $driverClass(...$commonArgs);
