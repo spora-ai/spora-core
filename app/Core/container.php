@@ -20,6 +20,8 @@ use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
 use Spora\Recipes\RecipeScanner;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\HandoverService;
+use Spora\Services\HandoverServiceInterface;
 use Spora\Services\ImapClient;
 use Spora\Services\ImapClientInterface;
 use Spora\Services\MailTemplateService;
@@ -304,6 +306,7 @@ return [
         Spora\Tools\UserInfoTool::class,
         Spora\Tools\SemanticScholarTool::class,
         Spora\Tools\WeatherApiTool::class,
+        Spora\Tools\HandoverTool::class,
     ],
 
     Spora\Http\LLMConfigController::class => static function (ContainerInterface $c): Spora\Http\LLMConfigController {
@@ -393,6 +396,12 @@ return [
             $c->get(LoggerInterface::class),
         );
     },
+    Spora\Tools\HandoverTool::class => static function (ContainerInterface $c): Spora\Tools\HandoverTool {
+        return new Spora\Tools\HandoverTool(
+            $c->get(HandoverServiceInterface::class),
+            $c->get(ToolConfigService::class),
+        );
+    },
 
     Spora\Http\UserPreferenceController::class => static function (ContainerInterface $c): Spora\Http\UserPreferenceController {
         return new Spora\Http\UserPreferenceController(
@@ -410,6 +419,12 @@ return [
 
     Spora\Services\LLMConfigServiceInterface::class => static function (ContainerInterface $c): Spora\Services\LLMConfigServiceInterface {
         return $c->get(Spora\Services\LLMConfigService::class);
+    },
+
+    HandoverServiceInterface::class => static function (ContainerInterface $c): HandoverServiceInterface {
+        return new HandoverService(
+            $c->get(OrchestratorInterface::class),
+        );
     },
 
     AgentServiceInterface::class => static function (ContainerInterface $c): AgentServiceInterface {

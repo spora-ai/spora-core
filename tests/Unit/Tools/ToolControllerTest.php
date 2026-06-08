@@ -67,7 +67,7 @@ test('index returns schema for registered tool classes', function (): void {
     $tool = $body['data']['tools'][0];
     expect($tool['tool_class'])->toBe(TestTool::class);
     expect($tool['tool_name'])->toBe('test_tool');
-    expect($tool['settings_schema'])->toHaveCount(3);
+    expect($tool['settings_schema'])->toHaveCount(4);
 });
 
 test('index returns correct schema field structure', function (): void {
