@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use RuntimeException;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\MercureConfigurationMissingException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 /**
@@ -72,7 +72,7 @@ final class SseController
     private function generateSubscriberJwt(int $userId): string
     {
         if ($this->jwtKey === null) {
-            throw new RuntimeException('Mercure JWT key is not configured. Set SPORA_MERCURE_JWT_KEY.');
+            throw new MercureConfigurationMissingException('Mercure JWT key is not configured. Set SPORA_MERCURE_JWT_KEY.');
         }
 
         $now     = time();

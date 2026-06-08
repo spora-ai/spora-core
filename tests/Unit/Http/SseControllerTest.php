@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Spora\Http\Exceptions\MercureConfigurationMissingException;
 use Spora\Http\SseController;
 
 final class SseControllerTestLiterals
@@ -150,13 +151,20 @@ describe('SseController::status', function (): void {
 });
 
 describe('SseController::generateSubscriberJwt defensive check', function (): void {
-    it('throws RuntimeException when jwtKey is null (via reflection)', function (): void {
+    it('throws MercureConfigurationMissingException when jwtKey is null (via reflection)', function (): void {
         $authService = bootAuthLayer();
         $controller = new SseController($authService, SseControllerTestLiterals::SSE_MERCURE_URL, null);
 
         $method = new ReflectionMethod($controller, 'generateSubscriberJwt');
 
         expect(fn() => $method->invoke($controller, 1))
-            ->toThrow(RuntimeException::class, 'Mercure JWT key is not configured. Set SPORA_MERCURE_JWT_KEY.');
+            ->toThrow(MercureConfigurationMissingException::class, 'Mercure JWT key is not configured. Set SPORA_MERCURE_JWT_KEY.');
+    });
+
+    it('MercureConfigurationMissingException is a final RuntimeException subclass', function (): void {
+        $reflection = new ReflectionClass(MercureConfigurationMissingException::class);
+
+        expect($reflection->isFinal())->toBeTrue();
+        expect($reflection->isSubclassOf(RuntimeException::class))->toBeTrue();
     });
 });
