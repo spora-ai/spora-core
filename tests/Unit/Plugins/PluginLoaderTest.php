@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Spora\Plugins\Exceptions\PluginLoadFailedException;
 use Spora\Plugins\PluginLoader;
 
 const FIXTURE_MANIFEST_PLUGINS    = BASE_PATH . '/tests/Fixtures/plugins_with_manifest';
@@ -54,16 +55,43 @@ test('"file" key loads the plugin from the specified path instead of Plugin.php'
     expect($loader->drivers())->toHaveKey('named_driver');
 });
 
-test('manifest missing "slug" throws RuntimeException', function (): void {
+test('manifest missing "slug" throws PluginLoadFailedException', function (): void {
     $loader = new PluginLoader(FIXTURE_INVALID_MANIFESTS . '/MissingClassKey');
 
-    expect(fn() => $loader->boot())->toThrow(RuntimeException::class, "'slug'");
+    expect(fn() => $loader->boot())->toThrow(PluginLoadFailedException::class, "'slug'");
 });
 
-test('manifest with invalid slug format throws RuntimeException', function (): void {
+test('manifest missing "class" field throws PluginLoadFailedException (slug present)', function (): void {
+    $loader = new PluginLoader(FIXTURE_INVALID_MANIFESTS . '/MissingClassField');
+
+    expect(fn() => $loader->boot())
+        ->toThrow(PluginLoadFailedException::class, "'class'");
+});
+
+test('manifest with invalid slug format throws PluginLoadFailedException', function (): void {
     $loader = new PluginLoader(FIXTURE_INVALID_MANIFESTS . '/InvalidSlug');
 
-    expect(fn() => $loader->boot())->toThrow(RuntimeException::class, 'INVALID SLUG!');
+    expect(fn() => $loader->boot())->toThrow(PluginLoadFailedException::class, 'INVALID SLUG!');
+});
+
+test('PluginLoadFailedException is a RuntimeException', function (): void {
+    expect(new PluginLoadFailedException('boom'))->toBeInstanceOf(RuntimeException::class);
+});
+
+test('boot() throws PluginLoadFailedException for a manifest containing invalid JSON', function (): void {
+    $dir = sys_get_temp_dir() . '/spora_bad_json_' . uniqid();
+    mkdir($dir . '/broken', 0o777, true);
+    file_put_contents($dir . '/broken/plugin.json', '{not json');
+
+    $loader = new PluginLoader($dir);
+
+    try {
+        expect(fn() => $loader->boot())->toThrow(PluginLoadFailedException::class, 'invalid JSON');
+    } finally {
+        @unlink($dir . '/broken/plugin.json');
+        @rmdir($dir . '/broken');
+        @rmdir($dir);
+    }
 });
 
 test('manifest whose declared class cannot be resolved is silently skipped', function (): void {
