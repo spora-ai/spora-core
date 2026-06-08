@@ -171,19 +171,24 @@ final class WorkerRunCommand extends Command
      */
     private function validateModeFlags(OutputInterface $output, bool $isDaemon, bool $isOnce, bool $isReapOnly): ?int
     {
-        if ($isDaemon && $isOnce) {
-            $output->writeln('<error>--daemon and --once cannot be used together.</error>');
-            return Command::FAILURE;
+        $conflict = $this->detectModeFlagConflict($isDaemon, $isOnce, $isReapOnly);
+        if ($conflict === null) {
+            return null;
         }
-        if ($isDaemon && $isReapOnly) {
-            $output->writeln('<error>--daemon and --reap-only cannot be used together.</error>');
-            return Command::FAILURE;
-        }
-        if ($isOnce && $isReapOnly) {
-            $output->writeln('<error>--once and --reap-only cannot be used together.</error>');
-            return Command::FAILURE;
-        }
-        return null;
+
+        $output->writeln("<error>{$conflict}</error>");
+
+        return Command::FAILURE;
+    }
+
+    private function detectModeFlagConflict(bool $isDaemon, bool $isOnce, bool $isReapOnly): ?string
+    {
+        return match (true) {
+            $isDaemon && $isOnce       => '--daemon and --once cannot be used together.',
+            $isDaemon && $isReapOnly   => '--daemon and --reap-only cannot be used together.',
+            $isOnce && $isReapOnly     => '--once and --reap-only cannot be used together.',
+            default                    => null,
+        };
     }
 
     private function announceMode(

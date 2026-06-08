@@ -84,6 +84,24 @@ final class TavilySearchTool extends AbstractTool
         $query       = trim((string) ($arguments['query'] ?? ''));
         $searchDepth = trim((string) ($arguments['search_depth'] ?? 'basic'));
 
+        $validation = $this->validateSearchInputs($agentId, $userId, $query);
+        if ($validation !== null) {
+            return $validation;
+        }
+
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
+        $apiKey = $settings['core.tavily.api_key'] ?? '';
+
+        try {
+            return $this->performTavilySearch($query, $searchDepth, $apiKey, $this->effectiveTimeout($settings));
+        } catch (Throwable $e) {
+            $this->logger?->error('Tavily API Exception', ['exception' => $e]);
+            return new ToolResult(false, 'Search tool error: ' . $e->getMessage());
+        }
+    }
+
+    private function validateSearchInputs(int $agentId, ?int $userId, string $query): ?ToolResult
+    {
         if ($query === '') {
             return new ToolResult(false, 'The search query cannot be empty.');
         }
@@ -94,12 +112,7 @@ final class TavilySearchTool extends AbstractTool
             return new ToolResult(false, 'Tavily API key is not configured for this agent. Please edit the Tavily Search settings.');
         }
 
-        try {
-            return $this->performTavilySearch($query, $searchDepth, $apiKey, $this->effectiveTimeout($settings));
-        } catch (Throwable $e) {
-            $this->logger?->error('Tavily API Exception', ['exception' => $e]);
-            return new ToolResult(false, 'Search tool error: ' . $e->getMessage());
-        }
+        return null;
     }
 
     private function performTavilySearch(string $query, string $searchDepth, string $apiKey, int $timeout): ToolResult
