@@ -17,7 +17,17 @@ use Spora\Tools\Attributes\ToolSetting;
  */
 final class ToolConfigSchemaInspector
 {
-    public function __construct() {}
+    public function __construct()
+    {
+        // Intentionally empty: this collaborator is reflection-driven and
+        // stateless. The original ToolConfigService took the tool_classes
+        // array and SecurityManager as constructor args so it could build
+        // the inspector + the cryptography + the name resolver on demand.
+        // After the split, the inspector no longer needs the password-key
+        // resolver or the schema — those live on ToolConfigCryptographer
+        // (for encryption) and the per-call schema queries (in this class).
+        // Each public method resolves the schema it needs via ReflectionClass.
+    }
 
     /**
      * Return keys of all #[ToolSetting] attributes where type === 'password'.
