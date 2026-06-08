@@ -110,6 +110,26 @@ abstract class AbstractMemoryTool extends AbstractTool
         $order = isset($arguments['order']) ? (int) $arguments['order'] : 0;
 
         $query = Memory::where('name', $name);
+        $this->applyScopeFilter($query, $scope, $agentId, $userId);
+
+        $memory = $query->first();
+        if ($memory !== null) {
+            $this->updateMemoryFields($memory, $content, $summary, $order);
+            return new ToolResult(true, "Updated memory [{$name}] in {$scope} scope.");
+        }
+
+        $summary ??= $this->deriveSummary($content);
+        Memory::create($this->buildCreateData($scope, $agentId, $userId, $name, $summary, $content, $order));
+
+        return new ToolResult(true, "Created memory [{$name}] in {$scope} scope.");
+    }
+
+    // Helpers extracted from save() to keep its cognitive complexity below SonarQube's
+    // php:S3776 threshold. The scope/userId filter and create-data rules are non-trivial
+    // branches, and inlining them inflated the method's complexity past the limit.
+
+    private function applyScopeFilter($query, string $scope, int $agentId, ?int $userId): void
+    {
         if ($scope === 'global') {
             $query->whereNull('agent_id');
             if ($userId !== null) {
@@ -118,25 +138,21 @@ abstract class AbstractMemoryTool extends AbstractTool
         } else {
             $query->where('agent_id', $agentId);
         }
+    }
 
-        $memory = $query->first();
-
-        if ($memory !== null) {
-            $memory->content = $content;
-            if ($summary !== null) {
-                $memory->summary = $summary;
-            }
-            $memory->order = $order;
-            $memory->save();
-            return new ToolResult(true, "Updated memory [{$name}] in {$scope} scope.");
+    private function updateMemoryFields(Memory $memory, string $content, ?string $summary, int $order): void
+    {
+        $memory->content = $content;
+        if ($summary !== null) {
+            $memory->summary = $summary;
         }
+        $memory->order = $order;
+        $memory->save();
+    }
 
-        // Auto-derive summary from content only when creating new memory
-        if ($summary === null && $content !== '') {
-            $summary = mb_substr(strip_tags($content), 0, 200);
-        }
-
-        $createData = [
+    private function buildCreateData(string $scope, int $agentId, ?int $userId, string $name, ?string $summary, string $content, int $order): array
+    {
+        $data = [
             'agent_id' => $scope === 'agent' ? $agentId : null,
             'name'     => $name,
             'summary'  => $summary,
@@ -145,12 +161,15 @@ abstract class AbstractMemoryTool extends AbstractTool
         ];
 
         if (($scope === 'global' && $userId !== null) || $scope === 'agent') {
-            $createData['user_id'] = $userId;
+            $data['user_id'] = $userId;
         }
 
-        Memory::create($createData);
+        return $data;
+    }
 
-        return new ToolResult(true, "Created memory [{$name}] in {$scope} scope.");
+    private function deriveSummary(string $content): ?string
+    {
+        return $content !== '' ? mb_substr(strip_tags($content), 0, 200) : null;
     }
 
     public function delete(array $arguments, string $scope, int $agentId, ?int $userId = null): ToolResult
