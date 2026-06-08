@@ -125,15 +125,66 @@ it('continue() throws InvalidTaskTransitionException when task is not COMPLETED 
 // ---------------------------------------------------------------------------
 //
 // The post-transaction `!$task instanceof Task || !$state instanceof AgentState`
-// guard inside loadTaskAndStateForResume() is defensive code: under normal
-// operation the DB transaction always assigns both refs. The only externally
-// observable contract is that the exception extends RuntimeException, so the
-// resume()/reject() outer `catch (Throwable $e)` path can re-throw it. We
-// verify that contract here.
+// guard inside loadTaskAndStateForResume() and reject() is defensive code: under
+// normal operation the DB transaction always assigns both refs (firstOrFail
+// either returns a Task or throws). To exercise the defensive branch we
+// replace the global Capsule with a mock whose transaction() is a no-op, so
+// the closure does not run and the post-transaction guard sees null refs.
 
 it('TaskStateMissingException extends RuntimeException so resume()/reject() can re-throw it', function (): void {
     expect(get_parent_class(TaskStateMissingException::class))->toBe(RuntimeException::class);
 });
+
+it('loadTaskAndStateForResume throws TaskStateMissingException when the transaction exits without setting $task', function (): void {
+    $capsule = \Illuminate\Database\Capsule\Manager::class;
+    $ref     = new \ReflectionClass($capsule);
+    $prop    = $ref->getProperty('instance');
+    $prop->setAccessible(true);
+    $original = $prop->getValue();
+
+    $mockConn = Mockery::mock();
+    $mockConn->shouldReceive('transaction')->andReturnUsing(static function (): void {
+        // no-op: closure does not run, so $task and $state stay null
+    });
+    $mockManager = Mockery::mock();
+    $mockManager->shouldReceive('getConnection')->andReturn($mockConn);
+    $prop->setValue(null, $mockManager);
+
+    try {
+        $orch = makeBareOrchestrator();
+        $load = new ReflectionMethod(Orchestrator::class, 'loadTaskAndStateForResume');
+
+        expect(fn() => $load->invoke($orch, 99999))
+            ->toThrow(TaskStateMissingException::class, 'Failed to resolve task or state during resume.');
+    } finally {
+        $prop->setValue(null, $original);
+    }
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('reject throws TaskStateMissingException when the transaction exits without setting $task', function (): void {
+    $capsule = \Illuminate\Database\Capsule\Manager::class;
+    $ref     = new \ReflectionClass($capsule);
+    $prop    = $ref->getProperty('instance');
+    $prop->setAccessible(true);
+    $original = $prop->getValue();
+
+    $mockConn = Mockery::mock();
+    $mockConn->shouldReceive('transaction')->andReturnUsing(static function (): void {
+        // no-op: closure does not run, so $task and $state stay null
+    });
+    $mockManager = Mockery::mock();
+    $mockManager->shouldReceive('getConnection')->andReturn($mockConn);
+    $prop->setValue(null, $mockManager);
+
+    try {
+        $orch = makeBareOrchestrator();
+
+        expect(fn() => $orch->reject(99999, 'reason'))
+            ->toThrow(TaskStateMissingException::class, 'Failed to resolve task or state during reject.');
+    } finally {
+        $prop->setValue(null, $original);
+    }
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
 // ToolNotEnabledException — handleToolCalls() rejects a non-enabled tool
