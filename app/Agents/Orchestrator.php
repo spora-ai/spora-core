@@ -14,7 +14,6 @@ use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\Exceptions\LlmConfigurationMissingException;
 use Spora\Agents\Exceptions\TaskStateMissingException;
 use Spora\Agents\Exceptions\ToolContractException;
-use Spora\Agents\Exceptions\ToolNotEnabledException;
 use Spora\Agents\Exceptions\ToolNotRegisteredException;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
