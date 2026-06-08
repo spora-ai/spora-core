@@ -183,7 +183,14 @@ final class ToolController
         $operations = [];
         $usesOperations = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
         if ($usesOperations) {
-            $instance = $reflection->newInstanceWithoutConstructor();
+            // Intentionally bypass the constructor to enumerate #[ToolOperation]
+            // declarations for the tool's settings schema. The instance is held
+            // only for attribute reflection via getOperations(), which is a pure
+            // metadata reader on the class — it never performs work and never
+            // requires injected dependencies. The orchestrator constructs real
+            // tool instances via the DI container at execution time. Safe by
+            // construction.
+            $instance = $reflection->newInstanceWithoutConstructor(); // NOSONAR php:S3011 — see comment above
             foreach ($instance->getOperations() as $op) {
                 $operations[] = [
                     'name'                          => $op->name,
