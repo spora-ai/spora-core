@@ -61,7 +61,17 @@ use Throwable;
 #[ToolParameter(name: 'location', type: 'string', description: 'Event location (optional)', required: false)]
 #[ToolParameter(name: 'timezone', type: 'string', description: 'IANA timezone identifier (e.g. Europe/Berlin). Optional for create_event and edit_event.', required: false)]
 #[ToolParameter(name: 'all_day', type: 'boolean', description: 'If true, start_date and end_date are interpreted as date-only (YYYY-MM-DD) and the event is an all-day event. Optional.', required: false)]
-final class CalDavCalendarTool extends AbstractTool
+/**
+ * Method count is 26. The 4 transport/parser/builder/mapper collaborators
+ * were already extracted to the Spora\Tools\CalDav\* namespace in this
+ * branch; the remaining 26 methods are the 5 public operation entry
+ * points + their input/date/config parsing + their dispatch helpers,
+ * all of which are tightly coupled to the operation semantics. A further
+ * split would force one of the operations to live elsewhere or hand-
+ * wave dependency ownership. Tracking in `refactor/split-caldav-tool`
+ * (Phase 3.6c follow-up) once the Orchestrator split (3.6a/b) lands.
+ */
+final class CalDavCalendarTool extends AbstractTool // NOSONAR php:S1448 — see comment above
 {
     private const ERR_CONFIG_INCOMPLETE = 'CalDAV configuration is incomplete or missing.';
     private const ERR_EVENT_NOT_FOUND   = 'Event not found.';

@@ -84,9 +84,7 @@ final class ModelContextWindowService
             return [];
         }
 
-        /** @var array<string, mixed> $data */
-        $data = $response->toArray();
-
-        return $data;
+        /** @var array<string, mixed> */
+        return $response->toArray();
     }
 }
