@@ -20,6 +20,8 @@ use Throwable;
  */
 final class ScheduledRunController
 {
+    use JsonControllerHelpers;
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly ScheduledRunServiceInterface $scheduledRunService,
@@ -228,25 +230,12 @@ final class ScheduledRunController
         }
     }
 
-    private function decodeJson(Request $request): array
-    {
-        $content = $request->getContent();
-        if ($content === '') {
-            return [];
-        }
-
-        return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
-    }
-
-    private function error(string $code, string $message, int $status): JsonResponse
-    {
-        return new JsonResponse(['error' => ['code' => $code, 'message' => $message]], $status);
-    }
-
     private function notFound(): JsonResponse
     {
+        // Override to provide a domain-specific error code; delegates to the
+        // shared trait's response shape.
         return new JsonResponse(
-            ['error' => ['code' => 'NOT_FOUND', 'message' => 'Scheduled run not found.']],
+            ['error' => ['code' => 'SCHEDULED_RUN_NOT_FOUND', 'message' => 'Scheduled run not found.']],
             Response::HTTP_NOT_FOUND,
         );
     }

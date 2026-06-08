@@ -7,6 +7,8 @@ namespace Tests\Unit\Http;
 use Psr\Log\NullLogger;
 use Spora\Core\SecurityManager;
 use Spora\Http\AgentController;
+use Spora\Http\AgentOverrideController;
+use Spora\Http\AgentToolController;
 use Spora\Models\Agent;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\ToolConfigService;
@@ -151,20 +153,25 @@ class StubAgentService implements AgentServiceInterface
     }
 }
 
-function makeAgentController(): array
+/**
+ * @return array{AgentController, AgentToolController, AgentOverrideController, \Spora\Auth\AuthService, StubAgentService, ToolConfigService}
+ */
+function makeAgentControllers(): array
 {
     $authService = bootAuthLayer();
     $service = new StubAgentService();
     $security = new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $toolConfig = new ToolConfigService($security, new NullLogger(), [CalculatorTool::class]);
-    $controller = new AgentController($authService, $service, $toolConfig);
+    $crudController = new AgentController($authService, $service);
+    $toolController = new AgentToolController($authService, $service, $toolConfig);
+    $overrideController = new AgentOverrideController($authService, $service, $toolConfig);
 
-    return [$controller, $authService, $service, $toolConfig];
+    return [$crudController, $toolController, $overrideController, $authService, $service, $toolConfig];
 }
 
 describe('AgentController::index', function (): void {
     test('returns 200 with list of agents', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [$controller, , , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $response = $controller->index();
@@ -177,7 +184,7 @@ describe('AgentController::index', function (): void {
 
 describe('AgentController::show', function (): void {
     test('returns 200 with the agent', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [$controller, , , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -190,7 +197,7 @@ describe('AgentController::show', function (): void {
     });
 
     test('returns 404 for unknown id', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [$controller, , , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -203,7 +210,7 @@ describe('AgentController::show', function (): void {
 
 describe('AgentController::store', function (): void {
     test('returns 201 with the created agent', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [$controller, , , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = jsonRequest('POST', '/api/v1/agents', ['name' => 'New Agent']);
@@ -213,7 +220,7 @@ describe('AgentController::store', function (): void {
     });
 
     test('returns 400 on invalid JSON', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [$controller, , , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = Request::create('/api/v1/agents', 'POST', [], [], [], ['CONTENT_TYPE' => 'application/json'], 'not json');
@@ -223,7 +230,7 @@ describe('AgentController::store', function (): void {
     });
 
     test('returns 422 when name is missing', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [$controller, , , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = jsonRequest('POST', '/api/v1/agents', []);
@@ -235,7 +242,7 @@ describe('AgentController::store', function (): void {
 
 describe('AgentController::update', function (): void {
     test('returns 200 with the updated agent', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [$controller, , , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = jsonRequest('PATCH', '/api/v1/agents/1', ['name' => 'Renamed']);
@@ -246,7 +253,7 @@ describe('AgentController::update', function (): void {
     });
 
     test('returns 404 for unknown id', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [$controller, , , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = jsonRequest('PATCH', '/api/v1/agents/999999', ['name' => 'X']);
@@ -259,7 +266,7 @@ describe('AgentController::update', function (): void {
 
 describe('AgentController::destroy', function (): void {
     test('returns 200 with deleted: true on success', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [$controller, , , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -270,7 +277,7 @@ describe('AgentController::destroy', function (): void {
     });
 
     test('returns 404 for unknown id', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [$controller, , , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -281,9 +288,9 @@ describe('AgentController::destroy', function (): void {
     });
 });
 
-describe('AgentController::enableTool / disableTool / getToolStatus / getToolsStatus / getToolsOperations', function (): void {
+describe('AgentToolController::enableTool / disableTool / getToolStatus / getToolsStatus / getToolsOperations', function (): void {
     test('enableTool returns 200/201 on success', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, $controller, , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -295,7 +302,7 @@ describe('AgentController::enableTool / disableTool / getToolStatus / getToolsSt
     });
 
     test('enableTool returns 404 for unknown agent', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, $controller, , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -307,7 +314,7 @@ describe('AgentController::enableTool / disableTool / getToolStatus / getToolsSt
     });
 
     test('disableTool returns 200 with deleted: true on success', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, $controller, , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -319,7 +326,7 @@ describe('AgentController::enableTool / disableTool / getToolStatus / getToolsSt
     });
 
     test('getToolStatus returns 200 with status', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, $controller, , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -331,7 +338,7 @@ describe('AgentController::enableTool / disableTool / getToolStatus / getToolsSt
     });
 
     test('getToolStatus returns 404 for unknown agent', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, $controller, , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -343,7 +350,7 @@ describe('AgentController::enableTool / disableTool / getToolStatus / getToolsSt
     });
 
     test('getToolsStatus returns 200 with statuses list', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, $controller, , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -354,7 +361,7 @@ describe('AgentController::enableTool / disableTool / getToolStatus / getToolsSt
     });
 
     test('getToolsStatus returns 404 for unknown agent', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, $controller, , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -365,7 +372,7 @@ describe('AgentController::enableTool / disableTool / getToolStatus / getToolsSt
     });
 
     test('getToolsOperations returns 200 with operations list', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, $controller, , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -376,7 +383,7 @@ describe('AgentController::enableTool / disableTool / getToolStatus / getToolsSt
     });
 
     test('getToolsOperations returns 404 for unknown agent', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, $controller, , $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -387,9 +394,9 @@ describe('AgentController::enableTool / disableTool / getToolStatus / getToolsSt
     });
 });
 
-describe('AgentController::getOverride / putOverride / deleteOverride', function (): void {
+describe('AgentOverrideController::getOverride / putOverride / deleteOverride', function (): void {
     test('getOverride returns 200 with settings', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, , $controller, $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -401,7 +408,7 @@ describe('AgentController::getOverride / putOverride / deleteOverride', function
     });
 
     test('putOverride returns 200 with saved settings', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, , $controller, $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = jsonRequest('PUT', '/api/v1/agents/1/tools/calculator/override', ['settings' => ['key' => 'v']]);
@@ -413,7 +420,7 @@ describe('AgentController::getOverride / putOverride / deleteOverride', function
     });
 
     test('putOverride returns 400 on invalid JSON', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, , $controller, $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = Request::create('/api/v1/agents/1/tools/calculator/override', 'PUT', [], [], [], ['CONTENT_TYPE' => 'application/json'], 'not json');
@@ -425,7 +432,7 @@ describe('AgentController::getOverride / putOverride / deleteOverride', function
     });
 
     test('deleteOverride returns 200 with deleted: true', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, , $controller, $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -437,9 +444,9 @@ describe('AgentController::getOverride / putOverride / deleteOverride', function
     });
 });
 
-describe('AgentController::getOperationOverride / patchOperationOverride', function (): void {
+describe('AgentOverrideController::getOperationOverride / patchOperationOverride', function (): void {
     test('getOperationOverride returns 200 with operation data', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, , $controller, $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = new Request();
@@ -452,7 +459,7 @@ describe('AgentController::getOperationOverride / patchOperationOverride', funct
     });
 
     test('patchOperationOverride returns 200 with patched operation data', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, , $controller, $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = jsonRequest('PATCH', '/api/v1/agents/1/tools/calculator/operations/calculate', ['enabled' => true]);
@@ -465,7 +472,7 @@ describe('AgentController::getOperationOverride / patchOperationOverride', funct
     });
 
     test('patchOperationOverride returns 400 on invalid JSON', function (): void {
-        [$controller, $authService] = makeAgentController();
+        [, , $controller, $authService] = makeAgentControllers();
         bootAuth($authService);
 
         $request = Request::create('/api/v1/agents/1/tools/calculator/operations/calculate', 'PATCH', [], [], [], ['CONTENT_TYPE' => 'application/json'], 'not json');

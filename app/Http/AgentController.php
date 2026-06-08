@@ -9,19 +9,26 @@ use Spora\Auth\AuthService;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Services\AgentServiceInterface;
-use Spora\Services\ToolConfigService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Agent CRUD endpoints.
+ *
+ * Tool enablement / status / overrides are handled by AgentToolController
+ * and AgentOverrideController respectively.
+ */
 final class AgentController
 {
+    use JsonControllerHelpers;
+
+    private const MSG_AGENT_NOT_FOUND = 'Agent not found.';
     private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
 
     public function __construct(
         private readonly AuthService $authService,
         private readonly AgentServiceInterface $agentService,
-        private readonly ToolConfigService $toolConfigService,
     ) {}
 
     /**
@@ -81,7 +88,7 @@ final class AgentController
         $agent = $this->agentService->getAgent($agentId, $userId);
 
         if ($agent === null) {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
         return new JsonResponse(['data' => ['agent' => $this->agentResource($agent)]]);
@@ -107,7 +114,7 @@ final class AgentController
         $agent = $this->agentService->updateAgent($agentId, $userId, $data);
 
         if ($agent === null) {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
         return new JsonResponse(['data' => ['agent' => $this->agentResource($agent)]]);
@@ -124,235 +131,10 @@ final class AgentController
         $deleted = $this->agentService->deleteAgent($agentId, $userId);
 
         if (!$deleted) {
-            return $this->notFound();
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);
-    }
-
-    /**
-     * POST /api/v1/agents/{id}/tools/{toolClass}/enable
-     */
-    public function enableTool(Request $request): JsonResponse
-    {
-        $userId    = $this->authService->currentUserId();
-        $agentId   = (int) $request->attributes->get('id', 0);
-        $toolClass = $this->resolveToolClassFromRequest($request);
-
-        if ($toolClass === null) {
-            return $this->error('VALIDATION_ERROR', 'toolClass is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        $result = $this->agentService->enableTool($agentId, $userId, $toolClass);
-
-        if (array_key_exists('error', $result)) {
-            return $this->notFound();
-        }
-
-        $isIdempotent = array_key_exists('is_idempotent', $result);
-        $status = $isIdempotent ? Response::HTTP_OK : Response::HTTP_CREATED;
-        if ($isIdempotent) {
-            unset($result['is_idempotent']);
-        }
-        return new JsonResponse(['data' => $result], $status);
-    }
-
-    /**
-     * GET /api/v1/agents/{id}/tools/{toolId}/status
-     */
-    public function getToolStatus(Request $request): JsonResponse
-    {
-        $userId   = $this->authService->currentUserId();
-        $agentId  = (int) $request->attributes->get('id', 0);
-        $toolId   = (string) $request->attributes->get('toolId', '');
-        $toolClass = $this->toolConfigService->resolveToolClass($toolId);
-
-        if ($toolClass === null) {
-            return $this->notFound();
-        }
-
-        $status = $this->agentService->getToolStatus($agentId, $userId, $toolClass);
-
-        if ($status === null) {
-            return $this->notFound();
-        }
-
-        return new JsonResponse(['data' => $status]);
-    }
-
-    /**
-     * GET /api/v1/agents/{id}/tools/status
-     */
-    public function getToolsStatus(Request $request): JsonResponse
-    {
-        $userId  = $this->authService->currentUserId();
-        $agentId = (int) $request->attributes->get('id', 0);
-
-        $statuses = $this->agentService->getAllToolsStatus($agentId, $userId);
-
-        if ($statuses === null) {
-            return $this->notFound();
-        }
-
-        return new JsonResponse(['data' => ['statuses' => $statuses]]);
-    }
-
-    /**
-     * GET /api/v1/agents/{id}/tools/operations
-     */
-    public function getToolsOperations(Request $request): JsonResponse
-    {
-        $userId  = $this->authService->currentUserId();
-        $agentId = (int) $request->attributes->get('id', 0);
-
-        $operations = $this->agentService->getToolsOperations($agentId, $userId);
-
-        if ($operations === null) {
-            return $this->notFound();
-        }
-
-        return new JsonResponse(['data' => ['operations' => $operations]]);
-    }
-
-    /**
-     * DELETE /api/v1/agents/{id}/tools/{toolClass}/enable
-     */
-    public function disableTool(Request $request): JsonResponse
-    {
-        $userId    = $this->authService->currentUserId();
-        $agentId   = (int) $request->attributes->get('id', 0);
-        $toolClass = $this->resolveToolClassFromRequest($request);
-
-        if ($toolClass === null) {
-            return $this->notFound();
-        }
-
-        $this->agentService->disableTool($agentId, $userId, $toolClass);
-
-        return new JsonResponse(['data' => ['deleted' => true]]);
-    }
-
-    /**
-     * GET /api/v1/agents/{id}/tools/{toolClass}/override
-     */
-    public function getOverride(Request $request): JsonResponse
-    {
-        $userId   = $this->authService->currentUserId();
-        $agentId  = (int) $request->attributes->get('id', 0);
-        $toolId   = (string) $request->attributes->get('toolId', '');
-        $rawOnly  = $request->query->get('raw') === 'true';
-
-        $toolClass = $toolId === 'llm_configuration'
-            ? 'llm_configuration'
-            : $this->toolConfigService->resolveToolClass($toolId);
-
-        if ($toolClass === null) {
-            return $this->notFound();
-        }
-
-        $settings = $this->agentService->getOverride($agentId, $userId, $toolClass, $rawOnly);
-
-        return new JsonResponse(['data' => ['settings' => $settings]]);
-    }
-
-    /**
-     * PUT /api/v1/agents/{id}/tools/{toolId}/override
-     */
-    public function putOverride(Request $request): JsonResponse
-    {
-        $userId    = $this->authService->currentUserId();
-        $agentId   = (int) $request->attributes->get('id', 0);
-        $toolClass = $this->resolveToolClassFromRequest($request);
-
-        if ($toolClass === null) {
-            return $this->notFound();
-        }
-
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
-        }
-
-        $settings = isset($body['settings']) && is_array($body['settings']) ? $body['settings'] : $body;
-
-        $masked = $this->agentService->putOverride($agentId, $userId, $toolClass, $settings);
-
-        return new JsonResponse(['data' => ['settings' => $masked]]);
-    }
-
-    /**
-     * DELETE /api/v1/agents/{id}/tools/{toolId}/override
-     */
-    public function deleteOverride(Request $request): JsonResponse
-    {
-        $userId    = $this->authService->currentUserId();
-        $agentId   = (int) $request->attributes->get('id', 0);
-        $toolClass = $this->resolveToolClassFromRequest($request);
-
-        if ($toolClass === null) {
-            return $this->notFound();
-        }
-
-        $this->agentService->deleteOverride($agentId, $userId, $toolClass);
-
-        return new JsonResponse(['data' => ['deleted' => true]]);
-    }
-
-    /**
-     * GET /api/v1/agents/{id}/tools/{toolClass}/operations/{operation}
-     */
-    public function getOperationOverride(Request $request): JsonResponse
-    {
-        $userId     = $this->authService->currentUserId();
-        $agentId    = (int) $request->attributes->get('id', 0);
-        $toolClass  = $this->resolveToolClassFromRequest($request);
-        $operation  = (string) $request->attributes->get('operation', '');
-
-        if ($toolClass === null || $operation === '') {
-            return $this->notFound();
-        }
-
-        $result = $this->agentService->getOperationOverride($agentId, $userId, $toolClass, $operation);
-
-        return new JsonResponse(['data' => $result]);
-    }
-
-    /**
-     * PATCH /api/v1/agents/{id}/tools/{toolClass}/operations/{operation}
-     */
-    public function patchOperationOverride(Request $request): JsonResponse
-    {
-        $userId     = $this->authService->currentUserId();
-        $agentId    = (int) $request->attributes->get('id', 0);
-        $toolClass  = $this->resolveToolClassFromRequest($request);
-        $operation  = (string) $request->attributes->get('operation', '');
-
-        if ($toolClass === null || $operation === '') {
-            return $this->notFound();
-        }
-
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
-        }
-
-        $result = $this->agentService->patchOperationOverride($agentId, $userId, $toolClass, $operation, $body);
-
-        return new JsonResponse(['data' => $result]);
-    }
-
-
-    private function resolveToolClassFromRequest(Request $request): ?string
-    {
-        $toolId = (string) $request->attributes->get('toolId', '');
-
-        if ($toolId === '') {
-            return null;
-        }
-
-        return $this->toolConfigService->resolveToolClass($toolId);
     }
 
     /**
@@ -379,28 +161,5 @@ final class AgentController
                 'tool_name'  => $t->tool_name,
             ])->values()->toArray(),
         ];
-    }
-
-    private function decodeJson(Request $request): array
-    {
-        $content = $request->getContent();
-        if ($content === '') {
-            return [];
-        }
-
-        return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
-    }
-
-    private function error(string $code, string $message, int $status): JsonResponse
-    {
-        return new JsonResponse(['error' => ['code' => $code, 'message' => $message]], $status);
-    }
-
-    private function notFound(): JsonResponse
-    {
-        return new JsonResponse(
-            ['error' => ['code' => 'NOT_FOUND', 'message' => 'Agent not found.']],
-            Response::HTTP_NOT_FOUND,
-        );
     }
 }

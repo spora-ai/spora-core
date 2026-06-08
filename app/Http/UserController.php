@@ -10,6 +10,7 @@ use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Services\UserServiceInterface;
+use Spora\Http\JsonControllerHelpers;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -30,6 +31,8 @@ final class UserController
     private const ERR_USER_NOT_FOUND = 'User not found.';
 
     private const ERR_INVALID_JSON = 'Request body must be valid JSON.';
+
+    use JsonControllerHelpers;
 
     public function __construct(
         private readonly AuthService $authService,
@@ -215,16 +218,6 @@ final class UserController
         );
     }
 
-    private function decodeJson(Request $request): array
-    {
-        $content = $request->getContent();
-        if ($content === '') {
-            return [];
-        }
-
-        return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
-    }
-
     private function missingFields(array $body, array $fields): bool
     {
         foreach ($fields as $field) {
@@ -234,10 +227,5 @@ final class UserController
         }
 
         return false;
-    }
-
-    private function error(string $code, string $message, int $status): JsonResponse
-    {
-        return new JsonResponse(['error' => ['code' => $code, 'message' => $message]], $status);
     }
 }

@@ -445,6 +445,21 @@ return [
         return new Spora\Http\AgentController(
             $c->get(AuthService::class),
             $c->get(AgentServiceInterface::class),
+        );
+    },
+
+    Spora\Http\AgentToolController::class => static function (ContainerInterface $c): Spora\Http\AgentToolController {
+        return new Spora\Http\AgentToolController(
+            $c->get(AuthService::class),
+            $c->get(AgentServiceInterface::class),
+            $c->get(ToolConfigService::class),
+        );
+    },
+
+    Spora\Http\AgentOverrideController::class => static function (ContainerInterface $c): Spora\Http\AgentOverrideController {
+        return new Spora\Http\AgentOverrideController(
+            $c->get(AuthService::class),
+            $c->get(AgentServiceInterface::class),
             $c->get(ToolConfigService::class),
         );
     },

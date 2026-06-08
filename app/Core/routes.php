@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Spora\Core\MiddlewareRouteCollector;
 use Spora\Http\AgentController;
 use Spora\Http\AgentMemoryController;
+use Spora\Http\AgentOverrideController;
+use Spora\Http\AgentToolController;
 use Spora\Http\AppsController;
 use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
@@ -74,20 +76,20 @@ return static function (MiddlewareRouteCollector $r): void {
     $r->addRoute('DELETE', ROUTE_AGENTS_ID, [AgentController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
     // Agent tools — enablement
-    $r->addRoute('POST', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentController::class, 'enableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);
-    $r->addRoute('DELETE', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentController::class, 'disableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);
-    $r->addRoute('GET', '/api/v1/agents/{id}/tools/status', [AgentController::class, 'getToolsStatus'], [AuthMiddleware::class, CsrfMiddleware::class]);
-    $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/status', [AgentController::class, 'getToolStatus'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    $r->addRoute('POST', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentToolController::class, 'enableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    $r->addRoute('DELETE', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentToolController::class, 'disableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    $r->addRoute('GET', '/api/v1/agents/{id}/tools/status', [AgentToolController::class, 'getToolsStatus'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/status', [AgentToolController::class, 'getToolStatus'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
     // Agent tools — per-agent credential overrides
-    $r->addRoute('GET', ROUTE_AGENTS_TOOL_OVERRIDE, [AgentController::class, 'getOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
-    $r->addRoute('PUT', ROUTE_AGENTS_TOOL_OVERRIDE, [AgentController::class, 'putOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
-    $r->addRoute('DELETE', ROUTE_AGENTS_TOOL_OVERRIDE, [AgentController::class, 'deleteOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    $r->addRoute('GET', ROUTE_AGENTS_TOOL_OVERRIDE, [AgentOverrideController::class, 'getOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    $r->addRoute('PUT', ROUTE_AGENTS_TOOL_OVERRIDE, [AgentOverrideController::class, 'putOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    $r->addRoute('DELETE', ROUTE_AGENTS_TOOL_OVERRIDE, [AgentOverrideController::class, 'deleteOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
     // Agent tool operations — per-operation enable/auto-approve overrides
-    $r->addRoute('GET', '/api/v1/agents/{id}/tools/operations', [AgentController::class, 'getToolsOperations'], [AuthMiddleware::class, CsrfMiddleware::class]);
-    $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentController::class, 'getOperationOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
-    $r->addRoute('PATCH', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentController::class, 'patchOperationOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    $r->addRoute('GET', '/api/v1/agents/{id}/tools/operations', [AgentToolController::class, 'getToolsOperations'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentOverrideController::class, 'getOperationOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    $r->addRoute('PATCH', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentOverrideController::class, 'patchOperationOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
     // Tool registry — global settings
     $r->addRoute('GET', '/api/v1/tools', [ToolController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
