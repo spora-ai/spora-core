@@ -12,13 +12,15 @@ import { api, ApiError } from '@/api/client'
 export interface ToolSettingSchema {
   key: string
   label: string
-  type: 'text' | 'password' | 'select' | 'textarea' | 'toggle'
+  type: 'text' | 'password' | 'select' | 'textarea' | 'toggle' | 'multi-select'
   description: string
   default: unknown
   required: boolean
   options: Record<string, string> | string[] | null
   /** Whether this setting's value is exposed to the LLM in the tool definition. */
   expose_to_llm: boolean
+  /** Optional override for the endpoint that lists options for `multi-select` fields. */
+  multi_select_options_endpoint?: string
 }
 
 export interface ToolOperationSchema {

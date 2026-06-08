@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { api } from '@/api/client'
 import Toggle from '@/components/ui/Toggle.vue'
 import Icon from '@/components/ui/Icon.vue'
 import type { ToolSettingSchema } from '@/composables/useToolSettings'
@@ -49,6 +50,34 @@ function resolveOptionLabel(options: Record<string, string> | string[] | null | 
   if (!options || value == null) return String(value ?? '')
   if (Array.isArray(options)) return String(value)
   return (options as Record<string, string>)[String(value)] ?? String(value)
+}
+
+const multiSelectOptions = ref<Array<{ id: number; name: string }>>([])
+const multiSelectLoading = ref(false)
+const multiSelectEndpoint = computed(() =>
+  props.field.multi_select_options_endpoint ?? '/agents?select=id,name',
+)
+const multiSelectSelected = computed<number[]>(() => {
+  const v = props.modelValue
+  return Array.isArray(v) ? v.map(Number) : []
+})
+
+onMounted(async () => {
+  if (props.field.type !== 'multi-select') return
+  multiSelectLoading.value = true
+  try {
+    const res = await api.get<{ data: { agents: Array<{ id: number; name: string }> } }>(multiSelectEndpoint.value)
+    multiSelectOptions.value = res.data.agents
+  } finally {
+    multiSelectLoading.value = false
+  }
+})
+
+function toggleMultiSelect(id: number, checked: boolean): void {
+  const next = checked
+    ? [...multiSelectSelected.value, id]
+    : multiSelectSelected.value.filter(x => x !== id)
+  emit('update:modelValue', next)
 }
 </script>
 
@@ -126,6 +155,26 @@ function resolveOptionLabel(options: Record<string, string> | string[] | null | 
       />
       <span v-if="field.description" class="text-xs text-muted-foreground">{{ field.description }}</span>
     </label>
+
+    <!-- multi-select -->
+    <div v-else-if="field.type === 'multi-select'" class="flex flex-col gap-1.5">
+      <div v-if="multiSelectLoading" class="text-sm text-muted-foreground">Loading options…</div>
+      <div v-else-if="multiSelectOptions.length === 0" class="text-sm text-muted-foreground">No options available.</div>
+      <label
+        v-for="opt in multiSelectOptions"
+        v-else
+        :key="opt.id"
+        class="flex items-center gap-2 text-sm"
+      >
+        <input
+          type="checkbox"
+          :value="opt.id"
+          :checked="multiSelectSelected.includes(opt.id)"
+          @change="toggleMultiSelect(opt.id, ($event.target as HTMLInputElement).checked)"
+        />
+        <span>{{ opt.name }} <span class="text-slate-400">#{{ opt.id }}</span></span>
+      </label>
+    </div>
 
     <!-- password -->
     <div v-else-if="field.type === 'password'">
