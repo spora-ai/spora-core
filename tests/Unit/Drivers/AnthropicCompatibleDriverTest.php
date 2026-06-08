@@ -439,3 +439,104 @@ test('list-shaped assistant tool_call arguments are wrapped as object', function
     expect($rawBody)->not->toContain('"input":["a","b","c"]');
     expect($rawBody)->toContain('"input":{"0":"a","1":"b","2":"c"}');
 });
+
+// Headers & URL — exercised via the new buildAnthropicHeaders() helper
+
+test('x-api-key header is omitted when apiKey is empty (local models)', function (): void {
+    $capturedHeaders = null;
+
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$capturedHeaders): MockResponse {
+        $capturedHeaders = $options['headers'];
+
+        return new MockResponse(json_encode([
+            'id' => 'msg_no_key', 'stop_reason' => 'end_turn',
+            'content' => [['type' => 'text', 'text' => 'ok']],
+            'usage' => ['input_tokens' => 1, 'output_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: '',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com/v1/messages',
+        httpClient: $client,
+    );
+
+    $driver->complete(makeAnthropicRequest());
+
+    // The x-api-key header must NOT be present for local/Ollama models
+    expect($capturedHeaders)->not->toHaveKey('x-api-key');
+    // The version and content-type must still be there (Symfony flattens headers into a list of "Name: Value" strings)
+    $flat = implode("\n", $capturedHeaders);
+    expect($flat)->toContain('anthropic-version: 2023-06-01')
+        ->and($flat)->toContain('Content-Type: application/json');
+});
+
+test('trailing slash in base_url is stripped before appending /v1/messages', function (): void {
+    $capturedUrl = null;
+
+    $client = new MockHttpClient(static function (string $method, string $url) use (&$capturedUrl): MockResponse {
+        $capturedUrl = $url;
+
+        return new MockResponse(json_encode([
+            'id' => 'msg_url', 'stop_reason' => 'end_turn',
+            'content' => [['type' => 'text', 'text' => 'ok']],
+            'usage' => ['input_tokens' => 1, 'output_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'k',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com/', // note trailing slash
+        httpClient: $client,
+    );
+
+    $driver->complete(makeAnthropicRequest());
+
+    expect($capturedUrl)->toBe('https://api.anthropic.com/v1/messages');
+});
+
+// Response parser — exercised via the new parseAnthropicResponse() helper
+
+test('complete extracts reasoning from thinking content blocks', function (): void {
+    $payload = json_encode([
+        'id'          => 'msg_thinking',
+        'stop_reason' => 'end_turn',
+        'content'     => [
+            ['type' => 'thinking', 'thinking' => 'I should consider X and Y.'],
+            ['type' => 'text', 'text' => 'The answer is 42.'],
+        ],
+        'usage' => ['input_tokens' => 5, 'output_tokens' => 10],
+    ]);
+
+    $client = new MockHttpClient(new MockResponse($payload, ['http_code' => 200]));
+    $driver = makeAnthropicDriver($client);
+
+    $response = $driver->complete(makeAnthropicRequest());
+
+    expect($response->content)->toBe('The answer is 42.')
+        ->and($response->reasoning)->toBe('I should consider X and Y.')
+        ->and($response->toolCalls)->toBeEmpty();
+});
+
+test('complete falls back to empty content for tool_use with no text', function (): void {
+    $payload = json_encode([
+        'id'          => 'msg_tool_only',
+        'stop_reason' => 'tool_use',
+        'content'     => [
+            ['type' => 'tool_use', 'id' => 'toolu_1', 'name' => 'do_x', 'input' => ['k' => 'v']],
+        ],
+        'usage' => ['input_tokens' => 1, 'output_tokens' => 1],
+    ]);
+
+    $client = new MockHttpClient(new MockResponse($payload, ['http_code' => 200]));
+    $driver = makeAnthropicDriver($client);
+
+    $response = $driver->complete(makeAnthropicRequest());
+
+    // No text content but tool_use stop_reason => content is null
+    expect($response->content)->toBeNull()
+        ->and($response->toolCalls)->toHaveCount(1)
+        ->and($response->toolCalls[0]->toolName)->toBe('do_x');
+});
