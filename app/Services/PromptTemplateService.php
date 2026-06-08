@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
+use Spora\Services\Exceptions\AgentNotFoundException;
 
 /**
  * Service for prompt template management.
@@ -36,7 +36,7 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
     {
         $agent = $this->findAgent($agentId, $userId);
         if ($agent === null) {
-            throw new RuntimeException('Agent not found');
+            throw new AgentNotFoundException('Agent not found');
         }
 
         $id = Capsule::table('agent_prompt_templates')->insertGetId([

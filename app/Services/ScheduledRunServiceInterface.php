@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-use RuntimeException;
+use Spora\Services\Exceptions\AgentNotFoundException;
+use Spora\Services\Exceptions\PromptTemplateMissingException;
+use Spora\Services\Exceptions\ScheduledRunNotFoundException;
 
 /**
  * Service interface for scheduled run management.
@@ -50,7 +52,9 @@ interface ScheduledRunServiceInterface
      * Trigger a scheduled run immediately.
      *
      * @return array{scheduled_run: array, task_id: int}
-     * @throws RuntimeException If template not found or orchestration fails
+     * @throws AgentNotFoundException If the agent does not exist
+     * @throws ScheduledRunNotFoundException If the scheduled run does not exist
+     * @throws PromptTemplateMissingException If the assigned prompt template no longer exists
      */
     public function triggerRun(int $runId, int $agentId, int $userId): array;
 }

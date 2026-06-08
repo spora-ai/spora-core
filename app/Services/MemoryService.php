@@ -8,6 +8,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Models\Memory;
+use Spora\Services\Exceptions\AgentNotFoundException;
 
 /**
  * Service for memory management.
@@ -98,7 +99,7 @@ final class MemoryService implements MemoryServiceInterface
     {
         $agent = $this->findAgent($agentId, $userId);
         if ($agent === null) {
-            throw new RuntimeException('Agent not found');
+            throw new AgentNotFoundException('Agent not found');
         }
 
         $this->validate($data, isCreation: true);
@@ -244,7 +245,7 @@ final class MemoryService implements MemoryServiceInterface
     {
         $agent = $this->findAgent($agentId, $userId);
         if ($agent === null) {
-            throw new RuntimeException('Agent not found');
+            throw new AgentNotFoundException('Agent not found');
         }
 
         // Process only IDs that actually belong to this agent, preserving input order
