@@ -10,6 +10,12 @@ use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use ReflectionClass;
 use RuntimeException;
+use Spora\Agents\Exceptions\InvalidTaskTransitionException;
+use Spora\Agents\Exceptions\LlmConfigurationMissingException;
+use Spora\Agents\Exceptions\TaskStateMissingException;
+use Spora\Agents\Exceptions\ToolContractException;
+use Spora\Agents\Exceptions\ToolNotEnabledException;
+use Spora\Agents\Exceptions\ToolNotRegisteredException;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Agents\ValueObjects\WorkerMode;
@@ -110,7 +116,7 @@ final class Orchestrator implements OrchestratorInterface
         $task = Task::findOrFail($taskId);
 
         if (!in_array($task->status, ['COMPLETED', 'FAILED'], true)) {
-            throw new RuntimeException('Can only continue completed or failed tasks.');
+            throw new InvalidTaskTransitionException('Can only continue completed or failed tasks.');
         }
 
         $this->appendHistory($task->id, 'user', $newPrompt);
@@ -612,7 +618,7 @@ final class Orchestrator implements OrchestratorInterface
         });
 
         if (!$task instanceof Task || !$state instanceof AgentState) {
-            throw new RuntimeException('Failed to resolve task or state during resume.');
+            throw new TaskStateMissingException('Failed to resolve task or state during resume.');
         }
 
         return [$task, $state];
@@ -790,7 +796,7 @@ final class Orchestrator implements OrchestratorInterface
 
         try {
             if (!$task instanceof Task || !$state instanceof AgentState) {
-                throw new RuntimeException('Failed to resolve task or state during reject.');
+                throw new TaskStateMissingException('Failed to resolve task or state during reject.');
             }
 
             $pendingModels = ToolCallModel::where('task_id', $taskId)
@@ -1010,7 +1016,7 @@ final class Orchestrator implements OrchestratorInterface
             return $toolInstance->requiresApprovalByDefault($operationName);
         }
 
-        throw new RuntimeException("Tool '{$toolClass}' does not use HasOperations trait.");
+        throw new ToolContractException("Tool '{$toolClass}' does not use HasOperations trait.");
     }
 
     public function isOperationEnabled(object $toolInstance, string $operationName, int $agentId): bool
@@ -1229,7 +1235,7 @@ final class Orchestrator implements OrchestratorInterface
             }
         }
 
-        throw new RuntimeException("No tool registered with name '{$toolName}'.");
+        throw new ToolNotRegisteredException("No tool registered with name '{$toolName}'.");
     }
 
     private function qualifiedToolName(string $toolClass, string $plainName): string
@@ -1384,7 +1390,7 @@ final class Orchestrator implements OrchestratorInterface
             ];
         }
 
-        throw new RuntimeException('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
+        throw new LlmConfigurationMissingException('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
     }
 
     private function getTemperatureFromSettings(LLMDriverConfiguration $config, float $default): float
