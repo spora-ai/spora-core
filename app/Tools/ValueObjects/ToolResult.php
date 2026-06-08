@@ -28,4 +28,20 @@ final readonly class ToolResult
          */
         public ?array  $data = null,
     ) {}
+
+    /**
+     * Build a successful ToolResult with the given content and optional data.
+     */
+    public static function ok(string $content, ?array $data = null): self
+    {
+        return new self(true, $content, $data);
+    }
+
+    /**
+     * Build a failed ToolResult carrying a human-readable error message.
+     */
+    public static function fail(string $message): self
+    {
+        return new self(false, $message);
+    }
 }
