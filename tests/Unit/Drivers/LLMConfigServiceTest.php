@@ -9,6 +9,7 @@ use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\UserPreference;
+use Spora\Services\LLMConfigSchemaInspector;
 use Spora\Services\LLMConfigService;
 use Spora\Tools\Attributes\ToolSetting;
 
@@ -786,18 +787,23 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
     });
 });
 
-describe('LLMConfigService::getPasswordKeys via reflection', function (): void {
+describe('LLMConfigService facade → schema inspector (getPasswordKeys)', function (): void {
+    // After the LLMConfigService split (refactor/split-llm-config-service),
+    // getPasswordKeys lives on LLMConfigSchemaInspector. The facade still
+    // exposes it (delegated), so we drive it via the public API path.
 
     test('returns the api_key list for OpenAICompatibleDriver', function (): void {
         $security = Mockery::mock(SecurityManagerInterface::class);
         $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
-        $ref = new ReflectionClass($service);
-        $method = $ref->getMethod('getPasswordKeys');
-        $method->setAccessible(true);
+        // Use the public facade to reach the inspector.
+        $ref  = new ReflectionObject($service);
+        $prop = $ref->getProperty('schemaInspector');
+        $prop->setAccessible(true);
+        /** @var LLMConfigSchemaInspector $inspector */
+        $inspector = $prop->getValue($service);
 
-        $keys = $method->invoke($service, OpenAICompatibleDriver::class);
-
+        $keys = $inspector->getPasswordKeysFor(OpenAICompatibleDriver::class);
         expect($keys)->toBe(['api_key']);
     });
 
@@ -805,12 +811,13 @@ describe('LLMConfigService::getPasswordKeys via reflection', function (): void {
         $security = Mockery::mock(SecurityManagerInterface::class);
         $service = new LLMConfigService($security, [AnthropicCompatibleDriver::class]);
 
-        $ref = new ReflectionClass($service);
-        $method = $ref->getMethod('getPasswordKeys');
-        $method->setAccessible(true);
+        $ref  = new ReflectionObject($service);
+        $prop = $ref->getProperty('schemaInspector');
+        $prop->setAccessible(true);
+        /** @var LLMConfigSchemaInspector $inspector */
+        $inspector = $prop->getValue($service);
 
-        $keys = $method->invoke($service, AnthropicCompatibleDriver::class);
-
+        $keys = $inspector->getPasswordKeysFor(AnthropicCompatibleDriver::class);
         expect($keys)->toBe(['api_key']);
     });
 
@@ -818,12 +825,13 @@ describe('LLMConfigService::getPasswordKeys via reflection', function (): void {
         $security = Mockery::mock(SecurityManagerInterface::class);
         $service = new LLMConfigService($security, []);
 
-        $ref = new ReflectionClass($service);
-        $method = $ref->getMethod('getPasswordKeys');
-        $method->setAccessible(true);
+        $ref  = new ReflectionObject($service);
+        $prop = $ref->getProperty('schemaInspector');
+        $prop->setAccessible(true);
+        /** @var LLMConfigSchemaInspector $inspector */
+        $inspector = $prop->getValue($service);
 
-        $keys = $method->invoke($service, NoPasswordFixtureDriver::class);
-
+        $keys = $inspector->getPasswordKeysFor(NoPasswordFixtureDriver::class);
         expect($keys)->toBe([]);
     });
 });
