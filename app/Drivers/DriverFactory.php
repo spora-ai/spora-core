@@ -6,6 +6,7 @@ namespace Spora\Drivers;
 
 use Psr\Log\LoggerInterface;
 use RuntimeException;
+use Spora\Drivers\Exceptions\DriverClassNotFoundException;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\LLMConfigService;
@@ -53,7 +54,7 @@ class DriverFactory
         $driverClass = $config->driver_class;
 
         if (! class_exists($driverClass)) {
-            throw new RuntimeException("LLM driver class {$driverClass} does not exist.");
+            throw new DriverClassNotFoundException("LLM driver class {$driverClass} does not exist.");
         }
 
         try {

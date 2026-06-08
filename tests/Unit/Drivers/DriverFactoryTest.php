@@ -6,6 +6,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\NullLogger;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
+use Spora\Drivers\Exceptions\DriverClassNotFoundException;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
@@ -305,6 +306,54 @@ test('makeFromAgent gracefully handles wrong key — partial settings returned, 
     expect($driver)->toBeInstanceOf(OpenAICompatibleDriver::class);
     expect($driver->getModelName())->toBe('gpt-4o');
     // api_key decryption failed → null → cast to empty string (no getApiKey method)
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});
+
+// DriverClassNotFoundException
+
+test('makeFromAgent returns a driver instance for a valid registered class', function (): void {
+    $service = makeSecureLLMConfigService();
+    $config = createConfigForTest(
+        'Valid Class',
+        OpenAICompatibleDriver::class,
+        ['api_key' => 'sk-valid', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1'],
+        service: $service,
+        userId: 1,
+    );
+
+    $agent = new Agent();
+    $agent->user_id = 1;
+    $agent->llm_driver_config_id = $config->id;
+
+    $factory = new DriverFactory(new NullLogger(), $service, 300);
+    $driver = $factory->makeFromAgent($agent);
+
+    expect($driver)->toBeInstanceOf(OpenAICompatibleDriver::class);
+
+    LLMDriverConfiguration::where('id', $config->id)->delete();
+});
+
+test('makeFromAgent throws DriverClassNotFoundException when the driver class is not registered', function (): void {
+    $service = makeSecureLLMConfigService();
+    // Class name that does not exist anywhere in the autoloader
+    $bogusClass = 'Spora\\Drivers\\DefinitelyNotARealDriver';
+    $config = createConfigForTest(
+        'Bogus Class',
+        $bogusClass,
+        ['api_key' => 'sk-bogus', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1'],
+        service: $service,
+        userId: 1,
+    );
+
+    $agent = new Agent();
+    $agent->user_id = 1;
+    $agent->llm_driver_config_id = $config->id;
+
+    $factory = new DriverFactory(new NullLogger(), $service, 300);
+
+    expect(fn() => $factory->makeFromAgent($agent))
+        ->toThrow(DriverClassNotFoundException::class);
 
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });
