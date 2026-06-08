@@ -148,10 +148,9 @@ final class UserController
 
     private function grantRoleToUser(Request $request, int $id): JsonResponse|array
     {
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', self::ERR_INVALID_JSON, Response::HTTP_BAD_REQUEST);
+        $body = $this->decodeBodyOrFail($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
         }
 
         $roleValidation = $this->validateGrantRolePayload($body);
@@ -159,6 +158,14 @@ final class UserController
             return $roleValidation;
         }
 
+        return $this->applyRoleGrant($id, $body);
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function applyRoleGrant(int $id, array $body): JsonResponse|array
+    {
         $result = $this->userService->grantRole($id, (string) $body['role']);
 
         if ($result === null) {
@@ -166,6 +173,18 @@ final class UserController
         }
 
         return $result;
+    }
+
+    /**
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function decodeBodyOrFail(Request $request): array|JsonResponse
+    {
+        try {
+            return $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', self::ERR_INVALID_JSON, Response::HTTP_BAD_REQUEST);
+        }
     }
 
     private function validateGrantRolePayload(array $body): ?JsonResponse

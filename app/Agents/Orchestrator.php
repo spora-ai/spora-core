@@ -1278,19 +1278,9 @@ final class Orchestrator implements OrchestratorInterface
 
     private function classifyError(Throwable $e): string
     {
-        if ($e instanceof LLMRateLimitException) {
-            return 'RATE_LIMIT';
-        }
-
-        if ($e instanceof LLMRetryableException) {
-            return $this->classifyRetryableError($e);
-        }
-
-        if ($e instanceof LLMProviderException) {
-            $code = $this->classifyProviderError($e);
-            if ($code !== null) {
-                return $code;
-            }
+        $classified = $this->classifySpecificError($e);
+        if ($classified !== null) {
+            return $classified;
         }
 
         if ($e instanceof TimeoutExceptionInterface) {
@@ -1298,6 +1288,16 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         return 'UNKNOWN';
+    }
+
+    private function classifySpecificError(Throwable $e): ?string
+    {
+        return match (true) {
+            $e instanceof LLMRateLimitException  => 'RATE_LIMIT',
+            $e instanceof LLMRetryableException  => $this->classifyRetryableError($e),
+            $e instanceof LLMProviderException    => $this->classifyProviderError($e),
+            default                              => null,
+        };
     }
 
     private function classifyRetryableError(LLMRetryableException $e): string
@@ -1321,10 +1321,8 @@ final class Orchestrator implements OrchestratorInterface
         if (str_contains($msg, '400')) {
             return 'BAD_REQUEST';
         }
-        if ($e->isRetryable()) {
-            return 'GATEWAY_ERROR';
-        }
-        return null;
+
+        return $e->isRetryable() ? 'GATEWAY_ERROR' : null;
     }
 
     private function friendlyMessages(): array
@@ -1407,24 +1405,46 @@ final class Orchestrator implements OrchestratorInterface
             return;
         }
 
-        /** @var Agent|null $agent */
-        $agent = Agent::find($failedTask->agent_id);
+        $agent = $this->resolveRetryAgent($failedTask);
         if ($agent === null) {
             return;
         }
+
         $retryAfterMinutes = $agent->retry_after_minutes ?? 0;
         $maxRetries = $agent->max_retries ?? 0;
-        if ($retryAfterMinutes <= 0 || $maxRetries <= 0) {
-            return;
-        }
 
         $rootTaskId = $failedTask->retry_of_task_id ?? $failedTask->id;
         $retryCount = (int) ($failedTask->retry_count ?? 0) + 1;
 
-        if ($retryCount > $maxRetries) {
-            return;
+        $this->dispatchRetryTask($agent, $failedTask, $rootTaskId, $retryCount, $retryAfterMinutes, $maxRetries);
+    }
+
+    private function resolveRetryAgent(Task $failedTask): ?Agent
+    {
+        /** @var Agent|null $agent */
+        $agent = Agent::find($failedTask->agent_id);
+        if ($agent === null) {
+            return null;
         }
 
+        $retryAfterMinutes = (int) ($agent->retry_after_minutes ?? 0);
+        $maxRetries = (int) ($agent->max_retries ?? 0);
+        $retryCount = (int) ($failedTask->retry_count ?? 0) + 1;
+        $isWithinRetryBudget = $retryAfterMinutes > 0
+            && $maxRetries > 0
+            && $retryCount <= $maxRetries;
+
+        return $isWithinRetryBudget ? $agent : null;
+    }
+
+    private function dispatchRetryTask(
+        Agent $agent,
+        Task $failedTask,
+        int $rootTaskId,
+        int $retryCount,
+        int $retryAfterMinutes,
+        int $maxRetries,
+    ): void {
         try {
             $retryTask = $this->start($agent->id, $failedTask->user_prompt, $failedTask->max_steps);
             $retryTask->update([

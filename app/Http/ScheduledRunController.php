@@ -52,10 +52,9 @@ final class ScheduledRunController
         $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        $body = $this->decodeBodyOrFail($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
         }
 
         $validationError = $this->validateCreate($body);
@@ -63,6 +62,14 @@ final class ScheduledRunController
             return $validationError;
         }
 
+        return $this->createRunAndRespond($agentId, $userId, $body);
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function createRunAndRespond(int $agentId, ?int $userId, array $body): JsonResponse
+    {
         try {
             $result = $this->scheduledRunService->createRun($agentId, $userId, $body);
             return new JsonResponse(
@@ -71,6 +78,18 @@ final class ScheduledRunController
             );
         } catch (RuntimeException) {
             return $this->notFound();
+        }
+    }
+
+    /**
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function decodeBodyOrFail(Request $request): array|JsonResponse
+    {
+        try {
+            return $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         }
     }
 
@@ -166,56 +185,94 @@ final class ScheduledRunController
      */
     private function validateCreate(array $body): ?JsonResponse
     {
-        $isRecurring       = !empty($body['cron_expression']);
-        $isOneShot         = !empty($body['run_at']);
-        $hasTemplate       = isset($body['template_id']) && is_int($body['template_id']);
-        $hasRawPrompt      = isset($body['raw_prompt']) && trim((string) $body['raw_prompt']) !== '';
+        $flags = $this->classifyCreatePayload($body);
 
-        if (!$hasTemplate && !$hasRawPrompt) {
-            return $this->error(
-                'VALIDATION_ERROR',
-                'Either template_id or raw_prompt is required.',
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
+        $shapeError = $this->validatePayloadShape($flags['isRecurring'], $flags['isOneShot'], $flags['hasTemplate'], $flags['hasRawPrompt']);
+        if ($shapeError !== null) {
+            return $shapeError;
         }
 
-        if ($isRecurring && $isOneShot) {
-            return $this->error(
-                'VALIDATION_ERROR',
-                'cron_expression and run_at are mutually exclusive.',
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        }
+        return $this->validateCreateSchedule($body, $flags['isOneShot'], $flags['isRecurring']);
+    }
 
-        if (!$isRecurring && !$isOneShot) {
-            return $this->error(
-                'VALIDATION_ERROR',
-                'Either cron_expression (recurring) or run_at (one-shot) is required.',
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        }
+    /**
+     * @param array<string, mixed> $body
+     * @return array{isRecurring: bool, isOneShot: bool, hasTemplate: bool, hasRawPrompt: bool}
+     */
+    private function classifyCreatePayload(array $body): array
+    {
+        return [
+            'isRecurring'  => !empty($body['cron_expression']),
+            'isOneShot'    => !empty($body['run_at']),
+            'hasTemplate'  => isset($body['template_id']) && is_int($body['template_id']),
+            'hasRawPrompt' => isset($body['raw_prompt']) && trim((string) $body['raw_prompt']) !== '',
+        ];
+    }
 
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function validateCreateSchedule(array $body, bool $isOneShot, bool $isRecurring): ?JsonResponse
+    {
         if ($isOneShot) {
-            $runAt = $this->parseDateTime($body['run_at']);
-            if ($runAt === false) {
-                return $this->error(
-                    'VALIDATION_ERROR',
-                    'run_at must be a valid ISO 8601 datetime.',
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
+            $dateError = $this->validateOneShotDate($body['run_at']);
+            if ($dateError !== null) {
+                return $dateError;
             }
         }
 
         if ($isRecurring) {
-            try {
-                new CronExpression($body['cron_expression']);
-            } catch (Throwable) {
-                return $this->error(
-                    'VALIDATION_ERROR',
-                    'cron_expression is invalid.',
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
-            }
+            return $this->validateCronExpression($body['cron_expression']);
+        }
+
+        return null;
+    }
+
+    private function validatePayloadShape(bool $isRecurring, bool $isOneShot, bool $hasTemplate, bool $hasRawPrompt): ?JsonResponse
+    {
+        return match (true) {
+            !$hasTemplate && !$hasRawPrompt => $this->error(
+                'VALIDATION_ERROR',
+                'Either template_id or raw_prompt is required.',
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            ),
+            $isRecurring && $isOneShot => $this->error(
+                'VALIDATION_ERROR',
+                'cron_expression and run_at are mutually exclusive.',
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            ),
+            !$isRecurring && !$isOneShot => $this->error(
+                'VALIDATION_ERROR',
+                'Either cron_expression (recurring) or run_at (one-shot) is required.',
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            ),
+            default => null,
+        };
+    }
+
+    private function validateOneShotDate(mixed $runAt): ?JsonResponse
+    {
+        if ($this->parseDateTime((string) $runAt) === false) {
+            return $this->error(
+                'VALIDATION_ERROR',
+                'run_at must be a valid ISO 8601 datetime.',
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
+
+        return null;
+    }
+
+    private function validateCronExpression(mixed $cronExpression): ?JsonResponse
+    {
+        try {
+            new CronExpression((string) $cronExpression);
+        } catch (Throwable) {
+            return $this->error(
+                'VALIDATION_ERROR',
+                'cron_expression is invalid.',
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
         }
 
         return null;

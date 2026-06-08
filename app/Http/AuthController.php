@@ -103,16 +103,37 @@ final class AuthController
         if ($userId === null) {
             return $this->validator->unauthenticated();
         }
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->validator->invalidJson();
+
+        $body = $this->decodeJsonOrFail($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
         }
+
+        return $this->performPasswordChange($body);
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function performPasswordChange(array $body): JsonResponse
+    {
         if ($this->validator->missingFields($body, ['current_password', 'new_password'])) {
             return $this->validator->error('VALIDATION_ERROR', 'The fields "current_password" and "new_password" are required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         return $this->workflow->performPasswordChange($body);
+    }
+
+    /**
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function decodeJsonOrFail(Request $request): array|JsonResponse
+    {
+        try {
+            return $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->validator->invalidJson();
+        }
     }
 
     public function account(Request $request): JsonResponse

@@ -49,21 +49,30 @@ final class UserPreferenceController
     {
         $userId = $this->authService->currentUserId();
 
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        $body = $this->decodeBodyOrFail($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
         }
 
         $configId = $body['config_id'] ?? null;
 
         // Null means clear the preference
         if ($configId === null) {
-            $this->llmConfigService->unsetUserPreferredConfig($userId);
-            return new JsonResponse(['data' => ['config' => null]]);
+            return $this->clearPreference($userId);
         }
 
-        // Validate config_id is an integer
+        return $this->setPreference($userId, $configId);
+    }
+
+    private function clearPreference(?int $userId): JsonResponse
+    {
+        $this->llmConfigService->unsetUserPreferredConfig($userId);
+
+        return new JsonResponse(['data' => ['config' => null]]);
+    }
+
+    private function setPreference(?int $userId, mixed $configId): JsonResponse
+    {
         if (!is_int($configId)) {
             return $this->error('VALIDATION_ERROR', 'config_id must be an integer or null.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
@@ -77,9 +86,26 @@ final class UserPreferenceController
             );
         }
 
+        return $this->buildPreferenceResponse($userId);
+    }
+
+    private function buildPreferenceResponse(?int $userId): JsonResponse
+    {
         $config = $this->llmConfigService->getUserPreferredConfig($userId);
 
         return new JsonResponse(['data' => ['config' => $config !== null ? $this->llmConfigService->configResource($config) : null]]);
+    }
+
+    /**
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function decodeBodyOrFail(Request $request): array|JsonResponse
+    {
+        try {
+            return $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
     }
 
     private function decodeJson(Request $request): array
