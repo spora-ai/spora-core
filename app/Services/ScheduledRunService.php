@@ -8,13 +8,15 @@ use Cron\CronExpression;
 use DateTimeImmutable;
 use DateTimeZone;
 use Illuminate\Database\Capsule\Manager as Capsule;
-use RuntimeException;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
 use Spora\Models\ScheduledRunNext;
 use Spora\Models\User;
+use Spora\Services\Exceptions\AgentNotFoundException;
+use Spora\Services\Exceptions\PromptTemplateMissingException;
+use Spora\Services\Exceptions\ScheduledRunNotFoundException;
 use Throwable;
 
 /**
@@ -50,7 +52,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
     {
         $agent = $this->findAgent($agentId, $userId);
         if ($agent === null) {
-            throw new RuntimeException('Agent not found');
+            throw new AgentNotFoundException('Agent not found');
         }
 
         $isRecurring = !empty($data['cron_expression']);
@@ -225,19 +227,19 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
     {
         $agent = $this->findAgent($agentId, $userId);
         if ($agent === null) {
-            throw new RuntimeException('Agent not found');
+            throw new AgentNotFoundException('Agent not found');
         }
 
         $run = $this->findRun($runId, $agentId);
         if ($run === null) {
-            throw new RuntimeException('Scheduled run not found');
+            throw new ScheduledRunNotFoundException('Scheduled run not found');
         }
 
         $template = null;
         if ($run->template_id !== null) {
             $template = AgentPromptTemplate::find($run->template_id);
             if ($template === null) {
-                throw new RuntimeException('The prompt template assigned to this scheduled run no longer exists.');
+                throw new PromptTemplateMissingException('The prompt template assigned to this scheduled run no longer exists.');
             }
         }
 
