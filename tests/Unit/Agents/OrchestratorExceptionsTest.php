@@ -23,6 +23,30 @@ use Spora\Tools\ValueObjects\ToolResult;
 defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
 
 // ---------------------------------------------------------------------------
+// Exception-class shape tests — exercise the new typed exception classes
+// directly (instantiate, verify instanceof, verify the message is preserved
+// on the parent RuntimeException). These tests cover the new code in
+// app/Agents/Exceptions/*.php that the throw-site tests don't reach
+// (e.g. the class declaration line that PHP executes on autoload).
+// ---------------------------------------------------------------------------
+
+it('every typed Orchestrator exception extends RuntimeException and preserves its message', function (): void {
+    $exceptions = [
+        InvalidTaskTransitionException::class,
+        LlmConfigurationMissingException::class,
+        TaskStateMissingException::class,
+        ToolContractException::class,
+        ToolNotEnabledException::class,
+        ToolNotRegisteredException::class,
+    ];
+    foreach ($exceptions as $class) {
+        $instance = new $class('boom ' . $class);
+        expect($instance)->toBeInstanceOf(RuntimeException::class)
+            ->and($instance->getMessage())->toBe('boom ' . $class);
+    }
+});
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -202,7 +226,6 @@ it('resolveRequiresApproval throws ToolContractException for a tool class withou
     };
 
     $ref = new ReflectionMethod(Orchestrator::class, 'resolveRequiresApproval');
-    $ref->setAccessible(true);
 
     $toolClass = $tool::class;
     expect(fn() => $ref->invoke($orch, $tool, $toolClass, 1, []))
@@ -217,7 +240,6 @@ it('resolveToolByName throws ToolNotRegisteredException for an unknown tool name
     $orch = makeBareOrchestrator();
 
     $ref = new ReflectionMethod(Orchestrator::class, 'resolveToolByName');
-    $ref->setAccessible(true);
 
     expect(fn() => $ref->invoke($orch, 'definitely_not_registered'))
         ->toThrow(ToolNotRegisteredException::class, "No tool registered with name 'definitely_not_registered'.");
