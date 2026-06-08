@@ -6,16 +6,11 @@ namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\LoggerInterface;
-use ReflectionClass;
-use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\SecurityManagerInterface;
-use Spora\Core\ValueObjects\EncryptedValue;
 use Spora\Models\Agent;
 use Spora\Models\AgentToolOverride;
 use Spora\Models\ToolConfiguration;
 use Spora\Models\ToolUserSetting;
-use Spora\Tools\Attributes\Tool;
-use Spora\Tools\Attributes\ToolSetting;
 
 /**
  * The ONLY class permitted to read or write tool_configurations.settings
@@ -23,20 +18,27 @@ use Spora\Tools\Attributes\ToolSetting;
  *
  * The Eloquent models have a guard accessor that throws LogicException on direct
  * `settings` access — all reads/writes must funnel through this service.
+ *
+ * This class is a thin facade. The schema/crypto/name responsibilities are
+ * delegated to ToolConfigSchemaInspector, ToolConfigCryptographer and
+ * ToolConfigNameResolver; the CRUD + effective-resolution orchestration
+ * lives here.
+ *
+ * Not declared `final` to preserve Mockery::mock(ToolConfigService::class) in
+ * existing tool tests (Mockery cannot mock final classes). The split itself
+ * resolves the php:S1448 (too many methods) violation that motivated the
+ * refactor. If a future change makes the class `final`, the consumer-side
+ * type hints should be switched to ToolConfigServiceInterface.
  */
-class ToolConfigService
+class ToolConfigService implements ToolConfigServiceInterface
 {
     private const DATETIME_FORMAT = 'Y-m-d H:i:s';
 
-    /** @var array<string, string> tool name (from #[Tool(name:)]) => fully-qualified class name */
-    private ?array $toolNameMap = null;
+    private readonly ToolConfigCryptographer $crypto;
 
-    /** @var list<string> */
-    private readonly array $toolClasses;
+    private readonly ToolConfigNameResolver $nameResolver;
 
-    private readonly SecurityManagerInterface $security;
-
-    private readonly LoggerInterface $logger;
+    private readonly ToolConfigSchemaInspector $schema;
 
     /**
      * @param list<string> $toolClasses
@@ -46,9 +48,9 @@ class ToolConfigService
         LoggerInterface $logger,
         array $toolClasses = [],
     ) {
-        $this->security = $security;
-        $this->logger = $logger;
-        $this->toolClasses = $toolClasses;
+        $this->schema = new ToolConfigSchemaInspector();
+        $this->crypto = new ToolConfigCryptographer($security, $this->schema->getPasswordKeys(...));
+        $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses);
     }
 
     /**
@@ -64,7 +66,7 @@ class ToolConfigService
             return [];
         }
 
-        return $this->decodeSettings($toolClass, $model->getRawOriginal('settings'));
+        return $this->crypto->decodeSettings($toolClass, $model->getRawOriginal('settings'));
     }
 
     /**
@@ -73,7 +75,7 @@ class ToolConfigService
      */
     public function putGlobalSettings(string $toolClass, array $settings): void
     {
-        $toolName = $this->getToolName($toolClass);
+        $toolName = $this->nameResolver->getToolName($toolClass);
 
         // Merge with existing stored settings so omitted fields are preserved.
         // Only fields present in $settings are overwritten; everything else carries over.
@@ -88,9 +90,9 @@ class ToolConfigService
 
         $merged   = array_merge($existing, $settings);
         // Filter out any remaining '***' sentinels before saving (only for password fields)
-        $merged   = $this->filterSettings($toolClass, $merged);
+        $merged   = $this->crypto->filterSettings($toolClass, $merged);
 
-        $encrypted = $this->encryptSettings($toolClass, $merged);
+        $encrypted = $this->crypto->encryptSettings($toolClass, $merged);
 
         $existingRecord = ToolConfiguration::where('tool_class', $toolClass)->first();
 
@@ -128,7 +130,7 @@ class ToolConfigService
             return [];
         }
 
-        return $this->decodeSettings($toolClass, $model->getRawOriginal('settings'));
+        return $this->crypto->decodeSettings($toolClass, $model->getRawOriginal('settings'));
     }
 
     /**
@@ -152,8 +154,8 @@ class ToolConfigService
 
         $merged    = array_merge($existingSettings, $settings);
         // Filter out any remaining '***' sentinels before saving (only for password fields)
-        $merged    = $this->filterSettings($toolClass, $merged);
-        $encrypted = $this->encryptSettings($toolClass, $merged);
+        $merged    = $this->crypto->filterSettings($toolClass, $merged);
+        $encrypted = $this->crypto->encryptSettings($toolClass, $merged);
 
         $record = ToolUserSetting::where('user_id', $userId)
             ->where('tool_class', $toolClass)
@@ -177,7 +179,7 @@ class ToolConfigService
             ]);
         }
 
-        return $this->decodeSettings($toolClass, $encrypted);
+        return $this->crypto->decodeSettings($toolClass, $encrypted);
     }
 
     /**
@@ -203,7 +205,7 @@ class ToolConfigService
             ->first();
 
         if ($override !== null) {
-            $overrideSettings = $this->decodeSettings(
+            $overrideSettings = $this->crypto->decodeSettings(
                 $toolClass,
                 $override->getRawOriginal('settings'),
             );
@@ -214,7 +216,7 @@ class ToolConfigService
         }
 
         // Fill in schema defaults where nothing is set yet
-        $defaults = $this->getSchemaDefaults($toolClass);
+        $defaults = $this->schema->getSchemaDefaults($toolClass);
         foreach ($defaults as $key => $defaultValue) {
             if (!isset($merged[$key])) {
                 $merged[$key] = $defaultValue;
@@ -233,16 +235,7 @@ class ToolConfigService
      */
     public function maskForApi(array $settings, string $toolClass): array
     {
-        $passwordKeys = $this->getPasswordKeys($toolClass);
-        $masked       = $settings;
-
-        foreach ($passwordKeys as $key) {
-            if (array_key_exists($key, $masked) && $masked[$key] !== null && $masked[$key] !== '') {
-                $masked[$key] = '***';
-            }
-        }
-
-        return $masked;
+        return $this->schema->maskForApi($settings, $toolClass);
     }
 
     /**
@@ -265,10 +258,10 @@ class ToolConfigService
         $merged = array_merge($existing, $agentSettings);
 
         // Filter: remove '***' sentinel (only for password fields), null, and empty strings (they mean "use parent")
-        $filtered = $this->filterSettings($toolClass, $merged);
+        $filtered = $this->crypto->filterSettings($toolClass, $merged);
         $filtered = array_filter($filtered, fn($v) => $v !== null && $v !== '');
 
-        $encrypted = $this->encryptSettings($toolClass, $filtered);
+        $encrypted = $this->crypto->encryptSettings($toolClass, $filtered);
 
         $existingRecord = AgentToolOverride::where('agent_id', $agentId)
             ->where('tool_class', $toolClass)
@@ -322,26 +315,6 @@ class ToolConfigService
     }
 
     /**
-     * Decode raw JSON from DB, decrypting password fields.
-     * Returns [] for null/empty input.
-     * DecryptionFailedException is caught per-field: that field becomes null.
-     *
-     * @return array<string, mixed>
-     */
-    private function decodeSettings(string $toolClass, ?string $rawJson): array
-    {
-        if ($rawJson === null || $rawJson === '') {
-            return [];
-        }
-
-        if ($this->isEncryptedBlob($rawJson)) {
-            return $this->decryptSettings($rawJson);
-        }
-
-        return $this->legacyDecodeSettings($toolClass, $rawJson);
-    }
-
-    /**
      * Encrypt a settings array to a storage string.
      * Only password fields are encrypted per-field; all other fields are stored as plain JSON.
      *
@@ -349,16 +322,7 @@ class ToolConfigService
      */
     public function encryptSettings(string $toolClass, array $settings): string
     {
-        $passwordKeys = $this->getPasswordKeys($toolClass);
-        $result = [];
-        foreach ($settings as $key => $value) {
-            if (in_array($key, $passwordKeys, true) && $value !== null && $value !== '') {
-                $result[$key] = $this->security->encrypt((string) $value)->toStorageString();
-            } else {
-                $result[$key] = $value;
-            }
-        }
-        return json_encode($result, JSON_THROW_ON_ERROR);
+        return $this->crypto->encryptSettings($toolClass, $settings);
     }
 
     /**
@@ -368,134 +332,7 @@ class ToolConfigService
      */
     public function decryptSettings(string $storageString): array
     {
-        $encrypted = new EncryptedValue($storageString);
-        $json = $this->security->decrypt($encrypted);
-        return json_decode($json, true) ?? [];
-    }
-
-    /**
-     * Detect whether a raw DB value is an encrypted blob (new format) or plain JSON (legacy).
-     */
-    private function isEncryptedBlob(string $raw): bool
-    {
-        return $this->security->looksEncrypted($raw);
-    }
-
-    /**
-     * Decode legacy plain-JSON stored settings (per-field password decryption).
-     *
-     * @return array<string, mixed>
-     */
-    private function legacyDecodeSettings(string $toolClass, string $rawJson): array
-    {
-        $data = json_decode($rawJson, true);
-        if (!is_array($data)) {
-            return [];
-        }
-
-        $passwordKeys = $this->getPasswordKeys($toolClass);
-        $result       = [];
-
-        foreach ($data as $key => $value) {
-            if (in_array($key, $passwordKeys, true) && $value !== null && $value !== '') {
-                try {
-                    $result[$key] = $this->security->decrypt(new EncryptedValue((string) $value));
-                } catch (DecryptionFailedException) {
-                    error_log("ToolConfigService: decryption failed for field {$key} of {$toolClass}");
-                    $result[$key] = null;
-                }
-            } else {
-                $result[$key] = $value;
-            }
-        }
-
-        return $result;
-    }
-
-    /**
-     * Filter settings: remove fields set to the "***" sentinel (preserve-existing marker).
-     *
-     * @param  array<string, mixed> $settings
-     * @return array<string, mixed>
-     */
-    private function filterSettings(string $toolClass, array $settings): array
-    {
-        $passwordKeys = $this->getPasswordKeys($toolClass);
-        return array_filter(
-            $settings,
-            fn($v, $k) => !($v === '***' && in_array($k, $passwordKeys, true)),
-            ARRAY_FILTER_USE_BOTH,
-        );
-    }
-
-    /**
-     * Return keys of all #[ToolSetting] attributes where type === 'password'.
-     *
-     * @return list<string>
-     */
-    private function getPasswordKeys(string $toolClass): array
-    {
-        $reflection = new ReflectionClass($toolClass);
-        $keys       = [];
-
-        foreach ($reflection->getAttributes(ToolSetting::class) as $attribute) {
-            /** @var ToolSetting $instance */
-            $instance = $attribute->newInstance();
-
-            if ($instance->type === 'password') {
-                $keys[] = $instance->key;
-            }
-        }
-
-        return $keys;
-    }
-
-    /**
-     * Extract the tool name from the #[Tool] attribute on the class.
-     * Falls back to the short class name if the attribute is absent.
-     */
-    private function getToolName(string $toolClass): string
-    {
-        $reflection = new ReflectionClass($toolClass);
-        $attrs      = $reflection->getAttributes(Tool::class);
-
-        if ($attrs !== []) {
-            /** @var Tool $tool */
-            $tool = $attrs[0]->newInstance();
-
-            return $tool->name;
-        }
-
-        return $reflection->getShortName();
-    }
-
-    /**
-     * Build the tool name → class map from registered tool classes.
-     *
-     * @return array<string, string>
-     */
-    private function buildToolNameMap(): array
-    {
-        if ($this->toolNameMap !== null) {
-            return $this->toolNameMap;
-        }
-
-        $this->toolNameMap = [];
-        foreach ($this->toolClasses as $class) {
-            if (!class_exists($class)) {
-                $this->logger->warning('buildToolNameMap: skipping non-existent class', ['class' => $class]);
-                continue;
-            }
-            $reflection = new ReflectionClass($class);
-            $attrs = $reflection->getAttributes(Tool::class);
-            if ($attrs !== []) {
-                /** @var Tool $tool */
-                $tool = $attrs[0]->newInstance();
-                $this->toolNameMap[$tool->name] = $class;
-            }
-        }
-
-        return $this->toolNameMap;
+        return $this->crypto->decryptSettings($storageString);
     }
 
     /**
@@ -503,7 +340,7 @@ class ToolConfigService
      */
     public function resolveToolClass(string $toolName): ?string
     {
-        return $this->buildToolNameMap()[$toolName] ?? null;
+        return $this->nameResolver->resolveToolClass($toolName);
     }
 
     /**
@@ -513,7 +350,7 @@ class ToolConfigService
      */
     public function getRegisteredToolClasses(): array
     {
-        return $this->toolClasses;
+        return $this->nameResolver->getRegisteredToolClasses();
     }
 
     /**
@@ -524,20 +361,7 @@ class ToolConfigService
      */
     public function getSchemaDefaults(string $toolClass): array
     {
-        if (!class_exists($toolClass)) {
-            return [];
-        }
-
-        $defaults = [];
-        foreach ((new ReflectionClass($toolClass))->getAttributes(ToolSetting::class) as $attr) {
-            /** @var ToolSetting $setting */
-            $setting = $attr->newInstance();
-            if ($setting->default !== null) {
-                $defaults[$setting->key] = $setting->default;
-            }
-        }
-
-        return $defaults;
+        return $this->schema->getSchemaDefaults($toolClass);
     }
 
     /**
@@ -548,23 +372,7 @@ class ToolConfigService
      */
     public function getMissingRequiredSettings(string $toolClass, array $effectiveSettings): array
     {
-        if (!class_exists($toolClass)) {
-            return [];
-        }
-
-        $missing = [];
-        foreach ((new ReflectionClass($toolClass))->getAttributes(ToolSetting::class) as $attr) {
-            /** @var ToolSetting $setting */
-            $setting = $attr->newInstance();
-            if ($setting->required) {
-                $value = $effectiveSettings[$setting->key] ?? null;
-                if ($value === null || $value === '') {
-                    $missing[] = $setting->key;
-                }
-            }
-        }
-
-        return $missing;
+        return $this->schema->getMissingRequiredSettings($toolClass, $effectiveSettings);
     }
 
     /**
@@ -597,7 +405,7 @@ class ToolConfigService
             ->first();
 
         if ($override !== null) {
-            $overrideSettings = $this->decodeSettings(
+            $overrideSettings = $this->crypto->decodeSettings(
                 $toolClass,
                 $override->getRawOriginal('settings'),
             );
@@ -608,7 +416,7 @@ class ToolConfigService
         }
 
         // Fill in schema defaults where nothing is set yet
-        $defaults = $this->getSchemaDefaults($toolClass);
+        $defaults = $this->schema->getSchemaDefaults($toolClass);
         foreach ($defaults as $key => $defaultValue) {
             if (!array_key_exists($key, $result)) {
                 $result[$key] = ['value' => $defaultValue, 'source' => 'default'];
@@ -634,7 +442,7 @@ class ToolConfigService
             return [];
         }
 
-        return $this->decodeSettings($toolClass, $override->getRawOriginal('settings'));
+        return $this->crypto->decodeSettings($toolClass, $override->getRawOriginal('settings'));
     }
 
     /**
@@ -646,39 +454,7 @@ class ToolConfigService
     public function getLlmToolSettings(string $toolClass, int $agentId, ?int $userId = null): array
     {
         $effective = $this->getEffectiveSettings($toolClass, $agentId, $userId);
-        $labels = $this->getLlmSettingLabels($toolClass);
 
-        $result = [];
-        foreach ($labels as $key => $label) {
-            $result[$key] = [
-                'label' => $label,
-                'value' => $effective[$key] ?? null,
-            ];
-        }
-
-        return $result;
-    }
-
-    /**
-     * Return key => label map for all #[ToolSetting] fields where exposeToLlm === true.
-     *
-     * @return array<string, string>
-     */
-    private function getLlmSettingLabels(string $toolClass): array
-    {
-        if (!class_exists($toolClass)) {
-            return [];
-        }
-
-        $labels = [];
-        foreach ((new ReflectionClass($toolClass))->getAttributes(ToolSetting::class) as $attr) {
-            /** @var ToolSetting $setting */
-            $setting = $attr->newInstance();
-            if ($setting->exposeToLlm) {
-                $labels[$setting->key] = $setting->label;
-            }
-        }
-
-        return $labels;
+        return $this->schema->getLlmToolSettings($toolClass, $effective);
     }
 }
