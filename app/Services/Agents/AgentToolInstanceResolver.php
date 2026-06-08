@@ -35,8 +35,7 @@ final class AgentToolInstanceResolver
                 // orchestrator and resolvers construct their own tool instances
                 // via the DI container. Safe by construction.
                 // phpcs:ignore Generic.PHP.NoSilencedErrors,SlevomatCodingStandard.ControlStructures.AssignmentInCondition
-                // nosonar: php:S3011 — accessibility bypass is intentional; instance is used only for reflection
-                $instances[$toolClass] = (new ReflectionClass($toolClass))->newInstanceWithoutConstructor();
+                $instances[$toolClass] = (new ReflectionClass($toolClass))->newInstanceWithoutConstructor(); // NOSONAR php:S3011 — see comment above
             } catch (Throwable) {
                 return null;
             }
