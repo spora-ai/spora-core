@@ -23,6 +23,7 @@ final class AgentController
 {
     use JsonControllerHelpers;
 
+    private const MSG_AGENT_NOT_FOUND = 'Agent not found.';
     private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
 
     public function __construct(
@@ -87,7 +88,7 @@ final class AgentController
         $agent = $this->agentService->getAgent($agentId, $userId);
 
         if ($agent === null) {
-            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
         return new JsonResponse(['data' => ['agent' => $this->agentResource($agent)]]);
@@ -113,7 +114,7 @@ final class AgentController
         $agent = $this->agentService->updateAgent($agentId, $userId, $data);
 
         if ($agent === null) {
-            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
         return new JsonResponse(['data' => ['agent' => $this->agentResource($agent)]]);
@@ -130,7 +131,7 @@ final class AgentController
         $deleted = $this->agentService->deleteAgent($agentId, $userId);
 
         if (!$deleted) {
-            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);

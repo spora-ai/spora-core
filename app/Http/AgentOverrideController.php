@@ -27,6 +27,7 @@ final class AgentOverrideController
     use JsonControllerHelpers;
     use AgentControllerToolHelpers;
 
+    private const MSG_AGENT_NOT_FOUND = 'Agent not found.';
     private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
 
     public function __construct(
@@ -50,7 +51,7 @@ final class AgentOverrideController
             : $this->toolConfigService->resolveToolClass($toolId);
 
         if ($toolClass === null) {
-            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
         $settings = $this->agentService->getOverride($agentId, $userId, $toolClass, $rawOnly);
@@ -68,7 +69,7 @@ final class AgentOverrideController
         $toolClass = $this->resolveToolClassFromRequest($request);
 
         if ($toolClass === null) {
-            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
         try {
@@ -94,7 +95,7 @@ final class AgentOverrideController
         $toolClass = $this->resolveToolClassFromRequest($request);
 
         if ($toolClass === null) {
-            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
         $this->agentService->deleteOverride($agentId, $userId, $toolClass);
@@ -113,7 +114,7 @@ final class AgentOverrideController
         $operation  = (string) $request->attributes->get('operation', '');
 
         if ($toolClass === null || $operation === '') {
-            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
         $result = $this->agentService->getOperationOverride($agentId, $userId, $toolClass, $operation);
@@ -132,7 +133,7 @@ final class AgentOverrideController
         $operation  = (string) $request->attributes->get('operation', '');
 
         if ($toolClass === null || $operation === '') {
-            return $this->notFound("AGENT_NOT_FOUND", "Agent not found.");
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
         try {
