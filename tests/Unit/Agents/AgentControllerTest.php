@@ -58,7 +58,7 @@ function makeAgentControllers(): array
     $toolConfig = new ToolConfigService($security, $logger, [TestTool::class]);
     $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class]);
     $agentService = new AgentService($toolConfig, $llmConfig);
-    $crudController      = new AgentController($authService, $agentService, $toolConfig);
+    $crudController      = new AgentController($authService, $agentService);
     $toolController      = new AgentToolController($authService, $agentService, $toolConfig);
     $overrideController  = new AgentOverrideController($authService, $agentService, $toolConfig);
     $authMiddleware = new AuthMiddleware($authService);

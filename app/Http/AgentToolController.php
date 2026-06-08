@@ -23,7 +23,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class AgentToolController
 {
-    use AgentControllerHelpers;
+    use AgentControllerJsonHelpers;
+    use AgentControllerToolHelpers;
 
     public function __construct(
         private readonly AuthService $authService,

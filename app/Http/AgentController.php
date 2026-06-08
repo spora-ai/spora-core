@@ -9,7 +9,6 @@ use Spora\Auth\AuthService;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Services\AgentServiceInterface;
-use Spora\Services\ToolConfigService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -22,14 +21,13 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class AgentController
 {
-    use AgentControllerHelpers;
+    use AgentControllerJsonHelpers;
 
     private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
 
     public function __construct(
         private readonly AuthService $authService,
         private readonly AgentServiceInterface $agentService,
-        private readonly ToolConfigService $toolConfigService,
     ) {}
 
     /**

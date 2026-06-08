@@ -162,7 +162,7 @@ function makeAgentControllers(): array
     $service = new StubAgentService();
     $security = new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $toolConfig = new ToolConfigService($security, new NullLogger(), [CalculatorTool::class]);
-    $crudController = new AgentController($authService, $service, $toolConfig);
+    $crudController = new AgentController($authService, $service);
     $toolController = new AgentToolController($authService, $service, $toolConfig);
     $overrideController = new AgentOverrideController($authService, $service, $toolConfig);
 

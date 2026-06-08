@@ -9,24 +9,11 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Shared helpers for AgentController, AgentToolController, and AgentOverrideController.
- *
- * Consumers must expose a `toolConfigService` property of type
- * `Spora\Services\ToolConfigService` for `resolveToolClassFromRequest()`.
+ * JSON / error helpers shared by AgentController, AgentToolController, and
+ * AgentOverrideController. No dependencies on ToolConfigService.
  */
-trait AgentControllerHelpers
+trait AgentControllerJsonHelpers
 {
-    private function resolveToolClassFromRequest(Request $request): ?string
-    {
-        $toolId = (string) $request->attributes->get('toolId', '');
-
-        if ($toolId === '') {
-            return null;
-        }
-
-        return $this->toolConfigService->resolveToolClass($toolId);
-    }
-
     /**
      * @return array<string, mixed>
      */

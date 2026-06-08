@@ -24,7 +24,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class AgentOverrideController
 {
-    use AgentControllerHelpers;
+    use AgentControllerJsonHelpers;
+    use AgentControllerToolHelpers;
 
     private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
 

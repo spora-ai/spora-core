@@ -72,7 +72,7 @@ test('AgentOverrideController exposes only override methods', function (): void 
     }
 });
 
-test('All three controllers accept the same constructor signature', function (): void {
+test('All three controllers share a consistent constructor surface', function (): void {
     $crud = new ReflectionClass(AgentController::class)->getConstructor();
     $tool = new ReflectionClass(AgentToolController::class)->getConstructor();
     $override = new ReflectionClass(AgentOverrideController::class)->getConstructor();
@@ -81,12 +81,13 @@ test('All three controllers accept the same constructor signature', function ():
     expect($tool)->toBeInstanceOf(ReflectionMethod::class);
     expect($override)->toBeInstanceOf(ReflectionMethod::class);
 
-    expect($crud->getNumberOfParameters())->toBe(3);
+    // CRUD controller doesn't need ToolConfigService (the resolveToolClass helper
+    // was moved to the tool/override controllers), so it takes 2 params; the
+    // tool and override controllers take 3. The shape (auth, agentService, …)
+    // is still shared.
+    expect($crud->getNumberOfParameters())->toBe(2);
     expect($tool->getNumberOfParameters())->toBe(3);
     expect($override->getNumberOfParameters())->toBe(3);
-
-    expect($crud->getNumberOfParameters())->toBe($tool->getNumberOfParameters());
-    expect($crud->getNumberOfParameters())->toBe($override->getNumberOfParameters());
 });
 
 test('Route registration wires agent tool + override routes to the new controllers', function (): void {
