@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Spora\Tools;
 
 use Psr\Log\LoggerInterface;
-use RuntimeException;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\Exceptions\ToolHttpErrorException;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
@@ -161,7 +161,7 @@ final class SerperSearchTool extends AbstractTool
 
         if ($statusCode >= 400) {
             $errorBody = $response->getContent(false);
-            throw new RuntimeException("HTTP {$statusCode}: {$errorBody}");
+            throw new ToolHttpErrorException("HTTP {$statusCode}: {$errorBody}");
         }
 
         return $response->toArray(false);
