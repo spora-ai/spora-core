@@ -39,12 +39,11 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
         HttpClientInterface $httpClient,
         ?LoggerInterface    $logger = null,
         ?int                $timeout = null,
-        ?float              $temperature = null,
-        ?int                $thinkingBudget = null,
+        ?AnthropicDriverOptions $options = null,
     ) {
         parent::__construct($apiKey, $model, $baseUrl, $httpClient, $logger, $timeout);
-        $this->temperature    = $temperature;
-        $this->thinkingBudget = $thinkingBudget;
+        $this->temperature    = $options?->temperature;
+        $this->thinkingBudget = $options?->thinkingBudget;
     }
 
     public function getProviderName(): string
