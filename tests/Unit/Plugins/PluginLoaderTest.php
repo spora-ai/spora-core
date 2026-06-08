@@ -61,6 +61,13 @@ test('manifest missing "slug" throws PluginLoadFailedException', function (): vo
     expect(fn() => $loader->boot())->toThrow(PluginLoadFailedException::class, "'slug'");
 });
 
+test('manifest missing "class" field throws PluginLoadFailedException (slug present)', function (): void {
+    $loader = new PluginLoader(FIXTURE_INVALID_MANIFESTS . '/MissingClassField');
+
+    expect(fn() => $loader->boot())
+        ->toThrow(PluginLoadFailedException::class, "'class'");
+});
+
 test('manifest with invalid slug format throws PluginLoadFailedException', function (): void {
     $loader = new PluginLoader(FIXTURE_INVALID_MANIFESTS . '/InvalidSlug');
 
