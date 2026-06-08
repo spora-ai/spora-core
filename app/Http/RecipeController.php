@@ -8,7 +8,6 @@ use Spora\Auth\AuthService;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Recipes\RecipeScanner;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -21,7 +20,7 @@ final class RecipeController
         private readonly RecipeScanner $scanner,
     ) {}
 
-    public function index(Request $_request, array $_vars = []): Response
+    public function index(): Response
     {
         if ($this->auth->currentUserId() === null) {
             throw new UnauthenticatedException();

@@ -23,7 +23,7 @@ final class UserProfileController
         private readonly UserServiceInterface $userService,
     ) {}
 
-    public function getProfile(Request $request): JsonResponse
+    public function getProfile(): JsonResponse
     {
 
 
@@ -57,7 +57,7 @@ final class UserProfileController
         return new JsonResponse(['data' => $result['profile']]);
     }
 
-    public function getLocations(Request $request): JsonResponse
+    public function getLocations(): JsonResponse
     {
 
 
@@ -121,7 +121,7 @@ final class UserProfileController
         return new JsonResponse(['data' => $result['location']]);
     }
 
-    public function deleteLocation(Request $request, int $id): JsonResponse
+    public function deleteLocation(int $id): JsonResponse
     {
 
 

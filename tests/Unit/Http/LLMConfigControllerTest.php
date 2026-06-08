@@ -31,7 +31,7 @@ describe('LLMConfigController::drivers', function (): void {
     test('returns the registered drivers list', function (): void {
         [$controller] = makeLLMConfigController();
 
-        $response = $controller->drivers(new Request());
+        $response = $controller->drivers();
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
@@ -46,7 +46,7 @@ describe('LLMConfigController::index', function (): void {
         [$controller, $authService] = makeLLMConfigController();
         bootAuth($authService);
 
-        $response = $controller->index(new Request());
+        $response = $controller->index();
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
@@ -58,7 +58,7 @@ describe('LLMConfigController::globalConfigs', function (): void {
     test('returns the global configs list', function (): void {
         [$controller] = makeLLMConfigController();
 
-        $response = $controller->globalConfigs(new Request());
+        $response = $controller->globalConfigs();
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
@@ -78,7 +78,7 @@ describe('LLMConfigController::show', function (): void {
         $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'm']));
         $config->save();
 
-        $response = $controller->show(new Request(), (int) $config->id);
+        $response = $controller->show((int) $config->id);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
@@ -89,7 +89,7 @@ describe('LLMConfigController::show', function (): void {
         [$controller, $authService] = makeLLMConfigController();
         bootAuth($authService);
 
-        $response = $controller->show(new Request(), 999999);
+        $response = $controller->show(999999);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
     });
@@ -216,7 +216,7 @@ describe('LLMConfigController::destroy', function (): void {
         $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']));
         $config->save();
 
-        $response = $controller->destroy(new Request(), (int) $config->id);
+        $response = $controller->destroy((int) $config->id);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
@@ -227,7 +227,7 @@ describe('LLMConfigController::destroy', function (): void {
         [$controller, $authService] = makeLLMConfigController();
         bootAuth($authService);
 
-        $response = $controller->destroy(new Request(), 999999);
+        $response = $controller->destroy(999999);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
     });
@@ -247,7 +247,7 @@ describe('LLMConfigController::setDefault', function (): void {
         $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']));
         $config->save();
 
-        $response = $controller->setDefault(new Request(), (int) $config->id);
+        $response = $controller->setDefault((int) $config->id);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
@@ -258,7 +258,7 @@ describe('LLMConfigController::setDefault', function (): void {
         [$controller, $authService] = makeLLMConfigController();
         bootAuth($authService, 'default-404@example.com');
 
-        $response = $controller->setDefault(new Request(), 999999);
+        $response = $controller->setDefault(999999);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
     });
