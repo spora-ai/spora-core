@@ -150,6 +150,7 @@ function navigateToApp(app: AppInfo): void {
                 v-for="app in apps"
                 :key="app.name"
                 @click="navigateToApp(app)"
+                :aria-label="`Open ${app.displayName}`"
                 class="w-full flex items-center gap-3 px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors"
               >
                 <Icon :name="app.icon" class="h-4 w-4 text-muted-foreground" />
@@ -185,6 +186,7 @@ function navigateToApp(app: AppInfo): void {
           <nav class="py-1">
             <button
               @click="() => { closeUserMenu(); router.push({ name: 'account' }) }"
+              aria-label="My Account"
               class="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
             >
               <Icon name="user" class="h-4 w-4 text-muted-foreground" />
@@ -192,6 +194,7 @@ function navigateToApp(app: AppInfo): void {
             </button>
             <button
               @click="() => { closeUserMenu(); router.push({ name: 'profile' }) }"
+              aria-label="Profile"
               class="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
             >
               <Icon name="user" class="h-4 w-4 text-muted-foreground" />
@@ -200,6 +203,7 @@ function navigateToApp(app: AppInfo): void {
             <hr class="my-1 border-border" />
             <button
               @click="logout"
+              aria-label="Sign out"
               class="w-full flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
               <Icon name="logout" />
