@@ -45,7 +45,7 @@ use Throwable;
 final class Orchestrator implements OrchestratorInterface
 {
     /** Format used when writing UTC wall-clock timestamps to the DB. */
-    private const DB_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
+    public const DB_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
 
     /** ISO 8601 / RFC 3339 format used for the AgentState `pausedAt` field. */
     private const ISO8601_UTC = 'Y-m-d\TH:i:s\Z';
@@ -841,108 +841,9 @@ final class Orchestrator implements OrchestratorInterface
 
         foreach ($toolCalls as $toolCall) {
             try {
-                $toolInstance = $this->resolveToolByName($toolCall->toolName);
-                $toolClass    = get_class($toolInstance);
+                $disposition = $this->toolCallExecutor()->executeOrQueue($toolCall, $agent, $task, $enabledClasses);
 
-                if (!in_array($toolClass, $enabledClasses, true)) {
-                    throw new RuntimeException("The LLM attempted to call tool '{$toolCall->toolName}' which is not enabled for this agent.");
-                }
-
-                $operationName        = 'default';
-                $operationDescription = null;
-                $usesOperations       = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
-
-                if ($usesOperations) {
-                    $operationName        = $this->callTraitMethod($toolInstance, 'getOperationName', [$toolCall->arguments]);
-                    $operationDescription = $this->callTraitMethod($toolInstance, 'getOperationDescription', [$operationName]);
-
-                    if (!$this->isOperationEnabled($toolInstance, $operationName, $agent->id)) {
-                        ToolCallModel::create([
-                            'task_id'               => $task->id,
-                            'agent_id'              => $agent->id,
-                            'provider_call_id'      => $toolCall->providerCallId,
-                            'tool_name'             => $toolCall->toolName,
-                            'tool_class'            => $toolClass,
-                            'tool_type'             => 'operation',
-                            'operation'             => $operationName,
-                            'operation_description' => $operationDescription,
-                            'status'                => 'DISABLED',
-                            'proposed_arguments'    => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
-                            'human_description'     => $operationDescription,
-                        ]);
-                        $this->appendHistory(
-                            taskId: $task->id,
-                            role: 'tool',
-                            content: "Operation '{$operationName}' is disabled for this agent.",
-                            context: new HistoryMessageContext(
-                                toolCallId: $toolCall->providerCallId,
-                                toolName: $toolCall->toolName,
-                            ),
-                        );
-                        continue;
-                    }
-                }
-
-                $requiresApproval = $this->resolveRequiresApproval($toolInstance, $toolClass, $agent->id, $toolCall->arguments);
-
-                $toolCallRecord = ToolCallModel::create([
-                    'task_id'               => $task->id,
-                    'agent_id'              => $agent->id,
-                    'provider_call_id'      => $toolCall->providerCallId,
-                    'tool_name'             => $toolCall->toolName,
-                    'tool_class'            => $toolClass,
-                    'tool_type'             => $requiresApproval ? 'output' : 'input',
-                    'operation'             => $operationName,
-                    'operation_description' => $operationDescription,
-                    'status'                => 'PENDING_APPROVAL',
-                    'proposed_arguments'    => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
-                    'human_description'     => $toolInstance->describeAction($toolCall->arguments),
-                ]);
-
-                try {
-                    SchemaValidator::validate($toolCall->arguments, $toolInstance->getParametersSchema());
-                } catch (Throwable $e) {
-                    $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
-                    Capsule::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
-                        $toolCallRecord->update([
-                            'status'         => 'APPROVED',
-                            'result_content' => $result->content,
-                            'executed_at'    => date(self::DB_TIMESTAMP_FORMAT),
-                        ]);
-                        $this->appendHistory(
-                            taskId: $task->id,
-                            role: 'tool',
-                            content: $result->content,
-                            context: new HistoryMessageContext(
-                                toolCallId: $toolCall->providerCallId,
-                                toolName: $toolCall->toolName,
-                            ),
-                        );
-                    });
-                    continue;
-                }
-
-                if (!$requiresApproval) {
-                    $result = $this->safeExecute($toolInstance, $toolCall->arguments, $agent->id, $task->id, $task->user_id);
-
-                    Capsule::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
-                        $toolCallRecord->update([
-                            'status'         => 'APPROVED',
-                            'result_content' => $result->content,
-                            'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                            'executed_at'    => date(self::DB_TIMESTAMP_FORMAT),
-                        ]);
-                        $this->appendHistory(
-                            taskId: $task->id,
-                            role: 'tool',
-                            content: $result->content,
-                            context: new HistoryMessageContext(
-                                toolCallId: $toolCall->providerCallId,
-                                toolName: $toolCall->toolName,
-                            ),
-                        );
-                    });
-                } else {
+                if ($disposition === ToolCallDisposition::AwaitingApproval) {
                     $pendingApproval[] = $toolCall;
                 }
             } catch (Throwable $e) {
@@ -992,6 +893,13 @@ final class Orchestrator implements OrchestratorInterface
         }
     }
 
+    private ?ToolCallExecutor $toolCallExecutorInstance = null;
+
+    private function toolCallExecutor(): ToolCallExecutor
+    {
+        return $this->toolCallExecutorInstance ??= new ToolCallExecutor($this);
+    }
+
     private function publishIntermediateState(Task $task): void
     {
         if ($this->mercure === null) {
@@ -1018,7 +926,7 @@ final class Orchestrator implements OrchestratorInterface
         $this->mercure->publish($task->id, $task->user_id, $taskData);
     }
 
-    private function safeExecute(
+    public function safeExecute(
         ToolInterface $toolInstance,
         array $arguments,
         int $agentId,
@@ -1067,7 +975,7 @@ final class Orchestrator implements OrchestratorInterface
         }
     }
 
-    private function resolveRequiresApproval(object $toolInstance, string $toolClass, int $agentId, array|object $arguments = []): bool
+    public function resolveRequiresApproval(object $toolInstance, string $toolClass, int $agentId, array|object $arguments = []): bool
     {
         if (is_object($arguments)) {
             $arguments = (array) $arguments;
@@ -1105,7 +1013,7 @@ final class Orchestrator implements OrchestratorInterface
         throw new RuntimeException("Tool '{$toolClass}' does not use HasOperations trait.");
     }
 
-    private function isOperationEnabled(object $toolInstance, string $operationName, int $agentId): bool
+    public function isOperationEnabled(object $toolInstance, string $operationName, int $agentId): bool
     {
         $toolClass = get_class($toolInstance);
 
@@ -1290,14 +1198,14 @@ final class Orchestrator implements OrchestratorInterface
         return $this->buildLlmConfigBlock($llmSettings);
     }
 
-    private function callTraitMethod(object $object, string $method, array $args): mixed
+    public function callTraitMethod(object $object, string $method, array $args): mixed
     {
         /** @var callable */
         $callable = [$object, $method];
         return $callable(...$args);
     }
 
-    private function resolveToolByName(string $toolName): ToolInterface
+    public function resolveToolByName(string $toolName): ToolInterface
     {
         // Strip plugin slug prefix if present (e.g. "my-plugin:web_search" → "web_search").
         $plainName = $toolName;
@@ -1337,7 +1245,7 @@ final class Orchestrator implements OrchestratorInterface
         return $plainName;
     }
 
-    private function appendHistory(
+    public function appendHistory(
         int                       $taskId,
         string                    $role,
         ?string                   $content,
