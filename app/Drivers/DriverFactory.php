@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Spora\Drivers;
 
 use Psr\Log\LoggerInterface;
-use RuntimeException;
 use Spora\Drivers\Exceptions\DriverClassNotFoundException;
+use Spora\Drivers\Exceptions\LLMConfigDecryptFailedException;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\LLMConfigService;
@@ -60,7 +60,7 @@ class DriverFactory
         try {
             $settings = $this->llmConfigService->decodeSettings($config->driver_class, $config->settings ?? '');
         } catch (Throwable $e) {
-            throw new RuntimeException(
+            throw new LLMConfigDecryptFailedException(
                 "Failed to decrypt settings for LLM config '{$config->name}' (id={$config->id}): " . $e->getMessage(),
                 0,
                 $e,

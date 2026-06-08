@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Spora\Models\Agent;
 use Spora\Models\Memory;
+use Spora\Services\Exceptions\MemoryValidationException;
 use Spora\Services\MemoryService;
 
 const AGENT1_EMAIL = 'agent1@test.com';
@@ -229,7 +230,7 @@ describe('MemoryService', function (): void {
             $service = makeMemoryService();
 
             expect(fn() => $service->createGlobalMemory($userId, ['name' => '']))
-                ->toThrow(RuntimeException::class, 'name is required');
+                ->toThrow(MemoryValidationException::class, 'name is required');
         });
 
         it('throws when name is missing', function (): void {
@@ -237,7 +238,7 @@ describe('MemoryService', function (): void {
             $service = makeMemoryService();
 
             expect(fn() => $service->createGlobalMemory($userId, []))
-                ->toThrow(RuntimeException::class, 'name is required');
+                ->toThrow(MemoryValidationException::class, 'name is required');
         });
     });
 
