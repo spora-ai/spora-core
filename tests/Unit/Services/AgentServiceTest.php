@@ -8,6 +8,8 @@ use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\Agents\AgentToolInstanceResolver;
+use Spora\Services\Agents\AgentToolOverrideResolver;
 use Spora\Services\AgentService;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
@@ -486,22 +488,44 @@ describe('AgentService::getToolsOperations / getOperationOverride / patchOperati
     });
 });
 
-describe('AgentService private helpers via reflection', function (): void {
+describe('AgentService private helpers (now on collaborators)', function (): void {
+    // After the AgentService split (refactor/split-agent-service), the helper
+    // methods moved to dedicated collaborators:
+    //   - AgentToolOverrideResolver::extractOverrideFlag, parseOverrideFlag, maskLlmConfig
+    //   - AgentToolInstanceResolver::resolveToolInstance
+    // The override-resolver methods are public on the new class, so they can
+    // be called directly. maskLlmConfig is still private, so reflection is
+    // needed (targeting the new class, not AgentService).
+
+    /**
+     * Build an override resolver with the same key + drivers the rest of the
+     * test suite uses (mirrors makeAgentServiceWithUser).
+     */
+    function makeOverrideResolver(): AgentToolOverrideResolver
+    {
+        $key = str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $security = new SecurityManager($key);
+        $toolConfig = new ToolConfigService($security, new NullLogger(), [CalculatorTool::class]);
+        $llmConfig  = new LLMConfigService($security, []);
+
+        return new AgentToolOverrideResolver(
+            $toolConfig,
+            $llmConfig,
+            new AgentToolInstanceResolver(),
+        );
+    }
 
     it('extractOverrideFlag returns null when the row is null', function (): void {
-        [$service] = makeAgentServiceWithUser();
-        $ref  = new ReflectionClass(AgentService::class);
-        $meth = $ref->getMethod('extractOverrideFlag');
+        $resolver = makeOverrideResolver();
 
-        expect($meth->invoke($service, null, 'enabled'))->toBeNull();
+        expect($resolver->extractOverrideFlag(null, 'enabled'))->toBeNull();
     });
 
     it('extractOverrideFlag returns 1 when the raw value is 1 and 0 otherwise', function (): void {
         [$service, $userId] = makeAgentServiceWithUser();
         $agent = $service->createAgent($userId, ['name' => 'ExtractFlag']);
 
-        $ref  = new ReflectionClass(AgentService::class);
-        $meth = $ref->getMethod('extractOverrideFlag');
+        $resolver = makeOverrideResolver();
 
         // Persisted row with enabled=1 → expect 1
         $rowOn = AgentToolOperationOverride::create([
@@ -510,7 +534,7 @@ describe('AgentService private helpers via reflection', function (): void {
             'operation'  => 'eval',
             'enabled'    => 1,
         ]);
-        expect($meth->invoke($service, $rowOn, 'enabled'))->toBe(1);
+        expect($resolver->extractOverrideFlag($rowOn, 'enabled'))->toBe(1);
 
         // Persisted row with enabled=0 → expect 0
         $rowOff = AgentToolOperationOverride::create([
@@ -519,55 +543,59 @@ describe('AgentService private helpers via reflection', function (): void {
             'operation'  => 'send',
             'enabled'    => 0,
         ]);
-        expect($meth->invoke($service, $rowOff, 'enabled'))->toBe(0);
+        expect($resolver->extractOverrideFlag($rowOff, 'enabled'))->toBe(0);
 
         // Field that wasn't set on the row → expect null
-        expect($meth->invoke($service, $rowOn, 'default_requires_approval'))->toBeNull();
+        expect($resolver->extractOverrideFlag($rowOn, 'default_requires_approval'))->toBeNull();
     });
 
     it('parseOverrideFlag accepts boolean, integer, and string forms; null when missing', function (): void {
-        [$service] = makeAgentServiceWithUser();
-        $ref  = new ReflectionClass(AgentService::class);
-        $meth = $ref->getMethod('parseOverrideFlag');
+        $resolver = makeOverrideResolver();
 
         // PHP booleans
-        expect($meth->invoke($service, ['enabled' => true], 'enabled'))->toBe(1);
-        expect($meth->invoke($service, ['enabled' => false], 'enabled'))->toBe(0);
+        expect($resolver->parseOverrideFlag(['enabled' => true], 'enabled'))->toBe(1);
+        expect($resolver->parseOverrideFlag(['enabled' => false], 'enabled'))->toBe(0);
 
         // Integers (1 / 0)
-        expect($meth->invoke($service, ['enabled' => 1], 'enabled'))->toBe(1);
-        expect($meth->invoke($service, ['enabled' => 0], 'enabled'))->toBe(0);
+        expect($resolver->parseOverrideFlag(['enabled' => 1], 'enabled'))->toBe(1);
+        expect($resolver->parseOverrideFlag(['enabled' => 0], 'enabled'))->toBe(0);
 
         // Boolean strings (filter_var uses FILTER_VALIDATE_BOOLEAN)
-        expect($meth->invoke($service, ['enabled' => 'true'], 'enabled'))->toBe(1);
-        expect($meth->invoke($service, ['enabled' => 'false'], 'enabled'))->toBe(0);
-        expect($meth->invoke($service, ['enabled' => '1'], 'enabled'))->toBe(1);
-        expect($meth->invoke($service, ['enabled' => '0'], 'enabled'))->toBe(0);
+        expect($resolver->parseOverrideFlag(['enabled' => 'true'], 'enabled'))->toBe(1);
+        expect($resolver->parseOverrideFlag(['enabled' => 'false'], 'enabled'))->toBe(0);
+        expect($resolver->parseOverrideFlag(['enabled' => '1'], 'enabled'))->toBe(1);
+        expect($resolver->parseOverrideFlag(['enabled' => '0'], 'enabled'))->toBe(0);
 
         // Explicit null → null
-        expect($meth->invoke($service, ['enabled' => null], 'enabled'))->toBeNull();
+        expect($resolver->parseOverrideFlag(['enabled' => null], 'enabled'))->toBeNull();
 
         // Key absent → null
-        expect($meth->invoke($service, [], 'enabled'))->toBeNull();
+        expect($resolver->parseOverrideFlag([], 'enabled'))->toBeNull();
     });
 
     it('resolveToolInstance returns an instance for a known tool and null for an unknown class', function (): void {
-        [$service] = makeAgentServiceWithUser();
-        $ref  = new ReflectionClass(AgentService::class);
-        $meth = $ref->getMethod('resolveToolInstance');
+        $resolver = new AgentToolInstanceResolver();
 
-        $instance = $meth->invoke($service, CalculatorTool::class);
+        $instance = $resolver->resolveToolInstance(CalculatorTool::class);
         expect($instance)->not->toBeNull();
         expect($instance)->toBeInstanceOf(CalculatorTool::class);
 
         // Unknown class → null, not a thrown Throwable
-        expect($meth->invoke($service, 'Spora\\Tools\\NotARealTool'))->toBeNull();
+        expect($resolver->resolveToolInstance('Spora\\Tools\\NotARealTool'))->toBeNull();
     });
 
     it('maskLlmConfig masks password keys and leaves other settings untouched', function (): void {
-        // Use the LLM-driver-enabled service so the schema can resolve.
-        [$service] = makeAgentServiceWithLlmDriver();
-        $ref  = new ReflectionClass(AgentService::class);
+        // Use the LLM-driver-enabled resolver so the schema can resolve.
+        $key = str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $security = new SecurityManager($key);
+        $toolConfig = new ToolConfigService($security, new NullLogger(), [CalculatorTool::class]);
+        $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+        $resolver = new AgentToolOverrideResolver(
+            $toolConfig,
+            $llmConfig,
+            new AgentToolInstanceResolver(),
+        );
+        $ref  = new ReflectionClass(AgentToolOverrideResolver::class);
         $meth = $ref->getMethod('maskLlmConfig');
 
         $config = LLMDriverConfiguration::create([
@@ -585,7 +613,7 @@ describe('AgentService private helpers via reflection', function (): void {
             'is_default' => true,
         ]);
 
-        $result = $meth->invoke($service, $config);
+        $result = $meth->invoke($resolver, $config);
 
         expect($result)->toBeArray();
         // api_key is a password field → masked

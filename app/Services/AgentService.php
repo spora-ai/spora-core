@@ -8,25 +8,36 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use ReflectionClass;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
-use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\AgentToolOverride;
-use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\Agents\AgentToolInstanceResolver;
+use Spora\Services\Agents\AgentToolOperationsResolver;
+use Spora\Services\Agents\AgentToolOverrideResolver;
 use Spora\Tools\Attributes\Tool;
-use Spora\Tools\Traits\HasOperations;
-use Throwable;
 
 /**
  * Service for agent lifecycle, tool management, and operation overrides.
  * All DB access for Agent domain goes through this service.
+ *
+ * Thin facade: lifecycle CRUD + tool enable/disable + tool status live here;
+ * settings overrides and per-operation resolution are delegated to collaborators
+ * in {@see Spora\Services\Agents}.
  */
 final class AgentService implements AgentServiceInterface
 {
     private const DATETIME_FORMAT = 'Y-m-d H:i:s';
 
+    private readonly AgentToolInstanceResolver $instanceResolver;
+    private readonly AgentToolOverrideResolver $overrideResolver;
+    private readonly AgentToolOperationsResolver $operationsResolver;
+
     public function __construct(
         private readonly ToolConfigService $toolConfig,
-        private readonly LLMConfigService $llmConfig,
-    ) {}
+        LLMConfigService $llmConfig,
+    ) {
+        $this->instanceResolver    = new AgentToolInstanceResolver();
+        $this->overrideResolver    = new AgentToolOverrideResolver($toolConfig, $llmConfig, $this->instanceResolver);
+        $this->operationsResolver  = new AgentToolOperationsResolver($this->instanceResolver, $this->overrideResolver);
+    }
 
 
     public function getAgentsForUser(int $userId): array
@@ -118,7 +129,7 @@ final class AgentService implements AgentServiceInterface
         Capsule::table('agent_tools')->insert([
             'agent_id'   => $agentId,
             'tool_class' => $toolClass,
-            'tool_name'  => $this->resolveToolName($toolClass),
+            'tool_name'  => $this->instanceResolver->resolveToolName($toolClass),
             'created_at' => date(self::DATETIME_FORMAT),
             'updated_at' => date(self::DATETIME_FORMAT),
         ]);
@@ -235,316 +246,35 @@ final class AgentService implements AgentServiceInterface
 
     public function getOverride(int $agentId, int $userId, string $toolClass, bool $rawOnly = false): array
     {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return [];
-        }
-        // llm_configuration is a special case — no registered tool class
-        if ($toolClass === 'llm_configuration') {
-            return $this->resolveLlmConfigurationOverride($agent);
-        }
-        return $rawOnly
-            ? $this->resolveRawOverride($agentId, $toolClass)
-            : $this->resolveAnnotatedOverride($agentId, $toolClass);
-    }
-
-    private function resolveLlmConfigurationOverride(Agent $agent): array
-    {
-        $config = $this->llmConfig->getEffectiveConfigForAgent($agent);
-        return $config !== null ? $this->maskLlmConfig($config) : [];
-    }
-
-    private function resolveRawOverride(int $agentId, string $toolClass): array
-    {
-        $settings = $this->toolConfig->getRawAgentOverride($toolClass, $agentId);
-        return $this->toolConfig->maskForApi($settings, $toolClass);
-    }
-
-    private function resolveAnnotatedOverride(int $agentId, string $toolClass): array
-    {
-        $annotated = $this->toolConfig->getEffectiveSettingsWithSource($toolClass, $agentId);
-        $passwordKeys = $this->getToolPasswordKeys($toolClass);
-        $result = [];
-        foreach ($annotated as $key => $item) {
-            $result[$key] = [
-                'value'  => $this->maskAnnotatedValueIfPassword($key, $item['value'], $passwordKeys),
-                'source' => $item['source'],
-            ];
-        }
-        return $result;
-    }
-
-    private function maskAnnotatedValueIfPassword(string $key, mixed $value, array $passwordKeys): mixed
-    {
-        if ($value !== null && $value !== '' && in_array($key, $passwordKeys, true)) {
-            return '***';
-        }
-        return $value;
+        return $this->overrideResolver->getOverride($agentId, $userId, $toolClass, $rawOnly);
     }
 
     public function putOverride(int $agentId, int $userId, string $toolClass, array $settings): array
     {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return [];
-        }
-
-        $this->toolConfig->putAgentOverride($toolClass, $agentId, $settings);
-
-        $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId);
-        return $this->toolConfig->maskForApi($effective, $toolClass);
+        return $this->overrideResolver->putOverride($agentId, $userId, $toolClass, $settings);
     }
 
     public function deleteOverride(int $agentId, int $userId, string $toolClass): void
     {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return;
-        }
-
-        $this->toolConfig->deleteAgentOverride($toolClass, $agentId);
+        $this->overrideResolver->deleteOverride($agentId, $userId, $toolClass);
     }
 
 
     public function getToolsOperations(int $agentId, int $userId): ?array
     {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return null;
-        }
-
-        $enabledTools = AgentTool::where('agent_id', $agentId)->get();
-        $operations = [];
-
-        $overrides = AgentToolOperationOverride::where('agent_id', $agentId)
-            ->get()
-            ->keyBy(fn($row) => $row->tool_class . '::' . $row->operation);
-
-        foreach ($enabledTools as $tool) {
-            if (!class_exists($tool->tool_class)) {
-                continue;
-            }
-            if (!in_array(HasOperations::class, class_uses_recursive($tool->tool_class), true)) {
-                continue;
-            }
-
-            $instance = $this->resolveToolInstance($tool->tool_class);
-            if ($instance === null) {
-                continue;
-            }
-
-            foreach ($instance->getOperations() as $op) {
-                $key = $tool->tool_class . '::' . $op->name;
-                $row = $overrides->get($key);
-
-                $operations[] = [
-                    'tool_class'                   => $tool->tool_class,
-                    'tool_name'                    => $tool->tool_name,
-                    'operation'                    => $op->name,
-                    'enabled'                      => $this->extractOverrideFlag($row, 'enabled'),
-                    'default_requires_approval'    => $this->extractOverrideFlag($row, 'default_requires_approval'),
-                    'effective_enabled'            => $this->resolveOperationEffectiveEnabled($tool->tool_class, $op->name, $agentId),
-                    'effective_requires_approval'  => $this->resolveOperationEffectiveRequiresApproval($tool->tool_class, $op->name, $agentId),
-                ];
-            }
-        }
-
-        return $operations;
+        return $this->operationsResolver->getToolsOperations($agentId, $userId);
     }
 
     public function getOperationOverride(int $agentId, int $userId, string $toolClass, string $operation): array
     {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return [];
-        }
-
-        $row = AgentToolOperationOverride::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->where('operation', $operation)
-            ->first();
-
-        return [
-            'operation'                   => $operation,
-            'tool_class'                  => $toolClass,
-            'enabled'                      => $this->extractOverrideFlag($row, 'enabled'),
-            'default_requires_approval'    => $this->extractOverrideFlag($row, 'default_requires_approval'),
-            'effective_enabled'            => $this->resolveOperationEffectiveEnabled($toolClass, $operation, $agentId),
-            'effective_requires_approval'  => $this->resolveOperationEffectiveRequiresApproval($toolClass, $operation, $agentId),
-        ];
+        return $this->operationsResolver->getOperationOverride($agentId, $userId, $toolClass, $operation);
     }
 
     public function patchOperationOverride(int $agentId, int $userId, string $toolClass, string $operation, array $data): array
     {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return [];
-        }
-
-        $enabled = $this->parseOverrideFlag($data, 'enabled');
-        $defaultRequiresApproval = $this->parseOverrideFlag($data, 'default_requires_approval');
-
-        $existing = AgentToolOperationOverride::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->where('operation', $operation)
-            ->first();
-
-        if ($existing !== null) {
-            $updateData = [];
-            if ($enabled !== null) {
-                $updateData['enabled'] = $enabled;
-            }
-            if ($defaultRequiresApproval !== null) {
-                $updateData['default_requires_approval'] = $defaultRequiresApproval;
-            }
-            if ($updateData !== []) {
-                $updateData['updated_at'] = date(self::DATETIME_FORMAT);
-                Capsule::table('agent_tool_operation_overrides')
-                    ->where('id', $existing->id)
-                    ->update($updateData);
-            }
-        } else {
-            $insertData = [
-                'agent_id'    => $agentId,
-                'tool_class'  => $toolClass,
-                'operation'   => $operation,
-                'created_at'  => date(self::DATETIME_FORMAT),
-                'updated_at'  => date(self::DATETIME_FORMAT),
-            ];
-            if ($enabled !== null) {
-                $insertData['enabled'] = $enabled;
-            }
-            if ($defaultRequiresApproval !== null) {
-                $insertData['default_requires_approval'] = $defaultRequiresApproval;
-            }
-            Capsule::table('agent_tool_operation_overrides')->insert($insertData);
-        }
-
-        return $this->getOperationOverride($agentId, $userId, $toolClass, $operation);
+        return $this->operationsResolver->patchOperationOverride($agentId, $userId, $toolClass, $operation, $data);
     }
 
-
-    private function resolveOperationEffectiveEnabled(string $toolClass, string $operation, int $agentId): bool
-    {
-        $override = AgentToolOperationOverride::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->where('operation', $operation)
-            ->first();
-
-        if ($override !== null) {
-            $raw = $override->getRawOriginal('enabled');
-            if ($raw !== null) {
-                return (bool) $raw;
-            }
-        }
-
-        $instance = $this->resolveToolInstance($toolClass);
-        if ($instance !== null && in_array(HasOperations::class, class_uses_recursive($toolClass), true)) {
-            return $instance->isEnabledByDefault($operation);
-        }
-
-        return true;
-    }
-
-    private function resolveOperationEffectiveRequiresApproval(string $toolClass, string $operation, int $agentId): bool
-    {
-        $override = AgentToolOperationOverride::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->where('operation', $operation)
-            ->first();
-
-        if ($override !== null) {
-            $raw = $override->getRawOriginal('default_requires_approval');
-            if ($raw !== null) {
-                return (bool) $raw;
-            }
-        }
-
-        $instance = $this->resolveToolInstance($toolClass);
-        if ($instance !== null && in_array(HasOperations::class, class_uses_recursive($toolClass), true)) {
-            return $instance->requiresApprovalByDefault($operation);
-        }
-
-        return true;
-    }
-
-    private function resolveToolInstance(string $toolClass): ?object
-    {
-        static $instances = [];
-        if (!class_exists($toolClass)) {
-            return null;
-        }
-        if (!isset($instances[$toolClass])) {
-            try {
-                // Bypass constructor to read tool metadata (e.g. #[Tool], operations)
-                // without triggering side effects from tool constructors.
-                $instances[$toolClass] = (new ReflectionClass($toolClass))->newInstanceWithoutConstructor();
-            } catch (Throwable) {
-                return null;
-            }
-        }
-        return $instances[$toolClass];
-    }
-
-    private function resolveToolName(string $toolClass): string
-    {
-        if (!class_exists($toolClass)) {
-            return basename(str_replace('\\', '/', $toolClass));
-        }
-
-        $reflection = new ReflectionClass($toolClass);
-        $attrs = $reflection->getAttributes(Tool::class);
-
-        if ($attrs !== []) {
-            return $attrs[0]->newInstance()->name;
-        }
-
-        return $reflection->getShortName();
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function getToolPasswordKeys(string $toolClass): array
-    {
-        if (!class_exists($toolClass)) {
-            return [];
-        }
-
-        $keys = [];
-        foreach ((new ReflectionClass($toolClass))->getAttributes(\Spora\Tools\Attributes\ToolSetting::class) as $attr) {
-            /** @var \Spora\Tools\Attributes\ToolSetting $instance */
-            $instance = $attr->newInstance();
-            if ($instance->type === 'password') {
-                $keys[] = $instance->key;
-            }
-        }
-
-        return $keys;
-    }
-
-    private function maskLlmConfig(LLMDriverConfiguration $config): array
-    {
-        try {
-            $settings = $this->llmConfig->decodeSettings(
-                $config->driver_class,
-                $config->getRawOriginal('settings'),
-            );
-        } catch (Throwable) {
-            $settings = [];
-        }
-
-        $drivers = $this->llmConfig->getDrivers();
-        $schema = null;
-        foreach ($drivers as $driver) {
-            if ($driver['driver_class'] === $config->driver_class) {
-                $schema = $driver['settings_schema'];
-                break;
-            }
-        }
-
-        return $schema !== null ? $this->llmConfig->maskForApi($settings, $schema) : $settings;
-    }
 
     private function agentResource(Agent $agent): array
     {
@@ -566,29 +296,5 @@ final class AgentService implements AgentServiceInterface
                 'tool_name'  => $t->tool_name,
             ])->values()->toArray(),
         ];
-    }
-
-    private function extractOverrideFlag(?AgentToolOperationOverride $row, string $field): ?int
-    {
-        if ($row === null) {
-            return null;
-        }
-        $raw = $row->getRawOriginal($field);
-        if ($raw === null) {
-            return null;
-        }
-        return (int) $raw === 1 ? 1 : 0;
-    }
-
-    private function parseOverrideFlag(array $data, string $key): ?int
-    {
-        if (!array_key_exists($key, $data)) {
-            return null;
-        }
-        $value = $data[$key];
-        if ($value === null) {
-            return null;
-        }
-        return filter_var($value, FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
     }
 }
