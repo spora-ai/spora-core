@@ -6,7 +6,7 @@ import Icon from '@/components/ui/Icon.vue'
 import type { ToolSettingSchema } from '@/composables/useToolSettings'
 
 const props = defineProps<{
-  modelValue: string | boolean | null
+  modelValue: string | boolean | number[] | null
   field: ToolSettingSchema
   error?: string | null
   disabled?: boolean
@@ -15,7 +15,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update:modelValue': [value: string | boolean | null]
+  'update:modelValue': [value: string | boolean | number[] | null]
 }>()
 
 const isPasswordMasked = (val: unknown): boolean => val === '***'
