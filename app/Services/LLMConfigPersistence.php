@@ -44,7 +44,7 @@ final class LLMConfigPersistence
         );
     }
 
-    public function updateConfiguration(int $configId, int $userId, array $data, bool $isAdmin): ?LLMDriverConfiguration
+    public function updateConfiguration(int $configId, array $data, bool $isAdmin): ?LLMDriverConfiguration
     {
         $config = $this->loadEditableConfiguration($configId, $isAdmin);
         if ($config === null) {

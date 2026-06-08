@@ -31,7 +31,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
      *        collaborator is not provided explicitly.
      */
     public function __construct(
-        private readonly SecurityManagerInterface $security,
+        SecurityManagerInterface $security,
         array $driverClasses = [],
         ?LLMConfigSchemaInspector $schemaInspector = null,
         ?LLMConfigPersistence $persistence = null,
@@ -158,7 +158,12 @@ final class LLMConfigService implements LLMConfigServiceInterface
 
     public function updateConfiguration(int $configId, int $userId, array $data, bool $isAdmin): ?LLMDriverConfiguration
     {
-        return $this->persistence->updateConfiguration($configId, $userId, $data, $isAdmin);
+        // $userId is preserved on the public facade signature for backwards
+        // compatibility with controllers/callers; the persistence collaborator
+        // dropped the parameter (it was unused in the body).
+        unset($userId);
+
+        return $this->persistence->updateConfiguration($configId, $data, $isAdmin);
     }
 
     public function deleteConfiguration(int $configId, int $userId, bool $isAdmin): bool
@@ -172,7 +177,12 @@ final class LLMConfigService implements LLMConfigServiceInterface
 
     public function setDefaultConfiguration(int $configId, int $userId, bool $isAdmin): ?LLMDriverConfiguration
     {
-        return $this->preferences->setDefaultConfiguration($configId, $userId, $isAdmin);
+        // $userId is preserved on the public facade signature for backwards
+        // compatibility; the preferences collaborator dropped the parameter
+        // (it was unused in the body).
+        unset($userId);
+
+        return $this->preferences->setDefaultConfiguration($configId, $isAdmin);
     }
 
     public function getDefaultConfiguration(int $userId): ?LLMDriverConfiguration

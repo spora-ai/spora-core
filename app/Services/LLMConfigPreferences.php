@@ -22,7 +22,7 @@ use Spora\Models\UserPreference;
  */
 final class LLMConfigPreferences
 {
-    public function setDefaultConfiguration(int $configId, int $userId, bool $isAdmin): ?LLMDriverConfiguration
+    public function setDefaultConfiguration(int $configId, bool $isAdmin): ?LLMDriverConfiguration
     {
         $config = $this->loadDefaultableConfiguration($configId, $isAdmin);
         if ($config === null) {
