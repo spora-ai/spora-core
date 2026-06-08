@@ -7,7 +7,7 @@
  * the scroll lifecycle and calls `scrollToBottom` after fetches + on new
  * history entries.
  */
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { TaskDetail } from '@/types/task'
 import type { ChatMessage } from '@/composables/useTaskChat'
 import { truncateText, isTruncated } from '@/composables/useTaskChat'
@@ -39,6 +39,40 @@ function scrollToBottom(): void {
 
 function truncate(content: string | null): string {
   return truncateText(content)
+}
+
+// Map tool_call_id (history row) to the tool call's structured result_data.
+// History rows carry the LLM-side id, which matches ToolCall.provider_call_id;
+// the DB id is also indexed for safety.
+const toolResultDataByHistoryCallId = computed(() => {
+  const map = new Map<string, Record<string, unknown>>()
+  for (const tc of props.task.tool_calls ?? []) {
+    if (tc.result_data) {
+      map.set(tc.provider_call_id, tc.result_data)
+      map.set(String(tc.id), tc.result_data)
+    }
+  }
+  return map
+})
+
+function resultDataForEntry(entry: ChatMessage): Record<string, unknown> | null {
+  if (entry.kind !== 'tool-result') return null
+  const callId = entry.entry.tool_call_id
+  if (!callId) return null
+  return toolResultDataByHistoryCallId.value.get(callId) ?? null
+}
+
+function toolResultLinkTarget(entry: ChatMessage): number | string | null {
+  const data = resultDataForEntry(entry)
+  if (!data) return null
+  const raw = data.new_task_id ?? data.task_id
+  if (raw == null) return null
+  return typeof raw === 'number' ? raw : String(raw)
+}
+
+function toolResultIsHandover(entry: ChatMessage): boolean {
+  const data = resultDataForEntry(entry)
+  return data?.handover === true
 }
 
 defineExpose({ scrollToBottom })
@@ -100,6 +134,14 @@ defineExpose({ scrollToBottom })
               </div>
             </template>
             <div v-else v-html="renderMarkdown(truncate(msg.entry.content))" />
+            <RouterLink
+              v-if="toolResultLinkTarget(msg) !== null"
+              :to="{ name: 'task', params: { id: String(toolResultLinkTarget(msg)) } }"
+              class="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors"
+            >
+              <template v-if="toolResultIsHandover(msg)">Handed off — </template>
+              Open chat #{{ toolResultLinkTarget(msg) }} →
+            </RouterLink>
           </div>
         </details>
       </div>

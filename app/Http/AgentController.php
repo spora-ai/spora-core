@@ -33,10 +33,27 @@ final class AgentController
 
     /**
      * GET /api/v1/agents
+     *
+     * Optional `?select=id,name` query param projects to a subset of columns
+     * (used by the multi-select ToolSetting field to fetch the agent list
+     * without serializing the full payload). Backward-compatible: no
+     * `?select` returns the full payload via AgentService.
      */
-    public function index(): JsonResponse
+    public function index(?Request $request = null): JsonResponse
     {
         $userId = $this->authService->currentUserId();
+
+        $select = $request?->query->get('select');
+        if (is_string($select) && $select !== '') {
+            $columns = array_values(array_filter(array_map('trim', explode(',', $select)), static fn(string $c): bool => $c !== ''));
+            if ($columns !== []) {
+                $agents = \Spora\Models\Agent::where('user_id', $userId)
+                    ->orderBy('name')
+                    ->get($columns)
+                    ->all();
+                return new JsonResponse(['data' => ['agents' => $agents]]);
+            }
+        }
 
         $agents = $this->agentService->getAgentsForUser($userId);
 

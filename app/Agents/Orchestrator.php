@@ -946,7 +946,7 @@ final class Orchestrator implements OrchestratorInterface
         ]);
 
         try {
-            $result = $toolInstance->execute($arguments, $agentId, $userId);
+            $result = $toolInstance->execute($arguments, $agentId, $userId, $taskId);
 
             if (!$result->success) {
                 $this->logger?->error('Tool returned failure', [

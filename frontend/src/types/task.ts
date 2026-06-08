@@ -39,6 +39,13 @@ export interface ToolCall {
   result_content: string | null
   executed_at: string | null
   /**
+   * Structured data from ToolResult::data, exposed for tools that return
+   * actionable links (e.g. HandoverTool's new_task_id). The shape is
+   * tool-specific; the chat UI only reads `new_task_id`, `task_id`, and
+   * `handover` keys.
+   */
+  result_data?: Record<string, unknown> | null
+  /**
    * JSON Schema for this tool's parameters, derived at serialization time
    * from the live tool instance. Used to render parameters in #[ToolParameter]
    * declaration order in the approval UI, and to drive typed inputs (enum,

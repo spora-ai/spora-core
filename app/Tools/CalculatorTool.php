@@ -30,7 +30,7 @@ use Throwable;
 )]
 final class CalculatorTool extends AbstractTool
 {
-    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
         return $this->calculate($arguments, $agentId);
     }

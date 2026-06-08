@@ -63,7 +63,7 @@ final class SemanticScholarTool extends AbstractTool
         private readonly ?LoggerInterface $logger = null,
     ) {}
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
         $action = $this->getOperationName($arguments);
 

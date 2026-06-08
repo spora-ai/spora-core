@@ -68,7 +68,7 @@ final class TavilySearchTool extends AbstractTool
         return $envTimeout > 0 ? $envTimeout : 30;
     }
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
         return $this->search($arguments, $agentId, $userId);
     }

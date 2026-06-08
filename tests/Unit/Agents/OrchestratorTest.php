@@ -564,7 +564,7 @@ it('keeps the task status as PENDING_APPROVAL during tool execution to prevent a
         {
             return ['type' => 'object', 'properties' => [], 'required' => []];
         }
-        public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+        public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
         {
             // Task status should still be PENDING_APPROVAL while the tool is heavily executing
             $task = Task::find($this->taskId);
@@ -2223,7 +2223,7 @@ it('buildToolDefinitions emits a definition for a tool without HasOperations tra
     // #[Tool] attribute and a single execute().
     $plainTool = new #[Tool(name: 'plain_tool', description: 'A tool without operations')]
     class implements ToolInterface {
-        public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+        public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
         {
             return new ToolResult(true, 'plain result');
         }
@@ -2340,7 +2340,7 @@ it('qualifiedToolName prepends the plugin slug when the tool belongs to a regist
     // Define a tool that we will attribute to a plugin.
     $pluginTool = new #[Tool(name: 'plugin_search', description: 'Search via plugin')]
     class implements ToolInterface {
-        public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+        public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
         {
             return new ToolResult(true, 'plugin result');
         }

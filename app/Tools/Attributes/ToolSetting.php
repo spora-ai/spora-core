@@ -12,6 +12,8 @@ use Attribute;
  * Usage:
  *   #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', required: true)]
  *   #[ToolSetting(key: 'max_results', label: 'Max Results', type: 'text', default: '10')]
+ *   #[ToolSetting(key: 'allowed_agents', label: 'Allowed Agents', type: 'multi-select',
+ *                 required: true, exposeToLlm: true)]
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class ToolSetting
@@ -19,7 +21,7 @@ final class ToolSetting
     public function __construct(
         public readonly string $key,
         public readonly string $label,
-        /** "text"|"password"|"select"|"toggle" */
+        /** "text"|"password"|"select"|"toggle"|"textarea"|"multi-select" */
         public readonly string $type,
         public readonly string $description = '',
         public readonly mixed  $default     = null,

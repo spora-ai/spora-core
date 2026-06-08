@@ -17,7 +17,7 @@ final class ThrowingTool implements ToolInterface
 {
     use HasOperations;
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
         return $this->run();
     }

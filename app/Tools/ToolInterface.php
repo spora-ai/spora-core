@@ -30,8 +30,11 @@ interface ToolInterface
      * @param  int                  $agentId    The agent executing this tool.
      * @param  int|null             $userId     The user context (from task->user_id). User settings
      *                                          are merged before agent overrides when provided.
+     * @param  int|null             $taskId     The current tick's task id. Available so chat-level
+     *                                          tools (handover, summarize, archive) can reference
+     *                                          the source Task without re-querying by user_id.
      */
-    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult;
+    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult;
 
     /**
      * Return a human-readable, markdown-safe description of what this tool WILL DO.
