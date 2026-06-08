@@ -1127,74 +1127,7 @@ final class Orchestrator implements OrchestratorInterface
 
     private function buildMessages(int $taskId): array
     {
-        $rows = TaskHistory::where('task_id', $taskId)
-            ->orderBy('sequence')
-            ->get();
-
-        $messages = [];
-        $lastSummarySeqEnd = -1;
-
-        foreach ($rows as $row) {
-            if ($row->role === 'summary' && $row->summarized_sequence_range !== null) {
-                if (preg_match('/^(\d+)-(\d+)$/', $row->summarized_sequence_range, $m)) {
-                    $rangeEnd = (int) $m[2];
-                    // Remove any previously-added messages whose sequence is in this range
-                    // (but preserve other summaries — they have their own _seq)
-                    $messages = array_values(array_filter(
-                        $messages,
-                        static fn(array $msg): bool => ($msg['_seq'] ?? -1) > $rangeEnd || ($msg['role'] ?? '') === 'summary',
-                    ));
-                    $lastSummarySeqEnd = $rangeEnd;
-                }
-                $messages[] = [
-                    'role'    => 'summary',
-                    'content' => $row->content,
-                ];
-                $messages[count($messages) - 1]['_seq'] = $row->sequence;
-                continue;
-            }
-
-            if ($row->sequence > $lastSummarySeqEnd) {
-                if ($row->role === 'tool') {
-                    $messages[] = [
-                        'role'         => 'tool',
-                        'tool_call_id' => $row->tool_call_id,
-                        'name'         => $row->tool_name,
-                        'content'      => $row->content,
-                    ];
-                } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
-                    $toolCallsData = json_decode($row->tool_call_payload, true);
-                    foreach ($toolCallsData as &$tc) {
-                        if (array_key_exists('arguments', $tc['function'])) {
-                            $args = $tc['function']['arguments'];
-                            $decodedArgs = is_string($args) ? (json_decode($args, true) ?? []) : (array) $args;
-                            if (empty($decodedArgs)) {
-                                $tc['function']['arguments'] = '{}';
-                            }
-                        }
-                    }
-                    unset($tc);
-                    $messages[] = [
-                        'role'       => 'assistant',
-                        'content'    => null,
-                        'tool_calls' => $toolCallsData,
-                    ];
-                } else {
-                    $messages[] = [
-                        'role'    => $row->role,
-                        'content' => $row->content,
-                    ];
-                }
-                $messages[count($messages) - 1]['_seq'] = $row->sequence;
-            }
-        }
-
-        foreach ($messages as &$msg) {
-            unset($msg['_seq']);
-        }
-        unset($msg);
-
-        return $messages;
+        return (new MessageHistoryBuilder())->build($taskId);
     }
 
     private function buildLlmConfigBlock(array $llmSettings): string
