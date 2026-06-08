@@ -9,7 +9,7 @@ use Illuminate\Database\Migrations\DatabaseMigrationRepository;
 use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Filesystem\Filesystem;
-use RuntimeException;
+use Spora\Core\Exceptions\SchemaInstallFailedException;
 use Spora\Plugins\PluginLoader;
 
 /**
@@ -182,7 +182,7 @@ final class DatabaseSchemaInstaller
 
     /**
      * Enforce that every migration file in $path starts with "{$slug}_".
-     * Throws RuntimeException on the first violation so plugin authors get a clear error.
+     * Throws SchemaInstallFailedException on the first violation so plugin authors get a clear error.
      */
     private function validateMigrationFilenames(string $slug, string $path): void
     {
@@ -192,7 +192,7 @@ final class DatabaseSchemaInstaller
             $basename = basename($file, '.php');
 
             if (!str_starts_with($basename, $prefix)) {
-                throw new RuntimeException(
+                throw new SchemaInstallFailedException(
                     "Plugin migration file '{$basename}.php' must be prefixed with the plugin slug. " .
                     "Expected filename starting with '{$prefix}', e.g. '{$prefix}{$basename}.php'.",
                 );

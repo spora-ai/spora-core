@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Core;
 
-use RuntimeException;
 use Spora\Core\Exceptions\DecryptionFailedException;
+use Spora\Core\Exceptions\DecryptKeyMissingException;
 use Spora\Core\ValueObjects\EncryptedValue;
 
 /**
@@ -21,7 +21,7 @@ final class SecurityManager implements SecurityManagerInterface
      *                           - A raw 32-byte key string (SPORA_SECRET_KEY env var decoded from base64)
      *                           - An absolute file path to secret.key (contains '/' or length > 32)
      *
-     * @throws RuntimeException  If key is invalid, file is missing/unreadable/wrong size.
+     * @throws DecryptKeyMissingException  If key file is missing/unreadable/wrong size.
      */
     public function __construct(string $keyOrPath)
     {
@@ -89,7 +89,7 @@ final class SecurityManager implements SecurityManagerInterface
     private function loadFromFile(string $path): string
     {
         if (!file_exists($path) || !is_readable($path)) {
-            throw new RuntimeException(
+            throw new DecryptKeyMissingException(
                 "Secret key file not found or not readable at: {$path}. Run install.php.",
             );
         }
@@ -97,7 +97,7 @@ final class SecurityManager implements SecurityManagerInterface
         $key = file_get_contents($path);
 
         if ($key === false || strlen($key) !== SODIUM_CRYPTO_SECRETBOX_KEYBYTES) {
-            throw new RuntimeException(
+            throw new DecryptKeyMissingException(
                 sprintf(
                     'Secret key at %s is corrupt: expected %d bytes, got %d.',
                     $path,

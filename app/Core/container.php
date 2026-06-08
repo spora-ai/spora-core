@@ -11,6 +11,8 @@ use Spora\Apps\AppRegistry;
 use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
+use Spora\Core\Exceptions\InvalidSecretKeyException;
+use Spora\Core\Exceptions\MissingSecretKeyException;
 use Spora\Core\SecurityManager;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Drivers\DriverFactory;
@@ -136,7 +138,7 @@ return [
         if ($envKey !== null) {
             $rawKey = base64_decode($envKey, strict: true);
             if ($rawKey === false) {
-                throw new RuntimeException(
+                throw new InvalidSecretKeyException(
                     'SPORA_SECRET_KEY is not valid base64. Regenerate with: base64_encode(random_bytes(32))',
                 );
             }
@@ -154,7 +156,7 @@ return [
             return new SecurityManager((string) $keyPath);
         }
 
-        throw new RuntimeException(
+        throw new MissingSecretKeyException(
             'No secret key configured. Set SPORA_SECRET_KEY (base64 32 bytes), ' .
             'SPORA_KEY_PATH, or run install.php to generate storage/secret.key.',
         );
