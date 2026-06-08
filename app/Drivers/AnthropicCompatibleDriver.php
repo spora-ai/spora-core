@@ -14,6 +14,7 @@ use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
 use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\HttpClient\ResponseInterface;
 
 #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', description: 'API key for the Anthropic-compatible endpoint. Leave empty for local models.', required: false)]
 #[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.anthropic.com).', required: false, default: 'https://api.anthropic.com')]
@@ -50,9 +51,32 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
 
     public function complete(LLMRequest $request): LLMResponse
     {
-        $tools = $this->convertTools($request->tools);
+        $tools    = $this->convertTools($request->tools);
         $messages = $this->convertMessages($request->messages);
+        $body     = $this->buildAnthropicRequestBody($request, $tools, $messages);
 
+        $url     = rtrim($this->baseUrl, '/') . '/v1/messages';
+        $headers = $this->buildAnthropicHeaders();
+        $this->logger?->debug('LLM Request (Anthropic)', ['url' => $url, 'payload' => $body]);
+
+        $response = $this->httpClient->request('POST', $url, [
+            'headers' => $headers,
+            'json'    => $body,
+            'timeout' => $this->timeout ?? 300,
+        ]);
+
+        $this->throwIfErrorResponse($response);
+
+        return $this->parseAnthropicResponse($response);
+    }
+
+    /**
+     * @param  list<array{name: string, description: string, input_schema: array}>  $tools
+     * @param  list<array{role: string, content: string|array}>  $messages
+     * @return array<string, mixed>
+     */
+    private function buildAnthropicRequestBody(LLMRequest $request, array $tools, array $messages): array
+    {
         $body = [
             'model'      => $this->model,
             'system'     => $request->systemPrompt,
@@ -75,23 +99,28 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
             ];
         }
 
-        $url = rtrim($this->baseUrl, '/') . '/v1/messages';
-        $this->logger?->debug('LLM Request (Anthropic)', ['url' => $url, 'payload' => $body]);
+        return $body;
+    }
 
+    /**
+     * @return array<string, string>
+     */
+    private function buildAnthropicHeaders(): array
+    {
         $headers = [
             'anthropic-version' => self::API_VERSION,
             'Content-Type'      => 'application/json',
         ];
+
         if ($this->apiKey !== '') {
             $headers['x-api-key'] = $this->apiKey;
         }
 
-        $response = $this->httpClient->request('POST', $url, [
-            'headers' => $headers,
-            'json'    => $body,
-            'timeout' => $this->timeout ?? 300,
-        ]);
+        return $headers;
+    }
 
+    private function throwIfErrorResponse(ResponseInterface $response): void
+    {
         $statusCode = $response->getStatusCode();
 
         if ($statusCode === 429) {
@@ -107,37 +136,28 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
             $rawBody = $response->getContent(throw: false);
             throw new LLMProviderException("Anthropic API error {$statusCode}: {$rawBody}");
         }
+    }
+
+    private function parseAnthropicResponse(ResponseInterface $response): LLMResponse
+    {
+        $statusCode = $response->getStatusCode();
 
         /** @var array<string, mixed> $data */
         $data = $response->toArray();
         $this->logger?->debug('LLM Response (Anthropic)', ['status' => $statusCode, 'data' => $data]);
 
-        $completionId = (string) ($data['id'] ?? '');
-        $inputTokens  = (int) ($data['usage']['input_tokens'] ?? 0);
-        $outputTokens = (int) ($data['usage']['output_tokens'] ?? 0);
-        $stopReason   = (string) ($data['stop_reason'] ?? '');
+        $completionId  = (string) ($data['id'] ?? '');
+        $inputTokens   = (int) ($data['usage']['input_tokens'] ?? 0);
+        $outputTokens  = (int) ($data['usage']['output_tokens'] ?? 0);
+        $stopReason    = (string) ($data['stop_reason'] ?? '');
         $contentBlocks = (array) ($data['content'] ?? []);
 
         $parsedContent = LLMContentParser::parse($contentBlocks);
 
-        if ($stopReason === 'tool_use') {
-            $toolCalls = [];
-
-            foreach ($contentBlocks as $block) {
-                if (($block['type'] ?? '') !== 'tool_use') {
-                    continue;
-                }
-
-                $toolCalls[] = new ToolCall(
-                    providerCallId: (string) ($block['id'] ?? ''),
-                    toolName: (string) ($block['name'] ?? ''),
-                    arguments: (array) ($block['input'] ?? []),
-                );
-            }
-
+        if ($stopReason !== 'tool_use') {
             return new LLMResponse(
-                content: $parsedContent['content'] !== '' ? $parsedContent['content'] : null,
-                toolCalls: $toolCalls,
+                content: $parsedContent['content'],
+                toolCalls: [],
                 inputTokens: $inputTokens,
                 outputTokens: $outputTokens,
                 completionId: $completionId,
@@ -146,13 +166,36 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
         }
 
         return new LLMResponse(
-            content: $parsedContent['content'],
-            toolCalls: [],
+            content: $parsedContent['content'] !== '' ? $parsedContent['content'] : null,
+            toolCalls: $this->extractToolCalls($contentBlocks),
             inputTokens: $inputTokens,
             outputTokens: $outputTokens,
             completionId: $completionId,
             reasoning: $parsedContent['reasoning'],
         );
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $contentBlocks
+     * @return list<ToolCall>
+     */
+    private function extractToolCalls(array $contentBlocks): array
+    {
+        $toolCalls = [];
+
+        foreach ($contentBlocks as $block) {
+            if (($block['type'] ?? '') !== 'tool_use') {
+                continue;
+            }
+
+            $toolCalls[] = new ToolCall(
+                providerCallId: (string) ($block['id'] ?? ''),
+                toolName: (string) ($block['name'] ?? ''),
+                arguments: (array) ($block['input'] ?? []),
+            );
+        }
+
+        return $toolCalls;
     }
 
     /**
@@ -204,47 +247,20 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
         foreach ($messages as $msg) {
             $role = $msg['role'];
 
-            // Flush accumulated tool results when we hit a non-tool message
-            if ($role !== 'tool' && $toolResults !== []) {
-                $converted[]  = ['role' => 'user', 'content' => $toolResults];
-                $toolResults  = [];
-            }
-
             if ($role === 'tool') {
                 // Accumulate; will be flushed as a single user turn
-                $toolResults[] = [
-                    'type'        => 'tool_result',
-                    'tool_use_id' => (string) ($msg['tool_call_id'] ?? ''),
-                    'content'     => (string) ($msg['content'] ?? ''),
-                ];
+                $toolResults[] = $this->buildToolResultBlock($msg);
                 continue;
             }
 
             if ($role === 'assistant' && isset($msg['tool_calls'])) {
-                $contentBlocks = [];
-
-                foreach ($msg['tool_calls'] as $tc) {
-                    $rawArguments = $tc['function']['arguments'] ?? '{}';
-                    $input = is_string($rawArguments)
-                        ? (json_decode($rawArguments, true) ?? [])
-                        : (array) $rawArguments;
-                    // Anthropic requires input to be a dict, not a bare list/array.
-                    // (object)[] becomes {} in JSON; array_is_list check handles
-                    // non-empty lists which also must not be sent as bare arrays.
-                    if (!is_array($input) || array_is_list($input)) {
-                        $input = (object) $input;
-                    }
-
-                    $contentBlocks[] = [
-                        'type'  => 'tool_use',
-                        'id'    => (string) ($tc['id'] ?? ''),
-                        'name'  => (string) ($tc['function']['name'] ?? ''),
-                        'input' => $input,
-                    ];
-                }
-
-                $converted[] = ['role' => 'assistant', 'content' => $contentBlocks];
+                $converted[] = $this->buildAssistantToolUseMessage($msg['tool_calls']);
                 continue;
+            }
+
+            if ($toolResults !== []) {
+                $converted[] = $this->flushToolResults($toolResults);
+                $toolResults = [];
             }
 
             $converted[] = ['role' => $role, 'content' => $msg['content'] ?? ''];
@@ -252,10 +268,73 @@ final class AnthropicCompatibleDriver implements LLMDriverInterface, LLMDriverCo
 
         // Flush any trailing tool results
         if ($toolResults !== []) {
-            $converted[] = ['role' => 'user', 'content' => $toolResults];
+            $converted[] = $this->flushToolResults($toolResults);
         }
 
         return $converted;
+    }
+
+    /**
+     * @param  array{role: string, content: string|null, tool_call_id?: string, name?: string}  $msg
+     * @return array{type: string, tool_use_id: string, content: string}
+     */
+    private function buildToolResultBlock(array $msg): array
+    {
+        return [
+            'type'        => 'tool_result',
+            'tool_use_id' => (string) ($msg['tool_call_id'] ?? ''),
+            'content'     => (string) ($msg['content'] ?? ''),
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $toolResults
+     * @return array{role: string, content: list<array<string, mixed>>}
+     */
+    private function flushToolResults(array $toolResults): array
+    {
+        return ['role' => 'user', 'content' => $toolResults];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $toolCalls
+     * @return array{role: string, content: list<array<string, mixed>>}
+     */
+    private function buildAssistantToolUseMessage(array $toolCalls): array
+    {
+        $contentBlocks = [];
+
+        foreach ($toolCalls as $tc) {
+            $contentBlocks[] = $this->buildToolUseBlock($tc);
+        }
+
+        return ['role' => 'assistant', 'content' => $contentBlocks];
+    }
+
+    /**
+     * @param  array<string, mixed>  $tc
+     * @return array{type: string, id: string, name: string, input: mixed}
+     */
+    private function buildToolUseBlock(array $tc): array
+    {
+        $rawArguments = $tc['function']['arguments'] ?? '{}';
+        $input        = is_string($rawArguments)
+            ? (json_decode($rawArguments, true) ?? [])
+            : (array) $rawArguments;
+
+        // Anthropic requires input to be a dict, not a bare list/array.
+        // (object)[] becomes {} in JSON; array_is_list check handles
+        // non-empty lists which also must not be sent as bare arrays.
+        if (!is_array($input) || array_is_list($input)) {
+            $input = (object) $input;
+        }
+
+        return [
+            'type'  => 'tool_use',
+            'id'    => (string) ($tc['id'] ?? ''),
+            'name'  => (string) ($tc['function']['name'] ?? ''),
+            'input' => $input,
+        ];
     }
 
     public static function getName(): string
