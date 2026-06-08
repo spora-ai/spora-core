@@ -6,8 +6,8 @@ namespace Spora\Tools\Traits;
 
 use ReflectionAttribute;
 use ReflectionClass;
-use RuntimeException;
 use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\Exceptions\ToolOperationMissingException;
 
 /**
  * Opt-in trait for tools that declare multiple operations.
@@ -29,7 +29,7 @@ trait HasOperations
         $operations = $ref->getAttributes(ToolOperation::class);
 
         if ($operations === []) {
-            throw new RuntimeException(
+            throw new ToolOperationMissingException(
                 'getOperationName() called on a tool that has no #[ToolOperation] attributes. '
                 . 'Either add #[ToolOperation] declarations or do not use the HasOperations trait.',
             );

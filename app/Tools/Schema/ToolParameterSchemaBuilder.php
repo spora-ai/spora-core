@@ -6,9 +6,9 @@ namespace Spora\Tools\Schema;
 
 use ReflectionAttribute;
 use ReflectionClass;
-use RuntimeException;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
+use Spora\Tools\Exceptions\ToolParameterSchemaException;
 use stdClass;
 
 /**
@@ -82,7 +82,7 @@ final class ToolParameterSchemaBuilder
             // operation enum and surface as a baffling "Unknown operation"
             // at dispatch time. Force the author to rename one.
             if ($discriminatorKey !== null && $param->name === $discriminatorKey) {
-                throw new RuntimeException(sprintf(
+                throw new ToolParameterSchemaException(sprintf(
                     'Tool %s declares #[ToolParameter(name: %s)] which collides with the synthesized '
                     . 'operation discriminator. Remove the parameter (the builder owns this property) '
                     . 'or pick a different discriminatorKey on its #[ToolOperation] attributes.',
