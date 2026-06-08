@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Agents;
 
-use RuntimeException;
+use Spora\Agents\Exceptions\ToolNotEnabledException;
+use Spora\Agents\SchemaValidator;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
@@ -40,14 +41,14 @@ final class ToolCallExecutor
         $toolClass    = get_class($toolInstance);
 
         if (!in_array($toolClass, $enabledClasses, true)) {
-            throw new RuntimeException("The LLM attempted to call tool '{$toolCall->toolName}' which is not enabled for this agent.");
+            throw new ToolNotEnabledException(
+                "The LLM attempted to call tool '{$toolCall->toolName}' which is not enabled for this agent.",
+            );
         }
 
         $operationName        = 'default';
         $operationDescription = null;
-        $usesOperations       = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
-
-        if ($usesOperations) {
+        if (in_array(HasOperations::class, class_uses_recursive($toolClass), true)) {
             $operationName        = $this->orchestrator->callTraitMethod($toolInstance, 'getOperationName', [$toolCall->arguments]);
             $operationDescription = $this->orchestrator->callTraitMethod($toolInstance, 'getOperationDescription', [$operationName]);
 
@@ -58,18 +59,25 @@ final class ToolCallExecutor
         }
 
         $requiresApproval = $this->orchestrator->resolveRequiresApproval($toolInstance, $toolClass, $agent->id, $toolCall->arguments);
+        $toolCallRecord   = $this->createPendingRecord($task, $agent, $toolCall, $operationName, $operationDescription, $requiresApproval, $toolInstance);
 
-        $toolCallRecord = $this->createPendingRecord(
-            $task,
-            $agent,
-            $toolCall,
-            $toolClass,
-            $operationName,
-            $operationDescription,
-            $requiresApproval,
-            $toolInstance,
-        );
+        return $this->validateAndExecute($task, $toolCall, $toolInstance, $agent, $toolCallRecord, $requiresApproval);
+    }
 
+    /**
+     * Validate the proposed arguments, then either execute immediately or
+     * leave the record PENDING_APPROVAL for the resume() flow to pick up.
+     * Extracted so {@see executeOrQueue} stays under the SonarQube S1142
+     * 3-return cap.
+     */
+    private function validateAndExecute(
+        Task           $task,
+        DriverToolCall $toolCall,
+        ToolInterface  $toolInstance,
+        Agent          $agent,
+        ToolCallModel  $toolCallRecord,
+        bool           $requiresApproval,
+    ): ToolCallDisposition {
         try {
             SchemaValidator::validate($toolCall->arguments, $toolInstance->getParametersSchema());
         } catch (Throwable $e) {
@@ -85,22 +93,26 @@ final class ToolCallExecutor
         return ToolCallDisposition::AwaitingApproval;
     }
 
+    /**
+     * Persist a PENDING_APPROVAL ToolCallModel row. The `tool_class` is
+     * derived from the tool instance rather than passed in, so this method
+     * has only 7 parameters (SonarQube S107 cap).
+     */
     private function createPendingRecord(
-        Task            $task,
-        Agent           $agent,
-        DriverToolCall  $toolCall,
-        string          $toolClass,
-        string          $operationName,
-        ?string         $operationDescription,
-        bool            $requiresApproval,
-        ToolInterface   $toolInstance,
+        Task           $task,
+        Agent          $agent,
+        DriverToolCall $toolCall,
+        string         $operationName,
+        ?string        $operationDescription,
+        bool           $requiresApproval,
+        ToolInterface  $toolInstance,
     ): ToolCallModel {
         return ToolCallModel::create([
             'task_id'               => $task->id,
             'agent_id'              => $agent->id,
             'provider_call_id'      => $toolCall->providerCallId,
             'tool_name'             => $toolCall->toolName,
-            'tool_class'            => $toolClass,
+            'tool_class'            => get_class($toolInstance),
             'tool_type'             => $requiresApproval ? 'output' : 'input',
             'operation'             => $operationName,
             'operation_description' => $operationDescription,
