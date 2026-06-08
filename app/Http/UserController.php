@@ -10,7 +10,6 @@ use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Services\UserServiceInterface;
-use Spora\Http\JsonControllerHelpers;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -20,6 +19,7 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class UserController
 {
+    use JsonControllerHelpers;
     private const ROLE_MAP = [
         'ADMIN'       => Role::ADMIN,
         'AUTHOR'      => Role::AUTHOR,
@@ -31,8 +31,6 @@ final class UserController
     private const ERR_USER_NOT_FOUND = 'User not found.';
 
     private const ERR_INVALID_JSON = 'Request body must be valid JSON.';
-
-    use JsonControllerHelpers;
 
     public function __construct(
         private readonly AuthService $authService,

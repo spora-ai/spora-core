@@ -24,8 +24,8 @@ use Symfony\Component\HttpFoundation\Response;
 final class AgentToolController
 {
     use JsonControllerHelpers;
-    private const MSG_AGENT_NOT_FOUND = 'Agent not found.';
     use AgentControllerToolHelpers;
+    private const MSG_AGENT_NOT_FOUND = 'Agent not found.';
 
     public function __construct(
         private readonly AuthService $authService,
