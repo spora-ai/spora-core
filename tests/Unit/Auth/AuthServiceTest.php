@@ -299,3 +299,31 @@ describe('AuthService typed exception flow', function (): void {
             ->toThrow(InvalidCredentialsException::class);
     });
 });
+
+// Smoke test added for the AuthService split in Phase 3 PR 3.4. The facade
+// must wire up the two new collaborators (AuthEmailFlow, AuthRoleAdmin) so
+// that delegated calls reach the right collaborator (php:S1448).
+// ---------------------------------------------------------------------------
+
+test('AuthService wires AuthEmailFlow and AuthRoleAdmin collaborators (split smoke test)', function (): void {
+    $service = bootAuthLayer();
+
+    $reflection = new ReflectionObject($service);
+    $emailFlow  = $reflection->getProperty('emailFlow')->getValue($service);
+    $roleAdmin  = $reflection->getProperty('roleAdmin')->getValue($service);
+
+    expect($emailFlow)->toBeInstanceOf(Spora\Auth\AuthEmailFlow::class);
+    expect($roleAdmin)->toBeInstanceOf(Spora\Auth\AuthRoleAdmin::class);
+});
+
+test('setSystemMailer forwards the mailer to the AuthEmailFlow collaborator', function (): void {
+    $service = bootAuthLayer();
+    $mailer  = new Spora\Services\SystemMailer(['mail_driver' => 'log']);
+
+    $service->setSystemMailer($mailer);
+
+    $flowProp  = (new ReflectionObject($service))->getProperty('emailFlow');
+    $flowValue = $flowProp->getValue($service);
+    $mailerProp = (new ReflectionObject($flowValue))->getProperty('systemMailer');
+    expect($mailerProp->getValue($flowValue))->toBe($mailer);
+});
