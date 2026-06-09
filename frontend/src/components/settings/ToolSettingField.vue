@@ -85,6 +85,11 @@ onMounted(async () => {
     // api.get already unwraps body.data (see api/client.ts), so the shape is { agents: [...] }.
     const res = await api.get<{ agents: Array<{ id: number; name: string }> }>(multiSelectEndpoint.value)
     multiSelectOptions.value = res.agents ?? []
+  } catch (e) {
+    // Don't let a transient fetch failure escape an async lifecycle hook as
+    // an unhandled rejection — render an empty option list instead.
+    log.warn(`[ToolSettingField] failed to load options from ${multiSelectEndpoint.value}; rendering empty list`, e)
+    multiSelectOptions.value = []
   } finally {
     multiSelectLoading.value = false
   }

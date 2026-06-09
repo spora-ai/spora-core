@@ -19,6 +19,7 @@ import {
   maskPasswordValue,
 } from '@/composables/useAgentToolConfig'
 import { useAgentStore } from '@/stores/agent'
+import { log } from '@/utils/logger'
 
 const props = defineProps<{
   tool: ToolSchema
@@ -35,7 +36,12 @@ const hasAnyEffectiveSettings = computed(() => checkAnyEffective(props.settingsW
 
 onMounted(() => {
   if (agentStore.agents.length === 0) {
-    agentStore.fetchAgents()
+    // Fire-and-forget — agent names are nice-to-have for multi-select labels.
+    // Catch here so a transient /agents failure doesn't escape as an unhandled
+    // rejection from this async lifecycle hook.
+    agentStore.fetchAgents().catch((e) => {
+      log.warn('[AgentToolActiveSettingsPanel] failed to load agents; multi-select labels will show IDs', e)
+    })
   }
 })
 
