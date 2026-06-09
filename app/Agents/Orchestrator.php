@@ -76,6 +76,7 @@ final class Orchestrator implements OrchestratorInterface
         private readonly ?ToolCallSerializer       $toolCallSerializer = null,
         private readonly ?ErrorClassifier          $errorClassifier = null,
         private readonly ?ToolDefinitionBuilder   $toolDefinitionBuilder = null,
+        private readonly ?LlmConfigResolver       $llmConfigResolver = null,
     ) {}
 
     // Public API
@@ -1079,60 +1080,7 @@ final class Orchestrator implements OrchestratorInterface
 
     private function resolveLlmConfig(Agent $agent): array
     {
-        $defaults = [
-            'context_window' => 128000,
-            'max_tokens_output' => 4096,
-            'temperature' => 0.7,
-        ];
-
-        $configId = $agent->llm_driver_config_id;
-
-        if ($configId !== null) {
-            $config = LLMDriverConfiguration::find($configId);
-            if ($config !== null) {
-                return [
-                    'context_window' => $config->context_window ?? $defaults['context_window'],
-                    'max_tokens_output' => $config->max_tokens_output ?? $defaults['max_tokens_output'],
-                    'temperature' => $this->getTemperatureFromSettings($config, $defaults['temperature']),
-                ];
-            }
-        }
-
-        // Fall back to user preference — in async context, agent->user_id is the user context
-        $preference = LLMDriverConfiguration::whereHas('userPreference', static fn($q) => $q->where('user_id', $agent->user_id))->first();
-        if ($preference !== null) {
-            return [
-                'context_window' => $preference->context_window ?? $defaults['context_window'],
-                'max_tokens_output' => $preference->max_tokens_output ?? $defaults['max_tokens_output'],
-                'temperature' => $this->getTemperatureFromSettings($preference, $defaults['temperature']),
-            ];
-        }
-
-        $globalDefault = LLMDriverConfiguration::where('is_global', true)
-            ->where('is_default', true)
-            ->first();
-
-        if ($globalDefault !== null) {
-            return [
-                'context_window' => $globalDefault->context_window ?? $defaults['context_window'],
-                'max_tokens_output' => $globalDefault->max_tokens_output ?? $defaults['max_tokens_output'],
-                'temperature' => $this->getTemperatureFromSettings($globalDefault, $defaults['temperature']),
-            ];
-        }
-
-        throw new LlmConfigurationMissingException('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
-    }
-
-    private function getTemperatureFromSettings(LLMDriverConfiguration $config, float $default): float
-    {
-        try {
-            $settings = $this->llmConfigService->decryptSettings($config->driver_class, $config->settings ?? '');
-            return isset($settings['temperature']) && $settings['temperature'] !== ''
-                ? (float) $settings['temperature']
-                : $default;
-        } catch (Throwable) {
-            return $default;
-        }
+        return $this->llmConfigResolver()->resolveLlmConfig($agent);
     }
 
     private function scheduleAutoRetry(Task $failedTask, string $errorCode): void
@@ -1221,5 +1169,12 @@ final class Orchestrator implements OrchestratorInterface
             $this->pluginLoader,
             fn(array $llmSettings): string => $this->buildLlmConfigBlock($llmSettings),
         );
+    }
+
+    private ?LlmConfigResolver $llmConfigResolverInstance = null;
+
+    private function llmConfigResolver(): LlmConfigResolver
+    {
+        return $this->llmConfigResolverInstance ??= new LlmConfigResolver($this->llmConfigService);
     }
 }
