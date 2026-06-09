@@ -49,17 +49,6 @@ final class Orchestrator implements OrchestratorInterface
     /** ISO 8601 / RFC 3339 format used for the AgentState `pausedAt` field. */
     private const ISO8601_UTC = 'Y-m-d\TH:i:s\Z';
 
-    /** Error codes that qualify for auto-retry. */
-    private const RETRYABLE_ERROR_CODES = [
-        'RATE_LIMIT',
-        'SERVER_OVERLOADED',
-        'SERVER_ERROR',
-        'GATEWAY_ERROR',
-        'AUTH_ERROR',
-        'LLM_TIMEOUT',
-        'ORPHANED',
-    ];
-
     /**
      * @param list<object> $toolInstances
      */
@@ -77,6 +66,7 @@ final class Orchestrator implements OrchestratorInterface
         private readonly ?ErrorClassifier          $errorClassifier = null,
         private readonly ?ToolDefinitionBuilder   $toolDefinitionBuilder = null,
         private readonly ?LlmConfigResolver       $llmConfigResolver = null,
+        private readonly ?RetryScheduler          $retryScheduler = null,
     ) {}
 
     // Public API
@@ -359,7 +349,7 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         try {
-            $this->scheduleAutoRetry($failedTask, $errorCode);
+            $this->retryScheduler()->scheduleAutoRetry($failedTask, $errorCode);
         } catch (Throwable $e) {
             $this->logger?->warning('Auto-retry scheduling failed', [
                 'task_id'   => $failedTask->id,
@@ -1078,73 +1068,15 @@ final class Orchestrator implements OrchestratorInterface
         });
     }
 
-    private function scheduleAutoRetry(Task $failedTask, string $errorCode): void
+    private ?RetryScheduler $retrySchedulerInstance = null;
+
+    private function retryScheduler(): RetryScheduler
     {
-        if (!in_array($errorCode, self::RETRYABLE_ERROR_CODES, true)) {
-            return;
-        }
-
-        $agent = $this->resolveRetryAgent($failedTask);
-        if ($agent === null) {
-            return;
-        }
-
-        $retryAfterMinutes = $agent->retry_after_minutes ?? 0;
-        $maxRetries = $agent->max_retries ?? 0;
-
-        $rootTaskId = $failedTask->retry_of_task_id ?? $failedTask->id;
-        $retryCount = (int) ($failedTask->retry_count ?? 0) + 1;
-
-        $this->dispatchRetryTask($agent, $failedTask, $rootTaskId, $retryCount, $retryAfterMinutes, $maxRetries);
-    }
-
-    private function resolveRetryAgent(Task $failedTask): ?Agent
-    {
-        /** @var Agent|null $agent */
-        $agent = Agent::find($failedTask->agent_id);
-        if ($agent === null) {
-            return null;
-        }
-
-        $retryAfterMinutes = (int) ($agent->retry_after_minutes ?? 0);
-        $maxRetries = (int) ($agent->max_retries ?? 0);
-        $retryCount = (int) ($failedTask->retry_count ?? 0) + 1;
-        $isWithinRetryBudget = $retryAfterMinutes > 0
-            && $maxRetries > 0
-            && $retryCount <= $maxRetries;
-
-        return $isWithinRetryBudget ? $agent : null;
-    }
-
-    private function dispatchRetryTask(
-        Agent $agent,
-        Task $failedTask,
-        int $rootTaskId,
-        int $retryCount,
-        int $retryAfterMinutes,
-        int $maxRetries,
-    ): void {
-        try {
-            $retryTask = $this->start($agent->id, $failedTask->user_prompt, $failedTask->max_steps);
-            $retryTask->update([
-                'retry_of_task_id' => $rootTaskId,
-                'retry_count'      => $retryCount,
-                'retry_after'      => date(self::DB_TIMESTAMP_FORMAT, time() + $retryAfterMinutes * 60),
-                'status'           => 'QUEUED',
-            ]);
-
-            $failedTask->update([
-                'retry_after' => $retryTask->retry_after,
-            ]);
-
-            $this->notificationService?->notifyRetryQueued($retryTask, $retryCount, $maxRetries);
-        } catch (Throwable $e) {
-            $this->logger?->warning('Failed to schedule auto-retry', [
-                'task_id'          => $failedTask->id,
-                'exception_class'  => get_class($e),
-                'message'          => $e->getMessage(),
-            ]);
-        }
+        return $this->retrySchedulerInstance ??= new RetryScheduler(
+            $this,
+            $this->logger,
+            $this->notificationService,
+        );
     }
 
     private ?ErrorClassifier $errorClassifierInstance = null;
