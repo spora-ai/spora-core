@@ -1,3 +1,4 @@
+import { api } from '@/api/client'
 import type { ApiConfig } from '@/types/auth'
 
 /**
@@ -15,20 +16,18 @@ export function clearConfigCache(): void {
 /**
  * Fetch public app config including whether registration is allowed.
  * Result is cached for the lifetime of the page session.
+ *
+ * Goes through the shared `api` client (rather than a raw `fetch`) so the
+ * call is interceptable by the `@/api/client` mock in tests, and so it
+ * benefits from the same base-URL / header handling as the rest of the
+ * app.
  */
 export async function fetchConfig(): Promise<ApiConfig> {
   if (cachedConfig !== null) {
     return cachedConfig
   }
   try {
-    const res = await fetch(`/api/v1/config`)
-    if (!res.ok) {
-      // Fail open: if the config endpoint is unreachable, assume registration is allowed
-      cachedConfig = { allow_registration: true }
-      return cachedConfig
-    }
-    const json = await res.json()
-    cachedConfig = json as ApiConfig
+    cachedConfig = await api.get<ApiConfig>('/config')
     return cachedConfig
   } catch {
     // Fail open: if the config endpoint is unreachable, assume registration is allowed

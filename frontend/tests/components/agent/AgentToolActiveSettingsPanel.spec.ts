@@ -5,10 +5,18 @@
  * and the LLM Capabilities section.
  */
 import { mount } from '@vue/test-utils'
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import AgentToolActiveSettingsPanel from '@/components/agent/AgentToolActiveSettingsPanel.vue'
 import type { ToolSchema } from '@/composables/useToolSettings'
+
+// The panel mounts with useAgentStore() and onMounted calls
+// agentStore.fetchAgents() to resolve multi-select agent IDs back to
+// human-readable names. Mock the api client so that call is intercepted
+// instead of hitting a real dev server.
+vi.mock('@/api/client', () => ({
+  api: { get: vi.fn().mockResolvedValue({ agents: [] }) },
+}))
 
 const baseTool: ToolSchema = {
   tool_class: 'Spora\\Tools\\web_search',

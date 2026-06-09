@@ -1,52 +1,42 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fetchConfig, isRegistrationEnabled, clearConfigCache } from '@/utils/auth'
 
-// Create mock fetch using vi.fn()
-const mockFetch = vi.fn()
-globalThis.fetch = mockFetch
+vi.mock('@/api/client', () => ({
+  api: {
+    get: vi.fn(),
+  },
+}))
+
+import { api } from '@/api/client'
+
+const getMock = api.get as ReturnType<typeof vi.fn>
 
 describe('auth utils', () => {
   beforeEach(() => {
-    mockFetch.mockClear()
+    getMock.mockReset()
     clearConfigCache()
   })
 
   describe('fetchConfig', () => {
     it('returns allow_registration true when config endpoint returns true', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ allow_registration: true }),
-      })
+      getMock.mockResolvedValueOnce({ allow_registration: true })
 
       const config = await fetchConfig()
 
       expect(config.allow_registration).toBe(true)
-      expect(mockFetch).toHaveBeenCalledWith('/api/v1/config')
+      expect(getMock).toHaveBeenCalledWith('/config')
     })
 
     it('returns allow_registration false when config endpoint returns false', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ allow_registration: false }),
-      })
+      getMock.mockResolvedValueOnce({ allow_registration: false })
 
       const config = await fetchConfig()
 
       expect(config.allow_registration).toBe(false)
     })
 
-    it('fails open (allow_registration true) when fetch fails', async () => {
-      mockFetch.mockImplementation(() => Promise.reject(new Error('network error')))
-
-      const config = await fetchConfig()
-
-      expect(config.allow_registration).toBe(true)
-    })
-
-    it('fails open when response is not ok', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-      })
+    it('fails open (allow_registration true) when the API call throws', async () => {
+      getMock.mockRejectedValueOnce(new Error('network error'))
 
       const config = await fetchConfig()
 
@@ -56,10 +46,7 @@ describe('auth utils', () => {
 
   describe('isRegistrationEnabled', () => {
     it('returns true when config allows registration', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ allow_registration: true }),
-      })
+      getMock.mockResolvedValueOnce({ allow_registration: true })
 
       const enabled = await isRegistrationEnabled()
 
@@ -67,10 +54,7 @@ describe('auth utils', () => {
     })
 
     it('returns false when config disallows registration', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ allow_registration: false }),
-      })
+      getMock.mockResolvedValueOnce({ allow_registration: false })
 
       const enabled = await isRegistrationEnabled()
 
