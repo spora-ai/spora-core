@@ -75,6 +75,7 @@ final class Orchestrator implements OrchestratorInterface
         private readonly ?ToolConfigService        $toolConfigService = null,
         private readonly ?ToolCallSerializer       $toolCallSerializer = null,
         private readonly ?ErrorClassifier          $errorClassifier = null,
+        private readonly ?ToolDefinitionBuilder   $toolDefinitionBuilder = null,
     ) {}
 
     // Public API
@@ -200,7 +201,7 @@ final class Orchestrator implements OrchestratorInterface
         $request = new LLMRequest(
             systemPrompt: $this->resolveSystemPrompt($agent),
             messages: $this->buildMessages($task->id),
-            tools: $this->buildToolDefinitions($enabledClasses, $agent->id, $agent->user_id),
+            tools: $this->toolDefinitionBuilder()->buildToolDefinitions($enabledClasses, $agent->id, $agent->user_id),
             contextWindow: $llmConfig['context_window'],
             maxTokens: $llmConfig['max_tokens_output'],
             temperature: $llmConfig['temperature'],
@@ -976,6 +977,18 @@ final class Orchestrator implements OrchestratorInterface
         return (new MessageHistoryBuilder())->build($taskId);
     }
 
+    /**
+     * Thin wrapper kept on the orchestrator so the existing test suite
+     * can call it via reflection. Delegates to {@see ToolDefinitionBuilder}.
+     *
+     * @param  list<string>  $enabledClasses
+     * @return list<array<string, mixed>>
+     */
+    private function buildToolDefinitions(array $enabledClasses, int $agentId, ?int $userId = null): array
+    {
+        return $this->toolDefinitionBuilder()->buildToolDefinitions($enabledClasses, $agentId, $userId);
+    }
+
     private function buildLlmConfigBlock(array $llmSettings): string
     {
         if ($llmSettings === []) {
@@ -997,149 +1010,6 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         return "\n[Effective Configuration]\n" . implode("\n", $lines);
-    }
-
-    private function buildToolDefinitions(array $enabledClasses, int $agentId, ?int $userId = null): array
-    {
-        $defs = [];
-        $overrides = $this->loadOperationOverrides($agentId, $enabledClasses);
-
-        foreach ($this->toolInstances as $instance) {
-            $toolClass = get_class($instance);
-
-            if (!in_array($toolClass, $enabledClasses, true)) {
-                continue;
-            }
-
-            $toolAttr = $this->extractToolAttribute($instance);
-            if ($toolAttr === null) {
-                continue;
-            }
-
-            $def = $this->usesOperationsTrait($toolClass)
-                ? $this->buildOperationToolDefinition($instance, $toolClass, $toolAttr, $overrides, $agentId, $userId)
-                : $this->buildSimpleToolDefinition($instance, $toolClass, $toolAttr, $agentId, $userId);
-
-            if ($def !== null) {
-                $defs[] = $def;
-            }
-        }
-
-        return $defs;
-    }
-
-    private function loadOperationOverrides(int $agentId, array $enabledClasses): Collection
-    {
-        return AgentToolOperationOverride::where('agent_id', $agentId)
-            ->whereIn('tool_class', $enabledClasses)
-            ->get()
-            ->keyBy(fn($row) => $row->tool_class . '::' . $row->operation);
-    }
-
-    private function extractToolAttribute(object $instance): ?Tool
-    {
-        $ref = new ReflectionClass($instance);
-        $attrs = $ref->getAttributes(Tool::class);
-
-        if ($attrs === []) {
-            return null;
-        }
-
-        return $attrs[0]->newInstance();
-    }
-
-    private function usesOperationsTrait(string $toolClass): bool
-    {
-        return in_array(HasOperations::class, class_uses_recursive($toolClass), true);
-    }
-
-    private function buildOperationToolDefinition(
-        object $instance,
-        string $toolClass,
-        Tool $toolAttr,
-        Collection $overrides,
-        int $agentId,
-        ?int $userId,
-    ): ?array {
-        $allowedOps = $this->resolveAllowedOperations($instance, $toolClass, $overrides);
-        if ($allowedOps === []) {
-            return null;
-        }
-
-        $schema = $instance->getParametersSchema();
-        $operations = $instance->getOperations();
-        $discriminatorKey = $operations[0]->discriminatorKey ?? 'action';
-        $filteredSchema = OperationSchemaFilter::filter($schema, $allowedOps, $discriminatorKey);
-
-        return [
-            'type'     => 'function',
-            'function' => [
-                'name'        => $this->qualifiedToolName($toolClass, $toolAttr->name),
-                'description' => $toolAttr->description . $this->buildConfigBlockFor($toolClass, $agentId, $userId),
-                'parameters'  => $filteredSchema,
-            ],
-        ];
-    }
-
-    private function buildSimpleToolDefinition(
-        object $instance,
-        string $toolClass,
-        Tool $toolAttr,
-        int $agentId,
-        ?int $userId,
-    ): array {
-        $schema = $instance->getParametersSchema();
-
-        if (isset($schema['properties']) && $schema['properties'] === []) {
-            $schema['properties'] = (object) [];
-        }
-
-        return [
-            'type'     => 'function',
-            'function' => [
-                'name'        => $this->qualifiedToolName($toolClass, $toolAttr->name),
-                'description' => $toolAttr->description . $this->buildConfigBlockFor($toolClass, $agentId, $userId),
-                'parameters'  => $schema,
-            ],
-        ];
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function resolveAllowedOperations(object $instance, string $toolClass, Collection $overrides): array
-    {
-        $allowedOps = [];
-
-        foreach ($instance->getOperations() as $op) {
-            $key = $toolClass . '::' . $op->name;
-            $row = $overrides->get($key);
-
-            if ($row !== null) {
-                if ($row->enabled === 0) {
-                    continue;
-                }
-                if ($row->enabled === 1) {
-                    $allowedOps[] = $op->name;
-                    continue;
-                }
-            }
-
-            if ($op->enabledByDefault) {
-                $allowedOps[] = $op->name;
-            }
-        }
-
-        return $allowedOps;
-    }
-
-    private function buildConfigBlockFor(string $toolClass, int $agentId, ?int $userId): string
-    {
-        $llmSettings = $this->toolConfigService !== null
-            ? $this->toolConfigService->getLlmToolSettings($toolClass, $agentId, $userId)
-            : [];
-
-        return $this->buildLlmConfigBlock($llmSettings);
     }
 
     public function callTraitMethod(object $object, string $method, array $args): mixed
@@ -1174,19 +1044,6 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         throw new ToolNotRegisteredException("No tool registered with name '{$toolName}'.");
-    }
-
-    private function qualifiedToolName(string $toolClass, string $plainName): string
-    {
-        if ($this->pluginLoader !== null) {
-            foreach ($this->pluginLoader->getPlugins() as $slug => $plugin) {
-                if (in_array($toolClass, $plugin->tools(), true)) {
-                    return "{$slug}:{$plainName}";
-                }
-            }
-        }
-
-        return $plainName;
     }
 
     public function appendHistory(
@@ -1352,5 +1209,17 @@ final class Orchestrator implements OrchestratorInterface
     private function errorClassifier(): ErrorClassifier
     {
         return $this->errorClassifierInstance ??= new ErrorClassifier($this->logger);
+    }
+
+    private ?ToolDefinitionBuilder $toolDefinitionBuilderInstance = null;
+
+    private function toolDefinitionBuilder(): ToolDefinitionBuilder
+    {
+        return $this->toolDefinitionBuilderInstance ??= new ToolDefinitionBuilder(
+            $this->toolInstances,
+            $this->toolConfigService,
+            $this->pluginLoader,
+            fn(array $llmSettings): string => $this->buildLlmConfigBlock($llmSettings),
+        );
     }
 }
