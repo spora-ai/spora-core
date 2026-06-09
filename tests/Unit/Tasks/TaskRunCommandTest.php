@@ -120,7 +120,7 @@ describe('TaskRunCommand — task claiming', function (): void {
 
         $db = new Database(
             ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
-            new Spora\Plugins\PluginLoader(BASE_PATH . PLUGINS_PATH),
+            new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
         );
         $db->bootDatabaseConnectionOnly();
 
@@ -196,7 +196,7 @@ describe('TaskRunCommand — task claiming', function (): void {
 
         $db = new Database(
             ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
-            new Spora\Plugins\PluginLoader(BASE_PATH . PLUGINS_PATH),
+            new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
         );
         $db->bootDatabaseConnectionOnly();
 
@@ -259,7 +259,7 @@ describe('TaskRunCommand — task claiming', function (): void {
 
         $db = new Database(
             ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
-            new Spora\Plugins\PluginLoader(BASE_PATH . PLUGINS_PATH),
+            new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
         );
         $db->bootDatabaseConnectionOnly();
 
@@ -355,7 +355,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
 
         $db = new Database(
             ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
-            new Spora\Plugins\PluginLoader(BASE_PATH . PLUGINS_PATH),
+            new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
         );
         $db->bootDatabaseConnectionOnly();
 
@@ -431,7 +431,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
 
         $db = new Database(
             ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
-            new Spora\Plugins\PluginLoader(BASE_PATH . PLUGINS_PATH),
+            new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
         );
         $db->bootDatabaseConnectionOnly();
 

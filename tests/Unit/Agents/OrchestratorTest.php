@@ -2367,7 +2367,7 @@ it('qualifiedToolName prepends the plugin slug when the tool belongs to a regist
     $mockPlugin->allows('migrationsPath')->andReturn(null);
 
     // Build a real PluginLoader and inject the plugin map via reflection (the class is final).
-    $pluginLoader = new PluginLoader(sys_get_temp_dir());
+    $pluginLoader = new PluginLoader([sys_get_temp_dir()]);
     $reflection = new ReflectionClass($pluginLoader);
     $pluginsProperty = $reflection->getProperty('plugins');
     $pluginsProperty->setValue($pluginLoader, ['test-plugin' => $mockPlugin]);
