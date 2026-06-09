@@ -1,8 +1,16 @@
 <script setup lang="ts">
+/**
+ * MemoriesPage — root shell for the /apps/memories route tree.
+ *
+ * Each Spora app is a self-contained page component: it owns its own
+ * GlobalNavbar, sidebar, mobile overlay, and the <RouterView> for any
+ * sub-routes. New apps can ship a similar shell without touching a
+ * shared layout file.
+ */
 import { ref } from 'vue'
 import { Brain } from 'lucide-vue-next'
 import GlobalNavbar from '@/components/GlobalNavbar.vue'
-import MemorySidebar from '@/apps/memories/components/MemorySidebar.vue'
+import MemorySidebar from '../components/MemorySidebar.vue'
 import Icon from '@/components/ui/Icon.vue'
 
 const sidebarOpen = ref(false)
