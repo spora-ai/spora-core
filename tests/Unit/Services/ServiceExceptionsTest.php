@@ -185,17 +185,17 @@ describe('ScheduledRunService throws typed exceptions', function (): void {
         // transaction, turn foreign_keys off, recreate the agent + run with an orphan
         // template_id, and delete the template. Re-creating the agent outside the
         // original transaction is necessary because the rollback above discards it.
-        $capsule = \Illuminate\Database\Capsule\Manager::connection();
+        $capsule = Illuminate\Database\Capsule\Manager::connection();
         $capsule->rollBack();
         $capsule->statement('PRAGMA foreign_keys = OFF');
 
-        $userId  = (int) \Illuminate\Database\Capsule\Manager::table('users')->insertGetId([
+        $userId  = (int) Illuminate\Database\Capsule\Manager::table('users')->insertGetId([
             'email'      => 'orphan@example.com',
             'password'   => 'x',
             'username'   => 'orphan',
             'registered' => time(),
         ]);
-        $agentId = (int) \Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+        $agentId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id'   => $userId,
             'name'      => 'OrphanAgent',
             'max_steps' => 10,
@@ -218,7 +218,7 @@ describe('ScheduledRunService throws typed exceptions', function (): void {
         ]);
 
         // Delete the template; FK cascade is disabled so the scheduled run survives.
-        \Illuminate\Database\Capsule\Manager::table('agent_prompt_templates')
+        Illuminate\Database\Capsule\Manager::table('agent_prompt_templates')
             ->where('id', $templateId)
             ->delete();
 

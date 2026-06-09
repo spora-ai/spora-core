@@ -77,7 +77,7 @@ final class Kernel
 
     private function loadContainerDefinitions(): array
     {
-        return \Spora\Core\ContainerDefinitions::all();
+        return ContainerDefinitions::all();
     }
 
     private function buildRouter(): Router

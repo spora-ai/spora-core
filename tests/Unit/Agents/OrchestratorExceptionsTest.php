@@ -136,8 +136,8 @@ it('TaskStateMissingException extends RuntimeException so resume()/reject() can 
 });
 
 it('loadTaskAndStateForResume throws TaskStateMissingException when the transaction exits without setting $task', function (): void {
-    $capsule = \Illuminate\Database\Capsule\Manager::class;
-    $ref     = new \ReflectionClass($capsule);
+    $capsule = Illuminate\Database\Capsule\Manager::class;
+    $ref     = new ReflectionClass($capsule);
     $prop    = $ref->getProperty('instance');
     $prop->setAccessible(true);
     $original = $prop->getValue();
@@ -162,8 +162,8 @@ it('loadTaskAndStateForResume throws TaskStateMissingException when the transact
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('reject throws TaskStateMissingException when the transaction exits without setting $task', function (): void {
-    $capsule = \Illuminate\Database\Capsule\Manager::class;
-    $ref     = new \ReflectionClass($capsule);
+    $capsule = Illuminate\Database\Capsule\Manager::class;
+    $ref     = new ReflectionClass($capsule);
     $prop    = $ref->getProperty('instance');
     $prop->setAccessible(true);
     $original = $prop->getValue();

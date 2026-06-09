@@ -318,7 +318,7 @@ test('AuthService wires AuthEmailFlow and AuthRoleAdmin collaborators (split smo
 
 test('setSystemMailer forwards the mailer to the AuthEmailFlow collaborator', function (): void {
     $service = bootAuthLayer();
-    $mailer  = new Spora\Services\SystemMailer(['mail_driver' => 'log']);
+    $mailer  = new SystemMailer(['mail_driver' => 'log']);
 
     $service->setSystemMailer($mailer);
 
