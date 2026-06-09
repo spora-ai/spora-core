@@ -197,7 +197,7 @@ final class Orchestrator implements OrchestratorInterface
         $agent = Agent::findOrFail($task->agent_id);
         $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->toArray();
 
-        $llmConfig = $this->resolveLlmConfig($agent);
+        $llmConfig = $this->llmConfigResolver()->resolveLlmConfig($agent);
 
         $request = new LLMRequest(
             systemPrompt: $this->resolveSystemPrompt($agent),
@@ -394,7 +394,7 @@ final class Orchestrator implements OrchestratorInterface
             throw $originalError;
         }
 
-        $llmConfig = $this->resolveLlmConfig($agent);
+        $llmConfig = $this->llmConfigResolver()->resolveLlmConfig($agent);
         $maxTokensOutput = $llmConfig['max_tokens_output'];
         $temperature = $llmConfig['temperature'];
 
@@ -1076,11 +1076,6 @@ final class Orchestrator implements OrchestratorInterface
             $row['sequence'] = $nextSeq + 1;
             TaskHistory::create($row);
         });
-    }
-
-    private function resolveLlmConfig(Agent $agent): array
-    {
-        return $this->llmConfigResolver()->resolveLlmConfig($agent);
     }
 
     private function scheduleAutoRetry(Task $failedTask, string $errorCode): void
