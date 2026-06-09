@@ -28,6 +28,8 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 {
     private const API_VERSION = '2023-06-01';
 
+    private const PROVIDER_KEY = 'anthropic_compatible';
+
     private readonly ?float $temperature;
 
     private readonly ?int $thinkingBudget;
@@ -48,7 +50,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 
     public function getProviderName(): string
     {
-        return 'anthropic_compatible';
+        return self::PROVIDER_KEY;
     }
 
     public function complete(LLMRequest $request): LLMResponse
@@ -341,7 +343,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 
     public static function getName(): string
     {
-        return 'anthropic_compatible';
+        return self::PROVIDER_KEY;
     }
 
     public static function getDisplayName(): string
