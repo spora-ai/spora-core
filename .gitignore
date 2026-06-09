@@ -28,6 +28,10 @@ storage/database.sqlite-journal
 # Schema installer stamp — regenerated on every migration run, not source
 storage/.schema_stamp
 
+# Plugin loader stamp + sidecar — regenerated on every plugin boot, not source
+storage/.plugins_stamp
+storage/.plugins_stamp.cache.json
+
 # Keep the empty storage/ directory in the repo
 !storage/.gitkeep
 

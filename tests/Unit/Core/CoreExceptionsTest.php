@@ -84,7 +84,7 @@ function bootBadPrefixInstaller(): DatabaseSchemaInstaller
     $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
     $db->bootDatabaseConnectionOnly();
 
-    $loader = new PluginLoader(BASE_PATH . '/tests/Fixtures/plugins_bad_migrations');
+    $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_bad_migrations']);
     $loader->boot();
 
     return new DatabaseSchemaInstaller($loader, null);

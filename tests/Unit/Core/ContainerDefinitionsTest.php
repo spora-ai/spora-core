@@ -155,7 +155,7 @@ it('every factory closure in the definitions array can be invoked', function ():
                 } else {
                     $skipped++;
                 }
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 $failed++;
             }
             continue;
@@ -164,7 +164,7 @@ it('every factory closure in the definitions array can be invoked', function ():
         try {
             $c->get($key);
             $resolved++;
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $failed++;
         }
     }
@@ -347,23 +347,23 @@ it('RouteDefinitions::register is callable and adds routes', function (): void {
         new FastRoute\DataGenerator\GroupCountBased(),
     );
 
-    \Spora\Core\RouteDefinitions::register($collector);
+    Spora\Core\RouteDefinitions::register($collector);
 
     // Use reflection to count the routes that were added internally.
     expect(true)->toBeTrue();
 });
 
 it('RouteDefinitions has the documented route path constants', function (): void {
-    expect(\Spora\Core\RouteDefinitions::ROUTE_AGENTS_ID)->toBe('/api/v1/agents/{id}');
-    expect(\Spora\Core\RouteDefinitions::ROUTE_TOOLS_SETTINGS)->toBe('/api/v1/tools/{toolId}/settings');
-    expect(\Spora\Core\RouteDefinitions::ROUTE_MEMORIES_ID)->toBe('/api/v1/memories/{id}');
-    expect(\Spora\Core\RouteDefinitions::ROUTE_USERS_ID)->toBe('/api/v1/users/{id}');
-    expect(\Spora\Core\RouteDefinitions::ROUTE_MAIL_TEMPLATES_ID)->toBe('/api/v1/mail-templates/{id}');
-    expect(\Spora\Core\RouteDefinitions::ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID)->toBe('/api/v1/agents/{id}/templates/{templateId}');
+    expect(Spora\Core\RouteDefinitions::ROUTE_AGENTS_ID)->toBe('/api/v1/agents/{id}');
+    expect(Spora\Core\RouteDefinitions::ROUTE_TOOLS_SETTINGS)->toBe('/api/v1/tools/{toolId}/settings');
+    expect(Spora\Core\RouteDefinitions::ROUTE_MEMORIES_ID)->toBe('/api/v1/memories/{id}');
+    expect(Spora\Core\RouteDefinitions::ROUTE_USERS_ID)->toBe('/api/v1/users/{id}');
+    expect(Spora\Core\RouteDefinitions::ROUTE_MAIL_TEMPLATES_ID)->toBe('/api/v1/mail-templates/{id}');
+    expect(Spora\Core\RouteDefinitions::ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID)->toBe('/api/v1/agents/{id}/templates/{templateId}');
 });
 
 it('UserConfig::load returns empty array when file does not exist', function (): void {
-    expect(\Spora\Core\UserConfig::load('/nonexistent/path/that/does/not/exist.php'))->toBe([]);
+    expect(Spora\Core\UserConfig::load('/nonexistent/path/that/does/not/exist.php'))->toBe([]);
 });
 
 it('UserConfig::load returns the array from a config file', function (): void {
@@ -371,7 +371,7 @@ it('UserConfig::load returns the array from a config file', function (): void {
     file_put_contents($tmpFile, "<?php\nreturn ['db_driver' => 'mysql', 'app_env' => 'local'];\n");
 
     try {
-        $config = \Spora\Core\UserConfig::load($tmpFile);
+        $config = Spora\Core\UserConfig::load($tmpFile);
         expect($config)->toBe(['db_driver' => 'mysql', 'app_env' => 'local']);
     } finally {
         unlink($tmpFile);
@@ -385,8 +385,8 @@ it('UserConfig::load returns different results for different file paths', functi
     file_put_contents($tmpB, "<?php\nreturn ['source' => 'B'];\n");
 
     try {
-        expect(\Spora\Core\UserConfig::load($tmpA))->toBe(['source' => 'A']);
-        expect(\Spora\Core\UserConfig::load($tmpB))->toBe(['source' => 'B']);
+        expect(Spora\Core\UserConfig::load($tmpA))->toBe(['source' => 'A']);
+        expect(Spora\Core\UserConfig::load($tmpB))->toBe(['source' => 'B']);
     } finally {
         unlink($tmpA);
         unlink($tmpB);

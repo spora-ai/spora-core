@@ -19,6 +19,32 @@ plugins/
 Plugins live in the directory configured as the plugin path (default: `plugins/` at the
 repo root). Each plugin must occupy its own subdirectory and ship a `plugin.json` manifest.
 
+### Loading from external paths
+
+By default, `PluginLoader` only scans the in-repo `plugins/` directory. Operators can
+point Spora at additional directories — e.g. sibling git checkouts of community
+plugins — via the `SPORA_PLUGINS_PATHS` env var (or the `plugins_paths` key in
+`config.php`).
+
+```bash
+# Comma-separated absolute paths. Whitespace is trimmed; empty entries are dropped.
+export SPORA_PLUGINS_PATHS="/var/spora-plugins/spora-plugin-minimax,/opt/spora/community-plugins"
+```
+
+```php
+// config.php (equivalent)
+'plugins_paths' => [
+    '/var/spora-plugins/spora-plugin-minimax',
+    '/opt/spora/community-plugins',
+],
+```
+
+The in-repo `BASE_PATH/plugins` directory is always scanned first. External paths are
+appended in declaration order. If the same `slug` appears in multiple directories, the
+first one wins (later manifests with the same slug are silently skipped, matching the
+existing duplicate-slug guard). Non-existent directories are silently skipped — never
+throw — so an uninstalled optional plugin doesn't break the boot.
+
 ---
 
 ## plugin.json manifest
@@ -209,3 +235,17 @@ runtime, check that its slug and class are unique across all plugins in the plug
 Plugins are loaded by `Spora\Plugins\PluginLoader` (`app/Plugins/PluginLoader.php`) at boot. They are **not sandboxed** — a plugin runs as ordinary PHP code with full access to the application, the database, the file system, and any decrypted credentials. Only install plugins from sources you trust, and review their `plugin.json` manifest and source before deployment.
 
 For the broader security model (credential encryption, API auth, rate limiting), see `docs/15_security.md`.
+
+### Boot-time stamp cache
+
+`PluginLoader` writes a sha256 stamp to `storage/.plugins_stamp` after each successful
+boot. The stamp hashes every discovered manifest (path, mtime, content hash) across
+all configured directories. On the next boot with an unchanged stamp, the loader
+re-instantiates plugins from a sidecar JSON (`storage/.plugins_stamp.cache.json`),
+skipping the manifest re-discovery. This eliminates the per-request cost of N file
+reads + N JSON parses for operators with many plugins.
+
+The cache is invalidated automatically when any manifest's path, mtime, or content
+changes. It is also invalidated by a corrupt or missing sidecar (the loader falls
+back to full discovery and rewrites both files). The stamp path is currently
+non-configurable; advanced operators can clear it by removing the two files.

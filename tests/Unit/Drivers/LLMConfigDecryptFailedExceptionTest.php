@@ -94,10 +94,10 @@ describe('LLMConfigDecryptFailedException', function (): void {
         $schemaInspector = new LLMConfigSchemaInspector([OpenAICompatibleDriver::class]);
         $persistence     = new LLMConfigPersistence($security, $schemaInspector);
         $service         = new LLMConfigService(
-            security:        $security,
-            driverClasses:   [OpenAICompatibleDriver::class],
+            security: $security,
+            driverClasses: [OpenAICompatibleDriver::class],
             schemaInspector: $schemaInspector,
-            persistence:     $persistence,
+            persistence: $persistence,
         );
 
         $factory = new DriverFactory(new NullLogger(), $service, 300);

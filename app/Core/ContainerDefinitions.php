@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Spora\Core;
 
-use Psr\Container\ContainerInterface;
-use Psr\Log\LoggerInterface;
 use Delight\Auth\Auth as DelightAuth;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Monolog\Handler\StreamHandler;
 use Monolog\Level;
 use Monolog\Logger as MonologLogger;
+use Psr\Container\ContainerInterface;
+use Psr\Log\LoggerInterface;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
@@ -140,11 +140,16 @@ final class ContainerDefinitions
                     'tool_http_timeout'   => 30,
                     'mercure_url'         => null,
                     'mercure_jwt_key'     => null,
-                    'app_url'             => \Spora\Core\RequestOrigin::detect(),
+                    'app_url'             => RequestOrigin::detect(),
+
+                    // Plugin directories scanned by PluginLoader. The in-repo BASE_PATH/plugins
+                    // is always appended; this list holds any additional external paths
+                    // (e.g. sibling git checkouts of community plugins).
+                    'plugins_paths'       => [],
                 ];
 
                 $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: BASE_PATH . '/config.php');
-                $fileConfig = \Spora\Core\UserConfig::load($configPath);
+                $fileConfig = UserConfig::load($configPath);
 
                 $envOverrides = self::collectEnvOverrides();
                 return array_merge($defaults, $fileConfig, $envOverrides);
@@ -184,6 +189,14 @@ final class ContainerDefinitions
         $apply('SPORA_MERCURE_JWT_KEY', 'mercure_jwt_key', static fn($v) => $v);
         $apply('SPORA_MERCURE_PUBLISH_URL', 'mercure_publish_url', static fn($v) => $v);
         $apply('SPORA_APP_URL', 'app_url', static fn($v) => $v);
+        $apply('SPORA_PLUGINS_PATHS', 'plugins_paths', static function (string $v): array {
+            // Comma-separated absolute paths. Whitespace trimmed, empties dropped.
+            $parts = array_filter(
+                array_map('trim', explode(',', $v)),
+                static fn(string $p): bool => $p !== '',
+            );
+            return array_values($parts);
+        });
 
         $notifEmail = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED');
         if ($notifEmail !== null) {
@@ -704,8 +717,22 @@ final class ContainerDefinitions
                 );
             },
 
-            PluginLoader::class => static function (): PluginLoader {
-                $loader = new PluginLoader(BASE_PATH . '/plugins');
+            PluginLoader::class => static function (ContainerInterface $c): PluginLoader {
+                $config        = $c->get('config');
+                $inRepoPlugins = BASE_PATH . '/plugins';
+
+                // Always scan the in-repo plugins dir first; external paths from
+                // SPORA_PLUGINS_PATHS are appended in declaration order. Duplicates are
+                // deduped via array_unique; non-existent directories are silently
+                // skipped by PluginLoader::boot().
+                $external = is_array($config['plugins_paths'] ?? null) ? $config['plugins_paths'] : [];
+                $directories = array_values(array_unique(
+                    array_merge([$inRepoPlugins], array_map('strval', $external)),
+                ));
+
+                $stampPath = BASE_PATH . '/storage/.plugins_stamp';
+
+                $loader = new PluginLoader($directories, $stampPath);
                 $loader->boot();
                 return $loader;
             },

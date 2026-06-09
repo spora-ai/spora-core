@@ -28,7 +28,7 @@ function bootInstaller(?PluginLoader $pluginLoader = null, ?string $stampPath = 
 
 function bootLoaderFromFixture(string $dir): PluginLoader
 {
-    $loader = new PluginLoader($dir);
+    $loader = new PluginLoader([$dir]);
     $loader->boot();
     return $loader;
 }
