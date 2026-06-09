@@ -1,4 +1,5 @@
 import { api } from '@/api/client'
+import { log } from '@/utils/logger'
 import type { ApiConfig } from '@/types/auth'
 
 /**
@@ -29,8 +30,9 @@ export async function fetchConfig(): Promise<ApiConfig> {
   try {
     cachedConfig = await api.get<ApiConfig>('/config')
     return cachedConfig
-  } catch {
+  } catch (e) {
     // Fail open: if the config endpoint is unreachable, assume registration is allowed
+    log.warn('[auth] /config unreachable; falling back to allow_registration=true', e)
     cachedConfig = { allow_registration: true }
     return cachedConfig
   }

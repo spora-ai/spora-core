@@ -2,6 +2,8 @@
 // A CSRF token (X-CSRF-Token header) is required on all state-changing requests (POST/PUT/PATCH/DELETE).
 // The token is obtained from the auth store after login/register/me and sent as a header.
 
+import { log } from '@/utils/logger'
+
 const BASE_URL = import.meta.env.VITE_API_URL ?? ''
 
 export class ApiError extends Error {
@@ -88,11 +90,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = text.length > 0 ? (JSON.parse(text) as Record<string, unknown>) : null
 
   if (!response.ok) {
-    if (response.status === 401) {
-      const err = body?.error as Record<string, string> | undefined
-      if (err?.code === 'UNAUTHENTICATED') {
-        await notifySessionExpired()
-      }
+    const err = body?.error as Record<string, string> | undefined
+    if (response.status === 401 && err?.code === 'UNAUTHENTICATED') {
+      // Routed to the session-expiry toast — keep the dev signal at debug
+      // level so we don't double-notify the user via the console.
+      log.debug(`${method} ${path} → 401 UNAUTHENTICATED (session expired)`)
+      await notifySessionExpired()
+    } else {
+      const level = response.status >= 500 ? 'error' : 'warn'
+      log[level](`${method} ${path} → ${response.status} ${err?.code ?? 'UNKNOWN_ERROR'}`, err?.message)
     }
     throw buildError(body, response.status)
   }

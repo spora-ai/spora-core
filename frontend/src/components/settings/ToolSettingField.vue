@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { api } from '@/api/client'
+import { log } from '@/utils/logger'
 import Toggle from '@/components/ui/Toggle.vue'
 import Icon from '@/components/ui/Icon.vue'
 import type { ToolSettingSchema } from '@/composables/useToolSettings'
@@ -68,7 +69,11 @@ const multiSelectSelected = computed<number[]>(() => {
     try {
       const parsed = JSON.parse(v)
       if (Array.isArray(parsed)) return parsed.map(Number)
-    } catch { /* fall through */ }
+    } catch (e) {
+      // Fires on every keystroke while the user is typing a partial value,
+      // so debug-only — visible in dev DevTools, silent in prod / tests.
+      log.debug('[ToolSettingField] multi-select value is not valid JSON; defaulting to []', e)
+    }
   }
   return []
 })
