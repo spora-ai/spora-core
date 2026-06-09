@@ -79,34 +79,17 @@ final class HandoverTool extends AbstractTool
         $targetAgentId = (int) ($arguments['target_agent_id'] ?? 0);
         $summary       = trim((string) ($arguments['context_summary'] ?? ''));
 
-        if ($targetAgentId <= 0) {
-            return new ToolResult(false, 'target_agent_id is required.');
-        }
-        if ($summary === '') {
-            return new ToolResult(false, 'context_summary is required.');
-        }
-        if ($userId === null) {
-            return new ToolResult(false, 'Handover requires an authenticated user.');
-        }
-        if ($taskId === null) {
-            return new ToolResult(false, 'Handover requires a current task context.');
-        }
-
-        $settings = $this->config->getEffectiveSettings(self::class, $agentId, $userId);
-        $allowed  = $settings['allowed_target_agents'] ?? [];
-        // Security: the LLM picks the target from the allowlist it sees,
-        // but the tool re-validates here so a tampered payload can't reach
-        // an agent the user did not pre-approve.
-        if (!is_array($allowed) || !in_array($targetAgentId, array_map('intval', $allowed), true)) {
-            return new ToolResult(false, 'Target agent is not in the allowed_target_agents list.');
+        $error = $this->validateInputs($targetAgentId, $summary, $agentId, $userId, $taskId);
+        if ($error !== null) {
+            return new ToolResult(false, $error);
         }
 
         try {
             $newTask = $this->handover->handover(
-                sourceTaskId: $taskId,
+                sourceTaskId: (int) $taskId,
                 targetAgentId: $targetAgentId,
                 summary: $summary,
-                userId: $userId,
+                userId: (int) $userId,
             );
         } catch (InvalidArgumentException $e) {
             return new ToolResult(false, $e->getMessage());
@@ -125,6 +108,39 @@ final class HandoverTool extends AbstractTool
                 'target_agent_id'  => $targetAgentId,
             ],
         );
+    }
+
+    /**
+     * Returns the first validation failure message, or null when the call is allowed.
+     *
+     * Order matters: $userId / $taskId are nullable, so the allowlist check at the
+     * end relies on the earlier guards having already short-circuited when they
+     * are missing — match-true evaluates arms top-down and stops at the first hit.
+     */
+    private function validateInputs(int $targetAgentId, string $summary, int $agentId, ?int $userId, ?int $taskId): ?string
+    {
+        return match (true) {
+            $targetAgentId <= 0 => 'target_agent_id is required.',
+            $summary === ''     => 'context_summary is required.',
+            $userId === null    => 'Handover requires an authenticated user.',
+            $taskId === null    => 'Handover requires a current task context.',
+            !$this->isTargetAllowed($targetAgentId, $agentId, $userId)
+                => 'Target agent is not in the allowed_target_agents list.',
+            default => null,
+        };
+    }
+
+    /**
+     * Security gate: the LLM picks the target from the allowlist it sees,
+     * but the tool re-validates here so a tampered payload can't reach an
+     * agent the user did not pre-approve.
+     */
+    private function isTargetAllowed(int $targetAgentId, int $agentId, int $userId): bool
+    {
+        $settings = $this->config->getEffectiveSettings(self::class, $agentId, $userId);
+        $allowed  = $settings['allowed_target_agents'] ?? [];
+
+        return is_array($allowed) && in_array($targetAgentId, array_map('intval', $allowed), true);
     }
 
     public function describeAction(array $arguments): string

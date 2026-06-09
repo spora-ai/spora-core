@@ -13,6 +13,7 @@ import { useNotificationStore } from '@/stores/notifications'
 import { useAuthStore } from '@/stores/auth'
 import { useAgentStore } from '@/stores/agent'
 import { api } from '@/api/client'
+import { log } from '@/utils/logger'
 
 let globalEventSource: EventSource | null = null
 const globalConnected = ref(false)
@@ -137,8 +138,11 @@ export function useRealtime() {
     taskStore.startDashboardPolling()
     notificationStore.startNotificationPolling()
     // Bootstrap the badge immediately — the polling tick would otherwise
-    // wait 60s for the first fetch.
-    void notificationStore.fetchNotifications()
+    // wait 60s for the first fetch. Fire-and-forget with a logged catch
+    // so a transient failure never escapes as an unhandled rejection.
+    notificationStore.fetchNotifications().catch((e) => {
+      log.warn('[useRealtime] bootstrap fetchNotifications failed; polling will retry in 60s', e)
+    })
   }
 
   function disconnect(): void {

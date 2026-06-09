@@ -209,7 +209,7 @@ final class ToolConfigSchemaInspector
     {
         $labels        = $this->getLlmSettingLabels($toolClass);
         $multiKeys     = array_flip($this->getMultiSelectKeys($toolClass));
-        $resolvedNames = $this->resolveAgentNames($toolClass, $effectiveSettings, $multiKeys);
+        $resolvedNames = $this->resolveAgentNames($effectiveSettings, $multiKeys);
 
         $result = [];
         foreach ($labels as $key => $label) {
@@ -231,7 +231,7 @@ final class ToolConfigSchemaInspector
      * @param  array<string, int>   $multiKeys        keys of multi-select settings (flipped for isset())
      * @return array<int, string>                     id => "Name"
      */
-    private function resolveAgentNames(string $toolClass, array $effectiveSettings, array $multiKeys): array
+    private function resolveAgentNames(array $effectiveSettings, array $multiKeys): array
     {
         if ($multiKeys === []) {
             return [];

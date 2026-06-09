@@ -19,7 +19,11 @@ const applySseEventToTasks = vi.fn()
 const applySseTaskEvent = vi.fn()
 const startDashboardPolling = vi.fn()
 const stopDashboardPolling = vi.fn()
-const fetchNotificationsInNotificationsStore = vi.fn()
+// The real fetchNotifications is declared async (returns Promise<void>),
+// so the production code chains .catch() on its return value. A bare
+// `vi.fn()` returns undefined and would crash that chain — give the mock
+// a resolved-promise default so consumers can await / chain safely.
+const fetchNotificationsInNotificationsStore = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/api/client', () => ({
   api: { get: vi.fn() },
