@@ -97,11 +97,19 @@ final class ToolConfigSchemaInspector
         foreach ((new ReflectionClass($toolClass))->getAttributes(ToolSetting::class) as $attr) {
             /** @var ToolSetting $setting */
             $setting = $attr->newInstance();
-            if ($setting->required) {
-                $value = $effectiveSettings[$setting->key] ?? null;
-                if ($value === null || $value === '') {
-                    $missing[] = $setting->key;
-                }
+            if (!$setting->required) {
+                continue;
+            }
+
+            $value = $effectiveSettings[$setting->key] ?? null;
+            // multi-select defaults to [] in getSchemaDefaults — without this
+            // arm a required allowlist with zero entries would silently pass
+            // the "configured" gate and let the tool be enabled empty.
+            $isEmpty = $value === null
+                || $value === ''
+                || (is_array($value) && $value === []);
+            if ($isEmpty) {
+                $missing[] = $setting->key;
             }
         }
 
@@ -181,12 +189,17 @@ final class ToolConfigSchemaInspector
                 $settings[$key] = array_values(array_map('intval', $value));
                 continue;
             }
+            // Anything not already an int[] must be coerced — a leftover JSON
+            // string would break the "multi-select is int[]" invariant that
+            // downstream consumers (Tool::execute(), the LLM projection) rely on.
             if (is_string($value) && $value !== '') {
                 $decoded = json_decode($value, true);
-                if (is_array($decoded)) {
-                    $settings[$key] = array_values(array_map('intval', $decoded));
-                }
+                $settings[$key] = is_array($decoded)
+                    ? array_values(array_map('intval', $decoded))
+                    : [];
+                continue;
             }
+            $settings[$key] = [];
         }
 
         return $settings;
@@ -205,11 +218,11 @@ final class ToolConfigSchemaInspector
      * @param  array<string, mixed> $effectiveSettings
      * @return array<string, array{label: string, value: mixed}>
      */
-    public function getLlmToolSettings(string $toolClass, array $effectiveSettings): array
+    public function getLlmToolSettings(string $toolClass, array $effectiveSettings, ?int $userId = null): array
     {
         $labels        = $this->getLlmSettingLabels($toolClass);
         $multiKeys     = array_flip($this->getMultiSelectKeys($toolClass));
-        $resolvedNames = $this->resolveAgentNames($effectiveSettings, $multiKeys);
+        $resolvedNames = $this->resolveAgentNames($effectiveSettings, $multiKeys, $userId);
 
         $result = [];
         foreach ($labels as $key => $label) {
@@ -229,11 +242,16 @@ final class ToolConfigSchemaInspector
     /**
      * @param  array<string, mixed> $effectiveSettings
      * @param  array<string, int>   $multiKeys        keys of multi-select settings (flipped for isset())
+     * @param  int|null             $userId           scope of the lookup; null returns no names
      * @return array<int, string>                     id => "Name"
      */
-    private function resolveAgentNames(array $effectiveSettings, array $multiKeys): array
+    private function resolveAgentNames(array $effectiveSettings, array $multiKeys, ?int $userId): array
     {
-        if ($multiKeys === []) {
+        // Multi-select values are user-controlled, so an unscoped lookup would
+        // happily resolve another tenant's agent name and leak it to the LLM
+        // (and downstream into the tool-call render). Without a user we can
+        // never prove ownership — fall back to "#id" by returning no names.
+        if ($multiKeys === [] || $userId === null) {
             return [];
         }
 
@@ -254,7 +272,9 @@ final class ToolConfigSchemaInspector
             return [];
         }
 
-        $names = Agent::whereIn('id', array_values($ids))->get(['id', 'name']);
+        $names = Agent::where('user_id', $userId)
+            ->whereIn('id', array_values($ids))
+            ->get(['id', 'name']);
 
         return $names->mapWithKeys(static fn(Agent $a) => [(int) $a->id => (string) $a->name])->all();
     }

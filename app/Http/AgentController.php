@@ -26,6 +26,13 @@ final class AgentController
     private const MSG_AGENT_NOT_FOUND = 'Agent not found.';
     private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
 
+    /**
+     * Columns the multi-select picker (ToolSettingField) is allowed to
+     * request via `?select=…`. Anything outside this list is silently
+     * dropped so we don't widen the API surface when the schema grows.
+     */
+    private const SELECTABLE_COLUMNS = ['id', 'name'];
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly AgentServiceInterface $agentService,
@@ -36,8 +43,9 @@ final class AgentController
      *
      * Optional `?select=id,name` query param projects to a subset of columns
      * (used by the multi-select ToolSetting field to fetch the agent list
-     * without serializing the full payload). Backward-compatible: no
-     * `?select` returns the full payload via AgentService.
+     * without serializing the full payload). Columns are allowlisted so
+     * clients can't request internal fields like `system_prompt`. Backward-
+     * compatible: no `?select` returns the full payload via AgentService.
      */
     public function index(?Request $request = null): JsonResponse
     {
@@ -45,7 +53,13 @@ final class AgentController
 
         $select = $request?->query->get('select');
         if (is_string($select) && $select !== '') {
-            $columns = array_values(array_filter(array_map('trim', explode(',', $select)), static fn(string $c): bool => $c !== ''));
+            $requested = array_values(array_filter(
+                array_map('trim', explode(',', $select)),
+                static fn(string $c): bool => $c !== '',
+            ));
+            // Only safe-for-picker columns are exposed via ?select. Anything
+            // else is silently dropped so future schema additions don't leak.
+            $columns = array_values(array_intersect($requested, self::SELECTABLE_COLUMNS));
             if ($columns !== []) {
                 $agents = Agent::where('user_id', $userId)
                     ->orderBy('name')

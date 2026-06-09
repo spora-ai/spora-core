@@ -98,6 +98,7 @@ it('renders a real HandoverTool LLM projection end-to-end', function (): void {
     $llm = $inspector->getLlmToolSettings(
         HandoverTool::class,
         ['allowed_target_agents' => [$agent->id]],
+        $userId,
     );
     $block = invokeLlmConfigBlock($llm);
 

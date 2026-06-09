@@ -459,6 +459,6 @@ class ToolConfigService implements ToolConfigServiceInterface
     {
         $effective = $this->getEffectiveSettings($toolClass, $agentId, $userId);
 
-        return $this->schema->getLlmToolSettings($toolClass, $effective);
+        return $this->schema->getLlmToolSettings($toolClass, $effective, $userId);
     }
 }

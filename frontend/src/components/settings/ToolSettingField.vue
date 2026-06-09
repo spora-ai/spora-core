@@ -184,20 +184,24 @@ function toggleMultiSelect(id: number, checked: boolean): void {
     <div v-else-if="field.type === 'multi-select'" class="flex flex-col gap-1.5">
       <div v-if="multiSelectLoading" class="text-sm text-muted-foreground">Loading options…</div>
       <div v-else-if="multiSelectOptions.length === 0" class="text-sm text-muted-foreground">No options available.</div>
-      <label
-        v-for="opt in multiSelectOptions"
-        v-else
-        :key="opt.id"
-        class="flex items-center gap-2 text-sm"
-      >
-        <input
-          type="checkbox"
-          :value="opt.id"
-          :checked="multiSelectSelected.includes(opt.id)"
-          @change="toggleMultiSelect(opt.id, ($event.target as HTMLInputElement).checked)"
-        />
-        <span>{{ opt.name }} <span class="text-slate-400">#{{ opt.id }}</span></span>
-      </label>
+      <!-- `v-else` and `v-for` cannot share the same element (Vue precedence
+           makes the chain brittle); use a <template v-else> wrapper so the
+           conditional applies to the *block* and the loop renders inside it. -->
+      <template v-else>
+        <label
+          v-for="opt in multiSelectOptions"
+          :key="opt.id"
+          class="flex items-center gap-2 text-sm"
+        >
+          <input
+            type="checkbox"
+            :value="opt.id"
+            :checked="multiSelectSelected.includes(opt.id)"
+            @change="toggleMultiSelect(opt.id, ($event.target as HTMLInputElement).checked)"
+          />
+          <span>{{ opt.name }} <span class="text-slate-400">#{{ opt.id }}</span></span>
+        </label>
+      </template>
     </div>
 
     <!-- password -->

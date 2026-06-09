@@ -143,7 +143,7 @@ test('multi-select: getLlmToolSettings resolves non-empty IDs to "Name (#id)" st
 
     $result = $inspector->getLlmToolSettings(TestTool::class, [
         'allowed_target_agents' => [$agentA->id, $agentB->id],
-    ]);
+    ], $userId);
 
     expect($result)->toHaveKey('allowed_target_agents');
     expect($result['allowed_target_agents']['label'])->toBe('Allowed target agents');
