@@ -722,7 +722,7 @@ final class ContainerDefinitions
                 $inRepoPlugins = BASE_PATH . '/plugins';
 
                 // Always scan the in-repo plugins dir first; external paths from
-                // Spora_PLUGINS_PATHS are appended in declaration order. Duplicates are
+                // SPORA_PLUGINS_PATHS are appended in declaration order. Duplicates are
                 // deduped via array_unique; non-existent directories are silently
                 // skipped by PluginLoader::boot().
                 $external = is_array($config['plugins_paths'] ?? null) ? $config['plugins_paths'] : [];

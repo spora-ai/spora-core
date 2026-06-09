@@ -28,7 +28,7 @@ plugins — via the `SPORA_PLUGINS_PATHS` env var (or the `plugins_paths` key in
 
 ```bash
 # Comma-separated absolute paths. Whitespace is trimmed; empty entries are dropped.
-export Spora_PLUGINS_PATHS="/var/spora-plugins/spora-plugin-minimax,/opt/spora/community-plugins"
+export SPORA_PLUGINS_PATHS="/var/spora-plugins/spora-plugin-minimax,/opt/spora/community-plugins"
 ```
 
 ```php

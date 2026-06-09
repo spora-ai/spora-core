@@ -17,7 +17,10 @@ use Spora\Plugins\Exceptions\PluginLoadFailedException;
  * Caching:
  *   The manifest-discovery and stamp-cache concerns live in {@see PluginLoaderCache}.
  *   When the cache is current, the loader re-instantiates plugins from the sidecar
- *   without re-reading or re-parsing any manifest.
+ *   without re-parsing or re-validating manifests and without calling each plugin's
+ *   `register()` hook. The boot path still does a full directory scan to compute
+ *   the stamp hash; what the cache saves is the more expensive parse + autoload-
+ *   register + instantiate cycle.
  *
  * Discovery order:
  *   The directories passed in $pluginDirectories are scanned in the order given.

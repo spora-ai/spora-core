@@ -14,10 +14,12 @@ use JsonException;
  * of "how do I instantiate a plugin once I have its manifest".
  *
  * The cache is a sha256 hash of every discovered manifest (path, mtime,
- * content hash) written to $stampPath after a successful boot. On a cache hit
- * the sidecar JSON is replayed directly — no glob, no file reads, no JSON
- * decode. A corrupt or missing sidecar signals a full re-scan; the stamp is
- * rewritten as a side-effect so the next boot can short-circuit again.
+ * content hash) written to $stampPath after a successful boot. On a cache
+ * hit, the loader re-instantiates plugins from the sidecar JSON without
+ * re-parsing or re-validating the manifest, and without calling each
+ * plugin's `register()` hook. The boot path still does a full directory
+ * scan to compute the stamp hash; what the cache saves is the more
+ * expensive parse + autoload-register + instantiate cycle.
  */
 final class PluginLoaderCache
 {
@@ -94,7 +96,14 @@ final class PluginLoaderCache
         if ($this->stampPath === null) {
             return null;
         }
+        return $this->decodeAndValidateSidecar();
+    }
 
+    /**
+     * @return list<array<string, mixed>>|null
+     */
+    private function decodeAndValidateSidecar(): ?array
+    {
         $raw = @file_get_contents($this->sidecarPath());
         if (!is_string($raw) || $raw === '') {
             return null;
@@ -102,10 +111,11 @@ final class PluginLoaderCache
 
         try {
             $decoded = json_decode($raw, true, 32, JSON_THROW_ON_ERROR);
-            if (!is_array($decoded) || !isset($decoded['plugins']) || !is_array($decoded['plugins'])) {
-                return null;
-            }
         } catch (JsonException) {
+            return null;
+        }
+
+        if (!is_array($decoded) || !isset($decoded['plugins']) || !is_array($decoded['plugins'])) {
             return null;
         }
 
@@ -128,10 +138,16 @@ final class PluginLoaderCache
 
         @file_put_contents($this->stampPath, $this->computeStampHash($discovered));
 
-        $payload = json_encode(
-            ['plugins' => $entries],
-            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
-        );
+        try {
+            $payload = json_encode(
+                ['plugins' => $entries],
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+            );
+        } catch (JsonException) {
+            // Best-effort: an encoding failure is not fatal, the next boot
+            // will simply fall back to a full re-scan.
+            return;
+        }
 
         @file_put_contents($this->sidecarPath(), $payload);
     }
