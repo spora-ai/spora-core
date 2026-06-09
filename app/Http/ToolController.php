@@ -96,7 +96,7 @@ final class ToolController
         return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
-    public function getUserSettings(Request $request, string $toolId): JsonResponse
+    public function getUserSettings(string $toolId): JsonResponse
     {
         $userId = $this->authService->currentUserId();
         $toolClass = $this->toolConfigService->resolveToolClass($toolId);

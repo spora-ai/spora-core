@@ -43,7 +43,7 @@ final class LLMConfigController
      * Returns all registered LLM driver classes with their settings schemas.
      * Used by the UI to render configuration forms dynamically.
      */
-    public function drivers(Request $request): JsonResponse
+    public function drivers(): JsonResponse
     {
         $drivers = $this->llmConfigService->getDrivers();
 
@@ -56,7 +56,7 @@ final class LLMConfigController
      * Returns the current user's personal configs merged with all global configs
      * (for browsing and selecting defaults). Use globalConfigs() for admin management.
      */
-    public function index(Request $request): JsonResponse
+    public function index(): JsonResponse
     {
         $userId = $this->authService->currentUserId();
 
@@ -70,7 +70,7 @@ final class LLMConfigController
      *
      * Returns all global configs (for admin management). Personal configs are excluded.
      */
-    public function globalConfigs(Request $request): JsonResponse
+    public function globalConfigs(): JsonResponse
     {
         $configs = $this->llmConfigService->getGlobalConfigurations();
 
@@ -80,7 +80,7 @@ final class LLMConfigController
     /**
      * GET /llm-configs/{id}
      */
-    public function show(Request $request, int $id): JsonResponse
+    public function show(int $id): JsonResponse
     {
         $userId = $this->authService->currentUserId();
 
@@ -126,7 +126,7 @@ final class LLMConfigController
     /**
      * DELETE /llm-configs/{id}
      */
-    public function destroy(Request $request, int $id): JsonResponse
+    public function destroy(int $id): JsonResponse
     {
         $userId = $this->authService->currentUserId();
         $isAdmin = $this->authService->isAdmin();
@@ -148,7 +148,7 @@ final class LLMConfigController
     /**
      * POST /llm-configs/{id}/set-default
      */
-    public function setDefault(Request $request, int $id): JsonResponse
+    public function setDefault(int $id): JsonResponse
     {
         $userId = $this->authService->currentUserId();
         $isAdmin = $this->authService->isAdmin();

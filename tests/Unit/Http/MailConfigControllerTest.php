@@ -36,7 +36,7 @@ test('index() returns masked password when password is set', function (): void {
         'mail_from'     => 'from@example.com',
     ]);
 
-    $response = $controller->index(new Request());
+    $response = $controller->index();
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
     $body = json_decode($response->getContent(), true);
@@ -50,7 +50,7 @@ test('index() leaves password null when no password is set', function (): void {
         'mail_driver' => 'php_mail',
     ]);
 
-    $response = $controller->index(new Request());
+    $response = $controller->index();
 
     $body = json_decode($response->getContent(), true);
     expect($body['data']['mail_config']['password'])->toBeNull();
@@ -59,7 +59,7 @@ test('index() leaves password null when no password is set', function (): void {
 test('index() uses sane defaults when config keys are missing', function (): void {
     [$controller] = makeMailConfigController([]);
 
-    $response = $controller->index(new Request());
+    $response = $controller->index();
 
     $body = json_decode($response->getContent(), true);
     expect($body['data']['mail_config']['driver'])->toBe('php_mail');

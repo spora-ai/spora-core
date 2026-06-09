@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Http\RecipeController;
 use Spora\Recipes\RecipeScanner;
-use Symfony\Component\HttpFoundation\Request;
 
 beforeEach(function (): void {
     Spora\Core\Database::resetBootState();
@@ -27,7 +26,7 @@ test('index() throws UnauthenticatedException when no user is logged in', functi
     [$controller] = makeRecipeControllerUnit();
     clearSession();
 
-    expect(fn() => $controller->index(new Request()))
+    expect(fn() => $controller->index())
         ->toThrow(UnauthenticatedException::class);
 });
 
@@ -35,7 +34,7 @@ test('index() returns empty recipes when scanner directory is empty', function (
     [$controller, $authService] = makeRecipeControllerUnit([]);
     bootAuth($authService);
 
-    $response = $controller->index(new Request());
+    $response = $controller->index();
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
@@ -54,7 +53,7 @@ test('index() returns recipes scanned from a temp directory containing valid YAM
         [$controller, $authService] = makeRecipeControllerUnit([$tmpDir]);
         bootAuth($authService);
 
-        $response = $controller->index(new Request());
+        $response = $controller->index();
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
@@ -80,7 +79,7 @@ test('index() skips files missing required keys', function (): void {
         [$controller, $authService] = makeRecipeControllerUnit([$tmpDir]);
         bootAuth($authService);
 
-        $response = $controller->index(new Request());
+        $response = $controller->index();
 
         $body = json_decode($response->getContent(), true);
         expect($body['data']['recipes'])->toHaveCount(1);

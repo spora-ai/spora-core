@@ -141,8 +141,7 @@ describe('ToolController::getUserSettings', function (): void {
         [$controller, $authService] = makeToolController();
         bootAuth($authService, 'tooluser@example.com');
 
-        $request = new Request();
-        $response = $controller->getUserSettings($request, 'calculator');
+        $response = $controller->getUserSettings('calculator');
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
@@ -153,8 +152,7 @@ describe('ToolController::getUserSettings', function (): void {
         [$controller, $authService] = makeToolController();
         bootAuth($authService, 'tooluser2@example.com');
 
-        $request = new Request();
-        $response = $controller->getUserSettings($request, 'unknown');
+        $response = $controller->getUserSettings('unknown');
 
         expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
     });

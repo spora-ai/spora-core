@@ -32,7 +32,7 @@ final class CalculatorTool extends AbstractTool
 {
     public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
-        return $this->calculate($arguments, $agentId);
+        return $this->calculate($arguments);
     }
 
     public function describeAction(array $arguments): string
@@ -41,7 +41,7 @@ final class CalculatorTool extends AbstractTool
         return "Evaluate mathematical expression: {$expr}";
     }
 
-    public function calculate(array $arguments, int $agentId): ToolResult
+    public function calculate(array $arguments): ToolResult
     {
         $expression = (string) ($arguments['expression'] ?? '');
 

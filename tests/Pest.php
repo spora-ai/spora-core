@@ -126,15 +126,18 @@ function callController(object $controller, string $method, Symfony\Component\Ht
 
     $next = function () use ($controller, $method, $vars, $request): Symfony\Component\HttpFoundation\Response {
         $params = (new ReflectionMethod($controller, $method))->getParameters();
-        $args = [$request];
-        foreach ($params as $i => $param) {
-            if ($i === 0) {
+        $args = [];
+        foreach ($params as $param) {
+            $type = $param->getType();
+            $isRequest = $type instanceof ReflectionNamedType
+                && is_a($type->getName(), Symfony\Component\HttpFoundation\Request::class, true);
+            if ($isRequest) {
+                $args[] = $request;
                 continue;
             }
             $name = $param->getName();
             if (isset($vars[$name])) {
                 $value = $vars[$name];
-                $type = $param->getType();
                 if ($type instanceof ReflectionNamedType && $type->getName() === 'int') {
                     $value = (int) $value;
                 }

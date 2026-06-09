@@ -35,7 +35,7 @@ final class MailConfigController
         private readonly array $config = [],
     ) {}
 
-    public function index(Request $request): JsonResponse
+    public function index(): JsonResponse
     {
         $mailConfig = [
             'driver'       => $this->config['mail_driver']     ?? 'php_mail',
