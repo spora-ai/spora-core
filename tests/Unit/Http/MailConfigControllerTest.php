@@ -10,6 +10,16 @@ use Symfony\Component\HttpFoundation\Response;
 beforeEach(function (): void {
     Spora\Core\Database::resetBootState();
     (new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->boot();
+
+    // SystemMailer::getMailConfig() lets SPORA_MAIL_* env vars override the
+    // passed config; the .env's SPORA_MAIL_DRIVER=log leaks into $_ENV the
+    // moment any other test boots the Kernel. Clear here so the per-test
+    // config we pass is what's actually used.
+    foreach (array_keys($_ENV) as $key) {
+        if (is_string($key) && str_starts_with($key, 'SPORA_MAIL_')) {
+            unset($_ENV[$key]);
+        }
+    }
 });
 
 afterEach(fn() => Spora\Core\Database::resetBootState());

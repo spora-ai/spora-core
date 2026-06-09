@@ -9,6 +9,19 @@ use Spora\Models\User;
 use Spora\Services\SystemMailer;
 use Symfony\Component\Mailer\Mailer;
 
+// SystemMailer::getMailConfig() lets SPORA_MAIL_* env vars override the passed
+// config. Any earlier test that boots the Kernel triggers
+// Dotenv::createImmutable()->safeLoad(), which writes the .env's
+// SPORA_MAIL_DRIVER=log into $_ENV process-wide. Without this cleanup, tests
+// that assert behavior for SMTP / invalid drivers silently get the log driver.
+beforeEach(function (): void {
+    foreach (array_keys($_ENV) as $key) {
+        if (is_string($key) && str_starts_with($key, 'SPORA_MAIL_')) {
+            unset($_ENV[$key]);
+        }
+    }
+});
+
 /**
  * Test logger that records every log call for later assertions.
  */
