@@ -52,7 +52,9 @@ export const useAgentStore = defineStore('agent', () => {
 
   async function fetchAgents(): Promise<void> {
     const result = await api.get<{ agents: Agent[] }>('/agents')
-    agents.value = result.agents
+    // Guard the assignment: a malformed response would leave `agents.value`
+    // undefined and crash any consumer doing `.find` / `.filter` on it.
+    agents.value = result.agents ?? []
   }
 
   async function fetchAgent(id: number): Promise<Agent> {

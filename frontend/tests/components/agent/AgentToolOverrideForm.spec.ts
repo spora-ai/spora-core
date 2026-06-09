@@ -4,10 +4,13 @@
  * Asserts that:
  *  - the form initialises from `settingsWithSource`
  *  - the "Remove all" button only appears when rawOverride has values
- *  - emitting @update:form bubbles the latest snapshot
+ *  - emitting @update:form bubbles the latest snapshot, AND the initial
+ *    form is emitted on mount so the parent ref is populated even when
+ *    the user doesn't mutate a field (this is what prevents the
+ *    "Save with no changes wipes the override" bug)
  *  - the source badge shows on non-default fields
  */
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { describe, it, expect } from 'vitest'
 import AgentToolOverrideForm from '@/components/agent/AgentToolOverrideForm.vue'
 import type { ToolSchema } from '@/composables/useToolSettings'
@@ -84,5 +87,38 @@ describe('AgentToolOverrideForm', () => {
       props: { tool: requiredTool, settingsWithSource: {}, rawOverride: {} },
     })
     expect(wrapper.text()).toContain('*')
+  })
+
+  it('emits the initial form on mount so the parent has the values for "Save with no changes"', async () => {
+    // Regression test: the parent ref starts as `{}` and only updates on
+    // the child's `update:form` event. Without `immediate: true` on the
+    // watch, the parent never sees the child's initial values, so a "Save
+    // with no changes" sends `{}` to the backend — which the backend
+    // interprets as a no-op *if the field is preserved* but as a wipe
+    // *if the current `buildAgentOverridePayload` sends null per field*.
+    // Either way the parent must have the initial form.
+    const wrapper = mountForm()
+    await flushPromises()
+    const events = wrapper.emitted('update:form')!
+    // The first emitted snapshot is the initial form, including the
+    // agent-source field that's pre-populated from the override.
+    expect(events[0][0]).toMatchObject({ api_key: 'sk-123' })
+  })
+
+  it('emits an empty form on mount when there is no agent override', async () => {
+    // The form only initializes from source === 'agent'. When no override
+    // exists, the parent should still receive an initial emit (so the
+    // modal's save handler has a defined form), but the form value is
+    // empty for every field.
+    const wrapper = mountForm({
+      rawOverride: {},
+      settingsWithSource: {
+        api_key: { value: 'sk-default', source: 'global' },
+        engine: { value: 'google', source: 'default' },
+      },
+    })
+    await flushPromises()
+    const events = wrapper.emitted('update:form')!
+    expect(events[0][0]).toEqual({})
   })
 })

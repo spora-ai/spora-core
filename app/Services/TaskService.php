@@ -394,6 +394,7 @@ final class TaskService implements TaskServiceInterface
      *         approved_arguments: array|null,
      *         human_description: string|null,
      *         result_content: string|null,
+     *         result_data: array<string,mixed>|null,
      *         executed_at: string|null
      *     }>,
      *     history: list<array{
@@ -420,6 +421,7 @@ final class TaskService implements TaskServiceInterface
             'approved_arguments' => $tc->approved_arguments,
             'human_description'  => $tc->human_description,
             'result_content'     => $tc->result_content,
+            'result_data'        => $tc->result_data,
             'executed_at'        => $tc->executed_at?->toIso8601String(),
         ])->all();
 

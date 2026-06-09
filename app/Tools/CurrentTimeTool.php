@@ -23,7 +23,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolOperation(name: 'now', description: 'Get the current date and time', enabledByDefault: true, requiresApprovalByDefault: false)]
 final class CurrentTimeTool extends AbstractTool
 {
-    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
         return $this->now($arguments);
     }

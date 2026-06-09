@@ -22,7 +22,10 @@ export const useNotificationStore = defineStore('notifications', () => {
 
   async function fetchNotifications(): Promise<void> {
     const result = await api.get<{ notifications: Notification[] }>('/notifications')
-    notifications.value = result.notifications
+    // Guard against a malformed response: the `unreadCount` computed reads
+    // `.filter` on this value on every reactive tick and would crash the
+    // navbar if it ever became undefined.
+    notifications.value = result.notifications ?? []
   }
 
   async function markRead(id: number): Promise<void> {
@@ -36,9 +39,7 @@ export const useNotificationStore = defineStore('notifications', () => {
   async function markAllRead(): Promise<void> {
     await api.post('/notifications/read-all')
     for (const n of notifications.value) {
-      if (n.read_at === null) {
-        n.read_at = new Date().toISOString()
-      }
+      n.read_at ??= new Date().toISOString()
     }
   }
 

@@ -94,7 +94,7 @@ final class CalDavCalendarTool extends AbstractTool // NOSONAR php:S1448 — see
     private readonly IcsParser     $parser;
     private readonly CalDavResponseMapper $mapper;
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
         $operation = $this->getOperationName($arguments);
 

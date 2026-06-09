@@ -260,7 +260,7 @@ it('resolveRequiresApproval throws ToolContractException for a tool class withou
             return 'Plain tool with no HasOperations';
         }
 
-        public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+        public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
         {
             return new ToolResult(true, 'ok');
         }

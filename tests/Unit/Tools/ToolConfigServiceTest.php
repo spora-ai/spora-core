@@ -437,5 +437,8 @@ test('facade wires the schema, crypto, and name-resolver collaborators', functio
     expect($service->maskForApi(['api_key' => 'x', 'max_results' => '10'], TestTool::class))
         ->toBe(['api_key' => '***', 'max_results' => '10']);
     expect($service->resolveToolClass('test_tool'))->toBe(TestTool::class);
-    expect($service->getEffectiveSettings(TestTool::class, $agentId))->toBe(['max_results' => '10']);
+    expect($service->getEffectiveSettings(TestTool::class, $agentId))->toBe([
+        'max_results'            => '10',
+        'allowed_target_agents'  => [],
+    ]);
 })->afterEach(fn() => Database::resetBootState());

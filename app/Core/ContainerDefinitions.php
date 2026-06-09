@@ -60,6 +60,8 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
 use Spora\Services\EmailTemplateLoader;
+use Spora\Services\HandoverService;
+use Spora\Services\HandoverServiceInterface;
 use Spora\Services\ImapClient;
 use Spora\Services\ImapClientInterface;
 use Spora\Services\LLMConfigService;
@@ -90,6 +92,7 @@ use Spora\Tools\CalDavCalendarTool;
 use Spora\Tools\CurrentTimeTool;
 use Spora\Tools\EmailTool;
 use Spora\Tools\GlobalMemoryTool;
+use Spora\Tools\HandoverTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\SemanticScholarTool;
 use Spora\Tools\SerperSearchTool;
@@ -359,6 +362,7 @@ final class ContainerDefinitions
                 UserInfoTool::class,
                 SemanticScholarTool::class,
                 WeatherApiTool::class,
+                HandoverTool::class,
             ],
 
             LLMConfigService::class => static function (ContainerInterface $c): LLMConfigService {
@@ -666,6 +670,22 @@ final class ContainerDefinitions
                     $c->get(ToolConfigService::class),
                     $c->get(HttpClientInterface::class),
                     $c->get(LoggerInterface::class),
+                );
+            },
+
+            HandoverTool::class => static function (ContainerInterface $c): HandoverTool {
+                return new HandoverTool(
+                    $c->get(HandoverServiceInterface::class),
+                    $c->get(ToolConfigService::class),
+                );
+            },
+
+            HandoverServiceInterface::class => static function (ContainerInterface $c): HandoverServiceInterface {
+                // Closure defers OrchestratorInterface resolution until HandoverService::handover()
+                // is called. Direct injection would create a cycle: Orchestrator → tool_instances
+                // → HandoverTool → HandoverService → Orchestrator. Same pattern as SeedCommand.
+                return new HandoverService(
+                    static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
                 );
             },
         ];

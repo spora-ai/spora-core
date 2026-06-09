@@ -533,6 +533,50 @@ describe('TaskService — getTaskWithHistory', function (): void {
         expect($result['history'][0]['sequence'])->toBe(2);
         expect($result['history'][1]['sequence'])->toBe(3);
     });
+
+    it('exposes tool_call result_data (e.g. handover new_task_id) in the detail response', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('resultdata@example.com', 'Password1!', 'RD');
+        simulateLoggedInSession($userId, 'resultdata@example.com');
+
+        $agent = Agent::create([
+            'user_id' => $userId, 'name' => 'ResultDataAgent', 'max_steps' => 5, 'is_active' => true,
+        ]);
+        $task = Task::create([
+            'user_id'     => $userId,
+            'agent_id'    => $agent->id,
+            'status'      => 'COMPLETED',
+            'user_prompt' => 'handover please',
+            'max_steps'   => 5,
+        ]);
+        Spora\Models\ToolCall::create([
+            'task_id'              => $task->id,
+            'agent_id'             => $agent->id,
+            'provider_call_id'     => 'handover-1',
+            'tool_name'            => 'handover',
+            'tool_class'           => Spora\Tools\HandoverTool::class,
+            'tool_type'            => 'output',
+            'operation'            => 'handover',
+            'operation_description' => 'Hand over to another agent',
+            'status'               => 'EXECUTED',
+            'proposed_arguments'   => ['target_agent_id' => 1],
+            'approved_arguments'   => ['target_agent_id' => 1],
+            'result_content'       => 'Handed over to agent #1. New task #42.',
+            'result_data'          => ['new_task_id' => 42, 'handover' => true, 'target_agent_id' => 1],
+        ]);
+
+        $service = makeTaskService();
+        $result  = $service->getTaskWithHistory($task->id, $userId);
+
+        expect($result)->not->toBeNull();
+        expect($result['tool_calls'])->toHaveCount(1);
+        expect($result['tool_calls'][0])->toHaveKey('result_data');
+        expect($result['tool_calls'][0]['result_data'])->toBe([
+            'new_task_id'     => 42,
+            'handover'        => true,
+            'target_agent_id' => 1,
+        ]);
+    });
 });
 
 describe('TaskService — approveTask', function (): void {

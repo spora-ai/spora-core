@@ -1,5 +1,7 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { setActivePinia, createPinia } from 'pinia'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import AgentToolConfigModal from '@/components/agent/AgentToolConfigModal.vue'
 
 const ModalStub = {
@@ -54,6 +56,17 @@ const makeTool = (overrides = {}) => ({
 describe('AgentToolConfigModal', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    // The modal's child panels call useAgentStore() for multi-select name
+    // resolution. Reset Pinia before every test so each starts fresh.
+    setActivePinia(createPinia())
+    // The modal calls useRouter() for "Configure global settings →" navigation.
+    // Each test gets a fresh memory-history router exposed on globalThis so
+    // the mount helpers below can pass it via `global.plugins`.
+    testRouter = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ name: 'settings-tools', path: '/', component: { template: '<div />' } }],
+    })
+    ;(globalThis as { __testRouter?: ReturnType<typeof createRouter> }).__testRouter = testRouter
     mockUseToolSettings.mockReturnValue({
       getSettings: vi.fn().mockReturnValue(Promise.resolve({})),
       putSettings: vi.fn().mockReturnValue(Promise.resolve({})),
@@ -69,7 +82,7 @@ describe('AgentToolConfigModal', () => {
     it('renders nothing when toolName is null (modal closed)', () => {
       const wrapper = mount(AgentToolConfigModal, {
         props: { toolName: null, tool: null, agentId: 1 },
-        global: { stubs: { Modal: ModalStub } },
+        global: { plugins: [testRouter], stubs: { Modal: ModalStub } },
       })
       expect(wrapper.find('.modal-stub').exists()).toBe(false)
     })
@@ -87,7 +100,7 @@ describe('AgentToolConfigModal', () => {
 
       const wrapper = mount(AgentToolConfigModal, {
         props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
-        global: { stubs: { Modal: ModalStub } },
+        global: { plugins: [testRouter], stubs: { Modal: ModalStub } },
       })
 
       await flushPromises()
@@ -107,7 +120,7 @@ describe('AgentToolConfigModal', () => {
 
       const wrapper = mount(AgentToolConfigModal, {
         props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
-        global: { stubs: { Modal: ModalStub } },
+        global: { plugins: [testRouter], stubs: { Modal: ModalStub } },
       })
 
       await flushPromises()
@@ -129,7 +142,7 @@ describe('AgentToolConfigModal', () => {
 
     const wrapper = mount(AgentToolConfigModal, {
       props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
-      global: { stubs: { Modal: ModalStub } },
+      global: { plugins: [testRouter], stubs: { Modal: ModalStub } },
     })
 
     await flushPromises()
@@ -150,7 +163,7 @@ describe('AgentToolConfigModal', () => {
 
     const wrapper = mount(AgentToolConfigModal, {
       props: { toolName: 'web_search', tool: makeTool(), agentId: 1 },
-      global: { stubs: { Modal: ModalStub } },
+      global: { plugins: [testRouter], stubs: { Modal: ModalStub } },
     })
 
     await flushPromises()
@@ -159,7 +172,8 @@ describe('AgentToolConfigModal', () => {
 })
 
 
-import { createMemoryHistory, createRouter } from 'vue-router'
+// File-scope so `makeWrapper` (defined below) can use it.
+let testRouter: ReturnType<typeof createRouter>
 
 const tool = makeTool()
 
@@ -176,11 +190,21 @@ function makeWrapper(propsOverrides = {}, settingsMock: Record<string, ReturnTyp
   mockApi.get = vi.fn().mockResolvedValue({})
   return mount(AgentToolConfigModal, {
     props: { toolName: 'web_search', tool, agentId: 1, ...propsOverrides },
-    global: { stubs: { Modal: ModalStub } },
+    global: { plugins: [testRouter], stubs: { Modal: ModalStub } },
   })
 }
 
 describe('AgentToolConfigModal — additional actions', () => {
+  beforeEach(() => {
+    // Each describe block has its own beforeEach (the Pinia + router setup
+    // for the child panels and useRouter() calls).
+    setActivePinia(createPinia())
+    testRouter = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ name: 'settings-tools', path: '/', component: { template: '<div />' } }],
+    })
+  })
+
   it('saves the form and emits saved + close on success', async () => {
     mockApi.put = vi.fn().mockResolvedValue({})
     const wrapper = makeWrapper()
@@ -315,12 +339,11 @@ describe('AgentToolConfigModal — additional actions', () => {
   })
 
   it('clicking "Configure global settings →" emits close and pushes the settings-tools route', async () => {
-    const router = createRouter({ history: createMemoryHistory(), routes: [{ name: 'settings-tools', path: '/', component: { template: '<div />' } }] })
-    const pushSpy = vi.spyOn(router, 'push')
+    const pushSpy = vi.spyOn(testRouter, 'push')
     const wrapper = mount(AgentToolConfigModal, {
       props: { toolName: 'web_search', tool, agentId: 1 },
       global: {
-        plugins: [router],
+        plugins: [testRouter],
         stubs: { Modal: ModalStub },
       },
     })
@@ -336,7 +359,7 @@ describe('AgentToolConfigModal — additional actions', () => {
     const toolNoSchema = makeTool({ settings_schema: [] })
     const wrapper = mount(AgentToolConfigModal, {
       props: { toolName: 'web_search', tool: toolNoSchema, agentId: 1 },
-      global: { stubs: { Modal: ModalStub } },
+      global: { plugins: [testRouter], stubs: { Modal: ModalStub } },
     })
     await flushPromises()
     expect(wrapper.text()).toContain('This tool has no configurable settings.')
@@ -369,7 +392,7 @@ describe('AgentToolConfigModal — additional actions', () => {
     const toolNoSchema = makeTool({ settings_schema: [] })
     const wrapper = mount(AgentToolConfigModal, {
       props: { toolName: 'web_search', tool: toolNoSchema, agentId: 1 },
-      global: { stubs: { Modal: ModalStub } },
+      global: { plugins: [testRouter], stubs: { Modal: ModalStub } },
     })
     await flushPromises()
     const closeBtn = wrapper.findAll('button').find((b) => b.text() === 'Close')!
@@ -397,7 +420,7 @@ describe('AgentToolConfigModal — additional actions', () => {
     })
     const wrapper = mount(AgentToolConfigModal, {
       props: { toolName: 'web_search', tool, agentId: 1 },
-      global: { stubs: { Modal: ModalStub } },
+      global: { plugins: [testRouter], stubs: { Modal: ModalStub } },
     })
     await flushPromises()
         expect(wrapper.find('.modal-stub').exists()).toBe(true)

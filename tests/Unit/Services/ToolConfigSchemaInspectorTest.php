@@ -22,7 +22,11 @@ test('getSchemaDefaults returns only the keys that have a non-null default', fun
     $defaults = $inspector->getSchemaDefaults(TestTool::class);
 
     // TestTool declares max_results default = '10'. api_key and custom_field have no default.
-    expect($defaults)->toBe(['max_results' => '10']);
+    // multi-select keys always seed with [].
+    expect($defaults)->toBe([
+        'max_results'           => '10',
+        'allowed_target_agents' => [],
+    ]);
 });
 
 test('getSchemaDefaults returns empty array for an unknown tool class', function (): void {
@@ -71,11 +75,106 @@ test('maskForApi leaves null and empty password fields as-is', function (): void
 test('getLlmToolSettings only annotates exposeToLlm keys with their label and value', function (): void {
     $inspector = new ToolConfigSchemaInspector();
 
-    // TestTool has no exposeToLlm fields — result must be empty.
+    // TestTool has no exposeToLlm fields other than allowed_target_agents.
     $result = $inspector->getLlmToolSettings(TestTool::class, [
-        'api_key'     => 'secret',
-        'max_results' => '25',
+        'api_key'               => 'secret',
+        'max_results'           => '25',
+        'allowed_target_agents' => [],
     ]);
 
-    expect($result)->toBe([]);
+    expect($result)->toHaveKey('allowed_target_agents');
+    expect($result)->not->toHaveKey('api_key');
+    expect($result)->not->toHaveKey('max_results');
+});
+
+test('multi-select: getSchemaDefaults returns [] when no default is declared', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $defaults = $inspector->getSchemaDefaults(TestTool::class);
+
+    expect($defaults)->toHaveKey('allowed_target_agents')
+        ->and($defaults['allowed_target_agents'])->toBe([]);
+});
+
+test('multi-select: getMultiSelectKeys returns the keys declared with type multi-select', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $keys = $inspector->getMultiSelectKeys(TestTool::class);
+
+    expect($keys)->toContain('allowed_target_agents')
+        ->and($keys)->not->toContain('api_key')
+        ->and($keys)->not->toContain('max_results');
+});
+
+test('multi-select: maskForApi returns array values as-is (no password masking)', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $masked = $inspector->maskForApi([
+        'api_key'               => 'secret',
+        'allowed_target_agents' => [1, 2, 3],
+    ], TestTool::class);
+
+    expect($masked['api_key'])->toBe('***');
+    expect($masked['allowed_target_agents'])->toBe([1, 2, 3]);
+});
+
+test('multi-select: getLlmToolSettings resolves non-empty IDs to "Name (#id)" strings via Agent lookup', function (): void {
+    $authService = bootAuthLayer();
+    $userId = $authService->register('inspector-multiselect@example.com', 'Password1!', 'Inspector');
+
+    $inspector = new ToolConfigSchemaInspector();
+
+    $agentA = Spora\Models\Agent::create([
+        'user_id'        => $userId,
+        'name'           => 'Legal Agent',
+        'llm_provider'   => 'mock',
+        'llm_model'      => 'mock',
+        'max_steps'      => 5,
+        'is_active'      => true,
+    ]);
+    $agentB = Spora\Models\Agent::create([
+        'user_id'        => $userId,
+        'name'           => 'Sales Agent',
+        'llm_provider'   => 'mock',
+        'llm_model'      => 'mock',
+        'max_steps'      => 5,
+        'is_active'      => true,
+    ]);
+
+    $result = $inspector->getLlmToolSettings(TestTool::class, [
+        'allowed_target_agents' => [$agentA->id, $agentB->id],
+    ], $userId);
+
+    expect($result)->toHaveKey('allowed_target_agents');
+    expect($result['allowed_target_agents']['label'])->toBe('Allowed target agents');
+    expect($result['allowed_target_agents']['value'])->toBe([
+        "Legal Agent (#{$agentA->id})",
+        "Sales Agent (#{$agentB->id})",
+    ]);
+});
+
+test('multi-select: getLlmToolSettings returns [] for an empty multi-select value', function (): void {
+    $authService = bootAuthLayer();
+    $authService->register('inspector-empty@example.com', 'Password1!', 'Empty');
+
+    $inspector = new ToolConfigSchemaInspector();
+
+    $result = $inspector->getLlmToolSettings(TestTool::class, [
+        'allowed_target_agents' => [],
+    ]);
+
+    expect($result['allowed_target_agents']['value'])->toBe([]);
+});
+
+test('multi-select: getLlmToolSettings falls back to "#id" when agent cannot be resolved', function (): void {
+    $authService = bootAuthLayer();
+    $authService->register('inspector-fallback@example.com', 'Password1!', 'Fallback');
+
+    $inspector = new ToolConfigSchemaInspector();
+
+    $result = $inspector->getLlmToolSettings(TestTool::class, [
+        'allowed_target_agents' => [9999],
+    ]);
+
+    expect($result['allowed_target_agents']['value'])->toBe(['#9999']);
 });

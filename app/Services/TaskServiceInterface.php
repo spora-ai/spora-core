@@ -126,6 +126,7 @@ interface TaskServiceInterface
      *         approved_arguments: array|null,
      *         human_description: string|null,
      *         result_content: string|null,
+     *         result_data: array<string,mixed>|null,
      *         executed_at: string|null
      *     }>,
      *     history: list<array{

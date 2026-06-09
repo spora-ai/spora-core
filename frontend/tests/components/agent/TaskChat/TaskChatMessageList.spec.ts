@@ -6,14 +6,25 @@
  */
 import { mount } from '@vue/test-utils'
 import { describe, it, expect, vi } from 'vitest'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import TaskChatMessageList from '@/components/agent/TaskChat/TaskChatMessageList.vue'
 import TaskFailedBanner from '@/components/agent/TaskFailedBanner.vue'
-import type { TaskDetail, HistoryEntry } from '@/types/task'
+import type { TaskDetail, HistoryEntry, ToolCall } from '@/types/task'
 import type { ChatMessage } from '@/composables/useTaskChat'
 
 vi.mock('@/composables/useMarkdown', () => ({
   renderMarkdown: (text: string) => text,
 }))
+
+function makeRouter() {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', name: 'dashboard', component: { template: '<div />' } },
+      { path: '/tasks/:id', name: 'task', component: { template: '<div />' } },
+    ],
+  })
+}
 
 const baseTask: TaskDetail = {
   id: 1,
@@ -194,5 +205,149 @@ describe('TaskChatMessageList', () => {
     await button.trigger('click')
     expect(wrapper.emitted('toggleExpanded')).toBeTruthy()
     expect((details.element as HTMLDetailsElement).open).toBe(true)
+  })
+})
+
+function makeToolCall(overrides: Partial<ToolCall> = {}): ToolCall {
+  return {
+    id: 1,
+    provider_call_id: 'pc_1',
+    tool_name: 'handover',
+    tool_type: 'handover',
+    operation: null,
+    operation_description: null,
+    status: 'EXECUTED',
+    proposed_arguments: null,
+    approved_arguments: null,
+    human_description: null,
+    result_content: 'Handed over.',
+    executed_at: null,
+    ...overrides,
+  }
+}
+
+describe('TaskChatMessageList — tool-call deep link', () => {
+  const router = makeRouter()
+  const global = { plugins: [router] }
+
+  it('renders an "Open chat #X" RouterLink when result_data.new_task_id is set', () => {
+    const toolCall = makeToolCall({
+      result_data: { new_task_id: 42, handover: true },
+    })
+    const messages: ChatMessage[] = [
+      { kind: 'tool-result', entry: makeEntry('tool', { sequence: 1, content: 'Handed over.', tool_name: 'handover', tool_call_id: 'pc_1' }) },
+    ]
+    const wrapper = mount(TaskChatMessageList, {
+      props: { task: { ...baseTask, tool_calls: [toolCall] }, chatMessages: messages, finalReasoning: null },
+      global,
+    })
+    const link = wrapper.find('a')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toContain('Open chat #42')
+    expect(link.text()).toContain('→')
+  })
+
+  it('prefixes the link text with "Handed off —" when result_data.handover is true', () => {
+    const toolCall = makeToolCall({
+      result_data: { new_task_id: 42, handover: true },
+    })
+    const messages: ChatMessage[] = [
+      { kind: 'tool-result', entry: makeEntry('tool', { sequence: 1, content: 'Handed over.', tool_name: 'handover', tool_call_id: 'pc_1' }) },
+    ]
+    const wrapper = mount(TaskChatMessageList, {
+      props: { task: { ...baseTask, tool_calls: [toolCall] }, chatMessages: messages, finalReasoning: null },
+      global,
+    })
+    const text = wrapper.find('a').text()
+    expect(text).toContain('Handed off')
+    expect(text).toContain('Open chat #42')
+  })
+
+  it('omits the "Handed off —" prefix when result_data.handover is not true', () => {
+    const toolCall = makeToolCall({
+      result_data: { new_task_id: 42 },
+    })
+    const messages: ChatMessage[] = [
+      { kind: 'tool-result', entry: makeEntry('tool', { sequence: 1, content: 'Done.', tool_name: 'generic_tool', tool_call_id: 'pc_1' }) },
+    ]
+    const wrapper = mount(TaskChatMessageList, {
+      props: { task: { ...baseTask, tool_calls: [toolCall] }, chatMessages: messages, finalReasoning: null },
+      global,
+    })
+    const link = wrapper.find('a')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).not.toContain('Handed off')
+    expect(link.text()).toContain('Open chat #42')
+  })
+
+  it('falls back to task_id when new_task_id is absent', () => {
+    const toolCall = makeToolCall({
+      result_data: { task_id: 99 },
+    })
+    const messages: ChatMessage[] = [
+      { kind: 'tool-result', entry: makeEntry('tool', { sequence: 1, content: 'Done.', tool_name: 'generic_tool', tool_call_id: 'pc_1' }) },
+    ]
+    const wrapper = mount(TaskChatMessageList, {
+      props: { task: { ...baseTask, tool_calls: [toolCall] }, chatMessages: messages, finalReasoning: null },
+      global,
+    })
+    const link = wrapper.find('a')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toContain('Open chat #99')
+  })
+
+  it('does not render a link when result_data has neither new_task_id nor task_id', () => {
+    const toolCall = makeToolCall({
+      result_data: { foo: 'bar' },
+    })
+    const messages: ChatMessage[] = [
+      { kind: 'tool-result', entry: makeEntry('tool', { sequence: 1, content: 'Done.', tool_name: 'web_search', tool_call_id: 'pc_1' }) },
+    ]
+    const wrapper = mount(TaskChatMessageList, {
+      props: { task: { ...baseTask, tool_calls: [toolCall] }, chatMessages: messages, finalReasoning: null },
+      global,
+    })
+    expect(wrapper.find('a').exists()).toBe(false)
+  })
+
+  it('does not render a link when result_data is absent', () => {
+    const toolCall = makeToolCall({})
+    const messages: ChatMessage[] = [
+      { kind: 'tool-result', entry: makeEntry('tool', { sequence: 1, content: 'Done.', tool_name: 'web_search', tool_call_id: 'pc_1' }) },
+    ]
+    const wrapper = mount(TaskChatMessageList, {
+      props: { task: { ...baseTask, tool_calls: [toolCall] }, chatMessages: messages, finalReasoning: null },
+      global,
+    })
+    expect(wrapper.find('a').exists()).toBe(false)
+  })
+
+  it('does not render a link when the history row has no tool_call_id', () => {
+    const toolCall = makeToolCall({
+      result_data: { new_task_id: 42 },
+    })
+    const messages: ChatMessage[] = [
+      { kind: 'tool-result', entry: makeEntry('tool', { sequence: 1, content: 'Done.', tool_name: 'web_search', tool_call_id: null }) },
+    ]
+    const wrapper = mount(TaskChatMessageList, {
+      props: { task: { ...baseTask, tool_calls: [toolCall] }, chatMessages: messages, finalReasoning: null },
+      global,
+    })
+    expect(wrapper.find('a').exists()).toBe(false)
+  })
+
+  it('uses the "task" route name with the new_task_id as a string param', () => {
+    const toolCall = makeToolCall({
+      result_data: { new_task_id: 7 },
+    })
+    const messages: ChatMessage[] = [
+      { kind: 'tool-result', entry: makeEntry('tool', { sequence: 1, content: 'Done.', tool_name: 'handover', tool_call_id: 'pc_1' }) },
+    ]
+    const wrapper = mount(TaskChatMessageList, {
+      props: { task: { ...baseTask, tool_calls: [toolCall] }, chatMessages: messages, finalReasoning: null },
+      global,
+    })
+    const link = wrapper.find('a')
+    expect(link.attributes('href')).toBe('/tasks/7')
   })
 })

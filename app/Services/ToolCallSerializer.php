@@ -52,6 +52,7 @@ final class ToolCallSerializer
             'operation'             => $tc->operation,
             'operation_description' => $tc->operation_description,
             'result_content'        => $tc->result_content,
+            'result_data'           => $tc->result_data,
             'executed_at'           => $tc->executed_at?->toIso8601String(),
         ];
 

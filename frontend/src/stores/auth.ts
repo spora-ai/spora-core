@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api, ApiError } from '@/api/client'
+import { log } from '@/utils/logger'
 import type { User } from '@/types/user'
 
 export { type User }
@@ -77,7 +78,11 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout(): Promise<void> {
     // Post first so the X-CSRF-Token header can still be injected from the store.
-    await api.post('/auth/logout').catch(() => {})
+    // Failures here are fine — the server may already consider the session gone;
+    // we clear local state regardless.
+    await api.post('/auth/logout').catch((e) => {
+      log.warn('[auth] logout request failed; clearing local session anyway', e)
+    })
     user.value = null
     csrfToken.value = null
     initPromise = null

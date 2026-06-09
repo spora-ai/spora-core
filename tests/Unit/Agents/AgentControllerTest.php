@@ -170,6 +170,45 @@ test('index returns all agents for the current user', function (): void {
     expect($body['data']['agents'])->toHaveCount(2);
 });
 
+test('index with ?select=id,name returns only id and name columns', function (): void {
+    clearSession();
+    [$controller, $authService, , , $authMiddleware] = makeAgentController();
+    registerUser($authService);
+    createAgent($controller, 'Selected Agent', [$authMiddleware]);
+
+    $request = jsonRequest('GET', AGENTS_API_PATH . '?select=id,name');
+    $response = callController($controller, 'index', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['agents'])->toHaveCount(1);
+    $row = (array) $body['data']['agents'][0];
+    expect($row)->toHaveKey('id')
+        ->and($row)->toHaveKey('name')
+        // Full payload fields must NOT be present when ?select is supplied
+        ->and($row)->not->toHaveKey('description')
+        ->and($row)->not->toHaveKey('system_prompt')
+        ->and($row)->not->toHaveKey('max_steps');
+});
+
+test('index without ?select returns the full payload (backward compat)', function (): void {
+    clearSession();
+    [$controller, $authService, , , $authMiddleware] = makeAgentController();
+    registerUser($authService);
+    createAgent($controller, 'Full Payload Agent', [$authMiddleware]);
+
+    $response = callController($controller, 'index', jsonRequest('GET', AGENTS_API_PATH), [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode($response->getContent(), true);
+    $row = $body['data']['agents'][0];
+    expect($row)->toHaveKey('id')
+        ->and($row)->toHaveKey('name')
+        ->and($row)->toHaveKey('description')
+        ->and($row)->toHaveKey('max_steps')
+        ->and($row)->toHaveKey('tools');
+});
+
 test('store creates a new agent and returns 201', function (): void {
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();

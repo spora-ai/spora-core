@@ -19,6 +19,11 @@ const applySseEventToTasks = vi.fn()
 const applySseTaskEvent = vi.fn()
 const startDashboardPolling = vi.fn()
 const stopDashboardPolling = vi.fn()
+// The real fetchNotifications is declared async (returns Promise<void>),
+// so the production code chains .catch() on its return value. A bare
+// `vi.fn()` returns undefined and would crash that chain — give the mock
+// a resolved-promise default so consumers can await / chain safely.
+const fetchNotificationsInNotificationsStore = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/api/client', () => ({
   api: { get: vi.fn() },
@@ -27,7 +32,7 @@ vi.mock('@/api/client', () => ({
 vi.mock('@/stores/notifications', () => ({
   useNotificationStore: () => ({
     prependFromSSE,
-    fetchNotifications: vi.fn(),
+    fetchNotifications: fetchNotificationsInNotificationsStore,
     startNotificationPolling: vi.fn(),
     stopNotificationPolling: vi.fn(),
   }),
@@ -77,5 +82,19 @@ describe('useRealtime integration', () => {
     await new Promise(r => setTimeout(r, 0))
 
     expect(startDashboardPolling).not.toHaveBeenCalled()
+  })
+
+  it('calls fetchNotifications once when SSE is inactive (polling fallback)', async () => {
+    vi.clearAllMocks()
+    // /sse/status reports inactive → useRealtime falls back to polling.
+    vi.mocked(api).get.mockResolvedValueOnce({ active: false })
+
+    const { useRealtime } = await import('@/composables/useRealtime')
+    useRealtime()
+    await new Promise(r => setTimeout(r, 0))
+
+    // The polling fallback must bootstrap the badge by calling
+    // fetchNotifications immediately, mirroring the SSE success path.
+    expect(fetchNotificationsInNotificationsStore).toHaveBeenCalledTimes(1)
   })
 })

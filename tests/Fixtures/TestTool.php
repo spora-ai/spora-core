@@ -15,12 +15,13 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', default: null)]
 #[ToolSetting(key: 'max_results', label: 'Max Results', type: 'text', default: '10')]
 #[ToolSetting(key: 'custom_field', label: 'Custom Field', type: 'text', default: null)]
+#[ToolSetting(key: 'allowed_target_agents', label: 'Allowed target agents', type: 'multi-select', exposeToLlm: true)]
 #[ToolOperation(name: 'default', description: 'Run the test tool', enabledByDefault: true, requiresApprovalByDefault: false)]
 final class TestTool implements ToolInterface
 {
     use HasOperations;
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
         return $this->run($arguments, $agentId);
     }

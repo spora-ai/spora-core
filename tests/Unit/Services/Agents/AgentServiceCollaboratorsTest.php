@@ -29,7 +29,7 @@ defined('AGENT_COLLABORATORS_TEST_PASSWORD') || define('AGENT_COLLABORATORS_TEST
 #[ToolSetting(key: 'public', type: 'string', label: 'Public', required: false)]
 final class CollaboratorTestPasswordTool extends Spora\Tools\AbstractTool
 {
-    public function execute(array $arguments, int $agentId, ?int $userId = null): Spora\Tools\ValueObjects\ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): Spora\Tools\ValueObjects\ToolResult
     {
         return new Spora\Tools\ValueObjects\ToolResult(true, '');
     }

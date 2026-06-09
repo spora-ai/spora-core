@@ -96,7 +96,7 @@ final class SerperSearchTool extends AbstractTool
         return ['query' => $query, 'settings' => $settings];
     }
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
+    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
         $operation = $this->getOperationName($arguments);
         return match ($operation) {
