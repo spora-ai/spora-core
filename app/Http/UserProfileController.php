@@ -73,21 +73,12 @@ final class UserProfileController
 
         $userId = $this->authService->currentUserId();
 
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON_MESSAGE]],
-                Response::HTTP_BAD_REQUEST,
-            );
+        $parsed = $this->parseAndValidate($request, true);
+        if ($parsed instanceof JsonResponse) {
+            return $parsed;
         }
 
-        $validationError = $this->validateLocationFields($body, true);
-        if ($validationError !== null) {
-            return $validationError;
-        }
-
-        $result = $this->userService->createLocation($userId, $body);
+        $result = $this->userService->createLocation($userId, $parsed);
 
         return new JsonResponse(['data' => $result['location']], 201);
     }
@@ -98,24 +89,15 @@ final class UserProfileController
 
         $userId = $this->authService->currentUserId();
 
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON_MESSAGE]],
-                Response::HTTP_BAD_REQUEST,
-            );
+        $parsed = $this->parseAndValidate($request, false);
+        if ($parsed instanceof JsonResponse) {
+            return $parsed;
         }
 
-        $validationError = $this->validateLocationFields($body, false);
-        if ($validationError !== null) {
-            return $validationError;
-        }
-
-        $result = $this->userService->updateLocation($id, $userId, $body);
+        $result = $this->userService->updateLocation($id, $userId, $parsed);
 
         if ($result === null) {
-            return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Location not found.']], 404);
+            return $this->locationNotFoundResponse();
         }
 
         return new JsonResponse(['data' => $result['location']]);
@@ -143,6 +125,40 @@ final class UserProfileController
         }
 
         return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * Decode the request body and run location-field validation in one step.
+     * Returns the parsed body on success, or a 400/422 JsonResponse on the
+     * first violation.
+     *
+     * @param bool $requireBoth when true (POST), both name and address are required;
+     *                          when false (PUT), only fields that are present are checked
+     *
+     * @return array|JsonResponse
+     */
+    private function parseAndValidate(Request $request, bool $requireBoth): array|JsonResponse
+    {
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return new JsonResponse(
+                ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON_MESSAGE]],
+                Response::HTTP_BAD_REQUEST,
+            );
+        }
+
+        $validationError = $this->validateLocationFields($body, $requireBoth);
+        if ($validationError !== null) {
+            return $validationError;
+        }
+
+        return $body;
+    }
+
+    private function locationNotFoundResponse(): JsonResponse
+    {
+        return new JsonResponse(['error' => ['code' => 'NOT_FOUND', 'message' => 'Location not found.']], 404);
     }
 
     /**

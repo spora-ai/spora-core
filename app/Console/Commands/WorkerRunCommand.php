@@ -90,11 +90,6 @@ final class WorkerRunCommand extends Command
         $includeQueue = (bool) $input->getOption('include-queue');
         $isReapOnly = (bool) $input->getOption('reap-only');
 
-        $validationError = $this->validateModeFlags($output, $isDaemon, $isOnce, $isReapOnly);
-        if ($validationError !== null) {
-            return $validationError;
-        }
-
         $isDaemon = $isDaemon || (!$isOnce && !$isReapOnly);
 
         // Resolve stale-minutes: CLI always wins; omit flag → config → default (60)
@@ -114,25 +109,18 @@ final class WorkerRunCommand extends Command
             default => (int) ($this->container->get('config')['max_workers'] ?? 0),
         };
 
-        if (!$isReapOnly && !$this->acquireLock($output)) {
-            return Command::FAILURE;
+        $earlyExit = $this->prepareForRun(
+            $output,
+            $isDaemon,
+            $isOnce,
+            $isReapOnly,
+            $includeQueue,
+            $staleMinutes,
+            $limit,
+        );
+        if ($earlyExit !== null) {
+            return $earlyExit;
         }
-
-        if ($isDaemon && extension_loaded('pcntl')) {
-            pcntl_async_signals(true);
-            pcntl_signal(SIGTERM, function () use ($output): void {
-                $this->shouldQuit = true;
-                $this->queueProcessor->shutdownParent();
-                $output->writeln('<info>Daemon shut down gracefully.</info>');
-            });
-            pcntl_signal(SIGINT, function () use ($output): void {
-                $this->shouldQuit = true;
-                $this->queueProcessor->shutdownParent();
-                $output->writeln('<info>Daemon shut down gracefully.</info>');
-            });
-        }
-
-        $this->announceMode($output, $isDaemon, $isOnce, $includeQueue, $staleMinutes, $limit);
 
         $processed = 0;
         $this->reaper->reapStaleTasks($output, $staleMinutes);
@@ -163,6 +151,51 @@ final class WorkerRunCommand extends Command
         }
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * Run the early-exit gates and side-effect setup shared by every mode:
+     * mode-flag validation, daemon lock acquisition, signal-handler wiring,
+     * the startup banner, and the initial orphan reaping sweep.
+     *
+     * Returns Command::FAILURE on validation/lock failure, or null once it
+     * is safe to proceed with mode-specific work.
+     */
+    private function prepareForRun(
+        OutputInterface $output,
+        bool $isDaemon,
+        bool $isOnce,
+        bool $isReapOnly,
+        bool $includeQueue,
+        int $staleMinutes,
+        int $limit,
+    ): ?int {
+        $validationError = $this->validateModeFlags($output, $isDaemon, $isOnce, $isReapOnly);
+        if ($validationError !== null) {
+            return $validationError;
+        }
+
+        if (!$isReapOnly && !$this->acquireLock($output)) {
+            return Command::FAILURE;
+        }
+
+        if ($isDaemon && extension_loaded('pcntl')) {
+            pcntl_async_signals(true);
+            pcntl_signal(SIGTERM, function () use ($output): void {
+                $this->shouldQuit = true;
+                $this->queueProcessor->shutdownParent();
+                $output->writeln('<info>Daemon shut down gracefully.</info>');
+            });
+            pcntl_signal(SIGINT, function () use ($output): void {
+                $this->shouldQuit = true;
+                $this->queueProcessor->shutdownParent();
+                $output->writeln('<info>Daemon shut down gracefully.</info>');
+            });
+        }
+
+        $this->announceMode($output, $isDaemon, $isOnce, $includeQueue, $staleMinutes, $limit);
+
+        return null;
     }
 
     /**
