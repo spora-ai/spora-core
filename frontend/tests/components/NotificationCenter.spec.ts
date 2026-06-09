@@ -59,7 +59,31 @@ function findItem(title: string): HTMLElement | undefined {
 describe('NotificationCenter', () => {
   it('renders nothing when closed', () => {
     const wrapper = mountNC()
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.body.querySelector('dialog[aria-modal="true"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('anchors the panel to the right edge of the viewport when open', async () => {
+    const wrapper = mountNC()
+    wrapper.vm.open()
+    await flushPromises()
+    // Panel is the right-anchored slide-in. It must be present in the DOM.
+    const panel = Array.from(document.body.querySelectorAll('div')).find(
+      (d) => d.classList.contains('right-0') && d.classList.contains('top-0') && d.classList.contains('h-full'),
+    )
+    expect(panel).toBeDefined()
+    // The dialog wrapper must fill the viewport — guards against the
+    // user-agent <dialog> default styles (margin: auto, -moz-fit-content)
+    // collapsing the wrapper to a 0×0 centered box.
+    const dialog = document.body.querySelector('dialog[aria-modal="true"]') as HTMLElement | null
+    expect(dialog).not.toBeNull()
+    expect(dialog?.classList.contains('fixed')).toBe(true)
+    expect(dialog?.classList.contains('inset-0')).toBe(true)
+    // The dialog must be transparent — the user-agent <dialog> ships with
+    // `background: white` which would sit under the backdrop and turn the
+    // dimmed area gray. The backdrop div is the only thing that should
+    // visually cover the page.
+    expect(dialog?.classList.contains('bg-transparent')).toBe(true)
     wrapper.unmount()
   })
 

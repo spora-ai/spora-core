@@ -2,7 +2,6 @@
 import { onMounted, ref } from 'vue'
 import { RouterView, useRouter } from 'vue-router'
 import { useThemeStore } from '@/stores/theme'
-import { useNotificationStore } from '@/stores/notifications'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { setupSessionHandler } from '@/api/client'
@@ -10,7 +9,6 @@ import ToastContainer from '@/components/ui/ToastContainer.vue'
 
 const theme = useThemeStore()
 const auth = useAuthStore()
-const notificationStore = useNotificationStore()
 const router = useRouter()
 const toast = useToast()
 
@@ -18,10 +16,9 @@ const isHandlingSessionExpiry = ref(false)
 
 onMounted(() => {
   theme.init()
-  // Only fetch notifications if the user is already authenticated
-  if (auth.user) {
-    notificationStore.fetchNotifications()
-  }
+  // Initial notification fetch is owned by useRealtime (called from GlobalNavbar
+  // and AgentPage). It waits for auth to finish initializing and fires the
+  // fetch on the SSE success path or the polling fallback.
 
   setupSessionHandler(() => {
     // Prevent duplicate handling if multiple 401s fire simultaneously

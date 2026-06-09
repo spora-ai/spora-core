@@ -83,8 +83,8 @@ defineExpose({ open: openPanel })
     <Transition name="notification-panel">
       <dialog
         v-if="open"
-        class="fixed inset-0 z-50 flex"
         aria-modal="true"
+        class="fixed inset-0 z-50 flex m-0 h-screen w-screen p-0 border-0 bg-transparent"
       >
         <!-- Backdrop -->
         <div
@@ -97,7 +97,7 @@ defineExpose({ open: openPanel })
           class="absolute right-0 top-0 h-full w-full max-w-sm bg-background shadow-xl flex flex-col"
         >
           <!-- Header -->
-          <div class="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
+          <div class="flex items-center justify-between border-b border-border pl-4 pr-6 py-3 shrink-0">
             <h2 class="font-semibold text-foreground">Notifications</h2>
             <div class="flex items-center gap-3">
               <button

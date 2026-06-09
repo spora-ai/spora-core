@@ -136,6 +136,9 @@ export function useRealtime() {
     // Start the adaptive polling loop managed entirely by the store.
     taskStore.startDashboardPolling()
     notificationStore.startNotificationPolling()
+    // Bootstrap the badge immediately — the polling tick would otherwise
+    // wait 60s for the first fetch.
+    void notificationStore.fetchNotifications()
   }
 
   function disconnect(): void {

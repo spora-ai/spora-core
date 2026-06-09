@@ -6,7 +6,6 @@ namespace Spora\Agents;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Support\Collection;
-use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use ReflectionClass;
 use RuntimeException;
