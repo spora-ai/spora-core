@@ -18,9 +18,6 @@ use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
-use Spora\Drivers\Exceptions\LLMProviderException;
-use Spora\Drivers\Exceptions\LLMRateLimitException;
-use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
@@ -32,7 +29,6 @@ use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Plugins\PluginLoader;
-use Spora\Services\ContextWindowErrorParser;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
@@ -43,7 +39,6 @@ use Spora\Tools\Schema\OperationSchemaFilter;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
-use Symfony\Contracts\HttpClient\Exception\TimeoutExceptionInterface;
 use Throwable;
 
 final class Orchestrator implements OrchestratorInterface
@@ -79,6 +74,7 @@ final class Orchestrator implements OrchestratorInterface
         private readonly ?MercurePublisherInterface $mercure       = null,
         private readonly ?ToolConfigService        $toolConfigService = null,
         private readonly ?ToolCallSerializer       $toolCallSerializer = null,
+        private readonly ?ErrorClassifier          $errorClassifier = null,
     ) {}
 
     // Public API
@@ -146,7 +142,7 @@ final class Orchestrator implements OrchestratorInterface
         try {
             $context = $this->prepareTickContext($task);
         } catch (RuntimeException $e) {
-            $this->markTaskNoLlmConfiguration($taskId, $e);
+            $this->errorClassifier()->markTaskNoLlmConfiguration($taskId, $e);
             throw $e;
         }
 
@@ -225,20 +221,6 @@ final class Orchestrator implements OrchestratorInterface
         return ($agent->system_prompt !== null && $agent->system_prompt !== '')
             ? $agent->system_prompt
             : 'You are a helpful AI assistant.';
-    }
-
-    private function markTaskNoLlmConfiguration(int $taskId, RuntimeException $e): void
-    {
-        if (!str_contains($e->getMessage(), 'No LLM configuration')) {
-            return;
-        }
-
-        Task::where('id', $taskId)->update([
-            'status'         => 'FAILED',
-            'failure_reason' => $e->getMessage(),
-            'error_code'     => 'NO_LLM_CONFIGURATION',
-            'error_message'  => 'No LLM configuration set. Please configure an LLM driver or set a global default.',
-        ]);
     }
 
     private function dispatchLlmRequest(array $context): LLMResponse
@@ -332,13 +314,13 @@ final class Orchestrator implements OrchestratorInterface
             'message'         => $e->getMessage(),
         ]);
 
-        if ($this->isContextWindowError($e)) {
+        if ($this->errorClassifier()->isContextWindowError($e)) {
             $this->tryCompactionAndRetry($context['task'], $context['agent'], $e);
             return;
         }
 
-        $errorCode = $this->classifyError($e);
-        $friendlyMsg = $this->friendlyMessageForError($e, $errorCode);
+        $errorCode = $this->errorClassifier()->classifyError($e);
+        $friendlyMsg = $this->errorClassifier()->friendlyMessageForError($e, $errorCode);
 
         try {
             $updated = Task::where('id', $taskId)
@@ -384,22 +366,6 @@ final class Orchestrator implements OrchestratorInterface
         }
     }
 
-    private function isContextWindowError(Throwable $e): bool
-    {
-        if (!$e instanceof LLMProviderException) {
-            return false;
-        }
-
-        $rawBody = $e->getMessage();
-        // Extract JSON body from "Provider API error N: {...}" format
-        if (preg_match('/\{.*\}/s', $rawBody, $matches)) {
-            $parser = new ContextWindowErrorParser();
-            return $parser->isContextWindowError($matches[0]);
-        }
-
-        return false;
-    }
-
     private function tryCompactionAndRetry(?Task $task, ?Agent $agent, Throwable $originalError): void
     {
         if ($task === null || $agent === null) {
@@ -410,7 +376,7 @@ final class Orchestrator implements OrchestratorInterface
 
         $historyCount = TaskHistory::where('task_id', $taskId)->count();
         if ($historyCount <= 1) {
-            $actualLimit = $this->extractActualContextWindow($originalError);
+            $actualLimit = $this->errorClassifier()->extractActualContextWindow($originalError);
             $msg = $actualLimit !== null
                 ? "Context window too small ({$actualLimit} tokens). The model cannot process this request even without any conversation history. Try a model with a larger context window (e.g., 128K+ tokens) or reduce the system prompt length."
                 : "Context window too small for the current prompt. The model cannot process this request even without any conversation history. Try a model with a larger context window (e.g., 128K+ tokens) or reduce the system prompt length.";
@@ -528,38 +494,6 @@ final class Orchestrator implements OrchestratorInterface
                 $nextSeq++;
             }
         });
-    }
-
-    private function extractActualContextWindow(Throwable $e): ?int
-    {
-        if (!$e instanceof LLMProviderException) {
-            return null;
-        }
-
-        if (preg_match('/\{.*\}/s', $e->getMessage(), $matches)) {
-            $parser = new ContextWindowErrorParser();
-            $parsed = $parser->parse($matches[0]);
-            return $parsed['actual_context_window'];
-        }
-
-        return $e->getActualContextWindow();
-    }
-
-    /**
-     * Build friendly message for an error, with extra context for context window errors.
-     */
-    private function friendlyMessageForError(Throwable $e, string $errorCode): string
-    {
-        $base = $this->friendlyMessages()[$errorCode] ?? $this->friendlyMessages()['UNKNOWN'];
-
-        if ($this->isContextWindowError($e)) {
-            $actualLimit = $this->extractActualContextWindow($e);
-            if ($actualLimit !== null) {
-                return "Context window exceeded ({$actualLimit} tokens). Try reducing history depth, choosing a model with larger context, or adjusting max_tokens_output.";
-            }
-        }
-
-        return $base;
     }
 
     /**
@@ -1286,71 +1220,6 @@ final class Orchestrator implements OrchestratorInterface
         });
     }
 
-    private function classifyError(Throwable $e): string
-    {
-        $classified = $this->classifySpecificError($e);
-        if ($classified !== null) {
-            return $classified;
-        }
-
-        if ($e instanceof TimeoutExceptionInterface) {
-            return 'LLM_TIMEOUT';
-        }
-
-        return 'UNKNOWN';
-    }
-
-    private function classifySpecificError(Throwable $e): ?string
-    {
-        return match (true) {
-            $e instanceof LLMRateLimitException  => 'RATE_LIMIT',
-            $e instanceof LLMRetryableException  => $this->classifyRetryableError($e),
-            $e instanceof LLMProviderException    => $this->classifyProviderError($e),
-            default                              => null,
-        };
-    }
-
-    private function classifyRetryableError(LLMRetryableException $e): string
-    {
-        $msg = $e->getMessage();
-        if (str_contains($msg, '529')) {
-            return 'SERVER_OVERLOADED';
-        }
-        if (str_contains($msg, '520') || str_contains($msg, '500')) {
-            return 'SERVER_ERROR';
-        }
-        return 'GATEWAY_ERROR';
-    }
-
-    private function classifyProviderError(LLMProviderException $e): ?string
-    {
-        $msg = $e->getMessage();
-        if (str_contains($msg, '401') || str_contains($msg, '403')) {
-            return 'AUTH_ERROR';
-        }
-        if (str_contains($msg, '400')) {
-            return 'BAD_REQUEST';
-        }
-
-        return $e->isRetryable() ? 'GATEWAY_ERROR' : null;
-    }
-
-    private function friendlyMessages(): array
-    {
-        return [
-            'RATE_LIMIT'        => 'The AI service is busy. Try again in a moment.',
-            'SERVER_OVERLOADED' => 'The AI service is under high load. Try again shortly.',
-            'SERVER_ERROR'      => 'The AI service encountered an error. Please try again.',
-            'GATEWAY_ERROR'     => 'The AI service is temporarily unavailable. Try again shortly.',
-            'AUTH_ERROR'        => 'API authentication failed. Please check your API key.',
-            'LLM_TIMEOUT'       => 'The AI request timed out. Check your model or increase the timeout setting.',
-            'BAD_REQUEST'           => 'Invalid request. Please check your agent configuration.',
-            'NO_LLM_CONFIGURATION'  => 'No LLM configuration set. Please configure an LLM driver or set a global default.',
-            'TOOL_ERROR'           => 'A tool encountered an error. Check the task history for details.',
-            'UNKNOWN'           => 'An unexpected error occurred. Please try again.',
-        ];
-    }
-
     private function resolveLlmConfig(Agent $agent): array
     {
         $defaults = [
@@ -1476,5 +1345,12 @@ final class Orchestrator implements OrchestratorInterface
                 'message'          => $e->getMessage(),
             ]);
         }
+    }
+
+    private ?ErrorClassifier $errorClassifierInstance = null;
+
+    private function errorClassifier(): ErrorClassifier
+    {
+        return $this->errorClassifierInstance ??= new ErrorClassifier($this->logger);
     }
 }
