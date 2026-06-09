@@ -1,9 +1,7 @@
 <script setup lang="ts">
 /**
  * PluginCard — single plugin summary in the inventory grid.
- *
- * Clicking the card emits `select` with the plugin resource; the page opens
- * a detail dialog. The card is keyboard-accessible (button role + enter/space).
+ * Emits `select` with the plugin resource when clicked.
  */
 import { Puzzle, Wrench, Cpu, FileText } from 'lucide-vue-next'
 import type { PluginResource } from '../types/plugin'

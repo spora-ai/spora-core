@@ -5,9 +5,8 @@ import type { PluginResource } from '../types/plugin'
 import { getPlugins } from '../api/plugins'
 
 /**
- * Inventory of installed plugins. Read-only in v1: load the list once on
- * mount and expose it to the page. Refresh is supported so a future
- * "Re-scan" button can be wired up without changing the shape.
+ * Inventory of installed plugins. Read-only in v1: the page calls `load()`
+ * on mount and again from the Refresh button.
  */
 export const usePluginsStore = defineStore('plugins', () => {
   const plugins = ref<PluginResource[]>([])

@@ -14,14 +14,10 @@ use Spora\Services\PluginsService;
 const PLUGINS_INVENTORY_FIXTURE = BASE_PATH . '/tests/Fixtures/plugins_inventory';
 
 /**
- * Build the controller + middleware stack against the in-tree fixture plugin.
- *
  * @return array{0: PluginsController, 1: AuthMiddleware, 2: CsrfMiddleware}
  */
 function spora_makePluginsController(): array
 {
-    ensureMigrationTables();
-
     $loader = new PluginLoader([PLUGINS_INVENTORY_FIXTURE], null);
     $loader->boot();
     $service = new PluginsService($loader, new PluginMetadataExtractor());
@@ -31,32 +27,6 @@ function spora_makePluginsController(): array
     $csrfMiddleware = new CsrfMiddleware(new CsrfTokenService());
 
     return [new PluginsController($service), $authMiddleware, $csrfMiddleware];
-}
-
-/**
- * Create the two tables PluginsService reads from. The Pest beforeEach boots an
- * in-memory SQLite connection but doesn't run the schema installer, so we create
- * them here with the minimal columns our queries touch.
- */
-function ensureMigrationTables(): void
-{
-    $schema = Capsule::schema();
-
-    if (!$schema->hasTable('migrations')) {
-        $schema->create('migrations', static function (Illuminate\Database\Schema\Blueprint $table): void {
-            $table->id();
-            $table->string('migration');
-            $table->integer('batch');
-        });
-    }
-
-    if (!$schema->hasTable('schema_versions')) {
-        $schema->create('schema_versions', static function (Illuminate\Database\Schema\Blueprint $table): void {
-            $table->string('component')->primary();
-            $table->unsignedInteger('version')->default(0);
-            $table->timestamp('updated_at')->nullable();
-        });
-    }
 }
 
 describe('PluginsController', function (): void {
