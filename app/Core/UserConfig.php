@@ -15,7 +15,7 @@ final class UserConfig
             return [];
         }
         if (!isset(self::$cache[$path])) {
-            $loaded = require $path;
+            $loaded = require_once $path;
             self::$cache[$path] = is_array($loaded) ? $loaded : [];
         }
         return self::$cache[$path];
