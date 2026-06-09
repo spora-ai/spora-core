@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use DI\ContainerBuilder;
+use Spora\Core\ContainerDefinitions;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Core\Exceptions\DatabaseNotBootedException;
@@ -19,7 +20,7 @@ use Spora\Plugins\PluginLoader;
 function buildContainer(): DI\Container
 {
     $builder = new ContainerBuilder();
-    $builder->addDefinitions(BASE_PATH . '/app/Core/container.php');
+    $builder->addDefinitions(ContainerDefinitions::all());
     return $builder->build();
 }
 

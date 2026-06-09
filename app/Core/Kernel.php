@@ -77,28 +77,12 @@ final class Kernel
 
     private function loadContainerDefinitions(): array
     {
-        $containerFile = BASE_PATH . '/app/Core/container.php';
-
-        if (!file_exists($containerFile)) {
-            return [];
-        }
-
-        // require (not require_once): tests reload definitions per-case for isolation.
-        return require $containerFile; // NOSONAR php:S2003 - require_once would break test isolation
+        return \Spora\Core\ContainerDefinitions::all();
     }
 
     private function buildRouter(): Router
     {
-        $routeFile = BASE_PATH . '/app/Core/routes.php';
-
-        $routeDefinitions = file_exists($routeFile)
-            // require (not require_once): tests reload routes per-case for isolation.
-            ? require $routeFile // NOSONAR php:S2003 - require_once would break test isolation
-            : static function (): void {
-                // No routes defined — used when routes.php does not exist.
-            };
-
-        return new Router($this->container, $routeDefinitions);
+        return new Router($this->container, [RouteDefinitions::class, 'register']);
     }
 
     private function handleException(Throwable $e): Response

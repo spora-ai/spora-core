@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Spora\Core\ContainerDefinitions;
 
 // Helpers
 
@@ -9,7 +10,7 @@ function getContainerConfig(): array
 {
     static $definitions = null;
     if ($definitions === null) {
-        $definitions = require BASE_PATH . '/app/Core/container.php';
+        $definitions = ContainerDefinitions::all();
     }
     return $definitions;
 }
