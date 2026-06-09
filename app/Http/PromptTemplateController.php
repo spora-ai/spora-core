@@ -47,22 +47,24 @@ final class PromptTemplateController
         $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        $body = $this->decodeBodyOrFail($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
         }
 
-        $name = trim((string) ($body['name'] ?? ''));
-        if ($name === '') {
-            return $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        $validationError = $this->validateStorePayload($body);
+        if ($validationError !== null) {
+            return $validationError;
         }
 
-        $promptTemplate = trim((string) ($body['prompt_template'] ?? ''));
-        if ($promptTemplate === '') {
-            return $this->error('VALIDATION_ERROR', 'prompt_template is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
+        return $this->createTemplateAndRespond($agentId, $userId, $body);
+    }
 
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function createTemplateAndRespond(int $agentId, ?int $userId, array $body): JsonResponse
+    {
         try {
             $result = $this->promptTemplateService->createTemplate($agentId, $userId, $body);
             return new JsonResponse(
@@ -72,6 +74,35 @@ final class PromptTemplateController
         } catch (RuntimeException) {
             return $this->notFound();
         }
+    }
+
+    /**
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function decodeBodyOrFail(Request $request): array|JsonResponse
+    {
+        try {
+            return $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function validateStorePayload(array $body): ?JsonResponse
+    {
+        $name = trim((string) ($body['name'] ?? ''));
+        if ($name === '') {
+            return $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        $promptTemplate = trim((string) ($body['prompt_template'] ?? ''));
+        if ($promptTemplate === '') {
+            return $this->error('VALIDATION_ERROR', 'prompt_template is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        return null;
     }
 
     /**

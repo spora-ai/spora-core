@@ -6,6 +6,8 @@ use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
 use Spora\Services\Exceptions\AgentNotFoundException;
+use Spora\Services\Exceptions\EmailTemplateParseException;
+use Spora\Services\Exceptions\MemoryValidationException;
 use Spora\Services\Exceptions\PromptTemplateMissingException;
 use Spora\Services\Exceptions\ScheduledRunNotFoundException;
 use Spora\Services\MemoryService;
@@ -90,6 +92,30 @@ describe('Service exceptions', function (): void {
         it('preserves the message verbatim', function (): void {
             $e = new PromptTemplateMissingException('The prompt template assigned to this scheduled run no longer exists.');
             expect($e->getMessage())->toBe('The prompt template assigned to this scheduled run no longer exists.');
+        });
+    });
+
+    describe('EmailTemplateParseException', function (): void {
+        it('extends RuntimeException', function (): void {
+            $e = new EmailTemplateParseException('Failed to parse email template');
+            expect($e)->toBeInstanceOf(RuntimeException::class);
+        });
+
+        it('preserves the message verbatim', function (): void {
+            $e = new EmailTemplateParseException('Failed to parse email template');
+            expect($e->getMessage())->toBe('Failed to parse email template');
+        });
+    });
+
+    describe('MemoryValidationException', function (): void {
+        it('extends RuntimeException', function (): void {
+            $e = new MemoryValidationException('name is required');
+            expect($e)->toBeInstanceOf(RuntimeException::class);
+        });
+
+        it('preserves the message verbatim', function (): void {
+            $e = new MemoryValidationException('name is required');
+            expect($e->getMessage())->toBe('name is required');
         });
     });
 });

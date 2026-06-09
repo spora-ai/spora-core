@@ -10,6 +10,11 @@ use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use ReflectionClass;
 use RuntimeException;
+use Spora\Agents\Exceptions\InvalidTaskTransitionException;
+use Spora\Agents\Exceptions\LlmConfigurationMissingException;
+use Spora\Agents\Exceptions\TaskStateMissingException;
+use Spora\Agents\Exceptions\ToolContractException;
+use Spora\Agents\Exceptions\ToolNotRegisteredException;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Agents\ValueObjects\WorkerMode;
@@ -110,7 +115,7 @@ final class Orchestrator implements OrchestratorInterface
         $task = Task::findOrFail($taskId);
 
         if (!in_array($task->status, ['COMPLETED', 'FAILED'], true)) {
-            throw new RuntimeException('Can only continue completed or failed tasks.');
+            throw new InvalidTaskTransitionException('Can only continue completed or failed tasks.');
         }
 
         $this->appendHistory($task->id, 'user', $newPrompt);
@@ -600,7 +605,7 @@ final class Orchestrator implements OrchestratorInterface
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
             if ($task->status !== 'PENDING_APPROVAL') {
-                throw new InvalidArgumentException("Task {$taskId} is not awaiting approval.");
+                throw new InvalidTaskTransitionException("Task {$taskId} is not awaiting approval.");
             }
 
             $state = $task->pending_state === null
@@ -612,7 +617,7 @@ final class Orchestrator implements OrchestratorInterface
         });
 
         if (!$task instanceof Task || !$state instanceof AgentState) {
-            throw new RuntimeException('Failed to resolve task or state during resume.');
+            throw new TaskStateMissingException('Failed to resolve task or state during resume.');
         }
 
         return [$task, $state];
@@ -776,7 +781,7 @@ final class Orchestrator implements OrchestratorInterface
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
             if ($task->status !== 'PENDING_APPROVAL') {
-                throw new InvalidArgumentException("Task {$taskId} is not awaiting approval.");
+                throw new InvalidTaskTransitionException("Task {$taskId} is not awaiting approval.");
             }
             if ($task->pending_state === null) {
                 $state = new AgentState(taskId: $task->id, agentId: $task->agent_id, pendingToolCalls: [], messageSnapshot: [], stepCount: $task->step_count, maxSteps: $task->max_steps, pausedAt: date(self::ISO8601_UTC));
@@ -790,7 +795,7 @@ final class Orchestrator implements OrchestratorInterface
 
         try {
             if (!$task instanceof Task || !$state instanceof AgentState) {
-                throw new RuntimeException('Failed to resolve task or state during reject.');
+                throw new TaskStateMissingException('Failed to resolve task or state during reject.');
             }
 
             $pendingModels = ToolCallModel::where('task_id', $taskId)
@@ -1010,7 +1015,7 @@ final class Orchestrator implements OrchestratorInterface
             return $toolInstance->requiresApprovalByDefault($operationName);
         }
 
-        throw new RuntimeException("Tool '{$toolClass}' does not use HasOperations trait.");
+        throw new ToolContractException("Tool '{$toolClass}' does not use HasOperations trait.");
     }
 
     public function isOperationEnabled(object $toolInstance, string $operationName, int $agentId): bool
@@ -1235,7 +1240,7 @@ final class Orchestrator implements OrchestratorInterface
             }
         }
 
-        throw new RuntimeException("No tool registered with name '{$toolName}'.");
+        throw new ToolNotRegisteredException("No tool registered with name '{$toolName}'.");
     }
 
     private function qualifiedToolName(string $toolClass, string $plainName): string
@@ -1284,19 +1289,9 @@ final class Orchestrator implements OrchestratorInterface
 
     private function classifyError(Throwable $e): string
     {
-        if ($e instanceof LLMRateLimitException) {
-            return 'RATE_LIMIT';
-        }
-
-        if ($e instanceof LLMRetryableException) {
-            return $this->classifyRetryableError($e);
-        }
-
-        if ($e instanceof LLMProviderException) {
-            $code = $this->classifyProviderError($e);
-            if ($code !== null) {
-                return $code;
-            }
+        $classified = $this->classifySpecificError($e);
+        if ($classified !== null) {
+            return $classified;
         }
 
         if ($e instanceof TimeoutExceptionInterface) {
@@ -1304,6 +1299,16 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         return 'UNKNOWN';
+    }
+
+    private function classifySpecificError(Throwable $e): ?string
+    {
+        return match (true) {
+            $e instanceof LLMRateLimitException  => 'RATE_LIMIT',
+            $e instanceof LLMRetryableException  => $this->classifyRetryableError($e),
+            $e instanceof LLMProviderException    => $this->classifyProviderError($e),
+            default                              => null,
+        };
     }
 
     private function classifyRetryableError(LLMRetryableException $e): string
@@ -1327,10 +1332,8 @@ final class Orchestrator implements OrchestratorInterface
         if (str_contains($msg, '400')) {
             return 'BAD_REQUEST';
         }
-        if ($e->isRetryable()) {
-            return 'GATEWAY_ERROR';
-        }
-        return null;
+
+        return $e->isRetryable() ? 'GATEWAY_ERROR' : null;
     }
 
     private function friendlyMessages(): array
@@ -1392,7 +1395,7 @@ final class Orchestrator implements OrchestratorInterface
             ];
         }
 
-        throw new RuntimeException('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
+        throw new LlmConfigurationMissingException('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
     }
 
     private function getTemperatureFromSettings(LLMDriverConfiguration $config, float $default): float
@@ -1413,24 +1416,46 @@ final class Orchestrator implements OrchestratorInterface
             return;
         }
 
-        /** @var Agent|null $agent */
-        $agent = Agent::find($failedTask->agent_id);
+        $agent = $this->resolveRetryAgent($failedTask);
         if ($agent === null) {
             return;
         }
+
         $retryAfterMinutes = $agent->retry_after_minutes ?? 0;
         $maxRetries = $agent->max_retries ?? 0;
-        if ($retryAfterMinutes <= 0 || $maxRetries <= 0) {
-            return;
-        }
 
         $rootTaskId = $failedTask->retry_of_task_id ?? $failedTask->id;
         $retryCount = (int) ($failedTask->retry_count ?? 0) + 1;
 
-        if ($retryCount > $maxRetries) {
-            return;
+        $this->dispatchRetryTask($agent, $failedTask, $rootTaskId, $retryCount, $retryAfterMinutes, $maxRetries);
+    }
+
+    private function resolveRetryAgent(Task $failedTask): ?Agent
+    {
+        /** @var Agent|null $agent */
+        $agent = Agent::find($failedTask->agent_id);
+        if ($agent === null) {
+            return null;
         }
 
+        $retryAfterMinutes = (int) ($agent->retry_after_minutes ?? 0);
+        $maxRetries = (int) ($agent->max_retries ?? 0);
+        $retryCount = (int) ($failedTask->retry_count ?? 0) + 1;
+        $isWithinRetryBudget = $retryAfterMinutes > 0
+            && $maxRetries > 0
+            && $retryCount <= $maxRetries;
+
+        return $isWithinRetryBudget ? $agent : null;
+    }
+
+    private function dispatchRetryTask(
+        Agent $agent,
+        Task $failedTask,
+        int $rootTaskId,
+        int $retryCount,
+        int $retryAfterMinutes,
+        int $maxRetries,
+    ): void {
         try {
             $retryTask = $this->start($agent->id, $failedTask->user_prompt, $failedTask->max_steps);
             $retryTask->update([

@@ -61,6 +61,28 @@ final class RecipeScanner
      */
     private function parseFile(string $path, string $filename): ?array
     {
+        $data = $this->loadFileData($path, $filename);
+        if ($data === null) {
+            return null;
+        }
+
+        if (!$this->hasRequiredKeys($data)) {
+            return null;
+        }
+
+        return [
+            'id'          => $data['id'],
+            'name'        => $data['name'],
+            'description' => $data['description'],
+            'filename'    => $filename,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function loadFileData(string $path, string $filename): ?array
+    {
         $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
 
         try {
@@ -73,25 +95,23 @@ final class RecipeScanner
             return null;
         }
 
-        if (!is_array($data)) {
-            return null;
+        return is_array($data) ? $data : null;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function hasRequiredKeys(array $data): bool
+    {
+        if (!isset($data['id'], $data['name'], $data['description'])) {
+            return false;
         }
 
-        if (
-            !isset($data['id'], $data['name'], $data['description']) ||
-            !is_string($data['id']) || $data['id'] === '' ||
-            !is_string($data['name']) || $data['name'] === '' ||
-            !is_string($data['description'])
-        ) {
-            return null;
-        }
+        $idIsString   = is_string($data['id']) && $data['id'] !== '';
+        $nameIsString = is_string($data['name']) && $data['name'] !== '';
+        $descIsString = is_string($data['description']);
 
-        return [
-            'id'          => $data['id'],
-            'name'        => $data['name'],
-            'description' => $data['description'],
-            'filename'    => $filename,
-        ];
+        return $idIsString && $nameIsString && $descIsString;
     }
 
     /**

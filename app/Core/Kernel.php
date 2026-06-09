@@ -84,8 +84,7 @@ final class Kernel
         }
 
         // require (not require_once): tests reload definitions per-case for isolation.
-        // nosonar: php:S2003 — require_once would return true on subsequent includes, breaking test isolation
-        return require $containerFile;
+        return require $containerFile; // NOSONAR php:S2003 - require_once would break test isolation
     }
 
     private function buildRouter(): Router
@@ -94,8 +93,7 @@ final class Kernel
 
         $routeDefinitions = file_exists($routeFile)
             // require (not require_once): tests reload routes per-case for isolation.
-            // nosonar: php:S2003 — require_once would return true on subsequent includes, breaking test isolation
-            ? require $routeFile
+            ? require $routeFile // NOSONAR php:S2003 - require_once would break test isolation
             : static function (): void {
                 // No routes defined — used when routes.php does not exist.
             };

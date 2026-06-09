@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\WorkerMode;
@@ -611,7 +612,7 @@ it('resume throws when task is not PENDING_APPROVAL', function (): void {
     $mock = Mockery::mock(LLMDriverInterface::class);
     $orch = makeOrchestrator(mockDriverFactory($mock));
 
-    expect(fn() => $orch->resume($task->id, []))->toThrow(InvalidArgumentException::class);
+    expect(fn() => $orch->resume($task->id, []))->toThrow(InvalidTaskTransitionException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -700,7 +701,7 @@ it('reject throws when task is not PENDING_APPROVAL', function (): void {
     $mock = Mockery::mock(LLMDriverInterface::class);
     $orch = makeOrchestrator(mockDriverFactory($mock));
 
-    expect(fn() => $orch->reject($task->id, 'reason'))->toThrow(InvalidArgumentException::class);
+    expect(fn() => $orch->reject($task->id, 'reason'))->toThrow(InvalidTaskTransitionException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------

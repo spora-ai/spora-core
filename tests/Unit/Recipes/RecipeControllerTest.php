@@ -21,7 +21,7 @@ test('index returns 401 when not authenticated', function (): void {
     clearSession();
     $controller = makeRecipeController();
 
-    expect(fn() => $controller->index(jsonRequest('GET', RECIPES_ENDPOINT)))
+    expect(fn() => $controller->index())
         ->toThrow(Spora\Http\Exceptions\UnauthenticatedException::class);
 });
 
@@ -33,7 +33,7 @@ test('index returns 200 with recipes array when authenticated', function (): voi
     $scanner    = new RecipeScanner([BASE_PATH . FIXTURES_RECIPES_DIR]);
     $controller = new RecipeController($service, $scanner);
 
-    $response = $controller->index(jsonRequest('GET', RECIPES_ENDPOINT));
+    $response = $controller->index();
     $body     = json_decode($response->getContent(), true);
 
     expect($response->getStatusCode())->toBe(200);
@@ -50,7 +50,7 @@ test('index returns only valid recipes', function (): void {
     $scanner    = new RecipeScanner([BASE_PATH . FIXTURES_RECIPES_DIR]);
     $controller = new RecipeController($service, $scanner);
 
-    $body    = json_decode($controller->index(jsonRequest('GET', RECIPES_ENDPOINT))->getContent(), true);
+    $body    = json_decode($controller->index()->getContent(), true);
     $recipes = $body['data']['recipes'];
     $ids     = array_column($recipes, 'id');
 
@@ -66,7 +66,7 @@ test('index returns empty recipes array when scanner has no directories', functi
 
     $controller = new RecipeController($service, new RecipeScanner([]));
 
-    $body = json_decode($controller->index(jsonRequest('GET', RECIPES_ENDPOINT))->getContent(), true);
+    $body = json_decode($controller->index()->getContent(), true);
 
     expect($body['data']['recipes'])->toBe([]);
 });
@@ -79,7 +79,7 @@ test('each recipe has the required shape', function (): void {
     $scanner    = new RecipeScanner([BASE_PATH . FIXTURES_RECIPES_DIR]);
     $controller = new RecipeController($service, $scanner);
 
-    $body    = json_decode($controller->index(jsonRequest('GET', RECIPES_ENDPOINT))->getContent(), true);
+    $body    = json_decode($controller->index()->getContent(), true);
 
     foreach ($body['data']['recipes'] as $recipe) {
         expect($recipe)->toHaveKeys(['id', 'name', 'description', 'filename']);

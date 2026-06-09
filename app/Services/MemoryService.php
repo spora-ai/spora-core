@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Models\Memory;
 use Spora\Services\Exceptions\AgentNotFoundException;
+use Spora\Services\Exceptions\MemoryValidationException;
 
 /**
  * Service for memory management.
@@ -266,7 +266,7 @@ final class MemoryService implements MemoryServiceInterface
         if ($isCreation) {
             $name = trim((string) ($data['name'] ?? ''));
             if ($name === '') {
-                throw new RuntimeException('name is required');
+                throw new MemoryValidationException('name is required');
             }
         }
     }

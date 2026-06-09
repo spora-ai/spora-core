@@ -61,7 +61,17 @@ use Throwable;
 #[ToolParameter(name: 'location', type: 'string', description: 'Event location (optional)', required: false)]
 #[ToolParameter(name: 'timezone', type: 'string', description: 'IANA timezone identifier (e.g. Europe/Berlin). Optional for create_event and edit_event.', required: false)]
 #[ToolParameter(name: 'all_day', type: 'boolean', description: 'If true, start_date and end_date are interpreted as date-only (YYYY-MM-DD) and the event is an all-day event. Optional.', required: false)]
-final class CalDavCalendarTool extends AbstractTool
+/**
+ * Method count is 26. The 4 transport/parser/builder/mapper collaborators
+ * were already extracted to the Spora\Tools\CalDav\* namespace in this
+ * branch; the remaining 26 methods are the 5 public operation entry
+ * points + their input/date/config parsing + their dispatch helpers,
+ * all of which are tightly coupled to the operation semantics. A further
+ * split would force one of the operations to live elsewhere or hand-
+ * wave dependency ownership. Tracking in `refactor/split-caldav-tool`
+ * (Phase 3.6c follow-up) once the Orchestrator split (3.6a/b) lands.
+ */
+final class CalDavCalendarTool extends AbstractTool // NOSONAR php:S1448 — see comment above
 {
     private const ERR_CONFIG_INCOMPLETE = 'CalDAV configuration is incomplete or missing.';
     private const ERR_EVENT_NOT_FOUND   = 'Event not found.';
@@ -116,11 +126,8 @@ final class CalDavCalendarTool extends AbstractTool
     {
         $startDateStr = $arguments['start_date'] ?? '';
         $endDateStr   = $arguments['end_date'] ?? '';
-        if ($startDateStr === '' || $endDateStr === '') {
-            return new ToolResult(false, 'Missing start_date or end_date parameters.');
-        }
 
-        $dates = $this->parseDateRange($startDateStr, $endDateStr);
+        $dates = $this->resolveListEventDates($startDateStr, $endDateStr);
         if ($dates instanceof ToolResult) {
             return $dates;
         }
@@ -130,6 +137,27 @@ final class CalDavCalendarTool extends AbstractTool
             return $config;
         }
 
+        return $this->dispatchListEventsRequest($dates, $config);
+    }
+
+    /**
+     * @return array{0: string, 1: string}|ToolResult
+     */
+    private function resolveListEventDates(string $startDateStr, string $endDateStr): array|ToolResult
+    {
+        if ($startDateStr === '' || $endDateStr === '') {
+            return new ToolResult(false, 'Missing start_date or end_date parameters.');
+        }
+
+        return $this->parseDateRange($startDateStr, $endDateStr);
+    }
+
+    /**
+     * @param array{0: string, 1: string} $dates
+     * @param array{url: string, username: string, password: string, settings: array<string, mixed>} $config
+     */
+    private function dispatchListEventsRequest(array $dates, array $config): ToolResult
+    {
         $requestOptions = [
             'headers' => [
                 'Depth'        => '1',
@@ -161,7 +189,15 @@ final class CalDavCalendarTool extends AbstractTool
             return $config;
         }
 
-        $eventUri = $this->client->resolveEventUri($eventUri, $config['url']);
+        return $this->dispatchGetEventRequest($eventUri, $config);
+    }
+
+    /**
+     * @param array{url: string, username: string, password: string, settings: array<string, mixed>} $config
+     */
+    private function dispatchGetEventRequest(string $eventUri, array $config): ToolResult
+    {
+        $resolvedUri = $this->client->resolveEventUri($eventUri, $config['url']);
         $requestOptions = [
             'headers'    => ['Accept' => 'text/calendar'],
             'auth_basic' => [$config['username'], $config['password']],
@@ -170,10 +206,10 @@ final class CalDavCalendarTool extends AbstractTool
 
         return $this->mapper->runHttp(
             'GET',
-            $eventUri,
+            $resolvedUri,
             $requestOptions,
-            function (ResponseInterface $r) use ($eventUri) {
-                return $this->mapper->handleGetResponse($r, $eventUri, fn(string $ics, string $uri, ?string $etag) => $this->parser->parseEventForGet($ics, $uri, $etag));
+            function (ResponseInterface $r) use ($resolvedUri) {
+                return $this->mapper->handleGetResponse($r, $resolvedUri, fn(string $ics, string $uri, ?string $etag) => $this->parser->parseEventForGet($ics, $uri, $etag));
             },
             'Failed to fetch CalDAV event',
             fn(ResponseInterface $r, int $code) => $this->mapper->handleGetError($code),
@@ -182,21 +218,79 @@ final class CalDavCalendarTool extends AbstractTool
 
     public function createEvent(array $arguments, int $agentId, ?int $userId): ToolResult
     {
+        $prepared = $this->prepareCreateEvent($arguments, $agentId, $userId);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
+        }
+
+        return $this->dispatchCreateEventRequest(
+            $prepared['inputs'],
+            $prepared['dates'],
+            $prepared['config'],
+            $agentId,
+        );
+    }
+
+    /**
+     * @return array{inputs: array{summary: string, start_date: string, end_date: string, description: string, location: string, timezone: string, allDay: bool}, dates: array{start: DateTimeImmutable, end: DateTimeImmutable}, config: array{url: string, username: string, password: string, settings: array<string, mixed>}}|ToolResult
+     */
+    private function prepareCreateEvent(array $arguments, int $agentId, ?int $userId): array|ToolResult
+    {
+        $stage = $this->parseCreateEventStages($arguments, $agentId, $userId);
+        if ($stage instanceof ToolResult) {
+            return $stage;
+        }
+
+        return [
+            'inputs' => $stage['inputs'],
+            'dates'  => $stage['dates'],
+            'config' => $stage['config'],
+        ];
+    }
+
+    /**
+     * @return array{inputs: array{summary: string, start_date: string, end_date: string, description: string, location: string, timezone: string, allDay: bool}, dates: array{start: DateTimeImmutable, end: DateTimeImmutable}, config: array{url: string, username: string, password: string, settings: array<string, mixed>}}|ToolResult
+     */
+    private function parseCreateEventStages(array $arguments, int $agentId, ?int $userId): array|ToolResult
+    {
         $inputs = $this->parseCreateInputs($arguments);
         if ($inputs instanceof ToolResult) {
             return $inputs;
         }
-
         $dates = $this->parseCreateDates($inputs);
         if ($dates instanceof ToolResult) {
             return $dates;
         }
 
+        return $this->assembleCreateEventStage($inputs, $dates, $agentId, $userId);
+    }
+
+    /**
+     * @param array{summary: string, start_date: string, end_date: string, description: string, location: string, timezone: string, allDay: bool} $inputs
+     * @param array{start: DateTimeImmutable, end: DateTimeImmutable} $dates
+     * @return array{inputs: array{summary: string, start_date: string, end_date: string, description: string, location: string, timezone: string, allDay: bool}, dates: array{start: DateTimeImmutable, end: DateTimeImmutable}, config: array{url: string, username: string, password: string, settings: array<string, mixed>}}|ToolResult
+     */
+    private function assembleCreateEventStage(array $inputs, array $dates, int $agentId, ?int $userId): array|ToolResult
+    {
         $config = $this->loadBaseConfig($agentId, $userId);
         if ($config instanceof ToolResult) {
             return $config;
         }
 
+        return [
+            'inputs' => $inputs,
+            'dates'  => $dates,
+            'config' => $config,
+        ];
+    }
+
+    /**
+     * @param array{summary: string, start_date: string, end_date: string, description: string, location: string, timezone: string, allDay: bool} $inputs
+     * @param array{start: DateTimeImmutable, end: DateTimeImmutable} $dates
+     * @param array{url: string, username: string, password: string, settings: array<string, mixed>} $config
+     */
+    private function dispatchCreateEventRequest(array $inputs, array $dates, array $config, int $agentId): ToolResult
+    {
         $eventUri  = rtrim($config['url'], '/') . '/' . ltrim($this->builder->generateEventFilename($inputs['summary'], $dates['start']), '/');
         $icsContent = $this->builder->buildIcs(
             $this->builder->generateUid($agentId),
@@ -240,6 +334,15 @@ final class CalDavCalendarTool extends AbstractTool
             return $config;
         }
 
+        return $this->prepareAndDispatchEditEvent($arguments, $inputs, $config, $agentId);
+    }
+
+    /**
+     * @param array{eventUri: string, etag: string, timezone: string, allDay: bool} $inputs
+     * @param array{url: string, username: string, password: string, settings: array<string, mixed>} $config
+     */
+    private function prepareAndDispatchEditEvent(array $arguments, array $inputs, array $config, int $agentId): ToolResult
+    {
         $eventUri = $this->client->resolveEventUri($inputs['eventUri'], $config['url']);
         $existing = $this->fetchExistingEvent($eventUri, $config);
         if ($existing instanceof ToolResult) {
@@ -251,6 +354,16 @@ final class CalDavCalendarTool extends AbstractTool
             return $updates;
         }
 
+        return $this->dispatchEditEventRequest($eventUri, $inputs, $updates, $config, $agentId);
+    }
+
+    /**
+     * @param array{eventUri: string, etag: string, timezone: string, allDay: bool} $inputs
+     * @param array{uid: ?string, summary: string, start: DateTimeImmutable, end: DateTimeImmutable, description: string, location: string} $updates
+     * @param array{url: string, username: string, password: string, settings: array<string, mixed>} $config
+     */
+    private function dispatchEditEventRequest(string $eventUri, array $inputs, array $updates, array $config, int $agentId): ToolResult
+    {
         $icsContent = $this->builder->buildIcs(
             $updates['uid'] ?? $this->builder->generateUid($agentId),
             $updates['summary'],

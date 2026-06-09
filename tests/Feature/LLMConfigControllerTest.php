@@ -197,7 +197,7 @@ test('configResource() includes context_window and max_tokens_output', function 
     $config->save();
 
     $request = new Symfony\Component\HttpFoundation\Request();
-    $response = $controller->show($request, $config->id);
+    $response = $controller->show($config->id);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 

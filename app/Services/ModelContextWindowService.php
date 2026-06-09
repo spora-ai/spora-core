@@ -6,6 +6,7 @@ namespace Spora\Services;
 
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\HttpClient\ResponseInterface;
 use Throwable;
 
 /**
@@ -59,20 +60,12 @@ final class ModelContextWindowService
                 'timeout' => 10,
             ]);
 
-            if ($response->getStatusCode() !== 200) {
-                return null;
-            }
-
-            /** @var array<string, mixed> $data */
-            $data = $response->toArray();
+            $data = $this->parseOpenAIContextResponse($response);
 
             // OpenAI returns context_window in the response
             $contextWindow = $data['context_window'] ?? $data['max_tokens'] ?? null;
-            if (is_numeric($contextWindow)) {
-                return (int) $contextWindow;
-            }
 
-            return null;
+            return is_numeric($contextWindow) ? (int) $contextWindow : null;
         } catch (Throwable $e) {
             $this->logger?->debug('Failed to fetch OpenAI model context window', [
                 'model' => $model,
@@ -80,5 +73,18 @@ final class ModelContextWindowService
             ]);
             return null;
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function parseOpenAIContextResponse(ResponseInterface $response): array
+    {
+        if ($response->getStatusCode() !== 200) {
+            return [];
+        }
+
+        /** @var array<string, mixed> */
+        return $response->toArray();
     }
 }

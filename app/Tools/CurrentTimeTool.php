@@ -25,7 +25,7 @@ final class CurrentTimeTool extends AbstractTool
 {
     public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
-        return $this->now($arguments, $agentId);
+        return $this->now($arguments);
     }
 
     public function describeAction(array $arguments): string
@@ -33,7 +33,7 @@ final class CurrentTimeTool extends AbstractTool
         return 'Get current date and time';
     }
 
-    public function now(array $arguments, int $agentId): ToolResult
+    public function now(array $arguments): ToolResult
     {
         $now      = new DateTimeImmutable();
         $iso8601  = $now->format(DateTimeInterface::ATOM);

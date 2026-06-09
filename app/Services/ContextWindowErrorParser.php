@@ -76,7 +76,23 @@ final class ContextWindowErrorParser
      */
     private function extractContextWindow(array $data, mixed $message): ?int
     {
-        // Direct fields
+        $limit = $this->extractLimitFromData($data);
+        if ($limit !== null) {
+            return $limit;
+        }
+
+        if (is_string($message)) {
+            return $this->extractLimitFromMessage($message);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function extractLimitFromData(array $data): ?int
+    {
         $limit = $data['max_context_window']
             ?? $data['context_window']
             ?? $data['max_tokens']
@@ -86,19 +102,18 @@ final class ContextWindowErrorParser
             ?? $data['error']['limit']
             ?? null;
 
-        if (is_numeric($limit)) {
-            return (int) $limit;
-        }
+        return is_numeric($limit) ? (int) $limit : null;
+    }
 
+    private function extractLimitFromMessage(string $message): ?int
+    {
         // Try to extract from error message string: "context window exceeds limit (2013)"
-        if (is_string($message)) {
-            if (preg_match('/\b(\d{4,6})\s*(?:token|context|tokens)\b/i', $message, $matches)) {
-                return (int) $matches[1];
-            }
-            // MiniMax-style: "context window exceeds limit (2013)" — the number IS the limit
-            if (preg_match('/limit\s*[\(\[]?\s*(\d{4,6})\s*[\)\]]?/i', $message, $matches)) {
-                return (int) $matches[1];
-            }
+        if (preg_match('/\b(\d{4,6})\s*(?:token|context|tokens)\b/i', $message, $matches)) {
+            return (int) $matches[1];
+        }
+        // MiniMax-style: "context window exceeds limit (2013)" — the number IS the limit
+        if (preg_match('/limit\s*[\(\[]?\s*(\d{4,6})\s*[\)\]]?/i', $message, $matches)) {
+            return (int) $matches[1];
         }
 
         return null;
