@@ -14,6 +14,7 @@ use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\Email\EmailActionDescriber;
 use Spora\Tools\Email\EmailMessageFormatter;
 use Spora\Tools\Email\EmailSettingsResolver;
+use Spora\Tools\Email\EmailValidationHelpers;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
@@ -190,7 +191,7 @@ final class EmailTool extends AbstractTool
         $subject = trim((string) ($arguments['subject'] ?? ''));
         $body    = trim((string) ($arguments['body'] ?? ''));
 
-        $missing = $this->requireNonEmptyStrings(
+        $missing = EmailValidationHelpers::requireNonEmptyStrings(
             ['to' => $to, 'subject' => $subject, 'body' => $body],
             'Missing required parameters: to, subject, or body.',
         );
@@ -222,7 +223,7 @@ final class EmailTool extends AbstractTool
         $subject = trim((string) ($arguments['subject'] ?? ''));
         $body    = trim((string) ($arguments['body'] ?? ''));
 
-        $missing = $this->requireNonEmptyStrings(
+        $missing = EmailValidationHelpers::requireNonEmptyStrings(
             ['to' => $to, 'subject' => $subject, 'body' => $body],
             'Missing required parameters: to, subject, or body.',
         );
@@ -230,7 +231,13 @@ final class EmailTool extends AbstractTool
             return $missing;
         }
 
-        return $this->withValidSmtpSettings($agentId, $userId, $to, function (array $settings) use ($to, $subject, $body): ToolResult {
+        return EmailValidationHelpers::withValidSmtpSettings(
+            $this->settingsResolver,
+            static::class,
+            $agentId,
+            $userId,
+            $to,
+            function (array $settings) use ($to, $subject, $body): ToolResult {
             try {
                 $this->dispatchSmtpEmail($settings, $to, $subject, $body);
             } catch (Throwable $e) {
@@ -246,7 +253,7 @@ final class EmailTool extends AbstractTool
     public function createFolder(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $name = trim((string) ($arguments['new_folder'] ?? ''));
-        $missing = $this->requireNonEmptyStrings(
+        $missing = EmailValidationHelpers::requireNonEmptyStrings(
             ['new_folder' => $name],
             'Missing required parameter: new_folder (folder name) is required for create_folder.',
         );
@@ -254,7 +261,16 @@ final class EmailTool extends AbstractTool
             return $missing;
         }
 
-        $guard = $this->withExistingFolderGuard($agentId, $userId, $name, false);
+        $guard = EmailValidationHelpers::withExistingFolderGuard(
+            $this->settingsResolver,
+            $this->imapClient,
+            $this->messageFormatter,
+            static::class,
+            $agentId,
+            $userId,
+            $name,
+            false,
+        );
         if ($guard instanceof ToolResult) {
             return $guard;
         }
@@ -272,7 +288,7 @@ final class EmailTool extends AbstractTool
         $oldName = trim((string) ($arguments['folder'] ?? ''));
         $newName = trim((string) ($arguments['new_folder'] ?? ''));
 
-        $missing = $this->requireNonEmptyStrings(
+        $missing = EmailValidationHelpers::requireNonEmptyStrings(
             ['folder' => $oldName, 'new_folder' => $newName],
             'Missing required parameters: folder (old name) and new_folder (new name) are required for rename_folder.',
         );
@@ -292,7 +308,7 @@ final class EmailTool extends AbstractTool
     public function deleteFolder(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $name = trim((string) ($arguments['folder'] ?? ''));
-        $missing = $this->requireNonEmptyStrings(
+        $missing = EmailValidationHelpers::requireNonEmptyStrings(
             ['folder' => $name],
             'Missing required parameter: folder name is required for delete_folder.',
         );
@@ -300,7 +316,16 @@ final class EmailTool extends AbstractTool
             return $missing;
         }
 
-        $guard = $this->withExistingFolderGuard($agentId, $userId, $name, true);
+        $guard = EmailValidationHelpers::withExistingFolderGuard(
+            $this->settingsResolver,
+            $this->imapClient,
+            $this->messageFormatter,
+            static::class,
+            $agentId,
+            $userId,
+            $name,
+            true,
+        );
         if ($guard instanceof ToolResult) {
             return $guard;
         }
@@ -387,24 +412,6 @@ final class EmailTool extends AbstractTool
     }
 
     /**
-     * Validate that every provided trimmed string is non-empty. Returns a
-     * failure `ToolResult` for the first empty value, or `null` when all are
-     * populated. Folds the 3-line empty-string guard into a single call.
-     *
-     * @param array<string, string> $values Map of label -> value (label is used in the error message).
-     * @param string                $message Error message to surface when any value is empty.
-     */
-    private function requireNonEmptyStrings(array $values, string $message): ?ToolResult
-    {
-        foreach ($values as $value) {
-            if (trim($value) === '') {
-                return ToolResult::fail($message);
-            }
-        }
-        return null;
-    }
-
-    /**
      * Run a callback against a resolved IMAP settings array, returning the
      * resolver's error verbatim if settings are incomplete. Keeps operations
      * to a single return point by hiding the imap-or-fail branch.
@@ -418,66 +425,6 @@ final class EmailTool extends AbstractTool
             return $imapSettings;
         }
         return $callback($imapSettings);
-    }
-
-    /**
-     * Run a callback against fully-validated SMTP settings for the given
-     * recipient. Hides the fetch + `validateSmtpSettings` branches and
-     * returns the resolver's error (incomplete config or recipient rejected
-     * by the allowlist) verbatim, mirroring `withImapSettings`.
-     *
-     * @param callable(array<string, mixed>): ToolResult $callback
-     */
-    private function withValidSmtpSettings(int $agentId, ?int $userId, string $to, callable $callback): ToolResult
-    {
-        $settings  = $this->settingsResolver->fetchSettings(static::class, $agentId, $userId);
-        $smtpCheck = $this->settingsResolver->validateSmtpSettings($settings, $to);
-        if ($smtpCheck instanceof ToolResult) {
-            return $smtpCheck;
-        }
-        return $callback($settings);
-    }
-
-    /**
-     * Resolve IMAP settings, fetch the current folder list, and verify that
-     * `$name` matches the requested existence check. Used by `createFolder`
-     * (must NOT exist) and `deleteFolder` (MUST exist). Hides the imap-or-fail
-     * branch, the fetch exception, and the membership check behind one helper
-     * so the public methods keep their return counts low.
-     *
-     * - Returns a `ToolResult` (failure) when settings are incomplete, the
-     *   folder list cannot be fetched, or the existence check fails.
-     * - Returns the resolved `array<string, mixed>` of IMAP settings plus
-     *   the validated folder list when the check passes.
-     *
-     * @return array{settings: array<string, mixed>, folders: list<string>}|ToolResult
-     */
-    private function withExistingFolderGuard(
-        int $agentId,
-        ?int $userId,
-        string $name,
-        bool $mustExist,
-    ): array|ToolResult {
-        $imapSettings = $this->settingsResolver->resolveImapSettingsOrFail(static::class, $agentId, $userId);
-        if ($imapSettings instanceof ToolResult) {
-            return $imapSettings;
-        }
-
-        try {
-            $existingFolders = $this->imapClient->fetchFolderNames($imapSettings);
-        } catch (Throwable $e) {
-            return $this->messageFormatter->formatImapError('Failed to fetch folders', $e);
-        }
-
-        $exists = in_array($name, $existingFolders, true);
-        if ($mustExist && !$exists) {
-            return ToolResult::ok("Folder '{$name}' does not exist.");
-        }
-        if (!$mustExist && $exists) {
-            return ToolResult::ok("Folder '{$name}' already exists.");
-        }
-
-        return ['settings' => $imapSettings, 'folders' => $existingFolders];
     }
 
     /**
