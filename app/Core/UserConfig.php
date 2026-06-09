@@ -6,11 +6,18 @@ namespace Spora\Core;
 
 final class UserConfig
 {
+    /** @var array<string, array> */
+    private static array $cache = [];
+
     public static function load(string $path): array
     {
         if (!file_exists($path)) {
             return [];
         }
-        return require_once $path;
+        if (!isset(self::$cache[$path])) {
+            $loaded = require $path;
+            self::$cache[$path] = is_array($loaded) ? $loaded : [];
+        }
+        return self::$cache[$path];
     }
 }
