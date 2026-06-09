@@ -193,17 +193,43 @@ HELP);
         int $port,
         array $config,
     ): ?int {
-        // Validate db_name BEFORE the missing-config scan. An injection-shaped
-        // db_name is the most dangerous input we can receive — refusing it
-        // first means it never reaches the rest of the config-reading path,
-        // and the error message can name the bad value unambiguously.
+        foreach ([
+            $this->validateMysqlName($io, $name),
+            $this->validateMysqlConfig($io, $config),
+            $this->confirmMysqlResetPrecondition($io, $force, $name, $host, $port),
+        ] as $result) {
+            if ($result !== null) {
+                return $result;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Validate db_name BEFORE the missing-config scan. An injection-shaped
+     * db_name is the most dangerous input we can receive — refusing it
+     * first means it never reaches the rest of the config-reading path,
+     * and the error message can name the bad value unambiguously.
+     */
+    private function validateMysqlName(SymfonyStyle $io, string $name): ?int
+    {
         if (!preg_match('/^[\x{0080}-\x{FFFF}a-zA-Z_\$][\x{0080}-\x{FFFF}a-zA-Z0-9_\$]{0,63}$/u', $name)) {
             $io->error("Invalid MySQL identifier for db_name: {$name}");
             return Command::FAILURE;
         }
 
-        // `empty()` would false-positive on a password literally equal to "0"
-        // and raise a notice on absent keys — check string-presence directly.
+        return null;
+    }
+
+    /**
+     * `empty()` would false-positive on a password literally equal to "0"
+     * and raise a notice on absent keys — check string-presence directly.
+     *
+     * @param array<string, mixed> $config
+     */
+    private function validateMysqlConfig(SymfonyStyle $io, array $config): ?int
+    {
         $missing = [];
         foreach (['db_host' => 'SPORA_DB_HOST', 'db_user' => 'SPORA_DB_USER', 'db_password' => 'SPORA_DB_PASSWORD'] as $key => $env) {
             $value = $config[$key] ?? null;
@@ -217,6 +243,11 @@ HELP);
             return Command::FAILURE;
         }
 
+        return null;
+    }
+
+    private function confirmMysqlResetPrecondition(SymfonyStyle $io, bool $force, string $name, ?string $host, int $port): ?int
+    {
         if (!$force && !$this->confirmMysqlReset($io, $name, $host, $port)) {
             return Command::FAILURE;
         }
