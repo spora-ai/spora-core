@@ -115,10 +115,19 @@ final class PluginLoaderCache
             return null;
         }
 
+        return $this->extractPluginsList($decoded);
+    }
+
+    /**
+     * @param mixed $decoded
+     *
+     * @return list<array<string, mixed>>|null
+     */
+    private function extractPluginsList(mixed $decoded): ?array
+    {
         if (!is_array($decoded) || !isset($decoded['plugins']) || !is_array($decoded['plugins'])) {
             return null;
         }
-
         return $decoded['plugins'];
     }
 
