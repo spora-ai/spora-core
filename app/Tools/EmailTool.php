@@ -261,7 +261,7 @@ final class EmailTool extends AbstractTool
             return $missing;
         }
 
-        $guard = EmailValidationHelpers::withExistingFolderGuard(
+        $guard = EmailValidationHelpers::withNewFolderGuard(
             $this->settingsResolver,
             $this->imapClient,
             $this->messageFormatter,
@@ -269,7 +269,6 @@ final class EmailTool extends AbstractTool
             $agentId,
             $userId,
             $name,
-            false,
         );
         if ($guard instanceof ToolResult) {
             return $guard;
@@ -324,7 +323,6 @@ final class EmailTool extends AbstractTool
             $agentId,
             $userId,
             $name,
-            true,
         );
         if ($guard instanceof ToolResult) {
             return $guard;

@@ -9,25 +9,17 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
 /**
- * Stateless validation and "guard" helpers shared by the Email tool. Pulled out
- * of {@see \Spora\Tools\EmailTool} to keep that class's method count and
- * per-method return counts under the SonarQube `S1448` / `S1142` caps without
- * changing the public API.
+ * Validation and "guard" helpers for {@see \Spora\Tools\EmailTool}, pulled out
+ * so the tool's method count and per-method return counts stay under the
+ * SonarQube `S1448` / `S1142` caps without changing its public API.
  *
- * All methods are static: the inputs are explicit parameters (no hidden
- * instance state), and the helpers compose into the public methods through
- * simple call-site glue. The shape mirrors {@see \Spora\Agents\SchemaValidator}
- * (final class, all-static, no constructor).
+ * All-static and stateless: each call passes the collaborators it needs as
+ * arguments. Same shape as {@see \Spora\Agents\SchemaValidator}.
  */
 final class EmailValidationHelpers
 {
     /**
-     * Validate that every provided trimmed string is non-empty. Returns a
-     * failure `ToolResult` for the first empty value, or `null` when all are
-     * populated.
-     *
-     * @param array<string, string> $values  Map of label -> value (label is used in the error message).
-     * @param string                $message Error message to surface when any value is empty.
+     * @param array<string, string> $values  label -> value; the label is included in the error.
      */
     public static function requireNonEmptyStrings(array $values, string $message): ?ToolResult
     {
@@ -40,13 +32,11 @@ final class EmailValidationHelpers
     }
 
     /**
-     * Run a callback against fully-validated SMTP settings for the given
-     * recipient. Hides the fetch + `validateSmtpSettings` branches and
-     * returns the resolver's error (incomplete config or recipient rejected
-     * by the allowlist) verbatim, mirroring `withImapSettings`.
+     * Mirrors {@see \Spora\Tools\EmailTool::withImapSettings()} for the SMTP
+     * path: resolves settings, runs the allowlist check, and only invokes the
+     * callback on success.
      *
-     * @param EmailSettingsResolver                              $resolver
-     * @param callable(array<string, mixed>): ToolResult         $callback
+     * @param callable(array<string, mixed>): ToolResult $callback
      */
     public static function withValidSmtpSettings(
         EmailSettingsResolver $resolver,
@@ -65,16 +55,24 @@ final class EmailValidationHelpers
     }
 
     /**
-     * Resolve IMAP settings, fetch the current folder list, and verify that
-     * `$name` matches the requested existence check. Used by `createFolder`
-     * (must NOT exist) and `deleteFolder` (MUST exist). Hides the imap-or-fail
-     * branch, the fetch exception, and the membership check behind one helper
-     * so the public methods keep their return counts low.
+     * Precondition for `createFolder`: `$name` must not already exist.
      *
-     * - Returns a `ToolResult` (failure) when settings are incomplete, the
-     *   folder list cannot be fetched, or the existence check fails.
-     * - Returns the resolved `array<string, mixed>` of IMAP settings plus
-     *   the validated folder list when the check passes.
+     * @return array{settings: array<string, mixed>, folders: list<string>}|ToolResult
+     */
+    public static function withNewFolderGuard(
+        EmailSettingsResolver $resolver,
+        ImapClientInterface $imap,
+        EmailMessageFormatter $formatter,
+        string $toolClass,
+        int $agentId,
+        ?int $userId,
+        string $name,
+    ): array|ToolResult {
+        return self::checkFolderInvariant($resolver, $imap, $formatter, $toolClass, $agentId, $userId, $name, mustExist: false);
+    }
+
+    /**
+     * Precondition for `deleteFolder`: `$name` must already exist.
      *
      * @return array{settings: array<string, mixed>, folders: list<string>}|ToolResult
      */
@@ -86,24 +84,11 @@ final class EmailValidationHelpers
         int $agentId,
         ?int $userId,
         string $name,
-        bool $mustExist,
     ): array|ToolResult {
-        $payload = self::resolveImapFoldersOrFail($resolver, $imap, $formatter, $toolClass, $agentId, $userId);
-        if ($payload instanceof ToolResult) {
-            return $payload;
-        }
-        $failure = self::folderExistenceFailure($name, $mustExist, $payload['folders']);
-        if ($failure !== null) {
-            return $failure;
-        }
-        return $payload;
+        return self::checkFolderInvariant($resolver, $imap, $formatter, $toolClass, $agentId, $userId, $name, mustExist: true);
     }
 
     /**
-     * Resolve IMAP settings and fetch the current folder list. Returns the
-     * payload `{settings, folders}` on success, or a `ToolResult` failure if
-     * either step fails.
-     *
      * @return array{settings: array<string, mixed>, folders: list<string>}|ToolResult
      */
     private static function resolveImapFoldersOrFail(
@@ -127,9 +112,6 @@ final class EmailValidationHelpers
     }
 
     /**
-     * Build the existence-check failure message for a folder operation, or
-     * return `null` if the current state matches the requested invariant.
-     *
      * @param list<string> $existingFolders
      */
     private static function folderExistenceFailure(string $name, bool $mustExist, array $existingFolders): ?ToolResult
@@ -142,5 +124,29 @@ final class EmailValidationHelpers
             return ToolResult::ok("Folder '{$name}' already exists.");
         }
         return null;
+    }
+
+    /**
+     * @return array{settings: array<string, mixed>, folders: list<string>}|ToolResult
+     */
+    private static function checkFolderInvariant(
+        EmailSettingsResolver $resolver,
+        ImapClientInterface $imap,
+        EmailMessageFormatter $formatter,
+        string $toolClass,
+        int $agentId,
+        ?int $userId,
+        string $name,
+        bool $mustExist,
+    ): array|ToolResult {
+        $payload = self::resolveImapFoldersOrFail($resolver, $imap, $formatter, $toolClass, $agentId, $userId);
+        if ($payload instanceof ToolResult) {
+            return $payload;
+        }
+        $failure = self::folderExistenceFailure($name, $mustExist, $payload['folders']);
+        if ($failure !== null) {
+            return $failure;
+        }
+        return $payload;
     }
 }
