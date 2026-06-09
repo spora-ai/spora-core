@@ -91,25 +91,22 @@ test('All three controllers share a consistent constructor surface', function ()
 });
 
 test('Route registration wires agent tool + override routes to the new controllers', function (): void {
-    $routeFile = BASE_PATH . '/app/Core/routes.php';
+    $routeFile = (new ReflectionClass(\Spora\Core\RouteDefinitions::class))->getFileName();
     expect(is_file($routeFile))->toBeTrue();
     $contents = (string) file_get_contents($routeFile);
 
-    // AgentToolController should now own tool enablement / status / operations routes.
     expect($contents)->toContain('[AgentToolController::class, \'enableTool\']');
     expect($contents)->toContain('[AgentToolController::class, \'disableTool\']');
     expect($contents)->toContain('[AgentToolController::class, \'getToolStatus\']');
     expect($contents)->toContain('[AgentToolController::class, \'getToolsStatus\']');
     expect($contents)->toContain('[AgentToolController::class, \'getToolsOperations\']');
 
-    // AgentOverrideController should own the override + operation-override routes.
     expect($contents)->toContain('[AgentOverrideController::class, \'getOverride\']');
     expect($contents)->toContain('[AgentOverrideController::class, \'putOverride\']');
     expect($contents)->toContain('[AgentOverrideController::class, \'deleteOverride\']');
     expect($contents)->toContain('[AgentOverrideController::class, \'getOperationOverride\']');
     expect($contents)->toContain('[AgentOverrideController::class, \'patchOperationOverride\']');
 
-    // The thin CRUD controller should no longer own any of the moved methods.
     foreach (['enableTool', 'disableTool', 'getToolStatus', 'getToolsStatus', 'getToolsOperations', 'getOverride', 'putOverride', 'deleteOverride', 'getOperationOverride', 'patchOperationOverride'] as $moved) {
         expect($contents)
             ->not->toContain('[AgentController::class, \'' . $moved . '\']');
