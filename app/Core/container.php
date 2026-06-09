@@ -76,8 +76,7 @@ return [
         // Shared hosting users set all values here, including db_password.
         $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: BASE_PATH . '/config.php');
         // require (not require_once): tests reload config per-case for isolation.
-        // nosonar: php:S2003 — require_once would return true on subsequent includes, breaking test isolation
-        $fileConfig = file_exists($configPath) ? require $configPath : [];
+        $fileConfig = file_exists($configPath) ? require $configPath : []; // NOSONAR php:S2003 - require_once would break test isolation
 
         // Layer 3 — SPORA_* env vars (highest priority; Docker / VPS / CI)
         // Priority: OS env > .env file > config.php (dotenv has already run by this point)

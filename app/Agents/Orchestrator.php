@@ -605,7 +605,7 @@ final class Orchestrator implements OrchestratorInterface
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
             if ($task->status !== 'PENDING_APPROVAL') {
-                throw new InvalidArgumentException("Task {$taskId} is not awaiting approval.");
+                throw new InvalidTaskTransitionException("Task {$taskId} is not awaiting approval.");
             }
 
             $state = $task->pending_state === null
@@ -781,7 +781,7 @@ final class Orchestrator implements OrchestratorInterface
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
             if ($task->status !== 'PENDING_APPROVAL') {
-                throw new InvalidArgumentException("Task {$taskId} is not awaiting approval.");
+                throw new InvalidTaskTransitionException("Task {$taskId} is not awaiting approval.");
             }
             if ($task->pending_state === null) {
                 $state = new AgentState(taskId: $task->id, agentId: $task->agent_id, pendingToolCalls: [], messageSnapshot: [], stepCount: $task->step_count, maxSteps: $task->max_steps, pausedAt: date(self::ISO8601_UTC));

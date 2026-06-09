@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Services\EmailTemplateLoader;
+use Spora\Services\Exceptions\EmailTemplateParseException;
 
 describe('EmailTemplateLoader', function (): void {
 
@@ -83,6 +84,27 @@ describe('EmailTemplateLoader', function (): void {
 
             $templates = $loader->getAll();
             expect($templates)->not->toBeEmpty();
+        });
+    });
+
+    describe('parse error handling', function (): void {
+        // Cover the EmailTemplateParseException throw at
+        // app/Services/EmailTemplateLoader.php:56 by dropping a malformed YAML
+        // file into the templates directory, triggering the catch branch, and
+        // cleaning up afterwards.
+        it('throws EmailTemplateParseException when a template YAML is malformed', function (): void {
+            $badFile = BASE_PATH . '/email-templates/_bad_test_' . uniqid() . '.yaml';
+            // Intentionally invalid YAML — unterminated flow mapping.
+            file_put_contents($badFile, "name: bad\nsubject: [: oops\n");
+
+            try {
+                $loader = makeLoader();
+
+                expect(fn() => $loader->getAll())
+                    ->toThrow(EmailTemplateParseException::class);
+            } finally {
+                @unlink($badFile);
+            }
         });
     });
 
