@@ -33,7 +33,7 @@ final class CurrentTimeTool extends AbstractTool
         return 'Get current date and time';
     }
 
-    public function now(array $arguments): ToolResult
+    public function now(array $arguments): ToolResult // NOSONAR php:S1172 — required by HasOperations dispatch trait
     {
         $now      = new DateTimeImmutable();
         $iso8601  = $now->format(DateTimeInterface::ATOM);

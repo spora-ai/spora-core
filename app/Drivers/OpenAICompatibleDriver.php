@@ -22,9 +22,11 @@ use Spora\Tools\Attributes\ToolSetting;
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
 final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 {
+    private const PROVIDER_KEY = 'openai_compatible';
+
     public function getProviderName(): string
     {
-        return 'openai_compatible';
+        return self::PROVIDER_KEY;
     }
 
     public function complete(LLMRequest $request): LLMResponse
@@ -128,7 +130,7 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 
     public static function getName(): string
     {
-        return 'openai_compatible';
+        return self::PROVIDER_KEY;
     }
 
     public static function getDisplayName(): string
