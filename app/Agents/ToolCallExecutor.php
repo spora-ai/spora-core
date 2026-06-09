@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\Agents;
 
 use Spora\Agents\Exceptions\ToolNotEnabledException;
-use Spora\Agents\SchemaValidator;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;

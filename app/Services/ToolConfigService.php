@@ -223,7 +223,11 @@ class ToolConfigService implements ToolConfigServiceInterface
             }
         }
 
-        return $merged;
+        // Multi-select values travel through the form as JSON-encoded strings
+        // (the form layer is Record<string, string>), so the cryptographer
+        // round-trips them as literal strings. Decode them back to arrays so
+        // tool `execute()` and the LLM-facing projection see a list<int>.
+        return $this->schema->normalizeMultiSelectValues($toolClass, $merged);
     }
 
     /**

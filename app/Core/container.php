@@ -422,8 +422,11 @@ return [
     },
 
     HandoverServiceInterface::class => static function (ContainerInterface $c): HandoverServiceInterface {
+        // Closure defers OrchestratorInterface resolution until HandoverService::handover()
+        // is called. Direct injection would create a cycle: Orchestrator → tool_instances
+        // → HandoverTool → HandoverService → Orchestrator. Same pattern as SeedCommand above.
         return new HandoverService(
-            $c->get(OrchestratorInterface::class),
+            static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
         );
     },
 

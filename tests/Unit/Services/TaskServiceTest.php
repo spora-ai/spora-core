@@ -557,7 +557,7 @@ describe('TaskService — getTaskWithHistory', function (): void {
             'tool_class'           => Spora\Tools\HandoverTool::class,
             'tool_type'            => 'output',
             'operation'            => 'handover',
-            'operation_description'=> 'Hand over to another agent',
+            'operation_description' => 'Hand over to another agent',
             'status'               => 'EXECUTED',
             'proposed_arguments'   => ['target_agent_id' => 1],
             'approved_arguments'   => ['target_agent_id' => 1],

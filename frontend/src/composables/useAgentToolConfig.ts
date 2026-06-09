@@ -31,6 +31,11 @@ export function buildAgentOverridePayload(
 /**
  * Initialize form state from settings with source annotation.
  * Returns the form values with source = 'agent' pre-filled.
+ *
+ * Array values (e.g. multi-select settings) are JSON-stringified so the
+ * form keeps its `Record<string, string>` shape while preserving the
+ * structure of the array. The form input components are responsible for
+ * parsing the string back when they need an array.
  */
 export function initFormFromSettingsWithSource(
   settingsWithSource: SettingsWithSource,
@@ -39,7 +44,13 @@ export function initFormFromSettingsWithSource(
 
   for (const [key, item] of Object.entries(settingsWithSource)) {
     if (item.source === 'agent') {
-      form[key] = item.value == null ? '' : String(item.value)
+      if (item.value == null) {
+        form[key] = ''
+      } else if (Array.isArray(item.value)) {
+        form[key] = JSON.stringify(item.value)
+      } else {
+        form[key] = String(item.value)
+      }
     }
   }
 

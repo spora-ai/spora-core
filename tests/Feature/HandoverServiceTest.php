@@ -16,7 +16,7 @@ function makeHandoverService(): array
 {
     $orchestrator = Mockery::mock(OrchestratorInterface::class);
 
-    return [new HandoverService($orchestrator), $orchestrator];
+    return [new HandoverService(static fn(): OrchestratorInterface => $orchestrator), $orchestrator];
 }
 
 /**

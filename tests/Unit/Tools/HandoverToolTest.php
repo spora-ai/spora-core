@@ -7,7 +7,6 @@ use Spora\Models\Task;
 use Spora\Services\HandoverServiceInterface;
 use Spora\Services\ToolConfigServiceInterface;
 use Spora\Tools\HandoverTool;
-use Spora\Tools\ValueObjects\ToolResult;
 
 const HANDOVER_AGENT_ID = 1;
 const HANDOVER_USER_ID  = 42;
@@ -134,7 +133,11 @@ describe('HandoverTool::execute', function (): void {
         expect($result->success)->toBeTrue()
             ->and($result->data['handover'])->toBeTrue()
             ->and($result->data['new_task_id'])->toBe(HANDOVER_NEW_TASK_ID)
-            ->and($result->data['target_agent_id'])->toBe(HANDOVER_TARGET_AGENT);
+            ->and($result->data['target_agent_id'])->toBe(HANDOVER_TARGET_AGENT)
+            // The content is rendered as markdown in the chat UI, so the
+            // "New task #N" reference is a clickable link to the new task.
+            ->and($result->content)->toContain("Handed over to agent #" . HANDOVER_TARGET_AGENT)
+            ->and($result->content)->toContain("[New task #" . HANDOVER_NEW_TASK_ID . "](/tasks/" . HANDOVER_NEW_TASK_ID . ")");
     });
 });
 

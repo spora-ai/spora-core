@@ -5,7 +5,8 @@
  * and the LLM Capabilities section.
  */
 import { mount } from '@vue/test-utils'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
+import { setActivePinia, createPinia } from 'pinia'
 import AgentToolActiveSettingsPanel from '@/components/agent/AgentToolActiveSettingsPanel.vue'
 import type { ToolSchema } from '@/composables/useToolSettings'
 
@@ -27,6 +28,12 @@ function mountPanel(settingsWithSource: Parameters<typeof AgentToolActiveSetting
 }
 
 describe('AgentToolActiveSettingsPanel', () => {
+  beforeEach(() => {
+    // The panel calls useAgentStore() to resolve multi-select agent IDs
+    // back to human-readable names.
+    setActivePinia(createPinia())
+  })
+
   it('renders every field with its masked value and a source label', () => {
     const wrapper = mountPanel({
       api_key: { value: 'sk-123', source: 'agent' },

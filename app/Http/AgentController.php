@@ -47,7 +47,7 @@ final class AgentController
         if (is_string($select) && $select !== '') {
             $columns = array_values(array_filter(array_map('trim', explode(',', $select)), static fn(string $c): bool => $c !== ''));
             if ($columns !== []) {
-                $agents = \Spora\Models\Agent::where('user_id', $userId)
+                $agents = Agent::where('user_id', $userId)
                     ->orderBy('name')
                     ->get($columns)
                     ->all();

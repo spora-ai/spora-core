@@ -1046,9 +1046,15 @@ final class Orchestrator implements OrchestratorInterface
 
         $lines = [];
         foreach ($llmSettings as $setting) {
-            $display = $setting['value'] === null || $setting['value'] === ''
-                ? '(not configured)'
-                : (string) $setting['value'];
+            $value = $setting['value'];
+            if ($value === null || $value === '' || $value === []) {
+                $display = '(not configured)';
+            } elseif (is_array($value)) {
+                // list<string> from a multi-select, or a list of agent "Name (#id)" pairs.
+                $display = implode(', ', array_map(static fn($v) => is_scalar($v) ? (string) $v : json_encode($v), $value));
+            } else {
+                $display = (string) $value;
+            }
             $lines[] = '- ' . $setting['label'] . ': ' . $display;
         }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Tools;
 
+use InvalidArgumentException;
 use Spora\Services\HandoverServiceInterface;
 use Spora\Services\ToolConfigServiceInterface;
 use Spora\Tools\Attributes\Tool;
@@ -107,13 +108,17 @@ final class HandoverTool extends AbstractTool
                 summary: $summary,
                 userId: $userId,
             );
-        } catch (\InvalidArgumentException $e) {
+        } catch (InvalidArgumentException $e) {
             return new ToolResult(false, $e->getMessage());
         }
 
         return new ToolResult(
             success: true,
-            content: "Handed over to agent #{$targetAgentId}. New task #{$newTask->id}.",
+            // The result is rendered as markdown in the chat UI, so the
+            // "[New task #N](/tasks/N)" link becomes a clickable link to the
+            // new task. The data payload also carries new_task_id for any
+            // consumer that wants to render its own link.
+            content: "Handed over to agent #{$targetAgentId}. [New task #{$newTask->id}](/tasks/{$newTask->id}).",
             data: [
                 'handover'         => true,
                 'new_task_id'      => $newTask->id,

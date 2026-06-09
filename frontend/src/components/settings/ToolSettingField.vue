@@ -57,17 +57,29 @@ const multiSelectLoading = ref(false)
 const multiSelectEndpoint = computed(() =>
   props.field.multi_select_options_endpoint ?? '/agents?select=id,name',
 )
+// The parent form is a Record<string, string>, so multi-select values are
+// transported as JSON-encoded strings (e.g. "[1,5,7]"). Parse them here so
+// the checkbox state stays in sync regardless of whether the value arrived
+// as an array, a JSON string, or a legacy raw value.
 const multiSelectSelected = computed<number[]>(() => {
   const v = props.modelValue
-  return Array.isArray(v) ? v.map(Number) : []
+  if (Array.isArray(v)) return v.map(Number)
+  if (typeof v === 'string' && v !== '') {
+    try {
+      const parsed = JSON.parse(v)
+      if (Array.isArray(parsed)) return parsed.map(Number)
+    } catch { /* fall through */ }
+  }
+  return []
 })
 
 onMounted(async () => {
   if (props.field.type !== 'multi-select') return
   multiSelectLoading.value = true
   try {
-    const res = await api.get<{ data: { agents: Array<{ id: number; name: string }> } }>(multiSelectEndpoint.value)
-    multiSelectOptions.value = res.data.agents
+    // api.get already unwraps body.data (see api/client.ts), so the shape is { agents: [...] }.
+    const res = await api.get<{ agents: Array<{ id: number; name: string }> }>(multiSelectEndpoint.value)
+    multiSelectOptions.value = res.agents ?? []
   } finally {
     multiSelectLoading.value = false
   }
@@ -77,7 +89,9 @@ function toggleMultiSelect(id: number, checked: boolean): void {
   const next = checked
     ? [...multiSelectSelected.value, id]
     : multiSelectSelected.value.filter(x => x !== id)
-  emit('update:modelValue', next)
+  // Emit a JSON string so the parent's `String($event ?? '')` is a no-op and
+  // the form keeps a Record<string, string> shape without losing the array.
+  emit('update:modelValue', JSON.stringify(next))
 }
 </script>
 

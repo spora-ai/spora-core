@@ -215,11 +215,12 @@ describe('ToolSettingField', () => {
     })
 
     it('renders one checkbox per agent from the default endpoint', async () => {
+      // api.get unwraps body.data, so the picker sees the agents array directly.
       mockApi.get.mockResolvedValueOnce({
-        data: { agents: [
+        agents: [
           { id: 1, name: 'Legal Agent' },
           { id: 2, name: 'Sales Agent' },
-        ] },
+        ],
       })
 
       const wrapper = mount(ToolSettingField, {
@@ -241,7 +242,7 @@ describe('ToolSettingField', () => {
     })
 
     it('uses the override endpoint when multi_select_options_endpoint is set', async () => {
-      mockApi.get.mockResolvedValueOnce({ data: { agents: [] } })
+      mockApi.get.mockResolvedValueOnce({ agents: [] })
 
       const wrapper = mount(ToolSettingField, {
         props: {
@@ -262,10 +263,10 @@ describe('ToolSettingField', () => {
 
     it('checking a checkbox emits a number[] with the new state', async () => {
       mockApi.get.mockResolvedValueOnce({
-        data: { agents: [
+        agents: [
           { id: 1, name: 'Legal' },
           { id: 2, name: 'Sales' },
-        ] },
+        ],
       })
 
       const wrapper = mount(ToolSettingField, {
@@ -284,17 +285,19 @@ describe('ToolSettingField', () => {
 
       const events = wrapper.emitted('update:modelValue')
       expect(events).toBeTruthy()
-      // First checkbox → [1]; second checkbox → [1, 2]
-      expect(events![0][0]).toEqual([1])
-      expect(events![1][0]).toEqual([1, 2])
+      // The picker emits a JSON-encoded string so the parent's
+      // `String($event ?? '')` coercion in the override form doesn't
+      // collapse the array. The form initializer parses it back.
+      expect(events![0][0]).toEqual('[1]')
+      expect(events![1][0]).toEqual('[1,2]')
     })
 
     it('unchecking a checkbox removes the id from the emitted array', async () => {
       mockApi.get.mockResolvedValueOnce({
-        data: { agents: [
+        agents: [
           { id: 1, name: 'Legal' },
           { id: 2, name: 'Sales' },
-        ] },
+        ],
       })
 
       const wrapper = mount(ToolSettingField, {
@@ -311,16 +314,16 @@ describe('ToolSettingField', () => {
 
       const events = wrapper.emitted('update:modelValue')
       expect(events).toBeTruthy()
-      expect(events![0][0]).toEqual([2])
+      expect(events![0][0]).toEqual('[2]')
     })
 
     it('selected IDs round-trip: existing selection is reflected as checked', async () => {
       mockApi.get.mockResolvedValueOnce({
-        data: { agents: [
+        agents: [
           { id: 1, name: 'Legal' },
           { id: 2, name: 'Sales' },
           { id: 3, name: 'Support' },
-        ] },
+        ],
       })
 
       const wrapper = mount(ToolSettingField, {
@@ -340,9 +343,9 @@ describe('ToolSettingField', () => {
 
     it('preserves an empty array selection (required field)', async () => {
       mockApi.get.mockResolvedValueOnce({
-        data: { agents: [
+        agents: [
           { id: 1, name: 'Legal' },
-        ] },
+        ],
       })
 
       const wrapper = mount(ToolSettingField, {

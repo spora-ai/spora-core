@@ -7,7 +7,7 @@
  * "default"). When the tool exposes LLM-facing fields, those get a
  * dedicated "LLM Capabilities" section.
  */
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 import type { ToolSchema, SettingsWithSource } from '@/composables/useToolSettings'
 import {
@@ -18,17 +18,26 @@ import {
   isPasswordField as checkPasswordField,
   maskPasswordValue,
 } from '@/composables/useAgentToolConfig'
+import { useAgentStore } from '@/stores/agent'
 
 const props = defineProps<{
   tool: ToolSchema
   settingsWithSource: SettingsWithSource
 }>()
 
+const agentStore = useAgentStore()
+
 const llmExposedFields = computed(() =>
   (props.tool.settings_schema ?? []).filter((f) => f.expose_to_llm),
 )
 
 const hasAnyEffectiveSettings = computed(() => checkAnyEffective(props.settingsWithSource))
+
+onMounted(() => {
+  if (agentStore.agents.length === 0) {
+    agentStore.fetchAgents()
+  }
+})
 
 function getSource(key: string): string {
   return resolveSource(props.settingsWithSource, key)
@@ -38,9 +47,27 @@ function isPasswordField(key: string): boolean {
   return checkPasswordField(props.tool, key)
 }
 
+function isFieldEmpty(key: string): boolean {
+  const v = props.settingsWithSource[key]?.value
+  if (v == null) return true
+  if (typeof v === 'string') return v === ''
+  if (Array.isArray(v)) return v.length === 0
+  return false
+}
+
+function agentName(id: number): string {
+  return agentStore.agents.find((a) => a.id === id)?.name ?? `#${id}`
+}
+
 function getMaskedValue(key: string): string {
+  const field = props.tool.settings_schema.find((f) => f.key === key)
   const item = props.settingsWithSource[key]
-  return maskPasswordValue(item?.value, isPasswordField(key))
+  const value = item?.value
+  if (field?.type === 'multi-select' && Array.isArray(value)) {
+    if (value.length === 0) return '—'
+    return value.map((id) => agentName(Number(id))).join(', ')
+  }
+  return maskPasswordValue(value, isPasswordField(key))
 }
 </script>
 
@@ -61,6 +88,7 @@ function getMaskedValue(key: string): string {
                 {{ getMaskedValue(field.key) }}
               </span>
               <span
+                v-if="!isFieldEmpty(field.key)"
                 class="text-xs px-1.5 py-0.5 rounded"
                 :class="getSourceBadgeClass(getSource(field.key))"
               >

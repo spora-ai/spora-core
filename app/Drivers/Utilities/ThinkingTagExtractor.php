@@ -31,7 +31,7 @@ final class ThinkingTagExtractor
             $trimmed   = trim($reasoning);
 
             // Strip <text>...</text> wrappers and replace with space
-            $textContent = preg_replace_callback('/<\/?text[^>]*>/is', static fn (): string => ' ', $textContent);
+            $textContent = preg_replace_callback('/<\/?text[^>]*>/is', static fn(): string => ' ', $textContent);
             // Remove thinking tags
             $textContent = preg_replace($pattern, '', $textContent);
             // Collapse horizontal whitespace only (preserve newlines)

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Closure;
+use InvalidArgumentException;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Agent;
 use Spora\Models\Task;
@@ -18,8 +20,15 @@ use Spora\Models\Task;
  */
 final class HandoverService implements HandoverServiceInterface
 {
+    /**
+     * @param Closure(): OrchestratorInterface $orchestratorFactory
+     *   Lazy factory — the Orchestrator is constructed with the tool instance
+     *   list (which includes this HandoverTool), so injecting OrchestratorInterface
+     *   directly creates a circular dependency. The closure defers resolution
+     *   to the moment {@see handover()} is actually called.
+     */
     public function __construct(
-        private readonly OrchestratorInterface $orchestrator,
+        private readonly Closure $orchestratorFactory,
     ) {}
 
     public function handover(
@@ -32,20 +41,20 @@ final class HandoverService implements HandoverServiceInterface
             ->where('user_id', $userId)
             ->first();
         if ($source === null) {
-            throw new \InvalidArgumentException('Source task not found.');
+            throw new InvalidArgumentException('Source task not found.');
         }
 
         $targetAgent = Agent::where('id', $targetAgentId)
             ->where('user_id', $userId)
             ->first();
         if ($targetAgent === null) {
-            throw new \InvalidArgumentException('Target agent not found.');
+            throw new InvalidArgumentException('Target agent not found.');
         }
 
         // parent_task_id is the lineage breadcrumb: the target task knows
         // which source conversation produced it, so the UI can later show
         // a "handed off from #X" link without re-scanning history.
-        $newTask = $this->orchestrator->start(
+        $newTask = ($this->orchestratorFactory)()->start(
             agentId: $targetAgent->id,
             userPrompt: $summary,
             maxSteps: (int) ($targetAgent->max_steps ?? 10),

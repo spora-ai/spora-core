@@ -153,6 +153,46 @@ final class ToolConfigSchemaInspector
     }
 
     /**
+     * Coerce stored multi-select values to `int[]`.
+     *
+     * Multi-select settings travel through the form layer as JSON-encoded
+     * strings (the form is `Record<string, string>`), so the cryptographer
+     * round-trips them as literal strings. To keep downstream consumers
+     * (`Tool::execute()` and the LLM-facing projection) array-typed, decode
+     * any string value at a known multi-select key back to `int[]`. Leaves
+     * non-multi-select keys, null, and already-array values untouched.
+     *
+     * @param  array<string, mixed> $settings
+     * @return array<string, mixed>
+     */
+    public function normalizeMultiSelectValues(string $toolClass, array $settings): array
+    {
+        $multiKeys = $this->getMultiSelectKeys($toolClass);
+        if ($multiKeys === []) {
+            return $settings;
+        }
+
+        foreach ($multiKeys as $key) {
+            if (!array_key_exists($key, $settings)) {
+                continue;
+            }
+            $value = $settings[$key];
+            if (is_array($value)) {
+                $settings[$key] = array_values(array_map('intval', $value));
+                continue;
+            }
+            if (is_string($value) && $value !== '') {
+                $decoded = json_decode($value, true);
+                if (is_array($decoded)) {
+                    $settings[$key] = array_values(array_map('intval', $decoded));
+                }
+            }
+        }
+
+        return $settings;
+    }
+
+    /**
      * Annotate effective settings with the human-readable label for each
      * `exposeToLlm === true` field. The facade supplies the effective
      * settings (computed from the cascade); this method only filters

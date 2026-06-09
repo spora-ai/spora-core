@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use InvalidArgumentException;
 use Spora\Models\Task;
 
 /**
@@ -19,7 +20,7 @@ use Spora\Models\Task;
 interface HandoverServiceInterface
 {
     /**
-     * @throws \InvalidArgumentException if the source task or target agent
+     * @throws InvalidArgumentException if the source task or target agent
      *                                   is not owned by $userId.
      */
     public function handover(
