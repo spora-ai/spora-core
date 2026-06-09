@@ -145,7 +145,7 @@ function navigateToApp(app: AppInfo): void {
             <div class="px-3 py-2 border-b border-border">
               <span class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Apps</span>
             </div>
-            <nav class="py-1">
+            <nav class="py-1" aria-label="Apps">
               <button
                 v-for="app in apps"
                 :key="app.name"
@@ -183,7 +183,7 @@ function navigateToApp(app: AppInfo): void {
         @click="closeUserMenu"
       >
         <div class="absolute right-4 top-14 w-48 rounded-lg border border-border bg-background shadow-md overflow-hidden">
-          <nav class="py-1">
+          <nav class="py-1" aria-label="Account">
             <button
               @click="() => { closeUserMenu(); router.push({ name: 'account' }) }"
               aria-label="My Account"
