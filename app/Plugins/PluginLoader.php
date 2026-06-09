@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Plugins;
 
-use JsonException;
 use Spora\Plugins\Exceptions\PluginLoadFailedException;
 
 /**
@@ -16,12 +15,9 @@ use Spora\Plugins\Exceptions\PluginLoadFailedException;
  * classloader so that the plugin's own classes are resolvable after boot.
  *
  * Caching:
- *   When $stampPath is provided, a composite hash of every discovered manifest is
- *   written to $stampPath after a successful boot. On subsequent boots with the same
- *   $stampPath and unchanged manifests, the loader short-circuits to a sidecar
- *   re-instantiation — no glob(), no file reads, no JSON decode. A sidecar JSON file
- *   sits next to the stamp and records the parsed manifests, slugs, classes, and
- *   plugin directories from the last successful boot.
+ *   The manifest-discovery and stamp-cache concerns live in {@see PluginLoaderCache}.
+ *   When the cache is current, the loader re-instantiates plugins from the sidecar
+ *   without re-reading or re-parsing any manifest.
  *
  * Discovery order:
  *   The directories passed in $pluginDirectories are scanned in the order given.
@@ -31,9 +27,6 @@ use Spora\Plugins\Exceptions\PluginLoadFailedException;
  */
 final class PluginLoader
 {
-    /** Stamp file suffix for the sidecar JSON cache. */
-    private const SIDECAR_SUFFIX = '.cache.json';
-
     /**
      * Loaded plugins, keyed by their manifest slug.
      *
@@ -50,14 +43,15 @@ final class PluginLoader
 
     /**
      * Map of slug => parsed manifest array (raw json_decode output, already
-     * validated for the required slug + class fields). Populated when a plugin
-     * is loaded and replayed from the sidecar on cache hits.
+     * validated for the required slug + class fields).
      *
      * @var array<string, array<string, mixed>>
      */
     private array $pluginManifests = [];
 
     private bool $booted = false;
+
+    private readonly PluginLoaderCache $cache;
 
     /**
      * @param list<string>  $pluginDirectories Absolute paths to scan for `<plugin>/plugin.json`.
@@ -68,9 +62,11 @@ final class PluginLoader
      *                                        always performs a full discovery (used in tests).
      */
     public function __construct(
-        private readonly array $pluginDirectories,
-        private readonly ?string $stampPath = null,
-    ) {}
+        array $pluginDirectories,
+        ?string $stampPath = null,
+    ) {
+        $this->cache = new PluginLoaderCache($pluginDirectories, $stampPath);
+    }
 
     /**
      * Discover, autoload, and boot all plugins.
@@ -84,15 +80,10 @@ final class PluginLoader
 
         $this->booted = true;
 
-        // Resolve every manifest across every directory up front. The stamp hash
-        // is computed over this snapshot so the cache hit/miss decision is based
-        // on the actual on-disk state, not a partial scan.
-        $discovered = $this->collectManifests();
+        $discovered = $this->cache->collectManifests();
 
-        $hash = $this->computeStampHash($discovered);
-
-        if ($this->stampPath !== null && $this->isStampCurrent($hash)) {
-            $this->loadFromSidecar();
+        if ($this->cache->isCurrent($discovered)) {
+            $this->restoreFromSidecar();
             return;
         }
 
@@ -106,9 +97,7 @@ final class PluginLoader
             );
         }
 
-        if ($this->stampPath !== null) {
-            $this->writeStampAndSidecar($hash);
-        }
+        $this->cache->write($discovered, $this->buildSidecarEntries());
     }
 
     /**
@@ -221,144 +210,81 @@ final class PluginLoader
     }
 
     /**
-     * Scan every configured directory and return a deterministic list of
-     * `path => contents` entries for every `<plugin>/plugin.json` found.
-     *
-     * @return array<string, array{path: string, contents: string}>
+     * Re-instantiate every plugin recorded in the sidecar JSON. Falls back to
+     * a full discovery if the sidecar is missing or corrupt.
      */
-    private function collectManifests(): array
+    private function restoreFromSidecar(): void
     {
-        $out = [];
+        $entries = $this->cache->read();
 
-        foreach ($this->pluginDirectories as $dir) {
-            if ($dir === '' || !is_dir($dir)) {
-                continue;
-            }
-
-            foreach (glob(rtrim($dir, '/') . '/*/plugin.json') ?: [] as $manifestFile) {
-                $real = realpath($manifestFile);
-                if ($real === false) {
-                    continue;
-                }
-                $contents = @file_get_contents($real);
-                if ($contents === false) {
-                    continue;
-                }
-                $out[$real] = ['path' => $real, 'contents' => $contents];
-            }
-        }
-
-        ksort($out);
-
-        return $out;
-    }
-
-    /**
-     * Build a deterministic sha256 hash over every discovered manifest.
-     * Changes to any manifest (mtime or content) invalidate the stamp.
-     *
-     * @param array<string, array{path: string, contents: string}> $discovered
-     */
-    private function computeStampHash(array $discovered): string
-    {
-        $parts = [];
-        foreach ($discovered as $entry) {
-            $mtime = @filemtime($entry['path']);
-            $parts[] = $entry['path'] . "\t" . ($mtime ?: 0) . "\t" . hash('sha256', $entry['contents']);
-        }
-        return hash('sha256', implode("\n", $parts));
-    }
-
-    private function isStampCurrent(string $hash): bool
-    {
-        if ($this->stampPath === null) {
-            return false;
-        }
-
-        $existing = @file_get_contents($this->stampPath);
-        return is_string($existing) && $existing === $hash;
-    }
-
-    /**
-     * Re-instantiate every plugin recorded in the sidecar JSON, skipping
-     * manifest re-parsing and re-discovery. Sets up PSR-4 autoload and
-     * require_once's the plugin file exactly like a cold boot.
-     */
-    private function loadFromSidecar(): void
-    {
-        if ($this->stampPath === null) {
-            return;
-        }
-
-        $sidecarPath = $this->sidecarPath();
-        $raw = @file_get_contents($sidecarPath);
-        if (!is_string($raw) || $raw === '') {
-            // Corrupt or missing sidecar — fall back to full discovery.
-            $this->fallbackToFullDiscovery();
-            return;
-        }
-
-        try {
-            /** @var mixed $decoded */
-            $decoded = json_decode($raw, true, 32, JSON_THROW_ON_ERROR);
-        } catch (JsonException) {
-            $this->fallbackToFullDiscovery();
-            return;
-        }
-
-        if (!is_array($decoded) || !isset($decoded['plugins']) || !is_array($decoded['plugins'])) {
+        if ($entries === null) {
             $this->fallbackToFullDiscovery();
             return;
         }
 
         $classLoader = $this->findClassLoader();
 
-        foreach ($decoded['plugins'] as $entry) {
-            if (!is_array($entry)) {
-                continue;
-            }
-            $slug  = $entry['slug']  ?? null;
-            $dir   = $entry['directory'] ?? null;
-            $manifest = $entry['manifest'] ?? null;
-            if (!is_string($slug) || !is_string($dir) || !is_array($manifest)) {
-                continue;
-            }
-
-            $this->registerManifestAutoload($manifest, $classLoader, $dir);
-
-            $fileToRequire = isset($manifest['file']) && is_string($manifest['file'])
-                ? $dir . '/' . ltrim($manifest['file'], '/')
-                : $dir . '/Plugin.php';
-            if (is_file($fileToRequire)) {
-                require_once $fileToRequire;
-            }
-
-            $this->instantiatePlugin($slug, (string) $manifest['class'], $classLoader, $dir, $manifest);
+        foreach ($entries as $entry) {
+            $this->restorePluginFromSidecarEntry($entry, $classLoader);
         }
     }
 
+    /**
+     * Restore a single plugin from a sidecar entry — the same operations a
+     * cold boot would do (PSR-4 autoload, require_once, instantiate), but
+     * without re-parsing the manifest JSON.
+     *
+     * @param mixed $entry
+     */
+    private function restorePluginFromSidecarEntry(mixed $entry, ?\Composer\Autoload\ClassLoader $classLoader): void
+    {
+        if (!is_array($entry)) {
+            return;
+        }
+
+        $slug     = $entry['slug']      ?? null;
+        $dir      = $entry['directory'] ?? null;
+        $manifest = $entry['manifest']  ?? null;
+
+        if (!is_string($slug) || !is_string($dir) || !is_array($manifest)) {
+            return;
+        }
+
+        $this->registerManifestAutoload($manifest, $classLoader, $dir);
+
+        $fileToRequire = isset($manifest['file']) && is_string($manifest['file'])
+            ? $dir . '/' . ltrim($manifest['file'], '/')
+            : $dir . '/Plugin.php';
+
+        if (is_file($fileToRequire)) {
+            require_once $fileToRequire;
+        }
+
+        $this->instantiatePlugin($slug, (string) $manifest['class'], $classLoader, $dir, $manifest);
+    }
+
+    /**
+     * Sidecar is unusable (missing, undecodable, schema-mismatch) — perform a
+     * full cold discovery and persist a fresh cache so the next boot can
+     * short-circuit again.
+     */
     private function fallbackToFullDiscovery(): void
     {
+        $discovered = $this->cache->collectManifests();
+
         $classLoader = $this->findClassLoader();
-        $discovered = $this->collectManifests();
         foreach ($discovered as $entry) {
             $this->loadPluginFromManifest($entry['path'], $entry['contents'], $classLoader);
         }
-        // Rewrite the stamp + sidecar so the next boot can short-circuit again.
-        $hash = $this->computeStampHash($discovered);
-        if ($this->stampPath !== null) {
-            $this->writeStampAndSidecar($hash);
-        }
+
+        $this->cache->write($discovered, $this->buildSidecarEntries());
     }
 
-    private function writeStampAndSidecar(string $hash): void
+    /**
+     * @return list<array{slug: string, class: ?string, directory: ?string, manifest: array<string, mixed>}>
+     */
+    private function buildSidecarEntries(): array
     {
-        if ($this->stampPath === null) {
-            return;
-        }
-
-        @file_put_contents($this->stampPath, $hash);
-
         $entries = [];
         foreach ($this->pluginManifests as $slug => $manifest) {
             $entries[] = [
@@ -368,18 +294,7 @@ final class PluginLoader
                 'manifest'  => $manifest,
             ];
         }
-
-        $payload = json_encode(
-            ['plugins' => $entries],
-            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
-        );
-
-        @file_put_contents($this->sidecarPath(), $payload);
-    }
-
-    private function sidecarPath(): string
-    {
-        return $this->stampPath . self::SIDECAR_SUFFIX;
+        return $entries;
     }
 
     /**
