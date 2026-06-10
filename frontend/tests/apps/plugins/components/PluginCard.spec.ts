@@ -11,6 +11,7 @@ const basePlugin: PluginResource = {
   slug: 'minimax',
   name: 'MiniMax',
   description: 'Image, speech, music, lyrics, and video generation.',
+  icon: 'puzzle',
   version: 1,
   path: '/plugins/minimax',
   bundledTools: [{ name: 'image', description: 'Generate an image' }],

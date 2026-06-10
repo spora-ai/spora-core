@@ -1,0 +1,5 @@
+{
+    "slug": "default-icon-plugin",
+    "class": "Tests\\Fixtures\\Plugins\\DefaultIconPlugin\\Plugin",
+    "description": "A test plugin that omits the icon field."
+}

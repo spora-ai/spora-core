@@ -14,6 +14,7 @@ const basePlugin: PluginResource = {
   slug: 'minimax',
   name: 'MiniMax',
   description: 'Multimodal content generation.',
+  icon: 'puzzle',
   version: 2,
   path: '/opt/spora-plugins/minimax',
   bundledTools: [

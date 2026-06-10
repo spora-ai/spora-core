@@ -33,6 +33,7 @@ describe('plugins store', () => {
         slug: 'minimax',
         name: 'MiniMax',
         description: 'Image generation',
+        icon: 'puzzle',
         version: 1,
         path: '/plugins/minimax',
         bundledTools: [],

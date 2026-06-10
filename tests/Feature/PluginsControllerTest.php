@@ -11,6 +11,7 @@ use Spora\Security\CsrfTokenService;
 use Spora\Services\PluginMetadataExtractor;
 use Spora\Services\PluginsService;
 
+// Parent directory — the loader globs `dir/*/plugin.json` one level deep.
 const PLUGINS_INVENTORY_FIXTURE = BASE_PATH . '/tests/Fixtures/plugins_inventory';
 
 /**
@@ -58,6 +59,7 @@ describe('PluginsController', function (): void {
         expect($plugin['slug'])->toBe('inventory-plugin');
         expect($plugin['name'])->toBe('Inventory Plugin');
         expect($plugin['description'])->toBe('A test plugin for the inventory API.');
+        expect($plugin['icon'])->toBe('M12 2L2 22h20L12 2z');
         expect($plugin['version'])->toBe(1);
         expect($plugin['path'])->toEndWith('/InventoryPlugin');
 
@@ -131,5 +133,66 @@ describe('PluginsController', function (): void {
         expect($m['pending'])->toBe(0);
         expect($m['status'])->toBe('up_to_date');
         expect($m['lastAppliedAt'])->toBe('2026-01-01 00:00:00');
+    });
+
+    it('falls back to the bundled "puzzle" icon when the manifest omits it', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('default-icon@example.com', 'ValidPass1!', 'DefaultIcon');
+        simulateLoggedInSession($userId, 'default-icon@example.com');
+
+        $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_inventory_brain'], null);
+        $loader->boot();
+        $controller = new PluginsController(new PluginsService($loader, new PluginMetadataExtractor()));
+        $authMw = new AuthMiddleware($authService);
+        $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+
+        $request = jsonRequest('GET', '/api/v1/plugins');
+        $response = callController($controller, 'index', $request, [$authMw, $csrfMw]);
+
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['plugins'][0]['icon'])->toBe('puzzle');
+    });
+
+    it('accepts a bundled icon name like "brain" in the manifest', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('bundled-icon@example.com', 'ValidPass1!', 'BundledIcon');
+        simulateLoggedInSession($userId, 'bundled-icon@example.com');
+
+        // Build a temp plugin that uses a bundled name in its manifest.
+        $dir = sys_get_temp_dir() . '/spora_bundled_icon_' . uniqid();
+        $slug = 'bundled-icon-plugin';
+        mkdir($dir . '/' . $slug, 0o777, true);
+        file_put_contents(
+            $dir . '/' . $slug . '/plugin.json',
+            json_encode([
+                'slug'        => $slug,
+                'class'       => 'Tests\\Fixtures\\Plugins\\InventoryPlugin\\Plugin',
+                'description' => 'A bundled-icon test plugin.',
+                'icon'        => 'brain',
+            ]),
+        );
+        symlink(
+            BASE_PATH . '/tests/Fixtures/plugins_inventory/InventoryPlugin/Plugin.php',
+            $dir . '/' . $slug . '/Plugin.php',
+        );
+
+        try {
+            $loader = new PluginLoader([$dir], null);
+            $loader->boot();
+            $controller = new PluginsController(new PluginsService($loader, new PluginMetadataExtractor()));
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+
+            $request = jsonRequest('GET', '/api/v1/plugins');
+            $response = callController($controller, 'index', $request, [$authMw, $csrfMw]);
+            $body = json_decode($response->getContent(), true);
+
+            expect($body['data']['plugins'][0]['icon'])->toBe('brain');
+        } finally {
+            @unlink($dir . '/' . $slug . '/Plugin.php');
+            @unlink($dir . '/' . $slug . '/plugin.json');
+            @rmdir($dir . '/' . $slug);
+            @rmdir($dir);
+        }
     });
 });

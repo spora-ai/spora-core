@@ -238,7 +238,7 @@ function scheduleName(run: ScheduledRunResource): string {
               class="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               title="Trigger now"
             >
-              <Icon name="lightning" class="h-4 w-4" />
+              <Icon name="zap" class="h-4 w-4" />
             </button>
             <!-- Edit -->
             <button

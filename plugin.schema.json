@@ -18,6 +18,20 @@
             "description": "Fully-qualified class name of the plugin entry point. Must implement Spora\\Plugins\\PluginInterface.",
             "examples": ["Acme\\MyPlugin\\Plugin"]
         },
+        "description": {
+            "type": "string",
+            "description": "Short human-readable description of the plugin, surfaced by the inventory UI.",
+            "maxLength": 500
+        },
+        "icon": {
+            "type": "string",
+            "description": "Icon for the plugin in the inventory UI. Three forms are accepted (resolution order: bundled name → full <svg> string → raw path). The frontend falls back to a bundled \"puzzle\" icon if the value is empty (or whitespace-only) or doesn't match any of these forms.\n\n  • Bundled name: a kebab-case identifier from the Spora palette (e.g. \"puzzle\", \"brain\", \"lightbulb\", \"compass\", \"globe\"). See docs/07_plugins.md § Bundled icons for the full list.\n  • Full <svg> string: a complete <svg viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\">…</svg> for multi-primitive icons (e.g. circle + path, rect + path). The host's outer <svg> tag is discarded; the host's class/fill/stroke/viewBox/stroke-width win. Inner children are sanitized to a tight SVG-primitive allowlist (path, circle, ellipse, polyline, polygon, rect, g + the matching geometric attributes) before being injected via v-html — any other tags or attributes are stripped.\n  • Raw SVG path: a single path string starting with a path command letter (M/L/H/V/C/S/Q/T/A/Z). Smallest in JSON, but limited to single-path icons.\n\nDefaults to \"puzzle\" when omitted.",
+            "examples": [
+                "puzzle",
+                "M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z",
+                "<svg viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z\"/></svg>"
+            ]
+        },
         "file": {
             "type": "string",
             "description": "Relative path (from the plugin directory) to the PHP file that declares the entry-point class. Defaults to Plugin.php when omitted.",

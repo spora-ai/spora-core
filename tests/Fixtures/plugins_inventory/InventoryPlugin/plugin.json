@@ -1,5 +1,6 @@
 {
     "slug": "inventory-plugin",
     "class": "Tests\\Fixtures\\Plugins\\InventoryPlugin\\Plugin",
-    "description": "A test plugin for the inventory API."
+    "description": "A test plugin for the inventory API.",
+    "icon": "M12 2L2 22h20L12 2z"
 }

@@ -3,8 +3,9 @@
  * PluginCard — single plugin summary in the inventory grid.
  * Emits `select` with the plugin resource when clicked.
  */
-import { Puzzle, Wrench, Cpu, FileText } from 'lucide-vue-next'
+import { Wrench, Cpu, FileText } from 'lucide-vue-next'
 import type { PluginResource } from '../types/plugin'
+import Icon from '@/components/ui/Icon.vue'
 import MigrationStatusBadge from './MigrationStatusBadge.vue'
 
 defineProps<{
@@ -24,7 +25,7 @@ defineEmits<{
   >
     <div class="flex items-start gap-3">
       <div class="rounded-lg bg-primary/10 p-2 shrink-0">
-        <Puzzle class="w-5 h-5 text-primary" />
+        <Icon :name="plugin.icon" class="w-5 h-5 text-primary" />
       </div>
       <div class="min-w-0 flex-1">
         <div class="flex items-start justify-between gap-2">

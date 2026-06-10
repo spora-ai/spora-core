@@ -35,6 +35,8 @@ export interface PluginResource {
   slug: string
   name: string
   description: string
+  /** Bundled icon name (e.g. "puzzle"), raw SVG path, or full <svg>…</svg> string. Resolved by the shared <Icon> component. Defaults to "puzzle" when the manifest omits it. */
+  icon: string
   version: number
   /** Absolute filesystem path to the plugin directory, or null when loaded from a sidecar without a recorded directory. */
   path: string | null
