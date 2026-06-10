@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Spora\Agents\ApprovedBatchExecutor;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\Exceptions\LlmConfigurationMissingException;
 use Spora\Agents\Exceptions\TaskStateMissingException;
@@ -152,9 +153,10 @@ it('loadTaskAndStateForResume throws TaskStateMissingException when the transact
 
     try {
         $orch = makeBareOrchestrator();
-        $load = new ReflectionMethod(Orchestrator::class, 'loadTaskAndStateForResume');
+        $executor = $orch->approvedBatchExecutor();
+        $load = new ReflectionMethod(ApprovedBatchExecutor::class, 'loadTaskAndStateForResume');
 
-        expect(fn() => $load->invoke($orch, 99999))
+        expect(fn() => $load->invoke($executor, 99999))
             ->toThrow(TaskStateMissingException::class, 'Failed to resolve task or state during resume.');
     } finally {
         $prop->setValue(null, $original);
