@@ -62,6 +62,7 @@ final class PluginsService
             'slug'             => $slug,
             'name'             => $plugin->getName(),
             'description'      => is_string($manifest['description'] ?? null) ? (string) $manifest['description'] : '',
+            'icon'             => $this->resolveIcon($manifest),
             'version'          => $schemaVersion,
             'path'             => $directory,
             'bundledTools'     => $this->metadataExtractor->extract($toolClasses),
@@ -69,6 +70,19 @@ final class PluginsService
             'recipePaths'      => array_values($recipePaths),
             'migrations'       => $this->buildMigrationStatus($slug, $schemaVersion, $migrationsPath),
         ];
+    }
+
+    /**
+     * Resolve the icon from the manifest, falling back to a sensible default
+     * (the bundled "puzzle" icon) when omitted. Empty strings are treated the
+     * same as missing so an accidentally blank `icon: ""` still renders.
+     *
+     * @param array<string, mixed> $manifest
+     */
+    private function resolveIcon(array $manifest): string
+    {
+        $icon = $manifest['icon'] ?? null;
+        return is_string($icon) && $icon !== '' ? $icon : 'puzzle';
     }
 
     /**

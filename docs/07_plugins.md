@@ -62,6 +62,8 @@ The full JSON Schema is in [`plugin.schema.json`](../plugin.schema.json) at the 
 
 | Field           | Type   | Description |
 |-----------------|--------|-------------|
+| `description`   | string | Short human-readable description surfaced by the inventory UI. Max 500 chars. |
+| `icon`          | string | Icon for the inventory UI. Either a bundled icon name (e.g. `"puzzle"`, `"brain"`) looked up in the frontend's shared map, or a raw SVG path string (starts with `M`/`L`/`H`/`V`/`C`/`S`/`Q`/`T`/`A`/`Z`) rendered directly. Defaults to `"puzzle"` when omitted. Lets a plugin ship its own visual identity without coordinating with the Spora frontend. |
 | `file`          | string | Relative path (from the plugin directory) to the PHP file that declares the entry-point class. Defaults to `Plugin.php` when omitted. |
 | `autoload.psr-4`  | object | PSR-4 namespace → relative path mappings registered with the Composer classloader before the plugin is instantiated. Multiple entries are supported. |
 | `autoload.files`  | array  | PHP files to `require_once` before the plugin is instantiated, relative to the plugin directory. Use `["vendor/autoload.php"]` to load the plugin's own Composer dependency tree. Processed after `psr-4` mappings. |
@@ -81,6 +83,8 @@ The full JSON Schema is in [`plugin.schema.json`](../plugin.schema.json) at the 
 {
     "slug": "acme-search",
     "class": "Acme\\Search\\Plugin",
+    "description": "Search the public web via the Acme API.",
+    "icon": "M11 4a7 7 0 1 1-4.95 11.95l-2.43 2.43a1 1 0 0 1-1.42-1.42l2.43-2.43A7 7 0 0 1 11 4Zm0 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z",
     "file": "src/Plugin.php",
     "autoload": {
         "psr-4": {

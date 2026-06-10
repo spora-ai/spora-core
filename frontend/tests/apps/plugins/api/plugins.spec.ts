@@ -24,6 +24,7 @@ describe('getPlugins', () => {
         slug: 'minimax',
         name: 'MiniMax',
         description: '',
+        icon: 'puzzle',
         version: 1,
         path: '/plugins/minimax',
         bundledTools: [],

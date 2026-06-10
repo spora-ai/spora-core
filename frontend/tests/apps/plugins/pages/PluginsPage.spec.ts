@@ -106,6 +106,7 @@ describe('PluginsPage', () => {
         slug: 'minimax',
         name: 'MiniMax',
         description: '',
+        icon: 'puzzle',
         version: 1,
         path: '/p',
         bundledTools: [],
