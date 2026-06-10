@@ -153,7 +153,7 @@ it('loadTaskAndStateForResume throws TaskStateMissingException when the transact
 
     try {
         $orch = makeBareOrchestrator();
-        $executor = $orch->approvedBatchExecutor();
+        $executor = $orch->approvedBatchExecutor;
         $load = new ReflectionMethod(ApprovedBatchExecutor::class, 'loadTaskAndStateForResume');
 
         expect(fn() => $load->invoke($executor, 99999))

@@ -27,8 +27,8 @@ final class ToolDefinitionBuilder
 {
     /**
      * @param  list<object>  $toolInstances
-     * @param  callable(string $toolClass, int $agentId, ?int $userId): string  $buildLlmConfigBlock
-     *         Callback into Orchestrator for the LLM-facing config block per tool.
+     * @param  callable(array<string, mixed> $llmSettings): string  $buildLlmConfigBlock
+     *         Callback into Orchestrator that renders the LLM-facing config block for a tool.
      */
     public function __construct(
         private readonly array $toolInstances,

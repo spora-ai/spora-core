@@ -42,13 +42,11 @@ final class TickPhaseRunner
         private readonly Orchestrator $orchestrator,
         private readonly DriverFactory $driverFactory,
         private readonly array $toolInstances,
-        private readonly WorkerMode $workerMode,
         private readonly ?LoggerInterface $logger = null,
         private readonly ?NotificationService $notificationService = null,
         private readonly ?MercurePublisherInterface $mercure = null,
         private readonly ?ToolCallSerializer $toolCallSerializer = null,
     ) {}
-
     public function runTick(int $taskId): void
     {
         $task = $this->lockRunningTaskForTick($taskId);
@@ -59,7 +57,7 @@ final class TickPhaseRunner
         try {
             $context = $this->prepareTickContext($task);
         } catch (RuntimeException $e) {
-            $this->orchestrator->errorClassifier()->markTaskNoLlmConfiguration($taskId, $e);
+            $this->orchestrator->errorClassifier->markTaskNoLlmConfiguration($taskId, $e);
             throw $e;
         }
 
@@ -112,12 +110,12 @@ final class TickPhaseRunner
         $agent = Agent::findOrFail($task->agent_id);
         $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->toArray();
 
-        $llmConfig = $this->orchestrator->llmConfigResolver()->resolveLlmConfig($agent);
+        $llmConfig = $this->orchestrator->llmConfigResolver->resolveLlmConfig($agent);
 
         $request = new LLMRequest(
             systemPrompt: $this->resolveSystemPrompt($agent),
             messages: $this->orchestrator->buildMessages($task->id),
-            tools: $this->orchestrator->toolDefinitionBuilder()->buildToolDefinitions($enabledClasses, $agent->id, $agent->user_id),
+            tools: $this->orchestrator->toolDefinitionBuilder->buildToolDefinitions($enabledClasses, $agent->id, $agent->user_id),
             contextWindow: $llmConfig['context_window'],
             maxTokens: $llmConfig['max_tokens_output'],
             temperature: $llmConfig['temperature'],
@@ -231,13 +229,13 @@ final class TickPhaseRunner
             'message'         => $e->getMessage(),
         ]);
 
-        if ($this->orchestrator->errorClassifier()->isContextWindowError($e)) {
-            $this->orchestrator->contextWindowRecovery()->tryCompactionAndRetry($context['task'], $context['agent'], $e);
+        if ($this->orchestrator->errorClassifier->isContextWindowError($e)) {
+            $this->orchestrator->contextWindowRecovery->tryCompactionAndRetry($context['task'], $context['agent'], $e);
             return;
         }
 
-        $errorCode = $this->orchestrator->errorClassifier()->classifyError($e);
-        $friendlyMsg = $this->orchestrator->errorClassifier()->friendlyMessageForError($e, $errorCode);
+        $errorCode = $this->orchestrator->errorClassifier->classifyError($e);
+        $friendlyMsg = $this->orchestrator->errorClassifier->friendlyMessageForError($e, $errorCode);
 
         try {
             $updated = Task::where('id', $taskId)
@@ -274,7 +272,7 @@ final class TickPhaseRunner
         }
 
         try {
-            $this->orchestrator->retryScheduler()->scheduleAutoRetry($failedTask, $errorCode);
+            $this->orchestrator->retryScheduler->scheduleAutoRetry($failedTask, $errorCode);
         } catch (Throwable $e) {
             $this->logger?->warning('Auto-retry scheduling failed', [
                 'task_id'   => $failedTask->id,
@@ -290,7 +288,7 @@ final class TickPhaseRunner
 
         foreach ($toolCalls as $toolCall) {
             try {
-                $disposition = $this->orchestrator->toolCallExecutor()->executeOrQueue($toolCall, $agent, $task, $enabledClasses);
+                $disposition = $this->orchestrator->toolCallExecutor->executeOrQueue($toolCall, $agent, $task, $enabledClasses);
 
                 if ($disposition === ToolCallDisposition::AwaitingApproval) {
                     $pendingApproval[] = $toolCall;

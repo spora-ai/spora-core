@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Agents;
 
-use Psr\Log\LoggerInterface;
 use RuntimeException;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
@@ -20,8 +19,7 @@ use Throwable;
  * `php:S1448` method-count cap.
  *
  * Package-private collaborator: constructed and called only by
- * {@see Orchestrator}. The orchestrator passes in the dependencies
- * (logger) at construction; everything else is pure logic.
+ * {@see Orchestrator}. Pure logic — no logger or notification dependencies.
  */
 final class ErrorClassifier
 {
@@ -36,9 +34,7 @@ final class ErrorClassifier
         'ORPHANED',
     ];
 
-    public function __construct(
-        private readonly ?LoggerInterface $logger = null,
-    ) {}
+    public function __construct() {}
 
     /**
      * Mark a task as FAILED with NO_LLM_CONFIGURATION if the underlying

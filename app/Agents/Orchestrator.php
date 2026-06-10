@@ -49,26 +49,73 @@ final class Orchestrator implements OrchestratorInterface
     /** ISO 8601 / RFC 3339 format used for the AgentState `pausedAt` field. */
     private const ISO8601_UTC = 'Y-m-d\TH:i:s\Z';
 
+    /** Package-private extracted services; read by `TickPhaseRunner` and the other extracted services via the orchestrator. */
+    public readonly ErrorClassifier $errorClassifier;
+    public readonly ToolDefinitionBuilder $toolDefinitionBuilder;
+    public readonly LlmConfigResolver $llmConfigResolver;
+    public readonly RetryScheduler $retryScheduler;
+    public readonly ContextWindowRecovery $contextWindowRecovery;
+    public readonly ApprovedBatchExecutor $approvedBatchExecutor;
+    public readonly TickPhaseRunner $tickPhaseRunner;
+    public readonly ToolCallExecutor $toolCallExecutor;
+    public readonly WorkerMode $workerMode;
+
+    /** @var list<object> */
+    public readonly array $toolInstances;
+    public readonly ?LoggerInterface $logger;
+    public readonly ?NotificationService $notificationService;
+    public readonly ?MercurePublisherInterface $mercure;
+    public readonly ?ToolConfigService $toolConfigService;
+    public readonly ?ToolCallSerializer $toolCallSerializer;
+    public readonly ?LLMConfigService $llmConfigService;
+    public readonly ?PluginLoader $pluginLoader;
+
     /**
      * @param list<object> $toolInstances
      */
     public function __construct(
-        private readonly DriverFactory              $driverFactory,
-        private readonly LLMConfigService|null    $llmConfigService = null,
-        private readonly array                      $toolInstances = [],
-        private readonly ?LoggerInterface           $logger         = null,
-        private readonly WorkerMode                 $workerMode     = WorkerMode::Sync,
-        private readonly ?NotificationService      $notificationService = null,
-        private readonly ?PluginLoader              $pluginLoader   = null,
-        private readonly ?MercurePublisherInterface $mercure       = null,
-        private readonly ?ToolConfigService        $toolConfigService = null,
-        private readonly ?ToolCallSerializer       $toolCallSerializer = null,
-        private readonly ?ErrorClassifier          $errorClassifier = null,
-        private readonly ?ToolDefinitionBuilder   $toolDefinitionBuilder = null,
-        private readonly ?LlmConfigResolver       $llmConfigResolver = null,
-        private readonly ?RetryScheduler          $retryScheduler = null,
-        private readonly ?ContextWindowRecovery  $contextWindowRecovery = null,
-    ) {}
+        DriverFactory              $driverFactory,
+        ?LLMConfigService          $llmConfigService = null,
+        array                      $toolInstances = [],
+        ?LoggerInterface           $logger         = null,
+        WorkerMode                 $workerMode     = WorkerMode::Sync,
+        ?NotificationService       $notificationService = null,
+        ?PluginLoader              $pluginLoader   = null,
+        ?MercurePublisherInterface $mercure       = null,
+        ?ToolConfigService         $toolConfigService = null,
+        ?ToolCallSerializer        $toolCallSerializer = null,
+    ) {
+        $this->workerMode            = $workerMode;
+        $this->toolInstances         = $toolInstances;
+        $this->logger                = $logger;
+        $this->notificationService   = $notificationService;
+        $this->mercure               = $mercure;
+        $this->toolConfigService     = $toolConfigService;
+        $this->toolCallSerializer    = $toolCallSerializer;
+        $this->llmConfigService      = $llmConfigService;
+        $this->pluginLoader          = $pluginLoader;
+        $this->errorClassifier       = new ErrorClassifier();
+        $this->llmConfigResolver     = new LlmConfigResolver($llmConfigService);
+        $this->toolDefinitionBuilder = new ToolDefinitionBuilder(
+            $toolInstances,
+            $toolConfigService,
+            $pluginLoader,
+            fn(array $llmSettings): string => $this->buildLlmConfigBlock($llmSettings),
+        );
+        $this->retryScheduler        = new RetryScheduler($this, $logger, $notificationService);
+        $this->contextWindowRecovery = new ContextWindowRecovery($this, $driverFactory, $logger, $notificationService);
+        $this->approvedBatchExecutor = new ApprovedBatchExecutor($this, $workerMode, $logger);
+        $this->tickPhaseRunner       = new TickPhaseRunner(
+            $this,
+            $driverFactory,
+            $toolInstances,
+            $logger,
+            $notificationService,
+            $mercure,
+            $toolCallSerializer,
+        );
+        $this->toolCallExecutor      = new ToolCallExecutor($this);
+    }
 
     // Public API
 
@@ -127,43 +174,7 @@ final class Orchestrator implements OrchestratorInterface
 
     public function tick(int $taskId): void
     {
-        $this->tickPhaseRunner()->runTick($taskId);
-    }
-
-    private ?TickPhaseRunner $tickPhaseRunnerInstance = null;
-
-    public function tickPhaseRunner(): TickPhaseRunner
-    {
-        return $this->tickPhaseRunnerInstance ??= new TickPhaseRunner(
-            $this,
-            $this->driverFactory,
-            $this->toolInstances,
-            $this->workerMode,
-            $this->logger,
-            $this->notificationService,
-            $this->mercure,
-            $this->toolCallSerializer,
-        );
-    }
-
-    private ?ContextWindowRecovery $contextWindowRecoveryInstance = null;
-
-    public function contextWindowRecovery(): ContextWindowRecovery
-    {
-        return $this->contextWindowRecoveryInstance ??= new ContextWindowRecovery(
-            $this,
-            $this->logger,
-            $this->notificationService,
-        );
-    }
-
-    /**
-     * Exposed for {@see ContextWindowRecovery} so it can build the LLM
-     * driver for history-compaction summaries. Not part of the public API.
-     */
-    public function getDriverFactory(): DriverFactory
-    {
-        return $this->driverFactory;
+        $this->tickPhaseRunner->runTick($taskId);
     }
 
     /**
@@ -173,18 +184,7 @@ final class Orchestrator implements OrchestratorInterface
      */
     public function resume(int $taskId, array $approvedBatch): void
     {
-        $this->approvedBatchExecutor()->execute($taskId, $approvedBatch);
-    }
-
-    private ?ApprovedBatchExecutor $approvedBatchExecutorInstance = null;
-
-    public function approvedBatchExecutor(): ApprovedBatchExecutor
-    {
-        return $this->approvedBatchExecutorInstance ??= new ApprovedBatchExecutor(
-            $this,
-            $this->workerMode,
-            $this->logger,
-        );
+        $this->approvedBatchExecutor->execute($taskId, $approvedBatch);
     }
 
     public function reject(int $taskId, string $reason): void
@@ -254,13 +254,6 @@ final class Orchestrator implements OrchestratorInterface
         }
     }
 
-
-    private ?ToolCallExecutor $toolCallExecutorInstance = null;
-
-    public function toolCallExecutor(): ToolCallExecutor
-    {
-        return $this->toolCallExecutorInstance ??= new ToolCallExecutor($this);
-    }
 
     public function safeExecute(
         ToolInterface $toolInstance,
@@ -381,9 +374,10 @@ final class Orchestrator implements OrchestratorInterface
      * @param  list<string>  $enabledClasses
      * @return list<array<string, mixed>>
      */
+    /** @phpstan-ignore method.unused (used via reflection in tests) */
     private function buildToolDefinitions(array $enabledClasses, int $agentId, ?int $userId = null): array
     {
-        return $this->toolDefinitionBuilder()->buildToolDefinitions($enabledClasses, $agentId, $userId);
+        return $this->toolDefinitionBuilder->buildToolDefinitions($enabledClasses, $agentId, $userId);
     }
 
     private function buildLlmConfigBlock(array $llmSettings): string
@@ -472,42 +466,5 @@ final class Orchestrator implements OrchestratorInterface
             $row['sequence'] = $nextSeq + 1;
             TaskHistory::create($row);
         });
-    }
-
-    private ?RetryScheduler $retrySchedulerInstance = null;
-
-    public function retryScheduler(): RetryScheduler
-    {
-        return $this->retrySchedulerInstance ??= new RetryScheduler(
-            $this,
-            $this->logger,
-            $this->notificationService,
-        );
-    }
-
-    private ?ErrorClassifier $errorClassifierInstance = null;
-
-    public function errorClassifier(): ErrorClassifier
-    {
-        return $this->errorClassifierInstance ??= new ErrorClassifier($this->logger);
-    }
-
-    private ?ToolDefinitionBuilder $toolDefinitionBuilderInstance = null;
-
-    public function toolDefinitionBuilder(): ToolDefinitionBuilder
-    {
-        return $this->toolDefinitionBuilderInstance ??= new ToolDefinitionBuilder(
-            $this->toolInstances,
-            $this->toolConfigService,
-            $this->pluginLoader,
-            fn(array $llmSettings): string => $this->buildLlmConfigBlock($llmSettings),
-        );
-    }
-
-    private ?LlmConfigResolver $llmConfigResolverInstance = null;
-
-    public function llmConfigResolver(): LlmConfigResolver
-    {
-        return $this->llmConfigResolverInstance ??= new LlmConfigResolver($this->llmConfigService);
     }
 }

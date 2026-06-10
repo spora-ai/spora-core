@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Agents;
 
 use Psr\Log\LoggerInterface;
+use Spora\Drivers\DriverFactory;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Models\Agent;
 use Spora\Models\Task;
@@ -25,6 +26,7 @@ final class ContextWindowRecovery
 {
     public function __construct(
         private readonly Orchestrator $orchestrator,
+        private readonly DriverFactory $driverFactory,
         private readonly ?LoggerInterface $logger = null,
         private readonly ?NotificationService $notificationService = null,
     ) {}
@@ -39,7 +41,7 @@ final class ContextWindowRecovery
 
         $historyCount = TaskHistory::where('task_id', $taskId)->count();
         if ($historyCount <= 1) {
-            $actualLimit = $this->orchestrator->errorClassifier()->extractActualContextWindow($originalError);
+            $actualLimit = $this->orchestrator->errorClassifier->extractActualContextWindow($originalError);
             $msg = $actualLimit !== null
                 ? "Context window too small ({$actualLimit} tokens). The model cannot process this request even without any conversation history. Try a model with a larger context window (e.g., 128K+ tokens) or reduce the system prompt length."
                 : "Context window too small for the current prompt. The model cannot process this request even without any conversation history. Try a model with a larger context window (e.g., 128K+ tokens) or reduce the system prompt length.";
@@ -55,7 +57,7 @@ final class ContextWindowRecovery
             throw $originalError;
         }
 
-        $llmConfig = $this->orchestrator->llmConfigResolver()->resolveLlmConfig($agent);
+        $llmConfig = $this->orchestrator->llmConfigResolver->resolveLlmConfig($agent);
         $maxTokensOutput = $llmConfig['max_tokens_output'];
         $temperature = $llmConfig['temperature'];
 
@@ -128,7 +130,7 @@ final class ContextWindowRecovery
             temperature: $temperature,
         );
 
-        $driver = $this->orchestrator->getDriverFactory()->makeFromAgent($agent);
+        $driver = $this->driverFactory->makeFromAgent($agent);
         $response = $driver->complete($summaryRequest);
 
         $summaryText = $response->content ?? 'Conversation summarized.';
