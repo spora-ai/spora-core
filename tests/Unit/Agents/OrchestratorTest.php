@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\Orchestrator;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
@@ -1436,9 +1437,11 @@ it('publishes intermediate state exactly once when tools are auto-approved', fun
     enableToolsForAgent($agentId, $tools);
 
     $orch = new Orchestrator(
-        driverFactory: mockDriverFactory($mock),
-        toolInstances: $tools,
-        mercure: $mockMercure,
+        mockDriverFactory($mock),
+        new OrchestratorConfig(
+            toolInstances: $tools,
+            mercure: $mockMercure,
+        ),
     );
 
     $task = $orch->start($agentId, 'Auto approve test', maxSteps: 10);
@@ -1474,9 +1477,11 @@ it('publishes intermediate state when tools require approval', function (): void
     enableToolsForAgent($agentId, $tools);
 
     $orch = new Orchestrator(
-        driverFactory: mockDriverFactory($mock),
-        toolInstances: $tools,
-        mercure: $mockMercure,
+        mockDriverFactory($mock),
+        new OrchestratorConfig(
+            toolInstances: $tools,
+            mercure: $mockMercure,
+        ),
     );
 
     $task = $orch->start($agentId, 'Approval test', maxSteps: 10);
@@ -2391,9 +2396,11 @@ it('qualifiedToolName prepends the plugin slug when the tool belongs to a regist
     });
 
     $orch = new Orchestrator(
-        driverFactory: mockDriverFactory($mock),
-        toolInstances: [$pluginTool],
-        pluginLoader: $pluginLoader,
+        mockDriverFactory($mock),
+        new OrchestratorConfig(
+            toolInstances: [$pluginTool],
+            pluginLoader: $pluginLoader,
+        ),
     );
     $orch->start($agentId, 'Plugin tool test', maxSteps: 5);
 
@@ -2538,9 +2545,11 @@ it('publishIntermediateState falls back to a default ToolCallSerializer when non
 
     // No ToolCallSerializer injected — the Orchestrator should default-instantiate one.
     $orch = new Orchestrator(
-        driverFactory: mockDriverFactory($mock),
-        toolInstances: $tools,
-        mercure: $mockMercure,
+        mockDriverFactory($mock),
+        new OrchestratorConfig(
+            toolInstances: $tools,
+            mercure: $mockMercure,
+        ),
     );
 
     $task = $orch->start($agentId, 'Default serializer test', maxSteps: 10);
@@ -2664,9 +2673,11 @@ describe('Orchestrator::handleToolCalls — happy path', function (): void {
         $tools = [new StubInputTool()];
         enableToolsForAgent($agentId, $tools);
         $orch = new Orchestrator(
-            driverFactory: mockDriverFactory($mock),
-            toolInstances: $tools,
-            mercure: $mockMercure,
+            mockDriverFactory($mock),
+            new OrchestratorConfig(
+                toolInstances: $tools,
+                mercure: $mockMercure,
+            ),
         );
         $task = $orch->start($agentId, 'Happy path test', maxSteps: 10);
 

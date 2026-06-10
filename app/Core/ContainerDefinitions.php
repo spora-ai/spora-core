@@ -12,6 +12,7 @@ use Monolog\Logger as MonologLogger;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\Orchestrator;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Apps\AppRegistry;
@@ -696,16 +697,18 @@ final class ContainerDefinitions
         return [
             OrchestratorInterface::class => static function (ContainerInterface $c): OrchestratorInterface {
                 return new Orchestrator(
-                    driverFactory: $c->get(DriverFactory::class),
-                    llmConfigService: $c->get(LLMConfigService::class),
-                    toolInstances: $c->get('tool_instances'),
-                    logger: $c->get(LoggerInterface::class),
-                    workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,
-                    notificationService: $c->get(NotificationService::class),
-                    pluginLoader: $c->get(PluginLoader::class),
-                    mercure: $c->get(MercurePublisherInterface::class),
-                    toolConfigService: $c->get(ToolConfigService::class),
-                    toolCallSerializer: $c->get(ToolCallSerializer::class),
+                    $c->get(DriverFactory::class),
+                    new OrchestratorConfig(
+                        llmConfigService: $c->get(LLMConfigService::class),
+                        toolInstances: $c->get('tool_instances'),
+                        logger: $c->get(LoggerInterface::class),
+                        workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,
+                        notificationService: $c->get(NotificationService::class),
+                        pluginLoader: $c->get(PluginLoader::class),
+                        mercure: $c->get(MercurePublisherInterface::class),
+                        toolConfigService: $c->get(ToolConfigService::class),
+                        toolCallSerializer: $c->get(ToolCallSerializer::class),
+                    ),
                 );
             },
 

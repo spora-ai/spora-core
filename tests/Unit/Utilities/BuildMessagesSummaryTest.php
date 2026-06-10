@@ -7,6 +7,7 @@ namespace Tests\Unit\Utilities;
 use Mockery;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
@@ -87,8 +88,8 @@ final class BuildMessagesSummaryTest extends TestCase
         );
 
         $orch = new \Spora\Agents\Orchestrator(
-            driverFactory: $driverFactory,
-            toolInstances: [],
+            $driverFactory,
+            new \Spora\Agents\OrchestratorConfig(),
         );
 
         $ref = new ReflectionMethod(\Spora\Agents\Orchestrator::class, 'buildMessages');

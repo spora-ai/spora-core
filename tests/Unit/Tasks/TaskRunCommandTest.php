@@ -6,6 +6,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\Orchestrator;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Core\Database;
@@ -444,9 +445,8 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         $factory->allows('makeFromAgent')->andReturn($throwingDriver);
 
         $orchestrator = new Orchestrator(
-            driverFactory: $factory,
-            toolInstances: [],
-            workerMode: WorkerMode::Sync,
+            $factory,
+            new OrchestratorConfig(),
         );
 
         try {
@@ -545,14 +545,14 @@ describe('TaskRunCommand — tool config injection', function (): void {
         $mockNotification->allows('notifyTaskFailed')->andReturnNull();
 
         $orchestrator = new Orchestrator(
-            driverFactory: $capturingFactory,
-            toolInstances: [$emailTool],
-            logger: null,
-            workerMode: WorkerMode::Sync,
-            notificationService: $mockNotification,
-            mercure: Mockery::mock(MercurePublisherInterface::class),
-            toolConfigService: $this->toolConfigService,
-            llmConfigService: $this->llmConfigService,
+            $capturingFactory,
+            new OrchestratorConfig(
+                toolInstances: [$emailTool],
+                notificationService: $mockNotification,
+                mercure: Mockery::mock(MercurePublisherInterface::class),
+                toolConfigService: $this->toolConfigService,
+                llmConfigService: $this->llmConfigService,
+            ),
         );
 
         $task = Task::create([
@@ -604,14 +604,14 @@ describe('TaskRunCommand — tool config injection', function (): void {
         $mockNotification->allows('notifyTaskFailed')->andReturnNull();
 
         $orchestrator = new Orchestrator(
-            driverFactory: $capturingFactory,
-            toolInstances: [$emailTool],
-            logger: null,
-            workerMode: WorkerMode::Sync,
-            notificationService: $mockNotification,
-            mercure: Mockery::mock(MercurePublisherInterface::class),
-            toolConfigService: $this->toolConfigService,
-            llmConfigService: $this->llmConfigService,
+            $capturingFactory,
+            new OrchestratorConfig(
+                toolInstances: [$emailTool],
+                notificationService: $mockNotification,
+                mercure: Mockery::mock(MercurePublisherInterface::class),
+                toolConfigService: $this->toolConfigService,
+                llmConfigService: $this->llmConfigService,
+            ),
         );
 
         $reflection = new ReflectionClass($orchestrator);
