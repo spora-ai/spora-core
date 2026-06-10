@@ -176,7 +176,7 @@ function onScheduleSaved(): void {
           class="flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer"
           title="Go to agent settings"
         >
-          <Icon name="lightning" class="h-3 w-3 shrink-0" />
+          <Icon name="zap" class="h-3 w-3 shrink-0" />
           <span>Max {{ agentStore.currentAgent.max_steps }} steps</span>
         </button>
       </div>
