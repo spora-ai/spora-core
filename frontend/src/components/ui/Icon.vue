@@ -1,10 +1,19 @@
 <script setup lang="ts">
+/**
+ * Inline icon registry. Resolution order:
+ *   1. Bundled-name lookup (e.g. "bell", "puzzle", "brain")
+ *   2. Raw SVG path starting with a path command letter — plugin authors
+ *      can ship their own icons without depending on this map
+ *   3. Fallback to "bell"
+ */
 defineProps<{
   name: string
   class?: string
 }>()
 
-const icons: Record<string, string> = {
+// Icons can be a single path (string) or multiple paths (string[]). Lucide
+// multi-path icons (Brain, Puzzle) use the array form.
+const icons: Record<string, string | string[]> = {
   // Navigation & Actions
   bell: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9',
   check: 'M4.5 12.75l6 6 9-13.5',
@@ -51,12 +60,52 @@ const icons: Record<string, string> = {
   'shield-check': 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
   'user-plus': 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z',
 
+  // Apps
+  // Multi-path icons live in the array form so the template can render
+  // each <path> separately. All path data is from lucide-vue-next v0.487.0.
+  brain: [
+    'M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z',
+    'M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z',
+    'M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4',
+    'M17.599 6.5a3 3 0 0 0 .399-1.375',
+    'M6.003 5.125A3 3 0 0 0 6.401 6.5',
+    'M3.477 10.896a4 4 0 0 1 .585-.396',
+    'M19.938 10.5a4 4 0 0 1 .585.396',
+    'M6 18a4 4 0 0 1-1.967-.516',
+    'M19.967 17.484A4 4 0 0 1 18 18',
+  ],
+  puzzle: [
+    'M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z',
+  ],
+
   // Extra UI
   eye: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z',
   lock: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z',
   'check-circle': 'M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
   info: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
   'error-circle': 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+}
+
+// An SVG path command letter (M, L, H, V, C, S, Q, T, A, Z) — paths always
+// start with one of these, while bundled icon names are kebab-case
+// alphanumeric. Used to detect when an `icon` string is a raw SVG path
+// (shipped by a plugin) vs. a bundled-name lookup.
+const SVG_PATH_LEAD = /^[MmLlHhVvCcSsQqTtAaZz]/
+
+const paths = (name: string): string[] => {
+  // 1. Bundled-name lookup takes priority — this is the common case.
+  if (Object.prototype.hasOwnProperty.call(icons, name)) {
+    const entry = icons[name] as string | string[]
+    return Array.isArray(entry) ? entry : [entry]
+  }
+  // 2. Plugin-supplied raw SVG path — render directly. Lets a third-party
+  //    plugin ship its own icon without depending on the central map.
+  if (SVG_PATH_LEAD.test(name)) {
+    return [name]
+  }
+  // 3. Unknown name that doesn't look like a path — fall back to bell.
+  const bell = icons.bell as string
+  return [bell]
 }
 </script>
 
@@ -70,9 +119,11 @@ const icons: Record<string, string> = {
     stroke-width="1.5"
   >
     <path
+      v-for="(d, i) in paths($props.name)"
+      :key="i"
       stroke-linecap="round"
       stroke-linejoin="round"
-      :d="icons[name] || icons.bell"
+      :d="d"
     />
   </svg>
 </template>

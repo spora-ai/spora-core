@@ -18,5 +18,12 @@ interface AppInterface
 
     public function description(): string;
 
+    /**
+     * Either a bundled icon name (e.g. "puzzle", "brain", "bell") looked up
+     * in the frontend's shared icon map, or a raw SVG path string (starting
+     * with a path command letter: M/L/H/V/C/S/Q/T/A/Z) rendered directly.
+     * The dual form lets third-party plugins ship their own icons without
+     * depending on the central map.
+     */
     public function icon(): string;
 }
