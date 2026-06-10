@@ -67,6 +67,7 @@ final class Orchestrator implements OrchestratorInterface
         private readonly ?ToolDefinitionBuilder   $toolDefinitionBuilder = null,
         private readonly ?LlmConfigResolver       $llmConfigResolver = null,
         private readonly ?RetryScheduler          $retryScheduler = null,
+        private readonly ?ContextWindowRecovery  $contextWindowRecovery = null,
     ) {}
 
     // Public API
@@ -307,7 +308,7 @@ final class Orchestrator implements OrchestratorInterface
         ]);
 
         if ($this->errorClassifier()->isContextWindowError($e)) {
-            $this->tryCompactionAndRetry($context['task'], $context['agent'], $e);
+            $this->contextWindowRecovery()->tryCompactionAndRetry($context['task'], $context['agent'], $e);
             return;
         }
 
@@ -358,134 +359,24 @@ final class Orchestrator implements OrchestratorInterface
         }
     }
 
-    private function tryCompactionAndRetry(?Task $task, ?Agent $agent, Throwable $originalError): void
+    private ?ContextWindowRecovery $contextWindowRecoveryInstance = null;
+
+    private function contextWindowRecovery(): ContextWindowRecovery
     {
-        if ($task === null || $agent === null) {
-            throw $originalError;
-        }
-
-        $taskId = $task->id;
-
-        $historyCount = TaskHistory::where('task_id', $taskId)->count();
-        if ($historyCount <= 1) {
-            $actualLimit = $this->errorClassifier()->extractActualContextWindow($originalError);
-            $msg = $actualLimit !== null
-                ? "Context window too small ({$actualLimit} tokens). The model cannot process this request even without any conversation history. Try a model with a larger context window (e.g., 128K+ tokens) or reduce the system prompt length."
-                : "Context window too small for the current prompt. The model cannot process this request even without any conversation history. Try a model with a larger context window (e.g., 128K+ tokens) or reduce the system prompt length.";
-
-            Task::where('id', $taskId)->where('status', 'RUNNING')->update([
-                'status'         => 'FAILED',
-                'failure_reason' => $originalError->getMessage(),
-                'error_code'     => 'CONTEXT_WINDOW_FIRST_TURN',
-                'error_message' => $msg,
-            ]);
-
-            $this->notificationService?->notifyTaskFailed(Task::find($taskId));
-            throw $originalError;
-        }
-
-        $llmConfig = $this->llmConfigResolver()->resolveLlmConfig($agent);
-        $maxTokensOutput = $llmConfig['max_tokens_output'];
-        $temperature = $llmConfig['temperature'];
-
-        $this->logger?->info('Context window error, compacting history and retrying', ['task_id' => $taskId]);
-
-        try {
-            $this->compactHistory($taskId, $maxTokensOutput, $temperature, $agent);
-        } catch (Throwable $e) {
-            $this->logger?->warning('Compaction failed', ['task_id' => $taskId, 'exception' => $e->getMessage()]);
-            throw $originalError;
-        }
-
-        try {
-            $this->tick($taskId);
-        } catch (Throwable) {
-            throw $originalError;
-        }
+        return $this->contextWindowRecoveryInstance ??= new ContextWindowRecovery(
+            $this,
+            $this->logger,
+            $this->notificationService,
+        );
     }
 
-    private function compactHistory(int $taskId, int $maxTokensOutput, float $temperature, Agent $agent): void
+    /**
+     * Exposed for {@see ContextWindowRecovery} so it can build the LLM
+     * driver for history-compaction summaries. Not part of the public API.
+     */
+    public function getDriverFactory(): DriverFactory
     {
-        $allRows = TaskHistory::where('task_id', $taskId)
-            ->orderBy('sequence')
-            ->get();
-
-        $keepCount = 5;
-        if ($allRows->count() <= $keepCount + 1) {
-            return;
-        }
-
-        $toSummarizeRows = $allRows->take($allRows->count() - $keepCount);
-
-        $firstRow = $toSummarizeRows->first();
-        $lastRow = $toSummarizeRows->last();
-        $firstSeq = $firstRow !== null ? $firstRow->sequence : 0;
-        $lastSeq = $lastRow !== null ? $lastRow->sequence : 0;
-
-        $summaryMessages = [];
-        foreach ($toSummarizeRows as $row) {
-            $content = $row->content ?? '';
-            if ($row->role === 'tool') {
-                $content = "[{$row->tool_name}]: " . $content;
-            }
-            if ($content !== '') {
-                $summaryMessages[] = ['role' => $row->role, 'content' => $content];
-            }
-        }
-
-        if ($summaryMessages === []) {
-            TaskHistory::where('task_id', $taskId)
-                ->where('sequence', '>=', $firstSeq)
-                ->where('sequence', '<=', $lastSeq)
-                ->delete();
-            return;
-        }
-
-        $systemPrompt = ($agent->system_prompt !== null && $agent->system_prompt !== '')
-            ? $agent->system_prompt
-            : 'You are a helpful AI assistant.';
-
-        $summaryInstruction = 'Summarize the conversation below concisely, preserving key facts, decisions, and any pending tasks. Output only the summary.';
-
-        $summaryRequest = new LLMRequest(
-            systemPrompt: $systemPrompt,
-            messages: array_merge($summaryMessages, [['role' => 'user', 'content' => $summaryInstruction]]),
-            tools: [],
-            maxTokens: min($maxTokensOutput, 1024),
-            temperature: $temperature,
-        );
-
-        $driver = $this->driverFactory->makeFromAgent($agent);
-        $response = $driver->complete($summaryRequest);
-
-        $summaryText = $response->content ?? 'Conversation summarized.';
-
-        Capsule::connection()->transaction(function () use ($taskId, $firstSeq, $lastSeq, $summaryText) {
-            TaskHistory::where('task_id', $taskId)
-                ->where('sequence', '>=', $firstSeq)
-                ->where('sequence', '<=', $lastSeq)
-                ->delete();
-
-            TaskHistory::create([
-                'task_id' => $taskId,
-                'sequence' => $firstSeq,
-                'role' => 'summary',
-                'content' => $summaryText,
-                'summarized_sequence_range' => "{$firstSeq}-{$lastSeq}",
-            ]);
-
-            $remaining = TaskHistory::where('task_id', $taskId)
-                ->where('sequence', '>', $lastSeq)
-                ->orderBy('sequence')
-                ->get();
-
-            $nextSeq = $lastSeq + 1;
-            foreach ($remaining as $row) {
-                $row->sequence = $nextSeq;
-                $row->save();
-                $nextSeq++;
-            }
-        });
+        return $this->driverFactory;
     }
 
     /**
@@ -1070,7 +961,7 @@ final class Orchestrator implements OrchestratorInterface
 
     private ?RetryScheduler $retrySchedulerInstance = null;
 
-    private function retryScheduler(): RetryScheduler
+    public function retryScheduler(): RetryScheduler
     {
         return $this->retrySchedulerInstance ??= new RetryScheduler(
             $this,
@@ -1081,14 +972,14 @@ final class Orchestrator implements OrchestratorInterface
 
     private ?ErrorClassifier $errorClassifierInstance = null;
 
-    private function errorClassifier(): ErrorClassifier
+    public function errorClassifier(): ErrorClassifier
     {
         return $this->errorClassifierInstance ??= new ErrorClassifier($this->logger);
     }
 
     private ?ToolDefinitionBuilder $toolDefinitionBuilderInstance = null;
 
-    private function toolDefinitionBuilder(): ToolDefinitionBuilder
+    public function toolDefinitionBuilder(): ToolDefinitionBuilder
     {
         return $this->toolDefinitionBuilderInstance ??= new ToolDefinitionBuilder(
             $this->toolInstances,
@@ -1100,7 +991,7 @@ final class Orchestrator implements OrchestratorInterface
 
     private ?LlmConfigResolver $llmConfigResolverInstance = null;
 
-    private function llmConfigResolver(): LlmConfigResolver
+    public function llmConfigResolver(): LlmConfigResolver
     {
         return $this->llmConfigResolverInstance ??= new LlmConfigResolver($this->llmConfigService);
     }
