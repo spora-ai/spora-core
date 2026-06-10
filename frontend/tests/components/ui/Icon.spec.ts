@@ -174,4 +174,44 @@ describe('Icon', () => {
       expect(wrapper.findAll('path')).toHaveLength(expectedPaths)
     })
   })
+
+  // Plugin-supplied icons — three forms accepted by `plugin.json`'s `icon`
+  // field. Resolution order: bundled name → full <svg> string → raw path →
+  // bell fallback. Plugin authors pick whichever is smallest for their icon.
+  describe('plugin-supplied icons', () => {
+    it('renders a single-path string as a <path> with that d-attribute', () => {
+      const d = 'M3 3l7 7-7 7'
+      const wrapper = mount(Icon, { props: { name: d } })
+      expect(wrapper.findAll('path')).toHaveLength(1)
+      expect(wrapper.find('path').attributes('d')).toBe(d)
+    })
+
+    it('renders a full <svg> string by extracting its inner children', () => {
+      // Two-primitive compass: outer circle + diagonal needle.
+      const svg = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10"/><path d="M3 3l7 7"/></svg>'
+      const wrapper = mount(Icon, { props: { name: svg } })
+      // Host renders one outer <svg> (the component's own), so we get
+      // exactly one circle and one path from the injected children.
+      expect(wrapper.findAll('circle')).toHaveLength(1)
+      expect(wrapper.findAll('path')).toHaveLength(1)
+      expect(wrapper.find('circle').attributes('cx')).toBe('12')
+      expect(wrapper.find('path').attributes('d')).toBe('M3 3l7 7')
+    })
+
+    it('discards the plugin <svg> outer tag — the host keeps its own viewBox', () => {
+      // The plugin declares viewBox="0 0 100 100"; the host's viewBox is 0 0 24 24.
+      const svg = '<svg viewBox="0 0 100 100"><path d="M1 1l7 7"/></svg>'
+      const wrapper = mount(Icon, { props: { name: svg } })
+      const host = wrapper.find('svg')
+      expect(host.attributes('viewBox')).toBe('0 0 24 24')
+    })
+
+    it('tolerates leading whitespace before the <svg> tag', () => {
+      // plugin.json parsers can occasionally return strings with leading
+      // whitespace; the resolver must still recognise the <svg> form.
+      const svg = '  <svg viewBox="0 0 24 24"><path d="M1 1l7 7"/></svg>'
+      const wrapper = mount(Icon, { props: { name: svg } })
+      expect(wrapper.findAll('path')).toHaveLength(1)
+    })
+  })
 })

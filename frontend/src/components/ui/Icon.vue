@@ -2,9 +2,14 @@
 /**
  * Inline icon registry. Resolution order:
  *   1. Bundled-name lookup (e.g. "bell", "puzzle", "brain")
- *   2. Raw SVG path starting with a path command letter — plugin authors
- *      can ship their own icons without depending on this map
- *   3. Fallback to "bell"
+ *   2. Full <svg>…</svg> string — plugin authors can ship multi-primitive
+ *      icons (circle + path, rect + path, etc.) without depending on the
+ *      bundled palette. The host extracts the inner children and renders
+ *      them with its own class / fill / stroke / viewBox; the outer <svg>
+ *      tag is discarded.
+ *   3. Raw SVG path starting with a path command letter — same use case as
+ *      the <svg> form, but for single-path icons. Smaller in JSON.
+ *   4. Fallback to "bell"
  *
  * Each bundled icon is a list of SVG primitives — most are single <path>,
  * but lucide uses <circle>, <ellipse>, <polyline>, <polygon>, and <rect>
@@ -23,6 +28,10 @@ type IconElement =
   | { tag: 'polyline'; points: string }
   | { tag: 'polygon'; points: string }
   | { tag: 'rect'; x?: string; y?: string; width: string; height: string; rx?: string; ry?: string }
+  // Plugin-supplied <svg>…</svg>: the inner children are rendered inside
+  // a <g> via v-html. The host's class / fill / stroke / viewBox win over
+  // whatever the plugin's <svg> declares.
+  | { tag: 'rawSvg'; inner: string }
 
 const icons: Record<string, IconElement[]> = {
   // Navigation & Actions
@@ -172,12 +181,23 @@ const elements = (name: string): IconElement[] => {
   if (Object.prototype.hasOwnProperty.call(icons, name)) {
     return icons[name]
   }
-  // 2. Plugin-supplied raw SVG path — render directly. Lets a third-party
-  //    plugin ship its own icon without depending on the central map.
+  // 2. Plugin-supplied full <svg>…</svg> — multi-primitive icons.
+  //    The host's outer <svg> wins on class / fill / stroke / viewBox; we
+  //    only render the inner children. Plugin authors are operators with
+  //    shell access (docs/07_plugins.md § Security), so the trust boundary
+  //    is the plugin manifest, not user input.
+  if (name.trimStart().toLowerCase().startsWith('<svg')) {
+    const inner = name
+      .replace(/^[\s\S]*?<svg[^>]*>/i, '')
+      .replace(/<\/svg>\s*$/i, '')
+    return [{ tag: 'rawSvg', inner }]
+  }
+  // 3. Plugin-supplied raw SVG path — single-path icons. Smaller in JSON
+  //    than the <svg> form.
   if (SVG_PATH_LEAD.test(name)) {
     return [{ tag: 'path', d: name }]
   }
-  // 3. Unknown name that doesn't look like a path — fall back to bell.
+  // 4. Unknown name that doesn't look like a path — fall back to bell.
   return icons.bell
 }
 </script>
@@ -228,6 +248,13 @@ const elements = (name: string): IconElement[] => {
         :rx="el.rx"
         :ry="el.ry"
       />
+      <!--
+        Plugin-supplied <svg>…</svg>: the outer tag was discarded, only
+        the inner children are in `el.inner`. Wrapped in <g> so multiple
+        injected elements stay grouped. The host's <svg> attributes
+        (class, fill, stroke, viewBox) take precedence.
+      -->
+      <g v-else-if="el.tag === 'rawSvg'" v-html="el.inner" />
     </template>
   </svg>
 </template>
