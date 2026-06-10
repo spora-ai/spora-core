@@ -70,49 +70,40 @@ final class Orchestrator implements OrchestratorInterface
     public readonly ?LLMConfigService $llmConfigService;
     public readonly ?PluginLoader $pluginLoader;
 
-    /**
-     * @param list<object> $toolInstances
-     */
     public function __construct(
-        DriverFactory              $driverFactory,
-        ?LLMConfigService          $llmConfigService = null,
-        array                      $toolInstances = [],
-        ?LoggerInterface           $logger         = null,
-        WorkerMode                 $workerMode     = WorkerMode::Sync,
-        ?NotificationService       $notificationService = null,
-        ?PluginLoader              $pluginLoader   = null,
-        ?MercurePublisherInterface $mercure       = null,
-        ?ToolConfigService         $toolConfigService = null,
-        ?ToolCallSerializer        $toolCallSerializer = null,
+        DriverFactory $driverFactory,
+        ?OrchestratorConfig $config = null,
     ) {
-        $this->workerMode            = $workerMode;
-        $this->toolInstances         = $toolInstances;
-        $this->logger                = $logger;
-        $this->notificationService   = $notificationService;
-        $this->mercure               = $mercure;
-        $this->toolConfigService     = $toolConfigService;
-        $this->toolCallSerializer    = $toolCallSerializer;
-        $this->llmConfigService      = $llmConfigService;
-        $this->pluginLoader          = $pluginLoader;
+        $config ??= new OrchestratorConfig();
+
+        $this->workerMode            = $config->workerMode;
+        $this->toolInstances         = $config->toolInstances;
+        $this->logger                = $config->logger;
+        $this->notificationService   = $config->notificationService;
+        $this->mercure               = $config->mercure;
+        $this->toolConfigService     = $config->toolConfigService;
+        $this->toolCallSerializer    = $config->toolCallSerializer;
+        $this->llmConfigService      = $config->llmConfigService;
+        $this->pluginLoader          = $config->pluginLoader;
         $this->errorClassifier       = new ErrorClassifier();
-        $this->llmConfigResolver     = new LlmConfigResolver($llmConfigService);
+        $this->llmConfigResolver     = new LlmConfigResolver($config->llmConfigService);
         $this->toolDefinitionBuilder = new ToolDefinitionBuilder(
-            $toolInstances,
-            $toolConfigService,
-            $pluginLoader,
+            $config->toolInstances,
+            $config->toolConfigService,
+            $config->pluginLoader,
             fn(array $llmSettings): string => $this->buildLlmConfigBlock($llmSettings),
         );
-        $this->retryScheduler        = new RetryScheduler($this, $logger, $notificationService);
-        $this->contextWindowRecovery = new ContextWindowRecovery($this, $driverFactory, $logger, $notificationService);
-        $this->approvedBatchExecutor = new ApprovedBatchExecutor($this, $workerMode, $logger);
+        $this->retryScheduler        = new RetryScheduler($this, $config->logger, $config->notificationService);
+        $this->contextWindowRecovery = new ContextWindowRecovery($this, $driverFactory, $config->logger, $config->notificationService);
+        $this->approvedBatchExecutor = new ApprovedBatchExecutor($this, $config->workerMode, $config->logger);
         $this->tickPhaseRunner       = new TickPhaseRunner(
             $this,
             $driverFactory,
-            $toolInstances,
-            $logger,
-            $notificationService,
-            $mercure,
-            $toolCallSerializer,
+            $config->toolInstances,
+            $config->logger,
+            $config->notificationService,
+            $config->mercure,
+            $config->toolCallSerializer,
         );
         $this->toolCallExecutor      = new ToolCallExecutor($this);
     }

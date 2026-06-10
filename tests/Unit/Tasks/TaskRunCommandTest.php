@@ -386,9 +386,8 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         );
 
         $orchestrator = new Orchestrator(
-            driverFactory: $factory,
-            toolInstances: [],
-            workerMode: WorkerMode::Sync,
+            $factory,
+            new OrchestratorConfig(),
         );
 
         // Run one tick — task should complete.

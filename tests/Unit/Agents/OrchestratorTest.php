@@ -60,11 +60,12 @@ function makeOrchestrator(
     WorkerMode $workerMode = WorkerMode::Sync,
 ): Orchestrator {
     return new Orchestrator(
-        driverFactory: $driverFactory,
-        llmConfigService: null,
-        toolInstances: $toolInstances,
-        logger: $logger,
-        workerMode: $workerMode,
+        $driverFactory,
+        new OrchestratorConfig(
+            toolInstances: $toolInstances,
+            logger: $logger,
+            workerMode: $workerMode,
+        ),
     );
 }
 

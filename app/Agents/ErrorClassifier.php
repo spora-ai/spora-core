@@ -34,7 +34,12 @@ final class ErrorClassifier
         'ORPHANED',
     ];
 
-    public function __construct() {}
+    public function __construct()
+    {
+        // Pure logic — no logger, notification, or other collaborator dependencies.
+        // Kept as an explicit (empty) constructor so the class can grow collaborators
+        // later without breaking the Orchestrator's `new ErrorClassifier()` call site.
+    }
 
     /**
      * Mark a task as FAILED with NO_LLM_CONFIGURATION if the underlying

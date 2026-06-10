@@ -73,11 +73,8 @@ function makeBareDriverFactory(): DriverFactory
 function makeBareOrchestrator(): Orchestrator
 {
     return new Orchestrator(
-        driverFactory: makeBareDriverFactory(),
-        llmConfigService: null,
-        toolInstances: [],
-        logger: null,
-        workerMode: WorkerMode::Sync,
+        makeBareDriverFactory(),
+        new OrchestratorConfig(),
     );
 }
 
@@ -228,11 +225,8 @@ it('handleToolCalls throws ToolNotEnabledException when LLM calls a tool that is
     // handleToolCalls() body will throw ToolNotEnabledException, which is
     // caught by the surrounding try/catch and turned into a System Error row.
     $orch = new Orchestrator(
-        driverFactory: $factory,
-        llmConfigService: null,
-        toolInstances: [new Tests\Fixtures\StubInputTool()],
-        logger: null,
-        workerMode: WorkerMode::Sync,
+        $factory,
+        new OrchestratorConfig(toolInstances: [new Tests\Fixtures\StubInputTool()]),
     );
     $task = $orch->start($agent->id, 'Tool not enabled test', maxSteps: 3);
 
