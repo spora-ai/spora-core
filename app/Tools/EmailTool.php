@@ -14,6 +14,7 @@ use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\Email\EmailActionDescriber;
 use Spora\Tools\Email\EmailMessageFormatter;
 use Spora\Tools\Email\EmailSettingsResolver;
+use Spora\Tools\Email\EmailValidationHelpers;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
@@ -127,45 +128,39 @@ final class EmailTool extends AbstractTool
         $markAsRead = (bool) ($arguments['mark_as_read'] ?? false);
         $unreadOnly = (bool) ($arguments['unread_only'] ?? false);
 
-        $imapSettings = $this->settingsResolver->resolveImapSettingsOrFail(static::class, $agentId, $userId);
-        if ($imapSettings instanceof ToolResult) {
-            return $imapSettings;
-        }
+        return $this->withImapSettings($agentId, $userId, function (array $imapSettings) use ($limit, $markAsRead, $unreadOnly): ToolResult {
+            try {
+                $messages = $this->imapClient->fetchInboxMessages($imapSettings, $limit, $markAsRead, $unreadOnly);
+            } catch (Throwable $e) {
+                return $this->messageFormatter->formatImapError('Failed to fetch emails', $e);
+            }
 
-        try {
-            $messages = $this->imapClient->fetchInboxMessages($imapSettings, $limit, $markAsRead, $unreadOnly);
-        } catch (Throwable $e) {
-            return $this->messageFormatter->formatImapError('Failed to fetch emails', $e);
-        }
+            if ($messages === []) {
+                return ToolResult::ok(
+                    $unreadOnly ? 'No unread emails in the INBOX.' : 'No recent emails in the INBOX.',
+                );
+            }
 
-        if ($messages === []) {
-            return ToolResult::ok(
-                $unreadOnly ? 'No unread emails in the INBOX.' : 'No recent emails in the INBOX.',
-            );
-        }
-
-        $header = $unreadOnly ? "Latest Unread Emails:\n\n" : "Latest Emails:\n\n";
-        return ToolResult::ok($header . $this->messageFormatter->formatMessageList($messages));
+            $header = $unreadOnly ? "Latest Unread Emails:\n\n" : "Latest Emails:\n\n";
+            return ToolResult::ok($header . $this->messageFormatter->formatMessageList($messages));
+        });
     }
 
     public function listFolders(int $agentId, ?int $userId): ToolResult
     {
-        $imapSettings = $this->settingsResolver->resolveImapSettingsOrFail(static::class, $agentId, $userId);
-        if ($imapSettings instanceof ToolResult) {
-            return $imapSettings;
-        }
+        return $this->withImapSettings($agentId, $userId, function (array $imapSettings): ToolResult {
+            try {
+                $names = $this->imapClient->fetchFolderNames($imapSettings);
+            } catch (Throwable $e) {
+                return $this->messageFormatter->formatImapError('Failed to list folders', $e);
+            }
 
-        try {
-            $names = $this->imapClient->fetchFolderNames($imapSettings);
-        } catch (Throwable $e) {
-            return $this->messageFormatter->formatImapError('Failed to list folders', $e);
-        }
+            if ($names === []) {
+                return ToolResult::ok('No email folders found.');
+            }
 
-        if ($names === []) {
-            return ToolResult::ok('No email folders found.');
-        }
-
-        return ToolResult::ok('Available folders: ' . implode(', ', $names));
+            return ToolResult::ok('Available folders: ' . implode(', ', $names));
+        });
     }
 
     public function readFolder(array $arguments, int $agentId, ?int $userId): ToolResult
@@ -173,11 +168,11 @@ final class EmailTool extends AbstractTool
         $folderName = trim((string) ($arguments['folder'] ?? ''));
         $limit      = $this->clampLimit((int) ($arguments['limit'] ?? self::DEFAULT_EMAIL_LIMIT));
 
-        $guard = $folderName !== ''
-            ? null
-            : ToolResult::fail('Missing required parameter: folder name is required for read_folder.');
+        if ($folderName === '') {
+            return ToolResult::fail('Missing required parameter: folder name is required for read_folder.');
+        }
 
-        return $guard ?? $this->withImapSettings($agentId, $userId, function (array $imapSettings) use ($folderName, $limit): ToolResult {
+        return $this->withImapSettings($agentId, $userId, function (array $imapSettings) use ($folderName, $limit): ToolResult {
             try {
                 $messages = $this->imapClient->fetchFolderMessages($imapSettings, $folderName, $limit);
             } catch (Throwable $e) {
@@ -196,29 +191,30 @@ final class EmailTool extends AbstractTool
         $subject = trim((string) ($arguments['subject'] ?? ''));
         $body    = trim((string) ($arguments['body'] ?? ''));
 
-        if ($to === '' || $subject === '' || $body === '') {
-            return ToolResult::fail('Missing required parameters: to, subject, or body.');
+        $missing = EmailValidationHelpers::requireNonEmptyStrings(
+            ['to' => $to, 'subject' => $subject, 'body' => $body],
+            'Missing required parameters: to, subject, or body.',
+        );
+        if ($missing instanceof ToolResult) {
+            return $missing;
         }
 
-        $imapSettings = $this->settingsResolver->resolveImapSettingsOrFail(static::class, $agentId, $userId);
-        if ($imapSettings instanceof ToolResult) {
-            return $imapSettings;
-        }
+        return $this->withImapSettings($agentId, $userId, function (array $imapSettings) use ($to, $subject, $body, $agentId, $userId): ToolResult {
+            $from = (string) ($this->settingsResolver->fetchSettings(static::class, $agentId, $userId)[self::KEY_SMTP_FROM] ?? '');
+            $imapSettings['from'] = $from;
 
-        $from = (string) ($this->settingsResolver->fetchSettings(static::class, $agentId, $userId)[self::KEY_SMTP_FROM] ?? '');
-        $imapSettings['from'] = $from;
+            if (!$this->imapClient->saveDraft($imapSettings, $to, $subject, $body)) {
+                $this->logger?->error('EmailTool: failed to save draft');
+                return ToolResult::fail('Failed to save draft to the Drafts folder. Check IMAP configuration.');
+            }
 
-        if (!$this->imapClient->saveDraft($imapSettings, $to, $subject, $body)) {
-            $this->logger?->error('EmailTool: failed to save draft');
-            return ToolResult::fail('Failed to save draft to the Drafts folder. Check IMAP configuration.');
-        }
+            $draft  = "From: " . ($from ?: '[From address not configured]') . "\n";
+            $draft .= "To: {$to}\n";
+            $draft .= "Subject: {$subject}\n";
+            $draft .= "\n{$body}";
 
-        $draft  = "From: " . ($from ?: '[From address not configured]') . "\n";
-        $draft .= "To: {$to}\n";
-        $draft .= "Subject: {$subject}\n";
-        $draft .= "\n{$body}";
-
-        return ToolResult::ok("Draft saved to Drafts folder:\n\n{$draft}");
+            return ToolResult::ok("Draft saved to Drafts folder:\n\n{$draft}");
+        });
     }
 
     public function sendEmail(array $arguments, int $agentId, ?int $userId): ToolResult
@@ -227,49 +223,58 @@ final class EmailTool extends AbstractTool
         $subject = trim((string) ($arguments['subject'] ?? ''));
         $body    = trim((string) ($arguments['body'] ?? ''));
 
-        if ($to === '' || $subject === '' || $body === '') {
-            return ToolResult::fail('Missing required parameters: to, subject, or body.');
+        $missing = EmailValidationHelpers::requireNonEmptyStrings(
+            ['to' => $to, 'subject' => $subject, 'body' => $body],
+            'Missing required parameters: to, subject, or body.',
+        );
+        if ($missing instanceof ToolResult) {
+            return $missing;
         }
 
-        $settings  = $this->settingsResolver->fetchSettings(static::class, $agentId, $userId);
-        $smtpCheck = $this->settingsResolver->validateSmtpSettings($settings, $to);
-        if ($smtpCheck instanceof ToolResult) {
-            return $smtpCheck;
-        }
+        return EmailValidationHelpers::withValidSmtpSettings(
+            $this->settingsResolver,
+            static::class,
+            $agentId,
+            $userId,
+            $to,
+            function (array $settings) use ($to, $subject, $body): ToolResult {
+            try {
+                $this->dispatchSmtpEmail($settings, $to, $subject, $body);
+            } catch (Throwable $e) {
+                $this->logger?->error('SMTP Error', ['exception' => $e]);
+                return ToolResult::fail('Failed to send email: ' . $e->getMessage());
+            }
 
-        try {
-            $this->dispatchSmtpEmail($settings, $to, $subject, $body);
-        } catch (Throwable $e) {
-            $this->logger?->error('SMTP Error', ['exception' => $e]);
-            return ToolResult::fail('Failed to send email: ' . $e->getMessage());
-        }
-
-        $this->logger?->debug('EmailTool: sent', ['to' => $to]);
-        return ToolResult::ok("Email successfully sent to {$to}.");
+            $this->logger?->debug('EmailTool: sent', ['to' => $to]);
+            return ToolResult::ok("Email successfully sent to {$to}.");
+        });
     }
 
     public function createFolder(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $name = trim((string) ($arguments['new_folder'] ?? ''));
-        if ($name === '') {
-            return ToolResult::fail('Missing required parameter: new_folder (folder name) is required for create_folder.');
+        $missing = EmailValidationHelpers::requireNonEmptyStrings(
+            ['new_folder' => $name],
+            'Missing required parameter: new_folder (folder name) is required for create_folder.',
+        );
+        if ($missing instanceof ToolResult) {
+            return $missing;
         }
 
-        $imapSettings = $this->settingsResolver->resolveImapSettingsOrFail(static::class, $agentId, $userId);
-        if ($imapSettings instanceof ToolResult) {
-            return $imapSettings;
+        $guard = EmailValidationHelpers::withNewFolderGuard(
+            $this->settingsResolver,
+            $this->imapClient,
+            $this->messageFormatter,
+            static::class,
+            $agentId,
+            $userId,
+            $name,
+        );
+        if ($guard instanceof ToolResult) {
+            return $guard;
         }
 
-        try {
-            $existingFolders = $this->imapClient->fetchFolderNames($imapSettings);
-        } catch (Throwable $e) {
-            return $this->messageFormatter->formatImapError('Failed to fetch folders', $e);
-        }
-
-        if (in_array($name, $existingFolders, true)) {
-            return ToolResult::ok("Folder '{$name}' already exists.");
-        }
-
+        $imapSettings = $guard['settings'];
         if (!$this->imapClient->createFolder($imapSettings, $name)) {
             return ToolResult::fail("Failed to create folder '{$name}'. Check that the folder name is valid.");
         }
@@ -282,44 +287,48 @@ final class EmailTool extends AbstractTool
         $oldName = trim((string) ($arguments['folder'] ?? ''));
         $newName = trim((string) ($arguments['new_folder'] ?? ''));
 
-        if ($oldName === '' || $newName === '') {
-            return ToolResult::fail('Missing required parameters: folder (old name) and new_folder (new name) are required for rename_folder.');
+        $missing = EmailValidationHelpers::requireNonEmptyStrings(
+            ['folder' => $oldName, 'new_folder' => $newName],
+            'Missing required parameters: folder (old name) and new_folder (new name) are required for rename_folder.',
+        );
+        if ($missing instanceof ToolResult) {
+            return $missing;
         }
 
-        $imapSettings = $this->settingsResolver->resolveImapSettingsOrFail(static::class, $agentId, $userId);
-        if ($imapSettings instanceof ToolResult) {
-            return $imapSettings;
-        }
+        return $this->withImapSettings($agentId, $userId, function (array $imapSettings) use ($oldName, $newName): ToolResult {
+            if (!$this->imapClient->renameFolder($imapSettings, $oldName, $newName)) {
+                return ToolResult::fail("Failed to rename folder '{$oldName}' to '{$newName}'. Check that the source folder exists and the new name is valid.");
+            }
 
-        if (!$this->imapClient->renameFolder($imapSettings, $oldName, $newName)) {
-            return ToolResult::fail("Failed to rename folder '{$oldName}' to '{$newName}'. Check that the source folder exists and the new name is valid.");
-        }
-
-        return ToolResult::ok("Folder '{$oldName}' renamed to '{$newName}' successfully.");
+            return ToolResult::ok("Folder '{$oldName}' renamed to '{$newName}' successfully.");
+        });
     }
 
     public function deleteFolder(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $name = trim((string) ($arguments['folder'] ?? ''));
-        if ($name === '') {
-            return ToolResult::fail('Missing required parameter: folder name is required for delete_folder.');
+        $missing = EmailValidationHelpers::requireNonEmptyStrings(
+            ['folder' => $name],
+            'Missing required parameter: folder name is required for delete_folder.',
+        );
+        if ($missing instanceof ToolResult) {
+            return $missing;
         }
 
-        $imapSettings = $this->settingsResolver->resolveImapSettingsOrFail(static::class, $agentId, $userId);
-        if ($imapSettings instanceof ToolResult) {
-            return $imapSettings;
+        $guard = EmailValidationHelpers::withExistingFolderGuard(
+            $this->settingsResolver,
+            $this->imapClient,
+            $this->messageFormatter,
+            static::class,
+            $agentId,
+            $userId,
+            $name,
+        );
+        if ($guard instanceof ToolResult) {
+            return $guard;
         }
 
-        try {
-            $existingFolders = $this->imapClient->fetchFolderNames($imapSettings);
-        } catch (Throwable $e) {
-            return $this->messageFormatter->formatImapError('Failed to fetch folders', $e);
-        }
-
-        if (!in_array($name, $existingFolders, true)) {
-            return ToolResult::ok("Folder '{$name}' does not exist.");
-        }
-
+        $imapSettings = $guard['settings'];
         if (!$this->imapClient->deleteFolder($imapSettings, $name)) {
             return ToolResult::fail("Failed to delete folder '{$name}'. Check that it is not a system folder (e.g. INBOX).");
         }
@@ -338,17 +347,14 @@ final class EmailTool extends AbstractTool
             return $validation;
         }
 
-        $imapSettings = $this->settingsResolver->resolveImapSettingsOrFail(static::class, $agentId, $userId);
-        if ($imapSettings instanceof ToolResult) {
-            return $imapSettings;
-        }
+        return $this->withImapSettings($agentId, $userId, function (array $imapSettings) use ($uid, $fromFolder, $toFolder): ToolResult {
+            $newUid = $this->imapClient->moveEmail($imapSettings, $uid, $fromFolder, $toFolder);
+            if ($newUid === '') {
+                return ToolResult::fail("Failed to move email UID {$uid} from '{$fromFolder}' to '{$toFolder}'. Check that the email exists and both folders are valid.");
+            }
 
-        $newUid = $this->imapClient->moveEmail($imapSettings, $uid, $fromFolder, $toFolder);
-        if ($newUid === '') {
-            return ToolResult::fail("Failed to move email UID {$uid} from '{$fromFolder}' to '{$toFolder}'. Check that the email exists and both folders are valid.");
-        }
-
-        return ToolResult::ok("Email UID {$uid} moved from '{$fromFolder}' to '{$toFolder}' (new UID: {$newUid}) successfully.");
+            return ToolResult::ok("Email UID {$uid} moved from '{$fromFolder}' to '{$toFolder}' (new UID: {$newUid}) successfully.");
+        });
     }
 
     public function deleteEmail(array $arguments, int $agentId, ?int $userId): ToolResult
@@ -361,16 +367,13 @@ final class EmailTool extends AbstractTool
             return $validation;
         }
 
-        $imapSettings = $this->settingsResolver->resolveImapSettingsOrFail(static::class, $agentId, $userId);
-        if ($imapSettings instanceof ToolResult) {
-            return $imapSettings;
-        }
+        return $this->withImapSettings($agentId, $userId, function (array $imapSettings) use ($uid, $folder): ToolResult {
+            if (!$this->imapClient->deleteEmail($imapSettings, $uid, $folder)) {
+                return ToolResult::fail("Failed to delete email UID {$uid} from '{$folder}'. Check that the email exists and is not a system folder.");
+            }
 
-        if (!$this->imapClient->deleteEmail($imapSettings, $uid, $folder)) {
-            return ToolResult::fail("Failed to delete email UID {$uid} from '{$folder}'. Check that the email exists and is not a system folder.");
-        }
-
-        return ToolResult::ok("Email UID {$uid} deleted from '{$folder}' successfully.");
+            return ToolResult::ok("Email UID {$uid} deleted from '{$folder}' successfully.");
+        });
     }
 
     public function markEmailRead(array $arguments, int $agentId, ?int $userId): ToolResult
@@ -378,24 +381,20 @@ final class EmailTool extends AbstractTool
         $uid    = (int) ($arguments['uid'] ?? 0);
         $folder = trim((string) ($arguments['folder'] ?? ''));
         $read   = (bool) ($arguments['read'] ?? true);
+        $label  = $read ? 'read' : 'unread';
 
         $validation = $this->validateUidAndFolder($uid, $folder, 'mark_email_read');
         if ($validation instanceof ToolResult) {
             return $validation;
         }
 
-        $imapSettings = $this->settingsResolver->resolveImapSettingsOrFail(static::class, $agentId, $userId);
-        if ($imapSettings instanceof ToolResult) {
-            return $imapSettings;
-        }
+        return $this->withImapSettings($agentId, $userId, function (array $imapSettings) use ($uid, $folder, $read, $label): ToolResult {
+            if (!$this->imapClient->setEmailFlag($imapSettings, $uid, $folder, 'Seen', $read)) {
+                return ToolResult::fail("Failed to mark email UID {$uid} as {$label}. Check that the email exists.");
+            }
 
-        if (!$this->imapClient->setEmailFlag($imapSettings, $uid, $folder, 'Seen', $read)) {
-            $label = $read ? 'read' : 'unread';
-            return ToolResult::fail("Failed to mark email UID {$uid} as {$label}. Check that the email exists.");
-        }
-
-        $label = $read ? 'read' : 'unread';
-        return ToolResult::ok("Email UID {$uid} marked as {$label} successfully.");
+            return ToolResult::ok("Email UID {$uid} marked as {$label} successfully.");
+        });
     }
 
     /**
