@@ -79,7 +79,7 @@ The full JSON Schema is in [`plugin.schema.json`](../plugin.schema.json) at the 
 
 ### Bundled icons
 
-The Spora frontend ships a curated palette of `<path>`-based icons. Plugin authors can reference any of these by name from the manifest's `icon` field without shipping their own SVG. For categories not covered below, fall back to a raw SVG path string (the `icon` field accepts anything starting with a path command letter).
+The Spora frontend ships a curated palette of bundled SVG icons. Plugin authors can reference any of these by name from the manifest's `icon` field without shipping their own SVG. For categories not covered below, fall back to a raw SVG path string (the `icon` field accepts anything starting with a path command letter).
 
 | Category        | Names                                                                       |
 |-----------------|-----------------------------------------------------------------------------|
@@ -99,7 +99,7 @@ The `icon` field in `plugin.json` accepts three forms. The frontend tries them i
    { "icon": "puzzle" }
    ```
 
-2. **Full `<svg>` string** — a complete `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">…</svg>` for multi-primitive icons (e.g. circle + path, rect + path). The host's `<svg>` attributes — `class`, `fill`, `stroke`, `viewBox`, `stroke-width` — win over whatever the plugin's `<svg>` declares; only the inner children are rendered. Use this when you need a lucide icon (or a hand-rolled one) that uses non-`<path>` primitives.
+2. **Full `<svg>` string** — a complete `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">…</svg>` for multi-primitive icons (e.g. circle + path, rect + path). The host's outer `<svg>` tag is discarded and the host's `class`, `fill`, `stroke`, `viewBox`, `stroke-width` win. The inner children are sanitized to a tight allowlist (`path`, `circle`, `ellipse`, `polyline`, `polygon`, `rect`, `g` plus the attributes the template reads) before being rendered via `v-html` — any other tags or attributes are stripped. Use this when you need a lucide icon (or a hand-rolled one) that uses non-`<path>` primitives.
    ```json
    {
      "icon": "<svg viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z\"/></svg>"
@@ -111,9 +111,9 @@ The `icon` field in `plugin.json` accepts three forms. The frontend tries them i
    { "icon": "M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z" }
    ```
 
-If `icon` is omitted, the frontend defaults to the bundled `puzzle` icon. If `icon` is set but matches none of the three forms (typo, non-SVG garbage, etc.), the frontend falls back to the bundled `puzzle` icon — silently, not an error.
+If `icon` is omitted, the backend defaults it to `"puzzle"` and the frontend renders the bundled `puzzle` icon. If `icon` is set but matches none of the three forms (typo, non-SVG garbage, etc.), the frontend falls back to the bundled `puzzle` icon — silently, not an error. A whitespace-only `icon` value is treated the same as missing.
 
-**Security note:** Plugin authors are operators with shell access to the Spora host — see § Security. The frontend trust boundary is the plugin manifest itself, not user input. The `<svg>` form is rendered via Vue's `v-html` only on the inner children of a trusted plugin's `<svg>` string; the host's outer `<svg>` tag is discarded and cannot be overridden.
+**Security note:** Plugin authors are operators with shell access to the Spora host — see § Security. The frontend trust boundary is the plugin manifest itself, not user input. The `<svg>` form is rendered via Vue's `v-html` only on the inner children of a trusted plugin's `<svg>` string, and only after DOMPurify has stripped everything outside the SVG-primitive allowlist. The host's outer `<svg>` tag is discarded and cannot be overridden.
 
 ### Full example
 

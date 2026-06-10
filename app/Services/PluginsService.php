@@ -73,16 +73,16 @@ final class PluginsService
     }
 
     /**
-     * Resolve the icon from the manifest, falling back to a sensible default
-     * (the bundled "puzzle" icon) when omitted. Empty strings are treated the
-     * same as missing so an accidentally blank `icon: ""` still renders.
-     *
      * @param array<string, mixed> $manifest
      */
     private function resolveIcon(array $manifest): string
     {
         $icon = $manifest['icon'] ?? null;
-        return is_string($icon) && $icon !== '' ? $icon : 'puzzle';
+        if (!is_string($icon)) {
+            return 'puzzle';
+        }
+        $icon = trim($icon);
+        return $icon !== '' ? $icon : 'puzzle';
     }
 
     /**

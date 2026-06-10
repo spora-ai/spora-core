@@ -6,7 +6,7 @@
  * dispatching on `tag`. The resolution order is:
  *   1. Bundled-name lookup
  *   2. Raw SVG path string (plugin-supplied icons)
- *   3. Fallback to bell
+ *   3. Fallback to puzzle
  */
 import { mount } from '@vue/test-utils'
 import { describe, it, expect } from 'vitest'
@@ -30,16 +30,28 @@ describe('Icon', () => {
     expect(wrapper.find('path').attributes('d')).toBe(customPath)
   })
 
-  it('falls back to bell for unknown icon names', () => {
+  it('falls back to puzzle for unknown icon names', () => {
     const wrapper = mount(Icon, { props: { name: 'definitely-not-a-real-icon' } })
-    const bellWrapper = mount(Icon, { props: { name: 'bell' } })
-    expect(wrapper.find('path').attributes('d')).toBe(bellWrapper.find('path').attributes('d'))
+    const puzzleWrapper = mount(Icon, { props: { name: 'puzzle' } })
+    expect(wrapper.find('path').attributes('d')).toBe(puzzleWrapper.find('path').attributes('d'))
   })
 
-  it('falls back to bell when the name is empty', () => {
+  it('falls back to puzzle when the name is empty', () => {
     const wrapper = mount(Icon, { props: { name: '' } })
-    const bellWrapper = mount(Icon, { props: { name: 'bell' } })
-    expect(wrapper.find('path').attributes('d')).toBe(bellWrapper.find('path').attributes('d'))
+    const puzzleWrapper = mount(Icon, { props: { name: 'puzzle' } })
+    expect(wrapper.find('path').attributes('d')).toBe(puzzleWrapper.find('path').attributes('d'))
+  })
+
+  it('falls back to puzzle for whitespace-only names', () => {
+    const wrapper = mount(Icon, { props: { name: '   ' } })
+    const puzzleWrapper = mount(Icon, { props: { name: 'puzzle' } })
+    expect(wrapper.find('path').attributes('d')).toBe(puzzleWrapper.find('path').attributes('d'))
+  })
+
+  it('trims whitespace before looking up a bundled name', () => {
+    const wrapper = mount(Icon, { props: { name: '  check  ' } })
+    const checkWrapper = mount(Icon, { props: { name: 'check' } })
+    expect(wrapper.find('path').attributes('d')).toBe(checkWrapper.find('path').attributes('d'))
   })
 
   // Non-path SVG primitives — the icons that motivated the generic
@@ -50,7 +62,6 @@ describe('Icon', () => {
       const wrapper = mount(Icon, { props: { name: 'search' } })
       expect(wrapper.findAll('circle')).toHaveLength(1)
       expect(wrapper.findAll('path')).toHaveLength(1)
-      // The circle's center is at (11, 11) and its radius is 8.
       const circle = wrapper.find('circle')
       expect(circle.attributes('cx')).toBe('11')
       expect(circle.attributes('cy')).toBe('11')
@@ -61,7 +72,6 @@ describe('Icon', () => {
       const wrapper = mount(Icon, { props: { name: 'database' } })
       expect(wrapper.findAll('ellipse')).toHaveLength(1)
       expect(wrapper.findAll('path')).toHaveLength(2)
-      // The top ellipse is at (12, 5) with rx=9, ry=3.
       const ellipse = wrapper.find('ellipse')
       expect(ellipse.attributes('cx')).toBe('12')
       expect(ellipse.attributes('cy')).toBe('5')
@@ -73,7 +83,6 @@ describe('Icon', () => {
       const wrapper = mount(Icon, { props: { name: 'music' } })
       expect(wrapper.findAll('path')).toHaveLength(1)
       expect(wrapper.findAll('circle')).toHaveLength(2)
-      // Notes are at (6, 18) and (18, 16), both r=3.
       const circles = wrapper.findAll('circle')
       expect(circles[0].attributes('cx')).toBe('6')
       expect(circles[0].attributes('cy')).toBe('18')
@@ -85,7 +94,6 @@ describe('Icon', () => {
       const wrapper = mount(Icon, { props: { name: 'code' } })
       expect(wrapper.findAll('polyline')).toHaveLength(2)
       expect(wrapper.findAll('path')).toHaveLength(0)
-      // The two polylines form the brackets.
       const polylines = wrapper.findAll('polyline')
       expect(polylines[0].attributes('points')).toBe('16 18 22 12 16 6')
       expect(polylines[1].attributes('points')).toBe('8 6 2 12 8 18')
@@ -114,7 +122,6 @@ describe('Icon', () => {
       const wrapper = mount(Icon, { props: { name: 'compass' } })
       expect(wrapper.findAll('circle')).toHaveLength(1)
       expect(wrapper.findAll('path')).toHaveLength(1)
-      // The outer ring is centered at (12, 12) with radius 10.
       const circle = wrapper.find('circle')
       expect(circle.attributes('cx')).toBe('12')
       expect(circle.attributes('cy')).toBe('12')
@@ -177,7 +184,8 @@ describe('Icon', () => {
 
   // Plugin-supplied icons — three forms accepted by `plugin.json`'s `icon`
   // field. Resolution order: bundled name → full <svg> string → raw path →
-  // bell fallback. Plugin authors pick whichever is smallest for their icon.
+  // puzzle fallback. Inner children of the <svg> form are sanitized to a
+  // tight SVG-primitive allowlist before injection.
   describe('plugin-supplied icons', () => {
     it('renders a single-path string as a <path> with that d-attribute', () => {
       const d = 'M3 3l7 7-7 7'
@@ -187,11 +195,8 @@ describe('Icon', () => {
     })
 
     it('renders a full <svg> string by extracting its inner children', () => {
-      // Two-primitive compass: outer circle + diagonal needle.
       const svg = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10"/><path d="M3 3l7 7"/></svg>'
       const wrapper = mount(Icon, { props: { name: svg } })
-      // Host renders one outer <svg> (the component's own), so we get
-      // exactly one circle and one path from the injected children.
       expect(wrapper.findAll('circle')).toHaveLength(1)
       expect(wrapper.findAll('path')).toHaveLength(1)
       expect(wrapper.find('circle').attributes('cx')).toBe('12')
@@ -199,7 +204,6 @@ describe('Icon', () => {
     })
 
     it('discards the plugin <svg> outer tag — the host keeps its own viewBox', () => {
-      // The plugin declares viewBox="0 0 100 100"; the host's viewBox is 0 0 24 24.
       const svg = '<svg viewBox="0 0 100 100"><path d="M1 1l7 7"/></svg>'
       const wrapper = mount(Icon, { props: { name: svg } })
       const host = wrapper.find('svg')
@@ -207,11 +211,28 @@ describe('Icon', () => {
     })
 
     it('tolerates leading whitespace before the <svg> tag', () => {
-      // plugin.json parsers can occasionally return strings with leading
-      // whitespace; the resolver must still recognise the <svg> form.
       const svg = '  <svg viewBox="0 0 24 24"><path d="M1 1l7 7"/></svg>'
       const wrapper = mount(Icon, { props: { name: svg } })
       expect(wrapper.findAll('path')).toHaveLength(1)
+    })
+
+    it('strips disallowed tags from a plugin-supplied <svg>', () => {
+      // <script> and <foreignObject> must be removed before injection; only
+      // the <path> primitive survives the allowlist.
+      const svg = '<svg><script>alert(1)</script><path d="M1 1l7 7"/><foreignObject><div></div></foreignObject></svg>'
+      const wrapper = mount(Icon, { props: { name: svg } })
+      expect(wrapper.html()).not.toContain('<script>')
+      expect(wrapper.html()).not.toContain('alert(1)')
+      expect(wrapper.findAll('path')).toHaveLength(1)
+    })
+
+    it('strips event-handler attributes from inner children', () => {
+      // The host's <svg> has no onclick; an onclick on a plugin-supplied
+      // child would be ignored by Vue's listener binding but DOMPurify
+      // still strips it as part of the allowlist.
+      const svg = '<svg><path d="M1 1l7 7" onclick="alert(1)"/></svg>'
+      const wrapper = mount(Icon, { props: { name: svg } })
+      expect(wrapper.find('path').attributes('onclick')).toBeUndefined()
     })
   })
 })
