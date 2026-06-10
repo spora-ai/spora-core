@@ -91,3 +91,7 @@ Thumbs.db
 
 # Local Codex agent artifacts (plans, scratch notes) — not for the project repo
 .agents/plans/
+
+# Ignore plugins
+/plugins/*
+!/plugins/.gitkeep

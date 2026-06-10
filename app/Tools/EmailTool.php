@@ -238,16 +238,17 @@ final class EmailTool extends AbstractTool
             $userId,
             $to,
             function (array $settings) use ($to, $subject, $body): ToolResult {
-            try {
-                $this->dispatchSmtpEmail($settings, $to, $subject, $body);
-            } catch (Throwable $e) {
-                $this->logger?->error('SMTP Error', ['exception' => $e]);
-                return ToolResult::fail('Failed to send email: ' . $e->getMessage());
-            }
+                try {
+                    $this->dispatchSmtpEmail($settings, $to, $subject, $body);
+                } catch (Throwable $e) {
+                    $this->logger?->error('SMTP Error', ['exception' => $e]);
+                    return ToolResult::fail('Failed to send email: ' . $e->getMessage());
+                }
 
-            $this->logger?->debug('EmailTool: sent', ['to' => $to]);
-            return ToolResult::ok("Email successfully sent to {$to}.");
-        });
+                $this->logger?->debug('EmailTool: sent', ['to' => $to]);
+                return ToolResult::ok("Email successfully sent to {$to}.");
+            },
+        );
     }
 
     public function createFolder(array $arguments, int $agentId, ?int $userId): ToolResult

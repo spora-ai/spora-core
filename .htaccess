@@ -1,19 +1,46 @@
+# /.htaccess
+#
+# This file is read ONLY when the web server's DocumentRoot is the project
+# root (shared-host fallback). In the canonical setup (Docker, local dev),
+# DocumentRoot is /public/ and this file is never read.
+#
+# The rule is simple: only /public/ is web-accessible. Everything else
+# is denied (or routed to public/index.php if it doesn't exist).
+#
+#   1. Files under /public/ are served directly
+#   2. Anything else that exists is denied with 403
+#   3. Anything else (non-existing paths) routes to public/index.php
+#      — public/index.php then serves the SPA shell (non-/api/*) or the
+#      API (/api/*)
+
 Options -Indexes
+Options -MultiViews
 
-# Deny direct access to sensitive directories
-<FilesMatch "\.(env|key|sqlite|log)$">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
+# ─── Security headers (apply when this file is read) ──────────────────────
+<IfModule mod_headers.c>
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
 
+# ─── Routing & security (the public/ folder is the only public area) ─────
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteBase /
 
-    # Allow direct access to existing files and directories
-    RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteCond %{REQUEST_FILENAME} !-d
+    # 1. Files under /public/ are served directly (assets, favicon, etc.)
+    RewriteCond %{REQUEST_URI} ^/?public/ [NC]
+    RewriteCond %{REQUEST_FILENAME} -f
+    RewriteRule ^ - [L]
 
-    # Route everything else through the front controller
+    # 2. Anything else that exists as a file or directory is denied.
+    #    This is what protects config.php, app/, vendor/, storage/, etc.
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [F,L]
+
+    # 3. Everything else routes to public/index.php (SPA + API).
     RewriteRule ^(.*)$ public/index.php [QSA,L]
 </IfModule>
