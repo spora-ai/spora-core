@@ -63,7 +63,7 @@ The full JSON Schema is in [`plugin.schema.json`](../plugin.schema.json) at the 
 | Field           | Type   | Description |
 |-----------------|--------|-------------|
 | `description`   | string | Short human-readable description surfaced by the inventory UI. Max 500 chars. |
-| `icon`          | string | Icon for the inventory UI. Either a bundled icon name (e.g. `"puzzle"`, `"brain"`) looked up in the frontend's shared map, or a raw SVG path string (starts with `M`/`L`/`H`/`V`/`C`/`S`/`Q`/`T`/`A`/`Z`) rendered directly. Defaults to `"puzzle"` when omitted. Lets a plugin ship its own visual identity without coordinating with the Spora frontend. |
+| `icon`          | string | Icon for the inventory UI. Either a bundled icon name looked up in the frontend's shared map, or a raw SVG path string (starts with `M`/`L`/`H`/`V`/`C`/`S`/`Q`/`T`/`A`/`Z`) rendered directly. Defaults to `"puzzle"` when omitted. Lets a plugin ship its own visual identity without coordinating with the Spora frontend. See [Bundled icons](#bundled-icons) for the curated palette. |
 | `file`          | string | Relative path (from the plugin directory) to the PHP file that declares the entry-point class. Defaults to `Plugin.php` when omitted. |
 | `autoload.psr-4`  | object | PSR-4 namespace → relative path mappings registered with the Composer classloader before the plugin is instantiated. Multiple entries are supported. |
 | `autoload.files`  | array  | PHP files to `require_once` before the plugin is instantiated, relative to the plugin directory. Use `["vendor/autoload.php"]` to load the plugin's own Composer dependency tree. Processed after `psr-4` mappings. |
@@ -76,6 +76,21 @@ The full JSON Schema is in [`plugin.schema.json`](../plugin.schema.json) at the 
     "class": "Acme\\MyPlugin\\Plugin"
 }
 ```
+
+### Bundled icons
+
+The Spora frontend ships a curated palette of `<path>`-based icons. Plugin authors can reference any of these by name from the manifest's `icon` field without shipping their own SVG. For categories not covered below, fall back to a raw SVG path string (the `icon` field accepts anything starting with a path command letter).
+
+| Category        | Names                                                                       |
+|-----------------|-----------------------------------------------------------------------------|
+| General / apps  | `puzzle` (default), `brain`, `lightbulb`, `compass`, `globe`, `sparkles`     |
+| Documents & data| `file-text`, `database`                                                     |
+| Productivity    | `calendar`, `search`, `mail`                                                |
+| Media           | `music`                                                                     |
+| Tools & code    | `zap`, `code`                                                               |
+| UI utility      | `bell`, `check`, `x`, `plus`, `chevron-right/down/left`, `arrow-right`, `menu`, `grid`, `user`, `logout`, `settings`, `sun`, `moon`, `warning`, `pencil`, `trash`, `star`, `clock`, `lightning`, `computer`, `tools`, `file`, `chat`, `agents`, `shield-check`, `user-plus`, `eye`, `lock`, `check-circle`, `info`, `error-circle` |
+
+> A few lucide icons we'd love to expose — `play`, `image`, `video` — use `<polygon>` / `<rect>` / `<circle>` SVG elements instead of `<path>`. The shared `Icon` component only renders `<path>`, so those need a small extension (a generic SVG-element renderer) before they can be added. Workaround for now: ship the full `<svg>` as a raw path-string-equivalent via the future generic-element renderer, or fork the icon locally.
 
 ### Full example
 

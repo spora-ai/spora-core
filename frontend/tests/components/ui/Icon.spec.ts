@@ -44,4 +44,26 @@ describe('Icon', () => {
     const bellWrapper = mount(Icon, { props: { name: 'bell' } })
     expect(wrapper.find('path').attributes('d')).toBe(bellWrapper.find('path').attributes('d'))
   })
+
+  // Curated default palette — gives plugin / app authors a menu to pick from
+  // without coordinating with the Spora frontend. All paths lifted from
+  // lucide-vue-next v0.487.0. See the inline NOTE in Icon.vue for icons
+  // skipped here because they need non-<path> SVG elements (play, image, video).
+  it.each([
+    ['lightbulb', 3],
+    ['file-text', 5],
+    ['compass', 1],
+    ['globe', 2],
+    ['sparkles', 5],
+    ['music', 1],
+    ['database', 2],
+    ['search', 1],
+    ['mail', 1],
+    ['calendar', 3],
+    ['zap', 1],
+    ['code', 1],
+  ] as const)('renders bundled icon "%s" with %i path(s)', (name, expectedPaths) => {
+    const wrapper = mount(Icon, { props: { name } })
+    expect(wrapper.findAll('path')).toHaveLength(expectedPaths)
+  })
 })
