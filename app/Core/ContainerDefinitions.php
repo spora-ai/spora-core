@@ -16,6 +16,7 @@ use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Apps\AppRegistry;
 use Spora\Apps\MemoriesApp;
+use Spora\Apps\PluginsApp;
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\SeedCommand;
 use Spora\Console\Commands\SetupCommand;
@@ -42,6 +43,7 @@ use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\NotificationController;
+use Spora\Http\PluginsController;
 use Spora\Http\PromptTemplateController;
 use Spora\Http\RecipeController;
 use Spora\Http\ScheduledRunController;
@@ -75,6 +77,8 @@ use Spora\Services\MercurePublisher;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\NotificationServiceInterface;
+use Spora\Services\PluginMetadataExtractor;
+use Spora\Services\PluginsService;
 use Spora\Services\PromptTemplateService;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunService;
@@ -338,6 +342,7 @@ final class ContainerDefinitions
 
             'app_apps' => [
                 MemoriesApp::class,
+                PluginsApp::class,
             ],
 
             AppRegistry::class => static function (ContainerInterface $c): AppRegistry {
@@ -449,6 +454,21 @@ final class ContainerDefinitions
                 return new AgentMemoryController(
                     $c->get(AuthService::class),
                     $c->get(MemoryServiceInterface::class),
+                );
+            },
+
+            PluginMetadataExtractor::class => static fn(): PluginMetadataExtractor => new PluginMetadataExtractor(),
+
+            PluginsService::class => static function (ContainerInterface $c): PluginsService {
+                return new PluginsService(
+                    $c->get(PluginLoader::class),
+                    $c->get(PluginMetadataExtractor::class),
+                );
+            },
+
+            PluginsController::class => static function (ContainerInterface $c): PluginsController {
+                return new PluginsController(
+                    $c->get(PluginsService::class),
                 );
             },
 

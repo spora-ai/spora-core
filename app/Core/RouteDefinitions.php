@@ -20,6 +20,7 @@ use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\NotificationController;
+use Spora\Http\PluginsController;
 use Spora\Http\PromptTemplateController;
 use Spora\Http\RecipeController;
 use Spora\Http\ScheduledRunController;
@@ -49,6 +50,7 @@ final class RouteDefinitions
         $r->addRoute('GET', '/health', [HealthController::class, 'check'], []);
         $r->addRoute('GET', '/api/v1/config', [ConfigController::class, 'index'], []);
         $r->addRoute('GET', '/api/v1/apps', [AppsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/plugins', [PluginsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/auth/login', [AuthController::class, 'login'], []);
         $r->addRoute('POST', '/api/v1/auth/register', [AuthController::class, 'register'], []);
         $r->addRoute('POST', '/api/v1/auth/logout', [AuthController::class, 'logout'], [CsrfMiddleware::class]);
