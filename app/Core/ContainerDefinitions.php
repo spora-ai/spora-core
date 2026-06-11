@@ -12,6 +12,7 @@ use Monolog\Logger as MonologLogger;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\Orchestrator;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Apps\AppRegistry;
@@ -115,7 +116,9 @@ final class ContainerDefinitions
             self::configDefinition(),
             self::coreServiceDefinitions(),
             self::llmDefinitions(),
-            self::apiControllerDefinitions(),
+            self::apiAuthControllerDefinitions(),
+            self::apiResourceControllerDefinitions(),
+            self::apiTaskControllerDefinitions(),
             self::adminControllerDefinitions(),
             self::toolDefinitions(),
             self::orchestratorDefinitions(),
@@ -392,7 +395,7 @@ final class ContainerDefinitions
         ];
     }
 
-    private static function apiControllerDefinitions(): array
+    private static function apiAuthControllerDefinitions(): array
     {
         return [
             AuthController::class => static function (ContainerInterface $c): AuthController {
@@ -437,6 +440,24 @@ final class ContainerDefinitions
                 );
             },
 
+            ConfigController::class => static function (ContainerInterface $c): ConfigController {
+                return new ConfigController(
+                    $c->get('config'),
+                );
+            },
+
+            UserProfileController::class => static function (ContainerInterface $c): UserProfileController {
+                return new UserProfileController(
+                    $c->get(AuthService::class),
+                    $c->get(UserServiceInterface::class),
+                );
+            },
+        ];
+    }
+
+    private static function apiResourceControllerDefinitions(): array
+    {
+        return [
             AppsController::class => static function (ContainerInterface $c): AppsController {
                 return new AppsController(
                     $c->get(AppRegistry::class),
@@ -497,12 +518,6 @@ final class ContainerDefinitions
 
             HealthController::class => static fn(): HealthController => new HealthController(),
 
-            ConfigController::class => static function (ContainerInterface $c): ConfigController {
-                return new ConfigController(
-                    $c->get('config'),
-                );
-            },
-
             ToolController::class => static function (ContainerInterface $c): ToolController {
                 return new ToolController(
                     $c->get(AuthService::class),
@@ -510,7 +525,12 @@ final class ContainerDefinitions
                     $c->get('tool_classes'),
                 );
             },
+        ];
+    }
 
+    private static function apiTaskControllerDefinitions(): array
+    {
+        return [
             TaskController::class => static function (ContainerInterface $c): TaskController {
                 return new TaskController(
                     $c->get(AuthService::class),
@@ -554,13 +574,6 @@ final class ContainerDefinitions
                     $config['mercure_publish_url'] ?? null,
                     $config['mercure_jwt_key'] ?? null,
                     '/.well-known/mercure',
-                );
-            },
-
-            UserProfileController::class => static function (ContainerInterface $c): UserProfileController {
-                return new UserProfileController(
-                    $c->get(AuthService::class),
-                    $c->get(UserServiceInterface::class),
                 );
             },
         ];
@@ -716,16 +729,18 @@ final class ContainerDefinitions
         return [
             OrchestratorInterface::class => static function (ContainerInterface $c): OrchestratorInterface {
                 return new Orchestrator(
-                    driverFactory: $c->get(DriverFactory::class),
-                    llmConfigService: $c->get(LLMConfigService::class),
-                    toolInstances: $c->get('tool_instances'),
-                    logger: $c->get(LoggerInterface::class),
-                    workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,
-                    notificationService: $c->get(NotificationService::class),
-                    pluginLoader: $c->get(PluginLoader::class),
-                    mercure: $c->get(MercurePublisherInterface::class),
-                    toolConfigService: $c->get(ToolConfigService::class),
-                    toolCallSerializer: $c->get(ToolCallSerializer::class),
+                    $c->get(DriverFactory::class),
+                    new OrchestratorConfig(
+                        llmConfigService: $c->get(LLMConfigService::class),
+                        toolInstances: $c->get('tool_instances'),
+                        logger: $c->get(LoggerInterface::class),
+                        workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,
+                        notificationService: $c->get(NotificationService::class),
+                        pluginLoader: $c->get(PluginLoader::class),
+                        mercure: $c->get(MercurePublisherInterface::class),
+                        toolConfigService: $c->get(ToolConfigService::class),
+                        toolCallSerializer: $c->get(ToolCallSerializer::class),
+                    ),
                 );
             },
 

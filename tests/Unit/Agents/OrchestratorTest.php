@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\Orchestrator;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
@@ -60,11 +61,12 @@ function makeOrchestrator(
     WorkerMode $workerMode = WorkerMode::Sync,
 ): Orchestrator {
     return new Orchestrator(
-        driverFactory: $driverFactory,
-        llmConfigService: null,
-        toolInstances: $toolInstances,
-        logger: $logger,
-        workerMode: $workerMode,
+        $driverFactory,
+        new OrchestratorConfig(
+            toolInstances: $toolInstances,
+            logger: $logger,
+            workerMode: $workerMode,
+        ),
     );
 }
 
@@ -1435,9 +1437,11 @@ it('publishes intermediate state exactly once when tools are auto-approved', fun
     enableToolsForAgent($agentId, $tools);
 
     $orch = new Orchestrator(
-        driverFactory: mockDriverFactory($mock),
-        toolInstances: $tools,
-        mercure: $mockMercure,
+        mockDriverFactory($mock),
+        new OrchestratorConfig(
+            toolInstances: $tools,
+            mercure: $mockMercure,
+        ),
     );
 
     $task = $orch->start($agentId, 'Auto approve test', maxSteps: 10);
@@ -1473,9 +1477,11 @@ it('publishes intermediate state when tools require approval', function (): void
     enableToolsForAgent($agentId, $tools);
 
     $orch = new Orchestrator(
-        driverFactory: mockDriverFactory($mock),
-        toolInstances: $tools,
-        mercure: $mockMercure,
+        mockDriverFactory($mock),
+        new OrchestratorConfig(
+            toolInstances: $tools,
+            mercure: $mockMercure,
+        ),
     );
 
     $task = $orch->start($agentId, 'Approval test', maxSteps: 10);
@@ -2085,10 +2091,11 @@ it('scheduleAutoRetry creates a queued retry task when error code is retryable a
     $mock->allows('complete')->andReturnUsing(function () use (&$callCount) {
         $callCount++;
         // First call: throw rate limit (so the original task fails).
+        // scheduleAutoRetry queues the retry directly without a second LLM call,
+        // so no further invocations are expected on this mock.
         if ($callCount === 1) {
             throw new LLMRateLimitException('429 rate limit');
         }
-        // Second call: succeed (so the retry task that scheduleAutoRetry starts can complete).
         return new LLMResponse('Done.', [], 5, 3, 'cmp_retry');
     });
 
@@ -2390,9 +2397,11 @@ it('qualifiedToolName prepends the plugin slug when the tool belongs to a regist
     });
 
     $orch = new Orchestrator(
-        driverFactory: mockDriverFactory($mock),
-        toolInstances: [$pluginTool],
-        pluginLoader: $pluginLoader,
+        mockDriverFactory($mock),
+        new OrchestratorConfig(
+            toolInstances: [$pluginTool],
+            pluginLoader: $pluginLoader,
+        ),
     );
     $orch->start($agentId, 'Plugin tool test', maxSteps: 5);
 
@@ -2537,9 +2546,11 @@ it('publishIntermediateState falls back to a default ToolCallSerializer when non
 
     // No ToolCallSerializer injected — the Orchestrator should default-instantiate one.
     $orch = new Orchestrator(
-        driverFactory: mockDriverFactory($mock),
-        toolInstances: $tools,
-        mercure: $mockMercure,
+        mockDriverFactory($mock),
+        new OrchestratorConfig(
+            toolInstances: $tools,
+            mercure: $mockMercure,
+        ),
     );
 
     $task = $orch->start($agentId, 'Default serializer test', maxSteps: 10);
@@ -2663,9 +2674,11 @@ describe('Orchestrator::handleToolCalls — happy path', function (): void {
         $tools = [new StubInputTool()];
         enableToolsForAgent($agentId, $tools);
         $orch = new Orchestrator(
-            driverFactory: mockDriverFactory($mock),
-            toolInstances: $tools,
-            mercure: $mockMercure,
+            mockDriverFactory($mock),
+            new OrchestratorConfig(
+                toolInstances: $tools,
+                mercure: $mockMercure,
+            ),
         );
         $task = $orch->start($agentId, 'Happy path test', maxSteps: 10);
 

@@ -7,6 +7,7 @@ namespace Spora\Console\Commands;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Container\ContainerInterface;
 use Spora\Agents\Orchestrator;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Core\Database;
@@ -122,14 +123,16 @@ final class TaskRunCommand extends Command
     private function buildOrchestrator(): OrchestratorInterface
     {
         return new Orchestrator(
-            driverFactory: $this->container->get(DriverFactory::class),
-            llmConfigService: $this->container->get(LLMConfigService::class),
-            toolInstances: $this->container->get('tool_instances'),
-            logger: $this->container->get(\Psr\Log\LoggerInterface::class),
-            workerMode: WorkerMode::Sync,
-            notificationService: $this->container->get(NotificationService::class),
-            mercure: $this->mercure,
-            toolConfigService: $this->container->get(\Spora\Services\ToolConfigService::class),
+            $this->container->get(DriverFactory::class),
+            new OrchestratorConfig(
+                llmConfigService: $this->container->get(LLMConfigService::class),
+                toolInstances: $this->container->get('tool_instances'),
+                logger: $this->container->get(\Psr\Log\LoggerInterface::class),
+                workerMode: WorkerMode::Sync,
+                notificationService: $this->container->get(NotificationService::class),
+                mercure: $this->mercure,
+                toolConfigService: $this->container->get(\Spora\Services\ToolConfigService::class),
+            ),
         );
     }
 }

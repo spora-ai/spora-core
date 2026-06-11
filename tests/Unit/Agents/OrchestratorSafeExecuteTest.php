@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\ToolInterface;
@@ -48,16 +47,11 @@ afterEach(function (): void {
 
 test('safeExecute passes $taskId to the tool instance as the 4th argument', function (): void {
     $orchestrator = new Spora\Agents\Orchestrator(
-        driverFactory: Mockery::mock(Spora\Drivers\DriverFactory::class),
-        llmConfigService: null,
-        toolInstances: [new SpySafeExecuteTool()],
-        logger: new Psr\Log\NullLogger(),
-        workerMode: WorkerMode::Sync,
-        notificationService: null,
-        pluginLoader: null,
-        mercure: null,
-        toolConfigService: null,
-        toolCallSerializer: null,
+        Mockery::mock(Spora\Drivers\DriverFactory::class),
+        new Spora\Agents\OrchestratorConfig(
+            toolInstances: [new SpySafeExecuteTool()],
+            logger: new Psr\Log\NullLogger(),
+        ),
     );
 
     $result = $orchestrator->safeExecute(
@@ -75,16 +69,10 @@ test('safeExecute passes $taskId to the tool instance as the 4th argument', func
 
 test('safeExecute tolerates null $userId for backward compat', function (): void {
     $orchestrator = new Spora\Agents\Orchestrator(
-        driverFactory: Mockery::mock(Spora\Drivers\DriverFactory::class),
-        llmConfigService: null,
-        toolInstances: [],
-        logger: new Psr\Log\NullLogger(),
-        workerMode: WorkerMode::Sync,
-        notificationService: null,
-        pluginLoader: null,
-        mercure: null,
-        toolConfigService: null,
-        toolCallSerializer: null,
+        Mockery::mock(Spora\Drivers\DriverFactory::class),
+        new Spora\Agents\OrchestratorConfig(
+            logger: new Psr\Log\NullLogger(),
+        ),
     );
 
     $orchestrator->safeExecute(

@@ -18,9 +18,6 @@ use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
-use Spora\Drivers\Exceptions\LLMProviderException;
-use Spora\Drivers\Exceptions\LLMRateLimitException;
-use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
@@ -32,18 +29,15 @@ use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Plugins\PluginLoader;
-use Spora\Services\ContextWindowErrorParser;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
-use Spora\Tools\Schema\OperationSchemaFilter;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
-use Symfony\Contracts\HttpClient\Exception\TimeoutExceptionInterface;
 use Throwable;
 
 final class Orchestrator implements OrchestratorInterface
@@ -54,32 +48,64 @@ final class Orchestrator implements OrchestratorInterface
     /** ISO 8601 / RFC 3339 format used for the AgentState `pausedAt` field. */
     private const ISO8601_UTC = 'Y-m-d\TH:i:s\Z';
 
-    /** Error codes that qualify for auto-retry. */
-    private const RETRYABLE_ERROR_CODES = [
-        'RATE_LIMIT',
-        'SERVER_OVERLOADED',
-        'SERVER_ERROR',
-        'GATEWAY_ERROR',
-        'AUTH_ERROR',
-        'LLM_TIMEOUT',
-        'ORPHANED',
-    ];
+    /** Package-private extracted services; read by `TickPhaseRunner` and the other extracted services via the orchestrator. */
+    public readonly ErrorClassifier $errorClassifier;
+    public readonly ToolDefinitionBuilder $toolDefinitionBuilder;
+    public readonly LlmConfigResolver $llmConfigResolver;
+    public readonly RetryScheduler $retryScheduler;
+    public readonly ContextWindowRecovery $contextWindowRecovery;
+    public readonly ApprovedBatchExecutor $approvedBatchExecutor;
+    public readonly TickPhaseRunner $tickPhaseRunner;
+    public readonly ToolCallExecutor $toolCallExecutor;
+    public readonly WorkerMode $workerMode;
 
-    /**
-     * @param list<object> $toolInstances
-     */
+    /** @var list<object> */
+    public readonly array $toolInstances;
+    public readonly ?LoggerInterface $logger;
+    public readonly ?NotificationService $notificationService;
+    public readonly ?MercurePublisherInterface $mercure;
+    public readonly ?ToolConfigService $toolConfigService;
+    public readonly ?ToolCallSerializer $toolCallSerializer;
+    public readonly ?LLMConfigService $llmConfigService;
+    public readonly ?PluginLoader $pluginLoader;
+
     public function __construct(
-        private readonly DriverFactory              $driverFactory,
-        private readonly LLMConfigService|null    $llmConfigService = null,
-        private readonly array                      $toolInstances = [],
-        private readonly ?LoggerInterface           $logger         = null,
-        private readonly WorkerMode                 $workerMode     = WorkerMode::Sync,
-        private readonly ?NotificationService      $notificationService = null,
-        private readonly ?PluginLoader              $pluginLoader   = null,
-        private readonly ?MercurePublisherInterface $mercure       = null,
-        private readonly ?ToolConfigService        $toolConfigService = null,
-        private readonly ?ToolCallSerializer       $toolCallSerializer = null,
-    ) {}
+        DriverFactory $driverFactory,
+        ?OrchestratorConfig $config = null,
+    ) {
+        $config ??= new OrchestratorConfig();
+
+        $this->workerMode            = $config->workerMode;
+        $this->toolInstances         = $config->toolInstances;
+        $this->logger                = $config->logger;
+        $this->notificationService   = $config->notificationService;
+        $this->mercure               = $config->mercure;
+        $this->toolConfigService     = $config->toolConfigService;
+        $this->toolCallSerializer    = $config->toolCallSerializer;
+        $this->llmConfigService      = $config->llmConfigService;
+        $this->pluginLoader          = $config->pluginLoader;
+        $this->errorClassifier       = new ErrorClassifier();
+        $this->llmConfigResolver     = new LlmConfigResolver($config->llmConfigService);
+        $this->toolDefinitionBuilder = new ToolDefinitionBuilder(
+            $config->toolInstances,
+            $config->toolConfigService,
+            $config->pluginLoader,
+            fn(array $llmSettings): string => $this->buildLlmConfigBlock($llmSettings),
+        );
+        $this->retryScheduler        = new RetryScheduler($this, $config->logger, $config->notificationService);
+        $this->contextWindowRecovery = new ContextWindowRecovery($this, $driverFactory, $config->logger, $config->notificationService);
+        $this->approvedBatchExecutor = new ApprovedBatchExecutor($this, $config->workerMode, $config->logger);
+        $this->tickPhaseRunner       = new TickPhaseRunner(
+            $this,
+            $driverFactory,
+            $config->toolInstances,
+            $config->logger,
+            $config->notificationService,
+            $config->mercure,
+            $config->toolCallSerializer,
+        );
+        $this->toolCallExecutor      = new ToolCallExecutor($this);
+    }
 
     // Public API
 
@@ -138,428 +164,7 @@ final class Orchestrator implements OrchestratorInterface
 
     public function tick(int $taskId): void
     {
-        $task = $this->lockRunningTaskForTick($taskId);
-        if ($task === null) {
-            return;
-        }
-
-        try {
-            $context = $this->prepareTickContext($task);
-        } catch (RuntimeException $e) {
-            $this->markTaskNoLlmConfiguration($taskId, $e);
-            throw $e;
-        }
-
-        Task::where('id', $taskId)->increment('step_count');
-
-        try {
-            $response = $this->dispatchLlmRequest($context);
-            $this->handleTickLlmResponse($context, $response);
-        } catch (Throwable $e) {
-            $this->handleTickFailure($taskId, $context, $e);
-        }
-    }
-
-    private function lockRunningTaskForTick(int $taskId): ?Task
-    {
-        $taskRef = null;
-
-        Capsule::connection()->transaction(function () use ($taskId, &$taskRef): void {
-            $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
-
-            if ($task->status !== 'RUNNING') {
-                return;
-            }
-
-            if ($task->step_count >= $task->max_steps) {
-                $task->status         = 'FAILED';
-                $task->failure_reason = 'Max steps reached.';
-                $task->save();
-                return;
-            }
-
-            $taskRef = $task;
-        });
-
-        return $taskRef;
-    }
-
-    /**
-     * @return array{
-     *   task: Task,
-     *   agent: Agent,
-     *   enabledClasses: list<string>,
-     *   contextWindow: int,
-     *   maxTokensOutput: int,
-     *   request: LLMRequest
-     * }
-     */
-    private function prepareTickContext(Task $task): array
-    {
-        $agent = Agent::findOrFail($task->agent_id);
-        $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->toArray();
-
-        $llmConfig = $this->resolveLlmConfig($agent);
-
-        $request = new LLMRequest(
-            systemPrompt: $this->resolveSystemPrompt($agent),
-            messages: $this->buildMessages($task->id),
-            tools: $this->buildToolDefinitions($enabledClasses, $agent->id, $agent->user_id),
-            contextWindow: $llmConfig['context_window'],
-            maxTokens: $llmConfig['max_tokens_output'],
-            temperature: $llmConfig['temperature'],
-        );
-
-        return [
-            'task'            => $task,
-            'agent'           => $agent,
-            'enabledClasses'  => $enabledClasses,
-            'contextWindow'   => $llmConfig['context_window'],
-            'maxTokensOutput' => $llmConfig['max_tokens_output'],
-            'request'         => $request,
-        ];
-    }
-
-    private function resolveSystemPrompt(Agent $agent): string
-    {
-        return ($agent->system_prompt !== null && $agent->system_prompt !== '')
-            ? $agent->system_prompt
-            : 'You are a helpful AI assistant.';
-    }
-
-    private function markTaskNoLlmConfiguration(int $taskId, RuntimeException $e): void
-    {
-        if (!str_contains($e->getMessage(), 'No LLM configuration')) {
-            return;
-        }
-
-        Task::where('id', $taskId)->update([
-            'status'         => 'FAILED',
-            'failure_reason' => $e->getMessage(),
-            'error_code'     => 'NO_LLM_CONFIGURATION',
-            'error_message'  => 'No LLM configuration set. Please configure an LLM driver or set a global default.',
-        ]);
-    }
-
-    private function dispatchLlmRequest(array $context): LLMResponse
-    {
-        return $this->driverFactory
-            ->makeFromAgent($context['agent'])
-            ->complete($context['request']);
-    }
-
-    /**
-     * @param array{
-     *   task: Task,
-     *   agent: Agent,
-     *   enabledClasses: list<string>
-     * } $context
-     */
-    private function handleTickLlmResponse(array $context, LLMResponse $response): void
-    {
-        $task           = $context['task'];
-        $agent          = $context['agent'];
-        $enabledClasses = $context['enabledClasses'];
-
-        if ($response->hasToolCalls()) {
-            $this->recordAssistantToolCallBatch($task, $response);
-            $this->handleToolCalls($task, $agent, $response->toolCalls, $enabledClasses);
-            return;
-        }
-
-        $this->completeTaskWithResponse($task, $response);
-    }
-
-    private function recordAssistantToolCallBatch(Task $task, LLMResponse $response): void
-    {
-        $this->appendHistory(
-            taskId: $task->id,
-            role: 'assistant',
-            content: null,
-            context: new HistoryMessageContext(
-                toolCallPayload: json_encode(
-                    array_map(static fn(DriverToolCall $tc) => [
-                        'id'       => $tc->providerCallId,
-                        'type'     => 'function',
-                        'function' => [
-                            'name'      => $tc->toolName,
-                            // Normalize empty array [] to {} for strict providers
-                            'arguments' => empty($tc->arguments) ? '{}' : json_encode($tc->arguments, JSON_THROW_ON_ERROR),
-                        ],
-                    ], $response->toolCalls),
-                    JSON_THROW_ON_ERROR,
-                ),
-                inputTokens: $response->inputTokens,
-                outputTokens: $response->outputTokens,
-                reasoning: $response->reasoning,
-            ),
-        );
-    }
-
-    private function completeTaskWithResponse(Task $task, LLMResponse $response): void
-    {
-        $this->appendHistory(
-            taskId: $task->id,
-            role: 'assistant',
-            content: $response->content,
-            context: new HistoryMessageContext(
-                inputTokens: $response->inputTokens,
-                outputTokens: $response->outputTokens,
-                reasoning: $response->reasoning,
-            ),
-        );
-
-        $task->status         = 'COMPLETED';
-        $task->final_response = $response->content;
-        $task->save();
-
-        if (!isset($task->data['run_id'])) {
-            $this->notificationService?->notifyTaskCompleted($task);
-        }
-    }
-
-    /**
-     * @param array{
-     *   task: Task,
-     *   agent: Agent
-     * } $context
-     */
-    private function handleTickFailure(int $taskId, array $context, Throwable $e): void
-    {
-        $this->logger?->error('tick() failed', [
-            'task_id'         => $taskId,
-            'exception_class' => get_class($e),
-            'message'         => $e->getMessage(),
-        ]);
-
-        if ($this->isContextWindowError($e)) {
-            $this->tryCompactionAndRetry($context['task'], $context['agent'], $e);
-            return;
-        }
-
-        $errorCode = $this->classifyError($e);
-        $friendlyMsg = $this->friendlyMessageForError($e, $errorCode);
-
-        try {
-            $updated = Task::where('id', $taskId)
-                ->where('status', 'RUNNING')
-                ->update([
-                    'status'         => 'FAILED',
-                    'failure_reason' => $e->getMessage(),
-                    'error_code'     => $errorCode,
-                    'error_message'  => $friendlyMsg,
-                ]);
-
-            if ($updated > 0) {
-                $failedTask = Task::where('id', $taskId)->first();
-                if ($failedTask !== null) {
-                    $this->notifyFailedAndScheduleRetry($failedTask, $errorCode);
-                }
-            }
-        } catch (Throwable) {
-            // Ignore failure — DB itself may be unavailable.
-        }
-
-        throw $e;
-    }
-
-    private function notifyFailedAndScheduleRetry(Task $failedTask, string $errorCode): void
-    {
-        try {
-            $this->notificationService?->notifyTaskFailed($failedTask);
-        } catch (Throwable $e) {
-            $this->logger?->warning('Notification failed', [
-                'task_id'   => $failedTask->id,
-                'exception' => $e->getMessage(),
-            ]);
-        }
-
-        try {
-            $this->scheduleAutoRetry($failedTask, $errorCode);
-        } catch (Throwable $e) {
-            $this->logger?->warning('Auto-retry scheduling failed', [
-                'task_id'   => $failedTask->id,
-                'exception' => $e->getMessage(),
-            ]);
-        }
-    }
-
-    private function isContextWindowError(Throwable $e): bool
-    {
-        if (!$e instanceof LLMProviderException) {
-            return false;
-        }
-
-        $rawBody = $e->getMessage();
-        // Extract JSON body from "Provider API error N: {...}" format
-        if (preg_match('/\{.*\}/s', $rawBody, $matches)) {
-            $parser = new ContextWindowErrorParser();
-            return $parser->isContextWindowError($matches[0]);
-        }
-
-        return false;
-    }
-
-    private function tryCompactionAndRetry(?Task $task, ?Agent $agent, Throwable $originalError): void
-    {
-        if ($task === null || $agent === null) {
-            throw $originalError;
-        }
-
-        $taskId = $task->id;
-
-        $historyCount = TaskHistory::where('task_id', $taskId)->count();
-        if ($historyCount <= 1) {
-            $actualLimit = $this->extractActualContextWindow($originalError);
-            $msg = $actualLimit !== null
-                ? "Context window too small ({$actualLimit} tokens). The model cannot process this request even without any conversation history. Try a model with a larger context window (e.g., 128K+ tokens) or reduce the system prompt length."
-                : "Context window too small for the current prompt. The model cannot process this request even without any conversation history. Try a model with a larger context window (e.g., 128K+ tokens) or reduce the system prompt length.";
-
-            Task::where('id', $taskId)->where('status', 'RUNNING')->update([
-                'status'         => 'FAILED',
-                'failure_reason' => $originalError->getMessage(),
-                'error_code'     => 'CONTEXT_WINDOW_FIRST_TURN',
-                'error_message' => $msg,
-            ]);
-
-            $this->notificationService?->notifyTaskFailed(Task::find($taskId));
-            throw $originalError;
-        }
-
-        $llmConfig = $this->resolveLlmConfig($agent);
-        $maxTokensOutput = $llmConfig['max_tokens_output'];
-        $temperature = $llmConfig['temperature'];
-
-        $this->logger?->info('Context window error, compacting history and retrying', ['task_id' => $taskId]);
-
-        try {
-            $this->compactHistory($taskId, $maxTokensOutput, $temperature, $agent);
-        } catch (Throwable $e) {
-            $this->logger?->warning('Compaction failed', ['task_id' => $taskId, 'exception' => $e->getMessage()]);
-            throw $originalError;
-        }
-
-        try {
-            $this->tick($taskId);
-        } catch (Throwable) {
-            throw $originalError;
-        }
-    }
-
-    private function compactHistory(int $taskId, int $maxTokensOutput, float $temperature, Agent $agent): void
-    {
-        $allRows = TaskHistory::where('task_id', $taskId)
-            ->orderBy('sequence')
-            ->get();
-
-        $keepCount = 5;
-        if ($allRows->count() <= $keepCount + 1) {
-            return;
-        }
-
-        $toSummarizeRows = $allRows->take($allRows->count() - $keepCount);
-
-        $firstRow = $toSummarizeRows->first();
-        $lastRow = $toSummarizeRows->last();
-        $firstSeq = $firstRow !== null ? $firstRow->sequence : 0;
-        $lastSeq = $lastRow !== null ? $lastRow->sequence : 0;
-
-        $summaryMessages = [];
-        foreach ($toSummarizeRows as $row) {
-            $content = $row->content ?? '';
-            if ($row->role === 'tool') {
-                $content = "[{$row->tool_name}]: " . $content;
-            }
-            if ($content !== '') {
-                $summaryMessages[] = ['role' => $row->role, 'content' => $content];
-            }
-        }
-
-        if ($summaryMessages === []) {
-            TaskHistory::where('task_id', $taskId)
-                ->where('sequence', '>=', $firstSeq)
-                ->where('sequence', '<=', $lastSeq)
-                ->delete();
-            return;
-        }
-
-        $systemPrompt = ($agent->system_prompt !== null && $agent->system_prompt !== '')
-            ? $agent->system_prompt
-            : 'You are a helpful AI assistant.';
-
-        $summaryInstruction = 'Summarize the conversation below concisely, preserving key facts, decisions, and any pending tasks. Output only the summary.';
-
-        $summaryRequest = new LLMRequest(
-            systemPrompt: $systemPrompt,
-            messages: array_merge($summaryMessages, [['role' => 'user', 'content' => $summaryInstruction]]),
-            tools: [],
-            maxTokens: min($maxTokensOutput, 1024),
-            temperature: $temperature,
-        );
-
-        $driver = $this->driverFactory->makeFromAgent($agent);
-        $response = $driver->complete($summaryRequest);
-
-        $summaryText = $response->content ?? 'Conversation summarized.';
-
-        Capsule::connection()->transaction(function () use ($taskId, $firstSeq, $lastSeq, $summaryText) {
-            TaskHistory::where('task_id', $taskId)
-                ->where('sequence', '>=', $firstSeq)
-                ->where('sequence', '<=', $lastSeq)
-                ->delete();
-
-            TaskHistory::create([
-                'task_id' => $taskId,
-                'sequence' => $firstSeq,
-                'role' => 'summary',
-                'content' => $summaryText,
-                'summarized_sequence_range' => "{$firstSeq}-{$lastSeq}",
-            ]);
-
-            $remaining = TaskHistory::where('task_id', $taskId)
-                ->where('sequence', '>', $lastSeq)
-                ->orderBy('sequence')
-                ->get();
-
-            $nextSeq = $lastSeq + 1;
-            foreach ($remaining as $row) {
-                $row->sequence = $nextSeq;
-                $row->save();
-                $nextSeq++;
-            }
-        });
-    }
-
-    private function extractActualContextWindow(Throwable $e): ?int
-    {
-        if (!$e instanceof LLMProviderException) {
-            return null;
-        }
-
-        if (preg_match('/\{.*\}/s', $e->getMessage(), $matches)) {
-            $parser = new ContextWindowErrorParser();
-            $parsed = $parser->parse($matches[0]);
-            return $parsed['actual_context_window'];
-        }
-
-        return $e->getActualContextWindow();
-    }
-
-    /**
-     * Build friendly message for an error, with extra context for context window errors.
-     */
-    private function friendlyMessageForError(Throwable $e, string $errorCode): string
-    {
-        $base = $this->friendlyMessages()[$errorCode] ?? $this->friendlyMessages()['UNKNOWN'];
-
-        if ($this->isContextWindowError($e)) {
-            $actualLimit = $this->extractActualContextWindow($e);
-            if ($actualLimit !== null) {
-                return "Context window exceeded ({$actualLimit} tokens). Try reducing history depth, choosing a model with larger context, or adjusting max_tokens_output.";
-            }
-        }
-
-        return $base;
+        $this->tickPhaseRunner->runTick($taskId);
     }
 
     /**
@@ -569,205 +174,7 @@ final class Orchestrator implements OrchestratorInterface
      */
     public function resume(int $taskId, array $approvedBatch): void
     {
-        [$task, $state] = $this->loadTaskAndStateForResume($taskId);
-
-        try {
-            $this->logger?->info('Task resumed after approval', [
-                'task_id' => $task->id,
-                'approved_count' => count($approvedBatch),
-            ]);
-
-            $approvedMap = $this->indexApprovedBatch($approvedBatch);
-
-            foreach ($state->pendingToolCalls as $pendingToolCall) {
-                $this->executeApprovedToolCall($pendingToolCall, $approvedMap, $task, $state, $taskId);
-            }
-
-            $this->cleanupStrandedApprovals($task, $taskId);
-            $this->completeResume($taskId);
-        } catch (Throwable $e) {
-            $this->markResumeFailed($taskId, $e);
-            throw $e;
-        }
-    }
-
-    /**
-     * @return array{0: Task, 1: AgentState}
-     */
-    private function loadTaskAndStateForResume(int $taskId): array
-    {
-        $task = null;
-        $state = null;
-
-        Capsule::connection()->transaction(function () use ($taskId, &$task, &$state) {
-            /** @var Task $task */
-            $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
-
-            if ($task->status !== 'PENDING_APPROVAL') {
-                throw new InvalidTaskTransitionException("Task {$taskId} is not awaiting approval.");
-            }
-
-            $state = $task->pending_state === null
-                ? $this->emptyAgentStateFor($task)
-                : AgentState::fromJson($task->pending_state);
-
-            $task->pending_state = null;
-            $task->save();
-        });
-
-        if (!$task instanceof Task || !$state instanceof AgentState) {
-            throw new TaskStateMissingException('Failed to resolve task or state during resume.');
-        }
-
-        return [$task, $state];
-    }
-
-    private function emptyAgentStateFor(Task $task): AgentState
-    {
-        return new AgentState(
-            taskId: $task->id,
-            agentId: $task->agent_id,
-            pendingToolCalls: [],
-            messageSnapshot: [],
-            stepCount: $task->step_count,
-            maxSteps: $task->max_steps,
-            pausedAt: date(self::ISO8601_UTC),
-        );
-    }
-
-    /**
-     * @return array<string, array>
-     */
-    private function indexApprovedBatch(array $approvedBatch): array
-    {
-        $approvedMap = [];
-        foreach ($approvedBatch as $item) {
-            $approvedMap[$item['provider_call_id']] = $item['arguments'];
-        }
-        return $approvedMap;
-    }
-
-    private function executeApprovedToolCall(
-        DriverToolCall $pendingToolCall,
-        array $approvedMap,
-        Task $task,
-        AgentState $state,
-        int $taskId,
-    ): void {
-        $approvedArgs = $approvedMap[$pendingToolCall->providerCallId] ?? $pendingToolCall->arguments;
-        $toolInstance = $this->resolveToolByName($pendingToolCall->toolName);
-
-        try {
-            SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema());
-        } catch (Throwable $e) {
-            $this->recordResumeValidationFailure($task, $taskId, $pendingToolCall, $e);
-            return;
-        }
-
-        $result = $this->safeExecute($toolInstance, $approvedArgs, $state->agentId, $taskId, $task->user_id);
-        $this->recordResumeExecutionResult($task, $taskId, $pendingToolCall, $approvedArgs, $result);
-    }
-
-    private function recordResumeValidationFailure(
-        Task $task,
-        int $taskId,
-        DriverToolCall $pendingToolCall,
-        Throwable $e,
-    ): void {
-        $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
-
-        $this->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: $result->content,
-            context: new HistoryMessageContext(
-                toolCallId: $pendingToolCall->providerCallId,
-                toolName: $pendingToolCall->toolName,
-            ),
-        );
-
-        ToolCallModel::where('task_id', $taskId)
-            ->where('provider_call_id', $pendingToolCall->providerCallId)
-            ->update([
-                'status'         => 'APPROVED',
-                'result_content' => $result->content,
-                'executed_at'    => date(self::DB_TIMESTAMP_FORMAT),
-            ]);
-    }
-
-    private function recordResumeExecutionResult(
-        Task $task,
-        int $taskId,
-        DriverToolCall $pendingToolCall,
-        array $approvedArgs,
-        ToolResult $result,
-    ): void {
-        ToolCallModel::where('task_id', $taskId)
-            ->where('provider_call_id', $pendingToolCall->providerCallId)
-            ->update([
-                'status'             => 'APPROVED',
-                'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
-                'result_content'     => $result->content,
-                'result_data'        => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                'executed_at'        => date(self::DB_TIMESTAMP_FORMAT),
-            ]);
-
-        // Append the tool result into history so the LLM sees it on the next tick.
-        $this->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: $result->content,
-            context: new HistoryMessageContext(
-                toolCallId: $pendingToolCall->providerCallId,
-                toolName: $pendingToolCall->toolName,
-            ),
-        );
-    }
-
-    private function cleanupStrandedApprovals(Task $task, int $taskId): void
-    {
-        // Clean up any stranded PENDING_APPROVAL records from concurrency bugs.
-        $danglingTools = ToolCallModel::where('task_id', $taskId)
-            ->where('status', 'PENDING_APPROVAL')
-            ->get();
-
-        foreach ($danglingTools as $danglingTool) {
-            $this->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: 'Action discarded (state mismatch/timeout)',
-                context: new HistoryMessageContext(
-                    toolCallId: $danglingTool->provider_call_id,
-                    toolName: $danglingTool->tool_name,
-                ),
-            );
-        }
-
-        ToolCallModel::where('task_id', $taskId)
-            ->where('status', 'PENDING_APPROVAL')
-            ->update(['status' => 'REJECTED']);
-    }
-
-    private function completeResume(int $taskId): void
-    {
-        $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
-        Task::where('id', $taskId)->update(['status' => $taskStatus]);
-
-        if ($this->workerMode === WorkerMode::Sync) {
-            // Tick is called after the transaction commits so the LLM round-trip
-            // does not hold the lockForUpdate open for its full duration.
-            $this->tick($taskId);
-        }
-    }
-
-    private function markResumeFailed(int $taskId, Throwable $e): void
-    {
-        Task::where('id', $taskId)->update([
-            'status'         => 'FAILED',
-            'error_code'     => 'RESUME_FAILED',
-            'error_message'  => 'Task resume failed: ' . $e->getMessage(),
-            'failure_reason' => $e->getMessage(),
-        ]);
+        $this->approvedBatchExecutor->execute($taskId, $approvedBatch);
     }
 
     public function reject(int $taskId, string $reason): void
@@ -837,98 +244,6 @@ final class Orchestrator implements OrchestratorInterface
         }
     }
 
-
-    private function handleToolCalls(Task $task, Agent $agent, array $toolCalls, array $enabledClasses): void
-    {
-        /** @var list<DriverToolCall> $pendingApproval */
-        $pendingApproval = [];
-
-        foreach ($toolCalls as $toolCall) {
-            try {
-                $disposition = $this->toolCallExecutor()->executeOrQueue($toolCall, $agent, $task, $enabledClasses);
-
-                if ($disposition === ToolCallDisposition::AwaitingApproval) {
-                    $pendingApproval[] = $toolCall;
-                }
-            } catch (Throwable $e) {
-                $this->appendHistory(
-                    taskId: $task->id,
-                    role: 'tool',
-                    content: 'System Error: ' . $e->getMessage(),
-                    context: new HistoryMessageContext(
-                        toolCallId: $toolCall->providerCallId,
-                        toolName: $toolCall->toolName,
-                    ),
-                );
-            }
-        }
-
-        if ($pendingApproval === []) {
-            $this->publishIntermediateState($task);
-            $this->tick($task->id);
-        } else {
-            $state = new AgentState(
-                taskId: $task->id,
-                agentId: $agent->id,
-                pendingToolCalls: $pendingApproval,
-                messageSnapshot: $this->buildMessages($task->id),
-                stepCount: $task->step_count,
-                maxSteps: $task->max_steps,
-                pausedAt: date(self::ISO8601_UTC),
-            );
-
-            $task->status        = 'PENDING_APPROVAL';
-            $task->pending_state = $state->toJson();
-            $task->save();
-
-            $toolNames = implode(', ', array_unique(array_map(
-                static fn(DriverToolCall $tc) => $tc->toolName,
-                $pendingApproval,
-            )));
-            $this->logger?->info('Task paused — approval needed', [
-                'task_id' => $task->id,
-                'tool_count' => count($pendingApproval),
-                'tools' => $toolNames,
-            ]);
-
-            $this->notificationService?->notifyPendingApproval($task);
-
-            $this->publishIntermediateState($task);
-        }
-    }
-
-    private ?ToolCallExecutor $toolCallExecutorInstance = null;
-
-    private function toolCallExecutor(): ToolCallExecutor
-    {
-        return $this->toolCallExecutorInstance ??= new ToolCallExecutor($this);
-    }
-
-    private function publishIntermediateState(Task $task): void
-    {
-        if ($this->mercure === null) {
-            return;
-        }
-
-        $serializer = $this->toolCallSerializer ?? new ToolCallSerializer($this->toolInstances);
-
-        $taskData = [
-            'id'         => $task->id,
-            'status'     => $task->status,
-            'step_count' => $task->step_count,
-            'tool_calls' => $task->toolCalls->map(fn(ToolCallModel $tc) => $serializer->toArray($tc))->all(),
-            'history' => $task->taskHistory()->orderBy('sequence')->get()->map(fn(TaskHistory $h) => [
-                'sequence'     => $h->sequence,
-                'role'         => $h->role,
-                'content'      => $h->content,
-                'reasoning'    => $h->reasoning,
-                'tool_call_id' => $h->tool_call_id,
-                'tool_name'    => $h->tool_name,
-            ])->all(),
-        ];
-
-        $this->mercure->publish($task->id, $task->user_id, $taskData);
-    }
 
     public function safeExecute(
         ToolInterface $toolInstance,
@@ -1037,9 +352,22 @@ final class Orchestrator implements OrchestratorInterface
         return $toolInstance->isEnabledByDefault($operationName);
     }
 
-    private function buildMessages(int $taskId): array
+    public function buildMessages(int $taskId): array
     {
         return (new MessageHistoryBuilder())->build($taskId);
+    }
+
+    /**
+     * Thin wrapper kept on the orchestrator so the existing test suite
+     * can call it via reflection. Delegates to {@see ToolDefinitionBuilder}.
+     *
+     * @param  list<string>  $enabledClasses
+     * @return list<array<string, mixed>>
+     */
+    /** @phpstan-ignore method.unused (used via reflection in tests) */
+    private function buildToolDefinitions(array $enabledClasses, int $agentId, ?int $userId = null): array
+    {
+        return $this->toolDefinitionBuilder->buildToolDefinitions($enabledClasses, $agentId, $userId);
     }
 
     private function buildLlmConfigBlock(array $llmSettings): string
@@ -1063,149 +391,6 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         return "\n[Effective Configuration]\n" . implode("\n", $lines);
-    }
-
-    private function buildToolDefinitions(array $enabledClasses, int $agentId, ?int $userId = null): array
-    {
-        $defs = [];
-        $overrides = $this->loadOperationOverrides($agentId, $enabledClasses);
-
-        foreach ($this->toolInstances as $instance) {
-            $toolClass = get_class($instance);
-
-            if (!in_array($toolClass, $enabledClasses, true)) {
-                continue;
-            }
-
-            $toolAttr = $this->extractToolAttribute($instance);
-            if ($toolAttr === null) {
-                continue;
-            }
-
-            $def = $this->usesOperationsTrait($toolClass)
-                ? $this->buildOperationToolDefinition($instance, $toolClass, $toolAttr, $overrides, $agentId, $userId)
-                : $this->buildSimpleToolDefinition($instance, $toolClass, $toolAttr, $agentId, $userId);
-
-            if ($def !== null) {
-                $defs[] = $def;
-            }
-        }
-
-        return $defs;
-    }
-
-    private function loadOperationOverrides(int $agentId, array $enabledClasses): Collection
-    {
-        return AgentToolOperationOverride::where('agent_id', $agentId)
-            ->whereIn('tool_class', $enabledClasses)
-            ->get()
-            ->keyBy(fn($row) => $row->tool_class . '::' . $row->operation);
-    }
-
-    private function extractToolAttribute(object $instance): ?Tool
-    {
-        $ref = new ReflectionClass($instance);
-        $attrs = $ref->getAttributes(Tool::class);
-
-        if ($attrs === []) {
-            return null;
-        }
-
-        return $attrs[0]->newInstance();
-    }
-
-    private function usesOperationsTrait(string $toolClass): bool
-    {
-        return in_array(HasOperations::class, class_uses_recursive($toolClass), true);
-    }
-
-    private function buildOperationToolDefinition(
-        object $instance,
-        string $toolClass,
-        Tool $toolAttr,
-        Collection $overrides,
-        int $agentId,
-        ?int $userId,
-    ): ?array {
-        $allowedOps = $this->resolveAllowedOperations($instance, $toolClass, $overrides);
-        if ($allowedOps === []) {
-            return null;
-        }
-
-        $schema = $instance->getParametersSchema();
-        $operations = $instance->getOperations();
-        $discriminatorKey = $operations[0]->discriminatorKey ?? 'action';
-        $filteredSchema = OperationSchemaFilter::filter($schema, $allowedOps, $discriminatorKey);
-
-        return [
-            'type'     => 'function',
-            'function' => [
-                'name'        => $this->qualifiedToolName($toolClass, $toolAttr->name),
-                'description' => $toolAttr->description . $this->buildConfigBlockFor($toolClass, $agentId, $userId),
-                'parameters'  => $filteredSchema,
-            ],
-        ];
-    }
-
-    private function buildSimpleToolDefinition(
-        object $instance,
-        string $toolClass,
-        Tool $toolAttr,
-        int $agentId,
-        ?int $userId,
-    ): array {
-        $schema = $instance->getParametersSchema();
-
-        if (isset($schema['properties']) && $schema['properties'] === []) {
-            $schema['properties'] = (object) [];
-        }
-
-        return [
-            'type'     => 'function',
-            'function' => [
-                'name'        => $this->qualifiedToolName($toolClass, $toolAttr->name),
-                'description' => $toolAttr->description . $this->buildConfigBlockFor($toolClass, $agentId, $userId),
-                'parameters'  => $schema,
-            ],
-        ];
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function resolveAllowedOperations(object $instance, string $toolClass, Collection $overrides): array
-    {
-        $allowedOps = [];
-
-        foreach ($instance->getOperations() as $op) {
-            $key = $toolClass . '::' . $op->name;
-            $row = $overrides->get($key);
-
-            if ($row !== null) {
-                if ($row->enabled === 0) {
-                    continue;
-                }
-                if ($row->enabled === 1) {
-                    $allowedOps[] = $op->name;
-                    continue;
-                }
-            }
-
-            if ($op->enabledByDefault) {
-                $allowedOps[] = $op->name;
-            }
-        }
-
-        return $allowedOps;
-    }
-
-    private function buildConfigBlockFor(string $toolClass, int $agentId, ?int $userId): string
-    {
-        $llmSettings = $this->toolConfigService !== null
-            ? $this->toolConfigService->getLlmToolSettings($toolClass, $agentId, $userId)
-            : [];
-
-        return $this->buildLlmConfigBlock($llmSettings);
     }
 
     public function callTraitMethod(object $object, string $method, array $args): mixed
@@ -1242,19 +427,6 @@ final class Orchestrator implements OrchestratorInterface
         throw new ToolNotRegisteredException("No tool registered with name '{$toolName}'.");
     }
 
-    private function qualifiedToolName(string $toolClass, string $plainName): string
-    {
-        if ($this->pluginLoader !== null) {
-            foreach ($this->pluginLoader->getPlugins() as $slug => $plugin) {
-                if (in_array($toolClass, $plugin->tools(), true)) {
-                    return "{$slug}:{$plainName}";
-                }
-            }
-        }
-
-        return $plainName;
-    }
-
     public function appendHistory(
         int                       $taskId,
         string                    $role,
@@ -1284,197 +456,5 @@ final class Orchestrator implements OrchestratorInterface
             $row['sequence'] = $nextSeq + 1;
             TaskHistory::create($row);
         });
-    }
-
-    private function classifyError(Throwable $e): string
-    {
-        $classified = $this->classifySpecificError($e);
-        if ($classified !== null) {
-            return $classified;
-        }
-
-        if ($e instanceof TimeoutExceptionInterface) {
-            return 'LLM_TIMEOUT';
-        }
-
-        return 'UNKNOWN';
-    }
-
-    private function classifySpecificError(Throwable $e): ?string
-    {
-        return match (true) {
-            $e instanceof LLMRateLimitException  => 'RATE_LIMIT',
-            $e instanceof LLMRetryableException  => $this->classifyRetryableError($e),
-            $e instanceof LLMProviderException    => $this->classifyProviderError($e),
-            default                              => null,
-        };
-    }
-
-    private function classifyRetryableError(LLMRetryableException $e): string
-    {
-        $msg = $e->getMessage();
-        if (str_contains($msg, '529')) {
-            return 'SERVER_OVERLOADED';
-        }
-        if (str_contains($msg, '520') || str_contains($msg, '500')) {
-            return 'SERVER_ERROR';
-        }
-        return 'GATEWAY_ERROR';
-    }
-
-    private function classifyProviderError(LLMProviderException $e): ?string
-    {
-        $msg = $e->getMessage();
-        if (str_contains($msg, '401') || str_contains($msg, '403')) {
-            return 'AUTH_ERROR';
-        }
-        if (str_contains($msg, '400')) {
-            return 'BAD_REQUEST';
-        }
-
-        return $e->isRetryable() ? 'GATEWAY_ERROR' : null;
-    }
-
-    private function friendlyMessages(): array
-    {
-        return [
-            'RATE_LIMIT'        => 'The AI service is busy. Try again in a moment.',
-            'SERVER_OVERLOADED' => 'The AI service is under high load. Try again shortly.',
-            'SERVER_ERROR'      => 'The AI service encountered an error. Please try again.',
-            'GATEWAY_ERROR'     => 'The AI service is temporarily unavailable. Try again shortly.',
-            'AUTH_ERROR'        => 'API authentication failed. Please check your API key.',
-            'LLM_TIMEOUT'       => 'The AI request timed out. Check your model or increase the timeout setting.',
-            'BAD_REQUEST'           => 'Invalid request. Please check your agent configuration.',
-            'NO_LLM_CONFIGURATION'  => 'No LLM configuration set. Please configure an LLM driver or set a global default.',
-            'TOOL_ERROR'           => 'A tool encountered an error. Check the task history for details.',
-            'UNKNOWN'           => 'An unexpected error occurred. Please try again.',
-        ];
-    }
-
-    private function resolveLlmConfig(Agent $agent): array
-    {
-        $defaults = [
-            'context_window' => 128000,
-            'max_tokens_output' => 4096,
-            'temperature' => 0.7,
-        ];
-
-        $configId = $agent->llm_driver_config_id;
-
-        if ($configId !== null) {
-            $config = LLMDriverConfiguration::find($configId);
-            if ($config !== null) {
-                return [
-                    'context_window' => $config->context_window ?? $defaults['context_window'],
-                    'max_tokens_output' => $config->max_tokens_output ?? $defaults['max_tokens_output'],
-                    'temperature' => $this->getTemperatureFromSettings($config, $defaults['temperature']),
-                ];
-            }
-        }
-
-        // Fall back to user preference — in async context, agent->user_id is the user context
-        $preference = LLMDriverConfiguration::whereHas('userPreference', static fn($q) => $q->where('user_id', $agent->user_id))->first();
-        if ($preference !== null) {
-            return [
-                'context_window' => $preference->context_window ?? $defaults['context_window'],
-                'max_tokens_output' => $preference->max_tokens_output ?? $defaults['max_tokens_output'],
-                'temperature' => $this->getTemperatureFromSettings($preference, $defaults['temperature']),
-            ];
-        }
-
-        $globalDefault = LLMDriverConfiguration::where('is_global', true)
-            ->where('is_default', true)
-            ->first();
-
-        if ($globalDefault !== null) {
-            return [
-                'context_window' => $globalDefault->context_window ?? $defaults['context_window'],
-                'max_tokens_output' => $globalDefault->max_tokens_output ?? $defaults['max_tokens_output'],
-                'temperature' => $this->getTemperatureFromSettings($globalDefault, $defaults['temperature']),
-            ];
-        }
-
-        throw new LlmConfigurationMissingException('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
-    }
-
-    private function getTemperatureFromSettings(LLMDriverConfiguration $config, float $default): float
-    {
-        try {
-            $settings = $this->llmConfigService->decryptSettings($config->driver_class, $config->settings ?? '');
-            return isset($settings['temperature']) && $settings['temperature'] !== ''
-                ? (float) $settings['temperature']
-                : $default;
-        } catch (Throwable) {
-            return $default;
-        }
-    }
-
-    private function scheduleAutoRetry(Task $failedTask, string $errorCode): void
-    {
-        if (!in_array($errorCode, self::RETRYABLE_ERROR_CODES, true)) {
-            return;
-        }
-
-        $agent = $this->resolveRetryAgent($failedTask);
-        if ($agent === null) {
-            return;
-        }
-
-        $retryAfterMinutes = $agent->retry_after_minutes ?? 0;
-        $maxRetries = $agent->max_retries ?? 0;
-
-        $rootTaskId = $failedTask->retry_of_task_id ?? $failedTask->id;
-        $retryCount = (int) ($failedTask->retry_count ?? 0) + 1;
-
-        $this->dispatchRetryTask($agent, $failedTask, $rootTaskId, $retryCount, $retryAfterMinutes, $maxRetries);
-    }
-
-    private function resolveRetryAgent(Task $failedTask): ?Agent
-    {
-        /** @var Agent|null $agent */
-        $agent = Agent::find($failedTask->agent_id);
-        if ($agent === null) {
-            return null;
-        }
-
-        $retryAfterMinutes = (int) ($agent->retry_after_minutes ?? 0);
-        $maxRetries = (int) ($agent->max_retries ?? 0);
-        $retryCount = (int) ($failedTask->retry_count ?? 0) + 1;
-        $isWithinRetryBudget = $retryAfterMinutes > 0
-            && $maxRetries > 0
-            && $retryCount <= $maxRetries;
-
-        return $isWithinRetryBudget ? $agent : null;
-    }
-
-    private function dispatchRetryTask(
-        Agent $agent,
-        Task $failedTask,
-        int $rootTaskId,
-        int $retryCount,
-        int $retryAfterMinutes,
-        int $maxRetries,
-    ): void {
-        try {
-            $retryTask = $this->start($agent->id, $failedTask->user_prompt, $failedTask->max_steps);
-            $retryTask->update([
-                'retry_of_task_id' => $rootTaskId,
-                'retry_count'      => $retryCount,
-                'retry_after'      => date(self::DB_TIMESTAMP_FORMAT, time() + $retryAfterMinutes * 60),
-                'status'           => 'QUEUED',
-            ]);
-
-            $failedTask->update([
-                'retry_after' => $retryTask->retry_after,
-            ]);
-
-            $this->notificationService?->notifyRetryQueued($retryTask, $retryCount, $maxRetries);
-        } catch (Throwable $e) {
-            $this->logger?->warning('Failed to schedule auto-retry', [
-                'task_id'          => $failedTask->id,
-                'exception_class'  => get_class($e),
-                'message'          => $e->getMessage(),
-            ]);
-        }
     }
 }

@@ -6,8 +6,8 @@ namespace Spora\Agents\ValueObjects;
 
 /**
  * Optional context attached to a TaskHistory row written by Orchestrator::appendHistory().
- * Groups the LLM token accounting and tool-call correlation fields so the helper itself
- * stays under the S107 parameter-count limit.
+ * Groups the LLM token accounting and tool-call correlation fields so the helper
+ * doesn't have to take them as separate parameters.
  */
 final readonly class HistoryMessageContext
 {

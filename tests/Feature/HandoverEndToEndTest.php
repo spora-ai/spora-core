@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Agents\Orchestrator;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
@@ -161,11 +162,10 @@ function handoverE2eBuildOrchestrator(
     $driverFactoryInner->allows('makeFromAgent')->andReturn($llmInner);
 
     $innerOrchestrator = new Orchestrator(
-        driverFactory: $driverFactoryInner,
-        llmConfigService: null,
-        toolInstances: [new StubInputTool()],
-        logger: null,
-        workerMode: WorkerMode::Sync,
+        $driverFactoryInner,
+        new OrchestratorConfig(
+            toolInstances: [new StubInputTool()],
+        ),
     );
 
     $handoverService = new HandoverService(static fn(): OrchestratorInterface => $innerOrchestrator);
@@ -179,11 +179,10 @@ function handoverE2eBuildOrchestrator(
     $handoverTool = new HandoverTool($handoverService, $toolConfig);
 
     $outer = new Orchestrator(
-        driverFactory: $driverFactory,
-        llmConfigService: null,
-        toolInstances: [new StubInputTool(), $handoverTool],
-        logger: null,
-        workerMode: WorkerMode::Sync,
+        $driverFactory,
+        new OrchestratorConfig(
+            toolInstances: [new StubInputTool(), $handoverTool],
+        ),
     );
 
     return ['outer' => $outer, 'llm' => $llm, 'llmInner' => $llmInner];
