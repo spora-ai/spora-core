@@ -35,7 +35,6 @@ use Spora\Services\NotificationService;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
-use Spora\Tools\Schema\OperationSchemaFilter;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;

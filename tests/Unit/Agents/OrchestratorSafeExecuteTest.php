@@ -2,8 +2,6 @@
 
 declare(strict_types=1);
 
-use Spora\Agents\ValueObjects\WorkerMode;
-use Spora\Agents\OrchestratorConfig;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\ToolInterface;

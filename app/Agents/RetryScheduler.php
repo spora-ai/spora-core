@@ -85,13 +85,22 @@ final class RetryScheduler
         int $maxRetries,
     ): void {
         try {
-            $retryTask = $this->orchestrator->start($agent->id, $failedTask->user_prompt, $failedTask->max_steps);
-            $retryTask->update([
+            // Create the retry task directly in QUEUED state instead of routing
+            // through Orchestrator::start(), which would tick the LLM immediately
+            // in Sync mode and defeat the whole point of retry_after scheduling.
+            $retryTask = Task::create([
+                'agent_id'         => $agent->id,
+                'user_id'          => $agent->user_id,
+                'status'           => 'QUEUED',
+                'user_prompt'      => $failedTask->user_prompt,
+                'step_count'       => 0,
+                'max_steps'        => $failedTask->max_steps,
                 'retry_of_task_id' => $rootTaskId,
                 'retry_count'      => $retryCount,
                 'retry_after'      => date(Orchestrator::DB_TIMESTAMP_FORMAT, time() + $retryAfterMinutes * 60),
-                'status'           => 'QUEUED',
             ]);
+
+            $this->orchestrator->appendHistory($retryTask->id, 'user', $failedTask->user_prompt);
 
             $failedTask->update([
                 'retry_after' => $retryTask->retry_after,

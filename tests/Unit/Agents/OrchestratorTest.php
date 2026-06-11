@@ -2091,10 +2091,11 @@ it('scheduleAutoRetry creates a queued retry task when error code is retryable a
     $mock->allows('complete')->andReturnUsing(function () use (&$callCount) {
         $callCount++;
         // First call: throw rate limit (so the original task fails).
+        // scheduleAutoRetry queues the retry directly without a second LLM call,
+        // so no further invocations are expected on this mock.
         if ($callCount === 1) {
             throw new LLMRateLimitException('429 rate limit');
         }
-        // Second call: succeed (so the retry task that scheduleAutoRetry starts can complete).
         return new LLMResponse('Done.', [], 5, 3, 'cmp_retry');
     });
 
