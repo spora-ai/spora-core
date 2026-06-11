@@ -397,6 +397,15 @@ final class ContainerDefinitions
 
     private static function apiControllerDefinitions(): array
     {
+        return array_merge(
+            self::apiAuthUserDefinitions(),
+            self::apiMemoryPluginDefinitions(),
+            self::apiAgentOperationsDefinitions(),
+        );
+    }
+
+    private static function apiAuthUserDefinitions(): array
+    {
         return [
             AuthController::class => static function (ContainerInterface $c): AuthController {
                 return new AuthController(
@@ -440,6 +449,18 @@ final class ContainerDefinitions
                 );
             },
 
+            UserProfileController::class => static function (ContainerInterface $c): UserProfileController {
+                return new UserProfileController(
+                    $c->get(AuthService::class),
+                    $c->get(UserServiceInterface::class),
+                );
+            },
+        ];
+    }
+
+    private static function apiMemoryPluginDefinitions(): array
+    {
+        return [
             AppsController::class => static function (ContainerInterface $c): AppsController {
                 return new AppsController(
                     $c->get(AppRegistry::class),
@@ -474,7 +495,12 @@ final class ContainerDefinitions
                     $c->get(PluginsService::class),
                 );
             },
+        ];
+    }
 
+    private static function apiAgentOperationsDefinitions(): array
+    {
+        return [
             AgentController::class => static function (ContainerInterface $c): AgentController {
                 return new AgentController(
                     $c->get(AuthService::class),
@@ -560,13 +586,6 @@ final class ContainerDefinitions
                     $config['mercure_publish_url'] ?? null,
                     $config['mercure_jwt_key'] ?? null,
                     '/.well-known/mercure',
-                );
-            },
-
-            UserProfileController::class => static function (ContainerInterface $c): UserProfileController {
-                return new UserProfileController(
-                    $c->get(AuthService::class),
-                    $c->get(UserServiceInterface::class),
                 );
             },
         ];
