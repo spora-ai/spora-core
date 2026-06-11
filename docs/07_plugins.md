@@ -291,3 +291,63 @@ The cache is invalidated automatically when any manifest's path, mtime, or conte
 changes. It is also invalidated by a corrupt or missing sidecar (the loader falls
 back to full discovery and rewrites both files). The stamp path is currently
 non-configurable; advanced operators can clear it by removing the two files.
+
+---
+
+## Installing third-party plugins
+
+Spora plugins are distributed as standalone PHP packages. The Spora core repo
+deliberately ships an empty `plugins/` directory — third-party plugins live in
+their own repositories and are installed by either dropping them into
+`plugins/` or pointing Spora at external paths via `SPORA_PLUGINS_PATHS`.
+
+The canonical reference implementation is
+[`spora-ai/spora-plugin-minimax`](https://github.com/spora-ai/spora-plugin-minimax) — it
+ships five multimodal tools (image, speech, music, lyrics, video) and a
+migration. Use it as a starting point when authoring your own plugin.
+
+### Option A — Clone into the Spora repo
+
+```bash
+cd /path/to/your/spora
+git clone https://github.com/spora-ai/spora-plugin-minimax.git plugins/minimax
+php bin/spora spora:install   # applies the plugin's migration
+```
+
+The plugin's `plugin.json` manifest is auto-discovered on the next request;
+its tools are registered with the orchestrator and surfaced in
+`GET /api/v1/plugins`.
+
+### Option B — External path
+
+```bash
+git clone https://github.com/spora-ai/spora-plugin-minimax.git /opt/spora-plugins/minimax
+echo 'SPORA_PLUGINS_PATHS=/opt/spora-plugins/minimax' >> .env
+php bin/spora spora:install
+```
+
+Useful when you want the plugin's versioning completely decoupled from your
+Spora deployment. Multiple paths are supported — comma-separate them:
+
+```bash
+SPORA_PLUGINS_PATHS=/opt/spora-plugins/minimax,/srv/spora/community
+```
+
+`SPORA_PLUGINS_PATHS` is also accepted via `config.php` under the
+`plugins_paths` key (list of absolute paths).
+
+### Updating a plugin
+
+Pull the latest changes into the plugin directory and rerun `spora:install`
+to apply any new migrations. The `storage/.plugins_stamp` cache invalidates
+automatically when the manifest content changes — no manual cache-bust
+needed.
+
+### Uninstalling a plugin
+
+1. Drop the plugin directory (or remove the entry from `SPORA_PLUGINS_PATHS`).
+2. Manually roll back any plugin-specific migrations (Spora does not
+   auto-rollback plugin migrations on uninstall — see
+   [Database migrations](#database-migrations)).
+3. Optional: drop the plugin's database tables if you don't need the
+   historical data.

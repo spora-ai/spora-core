@@ -2,8 +2,22 @@
 
 declare(strict_types=1);
 
+use DI\Container;
+use DI\ContainerBuilder;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
+use Spora\Auth\AuthService;
 use Spora\Core\ContainerDefinitions;
 use Spora\Core\Kernel;
+use Spora\Core\SecurityManager;
+use Spora\Core\SecurityManagerInterface;
+use Spora\Http\ToolController;
+use Spora\Plugins\PluginLoader;
+use Spora\Services\ToolConfigService;
+use Spora\Tools\CalculatorTool;
+use Tests\Fixtures\TestTool;
+
+const FIXTURE_TOOLS_PLUGINS = BASE_PATH . '/tests/Fixtures/plugins_with_tools';
 
 /**
  * Invoke a private static method on ContainerDefinitions.
@@ -12,6 +26,45 @@ function callContainerMethod(string $name, array $args = []): mixed
 {
     $ref = new ReflectionMethod(ContainerDefinitions::class, $name);
     return $ref->invokeArgs(null, $args);
+}
+
+/**
+ * Build a real PluginLoader that loads the tools-contributing fixture plugin.
+ * The fixture's tools() returns [Tests\Fixtures\TestTool].
+ */
+function makeToolsPluginLoader(): PluginLoader
+{
+    $loader = new PluginLoader([FIXTURE_TOOLS_PLUGINS], null);
+    $loader->boot();
+    return $loader;
+}
+
+/**
+ * Build a DI container with the bare minimum dependencies the tool factory
+ * closures need. The optional $extra allows callers to register additional
+ * stubbed entries (e.g. for tool classes the tool_instances factory resolves).
+ */
+function makeContainerForToolFactories(
+    array $coreToolClasses,
+    ?PluginLoader $pluginLoader = null,
+    array $extra = [],
+): Container {
+    $builder = new DI\ContainerBuilder();
+    $builder->addDefinitions(array_merge([
+        'config' => static fn(): array => [
+            'app_env'   => 'testing',
+            'key_path'  => null,
+            'log_path'  => 'php://stdout',
+            'log_level' => 'WARNING',
+        ],
+        'tool_classes' => $coreToolClasses,
+        PluginLoader::class => $pluginLoader ?? makeToolsPluginLoader(),
+        SecurityManagerInterface::class => static fn(): SecurityManager
+            => new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+        LoggerInterface::class => static fn(): LoggerInterface => new NullLogger(),
+        AuthService::class => static fn(Container $c): AuthService => bootAuthLayer(),
+    ], $extra));
+    return $builder->build();
 }
 
 beforeEach(function (): void {
@@ -416,4 +469,103 @@ it('UserConfig::load returns different results for different file paths', functi
         unlink($tmpA);
         unlink($tmpB);
     }
+});
+
+// ─── Tool factory closures merge plugin tools into core tools ─────────────
+//
+// The ToolConfigService, ToolController, and tool_instances factories all
+// build their tool list as array_values(array_unique(array_merge(core, plugin)))
+// — the core `tool_classes` list comes first, then any plugin contributions,
+// with duplicates (the same FQCN in both) deduped. These tests verify that
+// merge actually reaches the constructed objects.
+
+it('ToolConfigService factory merges core + plugin tool classes and dedupes overlap', function (): void {
+    $c = makeContainerForToolFactories([
+        CalculatorTool::class,
+        TestTool::class, // overlaps with the plugin's contribution
+    ]);
+
+    $def = callContainerMethod('coreServiceDefinitions');
+    /** @var ToolConfigService $service */
+    $service = ($def[ToolConfigService::class])($c);
+
+    // ToolConfigService hands the class list to ToolConfigNameResolver.
+    $resolver = (new ReflectionProperty($service, 'nameResolver'))->getValue($service);
+    $merged   = (new ReflectionProperty($resolver, 'toolClasses'))->getValue($resolver);
+
+    expect($merged)->toBe([
+        CalculatorTool::class,
+        TestTool::class,
+    ]);
+});
+
+it('ToolController factory merges core + plugin tool classes and dedupes overlap', function (): void {
+    $c = makeContainerForToolFactories([
+        CalculatorTool::class,
+        TestTool::class, // overlaps with the plugin's contribution
+    ]);
+
+    $def = callContainerMethod('apiResourceControllerDefinitions');
+    /** @var ToolController $controller */
+    $controller = ($def[ToolController::class])($c);
+
+    $classes = (new ReflectionProperty($controller, 'toolClasses'))->getValue($controller);
+
+    expect($classes)->toBe([
+        CalculatorTool::class,
+        TestTool::class,
+    ]);
+});
+
+it('tool_instances factory returns a class => instance map including plugin tools', function (): void {
+    $c = makeContainerForToolFactories(
+        coreToolClasses: [CalculatorTool::class],
+        extra: [
+            CalculatorTool::class => static fn(): CalculatorTool => new CalculatorTool(),
+            TestTool::class        => static fn(): TestTool        => new TestTool(),
+        ],
+    );
+
+    $def = callContainerMethod('toolDefinitions');
+    $instances = ($def['tool_instances'])($c);
+
+    expect($instances)->toHaveKeys([CalculatorTool::class, TestTool::class]);
+    expect($instances[CalculatorTool::class])->toBeInstanceOf(CalculatorTool::class);
+    expect($instances[TestTool::class])->toBeInstanceOf(TestTool::class);
+});
+
+it('tool_instances factory dedupes when core and plugin both contribute the same class', function (): void {
+    $c = makeContainerForToolFactories(
+        coreToolClasses: [TestTool::class],
+        extra: [
+            TestTool::class => static fn(): TestTool => new TestTool(),
+        ],
+    );
+
+    $def = callContainerMethod('toolDefinitions');
+    $instances = ($def['tool_instances'])($c);
+
+    expect($instances)->toHaveCount(1);
+    expect($instances)->toHaveKey(TestTool::class);
+    expect($instances[TestTool::class])->toBeInstanceOf(TestTool::class);
+});
+
+it('tool_instances factory returns only core tools when no plugin is loaded', function (): void {
+    $emptyLoader = new PluginLoader([], null);
+    $emptyLoader->boot();
+
+    $c = makeContainerForToolFactories(
+        coreToolClasses: [CalculatorTool::class],
+        pluginLoader: $emptyLoader,
+        extra: [
+            CalculatorTool::class => static fn(): CalculatorTool => new CalculatorTool(),
+        ],
+    );
+
+    $def = callContainerMethod('toolDefinitions');
+    $instances = ($def['tool_instances'])($c);
+
+    expect($instances)->toHaveKey(CalculatorTool::class);
+    expect($instances)->not->toHaveKey(TestTool::class);
+    expect($instances[CalculatorTool::class])->toBeInstanceOf(CalculatorTool::class);
 });

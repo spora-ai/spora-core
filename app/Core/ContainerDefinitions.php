@@ -329,7 +329,10 @@ final class ContainerDefinitions
                 return new ToolConfigService(
                     $c->get(SecurityManagerInterface::class),
                     $c->get(LoggerInterface::class),
-                    $c->get('tool_classes'),
+                    array_values(array_unique(array_merge(
+                        $c->get('tool_classes'),
+                        $c->get(PluginLoader::class)->toolClasses(),
+                    ))),
                 );
             },
         ];
@@ -522,7 +525,10 @@ final class ContainerDefinitions
                 return new ToolController(
                     $c->get(AuthService::class),
                     $c->get(ToolConfigService::class),
-                    $c->get('tool_classes'),
+                    array_values(array_unique(array_merge(
+                        $c->get('tool_classes'),
+                        $c->get(PluginLoader::class)->toolClasses(),
+                    ))),
                 );
             },
         ];
@@ -622,10 +628,14 @@ final class ContainerDefinitions
     {
         return [
             'tool_instances' => static function (ContainerInterface $c): array {
-                return array_map(
-                    fn(string $toolClass) => $c->get($toolClass),
+                $classes = array_values(array_unique(array_merge(
                     $c->get('tool_classes'),
-                );
+                    $c->get(PluginLoader::class)->toolClasses(),
+                )));
+                return array_combine($classes, array_map(
+                    fn(string $toolClass) => $c->get($toolClass),
+                    $classes,
+                ));
             },
 
             ToolCallSerializer::class => static function (ContainerInterface $c): ToolCallSerializer {

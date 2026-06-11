@@ -39,7 +39,7 @@ function formatDate(iso: string | null): string {
       <div class="absolute inset-0 bg-black/50" @click="close" />
       <div
         data-testid="plugin-detail-dialog"
-        class="relative z-10 w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl border border-border bg-card shadow-lg"
+        class="relative z-10 w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl border border-border bg-background shadow-lg"
       >
         <header class="flex items-start justify-between gap-3 p-5 border-b border-border">
           <div>
