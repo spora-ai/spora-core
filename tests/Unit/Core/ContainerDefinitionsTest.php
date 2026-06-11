@@ -282,16 +282,41 @@ it('llmDefinitions includes all expected entries', function (): void {
     expect($def)->toHaveKey(Spora\Apps\AppRegistry::class);
 });
 
-it('apiControllerDefinitions includes all expected controllers', function (): void {
-    $def = callContainerMethod('apiControllerDefinitions');
+it('apiAuthControllerDefinitions includes auth/config controllers', function (): void {
+    $def = callContainerMethod('apiAuthControllerDefinitions');
 
     expect($def)->toHaveKey(Spora\Http\AuthController::class);
+    expect($def)->toHaveKey(Spora\Services\AuthWorkflow::class);
+    expect($def)->toHaveKey(Spora\Services\AuthValidator::class);
     expect($def)->toHaveKey(Spora\Http\LLMConfigController::class);
-    expect($def)->toHaveKey(Spora\Http\TaskController::class);
+    expect($def)->toHaveKey(Spora\Services\LlmConfigValidator::class);
+    expect($def)->toHaveKey(Spora\Http\UserPreferenceController::class);
+    expect($def)->toHaveKey(Spora\Http\ConfigController::class);
     expect($def)->toHaveKey(Spora\Http\UserProfileController::class);
-    expect($def)->toHaveKey(Spora\Http\SseController::class);
+});
+
+it('apiResourceControllerDefinitions includes resource controllers', function (): void {
+    $def = callContainerMethod('apiResourceControllerDefinitions');
+
+    expect($def)->toHaveKey(Spora\Http\AppsController::class);
+    expect($def)->toHaveKey(Spora\Http\MemoryController::class);
+    expect($def)->toHaveKey(Spora\Http\AgentMemoryController::class);
+    expect($def)->toHaveKey(Spora\Http\AgentController::class);
+    expect($def)->toHaveKey(Spora\Http\AgentToolController::class);
+    expect($def)->toHaveKey(Spora\Http\AgentOverrideController::class);
     expect($def)->toHaveKey(Spora\Http\HealthController::class);
     expect($def)->toHaveKey(Spora\Http\ToolController::class);
+});
+
+it('apiTaskControllerDefinitions includes task/workflow controllers', function (): void {
+    $def = callContainerMethod('apiTaskControllerDefinitions');
+
+    expect($def)->toHaveKey(Spora\Http\TaskController::class);
+    expect($def)->toHaveKey(Spora\Services\TaskServiceInterface::class);
+    expect($def)->toHaveKey(Spora\Http\RecipeController::class);
+    expect($def)->toHaveKey(Spora\Http\PromptTemplateController::class);
+    expect($def)->toHaveKey(Spora\Http\NotificationController::class);
+    expect($def)->toHaveKey(Spora\Http\SseController::class);
 });
 
 it('adminControllerDefinitions includes admin controllers', function (): void {
