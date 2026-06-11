@@ -8,11 +8,7 @@ use Spora\Models\TaskHistory;
 
 /**
  * Replays {@see TaskHistory} rows into the OpenAI-compatible message list sent
- * to the LLM each tick.
- *
- * Three responsibilities are extracted from {@see Orchestrator} so the
- * orchestrator itself stays under the SonarQube `php:S3776` cognitive-complexity
- * ceiling:
+ * to the LLM each tick. Three responsibilities:
  *   1. {@see applySummaryCompaction()} — drops rows whose `sequence` falls
  *      inside a `summary` row's `summarized_sequence_range`, keeping the
  *      summary row itself.

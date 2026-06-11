@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Psr\Log\NullLogger;
 use Spora\Agents\Orchestrator;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
@@ -58,10 +59,11 @@ describe('WorkerModeTest', function (): void {
         $mock = mockLlmForMode(new LLMResponse('Done.', [], 5, 3, 'cmp_1'));
 
         $orch = new Orchestrator(
-            driverFactory: mockDriverFactoryForMode($mock),
-            toolInstances: [],
-            logger: new NullLogger(),
-            workerMode: WorkerMode::Sync,
+            mockDriverFactoryForMode($mock),
+            new OrchestratorConfig(
+                logger: new NullLogger(),
+                workerMode: WorkerMode::Sync,
+            ),
         );
 
         $task = $orch->start($this->agent->id, 'Hello sync', maxSteps: 10);
@@ -75,10 +77,11 @@ describe('WorkerModeTest', function (): void {
         $mock->allows('complete')->never();
 
         $orch = new Orchestrator(
-            driverFactory: mockDriverFactoryForMode($mock),
-            toolInstances: [],
-            logger: new NullLogger(),
-            workerMode: WorkerMode::Worker,
+            mockDriverFactoryForMode($mock),
+            new OrchestratorConfig(
+                logger: new NullLogger(),
+                workerMode: WorkerMode::Worker,
+            ),
         );
 
         $task = $orch->start($this->agent->id, 'Hello worker', maxSteps: 10);
@@ -92,10 +95,11 @@ describe('WorkerModeTest', function (): void {
         $mock->allows('complete')->never();
 
         $orch = new Orchestrator(
-            driverFactory: mockDriverFactoryForMode($mock),
-            toolInstances: [],
-            logger: new NullLogger(),
-            workerMode: WorkerMode::Worker,
+            mockDriverFactoryForMode($mock),
+            new OrchestratorConfig(
+                logger: new NullLogger(),
+                workerMode: WorkerMode::Worker,
+            ),
         );
 
         $task = Task::create([

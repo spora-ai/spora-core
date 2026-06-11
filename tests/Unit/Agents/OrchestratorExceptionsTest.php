@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Spora\Agents\ApprovedBatchExecutor;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\Exceptions\LlmConfigurationMissingException;
 use Spora\Agents\Exceptions\TaskStateMissingException;
@@ -9,6 +10,7 @@ use Spora\Agents\Exceptions\ToolContractException;
 use Spora\Agents\Exceptions\ToolNotEnabledException;
 use Spora\Agents\Exceptions\ToolNotRegisteredException;
 use Spora\Agents\Orchestrator;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
@@ -72,11 +74,8 @@ function makeBareDriverFactory(): DriverFactory
 function makeBareOrchestrator(): Orchestrator
 {
     return new Orchestrator(
-        driverFactory: makeBareDriverFactory(),
-        llmConfigService: null,
-        toolInstances: [],
-        logger: null,
-        workerMode: WorkerMode::Sync,
+        makeBareDriverFactory(),
+        new OrchestratorConfig(),
     );
 }
 
@@ -152,9 +151,10 @@ it('loadTaskAndStateForResume throws TaskStateMissingException when the transact
 
     try {
         $orch = makeBareOrchestrator();
-        $load = new ReflectionMethod(Orchestrator::class, 'loadTaskAndStateForResume');
+        $executor = $orch->approvedBatchExecutor;
+        $load = new ReflectionMethod(ApprovedBatchExecutor::class, 'loadTaskAndStateForResume');
 
-        expect(fn() => $load->invoke($orch, 99999))
+        expect(fn() => $load->invoke($executor, 99999))
             ->toThrow(TaskStateMissingException::class, 'Failed to resolve task or state during resume.');
     } finally {
         $prop->setValue(null, $original);
@@ -226,11 +226,8 @@ it('handleToolCalls throws ToolNotEnabledException when LLM calls a tool that is
     // handleToolCalls() body will throw ToolNotEnabledException, which is
     // caught by the surrounding try/catch and turned into a System Error row.
     $orch = new Orchestrator(
-        driverFactory: $factory,
-        llmConfigService: null,
-        toolInstances: [new Tests\Fixtures\StubInputTool()],
-        logger: null,
-        workerMode: WorkerMode::Sync,
+        $factory,
+        new OrchestratorConfig(toolInstances: [new Tests\Fixtures\StubInputTool()]),
     );
     $task = $orch->start($agent->id, 'Tool not enabled test', maxSteps: 3);
 

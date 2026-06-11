@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Agents\Orchestrator;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\ToolCallDisposition;
 use Spora\Agents\ToolCallExecutor;
 use Spora\Agents\ValueObjects\WorkerMode;
@@ -33,11 +34,8 @@ function makeExecutorHost(array $toolInstances = []): Orchestrator
     $factory = Mockery::mock(DriverFactory::class);
 
     return new Orchestrator(
-        driverFactory: $factory,
-        llmConfigService: null,
-        toolInstances: $toolInstances,
-        logger: null,
-        workerMode: WorkerMode::Sync,
+        $factory,
+        new OrchestratorConfig(toolInstances: $toolInstances),
     );
 }
 

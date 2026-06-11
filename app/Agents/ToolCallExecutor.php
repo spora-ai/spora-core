@@ -16,11 +16,9 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
 /**
- * Per-call worker extracted from {@see Orchestrator::handleToolCalls()} to keep that
- * method under the SonarQube S3776 cognitive-complexity threshold.
- *
- * Handles the resolve → validate → execute-or-queue sequence for a single
- * {@see DriverToolCall} and reports the outcome as a {@see ToolCallDisposition}.
+ * Per-call worker for {@see Orchestrator::handleToolCalls()}: resolves,
+ * validates, and either executes or queues a single {@see DriverToolCall},
+ * reporting the outcome as a {@see ToolCallDisposition}.
  *
  * Package-private collaborator: constructed and called only by {@see Orchestrator}.
  */
@@ -66,8 +64,6 @@ final class ToolCallExecutor
     /**
      * Validate the proposed arguments, then either execute immediately or
      * leave the record PENDING_APPROVAL for the resume() flow to pick up.
-     * Extracted so {@see executeOrQueue} stays under the SonarQube S1142
-     * 3-return cap.
      */
     private function validateAndExecute(
         Task           $task,
@@ -94,8 +90,7 @@ final class ToolCallExecutor
 
     /**
      * Persist a PENDING_APPROVAL ToolCallModel row. The `tool_class` is
-     * derived from the tool instance rather than passed in, so this method
-     * has only 7 parameters (SonarQube S107 cap).
+     * derived from the tool instance rather than passed in.
      */
     private function createPendingRecord(
         Task           $task,
