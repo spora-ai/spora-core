@@ -25,12 +25,10 @@ use Throwable;
 
 /**
  * Runs the three tick phases (claim → LLM call → write results) for the
- * orchestrator. Extracted so the orchestrator stays under the SonarQube
- * `php:S1448` method-count cap.
- *
- * Holds the orchestrator by reference to call back into `appendHistory`,
- * `tick`, `buildMessages`, `errorClassifier`, `contextWindowRecovery`,
- * and `retryScheduler` (mirrors {@see ToolCallExecutor}).
+ * orchestrator. Holds the orchestrator by reference to call back into
+ * `appendHistory`, `tick`, `buildMessages`, `errorClassifier`,
+ * `contextWindowRecovery`, and `retryScheduler` (mirrors
+ * {@see ToolCallExecutor}).
  */
 final class TickPhaseRunner
 {

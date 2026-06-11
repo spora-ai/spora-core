@@ -21,9 +21,6 @@ use Throwable;
  * Executes the batch of tool calls that were paused for human approval.
  * Holds the orchestrator by ref to call back into `resolveToolByName`,
  * `safeExecute`, `appendHistory`, and `tick` (mirrors {@see ToolCallExecutor}).
- *
- * Extracted from {@see Orchestrator} so the orchestrator stays under the
- * SonarQube `php:S1448` method-count cap.
  */
 final class ApprovedBatchExecutor
 {

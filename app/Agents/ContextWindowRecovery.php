@@ -15,12 +15,8 @@ use Throwable;
 
 /**
  * Recovers from context-window errors by compacting the task history and
- * re-ticking.
- *
- * Extracted from {@see Orchestrator} so the orchestrator stays under the
- * SonarQube `php:S1448` method-count cap. Holds the orchestrator by
- * reference to call back into `tick()` after compaction (mirrors
- * {@see ToolCallExecutor}).
+ * re-ticking. Holds the orchestrator by reference to call back into `tick()`
+ * after compaction (mirrors {@see ToolCallExecutor}).
  */
 final class ContextWindowRecovery
 {

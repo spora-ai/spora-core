@@ -13,9 +13,6 @@ use Throwable;
 /**
  * Schedules and dispatches auto-retries for failed tasks.
  *
- * Extracted from {@see Orchestrator} so the orchestrator stays under the
- * SonarQube `php:S1448` method-count cap.
- *
  * Package-private collaborator: constructed and called only by
  * {@see Orchestrator}.
  */

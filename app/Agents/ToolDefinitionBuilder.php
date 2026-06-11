@@ -16,9 +16,6 @@ use Spora\Tools\Traits\HasOperations;
 /**
  * Builds the OpenAI-compatible tool definition list sent to the LLM each tick.
  *
- * Extracted from {@see Orchestrator} so the orchestrator stays under the
- * SonarQube `php:S1448` method-count cap.
- *
  * Package-private collaborator: constructed and called only by
  * {@see Orchestrator}. The orchestrator injects the tool instances and
  * the config/plugin dependencies.

@@ -15,8 +15,7 @@ use Spora\Plugins\PluginLoader;
 
 /**
  * Bundles the optional LLM-plumbing collaborators that the Orchestrator
- * threads through to its extracted services. Keeps the Orchestrator
- * constructor under the SonarQube `php:S107` 7-parameter cap.
+ * threads through to its extracted services.
  */
 final class OrchestratorConfig
 {

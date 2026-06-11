@@ -14,9 +14,8 @@ use Symfony\Contracts\HttpClient\Exception\TimeoutExceptionInterface;
 use Throwable;
 
 /**
- * Error classification + friendly-message helpers extracted from
- * {@see Orchestrator} so the orchestrator stays under the SonarQube
- * `php:S1448` method-count cap.
+ * Maps orchestrator-level exceptions and HTTP/timeout failures to retryable
+ * error codes and user-facing friendly messages.
  *
  * Package-private collaborator: constructed and called only by
  * {@see Orchestrator}. Pure logic — no logger or notification dependencies.
