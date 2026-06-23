@@ -128,9 +128,7 @@ final class MessageParser
             $i++;
         }
         $buf = trim($buf);
-        // Re-read the next char via substr() so PHPStan doesn't narrow it
-        // to a single literal from the loop's comparison above. The loop
-        // stopped because $raw[$i] is ',' or '<' (or $i >= $len).
+        // Re-read via substr() so PHPStan doesn't narrow the type from the loop's comparison.
         $next = $i < $len ? substr($raw, $i, 1) : '';
         if ($next === '<') {
             return [$buf !== '' ? $buf : null, self::readAngleAddress($raw, $i, $len)];
