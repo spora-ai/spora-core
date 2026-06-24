@@ -154,12 +154,13 @@ final class PluginManager
         }
 
         $decoded = json_decode($output, true);
+        // $decoded is either an array (object/JSON list) or null. When array,
+        // prefer the `installed` key Composer v2 emits; fall back to a bare
+        // top-level list for older Composer / forks. Both branches yield an
+        // array, so no further is_array() guard is needed.
         $entries = is_array($decoded)
             ? (is_array($decoded['installed'] ?? null) ? $decoded['installed'] : $decoded)
             : [];
-        if (!is_array($entries)) {
-            return [];
-        }
 
         $plugins = [];
         foreach ($entries as $entry) {
