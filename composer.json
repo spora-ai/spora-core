@@ -20,7 +20,6 @@
         "ext-sodium": "*",
         "ext-zip": "*",
         "chriskonnertz/string-calc": "^2.0",
-        "composer/installers": "^2.0",
         "craigk5n/php-icalendar-core": "^1.0",
         "delight-im/auth": "^9.0",
         "dragonmantank/cron-expression": "^3.6",
@@ -31,6 +30,7 @@
         "nikic/fast-route": "^1.3",
         "php-di/php-di": "^7.1",
         "psr/log": "^3.0",
+        "spora/installer": "dev-main",
         "symfony/console": "^8.0",
         "symfony/http-client": "^8.0",
         "symfony/http-foundation": "^8.0",
@@ -93,19 +93,22 @@
         "frontend:test": "cd frontend && npm test",
         "frontend:preview": "cd frontend && npm run preview"
     },
-    "extra": {
-        "installer-paths": {
-            "plugins/{$name}/": ["type:spora-plugin"]
-        }
-    },
     "config": {
         "optimize-autoloader": true,
         "sort-packages": true,
         "allow-plugins": {
             "pestphp/pest-plugin": true,
-            "composer/installers": true
+            "spora/installer": true
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "repositories": [{
+        "name": "spora/installer",
+        "type": "path",
+        "url": "./spora-installer",
+        "options": {
+            "symlink": true
+        }
+    }]
 }
