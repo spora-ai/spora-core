@@ -153,14 +153,7 @@ final class PluginManager
             return [];
         }
 
-        $decoded = json_decode($output, true);
-        // $decoded is either an array (object/JSON list) or null. When array,
-        // prefer the `installed` key Composer v2 emits; fall back to a bare
-        // top-level list for older Composer / forks. Both branches yield an
-        // array, so no further is_array() guard is needed.
-        $entries = is_array($decoded)
-            ? (is_array($decoded['installed'] ?? null) ? $decoded['installed'] : $decoded)
-            : [];
+        $entries = $this->parseComposerShowOutput($output);
 
         $plugins = [];
         foreach ($entries as $entry) {
@@ -174,6 +167,29 @@ final class PluginManager
         }
 
         return $plugins;
+    }
+
+    /**
+     * Decode `composer show --installed --direct --format=json` output into the
+     * underlying package-entry array.
+     *
+     * Composer v2 wraps its JSON under an `installed` key (`{"installed": [...]}`).
+     * Older Composer releases and some forks emit a bare top-level list, so
+     * this helper accepts both shapes — preferring the `installed` key when
+     * present and falling back to the decoded value itself otherwise.
+     *
+     * @return list<mixed> Empty when the output isn't a JSON object/list at all.
+     */
+    private function parseComposerShowOutput(string $output): array
+    {
+        $decoded = json_decode($output, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+        if (is_array($decoded['installed'] ?? null)) {
+            return $decoded['installed'];
+        }
+        return $decoded;
     }
 
     private function installFromRegistry(PluginInstallRequest $req): PluginInstallResult
