@@ -81,23 +81,24 @@ final class PluginManager
         );
     }
 
-    public function update(string $package): PluginInstallResult
+    public function update(?string $package = null): PluginInstallResult
     {
-        $argv = [
-            'composer',
-            'update',
-            $package,
+        $argv = ['composer', 'update'];
+        if ($package !== null) {
+            $argv[] = $package;
+        }
+        $argv = array_merge($argv, [
             '--no-interaction',
             '--no-progress',
             '--optimize-autoloader',
-        ];
+        ]);
 
         $output = $this->runProcess($argv);
 
-        $this->logger->info('Plugin updated', ['package' => $package]);
+        $this->logger->info('Plugin updated', ['package' => $package ?? '*']);
 
         return new PluginInstallResult(
-            package: $package,
+            package: $package ?? '',
             status: PluginInstallResult::STATUS_UPDATED,
             message: $output,
         );

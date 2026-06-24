@@ -21,6 +21,10 @@ use Spora\Apps\PluginsApp;
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\SeedCommand;
 use Spora\Console\Commands\SetupCommand;
+use Spora\Console\Commands\PluginInstallCommand;
+use Spora\Console\Commands\PluginListCommand;
+use Spora\Console\Commands\PluginUninstallCommand;
+use Spora\Console\Commands\PluginUpdateCommand;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Console\Commands\WorkerRunCommand;
 use Spora\Core\Exceptions\InvalidSecretKeyException;
@@ -888,6 +892,30 @@ final class ContainerDefinitions
                     $c->get(Database::class),
                     $c,
                     $c->get(MercurePublisherInterface::class),
+                );
+            },
+
+            PluginInstallCommand::class => static function (ContainerInterface $c): PluginInstallCommand {
+                return new PluginInstallCommand(
+                    $c->get(PluginManager::class),
+                );
+            },
+
+            PluginUninstallCommand::class => static function (ContainerInterface $c): PluginUninstallCommand {
+                return new PluginUninstallCommand(
+                    $c->get(PluginManager::class),
+                );
+            },
+
+            PluginListCommand::class => static function (ContainerInterface $c): PluginListCommand {
+                return new PluginListCommand(
+                    $c->get(PluginManager::class),
+                );
+            },
+
+            PluginUpdateCommand::class => static function (ContainerInterface $c): PluginUpdateCommand {
+                return new PluginUpdateCommand(
+                    $c->get(PluginManager::class),
                 );
             },
         ];

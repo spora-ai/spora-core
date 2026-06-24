@@ -5,89 +5,18 @@ declare(strict_types=1);
 namespace Tests\Unit\Extension;
 
 use Closure;
-use InvalidArgumentException;
 use Psr\Log\NullLogger;
 use Spora\Core\Extension\Exceptions\PluginInstallFailedException;
 use Spora\Core\Extension\PluginInstallRequest;
 use Spora\Core\Extension\PluginInstallResult;
 use Spora\Core\Extension\PluginManager;
-
-/**
- * Stand-in for {@see \Symfony\Component\Process\Process} that records the
- * argv + cwd it was constructed with and returns canned stdout / stderr /
- * exit code. The PluginManager only needs five methods on the return value
- * of its processFactory closure, so we duck-type them here.
- */
-final class InMemoryProcess
-{
-    public function __construct(
-        public readonly array $argv,
-        public readonly string $cwd,
-        private readonly string $output = '',
-        private readonly string $errorOutput = '',
-        private readonly int $exitCode = 0,
-    ) {}
-
-    public function run(): void {}
-
-    public function getExitCode(): int
-    {
-        return $this->exitCode;
-    }
-
-    public function getOutput(): string
-    {
-        return $this->output;
-    }
-
-    public function getErrorOutput(): string
-    {
-        return $this->errorOutput;
-    }
-
-    public function isSuccessful(): bool
-    {
-        return $this->exitCode === 0;
-    }
-}
-
-/**
- * A invocable factory that records every (argv, cwd) pair the manager
- * passes through and returns a canned {@see InMemoryProcess} keyed by the
- * joined argv (or a default success process when no key matches).
- */
-final class FakeProcessFactory
-{
-    /** @var list<array{argv: array<int, string>, cwd: string}> */
-    public array $calls = [];
-
-    /** @var array<string, InMemoryProcess> */
-    private array $canned = [];
-
-    public function __construct(array $canned = [])
-    {
-        foreach ($canned as $key => $process) {
-            if (!$process instanceof InMemoryProcess) {
-                throw new InvalidArgumentException('canned values must be InMemoryProcess');
-            }
-            $this->canned[$key] = $process;
-        }
-    }
-
-    public function __invoke(array $argv, string $cwd): object
-    {
-        $this->calls[] = ['argv' => $argv, 'cwd' => $cwd];
-        $key = implode(' ', $argv);
-        return $this->canned[$key] ?? new InMemoryProcess($argv, $cwd);
-    }
-}
+use Tests\Support\FakeProcessFactory;
+use Tests\Support\InMemoryProcess;
 
 function makeManager(FakeProcessFactory $factory, string $basePath = '/srv/spora'): PluginManager
 {
     return new PluginManager(new NullLogger(), Closure::fromCallable($factory), $basePath);
 }
-
-beforeEach(function (): void {});
 
 test('install() from registry builds a composer require argv with the bare package', function (): void {
     $factory = new FakeProcessFactory([
@@ -191,6 +120,19 @@ test('update() invokes composer update with the package and optimizer flag', fun
     expect($result->status)->toBe(PluginInstallResult::STATUS_UPDATED);
     expect($factory->calls[0]['argv'])->toBe([
         'composer', 'update', 'spora-ai/spora-plugin-tavily',
+        '--no-interaction', '--no-progress', '--optimize-autoloader',
+    ]);
+});
+
+test('update() without a package argument updates every installed plugin', function (): void {
+    $factory = new FakeProcessFactory();
+    $manager = makeManager($factory);
+
+    $result = $manager->update();
+
+    expect($result->status)->toBe(PluginInstallResult::STATUS_UPDATED);
+    expect($factory->calls[0]['argv'])->toBe([
+        'composer', 'update',
         '--no-interaction', '--no-progress', '--optimize-autoloader',
     ]);
 });
