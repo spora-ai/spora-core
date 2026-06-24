@@ -125,6 +125,10 @@ final class PluginManager
      * CLI "list" command should treat that as "no plugins installed" rather
      * than surfacing a confusing composer error to the operator.
      *
+     * Composer wraps its JSON under an `installed` key (`{"installed": [...]}`)
+     * since v2. A defensive top-level array fallback is included for older
+     * Composer releases and forks that emit a bare list.
+     *
      * @return list<array{name: string, version: ?string, path: ?string}>
      */
     public function list(): array
@@ -141,12 +145,15 @@ final class PluginManager
         }
 
         $decoded = json_decode($output, true);
-        if (!is_array($decoded)) {
+        $entries = is_array($decoded)
+            ? (is_array($decoded['installed'] ?? null) ? $decoded['installed'] : $decoded)
+            : [];
+        if (!is_array($entries)) {
             return [];
         }
 
         $plugins = [];
-        foreach ($decoded as $entry) {
+        foreach ($entries as $entry) {
             if (is_array($entry) && ($entry['type'] ?? null) === 'spora-plugin') {
                 $plugins[] = [
                     'name'    => (string) ($entry['name'] ?? ''),
@@ -197,8 +204,9 @@ final class PluginManager
 
         // Register the local directory as a Composer path repo, then require the
         // package with `*@dev` so the path repo's local version satisfies the
-        // constraint. The slug must be unique per repo; using the package's
-        // last segment matches Composer's own convention for path repos.
+        // constraint. The slug is `vendor-name` (slash→dot) so two packages
+        // with the same name from different vendors (acme/foo vs spora-ai/foo)
+        // cannot collide on `repositories.<slug>`.
         $this->runProcess($this->composerArgv([
             'config',
             "repositories.{$slug}",
@@ -222,10 +230,19 @@ final class PluginManager
         );
     }
 
+    /**
+     * Build a Composer `repositories.<name>` slug from a package name.
+     *
+     * Using only the last segment would collide when two vendors ship a
+     * package with the same name (`acme/foo` and `spora-ai/foo` both →
+     * `repositories.foo`). The full `vendor/name` is collision-free; we
+     * rewrite `/` to `.` because Composer repository keys are restricted
+     * to `[A-Za-z0-9_.-]+` and dots read more naturally than hyphens in
+     * nested config (`repositories.spora-ai.something-plugin`).
+     */
     private function packageSlug(string $package): string
     {
-        $pos = strrpos($package, '/');
-        return $pos === false ? $package : substr($package, $pos + 1);
+        return str_replace('/', '.', $package);
     }
 
     /**

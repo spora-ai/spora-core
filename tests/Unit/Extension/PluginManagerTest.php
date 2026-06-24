@@ -66,7 +66,7 @@ test('install() from path registers a path repo then requires the virtual packag
 
         expect($factory->calls)->toHaveCount(2);
         expect($factory->calls[0]['argv'])->toBe([
-            'composer', 'config', 'repositories.spora-plugin-minimax', 'path', $tmpPath,
+            'composer', 'config', 'repositories.spora-ai.spora-plugin-minimax', 'path', $tmpPath,
         ]);
         expect($factory->calls[1]['argv'])->toBe([
             'composer', 'require', 'spora-ai/spora-plugin-minimax:*@dev',
@@ -95,6 +95,27 @@ test('install() treats an empty-string path as a registry install', function ():
 
     expect($factory->calls)->toHaveCount(1);
     expect($factory->calls[0]['argv'][2])->toBe('spora-ai/spora-plugin-x');
+});
+
+test('install() from path uses the full vendor.name slug so acme/foo and spora-ai/foo do not collide', function (): void {
+    $tmpPathA = sys_get_temp_dir() . '/spora-fake-plugin-a-' . uniqid();
+    $tmpPathB = sys_get_temp_dir() . '/spora-fake-plugin-b-' . uniqid();
+    mkdir($tmpPathA);
+    mkdir($tmpPathB);
+
+    try {
+        $factory = new FakeProcessFactory();
+        $manager = makeManager($factory);
+
+        $manager->install(new PluginInstallRequest('acme/foo', path: $tmpPathA));
+        $manager->install(new PluginInstallRequest('spora-ai/foo', path: $tmpPathB));
+
+        expect($factory->calls[0]['argv'][2])->toBe('repositories.acme.foo');
+        expect($factory->calls[2]['argv'][2])->toBe('repositories.spora-ai.foo');
+    } finally {
+        rmdir($tmpPathA);
+        rmdir($tmpPathB);
+    }
 });
 
 test('uninstall() invokes composer remove with the package', function (): void {
@@ -141,11 +162,12 @@ test('update() without a package argument updates every installed plugin', funct
 });
 
 test('list() filters composer show output to packages with type: spora-plugin', function (): void {
-    $json = json_encode([
+    // Real Composer wraps the package list under an `installed` key since v2.
+    $json = json_encode(['installed' => [
         ['name' => 'spora-ai/spora-plugin-tavily',     'version' => '0.1.0', 'type' => 'spora-plugin', 'path' => '/srv/spora/plugins/tavily'],
         ['name' => 'symfony/console',                  'version' => '8.0.0', 'type' => 'library'],
         ['name' => 'spora-ai/spora-plugin-semantics',  'version' => '0.2.0', 'type' => 'spora-plugin', 'path' => '/srv/spora/plugins/semantics'],
-    ]);
+    ]]);
     $factory = new FakeProcessFactory([
         'composer show --installed --direct --format=json' => new InMemoryProcess([], '', $json),
     ]);
@@ -154,6 +176,20 @@ test('list() filters composer show output to packages with type: spora-plugin', 
     expect($manager->list())->toBe([
         ['name' => 'spora-ai/spora-plugin-tavily',    'version' => '0.1.0', 'path' => '/srv/spora/plugins/tavily'],
         ['name' => 'spora-ai/spora-plugin-semantics', 'version' => '0.2.0', 'path' => '/srv/spora/plugins/semantics'],
+    ]);
+});
+
+test('list() also accepts a bare top-level array (older Composer / forks)', function (): void {
+    $json = json_encode([
+        ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0', 'type' => 'spora-plugin', 'path' => '/srv/spora/plugins/tavily'],
+    ]);
+    $factory = new FakeProcessFactory([
+        'composer show --installed --direct --format=json' => new InMemoryProcess([], '', $json),
+    ]);
+    $manager = makeManager($factory);
+
+    expect($manager->list())->toBe([
+        ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0', 'path' => '/srv/spora/plugins/tavily'],
     ]);
 });
 

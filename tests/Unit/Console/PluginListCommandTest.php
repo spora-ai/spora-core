@@ -37,11 +37,12 @@ it('prints an empty-state message when no plugins are installed', function (): v
 });
 
 it('renders a table with one row per installed plugin', function (): void {
-    $json = json_encode([
+    // Real Composer wraps the package list under an `installed` key since v2.
+    $json = json_encode(['installed' => [
         ['name' => 'spora-ai/spora-plugin-tavily',     'version' => '0.1.0', 'type' => 'spora-plugin', 'path' => '/srv/spora/plugins/tavily'],
         ['name' => 'spora-ai/spora-plugin-semantics',  'version' => '0.2.0', 'type' => 'spora-plugin', 'path' => '/srv/spora/plugins/semantics'],
         ['name' => 'symfony/console',                  'version' => '8.0.0', 'type' => 'library'],
-    ]);
+    ]]);
     $factory = new FakeProcessFactory([
         'composer show --installed --direct --format=json' => new InMemoryProcess([], '', $json),
     ]);
@@ -58,9 +59,9 @@ it('renders a table with one row per installed plugin', function (): void {
 });
 
 it('renders (unknown) for plugins whose version is not reported', function (): void {
-    $json = json_encode([
+    $json = json_encode(['installed' => [
         ['name' => 'spora-ai/spora-plugin-x', 'version' => null, 'type' => 'spora-plugin', 'path' => '/srv/spora/plugins/x'],
-    ]);
+    ]]);
     $factory = new FakeProcessFactory([
         'composer show --installed --direct --format=json' => new InMemoryProcess([], '', $json),
     ]);
