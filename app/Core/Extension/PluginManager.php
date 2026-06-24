@@ -39,6 +39,15 @@ final class PluginManager
     public const TIMEOUT_SECONDS = 120;
 
     /**
+     * Composer flags we pass to every invocation. Centralized so a
+     * future change (e.g. dropping --no-progress) only needs to happen
+     * here, and so SONAR's "duplicate literal" check stays quiet.
+     */
+    private const FLAG_NO_INTERACTION      = '--no-interaction';
+    private const FLAG_NO_PROGRESS         = '--no-progress';
+    private const FLAG_OPTIMIZE_AUTOLOADER = '--optimize-autoloader';
+
+    /**
      * @param Closure(array<int, string>, string): object $processFactory
      *        Returns a process-like object exposing run(), getExitCode(),
      *        getOutput(), getErrorOutput(), and isSuccessful(). Production
@@ -78,8 +87,8 @@ final class PluginManager
         $argv = $this->composerArgv([
             'remove',
             $package,
-            '--no-interaction',
-            '--no-progress',
+            self::FLAG_NO_INTERACTION,
+            self::FLAG_NO_PROGRESS,
         ]);
 
         $output = $this->runProcess($argv);
@@ -101,9 +110,9 @@ final class PluginManager
         }
         $argv = $this->composerArgv([
             ...$args,
-            '--no-interaction',
-            '--no-progress',
-            '--optimize-autoloader',
+            self::FLAG_NO_INTERACTION,
+            self::FLAG_NO_PROGRESS,
+            self::FLAG_OPTIMIZE_AUTOLOADER,
         ]);
 
         $output = $this->runProcess($argv);
@@ -175,9 +184,9 @@ final class PluginManager
         $argv = $this->composerArgv([
             'require',
             $spec,
-            '--no-interaction',
-            '--no-progress',
-            '--optimize-autoloader',
+            self::FLAG_NO_INTERACTION,
+            self::FLAG_NO_PROGRESS,
+            self::FLAG_OPTIMIZE_AUTOLOADER,
         ]);
 
         $output = $this->runProcess($argv);
@@ -217,9 +226,9 @@ final class PluginManager
         $output = $this->runProcess($this->composerArgv([
             'require',
             $req->package . ':*@dev',
-            '--no-interaction',
-            '--no-progress',
-            '--optimize-autoloader',
+            self::FLAG_NO_INTERACTION,
+            self::FLAG_NO_PROGRESS,
+            self::FLAG_OPTIMIZE_AUTOLOADER,
         ]));
 
         return new PluginInstallResult(
