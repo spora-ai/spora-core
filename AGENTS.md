@@ -57,6 +57,13 @@
 ### CI
 GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Jobs: `php-lint` (PHPStan), `php-test` (Pest), `frontend-lint` (ESLint + tsc), `frontend-test` (Vitest), `build-docker`, `push-ghcr`.
 
+### SonarQube (MCP)
+- Project key `spora-ai_Spora` (see `sonar-project.properties`).
+- PRs / feature branches: pass the **SonarQube PR key** via `pullRequest` — find it via `list_pull_requests`; **never** pass a git branch name.
+- Long-lived branches: pass via `branch`.
+- Default branch: omit both to query `main`.
+- Useful tools: `search_sonar_issues_in_projects`, `get_project_quality_gate_status`, `show_rule`.
+
 > **Architecture deep-dive:** The Orchestrator loop, tick phases, worker modes, and plugin system are documented in [docs/01_architecture.md](docs/01_architecture.md) and [docs/11_agent_loop_async.md](docs/11_agent_loop_async.md).
 
 ### Testing

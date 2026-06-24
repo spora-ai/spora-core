@@ -48,6 +48,7 @@ Before sending the plan to the user, review it from:
 - No hardcoded values (use env variables)
 - Specific docs updated (e.g. `docs/04_api.md` for endpoints, `docs/06_tools.md` for tools)
 - **SonarQube quality gate** — new code introduces no new bugs, vulnerabilities, code smells, or duplications. `new_coverage` for the PR must not regress.
+- **SonarQube MCP pre-flight** — call `mcp__sonarqube__get_project_quality_gate_status` (projectKey `spora-ai_Spora`, `pullRequest=<key>`) before declaring the plan shippable; fix any CRITICAL/MAJOR issues `mcp__sonarqube__search_sonar_issues_in_projects` returns for files in scope.
 - **PR flow** — change goes through a feature branch + PR. Never direct to `main`; bypassing the PR flow breaks the `new_coverage` per-PR signal.
 
 ## 7. Code Documentation Standards
