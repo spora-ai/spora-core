@@ -1,9 +1,9 @@
 {
-    "name": "spora/core",
+    "name": "spora-ai/spora-core",
     "description": "The WordPress of AI Agents — a portable, zero-configuration agent orchestration platform.",
     "type": "library",
     "license": "MIT",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "require": {
         "php": "^8.4.1",
         "ext-curl": "*",
