@@ -14,7 +14,7 @@ function makePluginUpdateTester(FakeProcessFactory $factory): CommandTester
 {
     $manager = new PluginManager(
         new NullLogger(),
-        \Closure::fromCallable($factory),
+        Closure::fromCallable($factory),
         '/srv/spora',
     );
 

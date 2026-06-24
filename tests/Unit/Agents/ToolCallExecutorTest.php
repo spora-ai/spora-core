@@ -6,7 +6,6 @@ use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\ToolCallDisposition;
 use Spora\Agents\ToolCallExecutor;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;

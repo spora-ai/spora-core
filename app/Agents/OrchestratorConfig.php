@@ -6,12 +6,12 @@ namespace Spora\Agents;
 
 use Psr\Log\LoggerInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
+use Spora\Plugins\PluginLoader;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigService;
-use Spora\Plugins\PluginLoader;
 
 /**
  * Bundles the optional LLM-plumbing collaborators that the Orchestrator

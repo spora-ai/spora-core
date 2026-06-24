@@ -11,7 +11,6 @@ use Spora\Agents\Exceptions\ToolNotEnabledException;
 use Spora\Agents\Exceptions\ToolNotRegisteredException;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
