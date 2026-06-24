@@ -19,8 +19,7 @@ Execute the following commands in the terminal. Wait for each command to finish 
 3. **Frontend Linting**: `cd frontend && npm run lint`
 4. **Frontend Tests**: `cd frontend && npm run test`
 5. **Frontend Build**: `cd frontend && npm run build`
-6. **SonarQube gate (MCP)**: `mcp__sonarqube__get_project_quality_gate_status` with `projectKey=spora-ai_Spora`, `pullRequest=<key>` (find the key via `list_pull_requests` — never pass a git branch name). If not OK, stop.
-7. **SonarQube issues (MCP)**: `mcp__sonarqube__search_sonar_issues_in_projects` filtered to the files in your diff. Resolve MAJOR+ before committing.
+6. **SonarQube (MCP)**: query the quality gate + open issues for this PR via the sonarqube MCP. If the gate isn't OK or there are CRITICAL/MAJOR issues in your changed files, stop. Use `list_pull_requests` to find the PR key — never pass a git branch name.
 
 *Note: If any of these checks fail, **stop the process immediately**. Report the errors to the user and suggest fixes. Do not proceed to draft a commit message.*
 
