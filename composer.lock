@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "77cbc446624a9b7694159e473f7376e6",
+    "content-hash": "4036cc1a84f6824f875498fefba2f901",
     "packages": [
         {
             "name": "brick/math",
@@ -2382,11 +2382,11 @@
         },
         {
             "name": "spora/installer",
-            "version": "dev-plugin/spora-core-publish-and-plugin-move",
+            "version": "1.0.0",
             "dist": {
                 "type": "path",
                 "url": "./spora-installer",
-                "reference": "095488bf42d6f29b2799215dc0edb3cc2b565194"
+                "reference": "a632b8b763fc4b2ce9bb7c5a3dd76f86b9f4285c"
             },
             "require": {
                 "composer-plugin-api": "^2.0"
@@ -10859,9 +10859,7 @@
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {
-        "spora/installer": 20
-    },
+    "stability-flags": {},
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {

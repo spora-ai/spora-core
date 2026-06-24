@@ -2,6 +2,7 @@
     "name": "spora/installer",
     "description": "Routes `spora-plugin` package types to the `plugins/{$name}/` directory when installed via Composer. Internal to Spora; not for public consumption.",
     "type": "composer-plugin",
+    "version": "1.0.0",
     "license": "proprietary",
     "require": {
         "composer-plugin-api": "^2.0"
