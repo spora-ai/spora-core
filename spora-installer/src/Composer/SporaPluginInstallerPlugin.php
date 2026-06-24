@@ -23,9 +23,14 @@ final class SporaPluginInstallerPlugin implements PluginInterface
 
     public function deactivate(Composer $composer, IOInterface $io): void
     {
+        // Intentionally empty: the registered installer becomes inert once
+        // the plugin's own classes are no longer autoloadable. Matches the
+        // pattern used by composer/installers.
     }
 
     public function uninstall(Composer $composer, IOInterface $io): void
     {
+        // Intentionally empty: this plugin's own classes are being removed
+        // in the same operation, so the installer registration is moot.
     }
 }
