@@ -7,7 +7,6 @@ use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Core\Database;
 use Spora\Core\SecurityManager;

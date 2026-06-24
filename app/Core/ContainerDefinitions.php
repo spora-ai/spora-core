@@ -19,12 +19,17 @@ use Spora\Apps\AppRegistry;
 use Spora\Apps\MemoriesApp;
 use Spora\Apps\PluginsApp;
 use Spora\Auth\AuthService;
+use Spora\Console\Commands\PluginInstallCommand;
+use Spora\Console\Commands\PluginListCommand;
+use Spora\Console\Commands\PluginUninstallCommand;
+use Spora\Console\Commands\PluginUpdateCommand;
 use Spora\Console\Commands\SeedCommand;
 use Spora\Console\Commands\SetupCommand;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Console\Commands\WorkerRunCommand;
 use Spora\Core\Exceptions\InvalidSecretKeyException;
 use Spora\Core\Exceptions\MissingSecretKeyException;
+use Spora\Core\Extension\PluginManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
@@ -106,6 +111,7 @@ use Spora\Tools\UserInfoTool;
 use Spora\Tools\WeatherApiTool;
 use Spora\Tools\WorldNewsApiTool;
 use Symfony\Component\HttpClient\HttpClient;
+use Symfony\Component\Process\Process;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 final class ContainerDefinitions
@@ -121,6 +127,7 @@ final class ContainerDefinitions
             self::apiTaskControllerDefinitions(),
             self::adminControllerDefinitions(),
             self::toolDefinitions(),
+            self::extensionDefinitions(),
             self::orchestratorDefinitions(),
             self::consoleCommandDefinitions(),
         );
@@ -156,6 +163,12 @@ final class ContainerDefinitions
                     // is always appended; this list holds any additional external paths
                     // (e.g. sibling git checkouts of community plugins).
                     'plugins_paths'       => [],
+
+                    // Path/name of the composer executable PluginManager shells out to.
+                    // 'composer' relies on the host's $PATH (typical for dev/CI). Shared-host
+                    // operators can ship `bin/composer.phar` and override this with an absolute
+                    // path; when the value ends in `.phar` PluginManager prepends PHP_BINARY.
+                    'composer_binary'     => 'composer',
                 ];
 
                 $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: BASE_PATH . '/config.php');
@@ -207,6 +220,7 @@ final class ContainerDefinitions
             );
             return array_values($parts);
         });
+        $apply('SPORA_COMPOSER_BINARY', 'composer_binary', static fn($v) => $v);
 
         $notifEmail = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED');
         if ($notifEmail !== null) {
@@ -734,6 +748,34 @@ final class ContainerDefinitions
         ];
     }
 
+    private static function extensionDefinitions(): array
+    {
+        return [
+            PluginManager::class => static function (ContainerInterface $c): PluginManager {
+                // The production closure builds a Symfony Process with the argv, cwd,
+                // and a 120s timeout. Tests substitute a fake via the same closure
+                // seam in PluginManager's constructor.
+                $processFactory = static function (array $argv, string $cwd): object {
+                    $process = new Process($argv, $cwd);
+                    $process->setTimeout(PluginManager::TIMEOUT_SECONDS);
+                    return $process;
+                };
+
+                $config = $c->get('config');
+                $composerBinary = is_string($config['composer_binary'] ?? null) && $config['composer_binary'] !== ''
+                    ? $config['composer_binary']
+                    : 'composer';
+
+                return new PluginManager(
+                    $c->get(LoggerInterface::class),
+                    $processFactory,
+                    BASE_PATH,
+                    $composerBinary,
+                );
+            },
+        ];
+    }
+
     private static function orchestratorDefinitions(): array
     {
         return [
@@ -863,6 +905,30 @@ final class ContainerDefinitions
                     $c->get(Database::class),
                     $c,
                     $c->get(MercurePublisherInterface::class),
+                );
+            },
+
+            PluginInstallCommand::class => static function (ContainerInterface $c): PluginInstallCommand {
+                return new PluginInstallCommand(
+                    $c->get(PluginManager::class),
+                );
+            },
+
+            PluginUninstallCommand::class => static function (ContainerInterface $c): PluginUninstallCommand {
+                return new PluginUninstallCommand(
+                    $c->get(PluginManager::class),
+                );
+            },
+
+            PluginListCommand::class => static function (ContainerInterface $c): PluginListCommand {
+                return new PluginListCommand(
+                    $c->get(PluginManager::class),
+                );
+            },
+
+            PluginUpdateCommand::class => static function (ContainerInterface $c): PluginUpdateCommand {
+                return new PluginUpdateCommand(
+                    $c->get(PluginManager::class),
                 );
             },
         ];

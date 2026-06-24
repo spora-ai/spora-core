@@ -19,6 +19,7 @@ Execute the following commands in the terminal. Wait for each command to finish 
 3. **Frontend Linting**: `cd frontend && npm run lint`
 4. **Frontend Tests**: `cd frontend && npm run test`
 5. **Frontend Build**: `cd frontend && npm run build`
+6. **SonarQube (MCP)**: query the quality gate + open issues for this PR via the sonarqube MCP. If the gate isn't OK or there are any open issues in your changed files, stop. Use `list_pull_requests` to find the PR key — never pass a git branch name.
 
 *Note: If any of these checks fail, **stop the process immediately**. Report the errors to the user and suggest fixes. Do not proceed to draft a commit message.*
 

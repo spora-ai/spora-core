@@ -49,7 +49,7 @@ function makeContainerForToolFactories(
     ?PluginLoader $pluginLoader = null,
     array $extra = [],
 ): Container {
-    $builder = new DI\ContainerBuilder();
+    $builder = new ContainerBuilder();
     $builder->addDefinitions(array_merge([
         'config' => static fn(): array => [
             'app_env'   => 'testing',
@@ -102,9 +102,9 @@ it('all() returns the merged definitions array', function (): void {
     expect($defs)->toHaveKey('tool_classes');
     expect($defs)->toHaveKey('llm_driver_classes');
     expect($defs)->toHaveKey('app_apps');
-    expect($defs)->toHaveKey(Spora\Core\SecurityManagerInterface::class);
+    expect($defs)->toHaveKey(SecurityManagerInterface::class);
     expect($defs)->toHaveKey(Spora\Core\Database::class);
-    expect($defs)->toHaveKey(Spora\Plugins\PluginLoader::class);
+    expect($defs)->toHaveKey(PluginLoader::class);
     expect($defs)->toHaveKey(Spora\Console\Commands\SetupCommand::class);
     expect($defs)->toHaveKey(Spora\Console\Commands\WorkerRunCommand::class);
     expect($defs)->toHaveKey(Spora\Services\EmailTemplateLoader::class);
@@ -175,7 +175,7 @@ it('coreServiceDefinitions resolves core services', function (): void {
     $c = $kernel->getContainer();
 
     expect($c->get(Spora\Core\Database::class))->toBeInstanceOf(Spora\Core\Database::class);
-    expect($c->get(Spora\Services\ToolConfigService::class))->toBeInstanceOf(Spora\Services\ToolConfigService::class);
+    expect($c->get(ToolConfigService::class))->toBeInstanceOf(ToolConfigService::class);
     expect($c->get(Spora\Services\ImapClientInterface::class))->toBeInstanceOf(Spora\Services\ImapClientInterface::class);
     expect($c->get(Spora\Services\SystemMailer::class))->toBeInstanceOf(Spora\Services\SystemMailer::class);
     expect($c->get(Symfony\Contracts\HttpClient\HttpClientInterface::class))->toBeInstanceOf(Symfony\Contracts\HttpClient\HttpClientInterface::class);
@@ -234,9 +234,9 @@ it('coreServiceDefinitions throws InvalidSecretKeyException for non-base64 secre
     putenv('SPORA_SECRET_KEY=!not-valid-base64!');
 
     $def = callContainerMethod('coreServiceDefinitions');
-    $factory = $def[Spora\Core\SecurityManagerInterface::class];
+    $factory = $def[SecurityManagerInterface::class];
 
-    $builder = new DI\ContainerBuilder();
+    $builder = new ContainerBuilder();
     $builder->addDefinitions(['config' => static fn(): array => ['app_env' => 'testing']]);
     $c = $builder->build();
 
@@ -249,9 +249,9 @@ it('coreServiceDefinitions throws MissingSecretKeyException when no key source i
     putenv('SPORA_KEY_PATH');
 
     $def = callContainerMethod('coreServiceDefinitions');
-    $factory = $def[Spora\Core\SecurityManagerInterface::class];
+    $factory = $def[SecurityManagerInterface::class];
 
-    $builder = new DI\ContainerBuilder();
+    $builder = new ContainerBuilder();
     $builder->addDefinitions(['config' => static fn(): array => ['app_env' => 'testing', 'key_path' => null]]);
     $c = $builder->build();
 
@@ -269,14 +269,14 @@ it('coreServiceDefinitions builds SecurityManager from SPORA_KEY_PATH', function
         putenv('SPORA_SECRET_KEY');
 
         $def = callContainerMethod('coreServiceDefinitions');
-        $factory = $def[Spora\Core\SecurityManagerInterface::class];
+        $factory = $def[SecurityManagerInterface::class];
 
-        $builder = new DI\ContainerBuilder();
+        $builder = new ContainerBuilder();
         $builder->addDefinitions(['config' => static fn(): array => ['app_env' => 'testing']]);
         $c = $builder->build();
 
         $sm = $factory($c);
-        expect($sm)->toBeInstanceOf(Spora\Core\SecurityManager::class);
+        expect($sm)->toBeInstanceOf(SecurityManager::class);
     } finally {
         unlink($tmpKeyFile);
     }
@@ -288,14 +288,14 @@ it('coreServiceDefinitions builds SecurityManager from config key_path', functio
 
     try {
         $def = callContainerMethod('coreServiceDefinitions');
-        $factory = $def[Spora\Core\SecurityManagerInterface::class];
+        $factory = $def[SecurityManagerInterface::class];
 
-        $builder = new DI\ContainerBuilder();
+        $builder = new ContainerBuilder();
         $builder->addDefinitions(['config' => static fn(): array => ['app_env' => 'testing', 'key_path' => $tmpKeyFile]]);
         $c = $builder->build();
 
         $sm = $factory($c);
-        expect($sm)->toBeInstanceOf(Spora\Core\SecurityManager::class);
+        expect($sm)->toBeInstanceOf(SecurityManager::class);
     } finally {
         unlink($tmpKeyFile);
     }
@@ -303,14 +303,14 @@ it('coreServiceDefinitions builds SecurityManager from config key_path', functio
 
 it('coreServiceDefinitions builds Logger with stdout when log_path is stdout', function (): void {
     $def = callContainerMethod('coreServiceDefinitions');
-    $factory = $def[Psr\Log\LoggerInterface::class];
+    $factory = $def[LoggerInterface::class];
 
-    $builder = new DI\ContainerBuilder();
+    $builder = new ContainerBuilder();
     $builder->addDefinitions(['config' => static fn(): array => ['app_env' => 'testing', 'log_path' => 'stdout', 'log_level' => 'warning']]);
     $c = $builder->build();
 
     $logger = $factory($c);
-    expect($logger)->toBeInstanceOf(Psr\Log\LoggerInterface::class);
+    expect($logger)->toBeInstanceOf(LoggerInterface::class);
 });
 
 it('llmDefinitions includes all expected entries', function (): void {
@@ -358,7 +358,7 @@ it('apiResourceControllerDefinitions includes resource controllers', function ()
     expect($def)->toHaveKey(Spora\Http\AgentToolController::class);
     expect($def)->toHaveKey(Spora\Http\AgentOverrideController::class);
     expect($def)->toHaveKey(Spora\Http\HealthController::class);
-    expect($def)->toHaveKey(Spora\Http\ToolController::class);
+    expect($def)->toHaveKey(ToolController::class);
 });
 
 it('apiTaskControllerDefinitions includes task/workflow controllers', function (): void {
@@ -400,7 +400,7 @@ it('orchestratorDefinitions includes orchestrator, plugins, and facades', functi
     expect($def)->toHaveKey(Spora\Services\NotificationService::class);
     expect($def)->toHaveKey(Spora\Services\NotificationServiceInterface::class);
     expect($def)->toHaveKey(Spora\Services\SystemMailer::class);
-    expect($def)->toHaveKey(Spora\Plugins\PluginLoader::class);
+    expect($def)->toHaveKey(PluginLoader::class);
     expect($def)->toHaveKey(Spora\Recipes\RecipeScanner::class);
     expect($def)->toHaveKey(Spora\Services\MemoryServiceInterface::class);
     expect($def)->toHaveKey(Spora\Services\MailTemplateServiceInterface::class);
@@ -522,7 +522,7 @@ it('tool_instances factory returns a class => instance map including plugin tool
         coreToolClasses: [CalculatorTool::class],
         extra: [
             CalculatorTool::class => static fn(): CalculatorTool => new CalculatorTool(),
-            TestTool::class        => static fn(): TestTool        => new TestTool(),
+            TestTool::class        => static fn(): TestTool => new TestTool(),
         ],
     );
 
