@@ -25,6 +25,7 @@ use Spora\Console\Commands\TaskRunCommand;
 use Spora\Console\Commands\WorkerRunCommand;
 use Spora\Core\Exceptions\InvalidSecretKeyException;
 use Spora\Core\Exceptions\MissingSecretKeyException;
+use Spora\Core\Extension\PluginManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
@@ -106,6 +107,7 @@ use Spora\Tools\UserInfoTool;
 use Spora\Tools\WeatherApiTool;
 use Spora\Tools\WorldNewsApiTool;
 use Symfony\Component\HttpClient\HttpClient;
+use Symfony\Component\Process\Process;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 final class ContainerDefinitions
@@ -121,6 +123,7 @@ final class ContainerDefinitions
             self::apiTaskControllerDefinitions(),
             self::adminControllerDefinitions(),
             self::toolDefinitions(),
+            self::extensionDefinitions(),
             self::orchestratorDefinitions(),
             self::consoleCommandDefinitions(),
         );
@@ -729,6 +732,28 @@ final class ContainerDefinitions
                 // → HandoverTool → HandoverService → Orchestrator. Same pattern as SeedCommand.
                 return new HandoverService(
                     static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
+                );
+            },
+        ];
+    }
+
+    private static function extensionDefinitions(): array
+    {
+        return [
+            PluginManager::class => static function (ContainerInterface $c): PluginManager {
+                // The production closure builds a Symfony Process with the argv, cwd,
+                // and a 120s timeout. Tests substitute a fake via the same closure
+                // seam in PluginManager's constructor.
+                $processFactory = static function (array $argv, string $cwd): object {
+                    $process = new Process($argv, $cwd);
+                    $process->setTimeout(PluginManager::TIMEOUT_SECONDS);
+                    return $process;
+                };
+
+                return new PluginManager(
+                    $c->get(LoggerInterface::class),
+                    $processFactory,
+                    BASE_PATH,
                 );
             },
         ];
