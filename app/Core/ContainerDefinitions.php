@@ -163,6 +163,12 @@ final class ContainerDefinitions
                     // is always appended; this list holds any additional external paths
                     // (e.g. sibling git checkouts of community plugins).
                     'plugins_paths'       => [],
+
+                    // Path/name of the composer executable PluginManager shells out to.
+                    // 'composer' relies on the host's $PATH (typical for dev/CI). Shared-host
+                    // operators can ship `bin/composer.phar` and override this with an absolute
+                    // path; when the value ends in `.phar` PluginManager prepends PHP_BINARY.
+                    'composer_binary'     => 'composer',
                 ];
 
                 $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: BASE_PATH . '/config.php');
@@ -214,6 +220,7 @@ final class ContainerDefinitions
             );
             return array_values($parts);
         });
+        $apply('SPORA_COMPOSER_BINARY', 'composer_binary', static fn($v) => $v);
 
         $notifEmail = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED');
         if ($notifEmail !== null) {
@@ -754,10 +761,16 @@ final class ContainerDefinitions
                     return $process;
                 };
 
+                $config = $c->get('config');
+                $composerBinary = is_string($config['composer_binary'] ?? null) && $config['composer_binary'] !== ''
+                    ? $config['composer_binary']
+                    : 'composer';
+
                 return new PluginManager(
                     $c->get(LoggerInterface::class),
                     $processFactory,
                     BASE_PATH,
+                    $composerBinary,
                 );
             },
         ];

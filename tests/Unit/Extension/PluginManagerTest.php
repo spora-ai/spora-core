@@ -13,9 +13,12 @@ use Spora\Core\Extension\PluginManager;
 use Tests\Support\FakeProcessFactory;
 use Tests\Support\InMemoryProcess;
 
-function makeManager(FakeProcessFactory $factory, string $basePath = '/srv/spora'): PluginManager
-{
-    return new PluginManager(new NullLogger(), Closure::fromCallable($factory), $basePath);
+function makeManager(
+    FakeProcessFactory $factory,
+    string $basePath = '/srv/spora',
+    string $composerBinary = 'composer',
+): PluginManager {
+    return new PluginManager(new NullLogger(), Closure::fromCallable($factory), $basePath, $composerBinary);
 }
 
 test('install() from registry builds a composer require argv with the bare package', function (): void {
@@ -220,5 +223,60 @@ test('cwd is always the configured base path, never the cwd of the caller', func
 
     foreach ($factory->calls as $call) {
         expect($call['cwd'])->toBe('/var/www/spora');
+    }
+});
+
+test('composer binary defaults to "composer" on $PATH (no PHP_BINARY prefix)', function (): void {
+    $factory = new FakeProcessFactory();
+    $manager = makeManager($factory);
+
+    $manager->install(new PluginInstallRequest('spora-ai/spora-plugin-x'));
+
+    expect($factory->calls[0]['argv'][0])->toBe('composer');
+    expect($factory->calls[0]['argv'][1])->toBe('require');
+});
+
+test('a custom composer binary path is used verbatim (e.g. /usr/local/bin/composer)', function (): void {
+    $factory = new FakeProcessFactory();
+    $manager = makeManager($factory, composerBinary: '/usr/local/bin/composer');
+
+    $manager->install(new PluginInstallRequest('spora-ai/spora-plugin-x'));
+
+    expect($factory->calls[0]['argv'][0])->toBe('/usr/local/bin/composer');
+    expect($factory->calls[0]['argv'][1])->toBe('require');
+});
+
+test('a .phar composer binary is prefixed with PHP_BINARY so it executes via the runtime', function (): void {
+    $factory = new FakeProcessFactory();
+    $manager = makeManager($factory, composerBinary: '/srv/spora/bin/composer.phar');
+
+    $manager->install(new PluginInstallRequest('spora-ai/spora-plugin-x'));
+
+    expect($factory->calls[0]['argv'])->toBe([
+        PHP_BINARY,
+        '/srv/spora/bin/composer.phar',
+        'require',
+        'spora-ai/spora-plugin-x',
+        '--no-interaction',
+        '--no-progress',
+        '--optimize-autoloader',
+    ]);
+});
+
+test('phar prefix applies to every operation (install, uninstall, update, list)', function (): void {
+    $factory = new FakeProcessFactory([
+        'composer.phar show --installed --direct --format=json' => new InMemoryProcess([], '', '[]'),
+    ]);
+    $manager = makeManager($factory, composerBinary: 'composer.phar');
+
+    $manager->install(new PluginInstallRequest('spora-ai/spora-plugin-x'));
+    $manager->uninstall('spora-ai/spora-plugin-x');
+    $manager->update('spora-ai/spora-plugin-x');
+    $manager->list();
+
+    expect($factory->calls)->toHaveCount(4);
+    foreach ($factory->calls as $call) {
+        expect($call['argv'][0])->toBe(PHP_BINARY);
+        expect($call['argv'][1])->toBe('composer.phar');
     }
 });

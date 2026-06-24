@@ -26,6 +26,13 @@ use Spora\Core\Extension\Exceptions\PluginInstallFailedException;
  * The $processFactory is a closure seam (not a constructor-injected
  * ProcessInterface) so tests can substitute a fake that records argv + cwd
  * and returns canned output, without depending on symfony/process internals.
+ *
+ * Composer binary path: $composerBinary defaults to `'composer'` (resolved
+ * via the host's $PATH). Operators on shared hosts without a system-wide
+ * Composer can ship `composer.phar` alongside the application and configure
+ * `composer_binary` in `config.php` (or `SPORA_COMPOSER_BINARY` env) to
+ * the absolute phar path. When the configured value ends in `.phar`,
+ * PluginManager prepends PHP_BINARY so the PHP runtime executes it.
  */
 final class PluginManager
 {
@@ -37,11 +44,17 @@ final class PluginManager
      *        getOutput(), getErrorOutput(), and isSuccessful(). Production
      *        wires this to a Symfony Process constructed with the given argv,
      *        cwd, and a 120s timeout.
+     * @param string $composerBinary Absolute path to the composer executable
+     *        (a phar) OR the name of an executable on $PATH (e.g. 'composer').
+     *        The default ('composer') matches systems where the host has
+     *        Composer installed globally — typical for dev/CI but NOT for
+     *        shared-host deployments.
      */
     public function __construct(
         private readonly LoggerInterface $logger,
         private readonly Closure $processFactory,
         private readonly string $basePath,
+        private readonly string $composerBinary = 'composer',
     ) {}
 
     public function install(PluginInstallRequest $req): PluginInstallResult
@@ -62,13 +75,12 @@ final class PluginManager
 
     public function uninstall(string $package): PluginInstallResult
     {
-        $argv = [
-            'composer',
+        $argv = $this->composerArgv([
             'remove',
             $package,
             '--no-interaction',
             '--no-progress',
-        ];
+        ]);
 
         $output = $this->runProcess($argv);
 
@@ -83,11 +95,12 @@ final class PluginManager
 
     public function update(?string $package = null): PluginInstallResult
     {
-        $argv = ['composer', 'update'];
+        $args = ['update'];
         if ($package !== null) {
-            $argv[] = $package;
+            $args[] = $package;
         }
-        $argv = array_merge($argv, [
+        $argv = $this->composerArgv([
+            ...$args,
             '--no-interaction',
             '--no-progress',
             '--optimize-autoloader',
@@ -116,7 +129,7 @@ final class PluginManager
      */
     public function list(): array
     {
-        $argv = ['composer', 'show', '--installed', '--direct', '--format=json'];
+        $argv = $this->composerArgv(['show', '--installed', '--direct', '--format=json']);
 
         try {
             $output = $this->runProcess($argv);
@@ -152,14 +165,13 @@ final class PluginManager
             ? $req->package . ':' . $req->version
             : $req->package;
 
-        $argv = [
-            'composer',
+        $argv = $this->composerArgv([
             'require',
             $spec,
             '--no-interaction',
             '--no-progress',
             '--optimize-autoloader',
-        ];
+        ]);
 
         $output = $this->runProcess($argv);
 
@@ -187,22 +199,20 @@ final class PluginManager
         // package with `*@dev` so the path repo's local version satisfies the
         // constraint. The slug must be unique per repo; using the package's
         // last segment matches Composer's own convention for path repos.
-        $this->runProcess([
-            'composer',
+        $this->runProcess($this->composerArgv([
             'config',
             "repositories.{$slug}",
             'path',
             $path,
-        ]);
+        ]));
 
-        $output = $this->runProcess([
-            'composer',
+        $output = $this->runProcess($this->composerArgv([
             'require',
             $req->package . ':*@dev',
             '--no-interaction',
             '--no-progress',
             '--optimize-autoloader',
-        ]);
+        ]));
 
         return new PluginInstallResult(
             package: $req->package,
@@ -216,6 +226,24 @@ final class PluginManager
     {
         $pos = strrpos($package, '/');
         return $pos === false ? $package : substr($package, $pos + 1);
+    }
+
+    /**
+     * Build the argv prefix that invokes Composer. When the configured binary
+     * is a phar (`.phar` extension), the PHP runtime is prepended so the phar
+     * executes via the same PHP binary as the parent process (PHP_BINARY is
+     * always defined in CLI). For a bare executable name (e.g. `'composer'`),
+     * the prefix is just the binary — relying on the host's $PATH.
+     *
+     * @param array<int, string> $args  Composer subcommand + arguments, without the binary prefix.
+     * @return array<int, string>
+     */
+    private function composerArgv(array $args): array
+    {
+        if (str_ends_with($this->composerBinary, '.phar')) {
+            return [PHP_BINARY, $this->composerBinary, ...$args];
+        }
+        return [$this->composerBinary, ...$args];
     }
 
     /**
