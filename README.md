@@ -33,7 +33,7 @@ It is designed to be:
 
 - **Zero-config** — works out of the box with sensible defaults (SQLite for small-scale use, MySQL/MariaDB for team or production use)
 - **Portable** — runs on any PHP 8.4+ environment, from a laptop to a shared cPanel/FTP host or as a Docker Container
-- **Extensible** — a WordPress-like plugin system lets you add tools, drivers, and agent behaviors
+- **Extensible** — a documented plugin system lets you add tools, drivers, and agent behaviors
 - **Bring your own model** — connect any OpenAI- or Anthropic-compatible endpoint, from hosted APIs to local Ollama and LM Studio, and switch providers at any time
 - **Yours to keep** — every tool call, prompt, and result stays on your infrastructure; no vendor lock-in, no third-party telemetry
 
