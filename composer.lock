@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "4036cc1a84f6824f875498fefba2f901",
+    "content-hash": "a5f04abf1dfe965b06810493a999f4f5",
     "packages": [
         {
             "name": "brick/math",
@@ -2381,15 +2381,27 @@
             "time": "2021-10-29T13:26:27+00:00"
         },
         {
-            "name": "spora/installer",
-            "version": "1.0.0",
+            "name": "spora-ai/installer",
+            "version": "1.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/spora-ai/spora-installer.git",
+                "reference": "090519688037ae7e6ce28ffd7d7e5c45ad042a0b"
+            },
             "dist": {
-                "type": "path",
-                "url": "./spora-installer",
-                "reference": "a632b8b763fc4b2ce9bb7c5a3dd76f86b9f4285c"
+                "type": "zip",
+                "url": "https://api.github.com/repos/spora-ai/spora-installer/zipball/090519688037ae7e6ce28ffd7d7e5c45ad042a0b",
+                "reference": "090519688037ae7e6ce28ffd7d7e5c45ad042a0b",
+                "shasum": ""
             },
             "require": {
-                "composer-plugin-api": "^2.0"
+                "composer-plugin-api": "^2.0",
+                "php": "^8.4.1"
+            },
+            "require-dev": {
+                "composer/composer": "^2.7",
+                "mockery/mockery": "^1.6",
+                "pestphp/pest": "^4.0"
             },
             "type": "composer-plugin",
             "extra": {
@@ -2400,14 +2412,16 @@
                     "Spora\\Composer\\": "src/Composer/"
                 }
             },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "proprietary"
+                "MIT"
             ],
-            "description": "Routes `spora-plugin` package types to the `plugins/{$name}/` directory when installed via Composer. Internal to Spora; not for public consumption.",
-            "transport-options": {
-                "symlink": true,
-                "relative": true
-            }
+            "description": "Routes `spora-plugin` package types to `plugins/{$name}/` when installed via Composer. Companion to spora-ai/spora-core.",
+            "support": {
+                "issues": "https://github.com/spora-ai/spora-installer/issues",
+                "source": "https://github.com/spora-ai/spora-installer/tree/v1.1.0"
+            },
+            "time": "2026-06-25T08:05:29+00:00"
         },
         {
             "name": "symfony/clock",
