@@ -24,9 +24,6 @@ RUN docker-php-ext-install pdo_mysql
 
 # Install PHP deps (composer image has ext-zip baked in)
 COPY composer.json composer.lock* ./
-# Spora ships spora/installer as a path-repository Composer package; the
-# deps-builder stage needs the source tree to resolve it.
-COPY spora-installer/ ./spora-installer/
 RUN composer install --no-dev --optimize-autoloader --no-interaction
 
 # ── Stage 3: Production runtime ──────────────────────────────────────────────

@@ -1,9 +1,9 @@
 {
     "name": "spora-ai/spora-core",
-    "description": "The WordPress of AI Agents — a portable, zero-configuration agent orchestration platform.",
+    "description": "A portable, zero-configuration AI agent orchestration platform that runs on any shared host (cPanel/FTP) without system dependencies beyond PHP 8.4+.",
     "type": "library",
     "license": "MIT",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "require": {
         "php": "^8.4.1",
         "ext-curl": "*",
@@ -30,7 +30,7 @@
         "nikic/fast-route": "^1.3",
         "php-di/php-di": "^7.1",
         "psr/log": "^3.0",
-        "spora/installer": "^1.0",
+        "spora-ai/installer": "^1.1",
         "symfony/console": "^8.0",
         "symfony/http-client": "^8.0",
         "symfony/http-foundation": "^8.0",
@@ -98,17 +98,9 @@
         "sort-packages": true,
         "allow-plugins": {
             "pestphp/pest-plugin": true,
-            "spora/installer": true
+            "spora-ai/installer": true
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true,
-    "repositories": [{
-        "name": "spora/installer",
-        "type": "path",
-        "url": "./spora-installer",
-        "options": {
-            "symlink": true
-        }
-    }]
+    "prefer-stable": true
 }

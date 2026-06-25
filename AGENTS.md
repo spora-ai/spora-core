@@ -1,6 +1,6 @@
 # Spora
 
-**What:** "WordPress of AI Agents" — portable, zero-config agent orchestration in PHP 8.4+. Runs on any shared host (cPanel/FTP).
+**What:** A portable, zero-configuration AI agent orchestration platform that runs on any shared host (cPanel/FTP) without system dependencies beyond PHP 8.4+.
 
 **Stack:** Spora is standalone PHP — NOT Laravel. It borrows components from the Laravel and Symfony ecosystems for portability and reliability, but runs no full stack framework.
 
