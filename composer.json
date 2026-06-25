@@ -81,17 +81,7 @@
         "test:coverage": "./vendor/bin/pest --coverage --coverage-html=coverage",
         "test:coverage:clover": "./vendor/bin/pest --coverage-clover=coverage.xml",
         "analyse": "./vendor/bin/phpstan analyse --memory-limit=2G",
-        "format": "./vendor/bin/php-cs-fixer fix",
-        "frontend:dev": [
-            "Composer\\Config::disableProcessTimeout",
-            "cd frontend && npm run dev"
-        ],
-        "frontend:build": [
-            "Composer\\Config::disableProcessTimeout",
-            "cd frontend && npm run build"
-        ],
-        "frontend:test": "cd frontend && npm test",
-        "frontend:preview": "cd frontend && npm run preview"
+        "format": "./vendor/bin/php-cs-fixer fix"
     },
     "config": {
         "optimize-autoloader": true,
