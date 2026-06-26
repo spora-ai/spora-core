@@ -3,7 +3,6 @@
     "description": "A portable, zero-configuration AI agent orchestration platform that runs on any shared host (cPanel/FTP) without system dependencies beyond PHP 8.4+.",
     "type": "library",
     "license": "MIT",
-    "version": "0.3.0",
     "require": {
         "php": "^8.4.1",
         "ext-curl": "*",
