@@ -3,7 +3,19 @@
 
 declare(strict_types=1);
 
-define('BASE_PATH', dirname(__DIR__));
+// Determine BASE_PATH from the autoloader's location rather than our own __DIR__.
+// When invoked via an operator stub (require vendor/spora-ai/spora-core/bin/spora from
+// outside), __DIR__ would resolve to vendor/spora-ai/spora-core/bin/ — wrong. The
+// autoloader, however, lives at vendor/composer/ClassLoader.php and is always loaded
+// by the operator stub before requiring us, so its file path tells us where the
+// consumer's project root actually is.
+$autoloaderFile = null;
+try {
+    $autoloaderFile = (new ReflectionClass(\Composer\Autoload\ClassLoader::class))->getFileName();
+} catch (\ReflectionException $e) {
+    // Autoloader not loaded yet — fall back to the script-relative path.
+}
+define('BASE_PATH', $autoloaderFile !== null ? dirname($autoloaderFile, 3) : dirname(__DIR__));
 
 $autoloadPath = BASE_PATH . '/vendor/autoload.php';
 if (file_exists($autoloadPath)) {
