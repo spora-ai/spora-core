@@ -16,7 +16,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
-final class Kernel
+final class Kernel implements KernelInterface
 {
     /**
      * The application kernel that bootstraps the entire Spora framework.
