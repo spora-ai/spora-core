@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use Spora\Core\HttpKernel;
-use Spora\Core\Kernel;
 use Spora\Core\KernelInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -24,7 +23,7 @@ afterEach(function () {
 });
 
 test('handle() returns the response from the injected Kernel', function (): void {
-    $request  = Request::createFromGlobals();
+    $request  = Request::create('/');
     $response = new Response('hello', 200);
 
     $kernel = Mockery::mock(KernelInterface::class);
@@ -38,7 +37,7 @@ test('handle() returns the response from the injected Kernel', function (): void
 });
 
 test('handle() returns a JSON 500 when the inner Kernel throws', function (): void {
-    $request = Request::createFromGlobals();
+    $request = Request::create('/');
 
     // Redirect error_log to /dev/null while exercising the catch arm.
     $previousLog = ini_set('error_log', '/dev/null');
@@ -66,11 +65,3 @@ test('handle() returns a JSON 500 when the inner Kernel throws', function (): vo
             ],
         ]);
 });
-
-test('handle() returns a JSON 500 when Kernel construction throws', function (): void {
-    // Real boot failures cannot be triggered in-process without booting
-    // the real framework. The catch arm is fully exercised by the test
-    // above (which throws a Throwable from inside the try block) since
-    // both the construction-throws and dispatch-throws paths share the
-    // same catch arm in HttpKernel::handle().
-})->skip('Real boot failures cannot be triggered in-process without booting the real framework; the catch arm is covered by the previous test.');

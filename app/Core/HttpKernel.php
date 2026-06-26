@@ -25,10 +25,13 @@ use Throwable;
  *
  * Tests pass a pre-built KernelInterface implementation to avoid the
  * real framework boot. In production, the constructor creates a fresh
- * Kernel on first handle().
+ * Kernel on first handle(). Caches the Kernel across handle() calls to
+ * avoid per-request boot overhead.
  */
 final class HttpKernel
 {
+    private ?KernelInterface $cachedKernel = null;
+
     public function __construct(
         private readonly ?KernelInterface $kernel = null,
     ) {
@@ -37,20 +40,21 @@ final class HttpKernel
     public function handle(Request $request): Response
     {
         try {
-            $kernel = $this->kernel ?? new Kernel();
-            return $kernel->handle($request);
+            if ($this->cachedKernel === null) {
+                $this->cachedKernel = $this->kernel ?? new Kernel();
+            }
+            return $this->cachedKernel->handle($request);
         } catch (Throwable $e) {
+            // Log only class + message to avoid leaking filesystem paths in production.
             error_log(sprintf(
-                '[Spora] Boot failure — %s: %s in %s:%d',
+                '[Spora] Boot failure — %s: %s',
                 get_class($e),
                 $e->getMessage(),
-                $e->getFile(),
-                $e->getLine(),
             ));
 
             return new JsonResponse(
                 ['error' => ['code' => 'INTERNAL_SERVER_ERROR', 'message' => 'Application failed to start.']],
-                500,
+                Response::HTTP_INTERNAL_SERVER_ERROR,
             );
         }
     }
