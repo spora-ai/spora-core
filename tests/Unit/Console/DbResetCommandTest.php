@@ -19,7 +19,7 @@ use Symfony\Component\Console\Tester\CommandTester;
  * stamp save/restore the file around the test run.
  */
 
-define('SCHEMA_STAMP_PATH', BASE_PATH . '/storage/.schema_stamp');
+define('SCHEMA_STAMP_PATH', sys_get_temp_dir() . '/spora-test-storage/.schema_stamp');
 
 function makeTempSqliteFile(string $contents = ''): string
 {
