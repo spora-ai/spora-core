@@ -3,6 +3,7 @@
     "description": "A portable, zero-configuration AI agent orchestration platform that runs on any shared host (cPanel/FTP) without system dependencies beyond PHP 8.4+.",
     "type": "library",
     "license": "MIT",
+    "bin": ["bin/spora"],
     "require": {
         "php": "^8.4.1",
         "ext-curl": "*",
@@ -70,10 +71,6 @@
             "@php bin/spora db:seed"
         ],
         "reset": "@php bin/spora db:reset",
-        "dev": [
-            "Composer\\Config::disableProcessTimeout",
-            "bin/dev"
-        ],
         "install:db": "@php bin/spora spora:install",
         "seed": "@php bin/spora db:seed",
         "test": "./vendor/bin/pest",
