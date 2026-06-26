@@ -25,14 +25,24 @@ final class BasePathResolver
      */
     public static function resolve(): ?string
     {
+        return self::resolveFromClass(ClassLoader::class);
+    }
+
+    /**
+     * Returns the directory 3 levels above the given class's source file,
+     * or null if reflection on the class fails. Exposed so the catch branch
+     * can be exercised by tests with a non-existent class name.
+     */
+    public static function resolveFromClass(string $class): ?string
+    {
         try {
-            $file = (new ReflectionClass(ClassLoader::class))->getFileName();
+            $file = (new ReflectionClass($class))->getFileName();
         } catch (ReflectionException) {
             return null;
         }
 
         // vendor/composer/ClassLoader.php → up 3 levels → consumer root.
 
-        return dirname($file, 3);
+        return dirname((string) $file, 3);
     }
 }

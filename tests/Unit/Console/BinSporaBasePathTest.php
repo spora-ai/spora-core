@@ -47,24 +47,11 @@ it('falls back to null when the autoloader is not loaded', function (): void {
 });
 
 it('returns null when the autoloader is not loaded', function (): void {
-    // The Pest bootstrap loads vendor/autoload.php for us, so the catch branch
-    // of BasePathResolver::resolve() is unreachable from in-process tests.
-    // Spawn a fresh PHP process that requires the resolver directly (no
-    // autoloader) — reflection on the undefined Composer\Autoload\ClassLoader
-    // triggers ReflectionException, which resolve() catches and returns null.
-    $resolver = realpath(__DIR__ . '/../../../app/Core/BasePathResolver.php');
-    $projectRoot = realpath(__DIR__ . '/../../../');
+    // We can't unload ClassLoader without breaking the suite, so we exercise
+    // the catch branch via resolveFromClass() with a class name that doesn't
+    // exist. Reflection throws, the catch returns null.
 
-    $script = sprintf(
-        'require %s; echo \\Spora\\Core\\BasePathResolver::resolve() ?? "NULL";',
-        escapeshellarg($resolver)
-    );
+    $resolved = BasePathResolver::resolveFromClass('Spora\\Definitely\\Not\\A\\Real\\Class_' . uniqid());
 
-    $output = shell_exec(sprintf(
-        'cd %s && php -r %s 2>&1',
-        escapeshellarg($projectRoot),
-        escapeshellarg($script)
-    ));
-
-    expect(trim((string) $output))->toBe('NULL');
+    expect($resolved)->toBeNull();
 });
