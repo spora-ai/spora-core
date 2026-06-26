@@ -5,12 +5,15 @@ declare(strict_types=1);
 
 define('BASE_PATH', dirname(__DIR__));
 
-if (file_exists(BASE_PATH . '/vendor/autoload.php')) {
-    require BASE_PATH . '/vendor/autoload.php';
-} else {
+$autoloadPath = BASE_PATH . '/vendor/autoload.php';
+if (file_exists($autoloadPath)) {
+    require $autoloadPath;
+} elseif (!class_exists(\Composer\Autoload\ClassLoader::class)) {
     echo "Dependencies missing. Run `composer install`.\n";
     exit(1);
 }
+// else: an outer script (e.g. spora-ai/spora's bin/spora stub) has already
+// loaded the consumer's autoloader. Proceed without re-requiring.
 
 use Spora\Core\Kernel;
 use Symfony\Component\Console\Application;
