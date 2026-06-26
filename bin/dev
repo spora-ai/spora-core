@@ -1,22 +1,19 @@
 #!/usr/bin/env bash
 #
-# Start the full local development stack:
-#   - PHP built-in server on localhost:8080
-#   - Vite dev server on localhost:5173 (proxies /api to PHP)
+# Start the PHP built-in server for spora-core development.
+# Serves the public/ directory (the framework's web root).
 #
-# Usage: bin/dev   or   composer dev
+# For full-stack dev, start the frontend separately:
+#   cd ../spora-frontend
+#   npm run dev   # Vite on :5173, proxies /api to PHP
 #
-# Ports can be configured via .env in the project root:
-#   PHP_PORT=8081
-#   VITE_PORT=5174
+# Ports via env (PHP_PORT defaults to 8080).
 
 set -euo pipefail
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
 PHP_LOG="$BASE_DIR/storage/php.log"
 
-# Load .env file if it exists
 if [[ -f "$BASE_DIR/.env" ]]; then
     set -a
     source "$BASE_DIR/.env"
@@ -24,19 +21,8 @@ if [[ -f "$BASE_DIR/.env" ]]; then
 fi
 
 PHP_PORT="${PHP_PORT:-8080}"
-VITE_PORT="${VITE_PORT:-5173}"
 
 mkdir -p "$BASE_DIR/storage"
 
 echo "Starting PHP server on http://localhost:${PHP_PORT} (log: storage/php.log)"
-php -S "localhost:${PHP_PORT}" -t "$BASE_DIR/public" > "$PHP_LOG" 2>&1 &
-PHP_PID=$!
-
-cleanup() {
-    kill "$PHP_PID" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
-
-echo "Starting Vite dev server on http://localhost:${VITE_PORT}"
-cd "$BASE_DIR/frontend" && VITE_PORT="$VITE_PORT" npx vite --port "$VITE_PORT"
-
+exec php -S "localhost:${PHP_PORT}" -t "$BASE_DIR/public" > "$PHP_LOG" 2>&1
