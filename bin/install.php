@@ -29,7 +29,7 @@ if ($basePath === null) {
 
 $autoload = $basePath . '/vendor/autoload.php';
 if (file_exists($autoload)) {
-    require $autoload;
+    require_once $autoload;
 }
 
 if (! class_exists(Spora\Core\SecretKeyInstaller::class)) {

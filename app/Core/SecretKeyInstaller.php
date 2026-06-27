@@ -70,12 +70,9 @@ final class SecretKeyInstaller
         $replacement = "'key_path' => " . var_export($keyPath, true) . ',';
 
         $updated = preg_replace($pattern, $replacement, $source, 1);
-        if ($updated === null || $updated === $source) {
-            return false;
-        }
 
-        file_put_contents($configPath, $updated);
-
-        return true;
+        return $updated !== null
+            && $updated !== $source
+            && file_put_contents($configPath, $updated) !== false;
     }
 }
