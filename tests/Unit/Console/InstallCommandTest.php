@@ -77,9 +77,15 @@ it('fails with a helpful hint when public/dist/index.html is missing', function 
         $tester->execute([]);
 
         expect($tester->getStatusCode())->toBe(Command::FAILURE);
-        expect($tester->getDisplay())
+        $display = $tester->getDisplay();
+        expect($display)
             ->toContain('public/dist/index.html is missing')
             ->toContain('composer install spora-ai/spora-frontend');
+        // The dist guard must fire BEFORE the migration step, so the
+        // operator never sees a misleading "Schema is up to date" line
+        // when the UI is broken.
+        expect($display)->not->toContain('Schema is up to date');
+        expect($display)->not->toContain('Running Spora database migrations');
     } finally {
         if (is_file($indexFile . '.bak')) {
             rename($indexFile . '.bak', $indexFile);
