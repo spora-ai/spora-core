@@ -15,7 +15,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Throwable;
 
 #[AsCommand(
-    name: 'spora:plugin:update',
+    name: 'plugin:update',
     description: 'Update a Spora plugin (or all plugins) via composer update.',
 )]
 final class PluginUpdateCommand extends Command

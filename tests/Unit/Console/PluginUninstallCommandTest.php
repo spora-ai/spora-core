@@ -19,7 +19,7 @@ function makePluginUninstallTester(FakeProcessFactory $factory): CommandTester
     );
 
     $command = new PluginUninstallCommand($manager);
-    $command->setName('spora:plugin:uninstall');
+    $command->setName('plugin:uninstall');
 
     return new CommandTester($command);
 }

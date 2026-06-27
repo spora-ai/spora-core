@@ -15,7 +15,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Throwable;
 
 #[AsCommand(
-    name: 'spora:plugin:uninstall',
+    name: 'plugin:uninstall',
     description: 'Uninstall a Spora plugin via composer remove.',
 )]
 final class PluginUninstallCommand extends Command
