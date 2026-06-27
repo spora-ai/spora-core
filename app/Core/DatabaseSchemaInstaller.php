@@ -34,17 +34,22 @@ use Spora\Plugins\PluginLoader;
  */
 final class DatabaseSchemaInstaller
 {
-    private const CORE_MIGRATIONS_PATH = BASE_PATH . '/database/migrations';
+    private readonly string $coreMigrationsPath;
 
     /**
-     * @param  ?PluginLoader  $pluginLoader  Null during early boot or in tests without plugins.
-     * @param  ?string        $stampPath     Path to the filesystem stamp file. Null disables caching
-     *                                       (used for :memory: SQLite in tests).
+     * @param  ?PluginLoader  $pluginLoader       Null during early boot or in tests without plugins.
+     * @param  ?string        $stampPath          Stamp file path. Null disables caching (e.g. :memory: SQLite in tests).
+     * @param  ?string        $coreMigrationsPath Override the core migrations path. Null uses the
+     *                                           project-local → framework-vendor fallback chain.
+     *                                           Mainly for tests.
      */
     public function __construct(
-        private readonly ?PluginLoader $pluginLoader = null,
-        private readonly ?string       $stampPath    = null,
-    ) {}
+        private readonly ?PluginLoader $pluginLoader      = null,
+        private readonly ?string       $stampPath         = null,
+        ?string                        $coreMigrationsPath = null,
+    ) {
+        $this->coreMigrationsPath = $coreMigrationsPath ?? $this->resolveCoreMigrationsPath();
+    }
 
     public function install(): void
     {
@@ -59,7 +64,7 @@ final class DatabaseSchemaInstaller
 
         $migrator = $this->buildMigrator();
 
-        $this->runComponent($migrator, 'core', $this->getCoreMigrationVersion(), self::CORE_MIGRATIONS_PATH);
+        $this->runComponent($migrator, 'core', $this->getCoreMigrationVersion(), $this->coreMigrationsPath);
 
         if ($this->pluginLoader !== null) {
             foreach ($this->pluginLoader->pluginMigrationPaths() as $slug => $entry) {
@@ -101,7 +106,7 @@ final class DatabaseSchemaInstaller
      */
     private function getCoreMigrationVersion(): int
     {
-        $files = glob(self::CORE_MIGRATIONS_PATH . '/[0-9]*.php') ?: [];
+        $files = glob($this->coreMigrationsPath . '/[0-9]*.php') ?: [];
 
         $max = 0;
         foreach ($files as $file) {
@@ -115,6 +120,47 @@ final class DatabaseSchemaInstaller
         }
 
         return $max;
+    }
+
+    /**
+     * Resolve the on-disk path to the framework's core migrations.
+     *
+     * Fallback chain:
+     *   1. Project-local override at <BASE_PATH>/database/migrations/
+     *   2. Framework-bundled at <BASE_PATH>/vendor/spora-ai/spora-core/database/migrations/
+     *
+     * Throws rather than silently no-op'ing — a silent skip would leave the DB empty
+     * and be masked by the O(1) stamp hot path.
+     */
+    private function resolveCoreMigrationsPath(): string
+    {
+        $projectLocal = BASE_PATH . '/database/migrations';
+        if (is_dir($projectLocal) && $this->hasVersionedMigrations($projectLocal)) {
+            return $projectLocal;
+        }
+
+        $framework = BASE_PATH . '/vendor/spora-ai/spora-core/database/migrations';
+        if (is_dir($framework) && $this->hasVersionedMigrations($framework)) {
+            return $framework;
+        }
+
+        throw new SchemaInstallFailedException(
+            'No core migrations found. Expected either ' . $projectLocal
+            . ' (project-local override, must contain at least one versioned *.php migration)'
+            . ' or ' . $framework
+            . ' (framework-bundled, shipped with the spora-ai/spora-core Composer package).'
+            . ' Did `composer install` run successfully?',
+        );
+    }
+
+    /**
+     * True when $path contains at least one migration matching the leading-digits
+     * versioning contract (`[0-9]*.php`). Guards against selecting an empty dir
+     * which would yield version 0 and silent skip via the stamp hot path.
+     */
+    private function hasVersionedMigrations(string $path): bool
+    {
+        return count(glob($path . '/[0-9]*.php') ?: []) > 0;
     }
 
     private function isStampCurrent(string $hash): bool
