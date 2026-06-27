@@ -32,9 +32,8 @@ function makeInstallDb(): Database
 }
 
 it('boots the DB, runs migrations, and reports success', function (): void {
-    // InstallCommand (C4.4) verifies public/dist/index.html exists after
-    // migrations. CI runners check out a fresh tree without the rendered
-    // UI, so seed a placeholder file for the duration of this test.
+    // Fresh CI trees have no rendered UI; seed a placeholder so the C4.4
+    // dist guard inside InstallCommand doesn't fail this happy-path test.
     $distDir  = BASE_PATH . '/public/dist';
     $indexFile = $distDir . '/index.html';
     $created = false;
@@ -77,9 +76,14 @@ it('fails with a helpful hint when public/dist/index.html is missing', function 
         $tester->execute([]);
 
         expect($tester->getStatusCode())->toBe(Command::FAILURE);
-        expect($tester->getDisplay())
+        $display = $tester->getDisplay();
+        expect($display)
             ->toContain('public/dist/index.html is missing')
             ->toContain('composer install spora-ai/spora-frontend');
+        // Guard must fire before migrations — otherwise the operator sees
+        // a misleading "Schema is up to date" alongside the broken UI.
+        expect($display)->not->toContain('Schema is up to date');
+        expect($display)->not->toContain('Running Spora database migrations');
     } finally {
         if (is_file($indexFile . '.bak')) {
             rename($indexFile . '.bak', $indexFile);

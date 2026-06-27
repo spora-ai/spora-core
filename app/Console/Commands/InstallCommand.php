@@ -28,14 +28,11 @@ final class InstallCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $output->writeln('<info>Running Spora database migrations...</info>');
-
         try {
-            $this->database->bootDatabaseConnectionOnly();
-            $this->installer->install();
-
-            $output->writeln('<info>Done. Schema is up to date.</info>');
-
+            // Pre-migration check — installer routes spora-ai/spora-frontend
+            // to public/dist/, so a broken install (404, wrong tag, partial
+            // download) leaves the file missing. Fail loudly here rather than
+            // letting the operator chase an empty DB or a 200-with-no-UI.
             $frontendIndex = BASE_PATH . '/public/dist/index.html';
             if (! is_file($frontendIndex)) {
                 throw new FrontendAssetsMissingException(
@@ -43,6 +40,13 @@ final class InstallCommand extends Command
                     . 'Run: composer install spora-ai/spora-frontend'
                 );
             }
+
+            $output->writeln('<info>Running Spora database migrations...</info>');
+
+            $this->database->bootDatabaseConnectionOnly();
+            $this->installer->install();
+
+            $output->writeln('<info>Done. Schema is up to date.</info>');
 
             return Command::SUCCESS;
         } catch (Throwable $e) {
