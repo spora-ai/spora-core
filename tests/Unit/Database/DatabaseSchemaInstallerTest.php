@@ -256,18 +256,16 @@ test('Database::boot() installs the full schema end-to-end', function (): void {
 
 // Core migrations path resolution
 //
-// These tests use the public constructor override (`$coreMigrationsPath`) which
-// exercises the same code path as the implicit resolver — but lets us inject
-// temp dirs without monkey-patching BASE_PATH (a constant).
+// The constructor override ($coreMigrationsPath) exercises the same code path as
+// the implicit resolver while letting us inject temp dirs without monkey-patching
+// the BASE_PATH constant.
 
 test('constructor override is used verbatim when provided', function (): void {
     Database::resetBootState();
     $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
     $db->bootDatabaseConnectionOnly();
 
-    // Even on a fresh DB with no tables, an explicit override must be honoured.
-    // We point it at an empty dir and assert install() still runs against it
-    // (version 0 → no migrations to run, no upsert past 0).
+    // Point at an empty dir: version 0 → no migrations to run, no upsert past 0.
     $tmp = sys_get_temp_dir() . '/spora-mig-override-' . uniqid();
     mkdir($tmp, 0755, true);
 
@@ -275,7 +273,6 @@ test('constructor override is used verbatim when provided', function (): void {
         $installer = new DatabaseSchemaInstaller(null, null, $tmp);
         $installer->install();
 
-        // No core migration file → version 0 → no row written for core.
         $row = Capsule::table('schema_versions')->where('component', 'core')->first();
         expect($row)->toBeNull();
     } finally {
@@ -285,33 +282,28 @@ test('constructor override is used verbatim when provided', function (): void {
 })->afterEach(fn() => Database::resetBootState());
 
 test('resolver prefers the explicit override over the implicit fallback chain', function (): void {
-    // Sanity check: the override path short-circuits resolveCoreMigrationsPath().
-    // We verify by passing a non-existent dir and expecting NO RuntimeException
-    // — the override should be used regardless of whether either fallback exists.
     Database::resetBootState();
     $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
     $db->bootDatabaseConnectionOnly();
 
+    // Override short-circuits resolveCoreMigrationsPath(): a non-existent path
+    // must NOT trigger the resolver's SchemaInstallFailedException.
     $fakeDir = sys_get_temp_dir() . '/spora-mig-does-not-exist-' . uniqid();
     expect(is_dir($fakeDir))->toBeFalse();
 
     $installer = new DatabaseSchemaInstaller(null, null, $fakeDir);
-    // Constructor must not throw even though neither fallback dir is used.
     expect($installer)->toBeInstanceOf(DatabaseSchemaInstaller::class);
 
     Database::resetBootState();
 })->afterEach(fn() => Database::resetBootState());
 
 test('implicit resolver finds migrations when BASE_PATH/database/migrations exists', function (): void {
-    // This test relies on the real project layout — it should pass in the
-    // current spora-core checkout (BASE_PATH/database/migrations is populated).
-    // The companion test below simulates the spora-ai/spora operator layout
-    // (migrations under vendor/spora-ai/spora-core/database/migrations).
+    // Pass null to opt into the implicit resolver; relies on the real
+    // spora-core checkout (BASE_PATH/database/migrations is populated).
     Database::resetBootState();
     $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
     $db->bootDatabaseConnectionOnly();
 
-    // Pass null to opt into the implicit resolver.
     $installer = new DatabaseSchemaInstaller(null, null, null);
     $installer->install();
 
@@ -320,11 +312,11 @@ test('implicit resolver finds migrations when BASE_PATH/database/migrations exis
     Database::resetBootState();
 })->afterEach(fn() => Database::resetBootState());
 
-test('resolveCoreMigrationsPath() throws a clear RuntimeException when no migrations exist', function (): void {
-    // We exercise the resolver indirectly: rename the project-local dir
-    // temporarily and point BASE_PATH at a fake root so the framework vendor
-    // path also doesn't resolve. The constructor must throw with a clear
-    // message instead of silently no-op'ing. The dir is always restored.
+test('resolveCoreMigrationsPath() throws a clear exception when no migrations exist', function (): void {
+    // We hide the project-local dir temporarily; BASE_PATH can't be changed (it's
+    // a constant), so we rely on the framework vendor path also being absent in
+    // this checkout (vendor/spora-ai/spora-core/ isn't populated for spora-core
+    // itself). The dir is always restored.
     Database::resetBootState();
 
     $local = BASE_PATH . '/database/migrations';
@@ -335,13 +327,9 @@ test('resolveCoreMigrationsPath() throws a clear RuntimeException when no migrat
         return;
     }
 
-    rename($local, $hide);
+    expect(rename($local, $hide))->toBeTrue();
 
     try {
-        // Without an explicit override, the resolver inspects BASE_PATH.
-        // We can't change BASE_PATH (it's a constant), so we rely on the
-        // fact that the framework vendor path doesn't exist in this checkout
-        // (vendor/spora-ai/spora-core/ is not populated for spora-core itself).
         $framework = BASE_PATH . '/vendor/spora-ai/spora-core/database/migrations';
         if (is_dir($framework)) {
             // Framework path is present — the resolver would succeed. Skip.
@@ -350,9 +338,13 @@ test('resolveCoreMigrationsPath() throws a clear RuntimeException when no migrat
         }
 
         expect(fn() => new DatabaseSchemaInstaller(null, null, null))
-            ->toThrow(RuntimeException::class, 'No core migrations found');
+            ->toThrow(\Spora\Core\Exceptions\SchemaInstallFailedException::class, 'No core migrations found');
     } finally {
-        rename($hide, $local);
+        // Re-rename could fail if an earlier rename already failed; ignore to
+        // keep teardown best-effort.
+        if (is_dir($hide)) {
+            rename($hide, $local);
+        }
         Database::resetBootState();
     }
 })->afterEach(fn() => Database::resetBootState());

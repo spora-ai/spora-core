@@ -9,7 +9,6 @@ use Illuminate\Database\Migrations\DatabaseMigrationRepository;
 use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Filesystem\Filesystem;
-use RuntimeException;
 use Spora\Core\Exceptions\SchemaInstallFailedException;
 use Spora\Plugins\PluginLoader;
 
@@ -38,11 +37,10 @@ final class DatabaseSchemaInstaller
     private readonly string $coreMigrationsPath;
 
     /**
-     * @param  ?PluginLoader  $pluginLoader      Null during early boot or in tests without plugins.
-     * @param  ?string        $stampPath         Path to the filesystem stamp file. Null disables caching
-     *                                           (used for :memory: SQLite in tests).
+     * @param  ?PluginLoader  $pluginLoader       Null during early boot or in tests without plugins.
+     * @param  ?string        $stampPath          Stamp file path. Null disables caching (e.g. :memory: SQLite in tests).
      * @param  ?string        $coreMigrationsPath Override the core migrations path. Null uses the
-     *                                           fallback chain (project-local then framework vendor).
+     *                                           project-local → framework-vendor fallback chain.
      *                                           Mainly for tests.
      */
     public function __construct(
@@ -129,33 +127,40 @@ final class DatabaseSchemaInstaller
      *
      * Fallback chain:
      *   1. Project-local override at <BASE_PATH>/database/migrations/
-     *      — operators can ship custom framework migrations this way.
-     *   2. Framework-bundled migrations at
-     *      <BASE_PATH>/vendor/spora-ai/spora-core/database/migrations/
-     *      — always present after `composer install` against spora-ai/spora-core.
-     *   3. If neither exists, throw a clear RuntimeException instead of silently
-     *      no-op'ing (which would leave the DB empty and mask the misconfiguration
-     *      behind the O(1) stamp hot path).
+     *   2. Framework-bundled at <BASE_PATH>/vendor/spora-ai/spora-core/database/migrations/
+     *
+     * Throws rather than silently no-op'ing — a silent skip would leave the DB empty
+     * and be masked by the O(1) stamp hot path.
      */
     private function resolveCoreMigrationsPath(): string
     {
         $projectLocal = BASE_PATH . '/database/migrations';
-        if (is_dir($projectLocal) && count(glob($projectLocal . '/*.php') ?: []) > 0) {
+        if (is_dir($projectLocal) && $this->hasVersionedMigrations($projectLocal)) {
             return $projectLocal;
         }
 
         $framework = BASE_PATH . '/vendor/spora-ai/spora-core/database/migrations';
-        if (is_dir($framework)) {
+        if (is_dir($framework) && $this->hasVersionedMigrations($framework)) {
             return $framework;
         }
 
-        throw new RuntimeException(
+        throw new SchemaInstallFailedException(
             'No core migrations found. Expected either ' . $projectLocal
-            . ' (project-local override, must contain at least one *.php migration)'
+            . ' (project-local override, must contain at least one versioned *.php migration)'
             . ' or ' . $framework
             . ' (framework-bundled, shipped with the spora-ai/spora-core Composer package).'
             . ' Did `composer install` run successfully?',
         );
+    }
+
+    /**
+     * True when $path contains at least one migration matching the leading-digits
+     * versioning contract (`[0-9]*.php`). Guards against selecting an empty dir
+     * which would yield version 0 and silent skip via the stamp hot path.
+     */
+    private function hasVersionedMigrations(string $path): bool
+    {
+        return count(glob($path . '/[0-9]*.php') ?: []) > 0;
     }
 
     private function isStampCurrent(string $hash): bool
