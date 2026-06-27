@@ -29,12 +29,10 @@ final class InstallCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         try {
-            // Guard against a broken frontend install before touching the DB.
-            // spora-ai/installer routes the spora-ai/spora-frontend package to
-            // public/dist/, but if the install was broken (e.g. dist.url 404,
-            // wrong tag, or a partial download) the file won't exist. Surface
-            // this early so the operator knows to fix the installation rather
-            // than debugging an empty database or a 200-with-no-UI response.
+            // Pre-migration check — installer routes spora-ai/spora-frontend
+            // to public/dist/, so a broken install (404, wrong tag, partial
+            // download) leaves the file missing. Fail loudly here rather than
+            // letting the operator chase an empty DB or a 200-with-no-UI.
             $frontendIndex = BASE_PATH . '/public/dist/index.html';
             if (! is_file($frontendIndex)) {
                 throw new FrontendAssetsMissingException(
