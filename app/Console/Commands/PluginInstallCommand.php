@@ -16,7 +16,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Throwable;
 
 #[AsCommand(
-    name: 'spora:plugin:install',
+    name: 'plugin:install',
     description: 'Install a Spora plugin from Packagist or a local path repository.',
 )]
 final class PluginInstallCommand extends Command

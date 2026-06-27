@@ -19,7 +19,7 @@ function makePluginListTester(FakeProcessFactory $factory): CommandTester
     );
 
     $command = new PluginListCommand($manager);
-    $command->setName('spora:plugin:list');
+    $command->setName('plugin:list');
 
     return new CommandTester($command);
 }

@@ -351,3 +351,61 @@ needed.
    [Database migrations](#database-migrations)).
 3. Optional: drop the plugin's database tables if you don't need the
    historical data.
+
+---
+
+## Plugin CLI commands
+
+Spora ships four `plugin:*` commands in `bin/spora` for Composer-driven
+plugin lifecycle management. All four delegate to `Spora\Core\Extension\PluginManager`,
+which wraps `composer require`, `composer remove`, `composer update`, and
+`composer show --installed` respectively.
+
+| Command | Purpose |
+|---------|---------|
+| `plugin:install <package>` | Install a plugin from Packagist (or a local path repo) |
+| `plugin:uninstall <package>` | Run `composer remove` for the given package |
+| `plugin:update [<package>]` | Update one plugin, or all of them when no argument is given |
+| `plugin:list` | List installed `spora-plugin` packages with version and path |
+
+### `plugin:install`
+
+```bash
+php bin/spora plugin:install vendor/package
+php bin/spora plugin:install vendor/package --version=^1.0
+php bin/spora plugin:install vendor/package --path=/abs/path/to/checkout
+```
+
+`--version` and `--path` are mutually exclusive. `--path` registers the local
+checkout as a Composer path repository — useful during plugin development
+against a sibling git clone.
+
+### `plugin:list`
+
+```bash
+php bin/spora plugin:list
+```
+
+Renders a table of every installed Composer package whose type is
+`spora-plugin`, with name, version, and filesystem path. Non-plugin
+dependencies (e.g. `symfony/console`) are filtered out.
+
+### `plugin:update`
+
+```bash
+php bin/spora plugin:update                       # update every installed plugin
+php bin/spora plugin:update vendor/package        # update a single plugin
+```
+
+Runs `composer update` against the plugin subset (or the entire project when
+no package is given).
+
+### `plugin:uninstall`
+
+```bash
+php bin/spora plugin:uninstall vendor/package
+```
+
+Runs `composer remove`. Note that this does **not** roll back plugin-specific
+database migrations — see [Uninstalling a plugin](#uninstalling-a-plugin)
+above.
