@@ -8,6 +8,7 @@ use Closure;
 use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSeeder;
+use Spora\Core\SecretKeyInstaller;
 use Spora\Services\EmailTemplateLoader;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -41,6 +42,15 @@ final class SeedCommand extends Command
         $output->writeln('<info>Starting database seeder...</info>');
 
         try {
+            // Bootstrap the secret key if missing (idempotent — no-op if present).
+            $keyPath = BASE_PATH . '/storage/secret.key';
+            if (SecretKeyInstaller::ensureKeyFile($keyPath)) {
+                $output->writeln(sprintf('<info>Generated new secret key at %s</info>', $keyPath));
+            }
+            if (SecretKeyInstaller::updateConfigKeyPath(BASE_PATH . '/config.php', $keyPath)) {
+                $output->writeln('<info>Updated config.php key_path</info>');
+            }
+
             // Boot the DB connection before constructing anything that touches Eloquent or Auth.
             $this->database->bootDatabaseConnectionOnly();
 
