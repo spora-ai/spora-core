@@ -90,7 +90,7 @@ final class SecurityManager implements SecurityManagerInterface
     {
         if (!file_exists($path) || !is_readable($path)) {
             throw new DecryptKeyMissingException(
-                "Secret key file not found or not readable at: {$path}. Run install.php.",
+                "Secret key file not found or not readable at: {$path}. Run bin/install.php.",
             );
         }
 

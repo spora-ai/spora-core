@@ -260,7 +260,7 @@ final class ContainerDefinitions
 
                 throw new MissingSecretKeyException(
                     'No secret key configured. Set SPORA_SECRET_KEY (base64 32 bytes), ' .
-                    'SPORA_KEY_PATH, or run install.php to generate storage/secret.key.',
+                    'SPORA_KEY_PATH, or run bin/install.php to generate storage/secret.key.',
                 );
             },
 

@@ -23,7 +23,7 @@ This is the **canonical reference** for every `SPORA_*` environment variable Spo
 | Variable | Default | Config key | Description |
 |---|---|---|---|
 | `SPORA_SECRET_KEY` | — | — | **Base64-encoded 32-byte master key** for libsodium secretbox encryption of tool credentials. Required for production. Generate: `php -r "echo base64_encode(random_bytes(32));"`. Never commit. Losing it means losing access to encrypted settings. |
-| `SPORA_KEY_PATH` | `storage/secret.key` (written by installer) | `key_path` | Alternative: path to a 32-byte binary key file. Overrides the default install path. |
+| `SPORA_KEY_PATH` | `storage/secret.key` (written by `bin/install.php`) | `key_path` | Alternative: path to a 32-byte binary key file. Overrides the default install path. Run `php bin/install.php` once on a fresh checkout to bootstrap `storage/secret.key`. |
 
 See [15_security.md](15_security.md) for the full key-resolution chain and algorithm.
 

@@ -10,7 +10,9 @@ The master key is resolved, in order, from:
 
 1. `SPORA_SECRET_KEY` env var — must be **base64-encoded** 32 raw bytes
 2. `SPORA_KEY_PATH` env var — path to a 32-byte binary key file
-3. `config['key_path']` (set by `install.php`, which writes to `storage/secret.key`)
+3. `config['key_path']` (set by `bin/install.php`, which writes to `storage/secret.key`)
+
+On a fresh checkout, run `php bin/install.php` once before `spora:install` to generate `storage/secret.key` and point `config['key_path']` at it. The helper is idempotent — re-running it leaves a valid existing key untouched.
 
 See `app/Core/container.php:149-183` for the resolution chain.
 
