@@ -16,6 +16,7 @@
     <source>
         <include>
             <directory>app</directory>
+            <directory>bin</directory>
         </include>
     </source>
 

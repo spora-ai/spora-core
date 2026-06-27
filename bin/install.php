@@ -42,16 +42,16 @@ $configPath = $basePath . '/config.php';
 
 $generated = Spora\Core\SecretKeyInstaller::ensureKeyFile($keyPath);
 if ($generated) {
-    fwrite(STDOUT, "Generated new secret key at {$keyPath} (chmod 0600)\n");
+    echo "Generated new secret key at {$keyPath} (chmod 0600)\n";
 } else {
-    fwrite(STDOUT, "Secret key already present at {$keyPath}\n");
+    echo "Secret key already present at {$keyPath}\n";
 }
 
 $updated = Spora\Core\SecretKeyInstaller::updateConfigKeyPath($configPath, $keyPath);
 if ($updated) {
-    fwrite(STDOUT, "Updated {$configPath} with key_path => {$keyPath}\n");
+    echo "Updated {$configPath} with key_path => {$keyPath}\n";
 } else {
-    fwrite(STDOUT, "Leaving config['key_path'] unchanged.\n");
+    echo "Leaving config['key_path'] unchanged.\n";
 }
 
-fwrite(STDOUT, "\nDone. Next step: php bin/spora spora:install\n");
+echo "\nDone. Next step: php bin/spora spora:install\n";

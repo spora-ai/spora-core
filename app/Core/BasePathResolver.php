@@ -22,9 +22,22 @@ final class BasePathResolver
     /**
      * Returns the consumer's project root (e.g. /home/operator/myapp),
      * or null if the Composer autoloader isn't loaded yet.
+     *
+     * The Spora\Core\SPORA_BASE_PATH env var, if set, takes precedence over
+     * reflection. Useful for containerised deployments (Docker entrypoint
+     * scripts) where the operator wants to pin BASE_PATH explicitly, and
+     * for tests that exercise the install/bootstrap scripts in-process.
      */
     public static function resolve(): ?string
     {
+        $envOverride = getenv('SPORA_BASE_PATH');
+        if (is_string($envOverride) && $envOverride !== '') {
+            $resolved = realpath(rtrim($envOverride, '/'));
+            if (is_string($resolved)) {
+                return $resolved;
+            }
+        }
+
         return self::resolveFromClass(ClassLoader::class);
     }
 
