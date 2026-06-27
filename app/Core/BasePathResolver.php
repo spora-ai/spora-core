@@ -41,8 +41,15 @@ final class BasePathResolver
             return null;
         }
 
+        // getFileName() returns false for PHP-internal classes and eval'd code.
+        // Without this guard, dirname((string) false, 3) === '.' (current dir),
+        // which would silently point resolve() at the wrong root.
+        if ($file === false) {
+            return null;
+        }
+
         // vendor/composer/ClassLoader.php → up 3 levels → consumer root.
 
-        return dirname((string) $file, 3);
+        return dirname($file, 3);
     }
 }

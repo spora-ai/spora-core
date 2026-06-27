@@ -19,33 +19,6 @@ it('resolves BASE_PATH from the autoloader location when loaded', function (): v
     expect(is_dir($resolved . '/vendor'))->toBeTrue();
 });
 
-it('falls back to null when the autoloader is not loaded', function (): void {
-    // We can't unload ClassLoader without breaking the suite, so we exercise
-    // the same code path BasePathResolver::resolve() uses — reflect on an
-    // absent class — and assert it raises ReflectionException. resolve()
-    // catches that exception and returns null.
-
-    $threw = false;
-    try {
-        new ReflectionClass('Spora\\Definitely\\Not\\A\\Real\\Class_' . uniqid());
-    } catch (ReflectionException) {
-        $threw = true;
-    }
-
-    expect($threw)->toBeTrue();
-
-    // Pin the documented return type so the bin/spora fallback
-    // (`if ($basePath === null)`) stays valid: must be `?string`.
-    $returnType = (new ReflectionMethod(BasePathResolver::class, 'resolve'))->getReturnType();
-
-    expect($returnType)->toBeInstanceOf(ReflectionNamedType::class);
-
-    /** @var ReflectionNamedType $returnType */
-    $returnType = $returnType;
-    expect($returnType->getName())->toBe('string');
-    expect($returnType->allowsNull())->toBeTrue();
-});
-
 it('returns null when the autoloader is not loaded', function (): void {
     // We can't unload ClassLoader without breaking the suite, so we exercise
     // the catch branch via resolveFromClass() with a class name that doesn't
