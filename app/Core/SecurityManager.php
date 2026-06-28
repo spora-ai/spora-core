@@ -90,7 +90,7 @@ final class SecurityManager implements SecurityManagerInterface
     {
         if (!file_exists($path) || !is_readable($path)) {
             throw new DecryptKeyMissingException(
-                "Secret key file not found or not readable at: {$path}. Run `php bin/spora spora:install` or `db:seed` to bootstrap storage/secret.key.",
+                "Secret key file not found or not readable at: {$path}. Run `php bin/spora spora:install` or `php bin/spora db:seed` to bootstrap storage/secret.key.",
             );
         }
 

@@ -26,12 +26,16 @@ final class SecretKeyInstaller
     /**
      * Write a 32-byte secret key to $keyPath. Returns true if a new key was
      * generated, false if the existing key was kept.
+     *
+     * Returns false if any of mkdir / file_put_contents / chmod fail so
+     * callers can surface a real error instead of silently booting with a
+     * missing key file.
      */
     public static function ensureKeyFile(string $keyPath): bool
     {
         $storageDir = dirname($keyPath);
-        if (! is_dir($storageDir)) {
-            mkdir($storageDir, 0o755, true);
+        if (! is_dir($storageDir) && ! mkdir($storageDir, 0o755, true) && ! is_dir($storageDir)) {
+            return false;
         }
 
         if (is_file($keyPath)) {
@@ -41,8 +45,15 @@ final class SecretKeyInstaller
             }
         }
 
-        file_put_contents($keyPath, random_bytes(self::KEY_BYTES));
-        chmod($keyPath, 0o600);
+        $key = random_bytes(self::KEY_BYTES);
+        if (file_put_contents($keyPath, $key) === false) {
+            return false;
+        }
+
+        if (! chmod($keyPath, 0o600)) {
+            @unlink($keyPath);
+            return false;
+        }
 
         return true;
     }
@@ -66,8 +77,8 @@ final class SecretKeyInstaller
             return false;
         }
 
-        $pattern     = "/'key_path'\s*=>\s*null\s*,/";
-        $replacement = "'key_path' => " . var_export($keyPath, true) . ',';
+        $pattern     = "/'key_path'\s*=>\s*null\s*,?\s*\n/";
+        $replacement = "'key_path' => " . var_export($keyPath, true) . ",\n";
 
         $updated = preg_replace($pattern, $replacement, $source, 1);
 

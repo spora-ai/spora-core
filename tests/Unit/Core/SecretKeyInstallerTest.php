@@ -142,3 +142,34 @@ it('is idempotent across repeated invocations', function (): void {
     expect($second)->toBeFalse();
     expect(filesize($keyPath))->toBe(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
 });
+
+it('returns false when the parent directory cannot be created', function (): void {
+    // /proc/0/secret.key — /proc/0 doesn't exist and cannot be created
+    $badPath = '/proc/0/spora-' . uniqid('', true) . '/secret.key';
+
+    $generated = SecretKeyInstaller::ensureKeyFile($badPath);
+
+    expect($generated)->toBeFalse();
+    expect(file_exists($badPath))->toBeFalse();
+});
+
+it('updates config.php key_path when key_path is the last entry without trailing comma', function (): void {
+    $root = makeTempProjectRoot('nocomma');
+    $configPath = $root . '/config.php';
+    file_put_contents($configPath, <<<'PHP'
+<?php
+
+return [
+    'db_driver' => 'sqlite',
+    'key_path' => null
+];
+PHP);
+
+    $keyPath = $root . '/storage/secret.key';
+    $updated = SecretKeyInstaller::updateConfigKeyPath($configPath, $keyPath);
+
+    expect($updated)->toBeTrue();
+    $contents = file_get_contents($configPath);
+    expect($contents)->toContain("'key_path' => " . var_export($keyPath, true));
+    expect($contents)->toContain("'db_driver' => 'sqlite'"); // untouched
+});

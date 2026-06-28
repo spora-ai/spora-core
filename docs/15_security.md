@@ -12,7 +12,7 @@ The master key is resolved, in order, from:
 2. `SPORA_KEY_PATH` env var — path to a 32-byte binary key file
 3. `config['key_path']` (auto-set to `storage/secret.key` on first run of `spora:install` or `db:seed`)
 
-See `app/Core/container.php:149-183` for the resolution chain.
+See `app/Core/ContainerDefinitions.php:237-267` for the resolution chain.
 
 **Protect this key** — anyone with access can decrypt all stored credentials.
 

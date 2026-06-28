@@ -260,7 +260,7 @@ final class ContainerDefinitions
 
                 throw new MissingSecretKeyException(
                     'No secret key configured. Set SPORA_SECRET_KEY (base64 32 bytes) or SPORA_KEY_PATH. '
-                    . 'The key is auto-generated on first run of `php bin/spora spora:install` or `db:seed` '
+                    . 'The key is auto-generated on first run of `php bin/spora spora:install` or `php bin/spora db:seed` '
                     . '— see storage/secret.key.',
                 );
             },
