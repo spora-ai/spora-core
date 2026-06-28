@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Console\Commands;
 
-use Spora\Console\Exceptions\FrontendAssetsMissingException;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -35,14 +34,6 @@ final class InstallCommand extends Command
             $this->installer->install();
 
             $output->writeln('<info>Done. Schema is up to date.</info>');
-
-            $frontendIndex = BASE_PATH . '/public/dist/index.html';
-            if (! is_file($frontendIndex)) {
-                throw new FrontendAssetsMissingException(
-                    'public/dist/index.html is missing.' . PHP_EOL
-                    . 'Run: composer install spora-ai/spora-frontend'
-                );
-            }
 
             return Command::SUCCESS;
         } catch (Throwable $e) {
