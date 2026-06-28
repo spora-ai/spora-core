@@ -6,6 +6,7 @@ namespace Spora\Console\Commands;
 
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
+use Spora\Core\SecretKeyInstaller;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -30,6 +31,15 @@ final class InstallCommand extends Command
         $output->writeln('<info>Running Spora database migrations...</info>');
 
         try {
+            // Bootstrap the secret key if missing (idempotent — no-op if present).
+            $keyPath = BASE_PATH . '/storage/secret.key';
+            if (SecretKeyInstaller::ensureKeyFile($keyPath)) {
+                $output->writeln(sprintf('<info>Generated new secret key at %s</info>', $keyPath));
+            }
+            if (SecretKeyInstaller::updateConfigKeyPath(BASE_PATH . '/config.php', $keyPath)) {
+                $output->writeln('<info>Updated config.php key_path</info>');
+            }
+
             $this->database->bootDatabaseConnectionOnly();
             $this->installer->install();
 

@@ -39,3 +39,53 @@ it('runs the seeder and reports success', function (): void {
     // Side effect: the admin user was created.
     expect(Spora\Models\User::where('email', 'admin@spora.local')->exists())->toBeTrue();
 });
+
+it('generates a fresh storage/secret.key on first run', function (): void {
+    Spora\Models\User::where('email', 'admin@spora.local')->delete();
+
+    $keyFile = BASE_PATH . '/storage/secret.key';
+    $existed = is_file($keyFile);
+    $existedContents = $existed ? file_get_contents($keyFile) : null;
+
+    if ($existed) {
+        @unlink($keyFile);
+    }
+
+    try {
+        $tester = makeSeedTester();
+        $tester->execute([]);
+
+        expect($tester->getStatusCode())->toBe(Command::SUCCESS);
+        expect($tester->getDisplay())->toContain('Generated new secret key at');
+        expect(is_file($keyFile))->toBeTrue();
+        expect(filesize($keyFile))->toBe(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    } finally {
+        if (! $existed) {
+            @unlink($keyFile);
+        } else {
+            file_put_contents($keyFile, $existedContents);
+        }
+    }
+});
+
+it('reports failure and exits with FAILURE when the factory throws', function (): void {
+    // The factory closure is invoked AFTER bootDatabaseConnectionOnly, so a
+    // throwing factory exercises the catch (Throwable) branch in SeedCommand::execute.
+    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db->bootDatabaseConnectionOnly();
+
+    $templateLoader = new EmailTemplateLoader();
+    $authFactory = static function (): AuthService {
+        throw new RuntimeException('factory exploded');
+    };
+
+    $command = new SeedCommand($db, $authFactory, $templateLoader);
+    $command->setName('db:seed');
+    $tester = new CommandTester($command);
+
+    $tester->execute([]);
+
+    expect($tester->getStatusCode())->toBe(Command::FAILURE);
+    expect($tester->getDisplay())
+        ->toContain('Seeding failed: factory exploded');
+});

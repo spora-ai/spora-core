@@ -168,6 +168,11 @@ uses()
         $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
         $db->boot();
         Illuminate\Database\Capsule\Manager::connection()->beginTransaction();
+        // Reset BASE_PATH/config.php to a known state. InstallCommand's bootstrap
+        // writes storage/secret.key + sets key_path; tests that resolve the
+        // SecurityManager from the real config (e.g. CoreExceptionsTest) must
+        // see key_path = null to exercise the MissingSecretKeyException path.
+        resetSporaConfigKeyPath();
     })
     ->afterEach(function () {
         if (Illuminate\Database\Capsule\Manager::connection()->transactionLevel() > 0) {
@@ -176,3 +181,32 @@ uses()
         Spora\Core\Database::resetBootState();
     })
     ->in(__DIR__);
+
+/**
+ * Ensure BASE_PATH/config.php has 'key_path' => null so test containers
+ * that resolve SecurityManager from the real file exercise the
+ * MissingSecretKeyException code path. Called via the global beforeEach.
+ */
+function resetSporaConfigKeyPath(): void
+{
+    $configPath = BASE_PATH . '/config.php';
+    if (! is_file($configPath)) {
+        return;
+    }
+
+    $source = file_get_contents($configPath);
+    if ($source === false) {
+        return;
+    }
+
+    $updated = preg_replace(
+        "/('key_path'\s*=>\s*)(?:'[^']*'|[^,]+)(,)/",
+        "\$1null\$2",
+        $source,
+        1,
+    );
+
+    if ($updated !== null && $updated !== $source) {
+        file_put_contents($configPath, $updated);
+    }
+}
