@@ -19,7 +19,7 @@ function makePluginInstallTester(FakeProcessFactory $factory): CommandTester
     );
 
     $command = new PluginInstallCommand($manager);
-    $command->setName('spora:plugin:install');
+    $command->setName('plugin:install');
 
     return new CommandTester($command);
 }

@@ -12,7 +12,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 #[AsCommand(
-    name: 'spora:plugin:list',
+    name: 'plugin:list',
     description: 'List Spora plugins installed via Composer.',
 )]
 final class PluginListCommand extends Command
