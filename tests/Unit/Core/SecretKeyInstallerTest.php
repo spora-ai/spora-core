@@ -173,3 +173,41 @@ PHP);
     expect($contents)->toContain("'key_path' => " . var_export($keyPath, true));
     expect($contents)->toContain("'db_driver' => 'sqlite'"); // untouched
 });
+
+it('returns false when config.php exists but cannot be read', function (): void {
+    $root = makeTempProjectRoot('unreadable');
+    $configPath = $root . '/config.php';
+    file_put_contents($configPath, "<?php\n\nreturn ['key_path' => null];\n");
+    chmod($configPath, 0o000);
+
+    $updated = SecretKeyInstaller::updateConfigKeyPath($configPath, $root . '/storage/secret.key');
+
+    expect($updated)->toBeFalse();
+    // Restore permissions so the afterEach cleanup can remove the directory.
+    chmod($configPath, 0o644);
+});
+
+it('returns false when config.php cannot be written back', function (): void {
+    $root = makeTempProjectRoot('nowrite');
+    $configPath = $root . '/config.php';
+    file_put_contents($configPath, "<?php\n\nreturn ['key_path' => null];\n");
+    // Make the directory read-only to defeat file_put_contents on the config file.
+    chmod($root, 0o555);
+
+    $updated = SecretKeyInstaller::updateConfigKeyPath($configPath, $root . '/storage/secret.key');
+
+    expect($updated)->toBeFalse();
+    // Restore permissions so the afterEach cleanup can remove the directory.
+    chmod($root, 0o755);
+});
+
+it('returns false when ensureKeyFile cannot write the key file', function (): void {
+    // /proc/0 is unwritable on Linux. On macOS /private is similarly protected,
+    // so /private/0/spora/secret.key reliably fails the file_put_contents step.
+    $badPath = '/private/0/spora-' . uniqid('', true) . '/secret.key';
+
+    $generated = SecretKeyInstaller::ensureKeyFile($badPath);
+
+    expect($generated)->toBeFalse();
+    expect(file_exists($badPath))->toBeFalse();
+});

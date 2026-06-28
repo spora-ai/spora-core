@@ -45,8 +45,18 @@ final class SecretKeyInstaller
             }
         }
 
-        $key = random_bytes(self::KEY_BYTES);
-        if (file_put_contents($keyPath, $key) === false) {
+        return self::writeFreshKey($keyPath);
+    }
+
+    /**
+     * Write a freshly generated key to disk and lock it down to 0600.
+     * Returns true on success, false if any step fails (and rolls back
+     * any partially-written file so we never leave a key behind without
+     * the correct permissions).
+     */
+    private static function writeFreshKey(string $keyPath): bool
+    {
+        if (file_put_contents($keyPath, random_bytes(self::KEY_BYTES)) === false) {
             return false;
         }
 
