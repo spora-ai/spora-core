@@ -91,3 +91,4 @@ final class EmailTemplateLoader
         $this->templates[$name] = $data;
     }
 }
+
