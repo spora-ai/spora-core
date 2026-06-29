@@ -35,13 +35,7 @@ final class HttpKernel
     public function __construct(
         private readonly ?KernelInterface $kernel = null,
     ) {
-        // The web entry point must define BASE_PATH before any framework
-        // service is constructed — Database, Kernel, and the container
-        // definitions all read BASE_PATH directly. The CLI's bin/spora
-        // already does this; the web path needs it too. Uses the same
-        // resolver as bin/spora so the consumer's project root is found
-        // whether public/index.php lives at the operator root or behind
-        // a symlink/vhost.
+        // Match the CLI: define BASE_PATH before any framework service boots.
         if (!defined('BASE_PATH')) {
             $basePath = BasePathResolver::resolve()
                 ?? dirname(__DIR__, 5); // vendor/spora-ai/spora-core/app/Core → up 5 = consumer root
