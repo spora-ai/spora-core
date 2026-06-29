@@ -48,29 +48,46 @@ final class EmailTemplateLoader
 
         $this->templates = [];
 
-        // Project overrides win over framework defaults.
         foreach ($this->paths->emailTemplatesPaths() as $dir) {
-            if (!is_dir($dir)) {
-                continue;
-            }
-            $files = glob($dir . '/*.yaml');
-            if ($files === false) {
-                continue;
-            }
-            foreach ($files as $file) {
-                try {
-                    $data = Yaml::parseFile($file);
-                    if (is_array($data) && isset($data['name'])) {
-                        $name = (string) $data['name'];
-                        // Project overrides win: skip if a higher-priority dir already provided this template.
-                        if (!isset($this->templates[$name])) {
-                            $this->templates[$name] = $data;
-                        }
-                    }
-                } catch (ParseException $e) {
-                    throw new EmailTemplateParseException(sprintf('Failed to parse email template "%s": %s', $file, $e->getMessage()), 0, $e);
-                }
+            foreach ($this->yamlFilesIn($dir) as $file) {
+                $this->mergeTemplateFile($file);
             }
         }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function yamlFilesIn(string $dir): array
+    {
+        if (!is_dir($dir)) {
+            return [];
+        }
+
+        $files = glob($dir . '/*.yaml');
+
+        return $files === false ? [] : $files;
+    }
+
+    private function mergeTemplateFile(string $file): void
+    {
+        try {
+            $data = Yaml::parseFile($file);
+        } catch (ParseException $e) {
+            throw new EmailTemplateParseException(sprintf('Failed to parse email template "%s": %s', $file, $e->getMessage()), 0, $e);
+        }
+
+        if (!is_array($data) || !isset($data['name'])) {
+            return;
+        }
+
+        $name = (string) $data['name'];
+
+        // Project overrides win: skip if a higher-priority dir already provided this template.
+        if (isset($this->templates[$name])) {
+            return;
+        }
+
+        $this->templates[$name] = $data;
     }
 }
