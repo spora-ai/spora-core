@@ -3,12 +3,12 @@
 
 declare(strict_types=1);
 
-// BASE_PATH is defined by the consumer's bin/spora stub (or by the
-// dev-mode test bootstrap). If we're being invoked directly (e.g. as
-// `vendor/bin/spora`), define it from the known depth of this script
-// in vendor/. vendor/spora-ai/spora-core/bin/spora → up 3 = consumer root.
+// BASE_PATH must be defined by the entry point that loaded us: the
+// consumer's bin/spora stub (for `php bin/spora ...`) or the dev-mode
+// test bootstrap (for `vendor/bin/spora` use, etc).
 if (!defined('BASE_PATH')) {
-    define('BASE_PATH', dirname(__FILE__, 3));
+    fwrite(STDERR, "BASE_PATH is not defined. Add `define('BASE_PATH', dirname(__FILE__, 2));` to your bin/spora before requiring this script.\n");
+    exit(1);
 }
 
 require_once BASE_PATH . '/vendor/autoload.php';
