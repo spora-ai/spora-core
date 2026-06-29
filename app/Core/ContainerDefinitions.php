@@ -27,6 +27,7 @@ use Spora\Console\Commands\SeedCommand;
 use Spora\Console\Commands\SetupCommand;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Console\Commands\WorkerRunCommand;
+use Spora\Core\Exceptions\BasePathNotDefinedException;
 use Spora\Core\Exceptions\InvalidSecretKeyException;
 use Spora\Core\Exceptions\MissingSecretKeyException;
 use Spora\Core\Extension\PluginManager;
@@ -231,18 +232,28 @@ final class ContainerDefinitions
         return $overrides;
     }
 
+    /**
+     * Resolve BASE_PATH from the constant when defined, or throw a dedicated
+     * exception so callers see a clear, actionable message rather than an
+     * "undefined constant" fatal. Mirrors Kernel::resolveBasePath().
+     */
+    private static function resolveBasePath(): string
+    {
+        if (!defined('BASE_PATH')) {
+            throw new BasePathNotDefinedException(
+                'BASE_PATH is not defined. Add `define(\'BASE_PATH\', dirname(__FILE__, 2));` '
+                . 'to your public/index.php (web entry) and bin/spora (CLI entry) '
+                . 'before any Spora framework code runs.'
+            );
+        }
+        return BASE_PATH;
+    }
+
     private static function coreServiceDefinitions(): array
     {
         return [
-            Paths::class => static function (ContainerInterface $c): Paths {
-                if (!defined('BASE_PATH')) {
-                    throw new \RuntimeException(
-                        'BASE_PATH is not defined. Add `define(\'BASE_PATH\', dirname(__FILE__, 2));` '
-                        . 'to your public/index.php (web entry) and bin/spora (CLI entry) '
-                        . 'before any Spora framework code runs.'
-                    );
-                }
-                return new Paths(BASE_PATH);
+            Paths::class => static function (): Paths {
+                return new Paths(self::resolveBasePath());
             },
 
             SecurityManagerInterface::class => static function (ContainerInterface $c): SecurityManager {

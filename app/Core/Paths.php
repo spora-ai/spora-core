@@ -94,8 +94,15 @@ final class Paths
 
     private function overrideOrDefault(string $envName, string $defaultSub): string
     {
+        // Check $_SERVER/$_ENV first (already populated by phpdotenv/symfony Dotenv),
+        // then fall back to getenv() so env vars set at the process level (e.g.
+        // CLI/service environments where variables_order excludes 'E') are still seen.
         $value = $_SERVER[$envName] ?? $_ENV[$envName] ?? null;
-        if ($value !== null && $value !== '') {
+        if ($value === null || $value === '') {
+            $fromEnv = getenv($envName);
+            $value = ($fromEnv === false || $fromEnv === '') ? null : $fromEnv;
+        }
+        if ($value !== null) {
             return $value;
         }
         return $this->base($defaultSub);

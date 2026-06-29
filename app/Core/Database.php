@@ -94,7 +94,7 @@ final class Database
             ? null
             : ($this->paths?->storage('.schema_stamp') ?? BASE_PATH . '/storage/.schema_stamp');
 
-        (new DatabaseSchemaInstaller($this->pluginLoader, $stampPath))->install();
+        (new DatabaseSchemaInstaller($this->pluginLoader, $stampPath, null, $this->paths))->install();
     }
 
     /** Returns the active Capsule instance (available after bootDatabaseConnectionOnly). */

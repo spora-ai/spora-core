@@ -61,7 +61,11 @@ final class EmailTemplateLoader
                 try {
                     $data = Yaml::parseFile($file);
                     if (is_array($data) && isset($data['name'])) {
-                        $this->templates[(string) $data['name']] = $data;
+                        $name = (string) $data['name'];
+                        // Project overrides win: skip if a higher-priority dir already provided this template.
+                        if (!isset($this->templates[$name])) {
+                            $this->templates[$name] = $data;
+                        }
                     }
                 } catch (ParseException $e) {
                     throw new EmailTemplateParseException(sprintf('Failed to parse email template "%s": %s', $file, $e->getMessage()), 0, $e);
