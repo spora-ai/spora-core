@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Spora\Core\Paths;
 use Spora\Services\EmailTemplateLoader;
 use Spora\Services\Exceptions\EmailTemplateParseException;
 
@@ -9,7 +10,7 @@ describe('EmailTemplateLoader', function (): void {
 
     function makeLoader(): EmailTemplateLoader
     {
-        return new EmailTemplateLoader();
+        return new EmailTemplateLoader(new Paths(BASE_PATH));
     }
 
     describe('getAll', function (): void {

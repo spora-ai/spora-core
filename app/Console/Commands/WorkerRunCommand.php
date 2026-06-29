@@ -12,6 +12,7 @@ use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Console\Worker\WorkerReaper;
 use Spora\Console\WorkerLoopOptions;
 use Spora\Core\Database;
+use Spora\Core\Paths;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Symfony\Component\Console\Command\Command;
@@ -51,6 +52,7 @@ final class WorkerRunCommand extends Command
         private readonly ContainerInterface     $container,
         MercurePublisherInterface            $mercure,
         NotificationService                  $notificationService,
+        private readonly Paths                $paths,
     ) {
         $this->reaper = new WorkerReaper($logger, $notificationService);
         $this->queueProcessor = new WorkerQueueProcessor(
@@ -58,6 +60,7 @@ final class WorkerRunCommand extends Command
             $logger,
             $mercure,
             $notificationService,
+            $paths,
         );
         $this->scheduledRunProcessor = new ScheduledRunProcessor(
             $orchestrator,
@@ -353,7 +356,7 @@ final class WorkerRunCommand extends Command
      */
     private function acquireLock(OutputInterface $output): bool
     {
-        $lockFile = rtrim(BASE_PATH . '/storage', '/') . '/spora-worker.lock';
+        $lockFile = $this->paths->storage('spora-worker.lock');
 
         $this->lockFd = fopen($lockFile, 'c');
         if (!flock($this->lockFd, LOCK_EX | LOCK_NB)) {

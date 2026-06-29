@@ -47,6 +47,7 @@ final class DatabaseSchemaInstaller
         private readonly ?PluginLoader $pluginLoader      = null,
         private readonly ?string       $stampPath         = null,
         ?string                        $coreMigrationsPath = null,
+        private readonly ?Paths        $paths             = null,
     ) {
         $this->coreMigrationsPath = $coreMigrationsPath ?? $this->resolveCoreMigrationsPath();
     }
@@ -134,12 +135,12 @@ final class DatabaseSchemaInstaller
      */
     private function resolveCoreMigrationsPath(): string
     {
-        $projectLocal = BASE_PATH . '/database/migrations';
+        $projectLocal = $this->paths?->database('migrations') ?? BASE_PATH . '/database/migrations';
         if (is_dir($projectLocal) && $this->hasVersionedMigrations($projectLocal)) {
             return $projectLocal;
         }
 
-        $framework = BASE_PATH . '/vendor/spora-ai/spora-core/database/migrations';
+        $framework = $this->paths?->framework('database/migrations') ?? BASE_PATH . '/vendor/spora-ai/spora-core/database/migrations';
         if (is_dir($framework) && $this->hasVersionedMigrations($framework)) {
             return $framework;
         }

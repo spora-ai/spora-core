@@ -9,6 +9,7 @@ use Psr\Log\NullLogger;
 use Spora\Auth\AuthService;
 use Spora\Core\ContainerDefinitions;
 use Spora\Core\Kernel;
+use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Http\ToolController;
@@ -26,6 +27,29 @@ function callContainerMethod(string $name, array $args = []): mixed
 {
     $ref = new ReflectionMethod(ContainerDefinitions::class, $name);
     return $ref->invokeArgs(null, $args);
+}
+
+/**
+ * Tiny throwaway container that resolves Paths::class only. Used by tests
+ * that exercise a single ContainerDefinitions factory in isolation without
+ * spinning up the full php-di container.
+ */
+function makeFakeContainer(): Psr\Container\ContainerInterface
+{
+    return new class (new Paths(BASE_PATH)) implements Psr\Container\ContainerInterface {
+        public function __construct(private readonly Paths $paths) {}
+        public function get(string $id): mixed
+        {
+            if ($id === Paths::class) {
+                return $this->paths;
+            }
+            throw new \RuntimeException("Unexpected container lookup: $id");
+        }
+        public function has(string $id): bool
+        {
+            return $id === Paths::class;
+        }
+    };
 }
 
 /**
@@ -113,7 +137,7 @@ it('all() returns the merged definitions array', function (): void {
 it('configDefinition returns a closure that resolves the config array', function (): void {
     $def = callContainerMethod('configDefinition');
     $closure = $def['config'];
-    $config = $closure();
+    $config = $closure(makeFakeContainer());
 
     expect($config['db_driver'])->toBeString();
     expect($config['app_env'])->toBeString();
@@ -145,7 +169,7 @@ it('configDefinition honours env var overrides for all keys', function (): void 
     $_ENV['SPORA_APP_URL'] = 'https://spora.example.com';
     $_ENV['SPORA_NOTIFICATIONS_EMAIL_ENABLED'] = 'true';
 
-    $config = callContainerMethod('configDefinition')['config']();
+    $config = callContainerMethod('configDefinition')['config'](makeFakeContainer());
 
     expect($config['db_driver'])->toBe('pgsql')
         ->and($config['db_host'])->toBe('db.example.com')

@@ -28,8 +28,11 @@ final class Kernel implements KernelInterface
     private Container $container;
     private bool $errorHandlerInstalled = false;
 
-    public function __construct()
+    private readonly Paths $paths;
+
+    public function __construct(?Paths $paths = null)
     {
+        $this->paths = $paths ?? new Paths(BASE_PATH);
         $this->loadDotEnv();
 
         $builder = new ContainerBuilder();
@@ -65,13 +68,13 @@ final class Kernel implements KernelInterface
 
     private function loadDotEnv(): void
     {
-        $envFile = BASE_PATH . '/.env';
+        $envFile = $this->paths->env();
 
         if (!file_exists($envFile)) {
             return;
         }
 
-        $dotenv = Dotenv::createImmutable(BASE_PATH);
+        $dotenv = Dotenv::createImmutable(dirname($envFile));
         $dotenv->safeLoad();
     }
 

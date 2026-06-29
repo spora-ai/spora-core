@@ -8,6 +8,7 @@ use Closure;
 use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSeeder;
+use Spora\Core\Paths;
 use Spora\Core\SecretKeyInstaller;
 use Spora\Services\EmailTemplateLoader;
 use Symfony\Component\Console\Command\Command;
@@ -28,6 +29,7 @@ final class SeedCommand extends Command
         private readonly Database $database,
         private readonly Closure $authServiceFactory,
         private readonly EmailTemplateLoader $templateLoader,
+        private readonly Paths $paths,
     ) {
         parent::__construct('db:seed');
     }
@@ -43,11 +45,11 @@ final class SeedCommand extends Command
 
         try {
             // Bootstrap the secret key if missing (idempotent — no-op if present).
-            $keyPath = BASE_PATH . '/storage/secret.key';
+            $keyPath = $this->paths->storage('secret.key');
             if (SecretKeyInstaller::ensureKeyFile($keyPath)) {
                 $output->writeln(sprintf('<info>Generated new secret key at %s</info>', $keyPath));
             }
-            if (SecretKeyInstaller::updateConfigKeyPath(BASE_PATH . '/config.php', $keyPath)) {
+            if (SecretKeyInstaller::updateConfigKeyPath($this->paths->config(), $keyPath)) {
                 $output->writeln('<info>Updated config.php key_path</info>');
             }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Console\Commands\SetupCommand;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
+use Spora\Core\Paths;
 use Spora\Services\EmailTemplateLoader;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -18,7 +19,7 @@ function makeSetupTester(): CommandTester
     $db->bootDatabaseConnectionOnly(); // no-op: already booted
 
     $authService    = bootAuthLayer();
-    $templateLoader = new EmailTemplateLoader();
+    $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
     $command = new SetupCommand(
         $db,
         new DatabaseSchemaInstaller(null, null),

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\SeedCommand;
 use Spora\Core\Database;
+use Spora\Core\Paths;
 use Spora\Services\EmailTemplateLoader;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -17,10 +18,10 @@ function makeSeedTester(): CommandTester
     $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
     $db->bootDatabaseConnectionOnly(); // no-op: already booted
 
-    $templateLoader = new EmailTemplateLoader();
+    $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
     $authFactory = static fn(): AuthService => bootAuthLayer();
 
-    $command = new SeedCommand($db, $authFactory, $templateLoader);
+    $command = new SeedCommand($db, $authFactory, $templateLoader, new Paths(BASE_PATH));
     $command->setName('db:seed');
 
     return new CommandTester($command);
@@ -74,12 +75,12 @@ it('reports failure and exits with FAILURE when the factory throws', function ()
     $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
     $db->bootDatabaseConnectionOnly();
 
-    $templateLoader = new EmailTemplateLoader();
+    $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
     $authFactory = static function (): AuthService {
         throw new RuntimeException('factory exploded');
     };
 
-    $command = new SeedCommand($db, $authFactory, $templateLoader);
+    $command = new SeedCommand($db, $authFactory, $templateLoader, new Paths(BASE_PATH));
     $command->setName('db:seed');
     $tester = new CommandTester($command);
 

@@ -3,27 +3,15 @@
 
 declare(strict_types=1);
 
-// Resolve BASE_PATH from the autoloader's file location rather than our own __DIR__.
-// When invoked via an operator stub, __DIR__ would point at vendor/spora-ai/spora-core/.
-// Falls back to dirname(__DIR__) if the autoloader isn't loaded yet.
-require_once __DIR__ . '/../app/Core/BasePathResolver.php';
-$basePath = Spora\Core\BasePathResolver::resolve();
-if ($basePath === null) {
-    // Autoloader not loaded yet — fall back to script-relative.
-    // (Defensive only — the operator stub always loads the autoloader first.)
-    $basePath = dirname(__DIR__);
+// BASE_PATH is defined by the consumer's bin/spora stub (or by the
+// dev-mode test bootstrap). If we're being invoked directly (e.g. as
+// `vendor/bin/spora`), define it from the known depth of this script
+// in vendor/. vendor/spora-ai/spora-core/bin/spora → up 3 = consumer root.
+if (!defined('BASE_PATH')) {
+    define('BASE_PATH', dirname(__FILE__, 3));
 }
-define('BASE_PATH', $basePath);
 
-$autoloadPath = BASE_PATH . '/vendor/autoload.php';
-if (file_exists($autoloadPath)) {
-    require $autoloadPath;
-} elseif (!class_exists(\Composer\Autoload\ClassLoader::class)) {
-    echo "Dependencies missing. Run `composer install`.\n";
-    exit(1);
-}
-// else: an outer script (e.g. spora-ai/spora's bin/spora stub) has already
-// loaded the consumer's autoloader. Proceed without re-requiring.
+require_once BASE_PATH . '/vendor/autoload.php';
 
 use Spora\Core\Kernel;
 use Symfony\Component\Console\Application;

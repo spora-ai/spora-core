@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Psr\Log\NullLogger;
 use Spora\Console\Commands\PluginUpdateCommand;
 use Spora\Core\Extension\PluginManager;
+use Spora\Core\Paths;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 use Tests\Support\FakeProcessFactory;
@@ -15,7 +16,7 @@ function makePluginUpdateTester(FakeProcessFactory $factory): CommandTester
     $manager = new PluginManager(
         new NullLogger(),
         Closure::fromCallable($factory),
-        '/srv/spora',
+        new Paths('/srv/spora'),
     );
 
     $command = new PluginUpdateCommand($manager);

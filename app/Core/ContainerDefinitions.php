@@ -136,10 +136,11 @@ final class ContainerDefinitions
     private static function configDefinition(): array
     {
         return [
-            'config' => static function (): array {
+            'config' => static function (ContainerInterface $c): array {
+                $paths = $c->get(Paths::class);
                 $defaults = [
                     'db_driver'           => 'sqlite',
-                    'db_path'             => BASE_PATH . '/storage/database.sqlite',
+                    'db_path'             => $paths->storage('database.sqlite'),
                     'db_host'             => null,
                     'db_port'             => null,
                     'db_name'             => null,
@@ -149,7 +150,7 @@ final class ContainerDefinitions
                     'allow_registration'  => true,
                     'app_env'             => 'production',
                     'log_level'           => 'WARNING',
-                    'log_path'            => BASE_PATH . '/storage/spora.log',
+                    'log_path'            => $paths->storage('spora.log'),
                     'worker_mode'         => true,
                     'worker_stale_minutes' => 60,
                     'max_workers'         => 0,
@@ -171,7 +172,7 @@ final class ContainerDefinitions
                     'composer_binary'     => 'composer',
                 ];
 
-                $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: BASE_PATH . '/config.php');
+                $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: $paths->config());
                 $fileConfig = UserConfig::load($configPath);
 
                 $envOverrides = self::collectEnvOverrides();
@@ -233,6 +234,17 @@ final class ContainerDefinitions
     private static function coreServiceDefinitions(): array
     {
         return [
+            Paths::class => static function (ContainerInterface $c): Paths {
+                if (!defined('BASE_PATH')) {
+                    throw new \RuntimeException(
+                        'BASE_PATH is not defined. Add `define(\'BASE_PATH\', dirname(__FILE__, 2));` '
+                        . 'to your public/index.php (web entry) and bin/spora (CLI entry) '
+                        . 'before any Spora framework code runs.'
+                    );
+                }
+                return new Paths(BASE_PATH);
+            },
+
             SecurityManagerInterface::class => static function (ContainerInterface $c): SecurityManager {
                 $envKey     = $_ENV['SPORA_SECRET_KEY'] ?? getenv('SPORA_SECRET_KEY') ?: null;
                 $envKeyPath = $_ENV['SPORA_KEY_PATH']    ?? getenv('SPORA_KEY_PATH') ?: null;
@@ -266,7 +278,7 @@ final class ContainerDefinitions
             },
 
             Database::class => static function (ContainerInterface $c): Database {
-                $db = new Database($c->get('config'), $c->get(PluginLoader::class));
+                $db = new Database($c->get('config'), $c->get(PluginLoader::class), $c->get(Paths::class));
                 $db->bootDatabaseConnectionOnly();
                 return $db;
             },
@@ -278,7 +290,7 @@ final class ContainerDefinitions
 
                 $logger = new MonologLogger('spora');
 
-                $logPath = $config['log_path'] ?? (BASE_PATH . '/storage/spora.log');
+                $logPath = $config['log_path'] ?? $c->get(Paths::class)->storage('spora.log');
                 $stream = ($logPath === 'stdout') ? 'php://stdout' : $logPath;
                 $handler = new StreamHandler($stream, $level);
 
@@ -770,7 +782,7 @@ final class ContainerDefinitions
                 return new PluginManager(
                     $c->get(LoggerInterface::class),
                     $processFactory,
-                    BASE_PATH,
+                    $c->get(Paths::class),
                     $composerBinary,
                 );
             },
@@ -827,7 +839,8 @@ final class ContainerDefinitions
 
             PluginLoader::class => static function (ContainerInterface $c): PluginLoader {
                 $config        = $c->get('config');
-                $inRepoPlugins = BASE_PATH . '/plugins';
+                $paths         = $c->get(Paths::class);
+                $inRepoPlugins = $paths->plugins();
 
                 // Always scan the in-repo plugins dir first; external paths from
                 // SPORA_PLUGINS_PATHS are appended in declaration order. Duplicates are
@@ -838,7 +851,7 @@ final class ContainerDefinitions
                     array_merge([$inRepoPlugins], array_map('strval', $external)),
                 ));
 
-                $stampPath = BASE_PATH . '/storage/.plugins_stamp';
+                $stampPath = $paths->storage('.plugins_stamp');
 
                 $loader = new PluginLoader($directories, $stampPath);
                 $loader->boot();
@@ -849,7 +862,7 @@ final class ContainerDefinitions
                 $pluginLoader = $c->get(PluginLoader::class);
 
                 $directories = array_merge(
-                    [BASE_PATH . '/recipes'],
+                    [$c->get(Paths::class)->recipes()],
                     $pluginLoader->recipePaths(),
                 );
 
@@ -859,7 +872,9 @@ final class ContainerDefinitions
             MemoryServiceInterface::class => static fn(): MemoryServiceInterface => new MemoryService(),
             MailTemplateServiceInterface::class => static fn(): MailTemplateServiceInterface => new MailTemplateService(),
             PromptTemplateServiceInterface::class => static fn(): PromptTemplateServiceInterface => new PromptTemplateService(),
-            EmailTemplateLoader::class => static fn(): EmailTemplateLoader => new EmailTemplateLoader(),
+            EmailTemplateLoader::class => static function (ContainerInterface $c): EmailTemplateLoader {
+                return new EmailTemplateLoader($c->get(Paths::class));
+            },
             ScheduledRunServiceInterface::class => static function (ContainerInterface $c): ScheduledRunServiceInterface {
                 return new ScheduledRunService(
                     $c->get(OrchestratorInterface::class),
@@ -887,6 +902,7 @@ final class ContainerDefinitions
                     $c->get(Database::class),
                     static fn(): AuthService => $c->get(AuthService::class),
                     $c->get(EmailTemplateLoader::class),
+                    $c->get(Paths::class),
                 );
             },
 
@@ -898,6 +914,7 @@ final class ContainerDefinitions
                     $c,
                     $c->get(MercurePublisherInterface::class),
                     $c->get(NotificationService::class),
+                    $c->get(Paths::class),
                 );
             },
 
