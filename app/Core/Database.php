@@ -26,6 +26,7 @@ final class Database
     public function __construct(
         private readonly array $config,
         private readonly ?PluginLoader $pluginLoader = null,
+        private readonly ?Paths $paths = null,
     ) {}
 
     public function bootDatabaseConnectionOnly(): void
@@ -91,9 +92,9 @@ final class Database
         $dbPath    = $this->config['db_path'] ?? null;
         $stampPath = ($dbPath === ':memory:')
             ? null
-            : BASE_PATH . '/storage/.schema_stamp';
+            : ($this->paths?->storage('.schema_stamp') ?? BASE_PATH . '/storage/.schema_stamp');
 
-        (new DatabaseSchemaInstaller($this->pluginLoader, $stampPath))->install();
+        (new DatabaseSchemaInstaller($this->pluginLoader, $stampPath, null, $this->paths))->install();
     }
 
     /** Returns the active Capsule instance (available after bootDatabaseConnectionOnly). */
@@ -124,7 +125,10 @@ final class Database
     public function getStampPath(): ?string
     {
         $dbPath = $this->config['db_path'] ?? null;
-        return ($dbPath === ':memory:') ? null : BASE_PATH . '/storage/.schema_stamp';
+        if ($dbPath === ':memory:') {
+            return null;
+        }
+        return $this->paths?->storage('.schema_stamp') ?? BASE_PATH . '/storage/.schema_stamp';
     }
 
     /** Reset the static boot flag (for testing only). */

@@ -7,6 +7,7 @@ namespace Spora\Console\Worker;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Core\Paths;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
@@ -34,6 +35,7 @@ final class WorkerQueueProcessor
         private readonly LoggerInterface $logger,
         private readonly MercurePublisherInterface $mercure,
         private readonly NotificationService $notificationService,
+        private readonly Paths $paths,
     ) {}
 
     /**
@@ -159,7 +161,7 @@ final class WorkerQueueProcessor
     public function spawnChild(int $taskId): ?int
     {
         $php = PHP_BINARY;
-        $bin = BASE_PATH . '/bin/spora';
+        $bin = $this->paths->base('bin/spora');
         $cmd = [$php, $bin, 'task:run', (string) $taskId];
 
         $proc = proc_open($cmd, [], $pipes);

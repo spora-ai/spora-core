@@ -8,6 +8,7 @@ use DI\Container;
 use DI\ContainerBuilder;
 use Dotenv\Dotenv;
 use Psr\Log\LoggerInterface;
+use Spora\Core\Exceptions\BasePathNotDefinedException;
 use Spora\Http\Exceptions\ForbiddenException;
 use Spora\Http\Exceptions\InvalidCsrfTokenException;
 use Spora\Http\Exceptions\UnauthenticatedException;
@@ -28,8 +29,11 @@ final class Kernel implements KernelInterface
     private Container $container;
     private bool $errorHandlerInstalled = false;
 
-    public function __construct()
+    private readonly Paths $paths;
+
+    public function __construct(?Paths $paths = null)
     {
+        $this->paths = $paths ?? new Paths(self::resolveBasePath());
         $this->loadDotEnv();
 
         $builder = new ContainerBuilder();
@@ -63,15 +67,32 @@ final class Kernel implements KernelInterface
         return $this->container;
     }
 
+    /**
+     * Resolve BASE_PATH from the constant when defined, or throw a dedicated
+     * exception so callers see a clear, actionable message rather than an
+     * "undefined constant" fatal.
+     */
+    private static function resolveBasePath(): string
+    {
+        if (!defined('BASE_PATH')) {
+            throw new BasePathNotDefinedException(
+                'BASE_PATH is not defined. Add `define(\'BASE_PATH\', dirname(__FILE__, 2));` '
+                . 'to your public/index.php (web entry) and bin/spora (CLI entry) '
+                . 'before any Spora framework code runs.'
+            );
+        }
+        return BASE_PATH;
+    }
+
     private function loadDotEnv(): void
     {
-        $envFile = BASE_PATH . '/.env';
+        $envFile = $this->paths->env();
 
         if (!file_exists($envFile)) {
             return;
         }
 
-        $dotenv = Dotenv::createImmutable(BASE_PATH);
+        $dotenv = Dotenv::createImmutable(dirname($envFile));
         $dotenv->safeLoad();
     }
 

@@ -5,13 +5,14 @@ declare(strict_types=1);
 use Spora\Console\Commands\InstallCommand;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
+use Spora\Core\Paths;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 function makeInstallTester(Database $db): CommandTester
 {
     Database::resetBootState();
-    $command = new InstallCommand($db, new DatabaseSchemaInstaller(null, null));
+    $command = new InstallCommand($db, new DatabaseSchemaInstaller(null, null), new Paths(BASE_PATH));
     $command->setName('spora:install');
 
     return new CommandTester($command);

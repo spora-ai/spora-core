@@ -10,6 +10,7 @@ use Spora\Console\Commands\WorkerRunCommand;
 use Spora\Console\Worker\ScheduledRunProcessor;
 use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Core\Database;
+use Spora\Core\Paths;
 use Spora\Models\Agent;
 use Spora\Models\ScheduledRun;
 use Spora\Models\ScheduledRunNext;
@@ -66,6 +67,7 @@ function makeWorkerRunCommand(): array
         $container,
         $mercure,
         $notificationService,
+        new Paths(BASE_PATH),
     );
 
     return [$command, $orchestrator, $db];
@@ -494,6 +496,7 @@ describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
             new NullLogger(),
             $mercure,
             $notificationService,
+            new Paths(BASE_PATH),
         );
 
         // Create agent and task
@@ -558,6 +561,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
             $container,
             $mercure,
             $notificationService,
+            new Paths(BASE_PATH),
         );
 
         $authService = bootAuthLayer();
@@ -620,6 +624,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
             $container,
             $mercure,
             $notificationService,
+            new Paths(BASE_PATH),
         );
 
         $authService = bootAuthLayer();
@@ -667,6 +672,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
         $db->boot();
 
+        $paths = new Paths(BASE_PATH);
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
         $mercure      = Mockery::mock(MercurePublisherInterface::class);
         $mercure->allows('publish')->andReturn(true);
@@ -674,7 +680,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
 
-        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification);
+        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths);
 
         $input  = new ArrayInput(['--daemon' => true, '--once' => true], $command->getDefinition());
         $output = new NullOutput();
@@ -690,6 +696,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
         $db->boot();
 
+        $paths = new Paths(BASE_PATH);
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
         $mercure      = Mockery::mock(MercurePublisherInterface::class);
         $mercure->allows('publish')->andReturn(true);
@@ -697,7 +704,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
 
-        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification);
+        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths);
 
         $input  = new ArrayInput(['--daemon' => true, '--reap-only' => true], $command->getDefinition());
         $output = new NullOutput();
@@ -713,6 +720,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
         $db->boot();
 
+        $paths = new Paths(BASE_PATH);
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
         $mercure      = Mockery::mock(MercurePublisherInterface::class);
         $mercure->allows('publish')->andReturn(true);
@@ -720,7 +728,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
 
-        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification);
+        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths);
 
         $input  = new ArrayInput(['--once' => true, '--reap-only' => true], $command->getDefinition());
         $output = new NullOutput();
@@ -907,6 +915,7 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
             new NullLogger(),
             $mercure,
             $notification ?? Mockery::mock(NotificationService::class),
+            new Paths(BASE_PATH),
         );
     }
 

@@ -7,6 +7,7 @@ namespace Spora\Console\Commands;
 use Closure;
 use PDO;
 use Spora\Core\Database;
+use Spora\Core\Paths;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -41,6 +42,7 @@ final class DbResetCommand extends Command
     public function __construct(
         private readonly Database $database,
         private readonly ?Closure $pdoFactory = null,
+        private readonly ?Paths $paths = null,
     ) {
         parent::__construct();
     }
@@ -113,7 +115,7 @@ HELP);
         $rawPath  = $config['db_path'] ?? null;
         $dbPath   = (is_string($rawPath) && $rawPath !== '' && $rawPath !== ':memory:')
             ? $rawPath
-            : BASE_PATH . '/storage/database.sqlite';
+            : ($this->paths?->storage('database.sqlite') ?? BASE_PATH . '/storage/database.sqlite');
 
         if (!$force && is_file($dbPath) && filesize($dbPath) > 0) {
             $io->writeln("{$dbPath} already exists and is non-empty.");

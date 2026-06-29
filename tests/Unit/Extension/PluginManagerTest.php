@@ -7,6 +7,7 @@ namespace Tests\Unit\Extension;
 use Closure;
 use Psr\Log\NullLogger;
 use Spora\Core\Extension\Exceptions\PluginInstallFailedException;
+use Spora\Core\Paths;
 use Spora\Core\Extension\PluginInstallRequest;
 use Spora\Core\Extension\PluginInstallResult;
 use Spora\Core\Extension\PluginManager;
@@ -18,7 +19,7 @@ function makeManager(
     string $basePath = '/srv/spora',
     string $composerBinary = 'composer',
 ): PluginManager {
-    return new PluginManager(new NullLogger(), Closure::fromCallable($factory), $basePath, $composerBinary);
+    return new PluginManager(new NullLogger(), Closure::fromCallable($factory), new Paths($basePath), $composerBinary);
 }
 
 test('install() from registry builds a composer require argv with the bare package', function (): void {

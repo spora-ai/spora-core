@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Core\DatabaseSeeder;
+use Spora\Core\Paths;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\User;
@@ -10,7 +11,7 @@ use Spora\Services\EmailTemplateLoader;
 
 it('seeds the admin user and agent successfully', function () {
     $authService = bootAuthLayer();
-    $templateLoader = new EmailTemplateLoader();
+    $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
     $seeder = new DatabaseSeeder($authService, $templateLoader);
 
     // Initial state
@@ -41,7 +42,7 @@ it('seeds the admin user and agent successfully', function () {
 
 it('does not duplicate records if seeder is run twice', function () {
     $authService = bootAuthLayer();
-    $templateLoader = new EmailTemplateLoader();
+    $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
     $seeder = new DatabaseSeeder($authService, $templateLoader);
 
     // First run

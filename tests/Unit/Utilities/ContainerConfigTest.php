@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use Psr\Container\ContainerInterface;
 use Spora\Core\ContainerDefinitions;
+use Spora\Core\Paths;
 
 // Helpers
 
@@ -42,7 +44,23 @@ function resolveConfig(array $tempEnv = [], ?array $fileConfig = null): array
 
     $definitions   = getContainerConfig();
     $configClosure = $definitions['config'];
-    $config        = $configClosure();
+    // The 'config' factory depends on Paths via $c->get(Paths::class).
+    // Build a tiny throwaway container to satisfy that lookup in tests.
+    $container = new class (new Paths(BASE_PATH)) implements ContainerInterface {
+        public function __construct(private readonly Paths $paths) {}
+        public function get(string $id): mixed
+        {
+            if ($id === Paths::class) {
+                return $this->paths;
+            }
+            throw new \RuntimeException("Unexpected container lookup: $id");
+        }
+        public function has(string $id): bool
+        {
+            return $id === Paths::class;
+        }
+    };
+    $config        = $configClosure($container);
 
     if ($tmpFile !== null && file_exists($tmpFile)) {
         unlink($tmpFile);

@@ -7,6 +7,7 @@ namespace Spora\Core\Extension;
 use Closure;
 use Psr\Log\LoggerInterface;
 use Spora\Core\Extension\Exceptions\PluginInstallFailedException;
+use Spora\Core\Paths;
 
 /**
  * Manages plugin install / uninstall / list / update by shelling out to Composer.
@@ -16,7 +17,7 @@ use Spora\Core\Extension\Exceptions\PluginInstallFailedException;
  * Process spawns the child without an intervening shell, so a package name
  * from a CLI flag or HTTP body is literal data, never shell metacharacters.
  *
- * CWD is fixed to the project root ({@see $basePath}) so `composer require` always
+ * CWD is fixed to the project root ({@see Paths::base()}) so `composer require` always
  * operates on this project's composer.json, not on whatever directory the
  * caller happened to invoke the command from. The 120s timeout is a generous
  * upper bound for `composer require` against Packagist; very slow registries
@@ -62,7 +63,7 @@ final class PluginManager
     public function __construct(
         private readonly LoggerInterface $logger,
         private readonly Closure $processFactory,
-        private readonly string $basePath,
+        private readonly Paths $paths,
         private readonly string $composerBinary = 'composer',
     ) {}
 
@@ -295,7 +296,7 @@ final class PluginManager
     private function runProcess(array $argv): string
     {
         /** @var object $process */
-        $process = ($this->processFactory)($argv, $this->basePath);
+        $process = ($this->processFactory)($argv, $this->paths->base());
 
         $process->run();
 
