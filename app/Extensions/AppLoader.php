@@ -80,23 +80,31 @@ final class AppLoader
             return null;
         }
 
+        // Snapshot declared classes BEFORE require_once so we can detect what
+        // the App file itself contributed.
+        $before = get_declared_classes();
         require_once $appFile;
+        $after = get_declared_classes();
 
-        $fqcn = $this->resolveAppFqcn($appFile);
-        if ($fqcn === null) {
-            throw new RuntimeException(sprintf(
-                'Could not determine the App class declared in %s. '
-                . 'Ensure the file declares exactly one class implementing %s.',
-                $appFile,
-                SporaExtensionInterface::class,
-            ));
+        $newlyDeclared = array_values(array_diff($after, $before));
+        if ($newlyDeclared === []) {
+            // The file exists but does not declare any class — treat this
+            // the same as "no App installed" (silent no-op). Common in
+            // early-boot / stub scenarios.
+            return null;
         }
 
-        if (!is_subclass_of($fqcn, SporaExtensionInterface::class)) {
+        $fqcn = $this->resolveAppFqcn($newlyDeclared);
+        if ($fqcn === null) {
+            // The file declared class(es), but none implements
+            // SporaExtensionInterface. That's a developer error —
+            // they shipped an App.php that doesn't look like an App.
             throw new RuntimeException(sprintf(
-                'App class %s (declared in %s) must implement %s (or extend %s).',
-                $fqcn,
+                'Class(es) declared in %s (%s) do not implement %s. '
+                . 'The App class must implement %s or extend %s.',
                 $appFile,
+                implode(', ', $newlyDeclared),
+                SporaExtensionInterface::class,
                 SporaExtensionInterface::class,
                 AbstractExtension::class,
             ));
@@ -149,35 +157,33 @@ final class AppLoader
     }
 
     /**
-     * Best-effort FQCN detection from a file path. We require_once the file
-     * first, then scan `get_declared_classes()` for the most recently declared
-     * class that implements SporaExtensionInterface.
+     * Pick the App class out of a list of classes newly declared by app/App.php.
+     *
+     * Caller is responsible for the require_once and for passing the diff
+     * between declared classes before and after — that isolates this method
+     * from the "require_once is a no-op" problem that would otherwise let
+     * us mistakenly pick up an extension class loaded by a previous file
+     * in the same process (a long-running worker, or a prior test).
+     *
+     * Returns null if the file did not declare a usable App class.
+     *
+     * @param list<string> $newlyDeclared Class FQCNs added by the App file
      */
-    private function resolveAppFqcn(string $appFile): ?string
+    private function resolveAppFqcn(array $newlyDeclared): ?string
     {
-        // Snapshot the declared classes BEFORE require_once so we can diff.
-        $before = get_declared_classes();
-        require_once $appFile;
-        $after = get_declared_classes();
+        if ($newlyDeclared === []) {
+            return null;
+        }
 
-        $candidates = array_values(array_diff($after, $before));
         // Filter to SporaExtensionInterface implementers, then take the last declared
         // one (most-recent declaration wins — matches typical "one class per file"
         // practice).
         $implementers = array_filter(
-            $candidates,
+            $newlyDeclared,
             static fn(string $c): bool => is_subclass_of($c, SporaExtensionInterface::class),
         );
 
         if (count($implementers) === 0) {
-            // Fallback: try every currently declared class — handles edge cases
-            // where require_once was a no-op (class already loaded from a previous
-            // boot in long-running workers).
-            foreach (get_declared_classes() as $class) {
-                if (is_subclass_of($class, SporaExtensionInterface::class)) {
-                    return $class;
-                }
-            }
             return null;
         }
 
