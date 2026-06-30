@@ -43,7 +43,7 @@ function makeFakeContainer(): Psr\Container\ContainerInterface
             if ($id === Paths::class) {
                 return $this->paths;
             }
-            throw new \RuntimeException("Unexpected container lookup: $id");
+            throw new RuntimeException("Unexpected container lookup: $id");
         }
         public function has(string $id): bool
         {
@@ -61,7 +61,7 @@ function makeContainerWithPaths(string $baseDir): Psr\Container\ContainerInterfa
             return match ($id) {
                 Paths::class => $this->paths,
                 'config'     => ['app_env' => 'testing', 'key_path' => null],
-                default      => throw new \RuntimeException("Unexpected container lookup: $id"),
+                default      => throw new RuntimeException("Unexpected container lookup: $id"),
             };
         }
         public function has(string $id): bool

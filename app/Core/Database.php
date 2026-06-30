@@ -6,6 +6,7 @@ namespace Spora\Core;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Core\Exceptions\DatabaseNotBootedException;
+use Spora\Extensions\AppLoader;
 use Spora\Plugins\PluginLoader;
 
 final class Database
@@ -14,9 +15,9 @@ final class Database
      * Manages the Eloquent ORM database connection and schema installation.
      *
      * This class bootstraps the database connection using Laravel's Capsule manager,
-     * supporting both MySQL and SQLite drivers. It provides methods to boot the
+     * supporting both MySQL and SQLite drivers. It exposes methods to boot the
      * connection only or the full database with schema installation including
-     * plugin-provided migrations.
+     * plugin-provided migrations and the project App's migrations.
      */
     private static bool $booted = false;
 
@@ -27,6 +28,7 @@ final class Database
         private readonly array $config,
         private readonly ?PluginLoader $pluginLoader = null,
         private readonly ?Paths $paths = null,
+        private readonly ?AppLoader $appLoader = null,
     ) {}
 
     public function bootDatabaseConnectionOnly(): void
@@ -94,7 +96,7 @@ final class Database
             ? null
             : ($this->paths?->storage('.schema_stamp') ?? BASE_PATH . '/storage/.schema_stamp');
 
-        (new DatabaseSchemaInstaller($this->pluginLoader, $stampPath, null, $this->paths))->install();
+        (new DatabaseSchemaInstaller($this->pluginLoader, $stampPath, null, $this->paths, $this->appLoader))->install();
     }
 
     /** Returns the active Capsule instance (available after bootDatabaseConnectionOnly). */

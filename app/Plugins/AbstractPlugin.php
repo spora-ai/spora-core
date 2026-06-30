@@ -6,6 +6,7 @@ namespace Spora\Plugins;
 
 use DI\ContainerBuilder;
 use ReflectionClass;
+use Spora\Core\MiddlewareRouteCollector;
 
 /**
  * Base implementation of {@see PluginInterface} with sensible no-op defaults
@@ -16,6 +17,11 @@ use ReflectionClass;
  * of PluginInterface remain valid — the interface is unchanged for backward
  * compatibility — but every direct implementer ends up writing the same six
  * empty methods.
+ *
+ * Inherited defaults from {@see SporaExtensionInterface}:
+ * - `apps(): array` → []
+ * - `routes(MiddlewareRouteCollector): void` → no-op
+ * - `boot(): void` → no-op
  */
 abstract class AbstractPlugin implements PluginInterface
 {
@@ -98,4 +104,27 @@ abstract class AbstractPlugin implements PluginInterface
      * host application. No-op by default.
      */
     public function register(ContainerBuilder $builder): void {}
+
+    /**
+     * UI side-panels this plugin contributes to the App Registry.
+     * No-op by default — plugins return [] unless they ship new admin panels.
+     *
+     * @return array<class-string<\Spora\Apps\AppInterface>>
+     */
+    public function apps(): array
+    {
+        return [];
+    }
+
+    /**
+     * Register HTTP routes into the running middleware collector.
+     * No-op by default. Plugins that need their own endpoints override this.
+     */
+    public function routes(MiddlewareRouteCollector $routes): void {}
+
+    /**
+     * Lifecycle hook fired once after the DI container is built and before the
+     * first request is dispatched. No-op by default — override for stateful init.
+     */
+    public function boot(): void {}
 }

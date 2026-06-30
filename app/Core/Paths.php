@@ -23,8 +23,7 @@ final class Paths
     public function __construct(
         private readonly string $basePath,
         private readonly ?string $frameworkPath = null,
-    ) {
-    }
+    ) {}
 
     public function base(string $sub = ''): string
     {
@@ -59,6 +58,15 @@ final class Paths
     public function env(): string
     {
         return $this->overrideOrDefault('SPORA_ENV_FILE', '.env');
+    }
+
+    /**
+     * Path to the project-level App extension directory.
+     * Default: `<basePath>/app`. Override with SPORA_APP_DIR.
+     */
+    public function app(string $sub = ''): string
+    {
+        return $this->join($this->overrideOrDefault('SPORA_APP_DIR', 'app'), $sub);
     }
 
     /**
@@ -110,12 +118,12 @@ final class Paths
 
     private function join(string $base, string ...$parts): string
     {
-        $segments = array_filter([$base, ...$parts], static fn (string $s): bool => $s !== '');
+        $segments = array_filter([$base, ...$parts], static fn(string $s): bool => $s !== '');
         $first = array_shift($segments);
         // Preserve the first segment's leading/trailing slashes (e.g. absolute paths).
         $first = rtrim($first, '/');
-        $rest  = array_map(static fn (string $s): string => trim($s, '/'), $segments);
-        $parts = array_filter([$first, ...$rest], static fn (string $s): bool => $s !== '');
+        $rest  = array_map(static fn(string $s): string => trim($s, '/'), $segments);
+        $parts = array_filter([$first, ...$rest], static fn(string $s): bool => $s !== '');
         return implode('/', $parts);
     }
 }

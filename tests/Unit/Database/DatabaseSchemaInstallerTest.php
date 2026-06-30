@@ -338,7 +338,7 @@ test('resolveCoreMigrationsPath() throws a clear exception when no migrations ex
         }
 
         expect(fn() => new DatabaseSchemaInstaller(null, null, null))
-            ->toThrow(\Spora\Core\Exceptions\SchemaInstallFailedException::class, 'No core migrations found');
+            ->toThrow(Spora\Core\Exceptions\SchemaInstallFailedException::class, 'No core migrations found');
     } finally {
         // Re-rename could fail if an earlier rename already failed; ignore to
         // keep teardown best-effort.

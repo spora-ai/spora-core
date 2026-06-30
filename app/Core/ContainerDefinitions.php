@@ -34,6 +34,7 @@ use Spora\Core\Extension\PluginManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Extensions\AppLoader;
 use Spora\Http\AgentController;
 use Spora\Http\AgentMemoryController;
 use Spora\Http\AgentOverrideController;
@@ -243,7 +244,7 @@ final class ContainerDefinitions
             throw new BasePathNotDefinedException(
                 'BASE_PATH is not defined. Add `define(\'BASE_PATH\', dirname(__FILE__, 2));` '
                 . 'to your public/index.php (web entry) and bin/spora (CLI entry) '
-                . 'before any Spora framework code runs.'
+                . 'before any Spora framework code runs.',
             );
         }
         return BASE_PATH;
@@ -260,7 +261,12 @@ final class ContainerDefinitions
                 => self::buildSecurityManager($c),
 
             Database::class => static function (ContainerInterface $c): Database {
-                $db = new Database($c->get('config'), $c->get(PluginLoader::class), $c->get(Paths::class));
+                $db = new Database(
+                    $c->get('config'),
+                    $c->get(PluginLoader::class),
+                    $c->get(Paths::class),
+                    $c->has(AppLoader::class) ? $c->get(AppLoader::class) : null,
+                );
                 $db->bootDatabaseConnectionOnly();
                 return $db;
             },
@@ -397,6 +403,19 @@ final class ContainerDefinitions
                 AnthropicCompatibleDriver::class,
             ],
 
+            // Plugin and App drivers are merged into this separate entry at
+            // container-build time. Kept distinct from `llm_driver_classes`
+            // so that the static list remains inspectable in tests and so
+            // LLMConfigService can opt into the merged view via constructor
+            // injection without rewriting the core list contract.
+            'llm_driver_classes_merged' => static fn(ContainerInterface $c): array => array_values(array_unique(array_merge(
+                $c->get('llm_driver_classes'),
+                array_values($c->get(PluginLoader::class)->drivers()),
+                $c->has(AppLoader::class)
+                    ? array_values($c->get(AppLoader::class)->getApp()?->drivers() ?? [])
+                    : [],
+            ))),
+
             'app_apps' => [
                 MemoriesApp::class,
                 PluginsApp::class,
@@ -404,7 +423,10 @@ final class ContainerDefinitions
 
             AppRegistry::class => static function (ContainerInterface $c): AppRegistry {
                 $registry = new AppRegistry();
-                foreach ($c->get('app_apps') as $appClass) {
+                $appContributedApps = $c->has(AppLoader::class)
+                    ? ($c->get(AppLoader::class)->getApp()?->apps() ?? [])
+                    : [];
+                foreach (array_merge($c->get('app_apps'), $appContributedApps) as $appClass) {
                     $registry->register($appClass);
                 }
                 return $registry;
@@ -430,7 +452,7 @@ final class ContainerDefinitions
             LLMConfigService::class => static function (ContainerInterface $c): LLMConfigService {
                 return new LLMConfigService(
                     $c->get(SecurityManagerInterface::class),
-                    $c->get('llm_driver_classes'),
+                    $c->get('llm_driver_classes_merged'),
                 );
             },
 
@@ -679,9 +701,13 @@ final class ContainerDefinitions
     {
         return [
             'tool_instances' => static function (ContainerInterface $c): array {
+                $appToolClasses = $c->has(AppLoader::class)
+                    ? ($c->get(AppLoader::class)->getApp()?->tools() ?? [])
+                    : [];
                 $classes = array_values(array_unique(array_merge(
                     $c->get('tool_classes'),
                     $c->get(PluginLoader::class)->toolClasses(),
+                    $appToolClasses,
                 )));
                 return array_combine($classes, array_map(
                     fn(string $toolClass) => $c->get($toolClass),
@@ -884,10 +910,14 @@ final class ContainerDefinitions
 
             RecipeScanner::class => static function (ContainerInterface $c): RecipeScanner {
                 $pluginLoader = $c->get(PluginLoader::class);
+                $appRecipePaths = $c->has(AppLoader::class)
+                    ? ($c->get(AppLoader::class)->getApp()?->recipePaths() ?? [])
+                    : [];
 
                 $directories = array_merge(
                     [$c->get(Paths::class)->recipes()],
                     $pluginLoader->recipePaths(),
+                    $appRecipePaths,
                 );
 
                 return new RecipeScanner($directories);
