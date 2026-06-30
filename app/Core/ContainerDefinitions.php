@@ -256,37 +256,8 @@ final class ContainerDefinitions
                 return new Paths(self::resolveBasePath());
             },
 
-            SecurityManagerInterface::class => static function (ContainerInterface $c): SecurityManager {
-                $envKey     = $_ENV['SPORA_SECRET_KEY'] ?? getenv('SPORA_SECRET_KEY') ?: null;
-                $envKeyPath = $_ENV['SPORA_KEY_PATH']    ?? getenv('SPORA_KEY_PATH') ?: null;
-
-                if ($envKey !== null) {
-                    $rawKey = base64_decode($envKey, strict: true);
-                    if ($rawKey === false) {
-                        throw new InvalidSecretKeyException(
-                            'SPORA_SECRET_KEY is not valid base64. Regenerate with: base64_encode(random_bytes(32))',
-                        );
-                    }
-                    return new SecurityManager($rawKey);
-                }
-
-                if ($envKeyPath !== null) {
-                    return new SecurityManager($envKeyPath);
-                }
-
-                $config  = $c->get('config');
-                $keyPath = $config['key_path'] ?? null;
-
-                if ($keyPath !== null) {
-                    return new SecurityManager((string) $keyPath);
-                }
-
-                throw new MissingSecretKeyException(
-                    'No secret key configured. Set SPORA_SECRET_KEY (base64 32 bytes) or SPORA_KEY_PATH. '
-                    . 'The key is auto-generated on first run of `php bin/spora spora:install` or `php bin/spora db:seed` '
-                    . '— see storage/secret.key.',
-                );
-            },
+            SecurityManagerInterface::class => static fn(ContainerInterface $c): SecurityManager
+                => self::buildSecurityManager($c),
 
             Database::class => static function (ContainerInterface $c): Database {
                 $db = new Database($c->get('config'), $c->get(PluginLoader::class), $c->get(Paths::class));
@@ -374,6 +345,48 @@ final class ContainerDefinitions
                 );
             },
         ];
+    }
+
+    private static function buildSecurityManager(ContainerInterface $c): SecurityManager
+    {
+        $envKey = $_ENV['SPORA_SECRET_KEY'] ?? getenv('SPORA_SECRET_KEY') ?: null;
+        if ($envKey !== null) {
+            $decoded = base64_decode($envKey, strict: true);
+            if ($decoded === false) {
+                throw new InvalidSecretKeyException(
+                    'SPORA_SECRET_KEY is not valid base64. Regenerate with: base64_encode(random_bytes(32))',
+                );
+            }
+            return new SecurityManager($decoded);
+        }
+
+        $path = self::resolveKeyPath($c);
+        if ($path === null) {
+            throw new MissingSecretKeyException(
+                'No secret key configured. Set SPORA_SECRET_KEY (base64 32 bytes) or SPORA_KEY_PATH, '
+                . 'or run `php bin/spora spora:install` (or `db:seed`) to auto-generate '
+                . 'storage/secret.key. Looked for: ' . $c->get(Paths::class)->storage('secret.key') . '.',
+            );
+        }
+
+        return new SecurityManager($path);
+    }
+
+    private static function resolveKeyPath(ContainerInterface $c): ?string
+    {
+        $envKeyPath = $_ENV['SPORA_KEY_PATH'] ?? getenv('SPORA_KEY_PATH') ?: null;
+        if ($envKeyPath !== null) {
+            return $envKeyPath;
+        }
+
+        $configKeyPath = ($c->get('config'))['key_path'] ?? null;
+        if ($configKeyPath !== null) {
+            return (string) $configKeyPath;
+        }
+
+        // Conventional fallback; SecretKeyInstaller writes here on `spora:install`.
+        $conventional = $c->get(Paths::class)->storage('secret.key');
+        return is_file($conventional) ? $conventional : null;
     }
 
     private static function llmDefinitions(): array
