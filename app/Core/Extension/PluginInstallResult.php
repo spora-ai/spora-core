@@ -25,17 +25,17 @@ final class PluginInstallResult
     public const STATUS_UPDATED     = 'updated';
 
     /**
-     * @param string                                                $package  Composer package name (vendor/name).
-     * @param string                                                $status   One of the STATUS_* constants.
-     * @param string|null                                           $version  Resolved version, or null when not yet resolved / not applicable.
-     * @param string|null                                           $path     Absolute install path, when known.
-     * @param string                                                $message  Human-readable summary suitable for CLI output / toast.
-     * @param list<array{name: string, version: ?string, path: ?string}> $plugins Optional structured list payload for HTTP responses; not populated by PluginManager directly.
+     * @param string                                                $package    Composer package name (vendor/name).
+     * @param string                                                $status     One of the STATUS_* constants.
+     * @param string|null                                           $constraint Requested version constraint as supplied by the caller (e.g. '^1.0'), or null when the caller did not pin one.
+     * @param string|null                                           $path       Absolute install path, when known.
+     * @param string                                                $message    Human-readable summary suitable for CLI output / toast.
+     * @param list<array{name: string, version: ?string, path: ?string}> $plugins   Optional structured list payload for HTTP responses; not populated by PluginManager directly.
      */
     public function __construct(
         public readonly string $package,
         public readonly string $status,
-        public readonly ?string $version = null,
+        public readonly ?string $constraint = null,
         public readonly ?string $path = null,
         public readonly string $message = '',
         public readonly array $plugins = [],

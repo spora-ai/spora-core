@@ -7,7 +7,7 @@ namespace Spora\Core\Extension;
 /**
  * Input value object for {@see PluginManager::install()}.
  *
- * Mutual exclusion: pass either `version` (registry / VCS) or `path` (local
+ * Mutual exclusion: pass either `constraint` (registry / VCS) or `path` (local
  * checkout installed as a Composer path repository for sibling-clone dev
  * workflows), not both.
  *
@@ -19,7 +19,7 @@ final class PluginInstallRequest
 {
     public function __construct(
         public readonly string $package,
-        public readonly ?string $version = null,
+        public readonly ?string $constraint = null,
         public readonly ?string $path = null,
     ) {}
 }

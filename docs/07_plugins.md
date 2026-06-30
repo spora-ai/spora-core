@@ -372,11 +372,11 @@ which wraps `composer require`, `composer remove`, `composer update`, and
 
 ```bash
 php bin/spora plugin:install vendor/package
-php bin/spora plugin:install vendor/package --version=^1.0
+php bin/spora plugin:install vendor/package --constraint=^1.0
 php bin/spora plugin:install vendor/package --path=/abs/path/to/checkout
 ```
 
-`--version` and `--path` are mutually exclusive. `--path` registers the local
+`--constraint` and `--path` are mutually exclusive. `--path` registers the local
 checkout as a Composer path repository — useful during plugin development
 against a sibling git clone.
 
