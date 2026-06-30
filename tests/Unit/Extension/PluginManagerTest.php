@@ -33,7 +33,7 @@ test('install() from registry builds a composer require argv with the bare packa
 
     expect($result->status)->toBe(PluginInstallResult::STATUS_INSTALLED);
     expect($result->package)->toBe('spora-ai/spora-plugin-tavily');
-    expect($result->version)->toBeNull();
+    expect($result->constraint)->toBeNull();
     expect($result->message)->toContain('Installing spora-ai/spora-plugin-tavily');
     expect($factory->calls)->toHaveCount(1);
     expect($factory->calls[0]['cwd'])->toBe('/srv/spora');
@@ -46,9 +46,9 @@ test('install() from registry appends the version constraint when provided', fun
     ]);
     $manager = makeManager($factory);
 
-    $result = $manager->install(new PluginInstallRequest('spora-ai/spora-plugin-tavily', '^1.0'));
+    $result = $manager->install(new PluginInstallRequest('spora-ai/spora-plugin-tavily', constraint: '^1.0'));
 
-    expect($result->version)->toBe('^1.0');
+    expect($result->constraint)->toBe('^1.0');
     expect($factory->calls[0]['argv'][2])->toBe('spora-ai/spora-plugin-tavily:^1.0');
 });
 

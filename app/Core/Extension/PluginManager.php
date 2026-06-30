@@ -195,8 +195,8 @@ final class PluginManager
 
     private function installFromRegistry(PluginInstallRequest $req): PluginInstallResult
     {
-        $spec = ($req->version !== null && $req->version !== '')
-            ? $req->package . ':' . $req->version
+        $spec = ($req->constraint !== null && $req->constraint !== '')
+            ? $req->package . ':' . $req->constraint
             : $req->package;
 
         $argv = $this->composerArgv([
@@ -212,7 +212,7 @@ final class PluginManager
         return new PluginInstallResult(
             package: $req->package,
             status: PluginInstallResult::STATUS_INSTALLED,
-            version: $req->version,
+            constraint: $req->constraint,
             message: $output,
         );
     }
