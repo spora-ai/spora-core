@@ -52,6 +52,25 @@ function makeFakeContainer(): Psr\Container\ContainerInterface
     };
 }
 
+function makeContainerWithPaths(string $baseDir): Psr\Container\ContainerInterface
+{
+    return new class (new Paths($baseDir)) implements Psr\Container\ContainerInterface {
+        public function __construct(private readonly Paths $paths) {}
+        public function get(string $id): mixed
+        {
+            return match ($id) {
+                Paths::class => $this->paths,
+                'config'     => ['app_env' => 'testing', 'key_path' => null],
+                default      => throw new \RuntimeException("Unexpected container lookup: $id"),
+            };
+        }
+        public function has(string $id): bool
+        {
+            return $id === Paths::class || $id === 'config';
+        }
+    };
+}
+
 /**
  * Build a real PluginLoader that loads the tools-contributing fixture plugin.
  * The fixture's tools() returns [Tests\Fixtures\TestTool].
@@ -275,11 +294,40 @@ it('coreServiceDefinitions throws MissingSecretKeyException when no key source i
     $def = callContainerMethod('coreServiceDefinitions');
     $factory = $def[SecurityManagerInterface::class];
 
-    $builder = new ContainerBuilder();
-    $builder->addDefinitions(['config' => static fn(): array => ['app_env' => 'testing', 'key_path' => null]]);
-    $c = $builder->build();
+    // Clean tmpdir: isolate from BASE_PATH/storage/secret.key.
+    $tmpBase = sys_get_temp_dir() . '/spora_test_no_key_' . bin2hex(random_bytes(4));
+    mkdir($tmpBase, 0o755, true);
+    try {
+        $c = makeContainerWithPaths($tmpBase);
+        expect(fn() => $factory($c))->toThrow(Spora\Core\Exceptions\MissingSecretKeyException::class);
+    } finally {
+        @rmdir($tmpBase);
+    }
+});
 
-    expect(fn() => $factory($c))->toThrow(Spora\Core\Exceptions\MissingSecretKeyException::class);
+it('coreServiceDefinitions falls back to Paths::storage(secret.key) when env and config are unset but the file exists', function (): void {
+    unset($_ENV['SPORA_SECRET_KEY'], $_ENV['SPORA_KEY_PATH']);
+    putenv('SPORA_SECRET_KEY');
+    putenv('SPORA_KEY_PATH');
+
+    // Mirrors a fresh consumer install: key file present, no env, no config.
+    $tmpBase = sys_get_temp_dir() . '/spora_test_fallback_' . bin2hex(random_bytes(4));
+    mkdir($tmpBase . '/storage', 0o755, true);
+    $keyFile = $tmpBase . '/storage/secret.key';
+    file_put_contents($keyFile, random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+
+    try {
+        $def = callContainerMethod('coreServiceDefinitions');
+        $factory = $def[SecurityManagerInterface::class];
+        $c = makeContainerWithPaths($tmpBase);
+
+        $sm = $factory($c);
+        expect($sm)->toBeInstanceOf(SecurityManager::class);
+    } finally {
+        @unlink($keyFile);
+        @rmdir($tmpBase . '/storage');
+        @rmdir($tmpBase);
+    }
 });
 
 it('coreServiceDefinitions builds SecurityManager from SPORA_KEY_PATH', function (): void {

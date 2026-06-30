@@ -11,16 +11,20 @@ use Spora\Core\Exceptions\DecryptKeyMissingException;
 use Spora\Core\Exceptions\InvalidSecretKeyException;
 use Spora\Core\Exceptions\MissingSecretKeyException;
 use Spora\Core\Exceptions\SchemaInstallFailedException;
+use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Plugins\PluginLoader;
 
 // Helpers
 
-function buildContainer(): DI\Container
+function buildContainer(array $extraDefinitions = []): DI\Container
 {
     $builder = new ContainerBuilder();
-    $builder->addDefinitions(ContainerDefinitions::all());
+    $builder->addDefinitions(array_merge(
+        ContainerDefinitions::all(),
+        $extraDefinitions,
+    ));
     return $builder->build();
 }
 
@@ -132,10 +136,16 @@ test('container throws InvalidSecretKeyException when SPORA_SECRET_KEY is not va
 
 test('container throws MissingSecretKeyException when no key source is configured', function (): void {
     withSecretKeyEnv(null, function (): void {
-        $container = buildContainer();
-
-        expect(fn() => $container->get(SecurityManagerInterface::class))
-            ->toThrow(MissingSecretKeyException::class, 'No secret key configured');
+        // Clean tmpdir: isolate from BASE_PATH/storage/secret.key.
+        $tmpBase = sys_get_temp_dir() . '/spora_test_no_key_' . bin2hex(random_bytes(4));
+        mkdir($tmpBase, 0o755, true);
+        try {
+            $container = buildContainer([Paths::class => new Paths($tmpBase)]);
+            expect(fn() => $container->get(SecurityManagerInterface::class))
+                ->toThrow(MissingSecretKeyException::class, 'No secret key configured');
+        } finally {
+            @rmdir($tmpBase);
+        }
     });
 });
 
