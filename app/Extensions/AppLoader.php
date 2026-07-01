@@ -183,13 +183,10 @@ final class AppLoader
             return null;
         }
 
-        // Filter to SporaExtensionInterface implementers that are CONCRETE —
-        // the App's parent (e.g. AbstractExtension) is autoloaded along with
-        // the App file and shows up in $newlyDeclared, but it is abstract and
-        // cannot be instantiated. Without the isAbstract() check,
-        // array_key_last() picks the most-recently-declared class which is
-        // usually the parent — leading to "Cannot instantiate abstract class"
-        // at boot.
+        // The require_once autoloads the abstract parent (e.g.
+        // AbstractExtension) into the same diff; without isAbstract(), that
+        // parent wins array_key_last() and boot crashes with
+        // "Cannot instantiate abstract class".
         $candidates = array_filter(
             $newlyDeclared,
             static function (string $c): bool {

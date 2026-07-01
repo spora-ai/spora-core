@@ -203,16 +203,10 @@ it('accepts an App that extends AbstractExtension without explicitly implements 
 });
 
 it('picks the concrete App over an abstract parent newly declared alongside it', function (): void {
-    // The fixture app/App.php references \Tests\Fixtures\AppLoaderAbstractParent
-    // ONLY inside a string. PHP autoloads that abstract parent (which
-    // transitively autoloads AbstractExtension) only when the
-    // `extends ResolvedAtRequireTime` clause resolves — meaning both
-    // classes are added to `get_declared_classes()` between the snapshot
-    // and the diff, and `array_key_last()` lands on the abstract parent.
-    //
-    // Without the isAbstract() guard in resolveAppFqcn(), the loader
-    // returns the abstract FQCN and `new $fqcn()` raises
-    // "Cannot instantiate abstract class" at boot.
+    // The fixture reference is a string, so the only way PHP autoloads
+    // AppLoaderAbstractParent (and transitively AbstractExtension) is via
+    // the require_once of the synthesized app/App.php — the exact scenario
+    // the bug exposes.
     file_put_contents(
         $this->tmpDir . '/app/App.php',
         "<?php class $this->appClass extends \\Tests\\Fixtures\\AppLoaderAbstractParent {}",
