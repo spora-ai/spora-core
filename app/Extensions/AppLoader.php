@@ -68,6 +68,33 @@ final class AppLoader
             return $this->app;
         }
 
+        $app = $this->discoverApp($paths);
+        if ($app === null) {
+            return null;
+        }
+
+        // PSR-4 mappings must be registered before App::register() so the App's
+        // own tool classes are resolvable during container build.
+        $this->registerAutoloadMappings($app);
+
+        // FINALLY wired — App::register() applies DI bindings to the
+        // ContainerBuilder BEFORE the container is built.
+        $app->register($builder);
+
+        $this->app = $app;
+        return $this->app;
+    }
+
+    /**
+     * Discover and instantiate the App class declared in app/App.php.
+     *
+     * Returns null when no App is installed (file missing, or file declares
+     * no class) — both cases are silent no-ops in the framework's view.
+     * Throws InvalidAppClassException when the file declares a class that
+     * does not implement SporaExtensionInterface — that's a developer error.
+     */
+    private function discoverApp(Paths $paths): ?SporaExtensionInterface
+    {
         $appFile = $paths->app('App.php');
         if (!is_file($appFile)) {
             return null;
@@ -77,21 +104,14 @@ final class AppLoader
         // the App file itself contributed.
         $before = get_declared_classes();
         require_once $appFile;
-        $after = get_declared_classes();
+        $newlyDeclared = array_values(array_diff(get_declared_classes(), $before));
 
-        $newlyDeclared = array_values(array_diff($after, $before));
         if (empty($newlyDeclared)) {
-            // The file exists but does not declare any class — treat this
-            // the same as "no App installed" (silent no-op). Common in
-            // early-boot / stub scenarios.
             return null;
         }
 
         $fqcn = $this->resolveAppFqcn($newlyDeclared);
         if ($fqcn === null) {
-            // The file declared class(es), but none implements
-            // SporaExtensionInterface. That's a developer error —
-            // they shipped an App.php that doesn't look like an App.
             throw new InvalidAppClassException(sprintf(
                 'Class(es) declared in %s (%s) do not implement %s. '
                 . 'The App class must implement %s or extend %s.',
@@ -103,23 +123,18 @@ final class AppLoader
             ));
         }
 
-        $this->app = new $fqcn();
+        return new $fqcn();
+    }
 
-        // 1. Register PSR-4 mappings so the App's own classes are resolvable
-        //    during container build (the App may have tools that depend on
-        //    App\Tools\Foo which only exists once its namespace is mapped).
+    private function registerAutoloadMappings(SporaExtensionInterface $app): void
+    {
         $classLoader = $this->findClassLoader();
-        if ($classLoader !== null) {
-            foreach ($this->app->autoload() as $namespace => $path) {
-                $classLoader->addPsr4($namespace, $path);
-            }
+        if ($classLoader === null) {
+            return;
         }
-
-        // 2. Apply DI bindings. FINALLY wired (was previously declared-but-ignored
-        //    on PluginInterface; the same hook now works on App as well).
-        $this->app->register($builder);
-
-        return $this->app;
+        foreach ($app->autoload() as $namespace => $path) {
+            $classLoader->addPsr4($namespace, $path);
+        }
     }
 
     /**
@@ -176,7 +191,7 @@ final class AppLoader
             static fn(string $c): bool => is_subclass_of($c, SporaExtensionInterface::class),
         );
 
-        if (count($implementers) === 0) {
+        if (empty($implementers)) {
             return null;
         }
 
