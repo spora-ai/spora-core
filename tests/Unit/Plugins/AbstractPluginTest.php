@@ -108,11 +108,6 @@ test('AbstractPlugin implements PluginInterface (so direct implementers stay bac
     expect($plugin)->toBeInstanceOf(\Spora\Plugins\PluginInterface::class);
 });
 
-// ─── Apps / Routes / Boot defaults introduced in the SporaExtensionInterface PR ──
-//
-// The three hooks are no-ops at the AbstractPlugin level. Plugins that want them
-// override only the relevant method (proven by the other tests above).
-
 test('apps() defaults to an empty array', function (): void {
     expect((new DemoPlugin())->apps())->toBe([]);
 });

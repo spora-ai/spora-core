@@ -643,14 +643,12 @@ it('tool_instances factory returns only core tools when no plugin is loaded', fu
     expect($instances[CalculatorTool::class])->toBeInstanceOf(CalculatorTool::class);
 });
 
-// ─── llm_driver_classes_merged factory ──────────────────────────────────
+// llm_driver_classes_merged factory
 
 /**
- * Pull the first value out of a non-empty associative array and cast to
- * class-string. PHPStan-friendly replacement for `array_values(...)[0]`,
- * which complains because the source array is `array<string, class-string>`
- * and `array_values` widens the key to `array{}` when the source may be
- * empty at static-analysis time.
+ * PHPStan-friendly replacement for `array_values(...)[0]`: $source is
+ * typed `array<string, class-string>` and `array_values` widens the key
+ * to `array{}` at static-analysis time.
  *
  * @param  array<string, mixed>  $source
  */
@@ -823,12 +821,9 @@ it('llm_driver_classes_merged is unchanged when the container has no AppLoader (
     ]);
 });
 
-// ─── tool_instances factory with App contribution ──────────────────────
+// tool_instances factory with App contribution
 
 it('tool_instances factory merges in App tools when AppLoader has a loaded App', function (): void {
-    // The App contributes the existing TestTool fixture as its single tool —
-    // re-using the same fixture that the container already maps for the plugin's
-    // tools() but here we're proving the App's contribution is merged in.
     $appToolFqcn = TestTool::class;
 
     $app = new class ($appToolFqcn) extends Spora\Extensions\AbstractExtension {

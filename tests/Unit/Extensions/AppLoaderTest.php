@@ -216,8 +216,8 @@ it('registers PSR-4 mappings declared by App::autoload() with the Composer Class
         }
     };
 
-    // Inject via reflection — AppLoader normally loads from a file path,
-    // but for this test we just want to verify register() wires autoload().
+    // Inject via reflection: AppLoader normally loads the App from a file path,
+    // but this test only needs to exercise the autoload() branch.
     $ref = new ReflectionClass($this->loader);
     $appProp = $ref->getProperty('app');
     $appProp->setValue($this->loader, $mappingApp);

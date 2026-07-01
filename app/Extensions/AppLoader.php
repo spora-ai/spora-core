@@ -13,20 +13,15 @@ use Spora\Extensions\Exceptions\InvalidAppClassException;
  * Discovers and boots the project-level App extension at `<BASE_PATH>/app/App.php`.
  *
  * Discovery is reflection-based — no manifest, no slug, no plugin.json — because
- * the App is a one-per-installation concern. The convention:
+ * the App is a one-per-installation concern, unlike Composer-distributed plugins.
  *
- *   app/
- *     App.php          (entry point; declares a class implementing AppInterface)
- *     Tools/           (PSR-4 namespace App\Tools\)
- *     Http/Controllers (PSR-4 namespace App\Http\Controllers)
+ * Hooks are applied in this order so the App's contributions are baked into the
+ * compiled container:
  *
- * Hooks are applied in this order so that the container ends up with the App's
- * contributions baked in:
- *
- *   1. App's PSR-4 mappings are registered with Composer's ClassLoader
- *      (so e.g. `App\Tools\Greeter` is resolvable during container build).
- *   2. App::register(ContainerBuilder) is called BEFORE build — its bindings
- *      are merged into the container that PHP-DI compiles.
+ *   1. App's PSR-4 mappings are registered with Composer's ClassLoader so e.g.
+ *      `App\Tools\Greeter` is resolvable during container build.
+ *   2. App::register(ContainerBuilder) is called BEFORE build — its bindings are
+ *      merged into the container that PHP-DI compiles.
  *   3. After the container is built, Kernel calls App::routes() and App::boot()
  *      with the now-live container and route collector.
  *
@@ -35,11 +30,9 @@ use Spora\Extensions\Exceptions\InvalidAppClassException;
 final class AppLoader
 {
     /**
-     * The loaded App, typed as the shared extension contract so any
-     * AbstractExtension descendant works (AppInterface is an additional
-     * marker, not a stricter type).
-     *
-     * @var SporaExtensionInterface|null
+     * Typed as the shared extension contract (not AppInterface) so any
+     * AbstractExtension descendant is accepted; AppInterface is a marker,
+     * not a stricter type.
      */
     private ?SporaExtensionInterface $app = null;
 

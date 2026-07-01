@@ -12,12 +12,8 @@ use Spora\Plugins\PluginLoader;
 final class Database
 {
     /**
-     * Manages the Eloquent ORM database connection and schema installation.
-     *
-     * This class bootstraps the database connection using Laravel's Capsule manager,
-     * supporting both MySQL and SQLite drivers. It exposes methods to boot the
-     * connection only or the full database with schema installation including
-     * plugin-provided migrations and the project App's migrations.
+     * Eloquent ORM connection bootstrap plus framework-wide schema installation,
+     * including plugin- and App-contributed migrations.
      */
     private static bool $booted = false;
 
