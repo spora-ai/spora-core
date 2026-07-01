@@ -7,6 +7,7 @@ namespace Tests\Unit\Extensions;
 use Spora\Core\MiddlewareRouteCollector;
 use Spora\Extensions\AbstractExtension;
 use Spora\Tools\ToolInterface;
+use Throwable;
 
 /**
  * Concrete subclass with no overrides — used to verify that every hook
@@ -91,22 +92,28 @@ it('defaults apps() to an empty array', function (): void {
 
 it('register() is a no-op', function (): void {
     $builder = new \DI\ContainerBuilder();
-    expect(fn() => (new EmptyExtension())->register($builder))->not->toThrow(\Throwable::class);
+    expect(fn() => (new EmptyExtension())->register($builder))->not->toThrow(Throwable::class);
 });
 
 it('routes() is a no-op', function (): void {
     $collector = new MiddlewareRouteCollector(new \FastRoute\RouteParser\Std(), new \FastRoute\DataGenerator\GroupCountBased());
-    expect(fn() => (new EmptyExtension())->routes($collector))->not->toThrow(\Throwable::class);
+    expect(fn() => (new EmptyExtension())->routes($collector))->not->toThrow(Throwable::class);
 });
 
 it('boot() is a no-op', function (): void {
-    expect(fn() => (new EmptyExtension())->boot())->not->toThrow(\Throwable::class);
+    expect(fn() => (new EmptyExtension())->boot())->not->toThrow(Throwable::class);
 });
 
 it('subclasses can override only tools() and inherit everything else', function (): void {
-    $extension = new ToolsOnlyExtension(['App\\Tools\\Foo', 'App\\Tools\\Bar']);
+    // Build the list through ToolInterface-resolving FQCNs so PHPStan can prove
+    // every element is a class-string<ToolInterface>. Real-world tools are
+    // declared as such; using strings that don't resolve would be a type error.
+    $fooFqcn = \Tests\Fixtures\TestTool::class;
+    $barFqcn = \Tests\Fixtures\StubInputTool::class;
 
-    expect($extension->tools())->toBe(['App\\Tools\\Foo', 'App\\Tools\\Bar']);
+    $extension = new ToolsOnlyExtension([$fooFqcn, $barFqcn]);
+
+    expect($extension->tools())->toBe([$fooFqcn, $barFqcn]);
     expect($extension->autoload())->toBe([]);
     expect($extension->drivers())->toBe([]);
     expect($extension->recipePaths())->toBe([]);

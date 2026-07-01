@@ -92,3 +92,34 @@ it('emailTemplatesPaths() returns the project dir first (if it exists), then the
     // First entry: project override (if exists, else skipped) — either way, last entry is always the framework path
     expect(end($list))->toBe($paths->framework('email-templates'));
 });
+
+it('app() defaults to <base>/app', function (): void {
+    $paths = new Paths('/srv/spora');
+    expect($paths->app())->toBe('/srv/spora/app')
+        ->and($paths->app('App.php'))->toBe('/srv/spora/app/App.php');
+});
+
+it('app() honours the SPORA_APP_DIR env override', function (): void {
+    $_SERVER['SPORA_APP_DIR'] = '/var/spora/project-app';
+    try {
+        $paths = new Paths('/srv/spora');
+        expect($paths->app())->toBe('/var/spora/project-app')
+            ->and($paths->app('App.php'))->toBe('/var/spora/project-app/App.php');
+    } finally {
+        unset($_SERVER['SPORA_APP_DIR']);
+    }
+});
+
+it('app() falls back to getenv() when $_SERVER is not populated', function (): void {
+    // Mirror storage()/plugins()/recipes() pattern: env vars set at the process
+    // level (where variables_order excludes 'E') must still be honoured.
+    unset($_SERVER['SPORA_APP_DIR'], $_ENV['SPORA_APP_DIR']);
+    putenv('SPORA_APP_DIR=/opt/spora-app');
+
+    try {
+        $paths = new Paths('/srv/spora');
+        expect($paths->app())->toBe('/opt/spora-app');
+    } finally {
+        putenv('SPORA_APP_DIR');
+    }
+});

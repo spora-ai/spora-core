@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace Tests\Unit\Extensions;
 
 use DI\ContainerBuilder;
+use FilesystemIterator;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
+use ReflectionClass;
 use Spora\Core\MiddlewareRouteCollector;
 use Spora\Core\Paths;
 use Spora\Extensions\AbstractExtension;
 use Spora\Extensions\AppInterface;
 use Spora\Extensions\AppLoader;
 use Spora\Extensions\SporaExtensionInterface;
+use Throwable;
 
 /**
  * App that records every method call so we can assert on the lifecycle.
@@ -48,9 +53,7 @@ class SpyApp extends AbstractExtension implements AppInterface
  * App whose class declaration is invalid for AppLoader (not implementing
  * SporaExtensionInterface). Used to assert the validation error path.
  */
-final class InvalidApp
-{
-}
+final class InvalidApp {}
 
 /**
  * Subclass of AbstractExtension that doesn't implement AppInterface — to
@@ -72,7 +75,7 @@ beforeEach(function (): void {
     mkdir($this->tmpDir . '/app', 0755, true);
     $this->paths = new Paths($this->tmpDir);
     $this->builder = new ContainerBuilder();
-    $this->loader = new AppLoader($this->paths, $this->builder);
+    $this->loader = new AppLoader();
     // Unique app class name per test so PHP doesn't choke on redeclaration
     // when require_once is a no-op for already-loaded classes from a previous test.
     $this->appClass = 'App_' . bin2hex(random_bytes(4));
@@ -80,9 +83,9 @@ beforeEach(function (): void {
 
 afterEach(function (): void {
     if (is_dir($this->tmpDir)) {
-        $rii = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($this->tmpDir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST,
+        $rii = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($this->tmpDir, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($rii as $file) {
             $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
@@ -145,7 +148,7 @@ it('invokes App::routes() when registerRoutes() is called', function (): void {
 
 it('is a no-op when registerRoutes() is called without a loaded App', function (): void {
     $collector = new MiddlewareRouteCollector(new \FastRoute\RouteParser\Std(), new \FastRoute\DataGenerator\GroupCountBased());
-    expect(fn() => $this->loader->registerRoutes($collector))->not->toThrow(\Throwable::class);
+    expect(fn() => $this->loader->registerRoutes($collector))->not->toThrow(Throwable::class);
 });
 
 it('invokes App::boot() on first call only (idempotent)', function (): void {
@@ -163,7 +166,7 @@ it('invokes App::boot() on first call only (idempotent)', function (): void {
 });
 
 it('is a no-op when boot() is called without a loaded App', function (): void {
-    expect(fn() => $this->loader->boot())->not->toThrow(\Throwable::class);
+    expect(fn() => $this->loader->boot())->not->toThrow(Throwable::class);
 });
 
 it('throws when app/App.php exists but declares a non-SporaExtension class', function (): void {
@@ -173,7 +176,7 @@ it('throws when app/App.php exists but declares a non-SporaExtension class', fun
     );
 
     expect(fn() => $this->loader->load($this->paths, $this->builder))
-        ->toThrow(\RuntimeException::class);
+        ->toThrow(\Spora\Extensions\Exceptions\InvalidAppClassException::class);
 });
 
 it('returns null when app/App.php exists but declares no class', function (): void {
@@ -201,19 +204,36 @@ it('accepts an App that extends AbstractExtension without explicitly implements 
 
 it('registers PSR-4 mappings declared by App::autoload() with the Composer ClassLoader', function (): void {
     $mappingApp = new class extends AbstractExtension {
-        public function getName(): string { return 'MappingApp'; }
+        public function getName(): string
+        {
+            return 'MappingApp';
+        }
         public function autoload(): array
         {
-            return ['MyApp\\Generated\\' => sys_get_temp_dir() . '/some-generated'];
+            // Pick a directory the project's own autoloader already uses — then we
+            // can introspect it before/after to verify the registration is idempotent.
+            return ['Tests\\Fixtures\\' => __DIR__ . '/../../Fixtures'];
         }
     };
 
     // Inject via reflection — AppLoader normally loads from a file path,
     // but for this test we just want to verify register() wires autoload().
-    $ref = new \ReflectionClass($this->loader);
+    $ref = new ReflectionClass($this->loader);
     $appProp = $ref->getProperty('app');
     $appProp->setValue($this->loader, $mappingApp);
 
+    $classLoader = null;
+    foreach (spl_autoload_functions() as $fn) {
+        if (is_array($fn) && $fn[0] instanceof \Composer\Autoload\ClassLoader) {
+            $classLoader = $fn[0];
+            break;
+        }
+    }
+    expect($classLoader)->toBeInstanceOf(\Composer\Autoload\ClassLoader::class);
+
+    // No exception is raised even when the ClassLoader already maps the namespace.
     $this->loader->registerRoutes(new MiddlewareRouteCollector(new \FastRoute\RouteParser\Std(), new \FastRoute\DataGenerator\GroupCountBased()));
-    // No exception = PSR-4 registration succeeded (or no ClassLoader found, also no-op).
+
+    // The namespace must still be resolvable after re-registration.
+    expect(class_exists(\Tests\Fixtures\TestTool::class))->toBeTrue();
 });

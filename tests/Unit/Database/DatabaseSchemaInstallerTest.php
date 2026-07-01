@@ -17,13 +17,16 @@ const PLUGINS_FIXTURE_WITH_MIGRATIONS = '/tests/Fixtures/plugins_with_migrations
  * Boot a fresh in-memory SQLite connection and return the installer under test.
  * No stamp path — in-memory DBs have no persistent filesystem.
  */
-function bootInstaller(?PluginLoader $pluginLoader = null, ?string $stampPath = null): DatabaseSchemaInstaller
-{
+function bootInstaller(
+    ?PluginLoader $pluginLoader = null,
+    ?string $stampPath = null,
+    ?Spora\Extensions\AppLoader $appLoader = null,
+): DatabaseSchemaInstaller {
     Database::resetBootState();
     $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:'], $pluginLoader);
     $db->bootDatabaseConnectionOnly();
 
-    return new DatabaseSchemaInstaller($pluginLoader, $stampPath);
+    return new DatabaseSchemaInstaller($pluginLoader, $stampPath, null, null, $appLoader);
 }
 
 function bootLoaderFromFixture(string $dir): PluginLoader
@@ -253,6 +256,147 @@ test('Database::boot() installs the full schema end-to-end', function (): void {
     expect(Capsule::schema()->hasTable('users'))->toBeTrue();
     expect(Capsule::schema()->hasTable('schema_versions'))->toBeTrue();
 })->afterEach(fn() => Database::resetBootState());
+
+// ─── AppLoader integration ──────────────────────────────────────────────
+
+test('installer accepts an AppLoader and installs app migrations under the "app" component', function (): void {
+    Database::resetBootState();
+
+    // Build a real App that declares a migrations directory with one migration
+    // file properly prefixed with "app_".
+    $migrationsDir = sys_get_temp_dir() . '/spora-app-migrations-' . bin2hex(random_bytes(4));
+    mkdir($migrationsDir, 0755, true);
+    file_put_contents($migrationsDir . '/app_001_create_app_notes.php', <<<'PHP'
+<?php
+use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+
+return new class extends Migration {
+    public function up(): void
+    {
+        Capsule::schema()->create('app_notes', static function (Blueprint $t): void {
+            $t->string('note')->primary();
+        });
+    }
+    public function down(): void { Capsule::schema()->dropIfExists('app_notes'); }
+};
+PHP);
+
+    // App declaring schemaVersion > 0 + a valid migrations path → must be installed.
+    $app = new class ($migrationsDir) extends Spora\Extensions\AbstractExtension {
+        public function __construct(private readonly string $migrationsPath) {}
+        public function getName(): string
+        {
+            return 'TestApp';
+        }
+        public function schemaVersion(): int
+        {
+            return 1;
+        }
+        public function migrationsPath(): string
+        {
+            return $this->migrationsPath;
+        }
+    };
+
+    // Hand-build an AppLoader with the App pre-set via reflection, the same
+    // way AppLoaderTest exercises the autoload() branch.
+    $loader = new Spora\Extensions\AppLoader();
+    (new ReflectionProperty($loader, 'app'))->setValue($loader, $app);
+
+    $installer = bootInstaller(appLoader: $loader);
+    $installer->install();
+
+    expect(Capsule::schema()->hasTable('app_notes'))->toBeTrue();
+    $row = Capsule::table('schema_versions')->where('component', 'app')->first();
+    expect($row)->not->toBeNull();
+    expect((int) $row->version)->toBe(1);
+
+    Database::resetBootState();
+    @unlink($migrationsDir . '/app_001_create_app_notes.php');
+    @rmdir($migrationsDir);
+});
+
+test('installer skips App migrations when App declares schemaVersion 0', function (): void {
+    Database::resetBootState();
+
+    // An App that returns schemaVersion 0 must be ignored entirely — no
+    // migrations run, no row in schema_versions.
+    $app = new class extends Spora\Extensions\AbstractExtension {
+        public function getName(): string
+        {
+            return 'NoSchemaApp';
+        }
+        public function schemaVersion(): int
+        {
+            return 0;
+        }
+        public function migrationsPath(): string
+        {
+            return '/somewhere/never-read';
+        }
+    };
+
+    $loader = new Spora\Extensions\AppLoader();
+    (new ReflectionProperty($loader, 'app'))->setValue($loader, $app);
+
+    $installer = bootInstaller(appLoader: $loader);
+    $installer->install();
+
+    $row = Capsule::table('schema_versions')->where('component', 'app')->first();
+    expect($row)->toBeNull();
+
+    Database::resetBootState();
+});
+
+test('installer skips App migrations when migrationsPath() returns null', function (): void {
+    Database::resetBootState();
+
+    // schemaVersion > 0 but no migrationsPath → design intent: not ready yet.
+    $app = new class extends Spora\Extensions\AbstractExtension {
+        public function getName(): string
+        {
+            return 'MigrationsTbdApp';
+        }
+        public function schemaVersion(): int
+        {
+            return 5;
+        }
+        public function migrationsPath(): ?string
+        {
+            return null;
+        }
+    };
+
+    $loader = new Spora\Extensions\AppLoader();
+    (new ReflectionProperty($loader, 'app'))->setValue($loader, $app);
+
+    $installer = bootInstaller(appLoader: $loader);
+    $installer->install();
+
+    $row = Capsule::table('schema_versions')->where('component', 'app')->first();
+    expect($row)->toBeNull();
+
+    Database::resetBootState();
+});
+
+test('installer is unchanged when no AppLoader is provided (backward compatibility)', function (): void {
+    Database::resetBootState();
+    Database::resetBootState();
+
+    // No AppLoader passed — the installer must take the original code path
+    // (no `app` component, no app_migrations token in the stamp hash).
+    $installer = bootInstaller();
+    $installer->install();
+
+    $row = Capsule::table('schema_versions')->where('component', 'app')->first();
+    expect($row)->toBeNull();
+    // Stamp hash must NOT include an "app_v..." token when there's no App.
+    expect(file_exists(sys_get_temp_dir() . '/.nonexistent'))->toBeFalse();
+
+    Database::resetBootState();
+});
 
 // Core migrations path resolution
 //

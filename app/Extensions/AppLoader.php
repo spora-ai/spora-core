@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Spora\Extensions;
 
 use DI\ContainerBuilder;
-use RuntimeException;
 use Spora\Core\MiddlewareRouteCollector;
 use Spora\Core\Paths;
+use Spora\Extensions\Exceptions\InvalidAppClassException;
 
 /**
  * Discovers and boots the project-level App extension at `<BASE_PATH>/app/App.php`.
@@ -66,8 +66,8 @@ final class AppLoader
      *   service for the post-build factories that depend on it (Database,
      *   RecipeScanner, AppRegistry, tool_instances).
      *
-     * @throws RuntimeException When app/App.php exists but does not declare
-     *                           a class implementing {@see SporaExtensionInterface}.
+     * @throws InvalidAppClassException When app/App.php exists but does not declare
+     *                                  a class implementing {@see SporaExtensionInterface}.
      */
     public function load(Paths $paths, ContainerBuilder $builder): ?SporaExtensionInterface
     {
@@ -87,7 +87,7 @@ final class AppLoader
         $after = get_declared_classes();
 
         $newlyDeclared = array_values(array_diff($after, $before));
-        if ($newlyDeclared === []) {
+        if (empty($newlyDeclared)) {
             // The file exists but does not declare any class — treat this
             // the same as "no App installed" (silent no-op). Common in
             // early-boot / stub scenarios.
@@ -99,7 +99,7 @@ final class AppLoader
             // The file declared class(es), but none implements
             // SporaExtensionInterface. That's a developer error —
             // they shipped an App.php that doesn't look like an App.
-            throw new RuntimeException(sprintf(
+            throw new InvalidAppClassException(sprintf(
                 'Class(es) declared in %s (%s) do not implement %s. '
                 . 'The App class must implement %s or extend %s.',
                 $appFile,
@@ -171,7 +171,7 @@ final class AppLoader
      */
     private function resolveAppFqcn(array $newlyDeclared): ?string
     {
-        if ($newlyDeclared === []) {
+        if (empty($newlyDeclared)) {
             return null;
         }
 
