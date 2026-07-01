@@ -4,25 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Fixtures\Plugins\ManifestPlugin;
 
-use DI\ContainerBuilder;
 use Spora\Drivers\LLMDriverInterface;
-use Spora\Plugins\PluginInterface;
+use Spora\Plugins\AbstractPlugin;
 
-final class Plugin implements PluginInterface
+final class Plugin extends AbstractPlugin
 {
     public function getName(): string
     {
         return 'Manifest Plugin';
-    }
-
-    public function autoload(): array
-    {
-        return [];
-    }
-
-    public function tools(): array
-    {
-        return [];
     }
 
     /**
@@ -32,22 +21,4 @@ final class Plugin implements PluginInterface
     {
         return ['manifest_driver' => ManifestDriver::class];
     }
-
-    public function recipePaths(): array
-    {
-        return [];
-    }
-
-    public function schemaVersion(): int
-    {
-        return 0;
-    }
-
-    /** @phpstan-return ?string */
-    public function migrationsPath(): ?string
-    {
-        return null;
-    }
-
-    public function register(ContainerBuilder $builder): void {}
 }

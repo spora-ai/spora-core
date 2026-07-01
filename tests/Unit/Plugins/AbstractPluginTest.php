@@ -107,3 +107,20 @@ test('AbstractPlugin implements PluginInterface (so direct implementers stay bac
 
     expect($plugin)->toBeInstanceOf(\Spora\Plugins\PluginInterface::class);
 });
+
+test('apps() defaults to an empty array', function (): void {
+    expect((new DemoPlugin())->apps())->toBe([]);
+});
+
+test('routes() is a no-op (accepts a route collector, does not throw)', function (): void {
+    $plugin = new DemoPlugin();
+    $collector = new \Spora\Core\MiddlewareRouteCollector(
+        new \FastRoute\RouteParser\Std(),
+        new \FastRoute\DataGenerator\GroupCountBased(),
+    );
+    expect(fn() => $plugin->routes($collector))->not->toThrow(Throwable::class);
+});
+
+test('boot() is a no-op', function (): void {
+    expect(fn() => (new DemoPlugin())->boot())->not->toThrow(Throwable::class);
+});

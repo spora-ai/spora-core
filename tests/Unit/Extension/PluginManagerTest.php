@@ -7,10 +7,10 @@ namespace Tests\Unit\Extension;
 use Closure;
 use Psr\Log\NullLogger;
 use Spora\Core\Extension\Exceptions\PluginInstallFailedException;
-use Spora\Core\Paths;
 use Spora\Core\Extension\PluginInstallRequest;
 use Spora\Core\Extension\PluginInstallResult;
 use Spora\Core\Extension\PluginManager;
+use Spora\Core\Paths;
 use Tests\Support\FakeProcessFactory;
 use Tests\Support\InMemoryProcess;
 

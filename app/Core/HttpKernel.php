@@ -34,8 +34,7 @@ final class HttpKernel
 
     public function __construct(
         private readonly ?KernelInterface $kernel = null,
-    ) {
-    }
+    ) {}
 
     public function handle(Request $request): Response
     {

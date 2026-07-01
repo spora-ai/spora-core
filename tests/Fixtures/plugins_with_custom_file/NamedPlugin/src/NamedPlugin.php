@@ -4,25 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Fixtures\Plugins\NamedPlugin;
 
-use DI\ContainerBuilder;
 use Spora\Drivers\LLMDriverInterface;
-use Spora\Plugins\PluginInterface;
+use Spora\Plugins\AbstractPlugin;
 
-final class NamedPlugin implements PluginInterface
+final class NamedPlugin extends AbstractPlugin
 {
     public function getName(): string
     {
         return 'Named Plugin';
-    }
-
-    public function autoload(): array
-    {
-        return [];
-    }
-
-    public function tools(): array
-    {
-        return [];
     }
 
     /**
@@ -32,22 +21,4 @@ final class NamedPlugin implements PluginInterface
     {
         return ['named_driver' => NamedDriver::class];
     }
-
-    public function recipePaths(): array
-    {
-        return [];
-    }
-
-    public function schemaVersion(): int
-    {
-        return 0;
-    }
-
-    /** @phpstan-return ?string */
-    public function migrationsPath(): ?string
-    {
-        return null;
-    }
-
-    public function register(ContainerBuilder $builder): void {}
 }

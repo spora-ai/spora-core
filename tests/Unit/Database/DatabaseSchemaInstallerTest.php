@@ -17,13 +17,16 @@ const PLUGINS_FIXTURE_WITH_MIGRATIONS = '/tests/Fixtures/plugins_with_migrations
  * Boot a fresh in-memory SQLite connection and return the installer under test.
  * No stamp path — in-memory DBs have no persistent filesystem.
  */
-function bootInstaller(?PluginLoader $pluginLoader = null, ?string $stampPath = null): DatabaseSchemaInstaller
-{
+function bootInstaller(
+    ?PluginLoader $pluginLoader = null,
+    ?string $stampPath = null,
+    ?Spora\Extensions\AppLoader $appLoader = null,
+): DatabaseSchemaInstaller {
     Database::resetBootState();
     $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:'], $pluginLoader);
     $db->bootDatabaseConnectionOnly();
 
-    return new DatabaseSchemaInstaller($pluginLoader, $stampPath);
+    return new DatabaseSchemaInstaller($pluginLoader, $stampPath, null, null, $appLoader);
 }
 
 function bootLoaderFromFixture(string $dir): PluginLoader
@@ -254,6 +257,137 @@ test('Database::boot() installs the full schema end-to-end', function (): void {
     expect(Capsule::schema()->hasTable('schema_versions'))->toBeTrue();
 })->afterEach(fn() => Database::resetBootState());
 
+// App migrations via AppLoader
+
+test('installer accepts an AppLoader and installs app migrations under the "app" component', function (): void {
+    Database::resetBootState();
+
+    $migrationsDir = sys_get_temp_dir() . '/spora-app-migrations-' . bin2hex(random_bytes(4));
+    mkdir($migrationsDir, 0755, true);
+    file_put_contents($migrationsDir . '/app_001_create_app_notes.php', <<<'PHP'
+<?php
+use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+
+return new class extends Migration {
+    public function up(): void
+    {
+        Capsule::schema()->create('app_notes', static function (Blueprint $t): void {
+            $t->string('note')->primary();
+        });
+    }
+    public function down(): void { Capsule::schema()->dropIfExists('app_notes'); }
+};
+PHP);
+
+    $app = new class ($migrationsDir) extends Spora\Extensions\AbstractExtension {
+        public function __construct(private readonly string $migrationsPath) {}
+        public function getName(): string
+        {
+            return 'TestApp';
+        }
+        public function schemaVersion(): int
+        {
+            return 1;
+        }
+        public function migrationsPath(): string
+        {
+            return $this->migrationsPath;
+        }
+    };
+
+    // Hand-build an AppLoader with the App pre-set via reflection — same
+    // seam AppLoaderTest uses for the autoload() branch.
+    $loader = new Spora\Extensions\AppLoader();
+    (new ReflectionProperty($loader, 'app'))->setValue($loader, $app);
+
+    $installer = bootInstaller(appLoader: $loader);
+    $installer->install();
+
+    expect(Capsule::schema()->hasTable('app_notes'))->toBeTrue();
+    $row = Capsule::table('schema_versions')->where('component', 'app')->first();
+    expect($row)->not->toBeNull();
+    expect((int) $row->version)->toBe(1);
+
+    Database::resetBootState();
+    @unlink($migrationsDir . '/app_001_create_app_notes.php');
+    @rmdir($migrationsDir);
+});
+
+test('installer skips App migrations when App declares schemaVersion 0', function (): void {
+    Database::resetBootState();
+
+    $app = new class extends Spora\Extensions\AbstractExtension {
+        public function getName(): string
+        {
+            return 'NoSchemaApp';
+        }
+        public function schemaVersion(): int
+        {
+            return 0;
+        }
+        public function migrationsPath(): string
+        {
+            return '/somewhere/never-read';
+        }
+    };
+
+    $loader = new Spora\Extensions\AppLoader();
+    (new ReflectionProperty($loader, 'app'))->setValue($loader, $app);
+
+    $installer = bootInstaller(appLoader: $loader);
+    $installer->install();
+
+    $row = Capsule::table('schema_versions')->where('component', 'app')->first();
+    expect($row)->toBeNull();
+
+    Database::resetBootState();
+});
+
+test('installer skips App migrations when migrationsPath() returns null', function (): void {
+    Database::resetBootState();
+
+    // schemaVersion > 0 but no migrationsPath → "not ready yet".
+    $app = new class extends Spora\Extensions\AbstractExtension {
+        public function getName(): string
+        {
+            return 'MigrationsTbdApp';
+        }
+        public function schemaVersion(): int
+        {
+            return 5;
+        }
+        public function migrationsPath(): ?string
+        {
+            return null;
+        }
+    };
+
+    $loader = new Spora\Extensions\AppLoader();
+    (new ReflectionProperty($loader, 'app'))->setValue($loader, $app);
+
+    $installer = bootInstaller(appLoader: $loader);
+    $installer->install();
+
+    $row = Capsule::table('schema_versions')->where('component', 'app')->first();
+    expect($row)->toBeNull();
+
+    Database::resetBootState();
+});
+
+test('installer is unchanged when no AppLoader is provided (backward compatibility)', function (): void {
+    Database::resetBootState();
+
+    $installer = bootInstaller();
+    $installer->install();
+
+    $row = Capsule::table('schema_versions')->where('component', 'app')->first();
+    expect($row)->toBeNull();
+
+    Database::resetBootState();
+});
+
 // Core migrations path resolution
 //
 // The constructor override ($coreMigrationsPath) exercises the same code path as
@@ -338,7 +472,7 @@ test('resolveCoreMigrationsPath() throws a clear exception when no migrations ex
         }
 
         expect(fn() => new DatabaseSchemaInstaller(null, null, null))
-            ->toThrow(\Spora\Core\Exceptions\SchemaInstallFailedException::class, 'No core migrations found');
+            ->toThrow(Spora\Core\Exceptions\SchemaInstallFailedException::class, 'No core migrations found');
     } finally {
         // Re-rename could fail if an earlier rename already failed; ignore to
         // keep teardown best-effort.

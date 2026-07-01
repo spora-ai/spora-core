@@ -4,31 +4,15 @@ declare(strict_types=1);
 
 namespace Tests\Fixtures\Plugins\BadPrefixPlugin;
 
-use DI\ContainerBuilder;
-use Spora\Plugins\PluginInterface;
+use Spora\Plugins\AbstractPlugin;
 
-final class Plugin implements PluginInterface
+final class Plugin extends AbstractPlugin
 {
     public function getName(): string
     {
         return 'Bad Prefix Plugin';
     }
-    public function autoload(): array
-    {
-        return [];
-    }
-    public function tools(): array
-    {
-        return [];
-    }
-    public function drivers(): array
-    {
-        return [];
-    }
-    public function recipePaths(): array
-    {
-        return [];
-    }
+
     public function schemaVersion(): int
     {
         return 1;
@@ -38,6 +22,4 @@ final class Plugin implements PluginInterface
     {
         return __DIR__ . '/migrations';
     }
-
-    public function register(ContainerBuilder $builder): void {}
 }

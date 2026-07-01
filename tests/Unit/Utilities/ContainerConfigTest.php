@@ -53,7 +53,7 @@ function resolveConfig(array $tempEnv = [], ?array $fileConfig = null): array
             if ($id === Paths::class) {
                 return $this->paths;
             }
-            throw new \RuntimeException("Unexpected container lookup: $id");
+            throw new RuntimeException("Unexpected container lookup: $id");
         }
         public function has(string $id): bool
         {

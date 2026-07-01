@@ -10,6 +10,7 @@ use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Filesystem\Filesystem;
 use Spora\Core\Exceptions\SchemaInstallFailedException;
+use Spora\Extensions\AppLoader;
 use Spora\Plugins\PluginLoader;
 
 /**
@@ -42,12 +43,16 @@ final class DatabaseSchemaInstaller
      * @param  ?string        $coreMigrationsPath Override the core migrations path. Null uses the
      *                                           project-local → framework-vendor fallback chain.
      *                                           Mainly for tests.
+     * @param  ?AppLoader     $appLoader          Project App extension. When non-null and the App declares
+     *                                           migrations, those migrations are installed under the "app"
+     *                                           component name.
      */
     public function __construct(
         private readonly ?PluginLoader $pluginLoader      = null,
         private readonly ?string       $stampPath         = null,
         ?string                        $coreMigrationsPath = null,
         private readonly ?Paths        $paths             = null,
+        private readonly ?AppLoader    $appLoader         = null,
     ) {
         $this->coreMigrationsPath = $coreMigrationsPath ?? $this->resolveCoreMigrationsPath();
     }
@@ -74,6 +79,14 @@ final class DatabaseSchemaInstaller
             }
         }
 
+        if ($this->appLoader !== null) {
+            $app = $this->appLoader->getApp();
+            if ($app !== null && $app->schemaVersion() > 0 && $app->migrationsPath() !== null) {
+                $this->validateMigrationFilenames('app', $app->migrationsPath());
+                $this->runComponent($migrator, 'app', $app->schemaVersion(), $app->migrationsPath());
+            }
+        }
+
         // Write the stamp only after all migrations succeed, so a partial failure
         // leaves the stamp stale and triggers a full re-check on next boot.
         if ($this->stampPath !== null) {
@@ -96,6 +109,13 @@ final class DatabaseSchemaInstaller
             }
             sort($pluginParts); // stable order regardless of discovery order
             array_push($parts, ...$pluginParts);
+        }
+
+        if ($this->appLoader !== null) {
+            $app = $this->appLoader->getApp();
+            if ($app !== null && $app->schemaVersion() > 0 && $app->migrationsPath() !== null) {
+                $parts[] = 'app_v' . $app->schemaVersion();
+            }
         }
 
         return implode('|', $parts);

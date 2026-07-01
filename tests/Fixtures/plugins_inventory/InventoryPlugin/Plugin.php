@@ -4,20 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Fixtures\Plugins\InventoryPlugin;
 
-use DI\ContainerBuilder;
-use Spora\Plugins\PluginInterface;
+use Spora\Plugins\AbstractPlugin;
 use Spora\Tools\ReadUrlTool;
 
-final class Plugin implements PluginInterface
+final class Plugin extends AbstractPlugin
 {
     public function getName(): string
     {
         return 'Inventory Plugin';
-    }
-
-    public function autoload(): array
-    {
-        return [];
     }
 
     public function tools(): array
@@ -30,11 +24,6 @@ final class Plugin implements PluginInterface
         return ['inventory_driver' => InventoryDriver::class];
     }
 
-    public function recipePaths(): array
-    {
-        return [];
-    }
-
     public function schemaVersion(): int
     {
         return 1;
@@ -44,6 +33,4 @@ final class Plugin implements PluginInterface
     {
         return __DIR__ . '/migrations';
     }
-
-    public function register(ContainerBuilder $builder): void {}
 }

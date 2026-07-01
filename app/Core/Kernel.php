@@ -9,6 +9,7 @@ use DI\ContainerBuilder;
 use Dotenv\Dotenv;
 use Psr\Log\LoggerInterface;
 use Spora\Core\Exceptions\BasePathNotDefinedException;
+use Spora\Extensions\AppLoader;
 use Spora\Http\Exceptions\ForbiddenException;
 use Spora\Http\Exceptions\InvalidCsrfTokenException;
 use Spora\Http\Exceptions\UnauthenticatedException;
@@ -30,6 +31,7 @@ final class Kernel implements KernelInterface
     private bool $errorHandlerInstalled = false;
 
     private readonly Paths $paths;
+    private readonly AppLoader $appLoader;
 
     public function __construct(?Paths $paths = null)
     {
@@ -38,6 +40,17 @@ final class Kernel implements KernelInterface
 
         $builder = new ContainerBuilder();
         $builder->addDefinitions($this->loadContainerDefinitions());
+
+        // AppLoader is owned by the Kernel (not lazily constructed inside a factory)
+        // because its `load()` step applies App::register() to the ContainerBuilder
+        // BEFORE the container is built — DI bindings must be in place first.
+        $this->appLoader = new AppLoader();
+        $this->appLoader->load($this->paths, $builder);
+
+        // Register the live AppLoader instance so container-managed services
+        // (e.g. Database → DatabaseSchemaInstaller) can resolve it later.
+        $builder->addDefinitions([AppLoader::class => $this->appLoader]);
+
         $this->container = $builder->build();
 
         $this->configureErrorHandling($this->container->get('config')['app_env'] ?? 'production');
@@ -56,6 +69,9 @@ final class Kernel implements KernelInterface
         try {
             $this->container->get(Database::class)->boot();
             $router = $this->buildRouter();
+            // App::boot() runs once per request, after the container is built
+            // and the DB is up — services are safe to use here.
+            $this->appLoader->boot();
             return $router->dispatch($request);
         } catch (Throwable $e) {
             return $this->handleException($e);
@@ -65,6 +81,11 @@ final class Kernel implements KernelInterface
     public function getContainer(): Container
     {
         return $this->container;
+    }
+
+    public function getAppLoader(): AppLoader
+    {
+        return $this->appLoader;
     }
 
     /**
@@ -78,7 +99,7 @@ final class Kernel implements KernelInterface
             throw new BasePathNotDefinedException(
                 'BASE_PATH is not defined. Add `define(\'BASE_PATH\', dirname(__FILE__, 2));` '
                 . 'to your public/index.php (web entry) and bin/spora (CLI entry) '
-                . 'before any Spora framework code runs.'
+                . 'before any Spora framework code runs.',
             );
         }
         return BASE_PATH;
@@ -103,7 +124,13 @@ final class Kernel implements KernelInterface
 
     private function buildRouter(): Router
     {
-        return new Router($this->container, [RouteDefinitions::class, 'register']);
+        return new Router(
+            $this->container,
+            function (MiddlewareRouteCollector $r): void {
+                RouteDefinitions::register($r);
+                $this->appLoader->registerRoutes($r);
+            },
+        );
     }
 
     private function handleException(Throwable $e): Response

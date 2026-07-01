@@ -51,4 +51,13 @@ $application->addCommand($container->get(TaskRunCommand::class));
 $application->addCommand($container->get(ToolSettingsMigrationCommand::class));
 $application->addCommand($container->get(WorkerRunCommand::class));
 
+// Optional dev-time scaffolder (spora-ai/spora-maker). When installed as a
+// require-dev dep, every `make:*` subcommand is exposed under the `make`
+// umbrella command. Skipped silently when the package is not installed.
+if (class_exists(\Spora\Maker\MakeCommand::class)) {
+    foreach (\Spora\Maker\MakeCommand::buildMakers(BASE_PATH) as $makerCommand) {
+        $application->addCommand($makerCommand);
+    }
+}
+
 $application->run();

@@ -47,7 +47,7 @@ test('handle() returns a JSON 500 when the inner Kernel throws', function (): vo
         $kernel->shouldReceive('handle')
             ->once()
             ->with($request)
-            ->andThrow(new \RuntimeException('boom'));
+            ->andThrow(new RuntimeException('boom'));
 
         $httpKernel = new HttpKernel($kernel);
         $result = $httpKernel->handle($request);
