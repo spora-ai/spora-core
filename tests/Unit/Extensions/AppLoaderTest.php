@@ -202,6 +202,22 @@ it('accepts an App that extends AbstractExtension without explicitly implements 
     expect($app)->toBeInstanceOf(SporaExtensionInterface::class);
 });
 
+it('picks the concrete App over an abstract parent newly declared alongside it', function (): void {
+    // The fixture reference is a string, so the only way PHP autoloads
+    // AppLoaderAbstractParent (and transitively AbstractExtension) is via
+    // the require_once of the synthesized app/App.php — the exact scenario
+    // the bug exposes.
+    file_put_contents(
+        $this->tmpDir . '/app/App.php',
+        "<?php class $this->appClass extends \\Tests\\Fixtures\\AppLoaderAbstractParent {}",
+    );
+
+    $app = $this->loader->load($this->paths, $this->builder);
+
+    expect($app)->toBeInstanceOf($this->appClass);
+    expect($app)->toBeInstanceOf(SporaExtensionInterface::class);
+});
+
 it('registers PSR-4 mappings declared by App::autoload() with the Composer ClassLoader', function (): void {
     $mappingApp = new class extends AbstractExtension {
         public function getName(): string
