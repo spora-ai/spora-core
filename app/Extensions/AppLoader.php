@@ -183,19 +183,28 @@ final class AppLoader
             return null;
         }
 
-        // Filter to SporaExtensionInterface implementers, then take the last declared
-        // one (most-recent declaration wins — matches typical "one class per file"
-        // practice).
-        $implementers = array_filter(
+        // Filter to SporaExtensionInterface implementers that are CONCRETE —
+        // the App's parent (e.g. AbstractExtension) is autoloaded along with
+        // the App file and shows up in $newlyDeclared, but it is abstract and
+        // cannot be instantiated. Without the isAbstract() check,
+        // array_key_last() picks the most-recently-declared class which is
+        // usually the parent — leading to "Cannot instantiate abstract class"
+        // at boot.
+        $candidates = array_filter(
             $newlyDeclared,
-            static fn(string $c): bool => is_subclass_of($c, SporaExtensionInterface::class),
+            static function (string $c): bool {
+                if (!is_subclass_of($c, SporaExtensionInterface::class)) {
+                    return false;
+                }
+                return !(new \ReflectionClass($c))->isAbstract();
+            },
         );
 
-        if (empty($implementers)) {
+        if (empty($candidates)) {
             return null;
         }
 
-        return $implementers[array_key_last($implementers)];
+        return $candidates[array_key_last($candidates)];
     }
 
     private function findClassLoader(): ?\Composer\Autoload\ClassLoader
