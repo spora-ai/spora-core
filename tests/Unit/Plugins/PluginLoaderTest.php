@@ -172,6 +172,8 @@ test('boot() with current stamp short-circuits and re-instantiates from the side
         expect($loader2->getPlugins())->toHaveKey('demo');
         expect($loader2->getPluginDirectories()['demo'])->toBe(realpath($dir . '/demo'));
     } finally {
+        @unlink($sidecar);
+        @unlink($stamp);
         $cleanup();
     }
 });
@@ -204,6 +206,8 @@ test('boot() rewrites the stamp when a manifest is added between boots', functio
     } finally {
         @unlink($dir . '/beta/plugin.json');
         @rmdir($dir . '/beta');
+        @unlink($dir . '/.stamp.cache.json');
+        @unlink($dir . '/.stamp');
         @unlink($dir . '/alpha/plugin.json');
         @rmdir($dir . '/alpha');
         @rmdir($dir);
@@ -246,6 +250,8 @@ test('boot() falls back to full discovery when the sidecar is corrupt', function
         $sidecarContents = file_get_contents($stamp . '.cache.json');
         expect($sidecarContents)->toContain('corrupt');
     } finally {
+        @unlink($dir . '/.stamp.cache.json');
+        @unlink($stamp);
         $cleanup();
     }
 });

@@ -17,8 +17,6 @@ if (!defined('BASE_PATH')) {
     define('BASE_PATH', dirname(__DIR__));
 }
 
-require_once BASE_PATH . '/vendor/autoload.php';
-
 // Fixture plugins are organised by test purpose (e.g. plugins_inventory/<Plugin>)
 // rather than by namespace, so Composer's `Tests\` → `tests/` mapping can't find
 // them. Register each fixture explicitly so `is_a(..., true)` in PluginLoader
