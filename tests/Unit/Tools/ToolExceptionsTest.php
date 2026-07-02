@@ -2,6 +2,11 @@
 
 declare(strict_types=1);
 
+namespace Tests\Unit\Tools;
+
+use Mockery;
+use ReflectionMethod;
+use RuntimeException;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
@@ -69,9 +74,3 @@ it('ToolParameterSchemaBuilder throws ToolParameterSchemaException on discrimina
     expect(fn() => ToolParameterSchemaBuilder::build($cls))
         ->toThrow(ToolParameterSchemaException::class);
 });
-
-/** Fixture that uses HasOperations without any #[ToolOperation] attributes. */
-final class HasOperationsFixtureWithoutOps
-{
-    use Spora\Tools\Traits\HasOperations;
-}

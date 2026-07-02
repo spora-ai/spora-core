@@ -2,20 +2,22 @@
 
 declare(strict_types=1);
 
+namespace Tests\Unit\Tools;
+
+use Mockery;
+use ReflectionClass;
 use Spora\Services\ImapClientInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\AbstractTool;
 use Spora\Tools\AgentMemoryTool;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
-use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\CalDavCalendarTool;
 use Spora\Tools\CurrentTimeTool;
 use Spora\Tools\EmailTool;
 use Spora\Tools\GlobalMemoryTool;
 use Spora\Tools\ReadUrlTool;
-use Spora\Tools\Schema\ToolParameterSchemaBuilder;
 use Spora\Tools\SemanticScholarTool;
 use Spora\Tools\SerperSearchTool;
 use Spora\Tools\TavilySearchTool;
@@ -23,6 +25,7 @@ use Spora\Tools\ToolInterface;
 use Spora\Tools\UserInfoTool;
 use Spora\Tools\WeatherApiTool;
 use Spora\Tools\WorldNewsApiTool;
+use stdClass;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
@@ -196,28 +199,3 @@ it('required[] only references declared property names', function (): void {
         }
     }
 });
-
-/**
- * Helper that walks the inheritance chain to collect attributes — matches
- * ToolParameterSchemaBuilder's own behaviour so the invariants above see
- * the same merged attribute list the builder produces. Kept in this file
- * to avoid leaking a test-only utility into app/.
- */
-final class ToolParameterSchemaBuilderHelper
-{
-    /**
-     * @return list<ReflectionAttribute<object>>
-     */
-    public static function collectAttributes(ReflectionClass $ref, string $attributeClass): array
-    {
-        $attrs = [];
-        $current = $ref;
-        while ($current !== false) {
-            foreach ($current->getAttributes($attributeClass) as $attr) {
-                $attrs[] = $attr;
-            }
-            $current = $current->getParentClass();
-        }
-        return $attrs;
-    }
-}

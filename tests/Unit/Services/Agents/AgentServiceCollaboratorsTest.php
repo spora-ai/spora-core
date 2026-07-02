@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+namespace Tests\Unit\Services\Agents;
+
 use Psr\Log\NullLogger;
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
@@ -12,33 +14,9 @@ use Spora\Services\Agents\AgentToolOverrideResolver;
 use Spora\Services\AgentService;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
-use Spora\Tools\Attributes\Tool;
-use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\CalculatorTool;
 
 defined('AGENT_COLLABORATORS_TEST_PASSWORD') || define('AGENT_COLLABORATORS_TEST_PASSWORD', 'Password1!');
-
-/**
- * A throwaway tool used to test #[ToolSetting] reflection in
- * AgentToolInstanceResolver without touching the real CalculatorTool fixture.
- * Attributes are placed at the class level because getToolPasswordKeys
- * reads class-level ToolSetting attributes.
- */
-#[Tool(name: 'pwtool', description: 'fake', displayName: 'PW', category: 'test')]
-#[ToolSetting(key: 'secret', type: 'password', label: 'Secret', required: false)]
-#[ToolSetting(key: 'public', type: 'string', label: 'Public', required: false)]
-final class CollaboratorTestPasswordTool extends Spora\Tools\AbstractTool
-{
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): Spora\Tools\ValueObjects\ToolResult
-    {
-        return new Spora\Tools\ValueObjects\ToolResult(true, '');
-    }
-
-    public function describeAction(array $arguments): string
-    {
-        return '';
-    }
-}
 
 /**
  * @return array{0: AgentService, 1: AgentToolInstanceResolver, 2: AgentToolOverrideResolver, 3: AgentToolOperationsResolver, 4: int}

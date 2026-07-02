@@ -2,26 +2,14 @@
 
 declare(strict_types=1);
 
-use Psr\Log\AbstractLogger;
+namespace Tests\Unit\Services;
+
+use Mockery;
+use Psr\Log\LoggerInterface;
+use RuntimeException;
 use Spora\Services\MercurePublisher;
-
-/**
- * Test logger that records every log call for later assertions.
- */
-final class MercurePublisherCapturingLogger extends AbstractLogger
-{
-    /** @var list<array{level: mixed, message: string, context: array<string, mixed>}> */
-    public array $records = [];
-
-    public function log($level, string|Stringable $message, array $context = []): void
-    {
-        $this->records[] = [
-            'level'   => $level,
-            'message' => (string) $message,
-            'context' => $context,
-        ];
-    }
-}
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\HttpClient\ResponseInterface;
 
 function mercureCapturingLogger(): MercurePublisherCapturingLogger
 {
@@ -29,7 +17,7 @@ function mercureCapturingLogger(): MercurePublisherCapturingLogger
 }
 
 test('publish returns false and does not call HTTP client when hubUrl is null', function (): void {
-    $client = Mockery::mock(Symfony\Contracts\HttpClient\HttpClientInterface::class);
+    $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
     $logger = mercureCapturingLogger();
@@ -44,7 +32,7 @@ test('publish returns false and does not call HTTP client when hubUrl is null', 
 });
 
 test('publish returns false and does not call HTTP client when jwtKey is null', function (): void {
-    $client = Mockery::mock(Symfony\Contracts\HttpClient\HttpClientInterface::class);
+    $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
     $logger = mercureCapturingLogger();
@@ -58,7 +46,7 @@ test('publish returns false and does not call HTTP client when jwtKey is null', 
 });
 
 test('publish returns false and logs error when HTTP client throws', function (): void {
-    $client = Mockery::mock(Symfony\Contracts\HttpClient\HttpClientInterface::class);
+    $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldReceive('request')
         ->once()
         ->andThrow(new RuntimeException('Connection refused'));
@@ -85,8 +73,8 @@ test('publish returns false and logs error when HTTP client throws', function ()
 });
 
 test('publish returns true on success and logs info with HTTP status', function (): void {
-    $client = Mockery::mock(Symfony\Contracts\HttpClient\HttpClientInterface::class);
-    $response = Mockery::mock(Symfony\Contracts\HttpClient\ResponseInterface::class);
+    $client = Mockery::mock(HttpClientInterface::class);
+    $response = Mockery::mock(ResponseInterface::class);
     $response->shouldReceive('getStatusCode')->andReturn(200);
 
     $client->shouldReceive('request')->once()->andReturn($response);
@@ -113,8 +101,8 @@ test('publish returns true on success and logs info with HTTP status', function 
 });
 
 test('publish logs error when HTTP response is 4xx', function (): void {
-    $client = Mockery::mock(Symfony\Contracts\HttpClient\HttpClientInterface::class);
-    $response = Mockery::mock(Symfony\Contracts\HttpClient\ResponseInterface::class);
+    $client = Mockery::mock(HttpClientInterface::class);
+    $response = Mockery::mock(ResponseInterface::class);
     $response->shouldReceive('getStatusCode')->andReturn(401);
 
     $client->shouldReceive('request')->once()->andReturn($response);
@@ -135,7 +123,7 @@ test('publish logs error when HTTP response is 4xx', function (): void {
 });
 
 test('publishToUser returns false and does not call HTTP client when hubUrl is null', function (): void {
-    $client = Mockery::mock(Symfony\Contracts\HttpClient\HttpClientInterface::class);
+    $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
     $logger = mercureCapturingLogger();
@@ -150,7 +138,7 @@ test('publishToUser returns false and does not call HTTP client when hubUrl is n
 });
 
 test('publishToUser returns false and does not call HTTP client when jwtKey is null', function (): void {
-    $client = Mockery::mock(Symfony\Contracts\HttpClient\HttpClientInterface::class);
+    $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
     $logger = mercureCapturingLogger();
@@ -164,7 +152,7 @@ test('publishToUser returns false and does not call HTTP client when jwtKey is n
 });
 
 test('publishToUser returns false and logs error when HTTP client throws', function (): void {
-    $client = Mockery::mock(Symfony\Contracts\HttpClient\HttpClientInterface::class);
+    $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldReceive('request')
         ->once()
         ->andThrow(new RuntimeException('Network unreachable'));
@@ -190,8 +178,8 @@ test('publishToUser returns false and logs error when HTTP client throws', funct
 });
 
 test('publishToUser returns true on success and logs info with HTTP status', function (): void {
-    $client = Mockery::mock(Symfony\Contracts\HttpClient\HttpClientInterface::class);
-    $response = Mockery::mock(Symfony\Contracts\HttpClient\ResponseInterface::class);
+    $client = Mockery::mock(HttpClientInterface::class);
+    $response = Mockery::mock(ResponseInterface::class);
     $response->shouldReceive('getStatusCode')->andReturn(204);
 
     $client->shouldReceive('request')->once()->andReturn($response);
@@ -217,8 +205,8 @@ test('publishToUser returns true on success and logs info with HTTP status', fun
 });
 
 test('publishToUser logs error when HTTP response is 5xx', function (): void {
-    $client = Mockery::mock(Symfony\Contracts\HttpClient\HttpClientInterface::class);
-    $response = Mockery::mock(Symfony\Contracts\HttpClient\ResponseInterface::class);
+    $client = Mockery::mock(HttpClientInterface::class);
+    $response = Mockery::mock(ResponseInterface::class);
     $response->shouldReceive('getStatusCode')->andReturn(500);
 
     $client->shouldReceive('request')->once()->andReturn($response);
@@ -239,8 +227,8 @@ test('publishToUser logs error when HTTP response is 5xx', function (): void {
 });
 
 test('publish and publishToUser do not throw when no logger is provided', function (): void {
-    $client = Mockery::mock(Symfony\Contracts\HttpClient\HttpClientInterface::class);
-    $response = Mockery::mock(Symfony\Contracts\HttpClient\ResponseInterface::class);
+    $client = Mockery::mock(HttpClientInterface::class);
+    $response = Mockery::mock(ResponseInterface::class);
     $response->shouldReceive('getStatusCode')->andReturn(200);
     $client->shouldReceive('request')->andReturn($response);
 
@@ -255,13 +243,13 @@ test('publish and publishToUser do not throw when no logger is provided', functi
 });
 
 test('publish and publishToUser do not throw when logger is provided and no error occurs', function (): void {
-    $client = Mockery::mock(Symfony\Contracts\HttpClient\HttpClientInterface::class);
-    $response = Mockery::mock(Symfony\Contracts\HttpClient\ResponseInterface::class);
+    $client = Mockery::mock(HttpClientInterface::class);
+    $response = Mockery::mock(ResponseInterface::class);
     $response->shouldReceive('getStatusCode')->andReturn(200);
     $client->shouldReceive('request')->andReturn($response);
 
     // Pass a mock logger that allows any calls
-    $logger = Mockery::mock(Psr\Log\LoggerInterface::class);
+    $logger = Mockery::mock(LoggerInterface::class);
     $logger->shouldReceive('debug')->zeroOrMoreTimes();
     $logger->shouldReceive('info')->zeroOrMoreTimes();
     $logger->shouldReceive('error')->zeroOrMoreTimes();

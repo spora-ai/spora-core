@@ -2,12 +2,14 @@
 
 declare(strict_types=1);
 
+namespace Tests\Feature;
+
+use Mockery;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Drivers\DriverFactory;
-use Spora\Drivers\LLMDriverInterface;
-use Spora\Drivers\ValueObjects\LLMRequest;
+use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
@@ -19,6 +21,7 @@ use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\HandoverService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\TaskService;
+use Spora\Services\ToolConfigServiceInterface;
 use Spora\Tools\HandoverTool;
 use Tests\Fixtures\StubInputTool;
 
@@ -41,42 +44,6 @@ const HANDOVER_E2E_SUMMARY           = 'User asked for a refund; I do not handle
 const HANDOVER_E2E_HAPPY_PROMPT      = 'I want a refund please';
 
 /**
- * Scripted LLM driver: returns queued responses in order, recycling the
- * last response if the queue is exhausted. Avoids Mockery's `andReturnUsing`
- * (which PHPStan cannot resolve on the mock type union) by being a real
- * implementation of LLMDriverInterface.
- */
-final class HandoverE2eScriptedDriver implements LLMDriverInterface
-{
-    /** @var list<LLMResponse> */
-    private array $responses;
-
-    public int $callCount = 0;
-
-    public function __construct(LLMResponse ...$responses)
-    {
-        $this->responses = array_values($responses);
-    }
-
-    public function complete(LLMRequest $request): LLMResponse
-    {
-        $this->callCount++;
-        $idx = min($this->callCount - 1, count($this->responses) - 1);
-        return $this->responses[$idx];
-    }
-
-    public function getProviderName(): string
-    {
-        return 'mock';
-    }
-
-    public function getModelName(): string
-    {
-        return 'mock-model';
-    }
-}
-
-/**
  * Seed: a user, a global LLMDriverConfiguration, and two agents
  * (Source, Target) under the same owner. Returns the relevant ids.
  *
@@ -96,7 +63,7 @@ function handoverE2eSeedAgents(): array
     $llmConfig = LLMDriverConfiguration::create([
         'user_id'          => null,
         'name'             => 'HandoverE2e Global Config',
-        'driver_class'     => Spora\Drivers\OpenAICompatibleDriver::class,
+        'driver_class'     => OpenAICompatibleDriver::class,
         'settings'         => json_encode(['api_key' => 'test']),
         'is_global'        => true,
         'is_default'       => true,
@@ -171,7 +138,7 @@ function handoverE2eBuildOrchestrator(
 
     $allowlist = $allowlistOverride ?? [$targetAgentId];
 
-    $toolConfig = Mockery::mock(Spora\Services\ToolConfigServiceInterface::class);
+    $toolConfig = Mockery::mock(ToolConfigServiceInterface::class);
     $toolConfig->allows('getEffectiveSettings')
         ->andReturn(['allowed_target_agents' => $allowlist]);
 

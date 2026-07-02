@@ -2,12 +2,9 @@
 
 declare(strict_types=1);
 
-use Spora\Tools\AbstractTool;
-use Spora\Tools\Attributes\Tool;
-use Spora\Tools\Attributes\ToolOperation;
-use Spora\Tools\Attributes\ToolParameter;
+namespace Tests\Unit\Tools;
+
 use Spora\Tools\ToolInterface;
-use Spora\Tools\ValueObjects\ToolResult;
 
 it('a concrete subclass is instantiable and produces a valid schema via the composed traits', function (): void {
     // Realistic subclass exercises both composed traits (HasOperations +
@@ -39,37 +36,3 @@ it('lets subclasses declare arbitrary constructors (DI signatures preserved)', f
 
     expect($tool->execute([], 1)->content)->toBe('hello: ok');
 });
-
-#[Tool(name: 'fixture_abstract_tool', description: 'AbstractTool unit test fixture')]
-#[ToolOperation(name: 'run', description: 'Run')]
-#[ToolOperation(name: 'stop', description: 'Stop')]
-#[ToolParameter(name: 'q', type: 'string', description: 'Query', required: true)]
-final class AbstractToolTestFixture extends AbstractTool
-{
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
-    {
-        return new ToolResult(true, 'ok');
-    }
-
-    public function describeAction(array $arguments): string
-    {
-        return 'fixture';
-    }
-}
-
-#[Tool(name: 'fixture_di_tool', description: 'AbstractTool DI fixture')]
-#[ToolOperation(name: 'run', description: 'Run')]
-final class AbstractToolTestWithDi extends AbstractTool
-{
-    public function __construct(private readonly string $prefix) {}
-
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
-    {
-        return new ToolResult(true, "{$this->prefix}: ok");
-    }
-
-    public function describeAction(array $arguments): string
-    {
-        return 'di fixture';
-    }
-}

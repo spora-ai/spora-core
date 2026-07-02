@@ -2,12 +2,15 @@
 
 declare(strict_types=1);
 
-use Psr\Log\AbstractLogger;
+namespace Tests\Unit\Services;
+
+use InvalidArgumentException;
 use Psr\Log\NullLogger;
 use Spora\Models\MailTemplate;
 use Spora\Models\User;
 use Spora\Services\SystemMailer;
 use Symfony\Component\Mailer\Mailer;
+use Throwable;
 
 // SystemMailer::getMailConfig() lets SPORA_MAIL_* env vars override the passed
 // config. Any earlier test that boots the Kernel triggers
@@ -21,24 +24,6 @@ beforeEach(function (): void {
         }
     }
 });
-
-/**
- * Test logger that records every log call for later assertions.
- */
-final class SystemMailerCapturingLogger extends AbstractLogger
-{
-    /** @var list<array{level: mixed, message: string, context: array<string, mixed>}> */
-    public array $records = [];
-
-    public function log($level, string|Stringable $message, array $context = []): void
-    {
-        $this->records[] = [
-            'level'   => $level,
-            'message' => (string) $message,
-            'context' => $context,
-        ];
-    }
-}
 
 function captureMailerLogger(): SystemMailerCapturingLogger
 {

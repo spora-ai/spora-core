@@ -2,16 +2,21 @@
 
 declare(strict_types=1);
 
+namespace Tests\Unit\Drivers;
+
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Mockery;
+use ReflectionObject;
+use Spora\Core\SecurityManager;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Drivers\AnthropicCompatibleDriver;
+use Spora\Drivers\LLMDriverConfigInterface;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\UserPreference;
 use Spora\Services\LLMConfigSchemaInspector;
 use Spora\Services\LLMConfigService;
-use Spora\Tools\Attributes\ToolSetting;
 
 const TEST_API_BASE_URL = 'https://api.example.com';
 const TEST_USER_PASSWORD = 'Password1!';
@@ -44,7 +49,7 @@ test('getDrivers returns empty array when no drivers registered', function (): v
 
 test('getDrivers excludes non-existent classes', function (): void {
     $security = Mockery::mock(SecurityManagerInterface::class);
-    /** @var list<class-string<Spora\Drivers\LLMDriverConfigInterface>> $driverClasses */
+    /** @var list<class-string<LLMDriverConfigInterface>> $driverClasses */
     $driverClasses = [
         OpenAICompatibleDriver::class,
         'Spora\Drivers\NonExistentDriver',
@@ -94,7 +99,7 @@ test('getDrivers returns settings_schema for each driver', function (): void {
 
 test('encodeSettings encrypts only password fields and stores others as plain strings', function (): void {
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-    $security = new Spora\Core\SecurityManager($key);
+    $security = new SecurityManager($key);
 
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
@@ -114,7 +119,7 @@ test('encodeSettings encrypts only password fields and stores others as plain st
 
 test('encodeSettings handles empty password field', function (): void {
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-    $security = new Spora\Core\SecurityManager($key);
+    $security = new SecurityManager($key);
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
     $result = $service->encodeSettings(OpenAICompatibleDriver::class, [
@@ -129,7 +134,7 @@ test('encodeSettings handles empty password field', function (): void {
 
 test('decodeSettings decrypts per-field format correctly', function (): void {
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-    $security = new Spora\Core\SecurityManager($key);
+    $security = new SecurityManager($key);
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
     $encoded = $service->encodeSettings(OpenAICompatibleDriver::class, [
@@ -146,7 +151,7 @@ test('decodeSettings decrypts per-field format correctly', function (): void {
 
 test('decodeSettings handles legacy wholesale-encrypted format', function (): void {
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-    $security = new Spora\Core\SecurityManager($key);
+    $security = new SecurityManager($key);
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
     // Simulate legacy wholesale encryption
@@ -160,7 +165,7 @@ test('decodeSettings handles legacy wholesale-encrypted format', function (): vo
 
 test('decodeSettings returns empty array for null/empty input', function (): void {
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-    $security = new Spora\Core\SecurityManager($key);
+    $security = new SecurityManager($key);
     $service = new LLMConfigService($security, []);
 
     expect($service->decodeSettings(OpenAICompatibleDriver::class, null))->toBe([]);
@@ -169,7 +174,7 @@ test('decodeSettings returns empty array for null/empty input', function (): voi
 
 test('encodeSettings + decodeSettings is a lossless round-trip', function (): void {
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-    $security = new Spora\Core\SecurityManager($key);
+    $security = new SecurityManager($key);
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
     $original = [
@@ -359,23 +364,6 @@ test('getEffectiveConfigForAgent returns null when no config at any tier', funct
     expect($result)->toBeNull();
 });
 
-/**
- * Internal fixture: a driver class with NO password-typed ToolSettings.
- * Used to verify getPasswordKeys() returns an empty list for password-free classes.
- */
-#[ToolSetting(key: 'greeting', label: 'Greeting', type: 'text', description: 'A friendly greeting.', required: false, default: 'hello')]
-final class NoPasswordFixtureDriver
-{
-    public static function getName(): string
-    {
-        return 'no_password_fixture';
-    }
-    public static function getDisplayName(): string
-    {
-        return 'No Password Fixture';
-    }
-}
-
 describe('LLMConfigService::validateNewConfigurationInputs', function (): void {
 
     test('returns null when name is empty', function (): void {
@@ -469,7 +457,7 @@ describe('LLMConfigService::applyConfigurationUpdates', function (): void {
 
     test('updates an existing configuration settings and preserves others', function (): void {
         $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-        $security = new Spora\Core\SecurityManager($key);
+        $security = new SecurityManager($key);
         $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
         $userId = Capsule::table('users')->insertGetId([

@@ -5,49 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Extensions;
 
 use Spora\Core\MiddlewareRouteCollector;
-use Spora\Extensions\AbstractExtension;
-use Spora\Tools\ToolInterface;
 use Throwable;
-
-/**
- * Concrete subclass with no overrides — used to verify that every hook
- * inherits its no-op default from AbstractExtension.
- */
-final class EmptyExtension extends AbstractExtension
-{
-    public function getName(): string
-    {
-        return 'Empty';
-    }
-}
-
-/**
- * Subclass that overrides only tools() — proves partial overrides work.
- */
-final class ToolsOnlyExtension extends AbstractExtension
-{
-    /** @var list<class-string<ToolInterface>> */
-    private array $tools;
-
-    /**
-     * @param list<class-string<ToolInterface>> $tools
-     */
-    public function __construct(array $tools)
-    {
-        $this->tools = $tools;
-    }
-
-    public function getName(): string
-    {
-        return 'ToolsOnly';
-    }
-
-    /** @return list<class-string<ToolInterface>> */
-    public function tools(): array
-    {
-        return $this->tools;
-    }
-}
 
 it('returns the directory containing the concrete subclass as getPath()', function (): void {
     $extension = new EmptyExtension();

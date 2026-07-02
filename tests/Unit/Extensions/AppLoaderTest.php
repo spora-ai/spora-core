@@ -12,62 +12,9 @@ use ReflectionClass;
 use Spora\Core\MiddlewareRouteCollector;
 use Spora\Core\Paths;
 use Spora\Extensions\AbstractExtension;
-use Spora\Extensions\AppInterface;
 use Spora\Extensions\AppLoader;
 use Spora\Extensions\SporaExtensionInterface;
 use Throwable;
-
-/**
- * App that records every method call so we can assert on the lifecycle.
- * Non-final because AppLoader's discovery creates a runtime subclass via
- * `class App extends SpyApp {}` written to a file on disk.
- */
-class SpyApp extends AbstractExtension implements AppInterface
-{
-    public int $registerCalls = 0;
-    public int $routesCalls = 0;
-    public int $bootCalls = 0;
-
-    public function getName(): string
-    {
-        return 'Spy';
-    }
-
-    public function register(ContainerBuilder $builder): void
-    {
-        $this->registerCalls++;
-    }
-
-    public function routes(MiddlewareRouteCollector $routes): void
-    {
-        $this->routesCalls++;
-    }
-
-    public function boot(): void
-    {
-        $this->bootCalls++;
-    }
-}
-
-/**
- * App whose class declaration is invalid for AppLoader (not implementing
- * SporaExtensionInterface). Used to assert the validation error path.
- */
-final class InvalidApp {}
-
-/**
- * Subclass of AbstractExtension that doesn't implement AppInterface — to
- * prove AppLoader's acceptance check uses SporaExtensionInterface, not
- * AppInterface, so apps don't have to `implements AppInterface` explicitly.
- * Non-final for the same reason as SpyApp.
- */
-class PlainApp extends AbstractExtension
-{
-    public function getName(): string
-    {
-        return 'Plain';
-    }
-}
 
 beforeEach(function (): void {
     $this->tmpDir = sys_get_temp_dir() . '/spora-app-loader-' . bin2hex(random_bytes(4));
