@@ -17,7 +17,24 @@ if (!defined('BASE_PATH')) {
     define('BASE_PATH', dirname(__DIR__));
 }
 
-require_once BASE_PATH . '/vendor/autoload.php';
+// Fixture plugins are organised by test purpose (e.g. plugins_inventory/<Plugin>)
+// rather than by namespace, so Composer's `Tests\` → `tests/` mapping can't find
+// them. Register each fixture explicitly so `is_a(..., true)` in PluginLoader
+// can resolve the class.
+$classLoader = require BASE_PATH . '/vendor/autoload.php';
+$fixtures   = BASE_PATH . '/tests/Fixtures';
+foreach ([
+    'ManifestPlugin'    => 'plugins_with_manifest/ManifestPlugin',
+    'ToolsPlugin'       => 'plugins_with_tools/ToolsPlugin',
+    'MigratingPlugin'   => 'plugins_with_migrations/MigratingPlugin',
+    'InventoryPlugin'   => 'plugins_inventory/InventoryPlugin',
+    'DefaultIconPlugin' => 'plugins_inventory_brain/DefaultIconPlugin',
+    'BadPrefixPlugin'   => 'plugins_bad_migrations/BadPrefixPlugin',
+    'NamedPlugin'       => 'plugins_with_custom_file/NamedPlugin',
+    'NotAPlugin'        => 'plugins_invalid_manifest/NotAPlugin',
+] as $plugin => $relativePath) {
+    $classLoader->addPsr4('Tests\\Fixtures\\Plugins\\' . $plugin . '\\', $fixtures . '/' . $relativePath . '/');
+}
 
 // Suppress E_DEPRECATED originating from delight-im vendor packages.
 // delight-im/auth v9.0.0 uses implicit nullable types (e.g. `callable $x = null`)

@@ -64,7 +64,6 @@ The full JSON Schema is in [`plugin.schema.json`](../plugin.schema.json) at the 
 |-----------------|--------|-------------|
 | `description`   | string | Short human-readable description surfaced by the inventory UI. Max 500 chars. |
 | `icon`          | string | Icon for the inventory UI. Three forms are accepted — bundled name, full `<svg>` string, or raw SVG path. Defaults to `"puzzle"` when omitted. Lets a plugin ship its own visual identity without coordinating with the Spora frontend. See [Bundled icons](#bundled-icons) for the curated palette and the three forms in detail. |
-| `file`          | string | Relative path (from the plugin directory) to the PHP file that declares the entry-point class. Defaults to `Plugin.php` when omitted. |
 | `autoload.psr-4`  | object | PSR-4 namespace → relative path mappings registered with the Composer classloader before the plugin is instantiated. Multiple entries are supported. |
 | `autoload.files`  | array  | PHP files to `require_once` before the plugin is instantiated, relative to the plugin directory. Use `["vendor/autoload.php"]` to load the plugin's own Composer dependency tree. Processed after `psr-4` mappings. |
 
@@ -123,7 +122,6 @@ If `icon` is omitted, the backend defaults it to `"puzzle"` and the frontend ren
     "class": "Acme\\Search\\Plugin",
     "description": "Search the public web via the Acme API.",
     "icon": "M11 4a7 7 0 1 1-4.95 11.95l-2.43 2.43a1 1 0 0 1-1.42-1.42l2.43-2.43A7 7 0 0 1 11 4Zm0 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z",
-    "file": "src/Plugin.php",
     "autoload": {
         "psr-4": {
             "Acme\\Search\\": "src/",
@@ -250,19 +248,20 @@ tree is completely isolated from the host application's vendor tree.
 
 ## Manifest validation
 
-`PluginLoader` enforces structural correctness at boot time and throws a `RuntimeException`
+`PluginLoader` enforces structural correctness at boot time and throws `PluginLoadFailedException`
 for any of the following:
 
 - Invalid JSON in `plugin.json`
 - Missing or non-string `slug` field
 - `slug` value that does not match `^[a-z0-9][a-z0-9_-]*$`
 - Missing or non-string `class` field
+- A `class` that cannot be resolved via PSR-4 autoloading (bad `autoload.psr-4` mapping, missing
+  composer.json entry, etc.), or that resolves to a class not implementing `PluginInterface`
 
-A manifest that is structurally valid but whose declared class cannot be resolved at
-runtime (e.g. a bad autoload path) is silently skipped — this is treated as a recoverable
-deployment error rather than a fatal one.
+The exception message includes the manifest path and the declared FQCN so the failure is
+straightforward to diagnose from a log line.
 
-The following conditions also result in a silent skip rather than a fatal error:
+The following conditions result in a silent skip rather than a fatal error:
 
 - **Duplicate slug** — a second plugin with the same `slug` as an already-loaded plugin.
 - **Duplicate class** — a second plugin manifest pointing to the same entry-point FQCN as an already-loaded plugin.
