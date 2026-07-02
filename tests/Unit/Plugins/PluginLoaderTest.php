@@ -47,9 +47,8 @@ test('toolClasses() returns empty array when plugin contributes no tools', funct
 });
 
 test('PSR-4 autoload resolves the entry-point class without a "file" key in the manifest', function (): void {
-    // The NamedPlugin fixture declares its entry point at NamedPlugin/NamedPlugin.php
-    // (no src/ subdirectory, no "file" key). The loader must rely on PSR-4 autoloading
-    // registered from the fixture's own composer.json mapping (Tests\ → tests/).
+    // The NamedPlugin fixture sits at NamedPlugin/NamedPlugin.php (no src/, no "file"
+    // key). The loader relies on the explicit PSR-4 mapping registered in tests/Pest.php.
     $loader = new PluginLoader([FIXTURE_CUSTOM_FILE_PLUGINS]);
     $loader->boot();
 
@@ -99,9 +98,6 @@ test('boot() throws PluginLoadFailedException for a manifest containing invalid 
 });
 
 test('manifest whose declared class cannot be autoloaded throws PluginLoadFailedException', function (): void {
-    // The manifest is structurally valid (has slug + class) but the PHP class is
-    // genuinely missing — the loader now surfaces this as a loud failure rather
-    // than silently dropping the plugin.
     $loader = new PluginLoader([FIXTURE_INVALID_MANIFESTS . '/BadClass']);
 
     expect(fn() => $loader->boot())
@@ -109,8 +105,6 @@ test('manifest whose declared class cannot be autoloaded throws PluginLoadFailed
 });
 
 test('manifest whose declared class is autoloadable but does not implement PluginInterface throws', function (): void {
-    // Class resolves via PSR-4 (it's a real class in the fixture) but it does
-    // not implement PluginInterface — the loader rejects it loudly.
     $loader = new PluginLoader([FIXTURE_INVALID_MANIFESTS . '/NotAPlugin']);
 
     expect(fn() => $loader->boot())

@@ -9,24 +9,17 @@ use Spora\Plugins\Exceptions\PluginLoadFailedException;
 /**
  * Discovers and boots PluginInterface implementations from one or more plugin directories.
  *
- * Convention: each plugin lives in its own subdirectory and must ship a plugin.json
- * manifest declaring the entry-point class FQCN. Plugin autoload mappings are
- * registered with the Composer classloader so that the plugin's own classes are
- * resolvable after boot.
+ * Each plugin lives in its own subdirectory and must ship a plugin.json manifest
+ * declaring the entry-point class FQCN. The manifest's `autoload.psr-4` mapping is
+ * registered with the Composer classloader before instantiation so the plugin's
+ * own classes are resolvable.
  *
- * Caching:
- *   The manifest-discovery and stamp-cache concerns live in {@see PluginLoaderCache}.
- *   When the cache is current, the loader re-instantiates plugins from the sidecar
- *   without re-parsing or re-validating manifests and without calling each plugin's
- *   `register()` hook. The boot path still does a full directory scan to compute
- *   the stamp hash; what the cache saves is the more expensive parse + autoload-
- *   register + instantiate cycle.
+ * The directory scan and manifest parse are cached via {@see PluginLoaderCache};
+ * a warm boot re-instantiates plugins from a sidecar JSON without re-reading
+ * manifests or calling each plugin's `register()` hook.
  *
- * Discovery order:
- *   The directories passed in $pluginDirectories are scanned in the order given.
- *   If the same slug appears in multiple directories, the first one wins (later
- *   manifests with the same slug are silently skipped, matching the existing
- *   duplicate-slug guard).
+ * Directories are scanned in the order given; if the same slug appears in more
+ * than one, the first one wins.
  */
 final class PluginLoader
 {
@@ -233,10 +226,6 @@ final class PluginLoader
     }
 
     /**
-     * Restore a single plugin from a sidecar entry — the same operations a
-     * cold boot would do (PSR-4 autoload register, instantiate), but without
-     * re-parsing the manifest JSON.
-     *
      * @param mixed $entry
      */
     private function restorePluginFromSidecarEntry(mixed $entry, ?\Composer\Autoload\ClassLoader $classLoader): void
@@ -253,13 +242,19 @@ final class PluginLoader
             return;
         }
 
+        $class = $manifest['class'] ?? null;
+        if (!is_string($class) || $class === '') {
+            // Sidecar entry is partially corrupt — surface to the caller so the
+            // boot path falls back to a full cold discovery rather than failing
+            // inside instantiatePlugin with a cryptic message.
+            throw new PluginLoadFailedException(
+                "Sidecar entry for plugin '{$slug}' is missing the 'class' field.",
+            );
+        }
+
         $this->registerManifestAutoload($manifest, $classLoader, $dir);
 
-        // Manifest file path is not preserved in the sidecar — use the sidecar manifest
-        // path joined with the plugin directory as a stable identifier for error messages.
-        $manifestFile = $dir . '/plugin.json';
-
-        $this->instantiatePlugin($slug, (string) $manifest['class'], $classLoader, $dir, $manifest, $manifestFile);
+        $this->instantiatePlugin($slug, $class, $classLoader, $dir, $manifest, $dir . '/plugin.json');
     }
 
     /**
@@ -297,12 +292,7 @@ final class PluginLoader
     }
 
     /**
-     * @throws PluginLoadFailedException  When the manifest JSON is invalid or violates the schema
-     *                                     contract, or when the declared class cannot be autoloaded
-     *                                     (e.g. a bad PSR-4 path in the manifest or composer.json).
-     *                                     The entry-point class is resolved via PSR-4 autoloading
-     *                                     using the manifest's `autoload.psr-4` mapping (registered
-     *                                     just above) and the package's own composer.json mapping.
+     * @throws PluginLoadFailedException
      */
     private function loadPluginFromManifest(
         string $manifestFile,
@@ -314,8 +304,7 @@ final class PluginLoader
         $fqcn     = $manifest['class'];
         $pluginDir = dirname($manifestFile);
 
-        // Register PSR-4 mappings from the manifest BEFORE the autoloader tries to
-        // resolve the entry-point class via is_a() in instantiatePlugin() below.
+        // PSR-4 mappings must register before instantiatePlugin() resolves the class.
         $this->registerManifestAutoload($manifest, $classLoader, $pluginDir);
 
         $this->instantiatePlugin($slug, $fqcn, $classLoader, $pluginDir, $manifest, $manifestFile);
@@ -372,15 +361,13 @@ final class PluginLoader
      */
     private function registerManifestAutoload(array $manifest, ?\Composer\Autoload\ClassLoader $classLoader, string $pluginDir): void
     {
-        // Register PSR-4 autoload mappings declared in the manifest before the entry-point
-        // class is resolved via is_a() in instantiatePlugin().
         if ($classLoader !== null && isset($manifest['autoload']['psr-4']) && is_array($manifest['autoload']['psr-4'])) {
             foreach ($manifest['autoload']['psr-4'] as $namespace => $relativePath) {
                 $classLoader->addPsr4((string) $namespace, $pluginDir . '/' . ltrim((string) $relativePath, '/'));
             }
         }
 
-        // Require bootstrap files (e.g. vendor/autoload.php for plugins with their own Composer deps).
+        // For plugins with their own Composer dependency tree.
         if (isset($manifest['autoload']['files']) && is_array($manifest['autoload']['files'])) {
             foreach ($manifest['autoload']['files'] as $relFile) {
                 $abs = $pluginDir . '/' . ltrim((string) $relFile, '/');
@@ -394,11 +381,9 @@ final class PluginLoader
     /**
      * @param array<string, mixed> $manifest
      *
-     * @throws PluginLoadFailedException When the declared class cannot be autoloaded or does
-     *                                   not implement {@see PluginInterface}. Triggered by
-     *                                   `is_a(..., true)` so that PSR-4 mappings registered
-     *                                   via {@see registerManifestAutoload()} are honoured
-     *                                   before the check fails.
+     * @throws PluginLoadFailedException When the class fails `is_a(..., true)` against
+     *                                   {@see PluginInterface} — either unresolvable via PSR-4
+     *                                   or not implementing the interface.
      */
     private function instantiatePlugin(
         string $slug,
@@ -420,7 +405,6 @@ final class PluginLoader
             ));
         }
 
-        // Skip if slug or class is already loaded.
         if (isset($this->plugins[$slug])) {
             return;
         }

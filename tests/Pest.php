@@ -19,11 +19,10 @@ if (!defined('BASE_PATH')) {
 
 require_once BASE_PATH . '/vendor/autoload.php';
 
-// Register explicit PSR-4 mappings for test fixture plugins. The fixture files
-// live under tests/Fixtures/<purpose>/<PluginName>/, but their namespaces are
-// Tests\Fixtures\Plugins\<PluginName>\ — i.e. the file layout is organised by
-// test purpose, not by namespace. Registering each fixture as a separate PSR-4
-// entry lets PluginLoader's `is_a(..., true)` autoload trigger resolve them.
+// Fixture plugins are organised by test purpose (e.g. plugins_inventory/<Plugin>)
+// rather than by namespace, so Composer's `Tests\` → `tests/` mapping can't find
+// them. Register each fixture explicitly so `is_a(..., true)` in PluginLoader
+// can resolve the class.
 $classLoader = require BASE_PATH . '/vendor/autoload.php';
 $fixtures   = BASE_PATH . '/tests/Fixtures';
 foreach ([
