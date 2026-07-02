@@ -295,17 +295,39 @@ non-configurable; advanced operators can clear it by removing the two files.
 
 ## Installing third-party plugins
 
-Spora plugins are distributed as standalone PHP packages. The Spora core repo
-deliberately ships an empty `plugins/` directory — third-party plugins live in
-their own repositories and are installed by either dropping them into
-`plugins/` or pointing Spora at external paths via `SPORA_PLUGINS_PATHS`.
+Spora plugins are distributed as standalone PHP packages. The canonical way to
+install one is the `plugin:install` CLI command — it wraps `composer require`
+with the `spora-ai/installer` package so the plugin lands in the right place
+and its manifest is picked up on the next request. The `plugins/` directory
+and `SPORA_PLUGINS_PATHS` env var are still supported as escape hatches for
+plugin authors iterating on a sibling git checkout; see the options below.
 
 The canonical reference implementation is
 [`spora-ai/spora-plugin-minimax`](https://github.com/spora-ai/spora-plugin-minimax) — it
 ships five multimodal tools (image, speech, music, lyrics, video) and a
 migration. Use it as a starting point when authoring your own plugin.
 
-### Option A — Clone into the Spora repo
+### Recommended — `bin/spora plugin:install`
+
+```bash
+php bin/spora plugin:install spora-ai/spora-plugin-minimax
+php bin/spora spora:install   # applies the plugin's migration
+```
+
+`plugin:install` is a thin wrapper around `composer require` that pins the
+right install path and runs `--optimize-autoloader`. The plugin's
+`plugin.json` manifest is auto-discovered on the next request; its tools are
+registered with the orchestrator and surfaced in `GET /api/v1/plugins`.
+
+For development against a sibling git checkout, pass `--path`:
+
+```bash
+php bin/spora plugin:install spora-ai/spora-plugin-minimax --path=/abs/path/to/checkout
+```
+
+The remaining options are listed under [Plugin CLI commands](#plugin-cli-commands).
+
+### Option A — Drop into `plugins/` (legacy / path-based)
 
 ```bash
 cd /path/to/your/spora
@@ -313,11 +335,11 @@ git clone https://github.com/spora-ai/spora-plugin-minimax.git plugins/minimax
 php bin/spora spora:install   # applies the plugin's migration
 ```
 
-The plugin's `plugin.json` manifest is auto-discovered on the next request;
-its tools are registered with the orchestrator and surfaced in
-`GET /api/v1/plugins`.
+Useful for plugin authors iterating on a plugin before tagging a release, or
+when you need the plugin's source visible at a stable path for debugging.
+The `plugins/` directory is gitignored by the operator skeleton.
 
-### Option B — External path
+### Option B — External path via `SPORA_PLUGINS_PATHS`
 
 ```bash
 git clone https://github.com/spora-ai/spora-plugin-minimax.git /opt/spora-plugins/minimax
@@ -337,14 +359,19 @@ SPORA_PLUGINS_PATHS=/opt/spora-plugins/minimax,/srv/spora/community
 
 ### Updating a plugin
 
-Pull the latest changes into the plugin directory and rerun `spora:install`
-to apply any new migrations. The `storage/.plugins_stamp` cache invalidates
-automatically when the manifest content changes — no manual cache-bust
-needed.
+For a CLI-installed plugin, run `php bin/spora plugin:update [package]` (or
+`php bin/spora plugin:install … --constraint=…` to pin a version). For a
+path-based install, pull the latest changes into the plugin directory and
+rerun `spora:install` to apply any new migrations.
+
+The `storage/.plugins_stamp` cache invalidates automatically when the
+manifest content changes — no manual cache-bust needed.
 
 ### Uninstalling a plugin
 
-1. Drop the plugin directory (or remove the entry from `SPORA_PLUGINS_PATHS`).
+1. `php bin/spora plugin:uninstall <package>` for a CLI-installed plugin, or
+   drop the plugin directory (or remove the entry from `SPORA_PLUGINS_PATHS`)
+   for a path-based install.
 2. Manually roll back any plugin-specific migrations (Spora does not
    auto-rollback plugin migrations on uninstall — see
    [Database migrations](#database-migrations)).
@@ -362,7 +389,7 @@ which wraps `composer require`, `composer remove`, `composer update`, and
 
 | Command | Purpose |
 |---------|---------|
-| `plugin:install <package>` | Install a plugin from Packagist (or a local path repo) |
+| `plugin:install <package>` | Install a plugin from Packagist (or a local path repo via `--path`) |
 | `plugin:uninstall <package>` | Run `composer remove` for the given package |
 | `plugin:update [<package>]` | Update one plugin, or all of them when no argument is given |
 | `plugin:list` | List installed `spora-plugin` packages with version and path |
