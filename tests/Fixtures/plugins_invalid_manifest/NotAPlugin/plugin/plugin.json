@@ -1,0 +1,4 @@
+{
+    "slug": "not-a-plugin",
+    "class": "Tests\\Fixtures\\Plugins\\NotAPlugin\\NotAPlugin"
+}

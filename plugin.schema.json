@@ -32,11 +32,6 @@
                 "<svg viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z\"/></svg>"
             ]
         },
-        "file": {
-            "type": "string",
-            "description": "Relative path (from the plugin directory) to the PHP file that declares the entry-point class. Defaults to Plugin.php when omitted.",
-            "examples": ["src/Plugin.php", "EntryPoint.php"]
-        },
         "autoload": {
             "type": "object",
             "description": "PSR-4 autoload mappings registered with the Composer classloader before the plugin is instantiated.",

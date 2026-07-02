@@ -19,6 +19,26 @@ if (!defined('BASE_PATH')) {
 
 require_once BASE_PATH . '/vendor/autoload.php';
 
+// Register explicit PSR-4 mappings for test fixture plugins. The fixture files
+// live under tests/Fixtures/<purpose>/<PluginName>/, but their namespaces are
+// Tests\Fixtures\Plugins\<PluginName>\ — i.e. the file layout is organised by
+// test purpose, not by namespace. Registering each fixture as a separate PSR-4
+// entry lets PluginLoader's `is_a(..., true)` autoload trigger resolve them.
+$classLoader = require BASE_PATH . '/vendor/autoload.php';
+$fixtures   = BASE_PATH . '/tests/Fixtures';
+foreach ([
+    'ManifestPlugin'    => 'plugins_with_manifest/ManifestPlugin',
+    'ToolsPlugin'       => 'plugins_with_tools/ToolsPlugin',
+    'MigratingPlugin'   => 'plugins_with_migrations/MigratingPlugin',
+    'InventoryPlugin'   => 'plugins_inventory/InventoryPlugin',
+    'DefaultIconPlugin' => 'plugins_inventory_brain/DefaultIconPlugin',
+    'BadPrefixPlugin'   => 'plugins_bad_migrations/BadPrefixPlugin',
+    'NamedPlugin'       => 'plugins_with_custom_file/NamedPlugin',
+    'NotAPlugin'        => 'plugins_invalid_manifest/NotAPlugin',
+] as $plugin => $relativePath) {
+    $classLoader->addPsr4('Tests\\Fixtures\\Plugins\\' . $plugin . '\\', $fixtures . '/' . $relativePath . '/');
+}
+
 // Suppress E_DEPRECATED originating from delight-im vendor packages.
 // delight-im/auth v9.0.0 uses implicit nullable types (e.g. `callable $x = null`)
 // which PHP 8.4+ deprecates. The maintainer has acknowledged this (GitHub #314)

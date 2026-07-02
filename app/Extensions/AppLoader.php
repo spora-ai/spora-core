@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Extensions;
 
 use DI\ContainerBuilder;
+use ReflectionClass;
 use Spora\Core\MiddlewareRouteCollector;
 use Spora\Core\Paths;
 use Spora\Extensions\Exceptions\InvalidAppClassException;
@@ -193,7 +194,7 @@ final class AppLoader
                 if (!is_subclass_of($c, SporaExtensionInterface::class)) {
                     return false;
                 }
-                return !(new \ReflectionClass($c))->isAbstract();
+                return !(new ReflectionClass($c))->isAbstract();
             },
         );
 

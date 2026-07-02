@@ -46,11 +46,15 @@ test('toolClasses() returns empty array when plugin contributes no tools', funct
     expect($loader->toolClasses())->toBe([]);
 });
 
-test('"file" key loads the plugin from the specified path instead of Plugin.php', function (): void {
+test('PSR-4 autoload resolves the entry-point class without a "file" key in the manifest', function (): void {
+    // The NamedPlugin fixture declares its entry point at NamedPlugin/NamedPlugin.php
+    // (no src/ subdirectory, no "file" key). The loader must rely on PSR-4 autoloading
+    // registered from the fixture's own composer.json mapping (Tests\ → tests/).
     $loader = new PluginLoader([FIXTURE_CUSTOM_FILE_PLUGINS]);
     $loader->boot();
 
     expect($loader->getPlugins())->toHaveCount(1);
+    expect($loader->getPlugins())->toHaveKey('named-plugin');
     expect($loader->getPlugins()['named-plugin']->getName())->toBe('Named Plugin');
     expect($loader->drivers())->toHaveKey('named_driver');
 });
@@ -94,13 +98,23 @@ test('boot() throws PluginLoadFailedException for a manifest containing invalid 
     }
 });
 
-test('manifest whose declared class cannot be resolved is silently skipped', function (): void {
-    // The manifest is structurally valid (has slug + class) but the PHP class simply
-    // doesn't exist at runtime — this is a recoverable situation (e.g. bad autoload path).
+test('manifest whose declared class cannot be autoloaded throws PluginLoadFailedException', function (): void {
+    // The manifest is structurally valid (has slug + class) but the PHP class is
+    // genuinely missing — the loader now surfaces this as a loud failure rather
+    // than silently dropping the plugin.
     $loader = new PluginLoader([FIXTURE_INVALID_MANIFESTS . '/BadClass']);
-    $loader->boot();
 
-    expect($loader->getPlugins())->toHaveCount(0);
+    expect(fn() => $loader->boot())
+        ->toThrow(PluginLoadFailedException::class, 'Tests\\Fixtures\\Plugins\\DoesNotExist\\Plugin');
+});
+
+test('manifest whose declared class is autoloadable but does not implement PluginInterface throws', function (): void {
+    // Class resolves via PSR-4 (it's a real class in the fixture) but it does
+    // not implement PluginInterface — the loader rejects it loudly.
+    $loader = new PluginLoader([FIXTURE_INVALID_MANIFESTS . '/NotAPlugin']);
+
+    expect(fn() => $loader->boot())
+        ->toThrow(PluginLoadFailedException::class, 'Tests\\Fixtures\\Plugins\\NotAPlugin\\NotAPlugin');
 });
 
 test('pluginMigrationPaths() is empty for plugins with schemaVersion 0', function (): void {
@@ -145,9 +159,6 @@ function spora_makePluginDir(string $slug, string $class): array
 
 test('boot() with current stamp short-circuits and re-instantiates from the sidecar', function (): void {
     [$dir, $cleanup] = spora_makePluginDir('demo', 'Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin');
-    // Symlink the real Plugin.php so the class can actually be loaded
-    symlink(FIXTURE_MANIFEST_PLUGINS . '/ManifestPlugin/Plugin.php', $dir . '/demo/Plugin.php');
-
     $stamp    = $dir . '/.stamp';
     $sidecar  = $stamp . '.cache.json';
 
@@ -173,7 +184,6 @@ test('boot() with current stamp short-circuits and re-instantiates from the side
 
 test('boot() rewrites the stamp when a manifest is added between boots', function (): void {
     [$dir, $cleanup] = spora_makePluginDir('alpha', 'Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin');
-    symlink(FIXTURE_MANIFEST_PLUGINS . '/ManifestPlugin/Plugin.php', $dir . '/alpha/Plugin.php');
     $stamp = $dir . '/.stamp';
 
     try {
@@ -188,7 +198,6 @@ test('boot() rewrites the stamp when a manifest is added between boots', functio
             'slug'  => 'beta',
             'class' => 'Tests\\Fixtures\\Plugins\\NamedPlugin\\NamedPlugin',
         ]));
-        symlink(FIXTURE_CUSTOM_FILE_PLUGINS . '/NamedPlugin/src/NamedPlugin.php', $dir . '/beta/NamedPlugin.php');
 
         $loader2 = new PluginLoader([$dir], $stamp);
         $loader2->boot();
@@ -200,10 +209,8 @@ test('boot() rewrites the stamp when a manifest is added between boots', functio
         expect($loader2->getPlugins())->toHaveKey('beta');
     } finally {
         @unlink($dir . '/beta/plugin.json');
-        @unlink($dir . '/beta/Plugin.php');
         @rmdir($dir . '/beta');
         @unlink($dir . '/alpha/plugin.json');
-        @unlink($dir . '/alpha/Plugin.php');
         @rmdir($dir . '/alpha');
         @rmdir($dir);
     }
@@ -211,7 +218,6 @@ test('boot() rewrites the stamp when a manifest is added between boots', functio
 
 test('boot() with null stampPath never writes a stamp or sidecar', function (): void {
     [$dir, $cleanup] = spora_makePluginDir('nostamp', 'Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin');
-    symlink(FIXTURE_MANIFEST_PLUGINS . '/ManifestPlugin/Plugin.php', $dir . '/nostamp/Plugin.php');
 
     try {
         $loader = new PluginLoader([$dir], null);
@@ -226,7 +232,6 @@ test('boot() with null stampPath never writes a stamp or sidecar', function (): 
 
 test('boot() falls back to full discovery when the sidecar is corrupt', function (): void {
     [$dir, $cleanup] = spora_makePluginDir('corrupt', 'Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin');
-    symlink(FIXTURE_MANIFEST_PLUGINS . '/ManifestPlugin/Plugin.php', $dir . '/corrupt/Plugin.php');
     $stamp = $dir . '/.stamp';
 
     try {
@@ -253,9 +258,7 @@ test('boot() falls back to full discovery when the sidecar is corrupt', function
 
 test('multi-path discovery merges plugins from multiple directories and dedupes by slug', function (): void {
     [$dirA, $cleanupA] = spora_makePluginDir('a-only', 'Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin');
-    symlink(FIXTURE_MANIFEST_PLUGINS . '/ManifestPlugin/Plugin.php', $dirA . '/a-only/Plugin.php');
     [$dirB, $cleanupB] = spora_makePluginDir('b-only', 'Tests\\Fixtures\\Plugins\\NamedPlugin\\NamedPlugin');
-    symlink(FIXTURE_CUSTOM_FILE_PLUGINS . '/NamedPlugin/src/NamedPlugin.php', $dirB . '/b-only/NamedPlugin.php');
 
     // Add a colliding slug to dirB with a different FQCN — the slug should dedup,
     // the class FQCN shouldn't matter for the dedup decision
@@ -264,7 +267,6 @@ test('multi-path discovery merges plugins from multiple directories and dedupes 
         'slug'  => 'a-only',
         'class' => 'Tests\\Fixtures\\Plugins\\NamedPlugin\\NamedPlugin',
     ]));
-    symlink(FIXTURE_CUSTOM_FILE_PLUGINS . '/NamedPlugin/src/NamedPlugin.php', $dirB . '/a-only/NamedPlugin.php');
 
     try {
         $loader = new PluginLoader([$dirA, $dirB], null);
@@ -277,7 +279,6 @@ test('multi-path discovery merges plugins from multiple directories and dedupes 
         expect($loader->getPluginDirectories()['a-only'])->toBe(realpath($dirA . '/a-only'));
     } finally {
         @unlink($dirB . '/a-only/plugin.json');
-        @unlink($dirB . '/a-only/NamedPlugin.php');
         @rmdir($dirB . '/a-only');
         $cleanupA();
         $cleanupB();
