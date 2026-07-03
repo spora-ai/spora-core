@@ -73,7 +73,7 @@ final class LocalAssetStore implements AssetStore
         }
         // World-readable is fine: the URL is unguessable. PHP-FPM and the
         // web server may run as different users; 0700 would break that.
-        chmod($dir, 0755);
+        chmod($dir, 0755); // NOSONAR — intentional; see docblock above.
 
         $token = $this->mintToken($ext);
         $path  = $dir . '/' . $token . '.' . $ext;
@@ -81,7 +81,10 @@ final class LocalAssetStore implements AssetStore
         if (file_put_contents($path, $bytes, LOCK_EX) === false) {
             throw new RuntimeException("Failed to write asset to {$path}");
         }
-        chmod($path, 0644);
+        // Same rationale as the directory: world-readable is the intent.
+        // Authorization for these files is the HMAC-signed daily URL token,
+        // not filesystem perms. See {@see self::signToken()}.
+        chmod($path, 0644); // NOSONAR — intentional; see docblock above.
 
         return new AssetReference(
             url: '/api/v1/assets/' . $token . '.' . $ext,
