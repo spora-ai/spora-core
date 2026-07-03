@@ -77,8 +77,6 @@ use Spora\Services\DataUrlAssetStore;
 use Spora\Services\EmailTemplateLoader;
 use Spora\Services\HandoverService;
 use Spora\Services\HandoverServiceInterface;
-use Spora\Services\ImapClient;
-use Spora\Services\ImapClientInterface;
 use Spora\Services\LLMConfigService;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
@@ -106,18 +104,11 @@ use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
 use Spora\Tools\AgentMemoryTool;
 use Spora\Tools\CalculatorTool;
-use Spora\Tools\CalDavCalendarTool;
 use Spora\Tools\CurrentTimeTool;
-use Spora\Tools\EmailTool;
 use Spora\Tools\GlobalMemoryTool;
 use Spora\Tools\HandoverTool;
 use Spora\Tools\ReadUrlTool;
-use Spora\Tools\SemanticScholarTool;
-use Spora\Tools\SerperSearchTool;
-use Spora\Tools\TavilySearchTool;
 use Spora\Tools\UserInfoTool;
-use Spora\Tools\WeatherApiTool;
-use Spora\Tools\WorldNewsApiTool;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\Process\Process;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -385,12 +376,6 @@ final class ContainerDefinitions
                 };
             },
 
-            ImapClientInterface::class => static function (ContainerInterface $c): ImapClientInterface {
-                return new ImapClient(
-                    $c->get(LoggerInterface::class),
-                );
-            },
-
             DriverFactory::class => static function (ContainerInterface $c): DriverFactory {
                 return new DriverFactory(
                     $c->get(LoggerInterface::class),
@@ -496,15 +481,8 @@ final class ContainerDefinitions
                 CalculatorTool::class,
                 AgentMemoryTool::class,
                 GlobalMemoryTool::class,
-                TavilySearchTool::class,
-                SerperSearchTool::class,
                 ReadUrlTool::class,
-                WorldNewsApiTool::class,
-                EmailTool::class,
-                CalDavCalendarTool::class,
                 UserInfoTool::class,
-                SemanticScholarTool::class,
-                WeatherApiTool::class,
                 HandoverTool::class,
             ],
 
@@ -785,22 +763,6 @@ final class ContainerDefinitions
             AgentMemoryTool::class => static fn(): AgentMemoryTool => new AgentMemoryTool(),
             GlobalMemoryTool::class => static fn(): GlobalMemoryTool => new GlobalMemoryTool(),
 
-            TavilySearchTool::class => static function (ContainerInterface $c): TavilySearchTool {
-                return new TavilySearchTool(
-                    $c->get(ToolConfigService::class),
-                    $c->get(HttpClientInterface::class),
-                    $c->get(LoggerInterface::class),
-                );
-            },
-
-            SerperSearchTool::class => static function (ContainerInterface $c): SerperSearchTool {
-                return new SerperSearchTool(
-                    $c->get(ToolConfigService::class),
-                    $c->get(HttpClientInterface::class),
-                    $c->get(LoggerInterface::class),
-                );
-            },
-
             ReadUrlTool::class => static function (ContainerInterface $c): ReadUrlTool {
                 return new ReadUrlTool(
                     $c->get(HttpClientInterface::class),
@@ -809,48 +771,7 @@ final class ContainerDefinitions
                 );
             },
 
-            WorldNewsApiTool::class => static function (ContainerInterface $c): WorldNewsApiTool {
-                return new WorldNewsApiTool(
-                    $c->get(ToolConfigService::class),
-                    $c->get(HttpClientInterface::class),
-                    $c->get(LoggerInterface::class),
-                );
-            },
-
-            EmailTool::class => static function (ContainerInterface $c): EmailTool {
-                return new EmailTool(
-                    $c->get(ToolConfigService::class),
-                    $c->get(ImapClientInterface::class),
-                    $c->get(LoggerInterface::class),
-                );
-            },
-
-            CalDavCalendarTool::class => static function (ContainerInterface $c): CalDavCalendarTool {
-                return new CalDavCalendarTool(
-                    $c->get(ToolConfigService::class),
-                    $c->get(HttpClientInterface::class),
-                    $c->get(LoggerInterface::class),
-                    $c->get('config'),
-                );
-            },
-
             UserInfoTool::class => static fn(): UserInfoTool => new UserInfoTool(),
-
-            SemanticScholarTool::class => static function (ContainerInterface $c): SemanticScholarTool {
-                return new SemanticScholarTool(
-                    $c->get(ToolConfigService::class),
-                    $c->get(HttpClientInterface::class),
-                    $c->get(LoggerInterface::class),
-                );
-            },
-
-            WeatherApiTool::class => static function (ContainerInterface $c): WeatherApiTool {
-                return new WeatherApiTool(
-                    $c->get(ToolConfigService::class),
-                    $c->get(HttpClientInterface::class),
-                    $c->get(LoggerInterface::class),
-                );
-            },
 
             HandoverTool::class => static function (ContainerInterface $c): HandoverTool {
                 return new HandoverTool(

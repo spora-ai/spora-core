@@ -220,7 +220,6 @@ it('coreServiceDefinitions resolves core services', function (): void {
 
     expect($c->get(Spora\Core\Database::class))->toBeInstanceOf(Spora\Core\Database::class);
     expect($c->get(ToolConfigService::class))->toBeInstanceOf(ToolConfigService::class);
-    expect($c->get(Spora\Services\ImapClientInterface::class))->toBeInstanceOf(Spora\Services\ImapClientInterface::class);
     expect($c->get(Spora\Services\SystemMailer::class))->toBeInstanceOf(Spora\Services\SystemMailer::class);
     expect($c->get(Symfony\Contracts\HttpClient\HttpClientInterface::class))->toBeInstanceOf(Symfony\Contracts\HttpClient\HttpClientInterface::class);
 
@@ -398,8 +397,8 @@ it('llmDefinitions includes all expected entries', function (): void {
 
     expect($def)->toHaveKey('tool_classes');
     expect($def['tool_classes'])->toContain(Spora\Tools\CurrentTimeTool::class);
-    expect($def['tool_classes'])->toContain(Spora\Tools\WeatherApiTool::class);
-    expect($def['tool_classes'])->toContain(Spora\Tools\EmailTool::class);
+    expect($def['tool_classes'])->toContain(CalculatorTool::class);
+    expect($def['tool_classes'])->toContain(Spora\Tools\UserInfoTool::class);
 
     expect($def)->toHaveKey(Spora\Services\LLMConfigService::class);
     expect($def)->toHaveKey(Spora\Services\LLMConfigServiceInterface::class);
@@ -461,8 +460,8 @@ it('toolDefinitions includes all tools and tool_instances', function (): void {
     expect($def)->toHaveKey('tool_instances');
     expect($def)->toHaveKey(Spora\Services\ToolCallSerializer::class);
     expect($def)->toHaveKey(Spora\Tools\CurrentTimeTool::class);
-    expect($def)->toHaveKey(Spora\Tools\WeatherApiTool::class);
-    expect($def)->toHaveKey(Spora\Tools\CalDavCalendarTool::class);
+    expect($def)->toHaveKey(CalculatorTool::class);
+    expect($def)->toHaveKey(Spora\Tools\UserInfoTool::class);
 });
 
 it('orchestratorDefinitions includes orchestrator, plugins, and facades', function (): void {
