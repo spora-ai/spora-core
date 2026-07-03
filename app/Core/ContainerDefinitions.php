@@ -6,6 +6,7 @@ namespace Spora\Core;
 
 use Delight\Auth\Auth as DelightAuth;
 use Illuminate\Database\Capsule\Manager as Capsule;
+use InvalidArgumentException;
 use Monolog\Handler\StreamHandler;
 use Monolog\Level;
 use Monolog\Logger as MonologLogger;
@@ -19,6 +20,7 @@ use Spora\Apps\AppRegistry;
 use Spora\Apps\MemoriesApp;
 use Spora\Apps\PluginsApp;
 use Spora\Auth\AuthService;
+use Spora\Console\Commands\AssetGcCommand;
 use Spora\Console\Commands\PluginInstallCommand;
 use Spora\Console\Commands\PluginListCommand;
 use Spora\Console\Commands\PluginUninstallCommand;
@@ -67,8 +69,11 @@ use Spora\Recipes\RecipeScanner;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentService;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\AssetStore;
 use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
+use Spora\Services\AutoAssetStore;
+use Spora\Services\DataUrlAssetStore;
 use Spora\Services\EmailTemplateLoader;
 use Spora\Services\HandoverService;
 use Spora\Services\HandoverServiceInterface;
@@ -77,6 +82,7 @@ use Spora\Services\ImapClientInterface;
 use Spora\Services\LLMConfigService;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
+use Spora\Services\LocalAssetStore;
 use Spora\Services\MailTemplateService;
 use Spora\Services\MailTemplateServiceInterface;
 use Spora\Services\MemoryService;
@@ -172,6 +178,20 @@ final class ContainerDefinitions
                     // operators can ship `bin/composer.phar` and override this with an absolute
                     // path; when the value ends in `.phar` PluginManager prepends PHP_BINARY.
                     'composer_binary'     => 'composer',
+
+                    // Binary asset storage. Plugins produce images/audio/video via
+                    // AssetStore::store() — the mode setting decides whether the
+                    // payload ships inline (data: URL) or written to disk and
+                    // served via GET /api/v1/assets/{token}. 'auto' picks per-call
+                    // based on auto_threshold_bytes.
+                    //   - mode:                 'auto' | 'data_url' | 'local'
+                    //   - auto_threshold_bytes: payloads ≤ this become data URLs
+                    //   - max_bytes:            hard ceiling per asset
+                    'asset_store' => [
+                        'mode'                 => 'auto',
+                        'auto_threshold_bytes' => 1 * 1024 * 1024,
+                        'max_bytes'            => 50 * 1024 * 1024,
+                    ],
                 ];
 
                 $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: $paths->config());
@@ -224,6 +244,9 @@ final class ContainerDefinitions
             return array_values($parts);
         });
         $apply('SPORA_COMPOSER_BINARY', 'composer_binary', static fn($v) => $v);
+        $apply('SPORA_ASSET_STORE_MODE', 'asset_store.mode', static fn($v) => $v);
+        $apply('SPORA_ASSET_STORE_AUTO_THRESHOLD_BYTES', 'asset_store.auto_threshold_bytes', static fn($v) => (int) $v);
+        $apply('SPORA_ASSET_STORE_MAX_BYTES', 'asset_store.max_bytes', static fn($v) => (int) $v);
 
         $notifEmail = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED');
         if ($notifEmail !== null) {
@@ -324,6 +347,42 @@ final class ContainerDefinitions
 
             HttpClientInterface::class => static function (): HttpClientInterface {
                 return HttpClient::create();
+            },
+
+            // AssetStore: binary blobs produced by tools (audio, video,
+            // images). Mode dispatched from `asset_store.mode` config; the
+            // concrete impls below own the disk and HTTP concerns, this
+            // entry just picks the strategy.
+            DataUrlAssetStore::class => static function (ContainerInterface $c): DataUrlAssetStore {
+                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 50 * 1024 * 1024);
+                return new DataUrlAssetStore($max);
+            },
+
+            LocalAssetStore::class => static function (ContainerInterface $c): LocalAssetStore {
+                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 50 * 1024 * 1024);
+                return new LocalAssetStore(
+                    $c->get(Paths::class),
+                    $c->get(SecurityManagerInterface::class),
+                    $max,
+                );
+            },
+
+            AssetStore::class => static function (ContainerInterface $c): AssetStore {
+                $cfg  = $c->get('config')['asset_store'] ?? [];
+                $mode = is_string($cfg['mode'] ?? null) ? $cfg['mode'] : 'auto';
+                $max  = (int) ($cfg['max_bytes'] ?? 50 * 1024 * 1024);
+                return match ($mode) {
+                    'local'    => $c->get(LocalAssetStore::class),
+                    'data_url' => new DataUrlAssetStore($max),
+                    'auto'     => new AutoAssetStore(
+                        new DataUrlAssetStore($max),
+                        $c->get(LocalAssetStore::class),
+                        (int) ($cfg['auto_threshold_bytes'] ?? 1_048_576),
+                    ),
+                    default    => throw new InvalidArgumentException(
+                        "Unknown asset_store.mode: {$mode}",
+                    ),
+                };
             },
 
             ImapClientInterface::class => static function (ContainerInterface $c): ImapClientInterface {
@@ -1001,6 +1060,12 @@ final class ContainerDefinitions
             PluginUpdateCommand::class => static function (ContainerInterface $c): PluginUpdateCommand {
                 return new PluginUpdateCommand(
                     $c->get(PluginManager::class),
+                );
+            },
+
+            AssetGcCommand::class => static function (ContainerInterface $c): AssetGcCommand {
+                return new AssetGcCommand(
+                    $c->get(Paths::class),
                 );
             },
         ];

@@ -17,3 +17,8 @@ parameters:
         - '#Call to an undefined method Pest\\PendingCalls\\TestCall::#'
         # Pest dynamic property access on TestCall (e.g. $userId, $agentId set by test)
         - '#Access to an undefined property Pest\\PendingCalls\\TestCall::#'
+        # Plugin-facing trait has no in-core consumers; plugins (in
+        # spora-plugin-*) use it. PHPStan can't see across repo boundaries.
+        -
+            message: '#Trait Spora\\Plugins\\Concerns\\StoresBinaryAssets is used zero times and is not analysed\.#'
+            path: app/Plugins/Concerns/StoresBinaryAssets.php

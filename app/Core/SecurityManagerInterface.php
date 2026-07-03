@@ -10,6 +10,15 @@ use Spora\Core\ValueObjects\EncryptedValue;
 interface SecurityManagerInterface
 {
     /**
+     * Access the raw 32-byte master key. Internal-use only — exposed for
+     * components that need to derive HMAC tokens (e.g.
+     * {@see \Spora\Services\LocalAssetStore}) without re-loading from disk.
+     * Must NOT be returned to API responses, logged, or written to
+     * persistent storage. Throws if the master key has not been loaded.
+     */
+    public function masterKey(): string;
+
+    /**
      * Encrypt plaintext using the master key.
      *
      * Steps:
