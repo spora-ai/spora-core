@@ -9,6 +9,7 @@ use Spora\Http\AgentMemoryController;
 use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentToolController;
 use Spora\Http\AppsController;
+use Spora\Http\AssetController;
 use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
 use Spora\Http\HealthController;
@@ -49,6 +50,10 @@ final class RouteDefinitions
     {
         $r->addRoute('GET', '/health', [HealthController::class, 'check'], []);
         $r->addRoute('GET', '/api/v1/config', [ConfigController::class, 'index'], []);
+
+        // Asset serving — public, no middleware. The HMAC token in the URL
+        // is the only authorization (S3-presigned-URL pattern).
+        $r->addRoute('GET', '/api/v1/assets/{filename}', [AssetController::class, 'show'], []);
         $r->addRoute('GET', '/api/v1/apps', [AppsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/plugins', [PluginsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/auth/login', [AuthController::class, 'login'], []);

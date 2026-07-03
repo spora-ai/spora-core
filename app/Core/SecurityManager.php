@@ -44,6 +44,15 @@ final class SecurityManager implements SecurityManagerInterface
         return new EncryptedValue(base64_encode($nonce . $ciphertext));
     }
 
+    public function masterKey(): string
+    {
+        // Internal-use accessor. Components like LocalAssetStore HMAC
+        // signed tokens with this; do NOT expose via any API endpoint or
+        // log line. The key is loaded eagerly in the constructor, so a
+        // missing-key failure has already surfaced before we get here.
+        return $this->masterKey;
+    }
+
     public function decrypt(EncryptedValue $value): string
     {
         $decoded = base64_decode($value->toStorageString(), strict: true);
