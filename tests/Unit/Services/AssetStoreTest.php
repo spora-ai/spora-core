@@ -198,6 +198,14 @@ test('LocalAssetStore rejects payloads above maxBytes', function (): void {
     }
 });
 
+test('AssetTooLargeException is the documented public storage-failure type', function (): void {
+    // Public contract: callers catch the single type AssetTooLargeException
+    // (a subclass of AssetStorageException) for size validation. Storage
+    // failures inside LocalAssetStore::store() throw the sibling
+    // AssetStorageException so callers can catch one base type.
+    expect(new AssetTooLargeException('x'))->toBeInstanceOf(\Spora\Services\AssetStorageException::class);
+});
+
 test('AutoAssetStore dispatches small payloads to DataUrlAssetStore', function (): void {
     [$local, , $restore] = buildLocalStore();
     try {

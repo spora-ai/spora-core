@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-use RuntimeException;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManagerInterface;
 
@@ -69,7 +68,7 @@ final class LocalAssetStore implements AssetStore
         $ext  = $this->pickExtension($mime, $filename);
         $dir  = $this->paths->storage('assets');
         if (! is_dir($dir) && ! @mkdir($dir, 0755, recursive: true) && ! is_dir($dir)) {
-            throw new RuntimeException("Failed to create asset directory: {$dir}");
+            throw new AssetStorageException("Failed to create asset directory: {$dir}");
         }
         // World-readable is fine: the URL is unguessable. PHP-FPM and the
         // web server may run as different users; 0700 would break that.
@@ -79,7 +78,7 @@ final class LocalAssetStore implements AssetStore
         $path  = $dir . '/' . $token . '.' . $ext;
 
         if (file_put_contents($path, $bytes, LOCK_EX) === false) {
-            throw new RuntimeException("Failed to write asset to {$path}");
+            throw new AssetStorageException("Failed to write asset to {$path}");
         }
         // Same rationale as the directory: world-readable is the intent.
         // Authorization for these files is the HMAC-signed daily URL token,
@@ -110,32 +109,28 @@ final class LocalAssetStore implements AssetStore
      */
     public function resolve(string $filename): ?array
     {
-        // Allowlist: only lowercase hex digits and dots. No slashes,
-        // backslashes, NULs, parent refs, or anything else. Length-bounded
-        // so a single huge input can't DoS the regex engine. Tokens are
-        // `<hmac-32hex>.<random-16hex>.<ext>` — exactly two dots.
-        if ($filename === '' || strlen($filename) > 128
-            || ! preg_match('/^[a-f0-9]+\.[a-f0-9]+\.[a-z0-9]+$/', $filename)) {
-            return null;
-        }
-
+        // Single guard block — every reason to reject the request is
+        // collected here so {@see resolve()} has one happy-path return.
+        // Each condition comments the *threat* it defends against.
+        //
+        // 1. Length-bound prevents regex DoS on huge inputs.
+        // 2. Strict regex keeps slashes/backslashes/dots/NULs out so a
+        //    URL-decoded `%2F` can't build a traversal path.
+        // 3. Empty token/ext catches the corner case of a regex match on
+        //    an oddly-shaped filename.
+        // 4. Constant-time HMAC compare — partial-prefix brute force
+        //    shouldn't leak which char is wrong via response timing.
+        // 5. Suffix-shape check — tokens are `<hmac-32hex>.<random-16hex>`;
+        //    a forged random suffix is rejected before we touch disk.
         $token = pathinfo($filename, PATHINFO_FILENAME);
         $ext   = pathinfo($filename, PATHINFO_EXTENSION);
-
-        if ($token === '' || $ext === '') {
-            return null;
-        }
-
-        $expected = $this->signToken($ext);
-        // Constant-time compare so a partial-prefix brute force doesn't
-        // leak which character is wrong via response timing.
-        if (! hash_equals($expected, substr($token, 0, strlen($expected)))) {
-            return null;
-        }
-        // Tokens are `<hmac-32hex>.<random-16hex>` — verify suffix shape
-        // before touching the filesystem.
-        $random = substr($token, strlen($expected) + 1);
-        if (strlen($random) !== 16 || ! ctype_xdigit($random)) {
+        if ($token === '' || $ext === ''
+            || strlen($filename) > 128
+            || ! preg_match('/^[a-f0-9]+\.[a-f0-9]+\.[a-z0-9]+$/', $filename)
+            || ! hash_equals($this->signToken($ext), substr($token, 0, 32))
+            || ! ctype_xdigit(substr($token, 33))
+            || strlen(substr($token, 33)) !== 16
+        ) {
             return null;
         }
 

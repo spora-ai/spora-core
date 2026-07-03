@@ -21,6 +21,13 @@ use Spora\Services\AssetStore;
  */
 final class MediaEmbed
 {
+    /**
+     * Static-only utility class — prevents `new MediaEmbed()` instantiation
+     * (which would be a misuse) and stops child classes from inheriting it.
+     * Without this, every consumer would have to remember not to
+     * instantiate it, and the static-only contract would be enforced by
+     * convention alone.
+     */
     private function __construct() {}
 
     /**
