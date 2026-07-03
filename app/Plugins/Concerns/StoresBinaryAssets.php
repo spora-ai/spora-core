@@ -62,11 +62,11 @@ trait StoresBinaryAssets
                 'Hex payload has odd length (' . strlen($hex) . ' chars); refusing to decode.',
             );
         }
-        $bytes = (string) hex2bin($hex);
-        if ($bytes === false || $bytes === '') {
+        $decoded = hex2bin($hex);
+        if ($decoded === false || $decoded === '') {
             throw new InvalidArgumentException('Hex payload decoded to empty bytes.');
         }
-        $ref = $this->assetStore()->store($bytes, mime: $mime, filename: $filename);
+        $ref = $this->assetStore()->store($decoded, mime: $mime, filename: $filename);
         return [$ref->url, $ref->mode];
     }
 }

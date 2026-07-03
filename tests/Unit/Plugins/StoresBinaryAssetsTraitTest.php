@@ -10,32 +10,37 @@ use Mockery;
 use Spora\Plugins\Concerns\StoresBinaryAssets;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
+use Spora\Services\AssetTooLargeException;
 
 /**
- * Anonymous-class host for the trait so we can exercise its protected
- * methods directly. Mocking AssetStore is cheaper than building a real one
+ * Concrete host for the trait so we can exercise its protected methods
+ * directly. Mocking {@see AssetStore} is cheaper than building a real one
  * because the trait's job is delegation, not store internals.
+ *
+ * Named class (not anonymous) so PHPStan can resolve the return type
+ * across the helper methods.
  */
-function traitHost(AssetStore $store): object
+final class StoresBinaryAssetsTraitHost
 {
-    return new class ($store) {
-        use StoresBinaryAssets;
+    use StoresBinaryAssets;
 
-        public function __construct(AssetStore $store)
-        {
+    public function __construct(?AssetStore $store = null)
+    {
+        if ($store !== null) {
             $this->setAssetStore($store);
         }
+    }
 
-        public function callEmbedHex(string $hex, string $mime, string $filename): array
-        {
-            return $this->embedHex($hex, $mime, $filename);
-        }
+    /** @return array{0: string, 1: string} */
+    public function callEmbedHex(string $hex, string $mime, string $filename): array
+    {
+        return $this->embedHex($hex, $mime, $filename);
+    }
 
-        public function callAssetStore(): AssetStore
-        {
-            return $this->assetStore();
-        }
-    };
+    public function callAssetStore(): AssetStore
+    {
+        return $this->assetStore();
+    }
 }
 
 test('embedHex() decodes hex and routes through AssetStore', function (): void {
@@ -45,7 +50,7 @@ test('embedHex() decodes hex and routes through AssetStore', function (): void {
         ->with('AB', 'audio/mpeg', 'speech.mp3')
         ->andReturn(new AssetReference('data:audio/mpeg;base64,', 'data_url'));
 
-    $host = traitHost($store);
+    $host = new StoresBinaryAssetsTraitHost($store);
 
     [$url, $mode] = $host->callEmbedHex('4142', 'audio/mpeg', 'speech.mp3');
 
@@ -57,41 +62,34 @@ test('embedHex() throws on odd-length hex', function (): void {
     $store = Mockery::mock(AssetStore::class);
     $store->shouldNotReceive('store');
 
-    $host = traitHost($store);
+    $host = new StoresBinaryAssetsTraitHost($store);
 
-    expect(static fn() => $host->callEmbedHex('414', 'audio/mpeg', 'speech.mp3'))
+    expect(static fn(): array => $host->callEmbedHex('414', 'audio/mpeg', 'speech.mp3'))
         ->toThrow(InvalidArgumentException::class, 'odd length');
 });
 
-test('embedHex() propagates AssetStoreTooLargeException', function (): void {
+test('embedHex() propagates AssetTooLargeException', function (): void {
     $store = Mockery::mock(AssetStore::class);
     $store->shouldReceive('store')
         ->once()
-        ->andThrow(new \Spora\Services\AssetTooLargeException('too big'));
+        ->andThrow(new AssetTooLargeException('too big'));
 
-    $host = traitHost($store);
+    $host = new StoresBinaryAssetsTraitHost($store);
 
-    expect(static fn() => $host->callEmbedHex('4142', 'audio/mpeg', 'speech.mp3'))
-        ->toThrow(\Spora\Services\AssetTooLargeException::class);
+    expect(static fn(): array => $host->callEmbedHex('4142', 'audio/mpeg', 'speech.mp3'))
+        ->toThrow(AssetTooLargeException::class);
 });
 
 test('assetStore() throws if not injected', function (): void {
-    $host = new class {
-        use StoresBinaryAssets;
+    $host = new StoresBinaryAssetsTraitHost();
 
-        public function callAssetStore(): AssetStore
-        {
-            return $this->assetStore();
-        }
-    };
-
-    expect(static fn() => $host->callAssetStore())
+    expect(static fn(): AssetStore => $host->callAssetStore())
         ->toThrow(LogicException::class, 'AssetStore has not been injected');
 });
 
 test('assetStore() returns the injected store', function (): void {
     $store = Mockery::mock(AssetStore::class);
-    $host  = traitHost($store);
+    $host  = new StoresBinaryAssetsTraitHost($store);
 
     expect($host->callAssetStore())->toBe($store);
 });
