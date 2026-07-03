@@ -23,7 +23,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *
  * Filenames look like `<32-hex-hmac>.<16-hex-random>.<ext>`. The first 32
  * hex chars embed a day stamp, so files older than `--max-age-days` are
- * unlinks.
+ * unlinked.
  */
 #[AsCommand(
     name: 'assets:gc',

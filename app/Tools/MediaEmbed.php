@@ -11,7 +11,7 @@ use Spora\Services\AssetStore;
  *
  * The chat UI's markdown sanitizer (`spora-frontend/src/composables/useMarkdown.ts`)
  * whitelists `<audio>`, `<video>`, `<source>`, and `<img>`, plus the
- * `data:` URI scheme on audio/video/src src attributes only. Use this
+ * `data:` URI scheme on audio/video/source src attributes only. Use this
  * class so the emitted HTML stays in sync with that allow-list; do not
  * hand-roll `<audio src="...">` in plugin code.
  *
@@ -24,14 +24,19 @@ final class MediaEmbed
     private function __construct() {}
 
     /**
-     * Markdown image syntax. `$alt` is HTML-escaped; `$url` is not (URLs
-     * can legitimately contain `&` in query strings, and the sanitizer
-     * handles URL context separately).
+     * Markdown image syntax. `$alt` is HTML-escaped AND Markdown-metacharacter
+     * escaped so an untrusted alt can't break out of `![alt]` and inject
+     * additional Markdown/HTML (e.g. `alt = "x](javascript:alert(1))"`).
+     * `$url` is only HTML-escaped (URLs legitimately contain `&`,
+     * `?`, etc.); the chat sanitizer handles URL context separately.
      */
     public static function image(string $url, string $alt = ''): string
     {
         $safeAlt = htmlspecialchars($alt, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        return "![{$safeAlt}]({$url})";
+        // Escape Markdown control chars: `\` (escape), `]` and `[` (alt text
+        // delimiters). Order matters — backslash first.
+        $mdEscAlt = strtr($safeAlt, ['\\' => '\\\\', ']' => '\\]', '[' => '\\[']);
+        return "![{$mdEscAlt}]({$url})";
     }
 
     /**

@@ -19,6 +19,27 @@ test('image() with empty alt emits bare image syntax', function (): void {
     expect(MediaEmbed::image('https://cdn/x.png'))->toBe('![](https://cdn/x.png)');
 });
 
+test('image() escapes Markdown metacharacters in alt to prevent injection', function (): void {
+    // An untrusted alt containing "](javascript:alert(1))" would otherwise
+    // break out of the ![alt](url) form and inject arbitrary URLs / Markdown.
+    // After our escapes, the `]` is preceded by a backslash, so the
+    // Markdown parser sees the alt as still-open rather than as a delimiter.
+    $html = MediaEmbed::image('https://cdn/x.png', 'click ](javascript:alert(1)');
+
+    // The output must NOT contain `](javascript:` immediately after the alt
+    // opening `[` — that's the injection vector. The backslash is in between.
+    expect($html)->toBe('![click \\](javascript:alert(1)](https://cdn/x.png)');
+    // And in particular, an UNescaped `](javascript:` sequence must not appear.
+    expect($html)->not->toMatch('/(?<!\\\\)]\\(javascript:alert\\(1\\)/');
+});
+
+test('image() escapes backslashes in alt', function (): void {
+    // Backslash is the Markdown escape character — must be escaped first so it
+    // can't neutralize the subsequent `]` / `[` escapes.
+    $html = MediaEmbed::image('https://cdn/x.png', 'back\\slash');
+    expect($html)->toBe('![back\\\\slash](https://cdn/x.png)');
+});
+
 test('audioFromUrl() emits an <audio controls> tag with the URL HTML-escaped', function (): void {
     $html = MediaEmbed::audioFromUrl('https://cdn/a.mp3?x=1&y=2');
 

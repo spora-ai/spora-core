@@ -99,10 +99,26 @@ final class LocalAssetStore implements AssetStore
      * when the token is invalid or the file is missing — callers should
      * respond with 404 in that case.
      *
+     * Security note: `$filename` arrives URL-decoded from the router (FastRoute
+     * calls `urldecode()` on path vars), so a request like
+     * `…%2F..%2F..%2Fconfig.php` would resolve to a path outside
+     * `<storage>/assets/`. We defend in depth by validating the full
+     * filename against a strict regex of `[a-f0-9.]+` BEFORE doing any
+     * string concatenation or filesystem access.
+     *
      * @return array{path: string, mime: string}|null
      */
     public function resolve(string $filename): ?array
     {
+        // Allowlist: only lowercase hex digits and dots. No slashes,
+        // backslashes, NULs, parent refs, or anything else. Length-bounded
+        // so a single huge input can't DoS the regex engine. Tokens are
+        // `<hmac-32hex>.<random-16hex>.<ext>` — exactly two dots.
+        if ($filename === '' || strlen($filename) > 128
+            || ! preg_match('/^[a-f0-9]+\.[a-f0-9]+\.[a-z0-9]+$/', $filename)) {
+            return null;
+        }
+
         $token = pathinfo($filename, PATHINFO_FILENAME);
         $ext   = pathinfo($filename, PATHINFO_EXTENSION);
 

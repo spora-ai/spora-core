@@ -29,7 +29,15 @@ final class AssetController
     {
         $resolved = $this->store->resolve($filename);
         if ($resolved === null) {
-            return new JsonResponse(['error' => 'Not found'], 404);
+            // Match the standard JSON error envelope used by every other
+            // controller (see JsonControllerHelpers::notFound()). Asset
+            // routes don't use the trait because they need to return
+            // BinaryFileResponse on success, but the error shape stays
+            // consistent so client error handling is uniform.
+            return new JsonResponse(
+                ['error' => ['code' => 'asset_not_found', 'message' => 'Asset not found.']],
+                404,
+            );
         }
 
         $response = new BinaryFileResponse(

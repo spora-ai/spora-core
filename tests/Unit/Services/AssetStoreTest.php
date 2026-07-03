@@ -52,18 +52,15 @@ function buildLocalStore(int $maxBytes = 50 * 1024 * 1024): array
     return [$store, $dir, $restore];
 }
 
+// Cleanup is the responsibility of buildLocalStore()'s $restore closure,
+// which removes exactly the tmp dir it created and restores the original
+// SPORA_STORAGE_DIR snapshot. Per-test ownership keeps parallel test runs
+// from deleting each other's tmp dirs (which a broad glob would do).
 afterEach(function () {
-    // Best-effort cleanup of any tmp asset dirs created by buildLocalStore().
-    foreach (glob(sys_get_temp_dir() . '/spora-asset-store-*') ?: [] as $tmpDir) {
-        if (is_dir($tmpDir)) {
-            foreach (glob($tmpDir . '/*') ?: [] as $f) {
-                @unlink($f);
-            }
-            @rmdir($tmpDir);
-        }
-    }
-    // Restore SPORA_STORAGE_DIR in case the last test didn't.
-    if (getenv('SPORA_STORAGE_DIR') !== false) {
+    // Defensive: if a test forgot to call $restore(), still clear the
+    // env so subsequent tests start from a known state. The tmp-dir glob
+    // sweep is intentionally absent — see comment above.
+    if (getenv('SPORA_STORAGE_DIR') !== false && str_contains((string) getenv('SPORA_STORAGE_DIR'), '/spora-asset-store-')) {
         putenv('SPORA_STORAGE_DIR');
         unset($_ENV['SPORA_STORAGE_DIR'], $_SERVER['SPORA_STORAGE_DIR']);
     }
@@ -138,6 +135,25 @@ test('LocalAssetStore::resolve() returns null for an unknown filename', function
     try {
         expect($store->resolve('garbage.mp3'))->toBeNull();
         expect($store->resolve(''))->toBeNull();
+    } finally {
+        $restore();
+    }
+});
+
+test('LocalAssetStore::resolve() rejects path-traversal attempts', function (): void {
+    [$store, , $restore] = buildLocalStore();
+    try {
+        // Each of these would resolve outside <storage>/assets/ if the
+        // strict filename check were absent. The router URL-decodes the
+        // path segment, so %2F here is already a literal `/`.
+        expect($store->resolve('token.mp3/../../../config.php'))->toBeNull();
+        expect($store->resolve('token.mp3\\..\\..\\config.php'))->toBeNull();
+        expect($store->resolve('token.mp3' . str_repeat('/..', 20)))->toBeNull();
+        expect($store->resolve('token.mp3' . "\0../config.php"))->toBeNull();
+        expect($store->resolve('a' . str_repeat('x', 200) . '.mp3'))->toBeNull(); // length DoS
+        expect($store->resolve(''))->toBeNull();
+        // Plain non-hex content also fails the regex before the HMAC check.
+        expect($store->resolve('not-hex-at-all.mp3'))->toBeNull();
     } finally {
         $restore();
     }
