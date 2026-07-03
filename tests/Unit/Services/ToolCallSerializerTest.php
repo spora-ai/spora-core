@@ -2,17 +2,12 @@
 
 declare(strict_types=1);
 
+namespace Tests\Unit\Services;
+
 use Carbon\Carbon as BaseCarbon;
 use Illuminate\Support\Carbon;
 use Spora\Models\ToolCall;
 use Spora\Services\ToolCallSerializer;
-use Spora\Tools\Attributes\Tool;
-use Spora\Tools\Attributes\ToolOperation;
-use Spora\Tools\Attributes\ToolParameter;
-use Spora\Tools\ToolInterface;
-use Spora\Tools\Traits\HasOperations;
-use Spora\Tools\Traits\HasParameterSchema;
-use Spora\Tools\ValueObjects\ToolResult;
 
 /**
  * Build a ToolCall model without booting Eloquent — we only read attributes,
@@ -114,23 +109,3 @@ it('parameter_schema property order matches declaration order', function (): voi
     // Schema declared: action (synthesized), q. UI must render in that order.
     expect(array_keys($payload['parameter_schema']['properties']))->toBe(['action', 'q']);
 });
-
-#[Tool(name: 'serializer_fixture', description: 'Serializer test fixture')]
-#[ToolOperation(name: 'run', description: 'Run')]
-#[ToolOperation(name: 'stop', description: 'Stop')]
-#[ToolParameter(name: 'q', type: 'string', description: 'Query', required: true)]
-final class ToolCallSerializerFixtureTool implements ToolInterface
-{
-    use HasOperations;
-    use HasParameterSchema;
-
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
-    {
-        return new ToolResult(true, 'ok');
-    }
-
-    public function describeAction(array $arguments): string
-    {
-        return 'fixture';
-    }
-}

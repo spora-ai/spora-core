@@ -2,8 +2,7 @@
 
 declare(strict_types=1);
 
-use Spora\Tools\Attributes\ToolParameter;
-use Spora\Tools\Traits\HasParameterSchema;
+namespace Tests\Unit\Tools;
 
 it('returns the builder output via getParametersSchema()', function (): void {
     $tool = new HasParameterSchemaTraitTestSimpleTool();
@@ -34,25 +33,3 @@ it('reads attributes from $this, not a static cache', function (): void {
     expect(array_keys($schemaA['properties']))->toBe(['x'])
         ->and(array_keys($schemaB['properties']))->toBe(['y']);
 });
-
-#[ToolParameter(name: 'x', type: 'string', description: 'X', required: true)]
-final class HasParameterSchemaTraitTestSimpleTool
-{
-    use HasParameterSchema;
-}
-
-#[ToolParameter(name: 'y', type: 'integer', description: 'Y', required: false)]
-final class HasParameterSchemaTraitTestSecondTool
-{
-    use HasParameterSchema;
-}
-
-final class HasParameterSchemaTraitTestOverridingTool
-{
-    use HasParameterSchema;
-
-    public function getParametersSchema(): array
-    {
-        return ['custom' => true];
-    }
-}

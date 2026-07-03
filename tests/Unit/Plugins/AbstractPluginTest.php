@@ -10,26 +10,6 @@ use Spora\Tools\ToolInterface;
 use Tests\Fixtures\TestTool;
 use Throwable;
 
-/**
- * Trivial subclass used to verify the AbstractPlugin defaults. The class name
- * deliberately ends in "Plugin" so {@see AbstractPlugin::getName()} can prove
- * it strips the suffix.
- */
-final class DemoPlugin extends AbstractPlugin
-{
-    /** @return array<class-string<ToolInterface>> */
-    public function tools(): array
-    {
-        return [TestTool::class];
-    }
-}
-
-/**
- * Subclass whose name does not end in "Plugin" — the default name derivation
- * must fall back to the unqualified class name in that case.
- */
-final class Plain extends AbstractPlugin {}
-
 test('getName() derives from the unqualified class name with the Plugin suffix stripped', function (): void {
     $plugin = new DemoPlugin();
 

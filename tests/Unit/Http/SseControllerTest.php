@@ -2,15 +2,13 @@
 
 declare(strict_types=1);
 
+namespace Tests\Unit\Http;
+
+use ReflectionClass;
+use ReflectionMethod;
+use RuntimeException;
 use Spora\Http\Exceptions\MercureConfigurationMissingException;
 use Spora\Http\SseController;
-
-final class SseControllerTestLiterals
-{
-    public const SSE_EMAIL = 'sse@example.com';
-    public const SSE_PASSWORD = 'Password1!';
-    public const SSE_MERCURE_URL = 'http://localhost:3000/.well-known/mercure';
-}
 
 describe('SseController', function (): void {
     it('auth returns 404 when mercure is not configured', function (): void {

@@ -2,10 +2,13 @@
 
 declare(strict_types=1);
 
-use Spora\Tools\Attributes\Tool;
+namespace Tests\Unit\Tools;
+
+use InvalidArgumentException;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Schema\ToolParameterSchemaBuilder;
+use stdClass;
 
 it('returns an empty stdClass properties object when there are no attributes', function (): void {
     $cls = new class {};
@@ -151,12 +154,3 @@ it('accepts a class-string in addition to an instance', function (): void {
 
     expect($schema)->toBe($schemaFromInstance);
 });
-
-#[ToolParameter(name: 'inherited', type: 'string', description: 'From parent', required: false)]
-abstract class SchemaBuilderTestParent {}
-
-#[Tool(name: 'fixture_subclass', description: 'Builder test fixture')]
-#[ToolOperation(name: 'run', description: 'Run it')]
-#[ToolOperation(name: 'stop', description: 'Stop it')]
-#[ToolParameter(name: 'q', type: 'string', description: 'Query', required: true)]
-final class SchemaBuilderTestSubclass extends SchemaBuilderTestParent {}
