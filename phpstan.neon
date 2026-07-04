@@ -12,13 +12,6 @@ parameters:
         - tests/Fixtures
     bootstrapFiles:
         - phpstan-bootstrap.php
-    scanFiles:
-        - vendor/illuminate/pagination/LengthAwarePaginator.php
-        - vendor/illuminate/pagination/Paginator.php
-        - vendor/illuminate/pagination/AbstractCursorPaginator.php
-        - vendor/illuminate/pagination/AbstractPaginator.php
-        - vendor/illuminate/pagination/Cursor.php
-        - vendor/illuminate/pagination/CursorPaginator.php
     ignoreErrors:
         # Pest dynamic __call methods (afterEach, beforeEach, etc. on TestCall via __call)
         - '#Call to an undefined method Pest\\PendingCalls\\TestCall::#'
