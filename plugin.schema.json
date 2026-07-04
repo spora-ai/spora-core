@@ -31,33 +31,6 @@
                 "M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z",
                 "<svg viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z\"/></svg>"
             ]
-        },
-        "autoload": {
-            "type": "object",
-            "description": "PSR-4 autoload mappings registered with the Composer classloader before the plugin is instantiated.",
-            "additionalProperties": false,
-            "properties": {
-                "psr-4": {
-                    "type": "object",
-                    "description": "Map of namespace prefix to relative path. Multiple entries are supported.",
-                    "additionalProperties": {
-                        "type": "string"
-                    },
-                    "examples": [
-                        { "Acme\\MyPlugin\\": "src/", "Acme\\Shared\\": "lib/" }
-                    ]
-                },
-                "files": {
-                    "type": "array",
-                    "description": "PHP files to require_once before the plugin is instantiated, relative to the plugin directory. Use [\"vendor/autoload.php\"] to load the plugin's own Composer dependency tree.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "examples": [
-                        ["vendor/autoload.php"]
-                    ]
-                }
-            }
         }
     }
 }
