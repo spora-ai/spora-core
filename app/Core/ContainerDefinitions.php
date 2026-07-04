@@ -163,6 +163,7 @@ final class ContainerDefinitions
                     // is always appended; this list holds any additional external paths
                     // (e.g. sibling git checkouts of community plugins).
                     'plugins_paths'       => [],
+                    'plugin_install_enabled' => false,
 
                     // Path/name of the composer executable PluginManager shells out to.
                     // 'composer' relies on the host's $PATH (typical for dev/CI). Shared-host
@@ -235,6 +236,7 @@ final class ContainerDefinitions
             return array_values($parts);
         });
         $apply('SPORA_COMPOSER_BINARY', 'composer_binary', static fn($v) => $v);
+        $apply('SPORA_PLUGIN_INSTALL_ENABLED', 'plugin_install_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_ASSET_STORE_MODE', 'asset_store.mode', static fn($v) => $v);
         $apply('SPORA_ASSET_STORE_AUTO_THRESHOLD_BYTES', 'asset_store.auto_threshold_bytes', static fn($v) => (int) $v);
         $apply('SPORA_ASSET_STORE_MAX_BYTES', 'asset_store.max_bytes', static fn($v) => (int) $v);
@@ -440,39 +442,20 @@ final class ContainerDefinitions
     }
 
     /**
-     * Resolve the `SPORA_PLUGIN_INSTALL_ENABLED` feature flag.
+     * Read the `plugin_install_enabled` config value.
      *
-     * Resolution: env var → config.php → safe default (false).
-     * The flag gates POST/DELETE/PATCH /api/v1/plugins — see
-     * docs/20_plugin_install_api.md § "Feature flag". The CLI
-     * `php bin/spora plugin:install|uninstall|update` is not gated;
+     * The flag is populated by the central `collectEnvOverrides()` step
+     * (SPORA_PLUGIN_INSTALL_ENABLED → filter_var FILTER_VALIDATE_BOOLEAN)
+     * and merged with config.php via the `config` factory. No second
+     * env-var resolution needed here. The flag gates POST/DELETE/PATCH
+     * /api/v1/plugins — see docs/20_plugin_install_api.md § "Feature flag".
+     * The CLI `php bin/spora plugin:install|uninstall|update` is not gated;
      * operators on shared hosting without `composer` on the path should
      * leave this off and use the CLI recovery path documented there.
      */
     private static function resolvePluginInstallEnabled(ContainerInterface $c): bool
     {
-        $envValue = $_ENV['SPORA_PLUGIN_INSTALL_ENABLED'] ?? getenv('SPORA_PLUGIN_INSTALL_ENABLED');
-        if (is_string($envValue) && $envValue !== '') {
-            return self::parseBool($envValue);
-        }
-
-        $configValue = ($c->get('config'))['plugin_install_enabled'] ?? null;
-        if (is_bool($configValue)) {
-            return $configValue;
-        }
-
-        return false;
-    }
-
-    /**
-     * Accept the usual truthy spellings — `true` / `1` / `yes` / `on` (case
-     * insensitive). Anything else is false. Used by all `SPORA_*_ENABLED`
-     * feature flags.
-     */
-    private static function parseBool(string $value): bool
-    {
-        $normalised = strtolower(trim($value));
-        return in_array($normalised, ['1', 'true', 'yes', 'on'], true);
+        return (bool) ($c->get('config')['plugin_install_enabled'] ?? false);
     }
 
     private static function llmDefinitions(): array
