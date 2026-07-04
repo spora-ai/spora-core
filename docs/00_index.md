@@ -22,6 +22,7 @@
 | Doc | Description |
 |---|---|
 | [04_api.md](04_api.md) | REST API reference — endpoints, request/response envelopes, auth |
+| [20_plugin_install_api.md](20_plugin_install_api.md) | Plugin install/uninstall HTTP endpoints (POST/DELETE/PATCH `/api/v1/plugins`) — added in v0.6.2 |
 | [08_logging.md](08_logging.md) | Log levels, PII policy, what gets logged and where, best practices |
 | [10_error_handling.md](10_error_handling.md) | Error codes, exception handling, toast notification system |
 | [11_agent_loop_async.md](11_agent_loop_async.md) | Worker modes (`sync`/`worker`), tick structure, Mercure SSE |
