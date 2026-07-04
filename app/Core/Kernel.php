@@ -13,6 +13,8 @@ use Spora\Extensions\AppLoader;
 use Spora\Http\Exceptions\ForbiddenException;
 use Spora\Http\Exceptions\InvalidCsrfTokenException;
 use Spora\Http\Exceptions\UnauthenticatedException;
+use Spora\Services\Exceptions\CatalogUnavailableException;
+use Spora\Services\Exceptions\MalformedCatalogException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -189,6 +191,14 @@ final class Kernel implements KernelInterface
             $e instanceof InvalidCsrfTokenException => new JsonResponse(
                 ['error' => ['code' => 'CSRF_INVALID', 'message' => $e->getMessage()]],
                 Response::HTTP_FORBIDDEN,
+            ),
+            $e instanceof CatalogUnavailableException => new JsonResponse(
+                ['error' => ['code' => 'CATALOG_UNAVAILABLE', 'message' => $e->getMessage()]],
+                Response::HTTP_SERVICE_UNAVAILABLE,
+            ),
+            $e instanceof MalformedCatalogException => new JsonResponse(
+                ['error' => ['code' => 'MALFORMED_CATALOG', 'message' => $e->getMessage()]],
+                Response::HTTP_BAD_GATEWAY,
             ),
             default => null,
         };

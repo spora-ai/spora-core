@@ -15,7 +15,8 @@
 | [05_drivers.md](05_drivers.md) | LLM driver system — `LLMDriverConfigInterface`, `LLMDriverConfiguration` model, `DriverFactory` |
 | [06_tools.md](06_tools.md) | Tool settings key convention, `#[ToolSetting]` architecture, core key reference |
 | [07_plugins.md](07_plugins.md) | Plugin manifest, auto-discovery, bundled deps, recipes, contributing tools/drivers |
-| [18_media_assets.md](18_media_assets.md) | Embedding images/audio/video in tool results — `AssetStore`, `MediaEmbed`, `StoresBinaryAssets` trait |
+| [18_plugin_author_guide.md](18_plugin_author_guide.md) | Author guide for shipping a Spora plugin (catalog keywords, structure, conventions) |
+| [19_media_assets.md](19_media_assets.md) | Embedding images/audio/video in tool results — `AssetStore`, `MediaEmbed`, `StoresBinaryAssets` trait |
 
 ## Operations
 
