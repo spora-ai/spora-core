@@ -96,6 +96,7 @@ Note: `storage/php.log` is **not** produced by Spora's logger. In local dev it i
 | Variable | Default | Config key | Description |
 |---|---|---|---|
 | `SPORA_NOTIFICATIONS_EMAIL_ENABLED` | `false` | `notifications_email_enabled` | Send an email when a scheduled run completes. Requires the `SPORA_MAIL_*` block to be configured. |
+| `SPORA_PLUGIN_INSTALL_ENABLED` | `false` | `plugin_install_enabled` | Enable the Web UI for plugin install/uninstall (`POST`/`DELETE`/`PATCH /api/v1/plugins`). When off, the routes return `403 FEATURE_DISABLED`. CLI commands (`php bin/spora plugin:install|uninstall|update`) are **not** gated — they're always available as the operator recovery path. See [20_plugin_install_api.md](20_plugin_install_api.md). |
 
 Mail transport itself is configured through the `SPORA_MAIL_*` env vars (read by `app/Services/SystemMailer.php:183-190` and `app/Http/MailConfigController.php:22-29`). These are **not** in the default `.env.example`; they are only in `docker/.env.local.example`. The full set is `SPORA_MAIL_DRIVER` / `SPORA_MAIL_HOST` / `SPORA_MAIL_PORT` / `SPORA_MAIL_USERNAME` / `SPORA_MAIL_PASSWORD` / `SPORA_MAIL_ENCRYPTION` / `SPORA_MAIL_FROM` / `SPORA_MAIL_FROM_NAME`.
 

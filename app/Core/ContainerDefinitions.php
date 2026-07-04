@@ -439,6 +439,42 @@ final class ContainerDefinitions
         return is_file($conventional) ? $conventional : null;
     }
 
+    /**
+     * Resolve the `SPORA_PLUGIN_INSTALL_ENABLED` feature flag.
+     *
+     * Resolution: env var → config.php → safe default (false).
+     * The flag gates POST/DELETE/PATCH /api/v1/plugins — see
+     * docs/20_plugin_install_api.md § "Feature flag". The CLI
+     * `php bin/spora plugin:install|uninstall|update` is not gated;
+     * operators on shared hosting without `composer` on the path should
+     * leave this off and use the CLI recovery path documented there.
+     */
+    private static function resolvePluginInstallEnabled(ContainerInterface $c): bool
+    {
+        $envValue = $_ENV['SPORA_PLUGIN_INSTALL_ENABLED'] ?? getenv('SPORA_PLUGIN_INSTALL_ENABLED');
+        if (is_string($envValue) && $envValue !== '') {
+            return self::parseBool($envValue);
+        }
+
+        $configValue = ($c->get('config'))['plugin_install_enabled'] ?? null;
+        if (is_bool($configValue)) {
+            return $configValue;
+        }
+
+        return false;
+    }
+
+    /**
+     * Accept the usual truthy spellings — `true` / `1` / `yes` / `on` (case
+     * insensitive). Anything else is false. Used by all `SPORA_*_ENABLED`
+     * feature flags.
+     */
+    private static function parseBool(string $value): bool
+    {
+        $normalised = strtolower(trim($value));
+        return in_array($normalised, ['1', 'true', 'yes', 'on'], true);
+    }
+
     private static function llmDefinitions(): array
     {
         return [
@@ -603,6 +639,8 @@ final class ContainerDefinitions
             PluginsController::class => static function (ContainerInterface $c): PluginsController {
                 return new PluginsController(
                     $c->get(PluginsService::class),
+                    $c->get(PluginManager::class),
+                    self::resolvePluginInstallEnabled($c),
                 );
             },
 

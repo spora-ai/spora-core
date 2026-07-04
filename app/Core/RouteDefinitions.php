@@ -56,6 +56,9 @@ final class RouteDefinitions
         $r->addRoute('GET', '/api/v1/assets/{filename}', [AssetController::class, 'show'], []);
         $r->addRoute('GET', '/api/v1/apps', [AppsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/plugins', [PluginsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/plugins', [PluginsController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        $r->addRoute('DELETE', '/api/v1/plugins/{package}', [PluginsController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        $r->addRoute('PATCH', '/api/v1/plugins/{package}', [PluginsController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('POST', '/api/v1/auth/login', [AuthController::class, 'login'], []);
         $r->addRoute('POST', '/api/v1/auth/register', [AuthController::class, 'register'], []);
         $r->addRoute('POST', '/api/v1/auth/logout', [AuthController::class, 'logout'], [CsrfMiddleware::class]);
