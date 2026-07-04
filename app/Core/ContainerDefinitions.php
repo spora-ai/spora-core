@@ -470,7 +470,10 @@ final class ContainerDefinitions
                 $appContributedApps = $c->has(AppLoader::class)
                     ? ($c->get(AppLoader::class)->getApp()?->apps() ?? [])
                     : [];
-                foreach (array_merge($c->get('app_apps'), $appContributedApps) as $appClass) {
+                $pluginContributedApps = $c->has(\Spora\Plugins\PluginLoader::class)
+                    ? $c->get(\Spora\Plugins\PluginLoader::class)->appClasses()
+                    : [];
+                foreach (array_merge($c->get('app_apps'), $appContributedApps, $pluginContributedApps) as $appClass) {
                     $registry->register($appClass);
                 }
                 return $registry;
@@ -867,26 +870,9 @@ final class ContainerDefinitions
                 );
             },
 
-            PluginLoader::class => static function (ContainerInterface $c): PluginLoader {
-                $config        = $c->get('config');
-                $paths         = $c->get(Paths::class);
-                $inRepoPlugins = $paths->plugins();
-
-                // Always scan the in-repo plugins dir first; external paths from
-                // SPORA_PLUGINS_PATHS are appended in declaration order. Duplicates are
-                // deduped via array_unique; non-existent directories are silently
-                // skipped by PluginLoader::boot().
-                $external = is_array($config['plugins_paths'] ?? null) ? $config['plugins_paths'] : [];
-                $directories = array_values(array_unique(
-                    array_merge([$inRepoPlugins], array_map('strval', $external)),
-                ));
-
-                $stampPath = $paths->storage('.plugins_stamp');
-
-                $loader = new PluginLoader($directories, $stampPath);
-                $loader->boot();
-                return $loader;
-            },
+            // PluginLoader is constructed eagerly in Kernel and added to the
+            // builder there. The AppRegistry factory above consumes it via
+            // `$c->get(PluginLoader::class)->appClasses()`.
 
             RecipeScanner::class => static function (ContainerInterface $c): RecipeScanner {
                 $pluginLoader = $c->get(PluginLoader::class);

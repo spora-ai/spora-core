@@ -13,6 +13,7 @@ use Spora\Extensions\AppLoader;
 use Spora\Http\Exceptions\ForbiddenException;
 use Spora\Http\Exceptions\InvalidCsrfTokenException;
 use Spora\Http\Exceptions\UnauthenticatedException;
+use Spora\Plugins\PluginLoader;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -32,6 +33,7 @@ final class Kernel implements KernelInterface
 
     private readonly Paths $paths;
     private readonly AppLoader $appLoader;
+    private readonly PluginLoader $pluginLoader;
 
     public function __construct(?Paths $paths = null)
     {
@@ -50,6 +52,18 @@ final class Kernel implements KernelInterface
         // Register the live AppLoader instance so container-managed services
         // (e.g. Database → DatabaseSchemaInstaller) can resolve it later.
         $builder->addDefinitions([AppLoader::class => $this->appLoader]);
+
+        // Eager-construct the PluginLoader (same pattern as AppLoader above) so
+        // its `register()` hook can add DI bindings to the ContainerBuilder BEFORE
+        // it is built. The previous lazy factory inside ContainerDefinitions
+        // closed the window for any plugin-supplied bindings.
+        $this->pluginLoader = new PluginLoader(
+            [$this->paths->plugins()],
+            $this->paths->storage('.plugins_stamp'),
+        );
+        $this->pluginLoader->boot();
+        $this->pluginLoader->registerPlugins($builder);
+        $builder->addDefinitions([PluginLoader::class => $this->pluginLoader]);
 
         $this->container = $builder->build();
 
@@ -72,6 +86,9 @@ final class Kernel implements KernelInterface
             // App::boot() runs once per request, after the container is built
             // and the DB is up — services are safe to use here.
             $this->appLoader->boot();
+            // Plugin::boot() runs after App::boot() so plugin authors can use
+            // any service the App registered. Idempotent within a process.
+            $this->pluginLoader->bootExtensions();
             return $router->dispatch($request);
         } catch (Throwable $e) {
             return $this->handleException($e);
@@ -129,6 +146,9 @@ final class Kernel implements KernelInterface
             function (MiddlewareRouteCollector $r): void {
                 RouteDefinitions::register($r);
                 $this->appLoader->registerRoutes($r);
+                // Plugin::routes() runs after App::routes() so plugin authors
+                // can override or extend App-registered routes.
+                $this->pluginLoader->registerRoutes($r);
             },
         );
     }
