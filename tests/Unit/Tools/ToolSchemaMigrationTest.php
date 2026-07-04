@@ -6,25 +6,19 @@ namespace Tests\Unit\Tools;
 
 use Mockery;
 use ReflectionClass;
-use Spora\Services\ImapClientInterface;
+use Spora\Services\HandoverServiceInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\AbstractTool;
 use Spora\Tools\AgentMemoryTool;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\CalculatorTool;
-use Spora\Tools\CalDavCalendarTool;
 use Spora\Tools\CurrentTimeTool;
-use Spora\Tools\EmailTool;
 use Spora\Tools\GlobalMemoryTool;
+use Spora\Tools\HandoverTool;
 use Spora\Tools\ReadUrlTool;
-use Spora\Tools\SemanticScholarTool;
-use Spora\Tools\SerperSearchTool;
-use Spora\Tools\TavilySearchTool;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\UserInfoTool;
-use Spora\Tools\WeatherApiTool;
-use Spora\Tools\WorldNewsApiTool;
 use stdClass;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -42,9 +36,9 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
  * Build a fresh instance of each tool with minimal mocked dependencies.
- * Tools may need DI (HttpClient, ToolConfigService, ImapClient) but the
- * invariants here don't call any tool method that touches those — Mockery
- * doubles with no expectations are enough.
+ * Tools may need DI (HttpClient, ToolConfigService) but the invariants
+ * here don't call any tool method that touches those — Mockery doubles
+ * with no expectations are enough.
  *
  * @return array<class-string<ToolInterface>, ToolInterface>
  */
@@ -52,22 +46,18 @@ function instantiateAllTools(): array
 {
     $httpClient    = Mockery::mock(HttpClientInterface::class);
     $configService = Mockery::mock(ToolConfigService::class);
-    $imapClient    = Mockery::mock(ImapClientInterface::class);
 
     return [
         CalculatorTool::class       => new CalculatorTool(),
         CurrentTimeTool::class      => new CurrentTimeTool(),
         ReadUrlTool::class          => new ReadUrlTool($httpClient, $configService),
         UserInfoTool::class         => new UserInfoTool(),
-        TavilySearchTool::class     => new TavilySearchTool($configService, $httpClient),
-        WeatherApiTool::class       => new WeatherApiTool($configService, $httpClient),
-        WorldNewsApiTool::class     => new WorldNewsApiTool($configService, $httpClient),
-        SemanticScholarTool::class  => new SemanticScholarTool($configService, $httpClient),
-        SerperSearchTool::class     => new SerperSearchTool($configService, $httpClient),
-        EmailTool::class            => new EmailTool($configService, $imapClient),
-        CalDavCalendarTool::class   => new CalDavCalendarTool($configService, $httpClient),
         AgentMemoryTool::class      => new AgentMemoryTool(),
         GlobalMemoryTool::class     => new GlobalMemoryTool(),
+        HandoverTool::class         => new HandoverTool(
+            Mockery::mock(HandoverServiceInterface::class),
+            $configService,
+        ),
     ];
 }
 

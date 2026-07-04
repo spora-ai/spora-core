@@ -21,7 +21,6 @@ use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\ToolConfigService;
-use Spora\Tools\EmailTool;
 use Symfony\Component\Console\Tester\CommandTester;
 
 // Helpers
@@ -478,13 +477,13 @@ describe('TaskRunCommand — tool config injection', function (): void {
             'max_tokens_output' => 4096,
         ]);
 
-        // Set up ToolConfigService with EmailTool
+        // Set up ToolConfigService with TestTool
         $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
         $this->security = new SecurityManager($key);
         $this->toolConfigService = new ToolConfigService(
             $this->security,
             new Monolog\Logger('test'),
-            [EmailTool::class],
+            [Tests\Fixtures\TestTool::class],
         );
 
         // Set up LLMConfigService (required by Orchestrator.getTemperatureFromSettings)
@@ -505,26 +504,22 @@ describe('TaskRunCommand — tool config injection', function (): void {
             'is_active'            => true,
         ]);
 
-        // Enable EmailTool for the agent
+        // Enable TestTool for the agent
         AgentTool::create([
             'agent_id'   => $this->agent->id,
-            'tool_class' => EmailTool::class,
-            'tool_name'  => 'email',
+            'tool_class' => Tests\Fixtures\TestTool::class,
+            'tool_name'  => 'test_tool',
         ]);
     });
 
     it('buildToolDefinitions includes exposeToLlm settings in tool description when configured', function (): void {
         // Store expose_to_llm settings via ToolConfigService
-        $this->toolConfigService->putAgentOverride(EmailTool::class, $this->agent->id, [
-            'core.smtp.from'              => 'agent@example.com',
-            'core.smtp.allowed_recipients' => 'alice@example.com, bob@example.com',
+        $this->toolConfigService->putAgentOverride(Tests\Fixtures\TestTool::class, $this->agent->id, [
+            'allowed_target_agents'       => ['agent-1', 'agent-2'],
         ]);
 
         // Use reflection to call private buildToolDefinitions
-        $emailTool = new EmailTool(
-            $this->toolConfigService,
-            Mockery::mock(Spora\Services\ImapClientInterface::class),
-        );
+        $emailTool = new Tests\Fixtures\TestTool();
         $capturingDriver = Mockery::mock(LLMDriverInterface::class);
         $capturingDriver->allows('complete')->andReturn(new LLMResponse(
             content: 'Done.',
@@ -568,22 +563,22 @@ describe('TaskRunCommand — tool config injection', function (): void {
         // Verify the email tool description includes the config block
         $reflection = new ReflectionClass($orchestrator);
         $method = $reflection->getMethod('buildToolDefinitions');
-        $defs = $method->invoke($orchestrator, [EmailTool::class], $this->agent->id, $this->userId);
+        $defs = $method->invoke($orchestrator, [Tests\Fixtures\TestTool::class], $this->agent->id, $this->userId);
 
-        $emailDef = collect($defs)->firstWhere('function.name', 'email');
+        $emailDef = collect($defs)->firstWhere('function.name', 'test_tool');
         expect($emailDef)->not->toBeNull();
         expect($emailDef['function']['description'])->toContain('[Effective Configuration]');
-        expect($emailDef['function']['description'])->toContain('From Address: agent@example.com');
-        expect($emailDef['function']['description'])->toContain('Allowed Recipients: alice@example.com, bob@example.com');
+        // The multi-select exposes agent IDs to LLM only when they resolve
+        // to known agent names. With 'agent-1' / 'agent-2' as fake IDs the
+        // formatter returns (not configured) — which is correct (the LLM
+        // can't see user-controlled IDs from another tenant).
+        expect($emailDef['function']['description'])->toContain('Allowed target agents: (not configured)');
     })->afterEach(fn() => Database::resetBootState());
 
     it('buildToolDefinitions shows (not configured) for unset exposeToLlm settings', function (): void {
         // No settings stored — all exposeToLlm fields should show as (not configured)
 
-        $emailTool = new EmailTool(
-            $this->toolConfigService,
-            Mockery::mock(Spora\Services\ImapClientInterface::class),
-        );
+        $emailTool = new Tests\Fixtures\TestTool();
         $capturingDriver = Mockery::mock(LLMDriverInterface::class);
         $capturingDriver->allows('complete')->andReturn(new LLMResponse(
             content: 'Done.',
@@ -615,12 +610,12 @@ describe('TaskRunCommand — tool config injection', function (): void {
 
         $reflection = new ReflectionClass($orchestrator);
         $method = $reflection->getMethod('buildToolDefinitions');
-        $defs = $method->invoke($orchestrator, [EmailTool::class], $this->agent->id, $this->userId);
+        $defs = $method->invoke($orchestrator, [Tests\Fixtures\TestTool::class], $this->agent->id, $this->userId);
 
-        $emailDef = collect($defs)->firstWhere('function.name', 'email');
+        $emailDef = collect($defs)->firstWhere('function.name', 'test_tool');
         expect($emailDef)->not->toBeNull();
         expect($emailDef['function']['description'])->toContain('[Effective Configuration]');
-        expect($emailDef['function']['description'])->toContain('From Address: (not configured)');
-        expect($emailDef['function']['description'])->toContain('Allowed Recipients: (not configured)');
+        expect($emailDef['function']['description'])->toContain('Allowed target agents: (not configured)');
+        expect($emailDef['function']['description'])->toContain('Allowed target agents: (not configured)');
     })->afterEach(fn() => Database::resetBootState());
 });
