@@ -150,7 +150,7 @@ test('store() surfaces PluginInstallFailedException for the Kernel to map', func
     // bubble — the Kernel maps it to a 500 PLUGIN_INSTALL_FAILED. Verified below
     // in the Kernel-level test.
     $logger = new Monolog\Logger('test');
-    $failingFactory = static function (): object {
+    $failingFactory = static function (array $argv, string $cwd): object {
         return new class {
             public function run(): void {}
             public function getExitCode(): int

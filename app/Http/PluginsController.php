@@ -87,6 +87,13 @@ final class PluginsController
                 Response::HTTP_BAD_REQUEST,
             );
         }
+        if ($path !== null && !str_starts_with($path, '/')) {
+            return $this->error(
+                'VALIDATION_FAILED',
+                'Field `path` must be an absolute filesystem path (start with `/`).',
+                Response::HTTP_BAD_REQUEST,
+            );
+        }
 
         $manager = $this->requirePluginManager();
         $result  = $manager->install(new PluginInstallRequest($package, $constraint, $path));
@@ -132,7 +139,12 @@ final class PluginsController
         }
 
         $body = $this->decodeBody($request);
-        $constraint = is_array($body) ? $this->asString($body, 'constraint') : null;
+        // An empty body is OK for update() (no re-pin); malformed JSON is not.
+        // decodeBody returns [] for empty and null for parse failures.
+        if ($body === null) {
+            return $this->error('VALIDATION_FAILED', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+        $constraint = $this->asString($body, 'constraint');
 
         // update() takes (string|null) and respects the existing composer.json
         // constraint if null. We use the re-pin path: install() with constraint
@@ -180,7 +192,9 @@ final class PluginsController
     }
 
     /**
-     * @return array<string, mixed>|null  Decoded body, or null on JSON error / empty body.
+     * @return array<string, mixed>|null  Decoded body. Empty body → [] (no
+     * body sent). Malformed JSON → null (caller must reject as 400). A
+     * non-object decoded JSON value (string, number, list) also returns null.
      */
     private function decodeBody(Request $request): ?array
     {

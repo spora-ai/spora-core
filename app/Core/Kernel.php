@@ -205,14 +205,17 @@ final class Kernel implements KernelInterface
      * Map {@see PluginInstallFailedException} to the JSON envelope documented
      * in docs/20_plugin_install_api.md § "Composer-failure body (500)".
      *
-     * Stderr is truncated to 8 KiB so a runaway Composer error doesn't blow up
-     * the response; the full output is in storage/spora.log.
+     * Stderr is truncated to a hard 8 KiB ceiling (suffix included) so a
+     * runaway Composer error doesn't blow up the response. The full output
+     * is in storage/spora.log.
      */
     private function mapPluginInstallFailureToResponse(PluginInstallFailedException $e): JsonResponse
     {
         $stderr = $e->stderr;
-        if (strlen($stderr) > 8192) {
-            $stderr = substr($stderr, 0, 8192) . '… [truncated; see storage/spora.log]';
+        $suffix = '… [truncated; see storage/spora.log]';
+        $budget = 8192;
+        if (strlen($stderr) > $budget - strlen($suffix)) {
+            $stderr = substr($stderr, 0, $budget - strlen($suffix)) . $suffix;
         }
 
         return new JsonResponse(
