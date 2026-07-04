@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Plugins;
 
+use DI\ContainerBuilder;
+use Spora\Core\MiddlewareRouteCollector;
 use Spora\Plugins\Exceptions\PluginLoadFailedException;
 
 /**
@@ -151,6 +153,25 @@ final class PluginLoader
     }
 
     /**
+     * All admin-panel App class FQCNs contributed by loaded plugins.
+     * Merged into the host AppRegistry at container build time.
+     *
+     * @return list<class-string>
+     */
+    public function appClasses(): array
+    {
+        $classes = [];
+
+        foreach ($this->plugins as $plugin) {
+            foreach ($plugin->apps() as $class) {
+                $classes[] = $class;
+            }
+        }
+
+        return $classes;
+    }
+
+    /**
      * All loaded plugins, indexed by their manifest slug.
      *
      * @return array<string, PluginInterface>
@@ -203,6 +224,60 @@ final class PluginLoader
         }
 
         return $result;
+    }
+
+    /**
+     * Invoke each loaded plugin's `register(ContainerBuilder)` hook. Called by
+     * Kernel AFTER appLoader->load() (so App::register() ran first) and BEFORE
+     * $builder->build() (so plugin DI bindings are part of the container graph).
+     *
+     * Plugin-throws are caught and logged (or stderr'd) so a single misbehaving
+     * plugin does not break boot.
+     */
+    public function registerPlugins(ContainerBuilder $builder): void
+    {
+        foreach ($this->plugins as $slug => $plugin) {
+            try {
+                $plugin->register($builder);
+            } catch (\Throwable $e) {
+                error_log(sprintf(
+                    '[spora] plugin %s register() failed: %s',
+                    $slug,
+                    $e->getMessage(),
+                ));
+            }
+        }
+    }
+
+    /**
+     * Invoke each loaded plugin's `routes(MiddlewareRouteCollector)` hook.
+     * Called per-request by Kernel::buildRouter() after the project's App routes
+     * have been registered — plugin routes can override or extend those.
+     */
+    public function registerRoutes(MiddlewareRouteCollector $routes): void
+    {
+        foreach ($this->plugins as $plugin) {
+            $plugin->routes($routes);
+        }
+    }
+
+    private bool $extensionsBooted = false;
+
+    /**
+     * Invoke each loaded plugin's `boot()` hook. Called per-request by
+     * Kernel::handle() after the project's App has booted. Idempotent — repeat
+     * calls within the same process are no-ops.
+     */
+    public function bootExtensions(): void
+    {
+        if ($this->extensionsBooted) {
+            return;
+        }
+        $this->extensionsBooted = true;
+
+        foreach ($this->plugins as $plugin) {
+            $plugin->boot();
+        }
     }
 
     /**

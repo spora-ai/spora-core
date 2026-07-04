@@ -148,7 +148,11 @@ it('all() returns the merged definitions array', function (): void {
     expect($defs)->toHaveKey('app_apps');
     expect($defs)->toHaveKey(SecurityManagerInterface::class);
     expect($defs)->toHaveKey(Spora\Core\Database::class);
-    expect($defs)->toHaveKey(PluginLoader::class);
+    // PluginLoader is added to the ContainerBuilder directly by Kernel
+    // (it must be constructed eagerly so plugins' register() hooks run before
+    // the container is built). The AppRegistry factory above consumes it via
+    // $c->get(PluginLoader::class)->appClasses().
+    expect($defs)->not->toHaveKey(PluginLoader::class);
     expect($defs)->toHaveKey(Spora\Console\Commands\SetupCommand::class);
     expect($defs)->toHaveKey(Spora\Console\Commands\WorkerRunCommand::class);
     expect($defs)->toHaveKey(Spora\Services\EmailTemplateLoader::class);
@@ -472,7 +476,10 @@ it('orchestratorDefinitions includes orchestrator, plugins, and facades', functi
     expect($def)->toHaveKey(Spora\Services\NotificationService::class);
     expect($def)->toHaveKey(Spora\Services\NotificationServiceInterface::class);
     expect($def)->toHaveKey(Spora\Services\SystemMailer::class);
-    expect($def)->toHaveKey(PluginLoader::class);
+    // PluginLoader is added to the ContainerBuilder by Kernel::__construct,
+    // not by ContainerDefinitions::orchestratorDefinitions. The AppRegistry
+    // factory (in this same method) consumes it via $c->get(PluginLoader::class).
+    expect($def)->not->toHaveKey(PluginLoader::class);
     expect($def)->toHaveKey(Spora\Recipes\RecipeScanner::class);
     expect($def)->toHaveKey(Spora\Services\MemoryServiceInterface::class);
     expect($def)->toHaveKey(Spora\Services\MailTemplateServiceInterface::class);
