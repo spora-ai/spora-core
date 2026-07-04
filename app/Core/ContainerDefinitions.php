@@ -457,18 +457,8 @@ final class ContainerDefinitions
         return is_file($conventional) ? $conventional : null;
     }
 
-    /**
-     * Read the `plugin_install_enabled` config value.
-     *
-     * The flag is populated by the central `collectEnvOverrides()` step
-     * (SPORA_PLUGIN_INSTALL_ENABLED → filter_var FILTER_VALIDATE_BOOLEAN)
-     * and merged with config.php via the `config` factory. No second
-     * env-var resolution needed here. The flag gates POST/DELETE/PATCH
-     * /api/v1/plugins — see docs/20_plugin_install_api.md § "Feature flag".
-     * The CLI `php bin/spora plugin:install|uninstall|update` is not gated;
-     * operators on shared hosting without `composer` on the path should
-     * leave this off and use the CLI recovery path documented there.
-     */
+    // Gates the Web UI plugin install endpoints (docs/20_plugin_install_api.md).
+    // CLI plugin commands are not gated — leave this off if `composer` isn't on $PATH.
     private static function resolvePluginInstallEnabled(ContainerInterface $c): bool
     {
         return (bool) ($c->get('config')['plugin_install_enabled'] ?? false);

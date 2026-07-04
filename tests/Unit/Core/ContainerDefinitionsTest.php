@@ -898,7 +898,7 @@ describe('SPORA_PLUGIN_INSTALL_ENABLED', function (): void {
 
 describe('resolvePluginInstallEnabled', function (): void {
     it('reads the config key (default false)', function (): void {
-        $c = new class () implements Psr\Container\ContainerInterface {
+        $c = new class implements Psr\Container\ContainerInterface {
             public function get(string $id): mixed
             {
                 if ($id === 'config') {
@@ -915,7 +915,7 @@ describe('resolvePluginInstallEnabled', function (): void {
     });
 
     it('falls back to false when the config key is missing', function (): void {
-        $c = new class () implements Psr\Container\ContainerInterface {
+        $c = new class implements Psr\Container\ContainerInterface {
             public function get(string $id): mixed
             {
                 if ($id === 'config') {
