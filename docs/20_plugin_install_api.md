@@ -131,8 +131,8 @@ after install (operator-visible install location).
 }
 ```
 
-`details.stderr` is truncated to **8 KiB** by the controller to keep
-responses bounded — operators with longer errors are pointed to
+`details.stderr` is truncated to **8 KiB** by `Kernel::mapPluginInstallFailureToResponse()`
+to keep responses bounded — operators with longer errors are pointed to
 `storage/spora.log`.
 
 ---

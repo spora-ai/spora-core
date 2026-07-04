@@ -229,7 +229,7 @@ final class PluginsController
 
         $body = $this->decodeBody($request);
         if ($body === null) {
-            return $this->error('VALIDATION_FAILED', 'Request body must be a JSON object.', Response::HTTP_BAD_REQUEST);
+            return $this->error('VALIDATION_FAILED', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         }
         $constraint = $this->asString($body, 'constraint');
 
@@ -273,8 +273,8 @@ final class PluginsController
 
     /**
      * @return array<string, mixed>|null  Decoded body. Empty body → [] (no
-     * body sent). Malformed JSON or a non-object value (string, number,
-     * list) → null (caller must reject as 400).
+     * body sent). Malformed JSON → null (caller must reject as 400). A
+     * non-object decoded JSON value (string, number, list) also returns null.
      */
     private function decodeBody(Request $request): ?array
     {
