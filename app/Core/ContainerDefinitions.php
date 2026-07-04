@@ -89,6 +89,7 @@ use Spora\Services\MercurePublisher;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\NotificationServiceInterface;
+use Spora\Services\PluginCatalogService;
 use Spora\Services\PluginMetadataExtractor;
 use Spora\Services\PluginsService;
 use Spora\Services\PromptTemplateService;
@@ -183,6 +184,19 @@ final class ContainerDefinitions
                         'auto_threshold_bytes' => 1 * 1024 * 1024,
                         'max_bytes'            => 50 * 1024 * 1024,
                     ],
+
+                    // Plugin catalog (Packagist browse) — enabled by default. The
+                    // endpoint is registered even when off so the navbar item
+                    // can decide to hide itself on a 404 instead of polling
+                    // a separate config endpoint. Set to false to take the
+                    // operator offline from external HTTP traffic.
+                    'plugin_catalog_enabled' => true,
+
+                    // Cache TTL (seconds) for the on-disk plugin-catalog cache.
+                    // One file keyed by sha1(query); multiple queries share the
+                    // storage path. 1 hour by default — Packagist search is
+                    // not real-time.
+                    'plugin_catalog_ttl' => PluginCatalogService::DEFAULT_TTL_SECONDS,
                 ];
 
                 $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: $paths->config());
@@ -238,6 +252,8 @@ final class ContainerDefinitions
         $apply('SPORA_ASSET_STORE_MODE', 'asset_store.mode', static fn($v) => $v);
         $apply('SPORA_ASSET_STORE_AUTO_THRESHOLD_BYTES', 'asset_store.auto_threshold_bytes', static fn($v) => (int) $v);
         $apply('SPORA_ASSET_STORE_MAX_BYTES', 'asset_store.max_bytes', static fn($v) => (int) $v);
+        $apply('SPORA_PLUGIN_CATALOG_ENABLED', 'plugin_catalog_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
+        $apply('SPORA_PLUGIN_CATALOG_TTL', 'plugin_catalog_ttl', static fn($v) => (int) $v);
 
         $notifEmail = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED');
         if ($notifEmail !== null) {
@@ -603,9 +619,22 @@ final class ContainerDefinitions
                 );
             },
 
+            PluginCatalogService::class => static function (ContainerInterface $c): PluginCatalogService {
+                return new PluginCatalogService(
+                    $c->get(HttpClientInterface::class),
+                    $c->get(Paths::class),
+                    (int) ($c->get('config')['plugin_catalog_ttl'] ?? PluginCatalogService::DEFAULT_TTL_SECONDS),
+                );
+            },
+
             PluginsController::class => static function (ContainerInterface $c): PluginsController {
+                $config = $c->get('config');
+                $enabled = (bool) ($config['plugin_catalog_enabled'] ?? true);
+
                 return new PluginsController(
                     $c->get(PluginsService::class),
+                    $enabled ? $c->get(PluginCatalogService::class) : null,
+                    $enabled,
                 );
             },
 
