@@ -95,4 +95,5 @@ Thumbs.db
 # Ignore plugins
 /plugins/*
 !/plugins/.gitkeep
+
 /.worktrees/
