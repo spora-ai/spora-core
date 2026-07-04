@@ -61,6 +61,9 @@ final class RouteDefinitions
         // returns 404 when SPORA_PLUGIN_CATALOG_ENABLED=false so the navbar
         // item can hide cleanly.
         $r->addRoute('GET', '/api/v1/plugins/catalog', [PluginsController::class, 'catalog'], [AuthMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/plugins', [PluginsController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        $r->addRoute('DELETE', '/api/v1/plugins/{package}', [PluginsController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        $r->addRoute('PATCH', '/api/v1/plugins/{package}', [PluginsController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('POST', '/api/v1/auth/login', [AuthController::class, 'login'], []);
         $r->addRoute('POST', '/api/v1/auth/register', [AuthController::class, 'register'], []);
         $r->addRoute('POST', '/api/v1/auth/logout', [AuthController::class, 'logout'], [CsrfMiddleware::class]);
