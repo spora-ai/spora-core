@@ -12,6 +12,7 @@ use Spora\Core\Exceptions\BasePathNotDefinedException;
 use Spora\Extensions\AppLoader;
 use Spora\Http\Exceptions\ForbiddenException;
 use Spora\Http\Exceptions\InvalidCsrfTokenException;
+use Spora\Http\Exceptions\PluginCatalogNotWiredException;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\Exceptions\CatalogUnavailableException;
@@ -219,6 +220,10 @@ final class Kernel implements KernelInterface
             $e instanceof MalformedCatalogException => new JsonResponse(
                 ['error' => ['code' => 'MALFORMED_CATALOG', 'message' => $e->getMessage()]],
                 Response::HTTP_BAD_GATEWAY,
+            ),
+            $e instanceof PluginCatalogNotWiredException => new JsonResponse(
+                ['error' => ['code' => 'PLUGIN_CATALOG_NOT_WIRED', 'message' => $e->getMessage()]],
+                Response::HTTP_INTERNAL_SERVER_ERROR,
             ),
             default => null,
         };

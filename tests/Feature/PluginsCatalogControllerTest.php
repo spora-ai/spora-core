@@ -183,7 +183,7 @@ describe('PluginsController::catalog', function (): void {
         try {
             $request = jsonRequest('GET', '/api/v1/plugins/catalog');
             expect(fn() => callController($controller, 'catalog', $request, [$authMw]))
-                ->toThrow(RuntimeException::class);
+                ->toThrow(Spora\Http\Exceptions\PluginCatalogNotWiredException::class);
         } finally {
             catalog_cleanUp($tmp);
         }

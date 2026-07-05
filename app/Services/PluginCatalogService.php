@@ -6,10 +6,10 @@ namespace Spora\Services;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
-use RuntimeException;
 use Spora\Core\Paths;
 use Spora\Services\Exceptions\CatalogUnavailableException;
 use Spora\Services\Exceptions\MalformedCatalogException;
+use Spora\Services\Exceptions\PluginCatalogCacheWriteException;
 use Symfony\Component\Clock\Clock;
 use Symfony\Component\Clock\ClockInterface;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
@@ -233,9 +233,8 @@ final class PluginCatalogService
         if ($age >= $this->ttlSeconds) {
             return null;
         }
-        /** @var list<array{name: string, description: string, version: ?string, downloads: int, favers: int, repository: ?string, homepage: ?string}> $packages */
-        $packages = $entry[self::CACHE_ENTRY_PACKAGES];
-        return $packages;
+        /** @var list<array{name: string, description: string, version: ?string, downloads: int, favers: int, repository: ?string, homepage: ?string}> */
+        return $entry[self::CACHE_ENTRY_PACKAGES];
     }
 
     /**
@@ -247,9 +246,8 @@ final class PluginCatalogService
         if ($entry === null) {
             return null;
         }
-        /** @var list<array{name: string, description: string, version: ?string, downloads: int, favers: int, repository: ?string, homepage: ?string}> $packages */
-        $packages = $entry[self::CACHE_ENTRY_PACKAGES];
-        return $packages;
+        /** @var list<array{name: string, description: string, version: ?string, downloads: int, favers: int, repository: ?string, homepage: ?string}> */
+        return $entry[self::CACHE_ENTRY_PACKAGES];
     }
 
     /**
@@ -258,17 +256,21 @@ final class PluginCatalogService
     private function readCacheEntry(string $query): ?array
     {
         $cache = $this->readCacheFile();
-        /** @var mixed $versionRaw */
-        $versionRaw = $cache['version'] ?? null;
-        if ((int) $versionRaw !== self::CACHE_VERSION) {
-            return null;
-        }
         /** @var mixed $entries */
         $entries = $cache['entries'] ?? null;
         if (!is_array($entries)) {
             return null;
         }
-        $key = hash('sha256', $query);
+        return $this->validateCacheEntry($entries, hash('sha256', $query));
+    }
+
+    /**
+     * @param array<string, mixed> $entries
+     *
+     * @return array{ttl: int, packages: list<array{name: string, description: string, version: ?string, downloads: int, favers: int, repository: ?string, homepage: ?string}>}|null
+     */
+    private function validateCacheEntry(array $entries, string $key): ?array
+    {
         $entry = $entries[$key] ?? null;
         if (!is_array($entry)) {
             return null;
@@ -290,27 +292,50 @@ final class PluginCatalogService
      */
     private function readCacheFile(): array
     {
+        $decoded = $this->decodeCacheFile();
+        if ($decoded === null) {
+            return [];
+        }
+
+        // Treat version mismatches as no cache: the next writeCache() rebuilds
+        // the file under the current schema instead of trusting the stale shape.
+        if ((int) ($decoded['version'] ?? null) !== self::CACHE_VERSION) {
+            return [];
+        }
+
+        /** @var array{version?: mixed, entries?: mixed} $decoded */
+        return $decoded;
+    }
+
+    /**
+     * Read + JSON-decode the on-disk cache file, returning null for any failure
+     * (missing, unreadable, malformed, or non-object body). Lets readCacheFile()
+     * stay focused on the version check.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function decodeCacheFile(): ?array
+    {
         $path = $this->cachePath();
         if (!is_file($path)) {
-            return [];
+            return null;
         }
 
         $raw = @file_get_contents($path);
         if ($raw === false || $raw === '') {
-            return [];
+            return null;
         }
 
         try {
             $decoded = json_decode($raw, true, 32, JSON_THROW_ON_ERROR);
         } catch (Throwable) {
-            return [];
+            return null;
         }
 
         if (!is_array($decoded)) {
-            return [];
+            return null;
         }
 
-        /** @var array{version?: mixed, entries?: mixed} $decoded */
         return $decoded;
     }
 
@@ -328,7 +353,7 @@ final class PluginCatalogService
         $json = json_encode($cache, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
         $tmp = $path . '.tmp.' . bin2hex(random_bytes(4));
         if (@file_put_contents($tmp, $json, LOCK_EX) === false) {
-            throw new RuntimeException("Unable to write plugin catalog cache: {$path}");
+            throw new PluginCatalogCacheWriteException("Unable to write plugin catalog cache: {$path}");
         }
         @rename($tmp, $path);
     }

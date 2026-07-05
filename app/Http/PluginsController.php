@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use RuntimeException;
+use Spora\Http\Exceptions\PluginCatalogNotWiredException;
 use Spora\Services\PluginCatalogService;
 use Spora\Services\PluginsService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -55,7 +55,7 @@ final class PluginsController
         // Wiring error: catalog is enabled but the service was never registered.
         // Surface a 500 so misconfiguration is loud during ops, not silent as 404.
         if ($this->pluginCatalog === null) {
-            throw new RuntimeException(
+            throw new PluginCatalogNotWiredException(
                 'Plugin catalog is enabled but the PluginCatalogService is not wired in the DI container.',
             );
         }
