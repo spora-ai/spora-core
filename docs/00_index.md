@@ -35,7 +35,7 @@
 
 | Doc | Description |
 |---|---|
-| [09_frontend.md](09_frontend.md) | Frontend stack, pages, stores, API design, dark mode, realtime updates |
+| [09_frontend.md](09_frontend.md) | Frontend stack (Vue 3 + Vite + Tailwind + radix-vue + Pinia), build, shared API client, composables, `apps/` module pattern |
 
 ---
 

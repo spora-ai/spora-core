@@ -161,14 +161,11 @@ core.{provider}.{field}
 | Segment    | Description                                           | Examples                    |
 |------------|-------------------------------------------------------|-----------------------------|
 | `core`     | Fixed literal. Denotes a built-in Spora setting.      | —                           |
-| `provider` | The external service or protocol the setting targets. | `tavily`, `imap`, `caldav`  |
+| `provider` | The external service or protocol the setting targets. | `openweathermap`             |
 | `field`    | The specific configuration field.                     | `api_key`, `host`, `port`   |
 
 **Examples:**
-- `core.tavily.api_key`
-- `core.imap.host`
-- `core.smtp.allowed_recipients`
-- `core.weatherapi.default_days`
+- `core.read_url.http_timeout`
 
 ### Plugin Tools
 
@@ -199,19 +196,19 @@ Settings are declared as `#[ToolSetting]` PHP attributes **directly on the tool 
 
 ```php
 #[Tool(
-    name: 'tavily_search',
-    description: 'Search the web using Tavily AI.',
+    name: 'my_search',
+    description: 'Search a remote API.',
 )]
 #[ToolSetting(
-    key: 'core.tavily.api_key',
-    label: 'Tavily API Key',
+    key: 'core.my_search.api_key',
+    label: 'API Key',
     type: 'password',
-    description: 'API key for api.tavily.com',
+    description: 'API key for the remote search service.',
     required: true,
 )]
 #[ToolOperation(name: 'search', description: 'Search', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolParameter(name: 'query', type: 'string', description: 'The search query.', required: true)]
-final class TavilySearchTool extends AbstractTool
+final class MySearchTool extends AbstractTool
 {
     public function __construct(
         private readonly ToolConfigService $configService,
@@ -220,9 +217,8 @@ final class TavilySearchTool extends AbstractTool
 
     public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
-        // Settings are resolved from the tool's OWN class:
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey   = $settings['core.tavily.api_key'] ?? '';
+        $apiKey   = $settings['core.my_search.api_key'] ?? '';
         // ...
     }
 
@@ -257,10 +253,10 @@ Later layers win; schema defaults fill in any keys that no layer has set. Tools 
 
 ## Shared Keys Across Tools
 
-Because keys are **globally unique**, two tools that reference the same key (e.g. `core.imap.host`) will resolve to the same stored value. This means:
+Because keys are **globally unique**, two tools that reference the same key (e.g. `core.my_search.api_key`) will resolve to the same stored value. This means:
 
-- A user configures `core.imap.host` once in the `EmailTool` settings panel.
-- A hypothetical future `SearchEmailTool` that also declares `core.imap.host` will automatically pick up the same value.
+- A user configures `core.my_search.api_key` once in the `MySearchTool` settings panel.
+- A hypothetical second tool that also declares `core.my_search.api_key` will automatically pick up the same value.
 
 The `ToolConfigService::getEffectiveSettings()` method resolves settings by scanning the `#[ToolSetting]` attributes on the requested class, then looking up each key in the global and agent-override stores.
 
@@ -274,17 +270,17 @@ The `exposeToLlm` parameter on `#[ToolSetting]` controls whether a setting's res
 
 ```php
 #[ToolSetting(
-    key: 'core.smtp.allowed_recipients',
-    label: 'Allowed Recipients',
+    key: 'core.my_search.allowed_domains',
+    label: 'Allowed Domains',
     type: 'text',
-    description: 'Comma-separated list of email addresses the agent is allowed to send to.',
+    description: 'Comma-separated list of domains the agent is allowed to query.',
     exposeToLlm: true,  // included in LLM tool definition
 )]
 #[ToolSetting(
-    key: 'core.smtp.host',
-    label: 'SMTP Host',
-    type: 'text',
-    exposeToLlm: false,  // NOT sent to LLM (infrastructure)
+    key: 'core.my_search.api_key',
+    label: 'API Key',
+    type: 'password',
+    exposeToLlm: false,  // NOT sent to LLM (credential)
 )]
 ```
 
@@ -298,7 +294,7 @@ The `exposeToLlm` parameter on `#[ToolSetting]` controls whether a setting's res
 
 ```
 [Effective Configuration]
-- Allowed Recipients: alice@example.com, bob@example.com
+- Allowed Domains: example.com, internal.example.org
 - From Address: agent@spora.local
 ```
 
@@ -310,34 +306,8 @@ Unconfigured settings are shown as `(not configured)` so the LLM knows a capabil
 
 | Key                            | Type     | Tool Class           | Purpose | LLM Exposed |
 |--------------------------------|----------|----------------------|---------|-------------|
-| `core.tavily.api_key`         | password | `TavilySearchTool`   | Tavily web search key | — |
-| `core.tavily.http_timeout`    | text     | `TavilySearchTool`   | Tavily HTTP timeout (seconds) | — |
-| `core.serper.api_key`         | password | `SerperSearchTool`   | Serper.dev Google search key | — |
-| `core.serper.http_timeout`    | text     | `SerperSearchTool`   | Serper HTTP timeout (seconds) | — |
-| `core.worldnewsapi.api_key`   | password | `WorldNewsApiTool`   | WorldNewsAPI key | — |
-| `core.worldnewsapi.http_timeout` | text  | `WorldNewsApiTool`   | WorldNewsAPI HTTP timeout (seconds) | — |
-| `core.weatherapi.api_key`     | password | `WeatherApiTool`     | WeatherAPI.com key | — |
-| `core.weatherapi.base_url`    | text     | `WeatherApiTool`     | API base URL (default `https://api.weatherapi.com/v1`) | — |
-| `core.weatherapi.default_days`| text     | `WeatherApiTool`     | Default forecast days 1–3 (default 3) | — |
-| `core.weatherapi.units`       | select   | `WeatherApiTool`     | `metric` or `imperial` | — |
-| `core.weatherapi.http_timeout`| text     | `WeatherApiTool`     | WeatherAPI HTTP timeout (seconds) | — |
 | `core.read_url.http_timeout`  | text     | `ReadUrlTool`        | Read URL HTTP timeout (seconds) | — |
-| `core.semantic_scholar.http_timeout` | text | `SemanticScholarTool` | Semantic Scholar HTTP timeout (seconds) | — |
-| `core.imap.host`              | text     | `EmailTool`          | IMAP server hostname | — |
-| `core.imap.port`              | text     | `EmailTool`          | IMAP port (default 993) | — |
-| `core.imap.encryption`        | select   | `EmailTool`          | `ssl` or `tls` or `notls` | — |
-| `core.imap.timeout`           | text     | `EmailTool`          | IMAP timeout in seconds (default 60) | — |
-| `core.email.username`         | text     | `EmailTool`          | Email login for both IMAP and SMTP | — |
-| `core.email.password`         | password | `EmailTool`          | Email password / app token for both | — |
-| `core.smtp.host`              | text     | `EmailTool`          | SMTP server hostname | — |
-| `core.smtp.port`              | text     | `EmailTool`          | SMTP port (default 587) | — |
-| `core.smtp.encryption`        | select   | `EmailTool`          | `tls` or `ssl` or `notls` | — |
-| `core.smtp.timeout`           | text     | `EmailTool`          | SMTP timeout in seconds (default 30) | — |
-| `core.smtp.from`              | text     | `EmailTool`          | Sender email address | ✓ |
-| `core.smtp.allowed_recipients`| text     | `EmailTool`          | Comma-separated whitelist (or `*`) | ✓ |
-| `core.caldav.url`             | text     | `CalDavCalendarTool` | CalDAV server URL | — |
-| `core.caldav.username`        | text     | `CalDavCalendarTool` | CalDAV login | — |
-| `core.caldav.password`        | password | `CalDavCalendarTool` | CalDAV password / app token | — |
-| `core.caldav.http_timeout`    | text     | `CalDavCalendarTool` | CalDAV HTTP timeout (seconds) | — |
 
 "LLM Exposed ✓" means `exposeToLlm: true` — the setting's effective value is included in the tool definition sent to the LLM.
+
+The remaining tools (`Calculator`, `CurrentTime`, `AgentMemory`, `GlobalMemory`, `Handover`, `ReadUrl`, `UserInfo`) declare no `#[ToolSetting]` attributes — they take their inputs entirely from the LLM's arguments and have no infrastructure configuration to expose.

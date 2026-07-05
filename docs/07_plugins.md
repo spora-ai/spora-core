@@ -357,6 +357,32 @@ SPORA_PLUGINS_PATHS=/opt/spora-plugins/minimax,/srv/spora/community
 `SPORA_PLUGINS_PATHS` is also accepted via `config.php` under the
 `plugins_paths` key (list of absolute paths).
 
+### Install via Composer (`composer require`)
+
+For a minimal install — no CLI wrapper — `composer require` works directly when the
+operator skeleton is in use (the bundled `spora-ai/installer` Composer plugin routes
+`spora-plugin` packages to `plugins/{$name}/` automatically):
+
+```bash
+composer require spora-ai/spora-plugin-tavily:^0.2
+composer require spora-ai/spora-plugin-serper:^0.2
+composer require spora-ai/spora-plugin-semantic-scholar:^0.1
+composer require spora-ai/spora-plugin-worldnews:^0.1
+composer require spora-ai/spora-plugin-weather:^0.1
+composer require spora-ai/spora-plugin-calendar:^0.1
+composer require spora-ai/spora-plugin-email:^0.1
+php bin/spora spora:install   # applies the plugin's migration
+```
+
+### Install via the Web UI
+
+When the operator has opted in by setting `SPORA_PLUGIN_INSTALL_ENABLED=true` in the
+host's environment, admins can install and uninstall plugins from the
+**Plugins** page in the admin UI. The UI calls a set of write endpoints under
+`/api/v1/plugins/install/*` that wrap the same `Spora\Core\Extension\PluginManager`
+that `plugin:install` uses on the CLI. For the request/response shape, gating, and
+audit-log behaviour, see [`docs/20_plugin_install_api.md`](20_plugin_install_api.md).
+
 ### Updating a plugin
 
 For a CLI-installed plugin, run `php bin/spora plugin:update [package]` (or
