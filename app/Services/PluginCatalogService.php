@@ -316,13 +316,8 @@ final class PluginCatalogService
      */
     private function decodeCacheFile(): ?array
     {
-        $path = $this->cachePath();
-        if (!is_file($path)) {
-            return null;
-        }
-
-        $raw = @file_get_contents($path);
-        if ($raw === false || $raw === '') {
+        $raw = $this->readCacheFileContents();
+        if ($raw === null) {
             return null;
         }
 
@@ -332,11 +327,24 @@ final class PluginCatalogService
             return null;
         }
 
-        if (!is_array($decoded)) {
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * Read the raw bytes of the on-disk cache file. Returns null when the file
+     * is missing, unreadable, or empty so callers can short-circuit.
+     */
+    private function readCacheFileContents(): ?string
+    {
+        $path = $this->cachePath();
+        if (!is_file($path)) {
             return null;
         }
-
-        return $decoded;
+        $raw = @file_get_contents($path);
+        if ($raw === false || $raw === '') {
+            return null;
+        }
+        return $raw;
     }
 
     /**
