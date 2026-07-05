@@ -62,11 +62,57 @@ final class PluginsController
         $this->requireInstallEnabled();
 
         $body = $this->decodeBody($request);
+        $validated = $this->validateInstallRequest($body);
+        if ($validated instanceof JsonResponse) {
+            return $validated;
+        }
+
+        [$package, $constraint, $path] = $validated;
+
+        return $this->runInstall($package, $constraint, $path);
+    }
+
+    /**
+     * Validate the decoded POST body for `store()`. Returns the (package,
+     * constraint, path) triple on success, or a 400 JsonResponse on the
+     * first failing rule.
+     *
+     * Extracted from `store()` to keep that method under the 3-return cap
+     * (SonarCloud php:S1142). Encapsulates every field-shape / mutual
+     * exclusion rule listed in docs/20_plugin_install_api.md §2.1.
+     *
+     * @param array<string, mixed>|null $body
+     * @return array{0: string, 1: ?string, 2: ?string}|JsonResponse
+     */
+    private function validateInstallRequest(?array $body): array|JsonResponse
+    {
+        $package = is_array($body) ? $this->asString($body, 'package') : null;
+        $constraint = is_array($body) ? $this->asString($body, 'constraint') : null;
+        $path = is_array($body) ? $this->asString($body, 'path') : null;
+
+        $failure = $this->validateInstallBodyShape($body)
+            ?? $this->validateInstallPackage($package)
+            ?? $this->validateInstallMode($constraint, $path);
+        if ($failure !== null) {
+            return $failure;
+        }
+
+        return [$package, $constraint, $path];
+    }
+
+    /**
+     * @param array<string, mixed>|null $body
+     */
+    private function validateInstallBodyShape(?array $body): ?JsonResponse
+    {
         if (!is_array($body)) {
             return $this->error('VALIDATION_FAILED', 'Request body must be a JSON object.', Response::HTTP_BAD_REQUEST);
         }
+        return null;
+    }
 
-        $package = $this->asString($body, 'package');
+    private function validateInstallPackage(?string $package): ?JsonResponse
+    {
         if ($package === null) {
             return $this->error('VALIDATION_FAILED', 'Missing required field: package.', Response::HTTP_BAD_REQUEST);
         }
@@ -77,9 +123,11 @@ final class PluginsController
                 Response::HTTP_BAD_REQUEST,
             );
         }
+        return null;
+    }
 
-        $constraint = $this->asString($body, 'constraint');
-        $path       = $this->asString($body, 'path');
+    private function validateInstallMode(?string $constraint, ?string $path): ?JsonResponse
+    {
         if ($constraint !== null && $path !== null) {
             return $this->error(
                 'VALIDATION_FAILED',
@@ -94,7 +142,11 @@ final class PluginsController
                 Response::HTTP_BAD_REQUEST,
             );
         }
+        return null;
+    }
 
+    private function runInstall(string $package, ?string $constraint, ?string $path): JsonResponse
+    {
         $manager = $this->requirePluginManager();
         $result  = $manager->install(new PluginInstallRequest($package, $constraint, $path));
 
