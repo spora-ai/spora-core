@@ -164,6 +164,7 @@ final class ContainerDefinitions
                     // is always appended; this list holds any additional external paths
                     // (e.g. sibling git checkouts of community plugins).
                     'plugins_paths'       => [],
+                    'plugin_install_enabled' => false,
 
                     // Path/name of the composer executable PluginManager shells out to.
                     // 'composer' relies on the host's $PATH (typical for dev/CI). Shared-host
@@ -249,6 +250,7 @@ final class ContainerDefinitions
             return array_values($parts);
         });
         $apply('SPORA_COMPOSER_BINARY', 'composer_binary', static fn($v) => $v);
+        $apply('SPORA_PLUGIN_INSTALL_ENABLED', 'plugin_install_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_ASSET_STORE_MODE', 'asset_store.mode', static fn($v) => $v);
         $apply('SPORA_ASSET_STORE_AUTO_THRESHOLD_BYTES', 'asset_store.auto_threshold_bytes', static fn($v) => (int) $v);
         $apply('SPORA_ASSET_STORE_MAX_BYTES', 'asset_store.max_bytes', static fn($v) => (int) $v);
@@ -455,6 +457,13 @@ final class ContainerDefinitions
         return is_file($conventional) ? $conventional : null;
     }
 
+    // Gates the Web UI plugin install endpoints (docs/20_plugin_install_api.md).
+    // CLI plugin commands are not gated — leave this off if `composer` isn't on $PATH.
+    private static function resolvePluginInstallEnabled(ContainerInterface $c): bool
+    {
+        return (bool) ($c->get('config')['plugin_install_enabled'] ?? false);
+    }
+
     private static function llmDefinitions(): array
     {
         return [
@@ -633,6 +642,8 @@ final class ContainerDefinitions
 
                 return new PluginsController(
                     $c->get(PluginsService::class),
+                    $c->get(PluginManager::class),
+                    self::resolvePluginInstallEnabled($c),
                     $enabled ? $c->get(PluginCatalogService::class) : null,
                     $enabled,
                 );

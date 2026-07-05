@@ -866,3 +866,68 @@ it('tool_instances factory merges in App tools when AppLoader has a loaded App',
     expect($instances)->toHaveKey(CalculatorTool::class);
     expect($instances)->toHaveKey($appToolFqcn);
 });
+
+// Spora_PLUGIN_INSTALL_ENABLED env-var → plugin_install_enabled config mapping
+
+describe('SPORA_PLUGIN_INSTALL_ENABLED', function (): void {
+    beforeEach(function (): void {
+        // Reset the env var around each test so cases are independent.
+        putenv('SPORA_PLUGIN_INSTALL_ENABLED');
+        unset($_ENV['SPORA_PLUGIN_INSTALL_ENABLED']);
+    });
+
+    it('defaults to false when the env var is not set', function (): void {
+        $overrides = callContainerMethod('collectEnvOverrides');
+        expect($overrides)->not->toHaveKey('plugin_install_enabled');
+    });
+
+    it('maps truthy spellings to true', function (string $value): void {
+        putenv("SPORA_PLUGIN_INSTALL_ENABLED=$value");
+        $_ENV['SPORA_PLUGIN_INSTALL_ENABLED'] = $value;
+        $overrides = callContainerMethod('collectEnvOverrides');
+        expect($overrides['plugin_install_enabled'])->toBeTrue();
+    })->with(['1', 'true', 'yes', 'on', 'TRUE', 'Yes']);
+
+    it('maps falsy spellings to false', function (string $value): void {
+        putenv("SPORA_PLUGIN_INSTALL_ENABLED=$value");
+        $_ENV['SPORA_PLUGIN_INSTALL_ENABLED'] = $value;
+        $overrides = callContainerMethod('collectEnvOverrides');
+        expect($overrides['plugin_install_enabled'])->toBeFalse();
+    })->with(['0', 'false', 'no', 'off', 'random-string']);
+});
+
+describe('resolvePluginInstallEnabled', function (): void {
+    it('reads the config key (default false)', function (): void {
+        $c = new class implements Psr\Container\ContainerInterface {
+            public function get(string $id): mixed
+            {
+                if ($id === 'config') {
+                    return ['plugin_install_enabled' => true];
+                }
+                throw new RuntimeException("Unexpected lookup: $id");
+            }
+            public function has(string $id): bool
+            {
+                return $id === 'config';
+            }
+        };
+        expect(callContainerMethod('resolvePluginInstallEnabled', [$c]))->toBeTrue();
+    });
+
+    it('falls back to false when the config key is missing', function (): void {
+        $c = new class implements Psr\Container\ContainerInterface {
+            public function get(string $id): mixed
+            {
+                if ($id === 'config') {
+                    return [];
+                }
+                throw new RuntimeException("Unexpected lookup: $id");
+            }
+            public function has(string $id): bool
+            {
+                return $id === 'config';
+            }
+        };
+        expect(callContainerMethod('resolvePluginInstallEnabled', [$c]))->toBeFalse();
+    });
+});

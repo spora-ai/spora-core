@@ -9,7 +9,9 @@ use DI\ContainerBuilder;
 use Dotenv\Dotenv;
 use Psr\Log\LoggerInterface;
 use Spora\Core\Exceptions\BasePathNotDefinedException;
+use Spora\Core\Extension\Exceptions\PluginInstallFailedException;
 use Spora\Extensions\AppLoader;
+use Spora\Http\Exceptions\FeatureDisabledException;
 use Spora\Http\Exceptions\ForbiddenException;
 use Spora\Http\Exceptions\InvalidCsrfTokenException;
 use Spora\Http\Exceptions\PluginCatalogNotWiredException;
@@ -225,8 +227,48 @@ final class Kernel implements KernelInterface
                 ['error' => ['code' => 'PLUGIN_CATALOG_NOT_WIRED', 'message' => $e->getMessage()]],
                 Response::HTTP_INTERNAL_SERVER_ERROR,
             ),
+            $e instanceof FeatureDisabledException => new JsonResponse(
+                ['error' => ['code' => 'FEATURE_DISABLED', 'message' => $e->getMessage()]],
+                Response::HTTP_FORBIDDEN,
+            ),
+            $e instanceof PluginInstallFailedException => $this->mapPluginInstallFailureToResponse($e),
             default => null,
         };
+    }
+
+    /**
+     * Map {@see PluginInstallFailedException} to the JSON envelope documented
+     * in docs/20_plugin_install_api.md § "Composer-failure body (500)".
+     *
+     * Stderr is truncated to a hard 8 KiB ceiling (suffix included) so a
+     * runaway Composer error doesn't blow up the response. The full output
+     * is in storage/spora.log.
+     */
+    private function mapPluginInstallFailureToResponse(PluginInstallFailedException $e): JsonResponse
+    {
+        $stderr = $e->stderr;
+        $suffix = '… [truncated; see storage/spora.log]';
+        $budget = 8192;
+        if (strlen($stderr) > $budget - strlen($suffix)) {
+            $stderr = substr($stderr, 0, $budget - strlen($suffix)) . $suffix;
+        }
+
+        return new JsonResponse(
+            [
+                'error'   => [
+                    'code'    => 'PLUGIN_INSTALL_FAILED',
+                    'message' => sprintf(
+                        'composer exited with code %d. See `details.stderr` or storage/spora.log for the full output.',
+                        $e->exitCode,
+                    ),
+                ],
+                'details' => [
+                    'exit_code' => $e->exitCode,
+                    'stderr'    => $stderr,
+                ],
+            ],
+            Response::HTTP_INTERNAL_SERVER_ERROR,
+        );
     }
 
     private function configureErrorHandling(string $appEnv): void

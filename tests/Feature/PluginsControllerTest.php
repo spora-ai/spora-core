@@ -17,7 +17,7 @@ const PLUGINS_INVENTORY_FIXTURE = BASE_PATH . '/tests/Fixtures/plugins_inventory
 /**
  * @return array{0: PluginsController, 1: AuthMiddleware, 2: CsrfMiddleware}
  */
-function spora_makePluginsController(): array
+function spora_makePluginsController(bool $installEnabled = false): array
 {
     $loader = new PluginLoader([PLUGINS_INVENTORY_FIXTURE], null);
     $loader->boot();
@@ -27,7 +27,13 @@ function spora_makePluginsController(): array
     $authMiddleware = new AuthMiddleware($authService);
     $csrfMiddleware = new CsrfMiddleware(new CsrfTokenService());
 
-    return [new PluginsController($service), $authMiddleware, $csrfMiddleware];
+    // Read-only `index()` doesn't need a PluginManager — null keeps these
+    // tests free of the Symfony Process factory.
+    return [
+        new PluginsController($service, null, $installEnabled, null, true),
+        $authMiddleware,
+        $csrfMiddleware,
+    ];
 }
 
 describe('PluginsController', function (): void {
@@ -93,7 +99,7 @@ describe('PluginsController', function (): void {
         $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null);
         $loader->boot();
         $service = new PluginsService($loader, new PluginMetadataExtractor());
-        $controller = new PluginsController($service);
+        $controller = new PluginsController($service, null, false, null, true);
 
         $authMw = new AuthMiddleware($authService);
         $csrfMw = new CsrfMiddleware(new CsrfTokenService());
@@ -142,7 +148,7 @@ describe('PluginsController', function (): void {
 
         $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_inventory_brain'], null);
         $loader->boot();
-        $controller = new PluginsController(new PluginsService($loader, new PluginMetadataExtractor()));
+        $controller = new PluginsController(new PluginsService($loader, new PluginMetadataExtractor()), null, false, null, true);
         $authMw = new AuthMiddleware($authService);
         $csrfMw = new CsrfMiddleware(new CsrfTokenService());
 
@@ -179,7 +185,7 @@ describe('PluginsController', function (): void {
         try {
             $loader = new PluginLoader([$dir], null);
             $loader->boot();
-            $controller = new PluginsController(new PluginsService($loader, new PluginMetadataExtractor()));
+            $controller = new PluginsController(new PluginsService($loader, new PluginMetadataExtractor()), null, false, null, true);
             $authMw = new AuthMiddleware($authService);
             $csrfMw = new CsrfMiddleware(new CsrfTokenService());
 
