@@ -150,9 +150,8 @@ test('store() installs via the registry on a valid request', function (): void {
 });
 
 test('store() surfaces PluginInstallFailedException for the Kernel to map', function (): void {
-    // PluginManager that always exits non-zero. The controller lets the exception
-    // bubble — the Kernel maps it to a 500 PLUGIN_INSTALL_FAILED. Verified below
-    // in the Kernel-level test.
+    // The controller lets the exception bubble; the Kernel-level test below
+    // verifies the 500 mapping.
     $logger = new Monolog\Logger('test');
     $failingFactory = static function (array $argv, string $cwd): object {
         return new class {
