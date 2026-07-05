@@ -150,41 +150,27 @@ This ensures global uniqueness — two plugins can never produce a tool name col
 
 ## Tool Settings Key Convention
 
-All setting keys follow a **dot-separated hierarchical format**:
+Settings keys are the **bare field name** (e.g. `api_key`, `http_timeout`,
+`host`), scoped to the declaring tool class via its `#[ToolSetting]` attribute.
+The key is what the UI displays and what tool code reads via
+`ToolConfigService::getEffectiveSettings(toolClass, ...)`.
 
-### Core Tools
-
-```
-core.{provider}.{field}
-```
-
-| Segment    | Description                                           | Examples                    |
-|------------|-------------------------------------------------------|-----------------------------|
-| `core`     | Fixed literal. Denotes a built-in Spora setting.      | —                           |
-| `provider` | The external service or protocol the setting targets. | `openweathermap`             |
-| `field`    | The specific configuration field.                     | `api_key`, `host`, `port`   |
+There is no shared key namespace — keys are looked up per tool class through
+reflection on the `#[ToolSetting]` attributes on that class. Two different
+tool classes may declare the same key name (e.g. `api_key`) without colliding;
+each resolves to its own setting on its own tool.
 
 **Examples:**
-- `core.read_url.http_timeout`
+- `http_timeout` (declared on `ReadUrlTool`)
+- `api_key` (declared on whatever tool needs it — `TavilySearchTool`,
+  `WeatherApiTool`, etc.)
 
 ### Plugin Tools
 
-```
-plugin.{plugin_name}.{provider}.{field}
-```
-
-| Segment       | Description                                              | Examples                        |
-|---------------|----------------------------------------------------------|---------------------------------|
-| `plugin`      | Fixed literal. Denotes a plugin-contributed setting.     | —                               |
-| `plugin_name` | The unique slug of the plugin (from `plugin.json`).      | `acme-weather`, `my-crm`       |
-| `provider`    | The external service or protocol the setting targets.    | `openweathermap`, `weatherapi`  |
-| `field`       | The specific configuration field.                        | `api_key`, `base_url`          |
-
-**Examples:**
-- `plugin.acme-weather.openweathermap.api_key`
-- `plugin.my-crm.salesforce.client_secret`
-
-The extra `plugin_name` segment ensures that two different plugins cannot accidentally collide on the same key, even if they wrap the same external provider.
+When a tool is contributed by a plugin, the same rule applies: the key is the
+bare field name. The plugin declares its tool class in a PSR-4-namespaced
+location and the `#[ToolSetting]` attributes on that class drive the same
+per-tool resolution. No `plugin.*` namespace prefix is used.
 
 ---
 
@@ -200,7 +186,7 @@ Settings are declared as `#[ToolSetting]` PHP attributes **directly on the tool 
     description: 'Search a remote API.',
 )]
 #[ToolSetting(
-    key: 'core.my_search.api_key',
+    key: 'api_key',
     label: 'API Key',
     type: 'password',
     description: 'API key for the remote search service.',
@@ -218,7 +204,7 @@ final class MySearchTool extends AbstractTool
     public function execute(array $arguments, int $agentId, ?int $userId = null): ToolResult
     {
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-        $apiKey   = $settings['core.my_search.api_key'] ?? '';
+        $apiKey   = $settings['api_key'] ?? '';
         // ...
     }
 
@@ -234,7 +220,7 @@ final class MySearchTool extends AbstractTool
 
 ### Exception: LLM driver settings
 
-LLM driver settings (OpenAI/Anthropic API keys, model, base URL, etc.) do **not** follow the `core.*` key convention. They are stored as a JSON blob on the `llm_driver_configurations` table, scoped to a per-driver `LLMDriverConfiguration` record, and surfaced via `LLMConfigService::decodeSettings()`. The driver class itself declares its settings via `#[ToolSetting]` on the class (see `app/Drivers/OpenAICompatibleDriver.php` and `app/Drivers/AnthropicCompatibleDriver.php`), and `DriverFactory` reads them when constructing a driver for an agent.
+LLM driver settings (OpenAI/Anthropic API keys, model, base URL, etc.) are stored as a JSON blob on the `llm_driver_configurations` table, scoped to a per-driver `LLMDriverConfiguration` record, and surfaced via `LLMConfigService::decodeSettings()`. The driver class itself declares its settings via `#[ToolSetting]` on the class (see `app/Drivers/OpenAICompatibleDriver.php` and `app/Drivers/AnthropicCompatibleDriver.php`), and `DriverFactory` reads them when constructing a driver for an agent.
 
 ---
 
@@ -251,14 +237,23 @@ Later layers win; schema defaults fill in any keys that no layer has set. Tools 
 
 ---
 
-## Shared Keys Across Tools
+## Per-Tool Key Scoping
 
-Because keys are **globally unique**, two tools that reference the same key (e.g. `core.my_search.api_key`) will resolve to the same stored value. This means:
+Settings keys are scoped to the declaring tool class. Two tools that happen to
+declare a setting with the same key name (e.g. both declaring `api_key`) do
+**not** share values — each tool resolves its own settings independently via
+`ToolConfigService::getEffectiveSettings(static::class, ...)`.
 
-- A user configures `core.my_search.api_key` once in the `MySearchTool` settings panel.
-- A hypothetical second tool that also declares `core.my_search.api_key` will automatically pick up the same value.
+This means:
 
-The `ToolConfigService::getEffectiveSettings()` method resolves settings by scanning the `#[ToolSetting]` attributes on the requested class, then looking up each key in the global and agent-override stores.
+- A user configures `api_key` once on the `TavilySearchTool` settings panel —
+  that value is only used when `TavilySearchTool` runs.
+- A different tool that also declares `api_key` (e.g. `WeatherApiTool`) reads
+  its own separately-stored `api_key` value.
+
+The `ToolConfigService::getEffectiveSettings()` method resolves settings by
+scanning the `#[ToolSetting]` attributes on the requested class, then looking
+up each key in the global and agent-override stores for that class.
 
 ---
 
@@ -270,14 +265,14 @@ The `exposeToLlm` parameter on `#[ToolSetting]` controls whether a setting's res
 
 ```php
 #[ToolSetting(
-    key: 'core.my_search.allowed_domains',
+    key: 'allowed_domains',
     label: 'Allowed Domains',
     type: 'text',
     description: 'Comma-separated list of domains the agent is allowed to query.',
     exposeToLlm: true,  // included in LLM tool definition
 )]
 #[ToolSetting(
-    key: 'core.my_search.api_key',
+    key: 'api_key',
     label: 'API Key',
     type: 'password',
     exposeToLlm: false,  // NOT sent to LLM (credential)
@@ -304,9 +299,9 @@ Unconfigured settings are shown as `(not configured)` so the LLM knows a capabil
 
 ## Quick Reference: All Core Keys
 
-| Key                            | Type     | Tool Class           | Purpose | LLM Exposed |
-|--------------------------------|----------|----------------------|---------|-------------|
-| `core.read_url.http_timeout`  | text     | `ReadUrlTool`        | Read URL HTTP timeout (seconds) | — |
+| Key              | Type     | Tool Class    | Purpose | LLM Exposed |
+|------------------|----------|---------------|---------|-------------|
+| `http_timeout`   | text     | `ReadUrlTool` | Read URL HTTP timeout (seconds) | — |
 
 "LLM Exposed ✓" means `exposeToLlm: true` — the setting's effective value is included in the tool definition sent to the LLM.
 

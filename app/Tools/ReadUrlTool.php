@@ -27,7 +27,7 @@ use Throwable;
 )]
 #[ToolOperation(name: 'fetch', description: 'Fetch and read the contents of a URL', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolSetting(
-    key: 'core.read_url.http_timeout',
+    key: 'http_timeout',
     label: 'HTTP Timeout',
     type: 'text',
     description: 'Seconds before an HTTP request fails (default: 15)',
@@ -54,8 +54,8 @@ final class ReadUrlTool extends AbstractTool
 
     private function effectiveTimeout(array $settings): int
     {
-        if (isset($settings['core.read_url.http_timeout']) && (int) $settings['core.read_url.http_timeout'] > 0) {
-            return (int) $settings['core.read_url.http_timeout'];
+        if (isset($settings['http_timeout']) && (int) $settings['http_timeout'] > 0) {
+            return (int) $settings['http_timeout'];
         }
         $envTimeout = (int) ($_ENV['SPORA_TOOL_HTTP_TIMEOUT'] ?? getenv('SPORA_TOOL_HTTP_TIMEOUT') ?: 0);
         return $envTimeout > 0 ? $envTimeout : 15;
