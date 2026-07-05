@@ -121,7 +121,7 @@ after install (operator-visible install location).
 {
     "error": {
         "code":    "PLUGIN_INSTALL_FAILED",
-        "message": "composer require failed (exit 2). See stderr for details."
+        "message": "composer exited with code 2. See `details.stderr` or storage/spora.log for the full output."
     },
     "details": {
         "exit_code": 2,

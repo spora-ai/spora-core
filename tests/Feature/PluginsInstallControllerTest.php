@@ -13,19 +13,10 @@ use Spora\Services\PluginsService;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
- * Tests for the Web UI plugin install surface:
- * POST   /api/v1/plugins
- * DELETE /api/v1/plugins/{package}
- * PATCH  /api/v1/plugins/{package}
- *
- * These exercise the controller body directly — the middleware stack
- * (Auth, Csrf, Admin) is verified by other test suites and doesn't need
- * re-verification here. Following the pattern in
- * `tests/Feature/UserControllerTest.php` which calls `$controller->store($request)`
- * without invoking the middleware.
- *
- * The composer invocation is intercepted via the `processFactory` closure
- * seam in {@see PluginManager}'s constructor — no real `composer` runs.
+ * Controller-level tests for the Web UI plugin install surface
+ * (POST / DELETE / PATCH). The middleware stack (Auth/Csrf/Admin) is covered
+ * by other suites — see UserControllerTest for the same direct-call pattern.
+ * Composer is faked via PluginManager's `processFactory` seam.
  */
 
 function spora_makeInstallController(PluginManager $manager, bool $installEnabled): PluginsController
@@ -84,13 +75,26 @@ test('store() throws FeatureDisabledException when flag is off', function (): vo
 
 test('store() validates missing package field', function (): void {
     $controller = spora_makeInstallController(spora_fakePluginManager(), true);
-    $request = Request::create('/api/v1/plugins', 'POST', [], [], [], ['CONTENT_TYPE' => 'application/json'], '{}');
+    $body = json_encode(['constraint' => '^0.2']);
+    $request = Request::create('/api/v1/plugins', 'POST', [], [], [], ['CONTENT_TYPE' => 'application/json'], $body);
 
     $response = $controller->store($request);
     expect($response->getStatusCode())->toBe(400);
     $body = json_decode($response->getContent(), true);
     expect($body['error']['code'])->toBe('VALIDATION_FAILED');
     expect($body['error']['message'])->toContain('package');
+});
+
+test('store() rejects non-object JSON body', function (): void {
+    $controller = spora_makeInstallController(spora_fakePluginManager(), true);
+    // JSON array — valid JSON, wrong shape.
+    $request = Request::create('/api/v1/plugins', 'POST', [], [], [], ['CONTENT_TYPE' => 'application/json'], '[]');
+
+    $response = $controller->store($request);
+    expect($response->getStatusCode())->toBe(400);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('VALIDATION_FAILED');
+    expect($body['error']['message'])->toContain('JSON object');
 });
 
 test('store() validates malformed package shape', function (): void {
