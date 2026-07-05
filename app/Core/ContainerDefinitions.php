@@ -193,7 +193,7 @@ final class ContainerDefinitions
                     'plugin_catalog_enabled' => true,
 
                     // Cache TTL (seconds) for the on-disk plugin-catalog cache.
-                    // One file keyed by sha1(query); multiple queries share the
+                    // One file keyed by hash('sha256', $query); multiple queries share the
                     // storage path. 1 hour by default — Packagist search is
                     // not real-time.
                     'plugin_catalog_ttl' => PluginCatalogService::DEFAULT_TTL_SECONDS,

@@ -22,7 +22,7 @@ use Throwable;
  * Calls Packagist's public search endpoint
  * (https://packagist.org/search.json?q={query}&type=spora-plugin) and filters
  * results to packages with type === 'spora-plugin'. Results are cached on
- * disk at `<storage>/.spora_plugin_catalog.json`, keyed by `hash('xxh128', $query)`,
+ * disk at `<storage>/.spora_plugin_catalog.json`, keyed by `hash('sha256', $query)`,
  * with a TTL (default 1 hour).
  *
  * On HTTP 429 or transport errors: serves the stale cache if one exists;
@@ -34,7 +34,7 @@ final class PluginCatalogService
 {
     public const DEFAULT_TTL_SECONDS = 3600;
     public const CACHE_FILENAME = '.spora_plugin_catalog.json';
-    public const CACHE_VERSION = 1;
+    public const CACHE_VERSION = 2;
 
     /**
      * Composer packages with type === 'spora-plugin' are listed in the
@@ -222,7 +222,7 @@ final class PluginCatalogService
         $cache['version'] = self::CACHE_VERSION;
         /** @var array<string, array{ttl: int, packages: list<array{name: string, description: string, version: ?string, downloads: int, favers: int, repository: ?string, homepage: ?string}>}> $entries */
         $entries = is_array($cache['entries'] ?? null) ? $cache['entries'] : [];
-        $entries[hash('xxh128', $query)] = [
+        $entries[hash('sha256', $query)] = [
             self::CACHE_ENTRY_TTL      => $now,
             self::CACHE_ENTRY_PACKAGES => $packages,
         ];
@@ -278,7 +278,7 @@ final class PluginCatalogService
         if (!is_array($entries)) {
             return null;
         }
-        $key = hash('xxh128', $query);
+        $key = hash('sha256', $query);
         if (!isset($entries[$key]) || !is_array($entries[$key])) {
             return null;
         }
