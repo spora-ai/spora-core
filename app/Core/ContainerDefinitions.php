@@ -486,8 +486,8 @@ final class ContainerDefinitions
                 $appContributedApps = $c->has(AppLoader::class)
                     ? ($c->get(AppLoader::class)->getApp()?->apps() ?? [])
                     : [];
-                $pluginContributedApps = $c->has(\Spora\Plugins\PluginLoader::class)
-                    ? $c->get(\Spora\Plugins\PluginLoader::class)->appClasses()
+                $pluginContributedApps = $c->has(PluginLoader::class)
+                    ? $c->get(PluginLoader::class)->appClasses()
                     : [];
                 foreach (array_merge($c->get('app_apps'), $appContributedApps, $pluginContributedApps) as $appClass) {
                     $registry->register($appClass);

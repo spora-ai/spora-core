@@ -7,6 +7,7 @@ namespace Spora\Plugins;
 use DI\ContainerBuilder;
 use Spora\Core\MiddlewareRouteCollector;
 use Spora\Plugins\Exceptions\PluginLoadFailedException;
+use Throwable;
 
 /**
  * Discovers and boots PluginInterface implementations from one or more plugin directories.
@@ -239,7 +240,7 @@ final class PluginLoader
         foreach ($this->plugins as $slug => $plugin) {
             try {
                 $plugin->register($builder);
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 error_log(sprintf(
                     '[spora] plugin %s register() failed: %s',
                     $slug,
