@@ -40,7 +40,7 @@ function catalog_makeController(int $ttlSeconds = 3600): array
     $authService = bootAuthLayer();
     $authMw = new AuthMiddleware($authService);
 
-    return [new PluginsController($service, $catalog, true), $authMw, $tmp];
+    return [new PluginsController($service, null, false, $catalog, true), $authMw, $tmp];
 }
 
 /**
@@ -60,7 +60,7 @@ function catalog_makeControllerDisabled(): array
     $authService = bootAuthLayer();
     $authMw = new AuthMiddleware($authService);
 
-    return [new PluginsController($service, null, false), $authMw, $tmp];
+    return [new PluginsController($service, null, false, null, false), $authMw, $tmp];
 }
 
 function catalog_cleanUp(string $dir): void
@@ -123,6 +123,8 @@ describe('PluginsController::catalog', function (): void {
                     $l->boot();
                     return $l;
                 })(), new PluginMetadataExtractor()),
+                null,
+                false,
                 $catalog,
                 true,
             );
@@ -177,7 +179,7 @@ describe('PluginsController::catalog', function (): void {
 
         // Feature flag ON, but service is null — a wiring bug the operator
         // cannot fix via config. Must surface as 500, not be hidden as 404.
-        $controller = new PluginsController($service, null, true);
+        $controller = new PluginsController($service, null, false, null, true);
         $authMw = new AuthMiddleware($authService);
 
         try {
@@ -222,7 +224,7 @@ describe('PluginsController::catalog', function (): void {
         $loader->boot();
         $service = new PluginsService($loader, new PluginMetadataExtractor());
 
-        $controller = new PluginsController($service, $catalog, true);
+        $controller = new PluginsController($service, null, false, $catalog, true);
         $authMw = new AuthMiddleware($authService);
 
         try {
@@ -254,7 +256,7 @@ describe('PluginsController::catalog', function (): void {
         $loader->boot();
         $service = new PluginsService($loader, new PluginMetadataExtractor());
 
-        $controller = new PluginsController($service, $catalog, true);
+        $controller = new PluginsController($service, null, false, $catalog, true);
         $authMw = new AuthMiddleware($authService);
 
         try {
@@ -287,7 +289,7 @@ describe('PluginsController::catalog', function (): void {
         $loader->boot();
         $service = new PluginsService($loader, new PluginMetadataExtractor());
 
-        $controller = new PluginsController($service, $catalog, true);
+        $controller = new PluginsController($service, null, false, $catalog, true);
         $authMw = new AuthMiddleware($authService);
 
         try {

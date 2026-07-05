@@ -301,10 +301,7 @@ final class PluginsController
         }
         // json_decode(..., true) returns arrays for both JSON objects and
         // JSON lists; treat sequential arrays as a different shape and reject.
-        if (!is_array($decoded) || array_is_list($decoded)) {
-            return null;
-        }
-        return $decoded;
+        return is_array($decoded) && !array_is_list($decoded) ? $decoded : null;
     }
 
     /**
