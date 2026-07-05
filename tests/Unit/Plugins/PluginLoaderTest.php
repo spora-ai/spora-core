@@ -295,7 +295,7 @@ test('multi-path discovery merges plugins from multiple directories and dedupes 
  * SpyPlugin records calls to register/apps/routes/boot and returns canned
  * values for apps()/tools(). Used to assert the loader invokes each hook.
  */
-final class SpyPlugin extends \Spora\Plugins\AbstractPlugin
+final class SpyPlugin extends Spora\Plugins\AbstractPlugin
 {
     public int $registerCalls  = 0;
     public int $routesCalls   = 0;
@@ -304,27 +304,27 @@ final class SpyPlugin extends \Spora\Plugins\AbstractPlugin
     /** @var array<class-string> */
     public array $appClasses = [];
 
-    public ?\DI\ContainerBuilder $builderSeen = null;
-    public ?\Spora\Core\MiddlewareRouteCollector $routesSeen = null;
+    public ?DI\ContainerBuilder $builderSeen = null;
+    public ?Spora\Core\MiddlewareRouteCollector $routesSeen = null;
 
     public function getName(): string
     {
         return 'Spy';
     }
 
-    /** @return array<class-string<\Spora\Apps\AppInterface>> */
+    /** @return array<class-string<Spora\Apps\AppInterface>> */
     public function apps(): array
     {
         return $this->appClasses;
     }
 
-    public function register(\DI\ContainerBuilder $builder): void
+    public function register(DI\ContainerBuilder $builder): void
     {
         $this->registerCalls++;
         $this->builderSeen = $builder;
     }
 
-    public function routes(\Spora\Core\MiddlewareRouteCollector $routes): void
+    public function routes(Spora\Core\MiddlewareRouteCollector $routes): void
     {
         $this->routesCalls++;
         $this->routesSeen = $routes;
@@ -350,7 +350,7 @@ test('appClasses() flattens apps() from every loaded plugin', function (): void 
 });
 
 test('registerPlugins() invokes register() on each loaded plugin once', function (): void {
-    $builder = new \DI\ContainerBuilder();
+    $builder = new DI\ContainerBuilder();
     $loader  = new PluginLoader([FIXTURE_MANIFEST_PLUGINS]);
     $loader->boot();
 
@@ -361,12 +361,12 @@ test('registerPlugins() invokes register() on each loaded plugin once', function
         // ManifestPlugin fixture has the no-op default register() — we just
         // assert the loader doesn't throw when calling it. A separate test
         // below covers the SpyPlugin path with a concrete recorder.
-        expect($plugin)->toBeInstanceOf(\Spora\Plugins\PluginInterface::class);
+        expect($plugin)->toBeInstanceOf(Spora\Plugins\PluginInterface::class);
     }
 });
 
 test('registerPlugins() is a no-op when no plugins are loaded', function (): void {
-    $builder = new \DI\ContainerBuilder();
+    $builder = new DI\ContainerBuilder();
     $loader  = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()]);
     $loader->boot();
 
@@ -380,14 +380,14 @@ test('registerPlugins() swallows exceptions from a misbehaving plugin and contin
     // Stub plugin whose register() throws. The loader must catch the throw
     // so one bad plugin cannot break boot — the rest of the plugins still
     // get their register() called.
-    $throwing = new class extends \Spora\Plugins\AbstractPlugin {
+    $throwing = new class extends Spora\Plugins\AbstractPlugin {
         public function getName(): string
         {
             return 'Throwing';
         }
-        public function register(\DI\ContainerBuilder $builder): void
+        public function register(DI\ContainerBuilder $builder): void
         {
-            throw new \RuntimeException('register() exploded');
+            throw new RuntimeException('register() exploded');
         }
     };
     $good = new SpyPlugin();
@@ -395,11 +395,11 @@ test('registerPlugins() swallows exceptions from a misbehaving plugin and contin
     // Manually inject both stub plugins into the loader's internal state.
     $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null);
     $loader->boot();
-    $reflection = new \ReflectionClass($loader);
+    $reflection = new ReflectionClass($loader);
     $pluginsProperty = $reflection->getProperty('plugins');
     $pluginsProperty->setValue($loader, ['throwing' => $throwing, 'good' => $good]);
 
-    $builder = new \DI\ContainerBuilder();
+    $builder = new DI\ContainerBuilder();
     $loader->registerPlugins($builder);
 
     // The good plugin's register() was still called.
@@ -427,7 +427,7 @@ test('bootExtensions() is idempotent within a process', function (): void {
 test('registerRoutes() does not throw when no plugins are loaded', function (): void {
     $loader  = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()]);
     $loader->boot();
-    $routes  = new \Spora\Core\MiddlewareRouteCollector(new \FastRoute\RouteParser\Std(), new \FastRoute\DataGenerator\GroupCountBased());
+    $routes  = new Spora\Core\MiddlewareRouteCollector(new FastRoute\RouteParser\Std(), new FastRoute\DataGenerator\GroupCountBased());
 
     $loader->registerRoutes($routes);
 
