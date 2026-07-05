@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use RuntimeException;
 use Spora\Services\PluginCatalogService;
 use Spora\Services\PluginsService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -39,8 +40,8 @@ final class PluginsController
      * Browse the Packagist catalog of Spora plugins. The query is optional —
      * an empty string lists every package with type === 'spora-plugin'.
      *
-     * When Spora_PLUGIN_CATALOG_ENABLED=false (default: true), the route returns
-     * 404 so the navbar item hides cleanly without a per-render feature check.
+     * Returns 404 when `SPORA_PLUGIN_CATALOG_ENABLED=false` so the navbar
+     * item hides cleanly without a per-render feature check.
      */
     public function catalog(Request $request): JsonResponse
     {
@@ -51,10 +52,11 @@ final class PluginsController
             );
         }
 
+        // Wiring error: catalog is enabled but the service was never registered.
+        // Surface a 500 so misconfiguration is loud during ops, not silent as 404.
         if ($this->pluginCatalog === null) {
-            return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Plugin catalog is disabled.']],
-                404,
+            throw new RuntimeException(
+                'Plugin catalog is enabled but the PluginCatalogService is not wired in the DI container.',
             );
         }
 

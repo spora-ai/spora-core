@@ -108,7 +108,7 @@ Mail transport itself is configured through the `SPORA_MAIL_*` env vars (read by
 | `SPORA_PLUGINS_PATHS` | `<base>/plugins` | `plugins_paths` | Comma-separated list of additional absolute paths to scan for plugins. The in-repo `plugins/` directory is always appended. |
 | `SPORA_COMPOSER_BINARY` | `composer` | `composer_binary` | Path to the `composer` executable that the install/uninstall commands shell out to. Absolute paths ending in `.phar` are prefixed with `php` automatically. |
 | `SPORA_PLUGIN_CATALOG_ENABLED` | `true` | `plugin_catalog_enabled` | When `false`, the Browse tab in `/apps/plugins` is hidden and `GET /api/v1/plugins/catalog` returns `404`. Already-installed plugins are unaffected — only the discovery surface is gated. |
-| `SPORA_PLUGIN_CATALOG_TTL` | `3600` | `plugin_catalog_ttl` | Cache TTL (seconds) for the on-disk Packagist cache at `storage/.spora_plugin_catalog.json`. Different queries share the file but each gets its own entry keyed by `sha1($query)`. |
+| `SPORA_PLUGIN_CATALOG_TTL` | `3600` | `plugin_catalog_ttl` | Cache TTL (seconds) for the on-disk Packagist cache at `storage/.spora_plugin_catalog.json`. Different queries share the file but each gets its own entry keyed by a SHA-256 fingerprint of the query string. |
 
 See [18_plugin_author_guide.md](18_plugin_author_guide.md#2-plugin-catalog) for
 what authors need to ship so their plugin shows up under Browse, and

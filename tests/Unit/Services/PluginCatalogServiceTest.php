@@ -299,6 +299,42 @@ test('different queries produce separate cache entries', function (): void {
     }
 });
 
+test('malformed cache entry falls back to the network', function (): void {
+    [$service, $client, $tmp] = catalogServiceFixture();
+    try {
+        // Hand-craft a cache file whose entry for the queried key is missing
+        // the `packages` field — must NOT trigger an undefined-index warning,
+        // must be treated as a cache miss.
+        $key = hash('sha256', '');
+        $cachePath = $tmp . '/storage/.spora_plugin_catalog.json';
+        @mkdir(dirname($cachePath), 0o777, true);
+        file_put_contents($cachePath, json_encode([
+            'version' => PluginCatalogService::CACHE_VERSION,
+            'entries' => [
+                $key => ['ttl' => 1_700_000_000], // missing 'packages'
+            ],
+        ]));
+
+        $payload = json_encode([
+            'results' => [
+                ['name' => 'spora-ai/x', 'description' => '', 'type' => 'spora-plugin', 'downloads' => 0, 'favers' => 0],
+            ],
+        ]);
+        $client->shouldReceive('request')
+            ->once()
+            ->andReturn(catalogResponse(200, $payload));
+
+        // Suppress warnings so an undefined-index regression fails loudly here,
+        // not silently as a passing test.
+        $packages = @$service->search('');
+
+        expect($packages)->toHaveCount(1);
+        expect($packages[0]['name'])->toBe('spora-ai/x');
+    } finally {
+        catalogCleanUp($tmp);
+    }
+});
+
 test('clearCache removes the cache file', function (): void {
     [$service, $client, $tmp] = catalogServiceFixture();
     try {

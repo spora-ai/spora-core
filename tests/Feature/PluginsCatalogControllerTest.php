@@ -163,6 +163,32 @@ describe('PluginsController::catalog', function (): void {
         }
     });
 
+    it('throws (500) when the catalog is enabled but the service is not wired', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('wiring@example.com', 'ValidPass1!', 'Wiring');
+        simulateLoggedInSession($userId, 'wiring@example.com');
+
+        $tmp = sys_get_temp_dir() . '/spora_catalog_wiring_' . uniqid('', true);
+        mkdir($tmp . '/storage', 0o777, true);
+
+        $loader = new PluginLoader([PLUGINS_CATALOG_FIXTURE], null);
+        $loader->boot();
+        $service = new PluginsService($loader, new PluginMetadataExtractor());
+
+        // Feature flag ON, but service is null — a wiring bug the operator
+        // cannot fix via config. Must surface as 500, not be hidden as 404.
+        $controller = new PluginsController($service, null, true);
+        $authMw = new AuthMiddleware($authService);
+
+        try {
+            $request = jsonRequest('GET', '/api/v1/plugins/catalog');
+            expect(fn() => callController($controller, 'catalog', $request, [$authMw]))
+                ->toThrow(RuntimeException::class);
+        } finally {
+            catalog_cleanUp($tmp);
+        }
+    });
+
     it('returns 401 for anonymous users', function (): void {
         clearSession();
 

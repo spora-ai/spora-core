@@ -17,18 +17,8 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 
 /**
- * Discovers Spora plugins on Packagist.
- *
- * Calls Packagist's public search endpoint
- * (https://packagist.org/search.json?q={query}&type=spora-plugin) and filters
- * results to packages with type === 'spora-plugin'. Results are cached on
- * disk at `<storage>/.spora_plugin_catalog.json`, keyed by `hash('sha256', $query)`,
- * with a TTL (default 1 hour).
- *
- * On HTTP 429 or transport errors: serves the stale cache if one exists;
- * otherwise throws CatalogUnavailableException (mapped to HTTP 503).
- *
- * On malformed JSON: throws MalformedCatalogException (mapped to HTTP 502).
+ * Discovers Spora plugins on Packagist and serves a cached, filtered view
+ * via `GET /api/v1/plugins/catalog`. See `docs/18_plugin_author_guide.md`.
  */
 final class PluginCatalogService
 {
@@ -279,11 +269,19 @@ final class PluginCatalogService
             return null;
         }
         $key = hash('sha256', $query);
-        if (!isset($entries[$key]) || !is_array($entries[$key])) {
+        $entry = $entries[$key] ?? null;
+        if (!is_array($entry)) {
+            return null;
+        }
+        // Defense against partially-written / hand-edited cache files: only treat
+        // well-shaped entries as hits; missing or wrong-typed fields fall through
+        // to a network fetch instead of triggering undefined-index warnings.
+        if (!isset($entry[self::CACHE_ENTRY_TTL], $entry[self::CACHE_ENTRY_PACKAGES])
+            || !is_array($entry[self::CACHE_ENTRY_PACKAGES])
+        ) {
             return null;
         }
         /** @var array{ttl: int, packages: list<array{name: string, description: string, version: ?string, downloads: int, favers: int, repository: ?string, homepage: ?string}>} $entry */
-        $entry = $entries[$key];
         return $entry;
     }
 

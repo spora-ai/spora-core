@@ -58,7 +58,7 @@ final class RouteDefinitions
         $r->addRoute('GET', '/api/v1/plugins', [PluginsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         // Plugin catalog (Packagist browse) — Auth only. Read-only, so no Csrf.
         // Admin not required: any logged-in user can browse. The controller
-        // returns 404 when Spora_PLUGIN_CATALOG_ENABLED=false so the navbar
+        // returns 404 when SPORA_PLUGIN_CATALOG_ENABLED=false so the navbar
         // item can hide cleanly.
         $r->addRoute('GET', '/api/v1/plugins/catalog', [PluginsController::class, 'catalog'], [AuthMiddleware::class]);
         $r->addRoute('POST', '/api/v1/auth/login', [AuthController::class, 'login'], []);

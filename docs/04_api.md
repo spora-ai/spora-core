@@ -89,6 +89,8 @@
 | `DELETE` | `/agents/{id}/scheduled-runs/{runId}` | Yes | Delete scheduled run |
 | `POST` | `/agents/{id}/scheduled-runs/{runId}/trigger` | Yes | Trigger scheduled run immediately |
 | `GET` | `/recipes` | Yes | List available recipes |
+| `GET` | `/plugins` | Yes | List installed plugins (with metadata + migration status). Read-only — plugins are installed via the `spora:install` CLI. |
+| `GET` | `/plugins/catalog` | Yes | Browse the Packagist catalog of Spora plugins. Returns `404` when `SPORA_PLUGIN_CATALOG_ENABLED=false`. |
 | `GET` | `/memories` | Yes | List global memories |
 | `POST` | `/memories` | Yes | Create global memory |
 | `PATCH` | `/memories/reorder` | Yes | Reorder global memories |
@@ -129,6 +131,39 @@
 | `DELETE` | `/mail-templates/{id}` | Yes (Admin) | Delete mail template (admin only) |
 
 **`{toolId}`** in paths = URL-encoded tool name (the value of `#[Tool(name: ...)]`, e.g. `serper_search`, `tavily_search`, `read_url`, `email`, `llm_configuration`). It is **not** the FQCN — the controller resolves the name to a class via `ToolConfigService::resolveToolClass()` (`app/Services/ToolConfigService.php:504-507`).
+
+---
+
+## Plugin Catalog
+
+### `GET /api/v1/plugins/catalog?q={query}`
+
+Browse the Packagist catalog of Spora plugins. The query is optional — omit `q` to list every package with `type === 'spora-plugin'`. Results are server-side filtered to that exact type to avoid keyword pollution. Served from a per-query disk cache at `storage/.spora_plugin_catalog.json` (TTL controlled by `SPORA_PLUGIN_CATALOG_TTL`, default `3600s`); on upstream 429/transport errors and no fresh cache the stale entry is used.
+
+Auth: any logged-in user. Returns `404` (`code: NOT_FOUND`) when `SPORA_PLUGIN_CATALOG_ENABLED=false`. Returns `503` (`code: CATALOG_UNAVAILABLE`) when the upstream is unreachable and no stale cache is available. Returns `502` (`code: MALFORMED_CATALOG`) when the upstream body is not the expected shape.
+
+**Response 200:**
+```json
+{
+  "data": {
+    "packages": [
+      {
+        "name": "spora-ai/spora-plugin-email",
+        "description": "IMAP/SMTP plugin for Spora.",
+        "version": "0.2.1",
+        "downloads": 5,
+        "favers": 1,
+        "repository": "https://github.com/spora-ai/spora-plugin-email",
+        "homepage": null
+      }
+    ],
+    "cached_at": 1700000000,
+    "ttl_seconds": 3600
+  }
+}
+```
+
+`cached_at` is a Unix timestamp of when the cache entry was last refreshed by a network fetch; `ttl_seconds` is the TTL applied to that cache entry (not the age).
 
 ---
 
