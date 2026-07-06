@@ -6,14 +6,17 @@ use Spora\Apps\AppRegistry;
 use Spora\Http\AppsController;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
+use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
 use Tests\Fixtures\StubMemoriesApp;
+use Tests\Fixtures\StubVueApp;
+use Tests\Fixtures\StubVueAppEmpty;
 
-function makeAppsController(?AppRegistry $registry = null): array
+function makeAppsController(?AppRegistry $registry = null, ?PluginLoader $loader = null): array
 {
     $authService = bootAuthLayer();
     $registry ??= new AppRegistry();
-    $controller = new AppsController($registry);
+    $controller = new AppsController($registry, $loader);
     $authMiddleware = new AuthMiddleware($authService);
     $csrfMiddleware = new CsrfMiddleware(new CsrfTokenService());
 
@@ -68,5 +71,64 @@ describe('AppsController', function (): void {
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
         expect($body['data']['apps'])->toBe([]);
+    });
+
+    it('emits frontendEntry when an app implements VueAppInterface', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('vue@example.com', 'ValidPass1!', 'Vue');
+        simulateLoggedInSession($userId, 'vue@example.com');
+
+        $registry = new AppRegistry();
+        $registry->register(StubVueApp::class);
+
+        [$controller, $authMiddleware, $csrfMiddleware] = makeAppsController($registry);
+
+        $request = jsonRequest('GET', '/api/v1/apps');
+        $response = callController($controller, 'index', $request, [$authMiddleware, $csrfMiddleware]);
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['apps'][0])->toHaveKey('frontendEntry');
+        expect($body['data']['apps'][0]['frontendEntry'])->toBe('main.js');
+    });
+
+    it('omits frontendEntry when a VueAppInterface returns an empty entry', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('vue-empty@example.com', 'ValidPass1!', 'VueEmpty');
+        simulateLoggedInSession($userId, 'vue-empty@example.com');
+
+        $registry = new AppRegistry();
+        $registry->register(StubVueAppEmpty::class);
+
+        [$controller, $authMiddleware, $csrfMiddleware] = makeAppsController($registry);
+
+        $request = jsonRequest('GET', '/api/v1/apps');
+        $response = callController($controller, 'index', $request, [$authMiddleware, $csrfMiddleware]);
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['apps'][0])->not->toHaveKey('frontendEntry');
+    });
+
+    it('does not emit frontendEntry when no PluginLoader is injected', function (): void {
+        // A plain AppInterface (no VueAppInterface) and no PluginLoader
+        // means the controller has no source for frontendEntry. The payload
+        // must still serialise without the key — never null, never empty.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('noentry@example.com', 'ValidPass1!', 'NoEntry');
+        simulateLoggedInSession($userId, 'noentry@example.com');
+
+        $registry = new AppRegistry();
+        $registry->register(StubMemoriesApp::class);
+
+        // Explicitly pass null for the loader.
+        [$controller, $authMiddleware, $csrfMiddleware] = makeAppsController($registry, null);
+
+        $request = jsonRequest('GET', '/api/v1/apps');
+        $response = callController($controller, 'index', $request, [$authMiddleware, $csrfMiddleware]);
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['apps'][0])->not->toHaveKey('frontendEntry');
     });
 });

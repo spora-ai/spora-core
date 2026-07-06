@@ -433,3 +433,198 @@ test('registerRoutes() does not throw when no plugins are loaded', function (): 
 
     expect(true)->toBeTrue();
 });
+
+// ---------------------------------------------------------------------------
+// Tests for PluginLoader::suggestedPackages() — the "companion plugins"
+// surface that reads each plugin's composer.json `suggest` field.
+// ---------------------------------------------------------------------------
+
+test('suggestedPackages() returns [] when no plugins are loaded', function (): void {
+    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()]);
+    $loader->boot();
+
+    expect($loader->suggestedPackages())->toBe([]);
+});
+
+test('suggestedPackages() skips plugins with no composer.json (hand-rolled plugins)', function (): void {
+    // The ManifestPlugin fixture ships only plugin.json — no composer.json.
+    // The loader must skip it gracefully rather than warning.
+    $loader = new PluginLoader([FIXTURE_MANIFEST_PLUGINS]);
+    $loader->boot();
+
+    expect($loader->suggestedPackages())->toBe([]);
+});
+
+test('suggestedPackages() returns the `suggest` map from a plugin\'s composer.json', function (): void {
+    $slug = 'withsuggest';
+    $dir  = sys_get_temp_dir() . '/spora_suggest_' . uniqid();
+    mkdir($dir . '/' . $slug, 0o777, true);
+
+    file_put_contents($dir . '/' . $slug . '/plugin.json', json_encode([
+        'slug'  => $slug,
+        'class' => 'Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin',
+    ]));
+    file_put_contents($dir . '/' . $slug . '/composer.json', json_encode([
+        'name'    => 'spora/' . $slug,
+        'suggest' => [
+            'spora/plugin-weather'    => 'For weather-aware prompts',
+            'spora/plugin-worldnews'  => 'For news-aware prompts',
+        ],
+    ]));
+
+    try {
+        $loader = new PluginLoader([$dir], null);
+        $loader->boot();
+        $suggests = $loader->suggestedPackages();
+
+        expect($suggests)->toHaveKey($slug);
+        expect($suggests[$slug])->toBe([
+            'spora/plugin-weather'    => 'For weather-aware prompts',
+            'spora/plugin-worldnews'  => 'For news-aware prompts',
+        ]);
+    } finally {
+        @unlink($dir . '/' . $slug . '/composer.json');
+        @unlink($dir . '/' . $slug . '/plugin.json');
+        @rmdir($dir . '/' . $slug);
+        @rmdir($dir);
+    }
+});
+
+test('suggestedPackages() ignores a composer.json with no `suggest` field', function (): void {
+    $slug = 'nosuggest';
+    $dir  = sys_get_temp_dir() . '/spora_nosuggest_' . uniqid();
+    mkdir($dir . '/' . $slug, 0o777, true);
+
+    file_put_contents($dir . '/' . $slug . '/plugin.json', json_encode([
+        'slug'  => $slug,
+        'class' => 'Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin',
+    ]));
+    file_put_contents($dir . '/' . $slug . '/composer.json', json_encode([
+        'name'    => 'spora/' . $slug,
+        'require' => ['php' => '^8.4'],
+    ]));
+
+    try {
+        $loader = new PluginLoader([$dir], null);
+        $loader->boot();
+        expect($loader->suggestedPackages())->toBe([]);
+    } finally {
+        @unlink($dir . '/' . $slug . '/composer.json');
+        @unlink($dir . '/' . $slug . '/plugin.json');
+        @rmdir($dir . '/' . $slug);
+        @rmdir($dir);
+    }
+});
+
+test('suggestedPackages() ignores a malformed composer.json', function (): void {
+    $slug = 'badjson';
+    $dir  = sys_get_temp_dir() . '/spora_badjson_' . uniqid();
+    mkdir($dir . '/' . $slug, 0o777, true);
+
+    file_put_contents($dir . '/' . $slug . '/plugin.json', json_encode([
+        'slug'  => $slug,
+        'class' => 'Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin',
+    ]));
+    file_put_contents($dir . '/' . $slug . '/composer.json', '{not valid json');
+
+    try {
+        $loader = new PluginLoader([$dir], null);
+        $loader->boot();
+        // Malformed JSON must be silently swallowed — the suggest list is
+        // informational, never an error surface.
+        expect($loader->suggestedPackages())->toBe([]);
+    } finally {
+        @unlink($dir . '/' . $slug . '/composer.json');
+        @unlink($dir . '/' . $slug . '/plugin.json');
+        @rmdir($dir . '/' . $slug);
+        @rmdir($dir);
+    }
+});
+
+test('suggestedPackages() filters out non-string keys and non-string values from suggest entries', function (): void {
+    $slug = 'mixed';
+    $dir  = sys_get_temp_dir() . '/spora_mixed_' . uniqid();
+    mkdir($dir . '/' . $slug, 0o777, true);
+
+    file_put_contents($dir . '/' . $slug . '/plugin.json', json_encode([
+        'slug'  => $slug,
+        'class' => 'Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin',
+    ]));
+    // The composer.json schema permits arrays as descriptions (e.g. for
+    // multiple-language descriptions). The loader's filter step drops those.
+    file_put_contents($dir . '/' . $slug . '/composer.json', json_encode([
+        'name'    => 'spora/' . $slug,
+        'suggest' => [
+            'spora/ok'      => 'Valid string description',
+            'integer-key'   => 42,           // value is not a string
+            99              => 'numeric key', // key is not a string
+            'spora/empty'   => '',            // empty value still kept
+        ],
+    ]));
+
+    try {
+        $loader = new PluginLoader([$dir], null);
+        $loader->boot();
+        $suggests = $loader->suggestedPackages();
+
+        // Only the well-formed entries survive.
+        expect($suggests[$slug])->toHaveKey('spora/ok');
+        expect($suggests[$slug])->toHaveKey('spora/empty');
+        expect($suggests[$slug])->not->toHaveKey('integer-key');
+        expect($suggests[$slug])->not->toHaveKey('99');
+    } finally {
+        @unlink($dir . '/' . $slug . '/composer.json');
+        @unlink($dir . '/' . $slug . '/plugin.json');
+        @rmdir($dir . '/' . $slug);
+        @rmdir($dir);
+    }
+});
+
+test('suggestedPackages() treats a non-object `suggest` field as empty', function (): void {
+    $slug = 'weirdsuggest';
+    $dir  = sys_get_temp_dir() . '/spora_weird_' . uniqid();
+    mkdir($dir . '/' . $slug, 0o777, true);
+
+    file_put_contents($dir . '/' . $slug . '/plugin.json', json_encode([
+        'slug'  => $slug,
+        'class' => 'Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin',
+    ]));
+    file_put_contents($dir . '/' . $slug . '/composer.json', json_encode([
+        'name'    => 'spora/' . $slug,
+        'suggest' => 'not-an-object',
+    ]));
+
+    try {
+        $loader = new PluginLoader([$dir], null);
+        $loader->boot();
+        expect($loader->suggestedPackages())->toBe([]);
+    } finally {
+        @unlink($dir . '/' . $slug . '/composer.json');
+        @unlink($dir . '/' . $slug . '/plugin.json');
+        @rmdir($dir . '/' . $slug);
+        @rmdir($dir);
+    }
+});
+
+test('suggestedPackages() ignores an empty composer.json file', function (): void {
+    $slug = 'emptyfile';
+    $dir  = sys_get_temp_dir() . '/spora_empty_' . uniqid();
+    mkdir($dir . '/' . $slug, 0o777, true);
+
+    file_put_contents($dir . '/' . $slug . '/plugin.json', json_encode([
+        'slug'  => $slug,
+        'class' => 'Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin',
+    ]));
+    file_put_contents($dir . '/' . $slug . '/composer.json', '');
+
+    try {
+        $loader = new PluginLoader([$dir], null);
+        $loader->boot();
+        expect($loader->suggestedPackages())->toBe([]);
+    } finally {
+        @unlink($dir . '/' . $slug . '/composer.json');
+        @unlink($dir . '/' . $slug . '/plugin.json');
+        @rmdir($dir . '/' . $slug);
+        @rmdir($dir);
+    }
+});

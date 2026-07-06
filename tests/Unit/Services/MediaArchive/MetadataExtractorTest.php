@@ -109,4 +109,91 @@ describe('MetadataExtractor::extractAudioVideoMeta', function (): void {
         expect($result['duration_seconds'])->toBeNull();
         expect($result['mime'])->toBe('audio/mpeg');
     });
+
+    it('returns null width/height for an audio file (image metadata is video-only)', function (): void {
+        $mp3 = "\xFF\xFB" . str_repeat("\x00", 64);
+        $result = makeExtractor(false)->extractAudioVideoMeta($mp3, 'audio/mpeg');
+        // extractAudioVideoMeta returns only duration_seconds + mime; width/height
+        // live on the ExtractedMetadata shape from extract(), not this helper.
+        expect($result)->toHaveKey('duration_seconds');
+        expect($result)->toHaveKey('mime');
+        expect($result)->not->toHaveKey('width');
+    });
+});
+
+describe('MetadataExtractor::extract dispatch', function (): void {
+    it('returns an ExtractedMetadata with all nulls for unknown media types', function (): void {
+        // Document MIME → default branch. The extractor preserves the caller's
+        // hint mime on the result and leaves width/height/duration null.
+        $bytes = '%PDF-1.4' . str_repeat("\x00", 64);
+        $result = makeExtractor()->extract($bytes, 'application/pdf', MediaType::Document);
+        expect($result->width)->toBeNull();
+        expect($result->height)->toBeNull();
+        expect($result->durationSeconds)->toBeNull();
+        expect($result->mime)->toBe('application/pdf');
+    });
+
+    it('honours the caller\'s mediaType for Image even when the sniff says octet-stream', function (): void {
+        // Random bytes — getimagesize() returns null, so imageResult() falls
+        // back to the call-supplied mime hint. The extractor still routes
+        // through the image branch because mediaType=Image wins.
+        $bytes = str_repeat("\x00", 32);
+        $result = makeExtractor()->extract($bytes, 'application/octet-stream', MediaType::Image);
+        expect($result->width)->toBeNull();
+        // imageResult() falls back to the caller's mime when getimagesize() fails.
+        expect($result->mime)->toBe('application/octet-stream');
+    });
+
+    it('returns an image result with sniffed dimensions for real PNG bytes routed via Image', function (): void {
+        $bytes = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+            strict: true,
+        );
+        $result = makeExtractor()->extract($bytes, 'image/png', MediaType::Image);
+        expect($result->width)->toBe(1);
+        expect($result->height)->toBe(1);
+        expect($result->mime)->toBe('image/png');
+    });
+
+    it('returns null duration for audio dispatched through extract()', function (): void {
+        $result = makeExtractor(false)->extract("\xFF\xFB", 'audio/mpeg', MediaType::Audio);
+        expect($result->durationSeconds)->toBeNull();
+    });
+
+    it('returns null duration for video dispatched through extract()', function (): void {
+        $mp4 = pack('N', 32) . 'ftyp' . 'isom' . str_repeat("\x00", 64);
+        $result = makeExtractor(false)->extract($mp4, 'video/mp4', MediaType::Video);
+        expect($result->durationSeconds)->toBeNull();
+    });
+
+    it('treats empty bytes as a no-op and preserves the call-supplied mime hint', function (): void {
+        $result = makeExtractor()->extract('', 'audio/mpeg', MediaType::Audio);
+        expect($result->width)->toBeNull();
+        expect($result->height)->toBeNull();
+        expect($result->durationSeconds)->toBeNull();
+        // The empty-bytes guard preserves the caller-supplied mime unchanged.
+        expect($result->mime)->toBe('audio/mpeg');
+    });
+});
+
+describe('MetadataExtractor image dispatcher', function (): void {
+    it('returns nulls when imageResult() cannot decode the bytes', function (): void {
+        // Real extractImageMeta() path. Bytes are not a real image — the
+        // decoder returns null and the helper falls back to the caller mime.
+        $result = makeExtractor()->extractImageMeta('not an image', 'application/octet-stream');
+        expect($result['width'])->toBeNull();
+        expect($result['height'])->toBeNull();
+        expect($result['mime'])->toBe('application/octet-stream');
+    });
+
+    it('returns the imageinfo mime in preference to the call-supplied hint when both are present', function (): void {
+        // PNG bytes — getimagesize() reports imageinfo['mime'] = 'image/png',
+        // which wins over the caller's 'application/octet-stream' hint.
+        $bytes = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+            strict: true,
+        );
+        $result = makeExtractor()->extractImageMeta($bytes, 'application/octet-stream');
+        expect($result['mime'])->toBe('image/png');
+    });
 });

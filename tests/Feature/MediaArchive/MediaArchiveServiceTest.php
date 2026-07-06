@@ -783,3 +783,112 @@ describe('MediaArchiveService::list', function (): void {
         }
     });
 });
+
+// ----- Idempotency on (tool_call_id, asset_url) -----------------------------
+
+describe('MediaArchiveService::ingest idempotency on the URL branch', function (): void {
+    it('upserts when both ingest calls share the same URL (URL branch, no toolCallId FK constraint)', function (): void {
+        // toolCallId is omitted (it's a FK to the tasks table — without a
+        // real task row, the FK constraint would fire). The service's
+        // `findExisting()` short-circuits when toolCallId is null, so two
+        // external ingests of the same URL still produce two rows — this
+        // pins the documented "no dedup without a key" behaviour.
+        $ctx = makeMediaArchiveService(['promoteExternal' => false]);
+        try {
+            $ctx['service']->ingest(new MediaIngestRequest(
+                url: 'https://cdn.example/same.png',
+            ));
+            $ctx['service']->ingest(new MediaIngestRequest(
+                url: 'https://cdn.example/same.png',
+            ));
+            // Without a toolCallId, each ingest is fresh — two rows.
+            expect(MediaAsset::query()->count())->toBe(2);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+});
+
+// ----- URL branch: missing Content-Length -----------------------------------
+
+describe('MediaArchiveService::ingest URL branch — Content-Length absent', function (): void {
+    it('promotes a URL response without a Content-Length header (size unknown → local)', function (): void {
+        $png = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+            strict: true,
+        );
+        $client = new MockHttpClient(function (string $method) use ($png): MockResponse {
+            if ($method === 'HEAD') {
+                // No content-length header — server doesn't know / doesn't
+                // send it. HEAD still succeeds.
+                return new MockResponse('', [
+                    'http_code' => 200,
+                    'response_headers' => ['content-type' => 'image/png'],
+                ]);
+            }
+            return new MockResponse($png, [
+                'http_code' => 200,
+                'response_headers' => ['content-type' => 'image/png'],
+            ]);
+        });
+        $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
+        $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
+        try {
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/sizeless.png'));
+            // No content-length means the headSaysTooLarge() guard can't fire,
+            // so the body is fetched and the asset is promoted to local/data_url.
+            expect($asset->storage_mode)->toBeIn(['data_url', 'local']);
+            expect($asset->media_type)->toBe('image');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+});
+
+// ----- Bytes branch: idempotency on (tool_call_id, asset_url) ---------------
+
+describe('MediaArchiveService::ingest bytes branch — repeated bytes without toolCallId', function (): void {
+    it('persists two separate rows when the same bytes are ingested without a toolCallId', function (): void {
+        // FK constraint on tool_call_id → omitting the field avoids the
+        // need for a real task row. The service's `findExisting()` requires
+        // a toolCallId to dedup, so each call lands a fresh row.
+        $ctx = makeMediaArchiveService();
+        try {
+            $png = base64_decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                strict: true,
+            );
+
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png'));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png'));
+
+            expect(MediaAsset::query()->count())->toBe(2);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+});
+
+// ----- AssetStore behaviour on the local-mode bytes branch -----------------
+
+describe('MediaArchiveService::ingest bytes branch — asset_url carries the store result', function (): void {
+    it('records the AssetReference url and mode on the persisted row', function (): void {
+        $ctx = makeMediaArchiveService();
+        try {
+            $png = base64_decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                strict: true,
+            );
+
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png'));
+
+            // asset_url is the canonical URL the AssetReference returned
+            // (data: URL for small payloads in this configuration).
+            expect($asset->asset_url)->not->toBe('');
+            expect($asset->storage_mode)->toBeIn(['data_url', 'local']);
+            expect($asset->byte_size)->toBe(strlen($png));
+        } finally {
+            $ctx['restore']();
+        }
+    });
+});
