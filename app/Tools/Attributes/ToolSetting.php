@@ -9,6 +9,11 @@ use Attribute;
 /**
  * Declares a UI-configurable setting for a tool.
  *
+ * The `key` is the bare field name (e.g. `api_key`, `http_timeout`) — it is
+ * scoped to the declaring tool class and resolved per-tool by
+ * `ToolConfigService::getEffectiveSettings(toolClass, ...)`. Two tools may
+ * declare a setting with the same key name without colliding.
+ *
  * Usage:
  *   #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', required: true)]
  *   #[ToolSetting(key: 'max_results', label: 'Max Results', type: 'text', default: '10')]

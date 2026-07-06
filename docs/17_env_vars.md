@@ -64,7 +64,7 @@ See [12_worker_deployment.md](12_worker_deployment.md) for deployment patterns (
 | Variable | Default | Config key | Description |
 |---|---|---|---|
 | `SPORA_LLM_TIMEOUT` | `300` | `llm_timeout` | Seconds for LLM API calls. Reasoning models may need 300+. |
-| `SPORA_TOOL_HTTP_TIMEOUT` | `30` | `tool_http_timeout` | Seconds for tool HTTP requests (web search, calendars, etc.). Per-tool overrides via `core.{tool}.http_timeout` in agent tool settings. |
+| `SPORA_TOOL_HTTP_TIMEOUT` | `30` | `tool_http_timeout` | Seconds for tool HTTP requests (web search, calendars, etc.). Per-tool overrides via the `http_timeout` setting on each tool's `#[ToolSetting]` in agent tool settings. |
 
 ---
 
