@@ -40,6 +40,12 @@ The flag is read in `ContainerDefinitions` (env-first, config-fallback, safe
 default) and exposed to controllers via a `pluginInstallEnabled(): bool`
 factory, mirroring the `SPORA_SECRET_KEY` resolution pattern.
 
+The same flag is mirrored to the SPA at runtime via
+[`GET /api/v1/config`](04_api.md#endpoint-summary) under the
+`plugin_install_enabled` key. The SPA fetches this endpoint on every page
+reload so the Web UI install buttons reflect the current server state — the
+SPA **never** reads a build-time `import.meta.env` for this flag.
+
 **Why off by default:** shared-host operators on cPanel/FTP don't have
 `composer` on the path. Enabling the Web UI without verifying
 `SPORA_COMPOSER_BINARY` is set would surface a confusing error to admins.

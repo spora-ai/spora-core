@@ -24,13 +24,23 @@ final class PluginCatalogService
 {
     public const DEFAULT_TTL_SECONDS = 3600;
     public const CACHE_FILENAME = '.spora_plugin_catalog.json';
-    public const CACHE_VERSION = 2;
+
+    /**
+     * Bumped from 2 → 3 to invalidate operator caches that were populated
+     * under the row-level type filter which silently rejected every result
+     * (Packagist's search.json does not echo back per-row `type`). Any cache
+     * entry written under CACHE_VERSION=2 is treated as a miss and refetched.
+     */
+    public const CACHE_VERSION = 3;
 
     /**
      * Composer packages with type === 'spora-plugin' are listed in the
-     * Browse tab. The `type` filter is also passed to Packagist as a
-     * query hint, but we re-filter on the response body to defend
-     * against keyword pollution.
+     * Browse tab. The `type` filter is passed to Packagist as a query
+     * hint; we keep a defensive re-filter on the response body for the
+     * rare case Packagist echoes back a `type` field on a row, but the
+     * check is permissive (only rejects when the field is present and
+     * non-matching) because Packagist's `search.json` does NOT include
+     * per-row `type` for type-filtered queries.
      */
     public const SPORA_PLUGIN_TYPE = 'spora-plugin';
 
@@ -161,7 +171,14 @@ final class PluginCatalogService
             if (!is_array($row)) {
                 continue;
             }
-            if (($row['type'] ?? null) !== self::SPORA_PLUGIN_TYPE) {
+            // Packagist's `search.json` does NOT echo back a per-row `type`
+            // when the request is filtered by `?type=…` — the type is
+            // applied server-side and the response row only carries
+            // {name, description, downloads, favers, repository, …}.
+            // The previous check `($row['type'] ?? null) !== self::SPORA_PLUGIN_TYPE`
+            // therefore rejected every row. Keep the defensive check but
+            // only fire when the field is actually present.
+            if (isset($row['type']) && $row['type'] !== self::SPORA_PLUGIN_TYPE) {
                 continue;
             }
             $packages[] = $this->mapPackage($row);
