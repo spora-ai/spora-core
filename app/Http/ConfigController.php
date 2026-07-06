@@ -48,19 +48,13 @@ final class ConfigController
      */
     private function boolFlag(string $key, bool $default): bool
     {
-        if (!array_key_exists($key, $this->config) || $this->config[$key] === null) {
-            return $default;
-        }
-        $value = $this->config[$key];
-        if (is_bool($value)) {
-            return $value;
-        }
-        if (is_int($value)) {
-            return $value !== 0;
-        }
-        if (is_string($value)) {
-            return filter_var($value, FILTER_VALIDATE_BOOLEAN);
-        }
-        return $default;
+        $value = $this->config[$key] ?? null;
+
+        return match (gettype($value)) {
+            'boolean' => $value,
+            'integer' => $value !== 0,
+            'string'  => filter_var($value, FILTER_VALIDATE_BOOLEAN),
+            default   => $default,
+        };
     }
 }
