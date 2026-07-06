@@ -177,8 +177,10 @@ final class PluginCatalogService
             // {name, description, downloads, favers, repository, …}.
             // The previous check `($row['type'] ?? null) !== self::SPORA_PLUGIN_TYPE`
             // therefore rejected every row. Keep the defensive check but
-            // only fire when the field is actually present.
-            if (isset($row['type']) && $row['type'] !== self::SPORA_PLUGIN_TYPE) {
+            // only fire when the field is actually present and non-matching.
+            // `array_key_exists` (not `isset`) so an explicit `null` value
+            // is still treated as a defensive-mismatch signal.
+            if (array_key_exists('type', $row) && $row['type'] !== self::SPORA_PLUGIN_TYPE) {
                 continue;
             }
             $packages[] = $this->mapPackage($row);

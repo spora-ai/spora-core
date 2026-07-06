@@ -28,9 +28,39 @@ final class ConfigController
     public function index(): JsonResponse
     {
         return new JsonResponse([
-            'allow_registration'     => (bool) ($this->config['allow_registration']     ?? true),
-            'plugin_install_enabled' => (bool) ($this->config['plugin_install_enabled'] ?? false),
-            'plugin_catalog_enabled' => (bool) ($this->config['plugin_catalog_enabled'] ?? true),
+            'allow_registration'     => $this->boolFlag('allow_registration', true),
+            'plugin_install_enabled' => $this->boolFlag('plugin_install_enabled', false),
+            'plugin_catalog_enabled' => $this->boolFlag('plugin_catalog_enabled', true),
         ]);
+    }
+
+    /**
+     * Resolve a boolean runtime flag from `$this->config`.
+     *
+     * Mirrors the env-overlay semantics in `app/Core/ContainerDefinitions.php`
+     * (`filter_var(..., FILTER_VALIDATE_BOOLEAN)`) so the SPA sees the same
+     * truthiness as the server-side resolvers. A naive `(bool)` cast would
+     * treat any non-empty string — including `'false'` — as `true`.
+     *
+     * Accepted truthy values: `true`, `1`, `'1'`, `'true'`, `'on'`, `'yes'`.
+     * Accepted falsy values: `false`, `0`, `'0'`, `'false'`, `'off'`, `'no'`,
+     * and `null` / missing (which falls back to `$default`).
+     */
+    private function boolFlag(string $key, bool $default): bool
+    {
+        if (!array_key_exists($key, $this->config) || $this->config[$key] === null) {
+            return $default;
+        }
+        $value = $this->config[$key];
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value)) {
+            return $value !== 0;
+        }
+        if (is_string($value)) {
+            return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+        }
+        return $default;
     }
 }
