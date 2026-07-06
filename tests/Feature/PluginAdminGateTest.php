@@ -2,8 +2,6 @@
 
 declare(strict_types=1);
 
-/* namespace removed */
-
 use Delight\Auth\Role;
 use Spora\Core\Kernel;
 use Spora\Http\Middleware\AdminMiddleware;
@@ -23,9 +21,10 @@ use Symfony\Component\HttpFoundation\Request;
  *   3. End-to-end through `Kernel::handle()` for the routes that can be
  *      reached without path-variable ambiguity (the POST route).
  *
- * All tests run with `SPORA_PLUGIN_INSTALL_ENABLED=true` so the admin gate
- * is provably the *first* gate a request hits — not the controller's
- * feature-flag check.
+ * Most tests run with `SPORA_PLUGIN_INSTALL_ENABLED=true` so the admin gate
+ * is provably the *first* gate a request hits. One test (`AdminMiddleware
+ * runs BEFORE the feature flag gate`) explicitly flips the flag off to
+ * prove that AdminMiddleware runs before `requireInstallEnabled()`.
  */
 
 const PLUGIN_ADMIN_GATE_PASSWORD = 'Password1!';
@@ -133,9 +132,27 @@ function pluginAdminGate_stateChangeRequest(string $method, string $path, ?array
     return Request::create($path, $method, [], [], [], $server);
 }
 
-// -----------------------------------------------------------------------
-// 1. Route registration — locks in the wiring declared in RouteDefinitions
-// -----------------------------------------------------------------------
+/**
+ * Decode a JSON response body and assert it is a non-empty array with the
+ * standard `{ "error": { "code": …, "message": … } }` envelope shape.
+ * `$body` is the array; the `code` is returned so callers can assert on
+ * it without re-indexing. Keeps every test failure message clear (vs. a
+ * raw `Cannot access offset on null` PHP error).
+ *
+ * @return string  the `error.code` value
+ */
+function pluginAdminGate_decodeErrorCode(string $rawContent): string
+{
+    $body = json_decode($rawContent, true);
+    expect($body)->toBeArray();
+    expect($body)->toHaveKey('error');
+    expect($body['error'])->toBeArray();
+    expect($body['error'])->toHaveKey('code');
+    expect($body['error']['code'])->toBeString();
+    return $body['error']['code'];
+}
+
+// Route registration — locks in the wiring declared in RouteDefinitions.
 
 test('POST /api/v1/plugins is registered with AdminMiddleware in its middleware stack', function (): void {
     $routes = pluginAdminGate_readRouteDefinitions();
@@ -175,14 +192,12 @@ test('PATCH /api/v1/plugins/{package} is registered with AdminMiddleware in its 
     ]);
 });
 
-// -----------------------------------------------------------------------
-// 2. End-to-end through Kernel::handle() for the routes that can be hit
-//    without path-variable ambiguity. The DELETE/PATCH routes have a
-//    separate fast-route `{package}` quirk (the placeholder doesn't decode
-//    `%2F`, so a vendor/name slug doesn't match the URL pattern) — that's a
-//    URL-routing concern, not an admin-enforcement concern. The route
-//    registration test above locks in the admin gate for ALL three routes.
-// -----------------------------------------------------------------------
+// End-to-end through Kernel::handle() for the routes that can be hit
+// without path-variable ambiguity. The DELETE/PATCH routes have a separate
+// fast-route `{package}` quirk (the placeholder doesn't decode `%2F`, so a
+// vendor/name slug doesn't match the URL pattern) — that's a URL-routing
+// concern, not an admin-enforcement concern. The route-registration tests
+// above lock in the admin gate for all three routes.
 
 test('POST /api/v1/plugins returns 403 FORBIDDEN for a logged-in non-admin (end-to-end)', function (): void {
     pluginAdminGate_makeUser('non-admin-post@example.com', admin: false);
@@ -197,10 +212,9 @@ test('POST /api/v1/plugins returns 403 FORBIDDEN for a logged-in non-admin (end-
 
     expect($response->getStatusCode())->toBe(403);
 
-    $body = json_decode($response->getContent(), true);
     // Distinct from 403 FEATURE_DISABLED — proves AdminMiddleware ran before
     // the controller's requireInstallEnabled().
-    expect($body['error']['code'])->toBe('FORBIDDEN');
+    expect(pluginAdminGate_decodeErrorCode($response->getContent()))->toBe('FORBIDDEN');
 });
 
 test('AdminMiddleware runs BEFORE the feature flag gate (non-admin gets FORBIDDEN, not FEATURE_DISABLED, when install flag is also off)', function (): void {
@@ -221,9 +235,9 @@ test('AdminMiddleware runs BEFORE the feature flag gate (non-admin gets FORBIDDE
 
     expect($response->getStatusCode())->toBe(403);
 
-    $body = json_decode($response->getContent(), true);
-    expect($body['error']['code'])->toBe('FORBIDDEN');
-    expect($body['error']['code'])->not->toBe('FEATURE_DISABLED');
+    $code = pluginAdminGate_decodeErrorCode($response->getContent());
+    expect($code)->toBe('FORBIDDEN');
+    expect($code)->not->toBe('FEATURE_DISABLED');
 });
 
 test('POST /api/v1/plugins reaches the controller for a logged-in admin (no 403)', function (): void {
@@ -242,8 +256,37 @@ test('POST /api/v1/plugins reaches the controller for a logged-in admin (no 403)
 
     expect($response->getStatusCode())->not->toBe(403);
 
-    $body = json_decode($response->getContent(), true);
-    if (isset($body['error']['code'])) {
-        expect($body['error']['code'])->not->toBe('FORBIDDEN');
+    // If the response is an error envelope, it must NOT be FORBIDDEN.
+    // (A 500 from a missing composer binary, etc., is acceptable — the
+    // admin gate passed, which is what we're proving.)
+    if (str_contains($response->headers->get('Content-Type', '') ?: '', 'application/json')) {
+        $body = json_decode($response->getContent(), true);
+        if (is_array($body) && isset($body['error']['code']) && is_string($body['error']['code'])) {
+            expect($body['error']['code'])->not->toBe('FORBIDDEN');
+        }
     }
+});
+
+test('Admin POST returns 403 FEATURE_DISABLED when the install flag is off (the controller gate is reachable after admin)', function (): void {
+    // With the install flag off AND an admin session, the request should
+    // get past AdminMiddleware, into the controller, where
+    // requireInstallEnabled() throws FeatureDisabledException → 403
+    // FEATURE_DISABLED. This is the OTHER half of the gating story —
+    // proving the controller's feature flag is reachable from the admin
+    // path (i.e. admin middleware runs first, controller runs second).
+    $_ENV['SPORA_PLUGIN_INSTALL_ENABLED'] = 'false';
+    pluginAdminGate_makeUser('admin-feature-off@example.com', admin: true);
+
+    $kernel   = new Kernel();
+    $response = $kernel->handle(pluginAdminGate_stateChangeRequest(
+        'POST',
+        PLUGIN_ADMIN_GATE_INSTALL_PATH,
+        ['package' => PLUGIN_ADMIN_GATE_PKG],
+    ));
+    $kernel->__destruct();
+
+    expect($response->getStatusCode())->toBe(403);
+
+    $code = pluginAdminGate_decodeErrorCode($response->getContent());
+    expect($code)->toBe('FEATURE_DISABLED');
 });
