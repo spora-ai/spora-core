@@ -21,6 +21,8 @@ use Spora\Apps\MemoriesApp;
 use Spora\Apps\PluginsApp;
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\AssetGcCommand;
+use Spora\Console\Commands\MediaArchiveGcCommand;
+use Spora\Console\Commands\MediaArchiveListCommand;
 use Spora\Console\Commands\PluginInstallCommand;
 use Spora\Console\Commands\PluginListCommand;
 use Spora\Console\Commands\PluginUninstallCommand;
@@ -48,6 +50,7 @@ use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
 use Spora\Http\MailTemplateController;
+use Spora\Http\MediaArchiveController;
 use Spora\Http\MemoryController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -83,6 +86,10 @@ use Spora\Services\LlmConfigValidator;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MailTemplateService;
 use Spora\Services\MailTemplateServiceInterface;
+use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\MediaArchive\MetadataExtractor;
+use Spora\Services\MediaArchive\MimeSniffer;
+use Spora\Services\MediaArchive\RemoteMediaFetcher;
 use Spora\Services\MemoryService;
 use Spora\Services\MemoryServiceInterface;
 use Spora\Services\MercurePublisher;
@@ -198,6 +205,26 @@ final class ContainerDefinitions
                     // of the query string); multiple queries share the storage path.
                     // 1 hour by default — Packagist search is not real-time.
                     'plugin_catalog_ttl' => PluginCatalogService::DEFAULT_TTL_SECONDS,
+
+                    // Media Archive: optional ingest surface for plugins that
+                    // produce binary media. When `promote_external = true`
+                    // (default), URL inputs are fetched and stored locally via
+                    // AssetStore so the operator's UI shows durable copies.
+                    //   - promote_external:    when false, URL inputs are stored
+                    //                          as `storage_mode = external` without
+                    //                          fetching the body
+                    //   - fetch_timeout_seconds: ceiling for the HEAD + GET path
+                    //   - max_promote_bytes:    CDN responses larger than this are
+                    //                           recorded as `external` (avoid filling
+                    //                           disk with multi-GB videos)
+                    //   - ffprobe_enabled:      when true (and ffprobe is on PATH),
+                    //                           audio/video duration is extracted
+                    'media_archive' => [
+                        'promote_external'      => true,
+                        'fetch_timeout_seconds' => 30,
+                        'max_promote_bytes'     => 100 * 1024 * 1024,
+                        'ffprobe_enabled'       => false,
+                    ],
                 ];
 
                 $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: $paths->config());
@@ -256,6 +283,10 @@ final class ContainerDefinitions
         $apply('SPORA_ASSET_STORE_MAX_BYTES', 'asset_store.max_bytes', static fn($v) => (int) $v);
         $apply('SPORA_PLUGIN_CATALOG_ENABLED', 'plugin_catalog_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_PLUGIN_CATALOG_TTL', 'plugin_catalog_ttl', static fn($v) => (int) $v);
+        $apply('SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL', 'media_archive.promote_external', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
+        $apply('SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT', 'media_archive.fetch_timeout_seconds', static fn($v) => (int) $v);
+        $apply('SPORA_MEDIA_ARCHIVE_MAX_PROMOTE_BYTES', 'media_archive.max_promote_bytes', static fn($v) => (int) $v);
+        $apply('SPORA_MEDIA_ARCHIVE_FFPROBE_ENABLED', 'media_archive.ffprobe_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
 
         $notifEmail = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED');
         if ($notifEmail !== null) {
@@ -392,6 +423,41 @@ final class ContainerDefinitions
                         "Unknown asset_store.mode: {$mode}",
                     ),
                 };
+            },
+
+            // MediaArchive service stack — see app/Services/MediaArchive.
+            // Config block lives under the `media_archive` key above.
+            MimeSniffer::class => static fn(): MimeSniffer => new MimeSniffer(),
+
+            RemoteMediaFetcher::class => static function (ContainerInterface $c): RemoteMediaFetcher {
+                $cfg = $c->get('config')['media_archive'] ?? [];
+                return new RemoteMediaFetcher(
+                    $c->get(HttpClientInterface::class),
+                    $c->get(LoggerInterface::class),
+                    (int) ($cfg['fetch_timeout_seconds'] ?? 30),
+                    (int) ($cfg['max_promote_bytes'] ?? (100 * 1024 * 1024)),
+                );
+            },
+
+            MetadataExtractor::class => static function (ContainerInterface $c): MetadataExtractor {
+                $cfg = $c->get('config')['media_archive'] ?? [];
+                return new MetadataExtractor(
+                    $c->get(LoggerInterface::class),
+                    (bool) ($cfg['ffprobe_enabled'] ?? false),
+                );
+            },
+
+            MediaArchiveService::class => static function (ContainerInterface $c): MediaArchiveService {
+                $cfg = $c->get('config')['media_archive'] ?? [];
+                return new MediaArchiveService(
+                    $c->get(AssetStore::class),
+                    $c->get(RemoteMediaFetcher::class),
+                    $c->get(MimeSniffer::class),
+                    $c->get(MetadataExtractor::class),
+                    $c->get(LoggerInterface::class),
+                    (bool) ($cfg['promote_external'] ?? true),
+                    (int) ($cfg['max_promote_bytes'] ?? (100 * 1024 * 1024)),
+                );
             },
 
             DriverFactory::class => static function (ContainerInterface $c): DriverFactory {
@@ -602,6 +668,7 @@ final class ContainerDefinitions
             AppsController::class => static function (ContainerInterface $c): AppsController {
                 return new AppsController(
                     $c->get(AppRegistry::class),
+                    $c->get(PluginLoader::class),
                 );
             },
 
@@ -682,6 +749,12 @@ final class ContainerDefinitions
                         $c->get('tool_classes'),
                         $c->get(PluginLoader::class)->toolClasses(),
                     ))),
+                );
+            },
+
+            MediaArchiveController::class => static function (ContainerInterface $c): MediaArchiveController {
+                return new MediaArchiveController(
+                    $c->get(MediaArchiveService::class),
                 );
             },
         ];
@@ -1012,6 +1085,19 @@ final class ContainerDefinitions
 
             AssetGcCommand::class => static function (ContainerInterface $c): AssetGcCommand {
                 return new AssetGcCommand(
+                    $c->get(Paths::class),
+                );
+            },
+
+            MediaArchiveListCommand::class => static function (ContainerInterface $c): MediaArchiveListCommand {
+                return new MediaArchiveListCommand(
+                    $c->get(MediaArchiveService::class),
+                );
+            },
+
+            MediaArchiveGcCommand::class => static function (ContainerInterface $c): MediaArchiveGcCommand {
+                return new MediaArchiveGcCommand(
+                    $c->get(MediaArchiveService::class),
                     $c->get(Paths::class),
                 );
             },

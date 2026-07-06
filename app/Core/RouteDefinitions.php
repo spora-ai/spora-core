@@ -16,6 +16,7 @@ use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
 use Spora\Http\MailTemplateController;
+use Spora\Http\MediaArchiveController;
 use Spora\Http\MemoryController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -114,6 +115,13 @@ final class RouteDefinitions
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/continue', [TaskController::class, 'continue'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/tasks/{taskId}/retry-chain', [TaskController::class, 'cancelRetryChain'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/tasks/{taskId}', [TaskController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // Media Archive — read & delete surface for the operator. Plugin
+        // tools write rows via MediaArchiveService::ingest(); this route
+        // set is for browsing and cleanup.
+        $r->addRoute('GET', '/api/v1/media', [MediaArchiveController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/media/{id}', [MediaArchiveController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', '/api/v1/media/{id}', [MediaArchiveController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', '/api/v1/recipes', [RecipeController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
 

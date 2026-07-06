@@ -129,8 +129,79 @@
 | `GET` | `/mail-templates/{id}` | Yes (Admin) | Get mail template (admin only) |
 | `PUT` | `/mail-templates/{id}` | Yes (Admin) | Update mail template (admin only) |
 | `DELETE` | `/mail-templates/{id}` | Yes (Admin) | Delete mail template (admin only) |
+| `GET` | `/media` | Yes | List archived media assets (filterable) |
+| `GET` | `/media/{id}` | Yes | Get a single archived media asset |
+| `DELETE` | `/media/{id}` | Yes | Delete an archived media asset |
 
 **`{toolId}`** in paths = URL-encoded tool name (the value of `#[Tool(name: ...)]`, e.g. `serper_search`, `tavily_search`, `read_url`, `email`, `llm_configuration`). It is **not** the FQCN — the controller resolves the name to a class via `ToolConfigService::resolveToolClass()` (`app/Services/ToolConfigService.php:504-507`).
+
+---
+
+## Media Archive
+
+The Media Archive is the indexed library of media produced by plugin tools. Rows are added by plugins calling `MediaArchiveService::ingest()` — there is no write endpoint on this controller by design (ingestion is opt-in per tool call, and the API surface is plugin-specific). The three read/delete endpoints here are for browsing and cleanup.
+
+### `GET /api/v1/media`
+
+Paginated list with the same query parameters supported by `ListMediaQuery`:
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `type` | `image` \| `audio` \| `video` \| `document` \| `unknown` | (none) | Coarse media-type filter |
+| `agent_id` | int | (none) | Filter by agent FK |
+| `plugin_slug` | string | (none) | Filter by plugin slug (e.g. `minimax`) |
+| `tool_name` | string | (none) | Filter by tool name (e.g. `image`, `speech`) |
+| `from` | ISO 8601 | (none) | `created_at >= from` |
+| `to` | ISO 8601 | (none) | `created_at <= to` |
+| `q` | string | (none) | Substring search across `prompt`, `asset_url`, `source_url` |
+| `sort` | `created_at_desc` \| `created_at_asc` \| `size_desc` | `created_at_desc` | |
+| `page` | int | `1` | |
+| `per_page` | int | `20` (max `100`) | Clamped to `100` |
+
+Response envelope:
+
+```json
+{
+  "data": {
+    "assets": [
+      {
+        "id": "f2c5…-uuid",
+        "agent_id": 1,
+        "task_id": 42,
+        "tool_call_id": 9001,
+        "plugin_slug": "minimax",
+        "tool_name": "image",
+        "media_type": "image",
+        "mime_type": "image/png",
+        "byte_size": 123456,
+        "width": 1024,
+        "height": 1024,
+        "duration_seconds": null,
+        "prompt": "a corgi astronaut",
+        "tags": null,
+        "metadata": null,
+        "asset_url": "/api/v1/assets/…",
+        "source_url": "https://cdn.minimax.example/…",
+        "storage_mode": "local",
+        "created_at": "2026-07-01T12:34:56+00:00",
+        "updated_at": "2026-07-01T12:34:56+00:00"
+      }
+    ],
+    "page": 1,
+    "perPage": 20,
+    "total": 47,
+    "lastPage": 3
+  }
+}
+```
+
+### `GET /api/v1/media/{id}`
+
+Returns the single asset envelope (same shape as the row in the list above). `404 NOT_FOUND` when the id is unknown.
+
+### `DELETE /api/v1/media/{id}`
+
+Removes the row. The asset bytes on disk (when `storage_mode = local`) are NOT deleted by this endpoint — run `php bin/spora media:gc` to sweep orphans after the row is gone, or use `php bin/spora assets:gc` to drop stale local files. `404 NOT_FOUND` when the id is unknown.
 
 ---
 

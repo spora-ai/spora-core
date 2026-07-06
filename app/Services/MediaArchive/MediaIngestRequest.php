@@ -1,0 +1,56 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Spora\Services\MediaArchive;
+
+use InvalidArgumentException;
+
+/**
+ * Readonly input DTO for {@see MediaArchiveService::ingest()}.
+ *
+ * Plugins populate one of `bytes` / `hex` / `base64` / `url` to indicate
+ * the source; everything else is optional context the core can't infer
+ * (agent/task linkage, source attribution, semantic tags).
+ *
+ * The `mediaType` discriminator is optional — when null the service derives
+ * it from the sniffed MIME type. Pre-setting it lets plugins short-circuit
+ * sniffing for cases where they already know the format (e.g. a tool that
+ * only ever produces PNG images).
+ */
+final readonly class MediaIngestRequest
+{
+    public function __construct(
+        public ?string $bytes = null,
+        public ?string $hex = null,
+        public ?string $base64 = null,
+        public ?string $url = null,
+        public ?string $mime = null,
+        public ?string $filename = null,
+        public ?MediaType $mediaType = null,
+        public ?int $agentId = null,
+        public ?int $taskId = null,
+        public ?int $toolCallId = null,
+        public ?string $pluginSlug = null,
+        public ?string $toolName = null,
+        public ?string $prompt = null,
+        public ?int $width = null,
+        public ?int $height = null,
+        public ?float $durationSeconds = null,
+        public ?int $byteSize = null,
+        /** @var array<string>|null */
+        public ?array $tags = null,
+        /** @var array<string, mixed>|null */
+        public ?array $metadata = null,
+    ) {
+        $sources = array_filter(
+            [isset($bytes), isset($hex), isset($base64), isset($url)],
+            static fn(bool $set): bool => $set,
+        );
+        if (count($sources) !== 1) {
+            throw new InvalidArgumentException(
+                'MediaIngestRequest requires exactly one of bytes, hex, base64, or url to be set.',
+            );
+        }
+    }
+}
