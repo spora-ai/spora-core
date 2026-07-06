@@ -402,3 +402,45 @@ test('search propagates unexpected runtime errors', function (): void {
         catalogCleanUp($tmp);
     }
 });
+
+test('search accepts Packagist search.json rows without per-row type field', function (): void {
+    // Regression: Packagist's `search.json` does NOT echo back a per-row
+    // `type` when the request is filtered by `?type=spora-plugin`. The
+    // service previously rejected every row because of a strict
+    // `($row['type'] ?? null) !== 'spora-plugin'` check, leaving the
+    // Browse tab empty and caching the empty result for an hour.
+    [$service, $client, $tmp] = catalogServiceFixture();
+    try {
+        $payload = json_encode([
+            'results' => [
+                [
+                    'name'        => 'spora-ai/spora-plugin-tavily',
+                    'description' => 'Tavily web search for Spora agents.',
+                    'url'         => 'https://packagist.org/packages/spora-ai/spora-plugin-tavily',
+                    'repository'  => 'https://github.com/spora-ai/spora-plugin-tavily',
+                    'downloads'   => 0,
+                    'favers'      => 0,
+                ],
+                [
+                    'name'        => 'spora-ai/spora-plugin-weather',
+                    'description' => 'WeatherAPI.com current conditions and forecasts for Spora agents.',
+                    'url'         => 'https://packagist.org/packages/spora-ai/spora-plugin-weather',
+                    'repository'  => 'https://github.com/spora-ai/spora-plugin-weather',
+                    'downloads'   => 0,
+                    'favers'      => 0,
+                ],
+            ],
+        ]);
+
+        $client->shouldReceive('request')
+            ->once()
+            ->andReturn(catalogResponse(200, $payload));
+
+        $packages = $service->search('');
+        expect($packages)->toHaveCount(2);
+        expect($packages[0]['name'])->toBe('spora-ai/spora-plugin-tavily');
+        expect($packages[1]['name'])->toBe('spora-ai/spora-plugin-weather');
+    } finally {
+        catalogCleanUp($tmp);
+    }
+});

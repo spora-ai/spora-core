@@ -17,7 +17,7 @@
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/health` | No | Liveness probe (no auth, no CSRF) |
-| `GET` | `/config` | No | Public app config (no auth) |
+| `GET` | `/config` | No | Public app config + runtime feature flags (no auth). Fetched by the SPA on every page reload via `src/stores/runtimeConfig.ts`; single source of truth for `allow_registration`, `plugin_install_enabled`, `plugin_catalog_enabled`. |
 | `GET` | `/apps` | Yes | List installed apps/plugins |
 | `POST` | `/auth/login` | No | Log in (rate-limited: 5 req/60s) |
 | `POST` | `/auth/register` | No | Register (rate-limited: 5 req/60s) |
