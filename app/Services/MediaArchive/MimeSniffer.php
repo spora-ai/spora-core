@@ -27,6 +27,12 @@ use Throwable;
 final class MimeSniffer
 {
     /**
+     * Fallback MIME returned when nothing matched. Centralised so callers and
+     * tests can refer to a single value rather than duplicating the literal.
+     */
+    public const OCTET_STREAM = 'application/octet-stream';
+
+    /**
      * Magic-byte signatures indexed by their canonical MIME type. Each
      * signature is `prefix_offset` => `byte_string`. The check requires the
      * prefix to start at exactly that offset in the input — most formats
@@ -100,28 +106,13 @@ final class MimeSniffer
     public function sniffFromBytes(string $bytes): string
     {
         if ($bytes === '') {
-            return 'application/octet-stream';
+            return self::OCTET_STREAM;
         }
 
         // finfo requires at least a few bytes — pass a 4 KiB prefix.
         $prefix = substr($bytes, 0, 4096);
 
-        // Run the magic table first — for the formats we know about it's
-        // more reliable than `finfo` (which labels MP3 sync frames as
-        // `text/plain`, WebP as `application/octet-stream`, etc.). Only
-        // when the magic table misses do we fall back to finfo.
-        $magicHit = $this->matchMagicTable($prefix);
-        if ($magicHit !== null) {
-            return $magicHit;
-        }
-
-        $detected = $this->finfoBuffer($prefix);
-        if ($detected !== null) {
-            $refined = $this->refineWithMagicTable($prefix, $detected);
-            return $refined ?? $detected;
-        }
-
-        return 'application/octet-stream';
+        return $this->sniffPrefix($prefix);
     }
 
     /**
@@ -132,7 +123,7 @@ final class MimeSniffer
     public function sniffFromExtension(?string $filenameOrUrl): string
     {
         if ($filenameOrUrl === null || $filenameOrUrl === '') {
-            return 'application/octet-stream';
+            return self::OCTET_STREAM;
         }
 
         // Strip query string and any leading path so the extension is the
@@ -140,10 +131,31 @@ final class MimeSniffer
         $path = parse_url($filenameOrUrl, PHP_URL_PATH) ?: $filenameOrUrl;
         $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
         if ($ext === '') {
-            return 'application/octet-stream';
+            return self::OCTET_STREAM;
         }
 
-        return self::EXT_TO_MIME[$ext] ?? 'application/octet-stream';
+        return self::EXT_TO_MIME[$ext] ?? self::OCTET_STREAM;
+    }
+
+    /**
+     * Core byte-level sniff. The magic table is consulted first — for the
+     * formats we know about it's more reliable than `finfo` (which labels
+     * MP3 sync frames as `text/plain`, WebP as `application/octet-stream`,
+     * etc.). Only when the magic table misses do we fall back to finfo.
+     */
+    private function sniffPrefix(string $prefix): string
+    {
+        $magicHit = $this->matchMagicTable($prefix);
+        if ($magicHit !== null) {
+            return $magicHit;
+        }
+
+        $detected = $this->finfoBuffer($prefix);
+        if ($detected === null) {
+            return self::OCTET_STREAM;
+        }
+
+        return $this->refineWithMagicTable($prefix, $detected) ?? $detected;
     }
 
     private function finfoBuffer(string $prefix): ?string
@@ -151,15 +163,28 @@ final class MimeSniffer
         if (!function_exists('finfo_buffer') || !class_exists(finfo::class)) {
             return null;
         }
+        $ctx = $this->openFinfoContext();
+        if ($ctx === null) {
+            return null;
+        }
+
+        return $this->runFinfo($ctx, $prefix);
+    }
+
+    private function openFinfoContext(): mixed
+    {
+        /** @var resource|null $ctx */
+        static $ctx = null;
+        if ($ctx === null) {
+            $ctx = @finfo_open(\FILEINFO_MIME_TYPE);
+        }
+
+        return $ctx === false ? null : $ctx;
+    }
+
+    private function runFinfo(mixed $ctx, string $prefix): ?string
+    {
         try {
-            /** @var resource|null $ctx */
-            static $ctx = null;
-            if ($ctx === null) {
-                $ctx = @finfo_open(\FILEINFO_MIME_TYPE);
-            }
-            if ($ctx === false) {
-                return null;
-            }
             $mime = @finfo_buffer($ctx, $prefix);
             return is_string($mime) && $mime !== '' ? $mime : null;
         } catch (Throwable) {
@@ -172,31 +197,51 @@ final class MimeSniffer
      * of `finfo` because `finfo` reports the parent container type
      * (`application/octet-stream` for WebP, `video/mp4` for HEVC inside
      * ISOBMFF) and gets confused by sub-brands.
-     *
-     * @param string $prefix The same bytes passed to `finfo`
-     * @param string $finfoDetected The MIME finfo reported
      */
     private function refineWithMagicTable(string $prefix, string $finfoDetected): ?string
     {
-        // WebP: finfo typically reports application/octet-stream — check
-        // the WEBP marker at offset 8 and prefer image/webp.
-        if (strlen($prefix) >= 12 && substr($prefix, 0, 4) === 'RIFF' && substr($prefix, 8, 4) === 'WEBP') {
-            return 'image/webp';
-        }
-
-        // MP4 brand discrimination: finfo says video/mp4 for any ISOBMFF;
-        // we want quicktime for the qt  brand.
-        if (strlen($prefix) >= 12 && substr($prefix, 4, 4) === 'ftyp') {
-            $brand = substr($prefix, 8, 4);
-            if ($brand === 'qt  ') {
-                return 'video/quicktime';
-            }
-            return 'video/mp4';
+        $refined = $this->matchRefinedContainer($prefix);
+        if ($refined !== null) {
+            return $refined;
         }
 
         // For everything else, trust finfo.
         unset($finfoDetected);
         return null;
+    }
+
+    private function matchRefinedContainer(string $prefix): ?string
+    {
+        // WebP: finfo typically reports application/octet-stream — check
+        // the WEBP marker at offset 8 and prefer image/webp.
+        if ($this->isWebp($prefix)) {
+            return 'image/webp';
+        }
+
+        // MP4 brand discrimination: finfo says video/mp4 for any ISOBMFF;
+        // we want quicktime for the qt  brand.
+        $mp4Brand = $this->readMp4Brand($prefix);
+        if ($mp4Brand === null) {
+            return null;
+        }
+
+        return $mp4Brand === 'qt  ' ? 'video/quicktime' : 'video/mp4';
+    }
+
+    private function isWebp(string $prefix): bool
+    {
+        return strlen($prefix) >= 12
+            && substr($prefix, 0, 4) === 'RIFF'
+            && substr($prefix, 8, 4) === 'WEBP';
+    }
+
+    private function readMp4Brand(string $prefix): ?string
+    {
+        if (strlen($prefix) < 12 || substr($prefix, 4, 4) !== 'ftyp') {
+            return null;
+        }
+
+        return substr($prefix, 8, 4);
     }
 
     private function matchMagicTable(string $prefix): ?string

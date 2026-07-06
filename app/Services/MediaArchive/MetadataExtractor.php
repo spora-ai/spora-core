@@ -87,22 +87,8 @@ final class MetadataExtractor
 
     private function imageResult(string $bytes, ?string $mime): ExtractedMetadata
     {
-        // `getimagesize()` is a PHP builtin; the @-suppression keeps
-        // non-image bytes from spamming logs — we already know it's
-        // an image because the caller pre-classified.
-        //
-        // PHPStan attaches a literal-return shape assertion to
-        // `getimagesizefromstring()`. JSON-encoding drops the shape to
-        // `array<int, mixed>` so the offset reads below don't trip
-        // "isset.offset" / "nullCoalesce.offset" noise for formats that
-        // omit some keys.
-        $raw = @getimagesizefromstring($bytes);
-        if (!is_array($raw)) {
-            return new ExtractedMetadata(width: null, height: null, durationSeconds: null, mime: $mime);
-        }
-
-        $decoded = json_decode((string) json_encode($raw), true);
-        if (!is_array($decoded)) {
+        $decoded = $this->readImageInfo($bytes);
+        if ($decoded === null) {
             return new ExtractedMetadata(width: null, height: null, durationSeconds: null, mime: $mime);
         }
 
@@ -126,6 +112,32 @@ final class MetadataExtractor
         );
     }
 
+    /**
+     * Read the result of `getimagesizefromstring()` as an associative
+     * array. Returns null when the bytes are not an image PHP recognises
+     * or when the round-trip through `json_encode`/`json_decode` fails
+     * (some formats omit keys the raw array would have).
+     *
+     * PHPStan attaches a literal-return shape assertion to
+     * `getimagesizefromstring()`. JSON-encoding drops the shape to
+     * `array<int, mixed>` so the offset reads below don't trip
+     * "isset.offset" / "nullCoalesce.offset" noise for formats that
+     * omit some keys.
+     *
+     * @return array<int|string, mixed>|null
+     */
+    private function readImageInfo(string $bytes): ?array
+    {
+        $raw = @getimagesizefromstring($bytes);
+        if (!is_array($raw)) {
+            return null;
+        }
+
+        $decoded = json_decode((string) json_encode($raw), true);
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
     private function avResult(string $bytes, ?string $mime): ExtractedMetadata
     {
         $duration = $this->runFfprobe($bytes);
@@ -139,82 +151,13 @@ final class MetadataExtractor
 
     private function runFfprobe(string $bytes): ?float
     {
-        if (!$this->ffprobeEnabled) {
-            return null;
-        }
-        $binary = $this->findFfprobe();
-        if ($binary === null) {
-            return null;
-        }
-
-        // Write bytes to a temp file rather than `-` pipe so the
-        // arg-vector stays free of `pipe:` redirection tokens that some
-        // shell interpreters handle differently. The temp file is unlinked
-        // in a `finally` so a crash mid-probe doesn't litter /tmp.
-        $tmp = tempnam(sys_get_temp_dir(), 'spora-ffprobe-');
-        if ($tmp === false) {
+        $binary = $this->locateFfprobe();
+        $tmp = $binary === null ? null : $this->writeTempBytes($bytes);
+        if ($binary === null || $tmp === null) {
             return null;
         }
         try {
-            if (file_put_contents($tmp, $bytes) === false) {
-                return null;
-            }
-
-            $descriptors = [
-                0 => ['pipe', 'r'],
-                1 => ['pipe', 'w'],
-                2 => ['pipe', 'w'],
-            ];
-            $cmd = [
-                $binary,
-                '-v', 'quiet',
-                '-print_format', 'json',
-                '-show_format',
-                '-show_streams',
-                $tmp,
-            ];
-
-            $proc = @proc_open($cmd, $descriptors, $pipes);
-            if (!is_resource($proc)) {
-                return null;
-            }
-            // Close stdin immediately — ffprobe reads from $tmp directly.
-            fclose($pipes[0]);
-
-            // Bounded wait: 5 s is generous for ffprobe on any sane file
-            // size; longer usually means the input is corrupt.
-            $stdout = stream_get_contents($pipes[1]);
-            // Drain stderr so the pipe buffer doesn't fill and block ffprobe.
-            // Discarded — the output format is the source of truth.
-            stream_get_contents($pipes[2]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-
-            $exit = proc_close($proc);
-            if ($exit !== 0 || !is_string($stdout) || $stdout === '') {
-                $this->logger->warning('MetadataExtractor: ffprobe returned no usable output', [
-                    'exit' => $exit,
-                    'size' => strlen($bytes),
-                ]);
-                return null;
-            }
-
-            $decoded = json_decode($stdout, true);
-            if (!is_array($decoded)) {
-                $this->logger->warning('MetadataExtractor: ffprobe JSON parse failed', [
-                    'exit' => $exit,
-                ]);
-                return null;
-            }
-
-            $duration = $decoded['format']['duration'] ?? null;
-            if (is_string($duration) && is_numeric($duration)) {
-                return (float) $duration;
-            }
-            if (is_numeric($duration)) {
-                return (float) $duration;
-            }
-            return null;
+            return $this->invokeFfprobe($binary, $tmp, $bytes);
         } catch (Throwable $e) {
             $this->logger->warning('MetadataExtractor: ffprobe threw', [
                 'error' => $e->getMessage(),
@@ -223,6 +166,153 @@ final class MetadataExtractor
         } finally {
             @unlink($tmp);
         }
+    }
+
+    /**
+     * Resolve the ffprobe binary to invoke. Returns null when the
+     * operator hasn't enabled ffprobe, or when no binary is on PATH.
+     */
+    private function locateFfprobe(): ?string
+    {
+        if (!$this->ffprobeEnabled) {
+            return null;
+        }
+
+        return $this->findFfprobe();
+    }
+
+    /**
+     * Write the bytes to a temp file rather than `-` pipe so the arg-vector
+     * stays free of `pipe:` redirection tokens that some shell interpreters
+     * handle differently. Returns the temp file path or null on failure.
+     */
+    private function writeTempBytes(string $bytes): ?string
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'spora-ffprobe-');
+        if ($tmp === false) {
+            return null;
+        }
+        if (file_put_contents($tmp, $bytes) === false) {
+            @unlink($tmp);
+            return null;
+        }
+
+        return $tmp;
+    }
+
+    /**
+     * Spawn ffprobe and decode its JSON output. Returns the duration in
+     * seconds, or null on any failure (logged, never thrown).
+     */
+    private function invokeFfprobe(string $binary, string $tmp, string $bytes): ?float
+    {
+        $handle = $this->spawnFfprobe($binary, $tmp);
+        if ($handle === null) {
+            return null;
+        }
+        $stdout = $this->drainFfprobePipes($handle);
+        $exit = proc_close($handle['proc']);
+
+        return $this->extractDuration($stdout, $exit, strlen($bytes));
+    }
+
+    /**
+     * Parse ffprobe's stdout into a duration, logging and returning
+     * null on any failure.
+     */
+    private function extractDuration(?string $stdout, int $exit, int $size): ?float
+    {
+        if ($exit !== 0 || $stdout === null || $stdout === '') {
+            $this->logger->warning('MetadataExtractor: ffprobe returned no usable output', [
+                'exit' => $exit,
+                'size' => $size,
+            ]);
+            return null;
+        }
+
+        $decoded = json_decode($stdout, true);
+        if (!is_array($decoded)) {
+            $this->logger->warning('MetadataExtractor: ffprobe JSON parse failed', [
+                'exit' => $exit,
+            ]);
+            return null;
+        }
+
+        return $this->parseDuration($decoded['format']['duration'] ?? null);
+    }
+
+    /**
+     * Open the ffprobe process and return the handle along with its
+     * open pipes. The caller is responsible for closing the pipes and
+     * the process; this helper only does the `proc_open` dance and the
+     * immediate stdin close.
+     *
+     * @return array{proc: resource, pipes: resource[]}|null
+     */
+    private function spawnFfprobe(string $binary, string $tmp): ?array
+    {
+        $descriptors = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+        $cmd = [
+            $binary,
+            '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_format',
+            '-show_streams',
+            $tmp,
+        ];
+
+        $proc = @proc_open($cmd, $descriptors, $pipes);
+        if (!is_resource($proc)) {
+            return null;
+        }
+        // Close stdin immediately — ffprobe reads from $tmp directly.
+        fclose($pipes[0]);
+
+        return ['proc' => $proc, 'pipes' => $pipes];
+    }
+
+    /**
+     * Drain stdout/stderr from the open ffprobe pipes. Returns the
+     * stdout contents (or null when no pipes were attached).
+     *
+     * @param array{proc: resource, pipes: resource[]} $handle
+     */
+    private function drainFfprobePipes(array $handle): ?string
+    {
+        $pipes = $handle['pipes'];
+
+        // Bounded wait: 5 s is generous for ffprobe on any sane file
+        // size; longer usually means the input is corrupt.
+        $stdout = stream_get_contents($pipes[1]);
+        // Drain stderr so the pipe buffer doesn't fill and block ffprobe.
+        // Discarded — the output format is the source of truth.
+        stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        return is_string($stdout) ? $stdout : null;
+    }
+
+    /**
+     * Coerce ffprobe's `format.duration` value (string for the JSON
+     * `format=duration` field, sometimes a number for `format=json`+`json`
+     * edge cases) into a float. Returns null for missing / non-numeric
+     * inputs.
+     */
+    private function parseDuration(mixed $raw): ?float
+    {
+        if (is_numeric($raw)) {
+            return (float) $raw;
+        }
+        if (is_string($raw) && is_numeric($raw)) {
+            return (float) $raw;
+        }
+
+        return null;
     }
 
     private function findFfprobe(): ?string

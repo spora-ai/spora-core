@@ -51,6 +51,32 @@ final class MediaArchiveListCommand extends Command
     {
         $io = new SymfonyStyle($input, $output);
 
+        $filters = $this->collectFilters($input, $io);
+        if ($filters === null) {
+            return Command::FAILURE;
+        }
+
+        $paginated = $this->service->list($filters['query']);
+
+        if ($input->getOption('json')) {
+            $this->renderJson($output, $paginated);
+            return Command::SUCCESS;
+        }
+
+        $this->renderTable($io, $paginated);
+
+        return Command::SUCCESS;
+    }
+
+    /**
+     * Validate and parse all CLI options. Returns the query + page params
+     * ready to pass to the service, or null when any input was rejected
+     * (error already written to $io).
+     *
+     * @return array{query: ListMediaQuery}|null
+     */
+    private function collectFilters(InputInterface $input, SymfonyStyle $io): ?array
+    {
         $mediaType = null;
         $typeOpt = $input->getOption('type');
         if (is_string($typeOpt) && $typeOpt !== '') {
@@ -60,7 +86,7 @@ final class MediaArchiveListCommand extends Command
                     'Unknown media type "%s"; expected one of: image, audio, video, document, unknown.',
                     $typeOpt,
                 ));
-                return Command::FAILURE;
+                return null;
             }
         }
 
@@ -71,7 +97,7 @@ final class MediaArchiveListCommand extends Command
                 $from = new DateTimeImmutable($sinceOpt);
             } catch (Exception) {
                 $io->error(sprintf('Could not parse --since "%s".', $sinceOpt));
-                return Command::FAILURE;
+                return null;
             }
         }
 
@@ -89,25 +115,28 @@ final class MediaArchiveListCommand extends Command
             perPage: $perPage,
         );
 
-        $paginated = $this->service->list($query);
+        return ['query' => $query];
+    }
 
-        if ($input->getOption('json')) {
-            $payload = [
-                'data' => [
-                    'assets'   => array_map(
-                        static fn($asset) => \Spora\Http\MediaArchiveController::serialize($asset),
-                        $paginated->items(),
-                    ),
-                    'page'     => $paginated->currentPage(),
-                    'perPage'  => $paginated->perPage(),
-                    'total'    => $paginated->total(),
-                    'lastPage' => $paginated->lastPage(),
-                ],
-            ];
-            $output->writeln(json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-            return Command::SUCCESS;
-        }
+    private function renderJson(OutputInterface $output, \Illuminate\Pagination\LengthAwarePaginator $paginated): void
+    {
+        $payload = [
+            'data' => [
+                'assets'   => array_map(
+                    static fn($asset) => \Spora\Http\MediaArchiveController::serialize($asset),
+                    $paginated->items(),
+                ),
+                'page'     => $paginated->currentPage(),
+                'perPage'  => $paginated->perPage(),
+                'total'    => $paginated->total(),
+                'lastPage' => $paginated->lastPage(),
+            ],
+        ];
+        $output->writeln(json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    }
 
+    private function renderTable(SymfonyStyle $io, \Illuminate\Pagination\LengthAwarePaginator $paginated): void
+    {
         $rows = [];
         foreach ($paginated->items() as $asset) {
             $rows[] = [
@@ -123,7 +152,7 @@ final class MediaArchiveListCommand extends Command
 
         if ($rows === []) {
             $io->writeln('<info>No archived media matched the filters.</info>');
-            return Command::SUCCESS;
+            return;
         }
 
         $io->table(
@@ -136,8 +165,6 @@ final class MediaArchiveListCommand extends Command
             $paginated->lastPage(),
             $paginated->total(),
         ));
-
-        return Command::SUCCESS;
     }
 
     private function asInt(mixed $value): ?int

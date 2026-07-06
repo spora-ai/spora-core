@@ -78,58 +78,63 @@ final class MediaArchiveController
     {
         $params = $request->query;
 
-        $mediaTypeRaw = $params->get('type');
-        $mediaType = null;
-        if (is_string($mediaTypeRaw) && $mediaTypeRaw !== '') {
-            $mediaType = MediaType::tryFrom(strtolower($mediaTypeRaw));
-        }
-
-        $from = null;
-        $fromRaw = $params->get('from');
-        if (is_string($fromRaw) && $fromRaw !== '') {
-            try {
-                $from = new DateTimeImmutable($fromRaw);
-            } catch (Exception) {
-                $from = null;
-            }
-        }
-
-        $to = null;
-        $toRaw = $params->get('to');
-        if (is_string($toRaw) && $toRaw !== '') {
-            try {
-                $to = new DateTimeImmutable($toRaw);
-            } catch (Exception) {
-                $to = null;
-            }
-        }
-
-        $agentIdRaw = $params->get('agent_id');
-        $agentId = null;
-        if (is_string($agentIdRaw) && $agentIdRaw !== '' && ctype_digit($agentIdRaw)) {
-            $agentId = (int) $agentIdRaw;
-        }
-
-        $sort = is_string($params->get('sort')) ? (string) $params->get('sort') : ListMediaQuery::SORT_CREATED_DESC;
-
-        $pageRaw = $params->get('page');
-        $page = is_string($pageRaw) && ctype_digit($pageRaw) ? (int) $pageRaw : 1;
-
-        $perPageRaw = $params->get('per_page');
-        $perPage = is_string($perPageRaw) && ctype_digit($perPageRaw) ? (int) $perPageRaw : ListMediaQuery::PER_PAGE_DEFAULT;
-
         return new ListMediaQuery(
-            mediaType: $mediaType,
-            agentId: $agentId,
-            pluginSlug: is_string($params->get('plugin_slug')) ? (string) $params->get('plugin_slug') : null,
-            toolName: is_string($params->get('tool_name')) ? (string) $params->get('tool_name') : null,
-            from: $from,
-            to: $to,
-            search: is_string($params->get('q')) ? (string) $params->get('q') : null,
-            sort: $sort,
-            page: $page,
-            perPage: $perPage,
+            mediaType: $this->parseMediaType($params->get('type')),
+            agentId: $this->parseAgentId($params->get('agent_id')),
+            pluginSlug: $this->parseString($params->get('plugin_slug')),
+            toolName: $this->parseString($params->get('tool_name')),
+            from: $this->parseDate($params->get('from')),
+            to: $this->parseDate($params->get('to')),
+            search: $this->parseString($params->get('q')),
+            sort: $this->parseSort($params->get('sort')),
+            page: $this->parseInt($params->get('page'), 1),
+            perPage: $this->parseInt($params->get('per_page'), ListMediaQuery::PER_PAGE_DEFAULT),
         );
+    }
+
+    private function parseMediaType(mixed $raw): ?MediaType
+    {
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+
+        return MediaType::tryFrom(strtolower($raw));
+    }
+
+    private function parseDate(mixed $raw): ?DateTimeImmutable
+    {
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+        try {
+            return new DateTimeImmutable($raw);
+        } catch (Exception) {
+            return null;
+        }
+    }
+
+    private function parseAgentId(mixed $raw): ?int
+    {
+        if (!is_string($raw) || $raw === '' || !ctype_digit($raw)) {
+            return null;
+        }
+
+        return (int) $raw;
+    }
+
+    private function parseSort(mixed $raw): string
+    {
+        return is_string($raw) ? $raw : ListMediaQuery::SORT_CREATED_DESC;
+    }
+
+    private function parseString(mixed $raw): ?string
+    {
+        return is_string($raw) ? $raw : null;
+    }
+
+    private function parseInt(mixed $raw, int $default): int
+    {
+        return is_string($raw) && ctype_digit($raw) ? (int) $raw : $default;
     }
 
     /**

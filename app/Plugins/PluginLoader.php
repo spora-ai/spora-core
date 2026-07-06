@@ -235,31 +235,29 @@ final class PluginLoader
     private function readComposerSuggest(string $pluginDir): array
     {
         $path = rtrim($pluginDir, '/') . '/composer.json';
-        if (!is_file($path)) {
-            return [];
-        }
-
         $raw = @file_get_contents($path);
-        if ($raw === false || $raw === '') {
+        if (!is_file($path) || $raw === false || $raw === '') {
             return [];
         }
 
         $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            return [];
-        }
-
-        $suggest = $decoded['suggest'] ?? null;
+        $suggest = is_array($decoded) ? ($decoded['suggest'] ?? null) : null;
         if (!is_array($suggest)) {
             return [];
         }
 
+        return $this->filterSuggestEntries($suggest);
+    }
+
+    /**
+     * @param array<mixed, mixed> $suggest
+     * @return array<string, string>
+     */
+    private function filterSuggestEntries(array $suggest): array
+    {
         $clean = [];
         foreach ($suggest as $package => $description) {
-            if (!is_string($package) || $package === '') {
-                continue;
-            }
-            if (!is_string($description)) {
+            if (!is_string($package) || $package === '' || !is_string($description)) {
                 continue;
             }
             $clean[$package] = $description;

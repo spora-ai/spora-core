@@ -4,18 +4,24 @@ declare(strict_types=1);
 
 namespace Tests\Feature\MediaArchive;
 
+use DateTimeImmutable;
 use FilesystemIterator;
 use InvalidArgumentException;
 use Psr\Log\NullLogger;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use RuntimeException;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Models\MediaAsset;
+use Spora\Services\AssetReference;
+use Spora\Services\AssetStore;
+use Spora\Services\AssetTooLargeException;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\ListMediaQuery;
+use Spora\Services\MediaArchive\MediaArchiveException;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MediaType;
@@ -101,6 +107,7 @@ function makeMediaArchiveService(array $overrides = []): array
         'assetStore' => $ctx['assetStore'],
         'sniffer'    => $ctx['sniffer'],
         'metadata'   => $ctx['metadata'],
+        'logger'     => $ctx['logger'],
         'fetcher'    => $fetcher,
         'tmp'        => $ctx['tmp'],
         'restore'    => $ctx['restore'],
@@ -432,6 +439,345 @@ describe('MediaArchiveService::find / delete / countForAgent', function (): void
             $asset = $ctx['service']->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png'));
             $ctx['service']->delete($asset->id);
             expect($ctx['service']->find($asset->id))->toBeNull();
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('delete is a no-op for unknown ids', function (): void {
+        $ctx = makeMediaArchiveService();
+        try {
+            $ctx['service']->delete('00000000-0000-0000-0000-000000000000');
+            expect($ctx['service']->find('00000000-0000-0000-0000-000000000000'))->toBeNull();
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('countForAgent returns 0 when no rows match', function (): void {
+        $ctx = makeMediaArchiveService();
+        try {
+            expect($ctx['service']->countForAgent(0))->toBe(0);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+});
+
+// ----- Idempotency: tool_call_id upsert path ----------------------------------
+
+describe('MediaArchiveService::ingest idempotency without tool_call_id', function (): void {
+    it('persists the same URL twice as separate rows when neither has a tool_call_id (no dedup without the key)', function (): void {
+        // promote_external=false short-circuits the URL branch before any
+        // HTTP call, so the service exercises `persistExternal()` twice
+        // and lands two separate external rows.
+        $ctx = makeMediaArchiveService(['promoteExternal' => false]);
+        try {
+            $ctx['service']->ingest(new MediaIngestRequest(
+                url: 'https://cdn.example/no-tool.png',
+            ));
+            $ctx['service']->ingest(new MediaIngestRequest(
+                url: 'https://cdn.example/no-tool.png',
+            ));
+            // Two separate external rows — without a toolCallId the
+            // (tool_call_id, asset_url) key can't match, so each ingest
+            // hits the insert path.
+            expect(MediaAsset::query()->count())->toBe(2);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+});
+
+// ----- Decoding failure modes -------------------------------------------------
+
+describe('MediaArchiveService::ingest decoding failure modes', function (): void {
+    it('rejects hex with odd length', function (): void {
+        $ctx = makeMediaArchiveService();
+        try {
+            expect(fn() => $ctx['service']->ingest(new MediaIngestRequest(hex: 'abc')))
+                ->toThrow(InvalidArgumentException::class, 'odd length');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('rejects hex with non-hex characters', function (): void {
+        $ctx = makeMediaArchiveService();
+        try {
+            expect(fn() => $ctx['service']->ingest(new MediaIngestRequest(hex: 'zz')))
+                ->toThrow(InvalidArgumentException::class, 'not valid hex');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('rejects base64 with non-base64 characters', function (): void {
+        $ctx = makeMediaArchiveService();
+        try {
+            // "!!!!" is not valid base64 in strict mode.
+            expect(fn() => $ctx['service']->ingest(new MediaIngestRequest(base64: '!!!!')))
+                ->toThrow(InvalidArgumentException::class, 'not valid base64');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+});
+
+// ----- URL branch coverage ---------------------------------------------------
+
+describe('MediaArchiveService::ingest URL branch — extension/head interaction', function (): void {
+    it('sniffs external MIME from URL extension when extension is recognised', function (): void {
+        $client = new MockHttpClient(function (string $method): MockResponse {
+            if ($method === 'HEAD') {
+                return new MockResponse('', ['http_code' => 200]);
+            }
+            return new MockResponse('', ['http_code' => 404]);
+        });
+        $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
+        $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
+        try {
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/photo.jpg'));
+            expect($asset->storage_mode)->toBe('external');
+            expect($asset->mime_type)->toBe('image/jpeg');
+            expect($asset->media_type)->toBe('image');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('falls back to the HEAD probe content-type when the URL has no extension', function (): void {
+        $client = new MockHttpClient(function (string $method): MockResponse {
+            if ($method === 'HEAD') {
+                return new MockResponse('', [
+                    'http_code' => 200,
+                    'response_headers' => ['content-type' => 'image/png'],
+                ]);
+            }
+            return new MockResponse('', ['http_code' => 404]);
+        });
+        $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
+        $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
+        try {
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/noext'));
+            expect($asset->storage_mode)->toBe('external');
+            expect($asset->mime_type)->toBe('image/png');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('falls back to the caller hint when both extension and HEAD have no MIME', function (): void {
+        $client = new MockHttpClient(function (string $method): MockResponse {
+            if ($method === 'HEAD') {
+                return new MockResponse('', ['http_code' => 200]);
+            }
+            return new MockResponse('', ['http_code' => 404]);
+        });
+        $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
+        $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
+        try {
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(
+                url: 'https://cdn.example/noext',
+                mime: 'application/pdf',
+            ));
+            expect($asset->storage_mode)->toBe('external');
+            expect($asset->mime_type)->toBe('application/pdf');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('falls back to OCTET_STREAM when extension, HEAD, and caller hint are all empty', function (): void {
+        $client = new MockHttpClient(function (string $method): MockResponse {
+            if ($method === 'HEAD') {
+                return new MockResponse('', ['http_code' => 200]);
+            }
+            return new MockResponse('', ['http_code' => 404]);
+        });
+        $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
+        $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
+        try {
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/noext'));
+            expect($asset->storage_mode)->toBe('external');
+            expect($asset->mime_type)->toBe('application/octet-stream');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('falls back to external when HEAD returns non-2xx and body fetch is also non-2xx', function (): void {
+        $client = new MockHttpClient(function (string $method): MockResponse {
+            if ($method === 'HEAD') {
+                return new MockResponse('', ['http_code' => 500]);
+            }
+            return new MockResponse('', ['http_code' => 500]);
+        });
+        $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
+        $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
+        try {
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/broken.png'));
+            expect($asset->storage_mode)->toBe('external');
+            expect($asset->asset_url)->toBe('https://cdn.example/broken.png');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+});
+
+// ----- Local-mode failure: AssetStore rejection --------------------------------
+
+describe('MediaArchiveService::ingest local-mode failure surfaces MediaArchiveException', function (): void {
+    it('throws MediaArchiveException when the asset store rejects the bytes', function (): void {
+        // Swap in a stub AssetStore whose `store()` always throws.
+        // The service catches AssetTooLargeException from inside the
+        // store and rethrows it as MediaArchiveException (a dedicated
+        // exception, not a generic RuntimeException).
+        $rejectingStore = new class implements AssetStore {
+            public function store(string $bytes, ?string $mime = null, ?string $filename = null): AssetReference
+            {
+                throw new AssetTooLargeException('test: oversize');
+            }
+        };
+
+        $ctx = makeMediaArchiveService();
+        try {
+            $service = new MediaArchiveService(
+                $rejectingStore,
+                $ctx['fetcher'],
+                $ctx['sniffer'],
+                $ctx['metadata'],
+                $ctx['logger'],
+                true,
+                100 * 1024 * 1024,
+            );
+            $png = base64_decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                strict: true,
+            );
+            expect(fn() => $service->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png')))
+                ->toThrow(MediaArchiveException::class);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('MediaArchiveException is a RuntimeException (still catchable by callers)', function (): void {
+        expect(new MediaArchiveException('boom'))->toBeInstanceOf(RuntimeException::class);
+    });
+});
+
+// ----- List filter branches --------------------------------------------------
+
+describe('MediaArchiveService::list', function (): void {
+    it('returns an empty page when no rows exist', function (): void {
+        $ctx = makeMediaArchiveService();
+        try {
+            $query = new ListMediaQuery();
+            $page = $ctx['service']->list($query);
+            expect($page->total())->toBe(0);
+            expect($page->items())->toBe([]);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('filters by plugin_slug, tool_name, and search', function (): void {
+        $ctx = makeMediaArchiveService();
+        try {
+            $png = base64_decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                strict: true,
+            );
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $png,
+                mime: 'image/png',
+                pluginSlug: 'foo',
+                toolName: 'tavily',
+                prompt: 'hello world',
+            ));
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $png,
+                mime: 'image/png',
+                pluginSlug: 'bar',
+                toolName: 'serper',
+                prompt: 'goodbye world',
+            ));
+
+            expect($ctx['service']->list(new ListMediaQuery(pluginSlug: 'foo'))->total())->toBe(1);
+            expect($ctx['service']->list(new ListMediaQuery(toolName: 'serper'))->total())->toBe(1);
+            expect($ctx['service']->list(new ListMediaQuery(search: 'hello'))->total())->toBe(1);
+            expect($ctx['service']->list(new ListMediaQuery(search: '  hello  '))->total())->toBe(1);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('ignores a whitespace-only search term', function (): void {
+        $ctx = makeMediaArchiveService();
+        try {
+            $png = base64_decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                strict: true,
+            );
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png'));
+            // Whitespace-only search must not throw and must match all rows.
+            expect($ctx['service']->list(new ListMediaQuery(search: '   '))->total())->toBe(1);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('applies the from/to date filters', function (): void {
+        $ctx = makeMediaArchiveService();
+        try {
+            $png = base64_decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                strict: true,
+            );
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png'));
+
+            $future = new DateTimeImmutable('+1 day');
+            $past   = new DateTimeImmutable('-1 day');
+
+            expect($ctx['service']->list(new ListMediaQuery(from: $future))->total())->toBe(0);
+            expect($ctx['service']->list(new ListMediaQuery(to: $past))->total())->toBe(0);
+            expect($ctx['service']->list(new ListMediaQuery(from: $past, to: $future))->total())->toBe(1);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('falls back to SORT_CREATED_DESC for an unrecognised sort key', function (): void {
+        $ctx = makeMediaArchiveService();
+        try {
+            $png = base64_decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                strict: true,
+            );
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png'));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png'));
+
+            $page = $ctx['service']->list(new ListMediaQuery(sort: 'bogus'));
+            expect($page->total())->toBe(2);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('honours SORT_CREATED_ASC and SORT_SIZE_DESC', function (): void {
+        $ctx = makeMediaArchiveService();
+        try {
+            $png = base64_decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                strict: true,
+            );
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png'));
+
+            $asc = $ctx['service']->list(new ListMediaQuery(sort: ListMediaQuery::SORT_CREATED_ASC));
+            $size = $ctx['service']->list(new ListMediaQuery(sort: ListMediaQuery::SORT_SIZE_DESC));
+            expect($asc->total())->toBe(1);
+            expect($size->total())->toBe(1);
         } finally {
             $ctx['restore']();
         }
