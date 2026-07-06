@@ -297,7 +297,7 @@ Unconfigured settings are shown as `(not configured)` so the LLM knows a capabil
 
 ---
 
-## Quick Reference: All Core Keys
+## Quick Reference: All Tool Settings Keys
 
 | Key              | Type     | Tool Class    | Purpose | LLM Exposed |
 |------------------|----------|---------------|---------|-------------|

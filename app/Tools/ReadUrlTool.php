@@ -30,7 +30,7 @@ use Throwable;
     key: 'http_timeout',
     label: 'HTTP Timeout',
     type: 'text',
-    description: 'Seconds before an HTTP request fails (default: 15)',
+    description: 'Seconds before an HTTP request fails (default: 30)',
 )]
 #[ToolParameter(
     name: 'url',
@@ -58,7 +58,7 @@ final class ReadUrlTool extends AbstractTool
             return (int) $settings['http_timeout'];
         }
         $envTimeout = (int) ($_ENV['SPORA_TOOL_HTTP_TIMEOUT'] ?? getenv('SPORA_TOOL_HTTP_TIMEOUT') ?: 0);
-        return $envTimeout > 0 ? $envTimeout : 15;
+        return $envTimeout > 0 ? $envTimeout : 30;
     }
 
     public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
