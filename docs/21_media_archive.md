@@ -90,8 +90,12 @@ For the **URL branch**:
    store the row as `external` (the URL becomes `asset_url`; no bytes
    are fetched).
 3. **GET** the body with a configurable timeout and follow-redirects.
-   Stream to `AssetStore::store()` — never holds the whole file in
-   memory for large media.
+   The bytes are materialised into a string bounded by
+   `media_archive.max_promote_bytes` (default 100 MiB), then handed
+   to `AssetStore::store()`. This is *not* a true streaming read —
+   peak memory on a max-size body is roughly the configured cap. For
+   very large media, set `promote_external = false` and let the row
+   stay as `storage_mode = external` with the source URL preserved.
 4. **MIME sniff** from the bytes (`finfo` + magic-byte table). The
    sniff wins over the caller's hint.
 5. **Image metadata** via `getimagesize()` — populates `width`,

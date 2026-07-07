@@ -274,6 +274,19 @@ describe('MediaArchiveService::ingest input forms', function (): void {
         expect(fn() => new MediaIngestRequest(bytes: 'a', hex: 'ab'))
             ->toThrow(InvalidArgumentException::class);
     });
+
+    it('rejects requests whose source is an empty string', function (): void {
+        // Empty strings are not a valid source — they would otherwise pass
+        // the `isset()` check used by the old validation.
+        expect(fn() => new MediaIngestRequest(bytes: ''))
+            ->toThrow(InvalidArgumentException::class, 'exactly one non-empty source');
+        expect(fn() => new MediaIngestRequest(hex: ''))
+            ->toThrow(InvalidArgumentException::class, 'exactly one non-empty source');
+        expect(fn() => new MediaIngestRequest(base64: ''))
+            ->toThrow(InvalidArgumentException::class, 'exactly one non-empty source');
+        expect(fn() => new MediaIngestRequest(url: ''))
+            ->toThrow(InvalidArgumentException::class, 'exactly one non-empty source');
+    });
 });
 
 // ----- Ingest: URL branch ----------------------------------------------------

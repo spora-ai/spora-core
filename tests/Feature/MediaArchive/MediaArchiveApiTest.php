@@ -198,313 +198,313 @@ describe('MediaArchiveController', function (): void {
     });
 
     it('returns 404 when destroying an unknown id', function (): void {
-    $ctx = mediaArchiveApiSetup();
-    try {
-        $authService = bootAuthLayer();
-        $userId = $authService->register('media-destroy@example.com', 'ValidPass1!', 'MediaDestroy');
-        simulateLoggedInSession($userId, 'media-destroy@example.com');
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-destroy@example.com', 'ValidPass1!', 'MediaDestroy');
+            simulateLoggedInSession($userId, 'media-destroy@example.com');
 
-        $csrfService = new CsrfTokenService();
-        $token = $csrfService->generate();
+            $csrfService = new CsrfTokenService();
+            $token = $csrfService->generate();
 
-        $authMw = new AuthMiddleware($authService);
-        $csrfMw = new CsrfMiddleware($csrfService);
-        $request = Request::create('/api/v1/media/00000000-0000-0000-0000-000000000000', 'DELETE');
-        $request->attributes->set('id', '00000000-0000-0000-0000-000000000000');
-        $request->headers->set('X-CSRF-Token', $token);
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware($csrfService);
+            $request = Request::create('/api/v1/media/00000000-0000-0000-0000-000000000000', 'DELETE');
+            $request->attributes->set('id', '00000000-0000-0000-0000-000000000000');
+            $request->headers->set('X-CSRF-Token', $token);
 
-        $response = callController($ctx['controller'], 'destroy', $request, [$authMw, $csrfMw]);
-        expect($response->getStatusCode())->toBe(404);
-    } finally {
-        $ctx['restore']();
-    }
-});
+            $response = callController($ctx['controller'], 'destroy', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(404);
+        } finally {
+            $ctx['restore']();
+        }
+    });
 
-it('parses the type query param to a MediaType enum', function (): void {
-    $ctx = mediaArchiveApiSetup();
-    try {
-        $authService = bootAuthLayer();
-        $userId = $authService->register('media-type@example.com', 'ValidPass1!', 'MediaType');
-        simulateLoggedInSession($userId, 'media-type@example.com');
+    it('parses the type query param to a MediaType enum', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-type@example.com', 'ValidPass1!', 'MediaType');
+            simulateLoggedInSession($userId, 'media-type@example.com');
 
-        $bytes = base64_decode(MEDIA_PNG, strict: true);
-        $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
-
-        $authMw = new AuthMiddleware($authService);
-        $csrfMw = new CsrfMiddleware(new CsrfTokenService());
-        $request = Request::create('/api/v1/media?type=image', 'GET');
-
-        $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
-        expect($response->getStatusCode())->toBe(200);
-        $body = json_decode($response->getContent(), true);
-        expect($body['data']['total'])->toBe(1);
-    } finally {
-        $ctx['restore']();
-    }
-});
-
-it('silently drops an unrecognised type query param (returns no filter)', function (): void {
-    $ctx = mediaArchiveApiSetup();
-    try {
-        $authService = bootAuthLayer();
-        $userId = $authService->register('media-bogus-type@example.com', 'ValidPass1!', 'BogusType');
-        simulateLoggedInSession($userId, 'media-bogus-type@example.com');
-
-        $bytes = base64_decode(MEDIA_PNG, strict: true);
-        $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
-
-        $authMw = new AuthMiddleware($authService);
-        $csrfMw = new CsrfMiddleware(new CsrfTokenService());
-        // Unrecognised type — the controller's parseMediaType() returns null
-        // for MediaType::tryFrom() misses, so the filter is dropped.
-        $request = Request::create('/api/v1/media?type=bogus', 'GET');
-
-        $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
-        expect($response->getStatusCode())->toBe(200);
-        $body = json_decode($response->getContent(), true);
-        expect($body['data']['total'])->toBe(1);
-    } finally {
-        $ctx['restore']();
-    }
-});
-
-it('filters by plugin_slug and tool_name query params', function (): void {
-    $ctx = mediaArchiveApiSetup();
-    try {
-        $authService = bootAuthLayer();
-        $userId = $authService->register('media-filter@example.com', 'ValidPass1!', 'MediaFilter');
-        simulateLoggedInSession($userId, 'media-filter@example.com');
-
-        $bytes = base64_decode(MEDIA_PNG, strict: true);
-        $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', pluginSlug: 'foo', toolName: 'tavily'));
-        $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', pluginSlug: 'bar', toolName: 'serper'));
-
-        $authMw = new AuthMiddleware($authService);
-        $csrfMw = new CsrfMiddleware(new CsrfTokenService());
-        $request = Request::create('/api/v1/media?plugin_slug=foo&tool_name=tavily', 'GET');
-
-        $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
-        expect($response->getStatusCode())->toBe(200);
-        $body = json_decode($response->getContent(), true);
-        expect($body['data']['total'])->toBe(1);
-        expect($body['data']['assets'][0]['plugin_slug'])->toBe('foo');
-    } finally {
-        $ctx['restore']();
-    }
-});
-
-it('filters by agent_id when the value is a positive integer', function (): void {
-    $ctx = mediaArchiveApiSetup();
-    try {
-        $authService = bootAuthLayer();
-        $userId = $authService->register('media-agent@example.com', 'ValidPass1!', 'MediaAgent');
-        simulateLoggedInSession($userId, 'media-agent@example.com');
-
-        $bytes = base64_decode(MEDIA_PNG, strict: true);
-        $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
-
-        $authMw = new AuthMiddleware($authService);
-        $csrfMw = new CsrfMiddleware(new CsrfTokenService());
-        // agent_id query param with a non-digit value is dropped by parseAgentId().
-        $request = Request::create('/api/v1/media?agent_id=notadigit', 'GET');
-        $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
-        expect($response->getStatusCode())->toBe(200);
-        $body = json_decode($response->getContent(), true);
-        // No agent_id filter applied (parseAgentId returns null for non-digit),
-        // so all rows are returned.
-        expect($body['data']['total'])->toBe(1);
-    } finally {
-        $ctx['restore']();
-    }
-});
-
-it('filters by q (search) query param', function (): void {
-    $ctx = mediaArchiveApiSetup();
-    try {
-        $authService = bootAuthLayer();
-        $userId = $authService->register('media-q@example.com', 'ValidPass1!', 'MediaQ');
-        simulateLoggedInSession($userId, 'media-q@example.com');
-
-        $bytes = base64_decode(MEDIA_PNG, strict: true);
-        $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', prompt: 'a fluffy cat'));
-        $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', prompt: 'a sleepy dog'));
-
-        $authMw = new AuthMiddleware($authService);
-        $csrfMw = new CsrfMiddleware(new CsrfTokenService());
-        $request = Request::create('/api/v1/media?q=cat', 'GET');
-        $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
-        expect($response->getStatusCode())->toBe(200);
-        $body = json_decode($response->getContent(), true);
-        expect($body['data']['total'])->toBe(1);
-    } finally {
-        $ctx['restore']();
-    }
-});
-
-it('honours the sort query param (created_at_asc)', function (): void {
-    $ctx = mediaArchiveApiSetup();
-    try {
-        $authService = bootAuthLayer();
-        $userId = $authService->register('media-sort@example.com', 'ValidPass1!', 'MediaSort');
-        simulateLoggedInSession($userId, 'media-sort@example.com');
-
-        $bytes = base64_decode(MEDIA_PNG, strict: true);
-        $first  = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
-        $second = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
-
-        $authMw = new AuthMiddleware($authService);
-        $csrfMw = new CsrfMiddleware(new CsrfTokenService());
-        $request = Request::create('/api/v1/media?sort=created_at_asc', 'GET');
-        $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
-        expect($response->getStatusCode())->toBe(200);
-        $body = json_decode($response->getContent(), true);
-        expect($body['data']['total'])->toBe(2);
-        expect($body['data']['assets'][0]['id'])->toBe($first->id);
-        expect($body['data']['assets'][1]['id'])->toBe($second->id);
-    } finally {
-        $ctx['restore']();
-    }
-});
-
-it('falls back to created_at_desc for an unrecognised sort query param', function (): void {
-    $ctx = mediaArchiveApiSetup();
-    try {
-        $authService = bootAuthLayer();
-        $userId = $authService->register('media-bogus-sort@example.com', 'ValidPass1!', 'BogusSort');
-        simulateLoggedInSession($userId, 'media-bogus-sort@example.com');
-
-        $bytes = base64_decode(MEDIA_PNG, strict: true);
-        $first  = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
-        // Force the older row's created_at back in time so the desc sort is
-        // deterministic regardless of SQLite's timestamp precision.
-        $first->created_at = \Illuminate\Support\Carbon::now()->subMinutes(5);
-        $first->save();
-        $second = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
-
-        $authMw = new AuthMiddleware($authService);
-        $csrfMw = new CsrfMiddleware(new CsrfTokenService());
-        $request = Request::create('/api/v1/media?sort=bogus', 'GET');
-        $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
-        expect($response->getStatusCode())->toBe(200);
-        $body = json_decode($response->getContent(), true);
-        expect($body['data']['total'])->toBe(2);
-        // Default sort is created_at_desc — newest first.
-        expect($body['data']['assets'][0]['id'])->toBe($second->id);
-        expect($body['data']['assets'][1]['id'])->toBe($first->id);
-    } finally {
-        $ctx['restore']();
-    }
-});
-
-it('honours per_page and page query params', function (): void {
-    $ctx = mediaArchiveApiSetup();
-    try {
-        $authService = bootAuthLayer();
-        $userId = $authService->register('media-pagination@example.com', 'ValidPass1!', 'Pagination');
-        simulateLoggedInSession($userId, 'media-pagination@example.com');
-
-        $bytes = base64_decode(MEDIA_PNG, strict: true);
-        for ($i = 0; $i < 5; $i++) {
+            $bytes = base64_decode(MEDIA_PNG, strict: true);
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+            $request = Request::create('/api/v1/media?type=image', 'GET');
+
+            $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(200);
+            $body = json_decode($response->getContent(), true);
+            expect($body['data']['total'])->toBe(1);
+        } finally {
+            $ctx['restore']();
         }
+    });
 
-        $authMw = new AuthMiddleware($authService);
-        $csrfMw = new CsrfMiddleware(new CsrfTokenService());
-        $request = Request::create('/api/v1/media?per_page=2&page=2', 'GET');
-        $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
-        expect($response->getStatusCode())->toBe(200);
-        $body = json_decode($response->getContent(), true);
-        expect($body['data']['perPage'])->toBe(2);
-        expect($body['data']['page'])->toBe(2);
-        expect($body['data']['total'])->toBe(5);
-        expect($body['data']['lastPage'])->toBe(3);
-        expect(count($body['data']['assets']))->toBe(2);
-    } finally {
-        $ctx['restore']();
-    }
-});
+    it('silently drops an unrecognised type query param (returns no filter)', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-bogus-type@example.com', 'ValidPass1!', 'BogusType');
+            simulateLoggedInSession($userId, 'media-bogus-type@example.com');
 
-it('drops an unparseable from/to query param (returns no filter, no error)', function (): void {
-    $ctx = mediaArchiveApiSetup();
-    try {
-        $authService = bootAuthLayer();
-        $userId = $authService->register('media-baddate@example.com', 'ValidPass1!', 'BadDate');
-        simulateLoggedInSession($userId, 'media-baddate@example.com');
+            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
 
-        $bytes = base64_decode(MEDIA_PNG, strict: true);
-        $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+            // Unrecognised type — the controller's parseMediaType() returns null
+            // for MediaType::tryFrom() misses, so the filter is dropped.
+            $request = Request::create('/api/v1/media?type=bogus', 'GET');
 
-        $authMw = new AuthMiddleware($authService);
-        $csrfMw = new CsrfMiddleware(new CsrfTokenService());
-        $request = Request::create('/api/v1/media?from=notadate&to=alsonotadate', 'GET');
-        $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
-        expect($response->getStatusCode())->toBe(200);
-        $body = json_decode($response->getContent(), true);
-        expect($body['data']['total'])->toBe(1);
-    } finally {
-        $ctx['restore']();
-    }
-});
-
-it('serialises a row with timestamps and full payload', function (): void {
-    $ctx = mediaArchiveApiSetup();
-    try {
-        $authService = bootAuthLayer();
-        $userId = $authService->register('media-serialize@example.com', 'ValidPass1!', 'Serialize');
-        simulateLoggedInSession($userId, 'media-serialize@example.com');
-
-        $bytes = base64_decode(MEDIA_PNG, strict: true);
-        $asset = $ctx['service']->ingest(new MediaIngestRequest(
-            bytes: $bytes,
-            mime: 'image/png',
-            pluginSlug: 'demo',
-            toolName: 'tavily',
-            prompt: 'hello',
-        ));
-
-        $authMw = new AuthMiddleware($authService);
-        $csrfMw = new CsrfMiddleware(new CsrfTokenService());
-        $request = Request::create('/api/v1/media/' . $asset->id, 'GET');
-        $request->attributes->set('id', $asset->id);
-
-        $response = callController($ctx['controller'], 'show', $request, [$authMw, $csrfMw]);
-        expect($response->getStatusCode())->toBe(200);
-        $body = json_decode($response->getContent(), true);
-        // Every serialised field is present.
-        foreach (['id', 'agent_id', 'task_id', 'tool_call_id', 'plugin_slug', 'tool_name', 'media_type', 'mime_type', 'byte_size', 'width', 'height', 'duration_seconds', 'prompt', 'tags', 'metadata', 'asset_url', 'source_url', 'storage_mode', 'created_at', 'updated_at'] as $key) {
-            expect($body['data'])->toHaveKey($key);
+            $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(200);
+            $body = json_decode($response->getContent(), true);
+            expect($body['data']['total'])->toBe(1);
+        } finally {
+            $ctx['restore']();
         }
-        expect($body['data']['plugin_slug'])->toBe('demo');
-        expect($body['data']['prompt'])->toBe('hello');
-    } finally {
-        $ctx['restore']();
-    }
-});
+    });
 
-it('returns 404 with a JSON error envelope on destroy of an unknown id', function (): void {
-    $ctx = mediaArchiveApiSetup();
-    try {
-        $authService = bootAuthLayer();
-        $userId = $authService->register('media-404@example.com', 'ValidPass1!', 'M404');
-        simulateLoggedInSession($userId, 'media-404@example.com');
+    it('filters by plugin_slug and tool_name query params', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-filter@example.com', 'ValidPass1!', 'MediaFilter');
+            simulateLoggedInSession($userId, 'media-filter@example.com');
 
-        $csrfService = new CsrfTokenService();
-        $token = $csrfService->generate();
+            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', pluginSlug: 'foo', toolName: 'tavily'));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', pluginSlug: 'bar', toolName: 'serper'));
 
-        $authMw = new AuthMiddleware($authService);
-        $csrfMw = new CsrfMiddleware($csrfService);
-        $request = Request::create('/api/v1/media/00000000-0000-0000-0000-000000000000', 'DELETE');
-        $request->attributes->set('id', '00000000-0000-0000-0000-000000000000');
-        $request->headers->set('X-CSRF-Token', $token);
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+            $request = Request::create('/api/v1/media?plugin_slug=foo&tool_name=tavily', 'GET');
 
-        $response = callController($ctx['controller'], 'destroy', $request, [$authMw, $csrfMw]);
-        expect($response->getStatusCode())->toBe(404);
-        $body = json_decode($response->getContent(), true);
-        expect($body)->toHaveKey('error');
-        expect($body['error']['code'])->toBe('NOT_FOUND');
-    } finally {
-        $ctx['restore']();
-    }
-});
+            $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(200);
+            $body = json_decode($response->getContent(), true);
+            expect($body['data']['total'])->toBe(1);
+            expect($body['data']['assets'][0]['plugin_slug'])->toBe('foo');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('filters by agent_id when the value is a positive integer', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-agent@example.com', 'ValidPass1!', 'MediaAgent');
+            simulateLoggedInSession($userId, 'media-agent@example.com');
+
+            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+            // agent_id query param with a non-digit value is dropped by parseAgentId().
+            $request = Request::create('/api/v1/media?agent_id=notadigit', 'GET');
+            $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(200);
+            $body = json_decode($response->getContent(), true);
+            // No agent_id filter applied (parseAgentId returns null for non-digit),
+            // so all rows are returned.
+            expect($body['data']['total'])->toBe(1);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('filters by q (search) query param', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-q@example.com', 'ValidPass1!', 'MediaQ');
+            simulateLoggedInSession($userId, 'media-q@example.com');
+
+            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', prompt: 'a fluffy cat'));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', prompt: 'a sleepy dog'));
+
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+            $request = Request::create('/api/v1/media?q=cat', 'GET');
+            $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(200);
+            $body = json_decode($response->getContent(), true);
+            expect($body['data']['total'])->toBe(1);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('honours the sort query param (created_at_asc)', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-sort@example.com', 'ValidPass1!', 'MediaSort');
+            simulateLoggedInSession($userId, 'media-sort@example.com');
+
+            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $first  = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            $second = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+            $request = Request::create('/api/v1/media?sort=created_at_asc', 'GET');
+            $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(200);
+            $body = json_decode($response->getContent(), true);
+            expect($body['data']['total'])->toBe(2);
+            expect($body['data']['assets'][0]['id'])->toBe($first->id);
+            expect($body['data']['assets'][1]['id'])->toBe($second->id);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('falls back to created_at_desc for an unrecognised sort query param', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-bogus-sort@example.com', 'ValidPass1!', 'BogusSort');
+            simulateLoggedInSession($userId, 'media-bogus-sort@example.com');
+
+            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $first  = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            // Force the older row's created_at back in time so the desc sort is
+            // deterministic regardless of SQLite's timestamp precision.
+            $first->created_at = \Illuminate\Support\Carbon::now()->subMinutes(5);
+            $first->save();
+            $second = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+            $request = Request::create('/api/v1/media?sort=bogus', 'GET');
+            $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(200);
+            $body = json_decode($response->getContent(), true);
+            expect($body['data']['total'])->toBe(2);
+            // Default sort is created_at_desc — newest first.
+            expect($body['data']['assets'][0]['id'])->toBe($second->id);
+            expect($body['data']['assets'][1]['id'])->toBe($first->id);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('honours per_page and page query params', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-pagination@example.com', 'ValidPass1!', 'Pagination');
+            simulateLoggedInSession($userId, 'media-pagination@example.com');
+
+            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            for ($i = 0; $i < 5; $i++) {
+                $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            }
+
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+            $request = Request::create('/api/v1/media?per_page=2&page=2', 'GET');
+            $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(200);
+            $body = json_decode($response->getContent(), true);
+            expect($body['data']['perPage'])->toBe(2);
+            expect($body['data']['page'])->toBe(2);
+            expect($body['data']['total'])->toBe(5);
+            expect($body['data']['lastPage'])->toBe(3);
+            expect(count($body['data']['assets']))->toBe(2);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('drops an unparseable from/to query param (returns no filter, no error)', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-baddate@example.com', 'ValidPass1!', 'BadDate');
+            simulateLoggedInSession($userId, 'media-baddate@example.com');
+
+            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+            $request = Request::create('/api/v1/media?from=notadate&to=alsonotadate', 'GET');
+            $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(200);
+            $body = json_decode($response->getContent(), true);
+            expect($body['data']['total'])->toBe(1);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('serialises a row with timestamps and full payload', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-serialize@example.com', 'ValidPass1!', 'Serialize');
+            simulateLoggedInSession($userId, 'media-serialize@example.com');
+
+            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $bytes,
+                mime: 'image/png',
+                pluginSlug: 'demo',
+                toolName: 'tavily',
+                prompt: 'hello',
+            ));
+
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+            $request = Request::create('/api/v1/media/' . $asset->id, 'GET');
+            $request->attributes->set('id', $asset->id);
+
+            $response = callController($ctx['controller'], 'show', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(200);
+            $body = json_decode($response->getContent(), true);
+            // Every serialised field is present.
+            foreach (['id', 'agent_id', 'task_id', 'tool_call_id', 'plugin_slug', 'tool_name', 'media_type', 'mime_type', 'byte_size', 'width', 'height', 'duration_seconds', 'prompt', 'tags', 'metadata', 'asset_url', 'source_url', 'storage_mode', 'created_at', 'updated_at'] as $key) {
+                expect($body['data'])->toHaveKey($key);
+            }
+            expect($body['data']['plugin_slug'])->toBe('demo');
+            expect($body['data']['prompt'])->toBe('hello');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('returns 404 with a JSON error envelope on destroy of an unknown id', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-404@example.com', 'ValidPass1!', 'M404');
+            simulateLoggedInSession($userId, 'media-404@example.com');
+
+            $csrfService = new CsrfTokenService();
+            $token = $csrfService->generate();
+
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware($csrfService);
+            $request = Request::create('/api/v1/media/00000000-0000-0000-0000-000000000000', 'DELETE');
+            $request->attributes->set('id', '00000000-0000-0000-0000-000000000000');
+            $request->headers->set('X-CSRF-Token', $token);
+
+            $response = callController($ctx['controller'], 'destroy', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(404);
+            $body = json_decode($response->getContent(), true);
+            expect($body)->toHaveKey('error');
+            expect($body['error']['code'])->toBe('NOT_FOUND');
+        } finally {
+            $ctx['restore']();
+        }
+    });
 
 });

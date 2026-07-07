@@ -365,11 +365,14 @@ final class MediaArchiveService
     }
 
     /**
-     * For external rows, MIME comes from the URL extension sniff first
-     * (cheap, no I/O), then the HEAD probe's Content-Type, then the
-     * caller's hint. The extension is consulted last among the cheap
-     * options because URL paths can lie (e.g. a /image endpoint
-     * returning JSON).
+     * For external rows, MIME is resolved cheapest-first:
+     *   1. URL extension sniff (no I/O). If the extension is recognised
+     *      we trust it and short-circuit — false positives are
+     *      recoverable downstream because the ingest pipeline only
+     *      classifies, it doesn't gate persistence on MIME.
+     *   2. HEAD probe's Content-Type.
+     *   3. The caller's `mime` hint.
+     *   4. `application/octet-stream` as the last-resort fallback.
      */
     private function sniffForExternal(MediaIngestRequest $request, string $url): string
     {

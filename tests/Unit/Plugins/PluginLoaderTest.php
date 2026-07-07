@@ -434,11 +434,6 @@ test('registerRoutes() does not throw when no plugins are loaded', function (): 
     expect(true)->toBeTrue();
 });
 
-// ---------------------------------------------------------------------------
-// Tests for PluginLoader::suggestedPackages() — the "companion plugins"
-// surface that reads each plugin's composer.json `suggest` field.
-// ---------------------------------------------------------------------------
-
 test('suggestedPackages() returns [] when no plugins are loaded', function (): void {
     $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()]);
     $loader->boot();

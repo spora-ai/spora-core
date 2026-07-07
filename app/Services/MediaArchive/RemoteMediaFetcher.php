@@ -15,10 +15,13 @@ use Throwable;
  *   1. HEAD probe to read `Content-Type` and `Content-Length` cheaply.
  *      Either header is optional and may be missing — the body fetch does
  *      not depend on them, they just feed the policy decisions below.
- *   2. Body GET with a configurable timeout. The response is fetched as a
- *      string — the Archive's media sizes are bounded by
- *      `media_archive.max_promote_bytes` (default 100 MiB) so streaming
- *      to disk via {@see AssetStore} keeps memory steady.
+ *   2. Body GET with a configurable timeout. The response is materialised
+ *      to a string bounded by `media_archive.max_promote_bytes` (default
+ *      100 MiB) — the bytes are then handed to {@see AssetStore::store()}.
+ *      This is not a streaming read: peak memory on a max-size body is
+ *      roughly the configured cap. Operators who need true streaming for
+ *      very large media should keep `promote_external = false` and let
+ *      the row stay as `storage_mode=external` with the source URL.
  *
  * Errors are normalised to {@see RemoteMediaFetchException} so the service
  * can decide whether to fall back to `storage_mode=external` or surface
@@ -44,12 +47,21 @@ final class RemoteMediaFetcher
      */
     public function fetch(string $url): array
     {
-        $response = $this->http->request('GET', $url, [
-            'timeout'      => $this->timeoutSeconds,
-            'max_duration' => $this->timeoutSeconds,
-            'headers'      => ['Accept' => '*/*'],
-        ]);
-        $status = $response->getStatusCode();
+        try {
+            $response = $this->http->request('GET', $url, [
+                'timeout'      => $this->timeoutSeconds,
+                'max_duration' => $this->timeoutSeconds,
+                'headers'      => ['Accept' => '*/*'],
+            ]);
+            $status = $response->getStatusCode();
+        } catch (Throwable $e) {
+            throw new RemoteMediaFetchException(
+                url: $url,
+                httpStatus: 0,
+                message: 'Remote media fetch transport error: ' . $e->getMessage(),
+            );
+        }
+
         if ($status < 200 || $status >= 300) {
             throw new RemoteMediaFetchException(
                 url: $url,
@@ -58,9 +70,19 @@ final class RemoteMediaFetcher
             );
         }
 
-        $contentLength = $response->getHeaders(false)['content-length'] ?? null;
-        $contentLength = is_array($contentLength) && isset($contentLength[0])
-            ? (int) $contentLength[0]
+        try {
+            $headers = $response->getHeaders(false);
+        } catch (Throwable $e) {
+            throw new RemoteMediaFetchException(
+                url: $url,
+                httpStatus: 0,
+                message: 'Remote media fetch header read failed: ' . $e->getMessage(),
+            );
+        }
+
+        $contentLengthRaw = $headers['content-length'] ?? null;
+        $contentLength = is_array($contentLengthRaw) && isset($contentLengthRaw[0])
+            ? (int) $contentLengthRaw[0]
             : null;
 
         if ($contentLength !== null && $contentLength > $this->maxBytes) {
@@ -76,9 +98,9 @@ final class RemoteMediaFetcher
             );
         }
 
-        $contentType = $response->getHeaders(false)['content-type'] ?? null;
-        $contentType = is_array($contentType) && isset($contentType[0])
-            ? trim(explode(';', $contentType[0])[0])
+        $contentTypeRaw = $headers['content-type'] ?? null;
+        $contentType = is_array($contentTypeRaw) && isset($contentTypeRaw[0])
+            ? trim(explode(';', $contentTypeRaw[0])[0])
             : null;
 
         try {

@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Tests\Unit\Services\MediaArchive;
 
 use Psr\Log\NullLogger;
-use Spora\Services\MediaArchive\RemoteMediaFetchException;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
+use Spora\Services\MediaArchive\RemoteMediaFetchException;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
@@ -61,22 +61,22 @@ describe('RemoteMediaFetcher::fetch', function (): void {
     });
 
     it('throws RemoteMediaFetchException when Content-Length exceeds the configured max', function (): void {
-    // Symfony's MockResponse validates body size against Content-Length
-    // before yielding — we have to provide a matching body. The fetcher's
-    // oversize guard fires on the header alone, but here the body must
-    // match the declared size so MockResponse stays happy long enough for
-    // the fetcher to evaluate it.
-    $declaredSize = 64 * 1024; // 64 KiB
-    $client = new MockHttpClient([
-        new MockResponse(str_repeat('x', $declaredSize), [
-            'http_code' => 200,
-            'response_headers' => ['content-length' => (string) $declaredSize],
-        ]),
-    ]);
+        // Symfony's MockResponse validates body size against Content-Length
+        // before yielding — we have to provide a matching body. The fetcher's
+        // oversize guard fires on the header alone, but here the body must
+        // match the declared size so MockResponse stays happy long enough for
+        // the fetcher to evaluate it.
+        $declaredSize = 64 * 1024; // 64 KiB
+        $client = new MockHttpClient([
+            new MockResponse(str_repeat('x', $declaredSize), [
+                'http_code' => 200,
+                'response_headers' => ['content-length' => (string) $declaredSize],
+            ]),
+        ]);
 
-    expect(static fn() => makeFetcher($client, maxBytes: 1024)->fetch('https://cdn.example/big.png'))
-        ->toThrow(RemoteMediaFetchException::class, 'max_promote_bytes');
-});
+        expect(static fn() => makeFetcher($client, maxBytes: 1024)->fetch('https://cdn.example/big.png'))
+            ->toThrow(RemoteMediaFetchException::class, 'max_promote_bytes');
+    });
 
     it('truncates Content-Type at the `;` boundary (charset stripped)', function (): void {
         $client = new MockHttpClient([
@@ -105,6 +105,25 @@ describe('RemoteMediaFetcher::fetch', function (): void {
         $result = makeFetcher($client)->fetch('https://cdn.example/x.png');
         expect($result['contentLength'])->toBeNull();
         expect($result['contentType'])->toBe('image/png');
+    });
+
+    it('throws RemoteMediaFetchException (httpStatus=0) on a transport failure', function (): void {
+        // `error` in MockResponse simulates a network-level failure —
+        // getStatusCode()/getHeaders() should both surface as
+        // RemoteMediaFetchException so the service can fall back.
+        $client = new MockHttpClient([
+            new MockResponse('', ['error' => 'Connection refused']),
+        ]);
+
+        $caught = null;
+        try {
+            makeFetcher($client)->fetch('https://cdn.example/unreachable.png');
+        } catch (RemoteMediaFetchException $e) {
+            $caught = $e;
+        }
+        expect($caught)->not->toBeNull();
+        expect($caught->httpStatus)->toBe(0);
+        expect($caught->url)->toBe('https://cdn.example/unreachable.png');
     });
 });
 

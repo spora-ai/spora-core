@@ -31,6 +31,14 @@ use Throwable;
  */
 final class MetadataExtractor
 {
+    /**
+     * Hard ceiling on how long we wait for ffprobe's stdout/stderr to
+     * drain. Anything longer usually means the input is corrupt or ffprobe
+     * is stuck on I/O — we'd rather return null duration than hang a
+     * request worker.
+     */
+    private const FFPROBE_TIMEOUT_SECONDS = 5.0;
+
     /** Path probe cache — kept on the instance to avoid repeated stat()s. */
     private ?bool $ffprobePathChecked = null;
     private ?string $ffprobePath = null;
@@ -210,7 +218,8 @@ final class MetadataExtractor
         if ($handle === null) {
             return null;
         }
-        $stdout = $this->drainFfprobePipes($handle);
+        $deadline = microtime(true) + self::FFPROBE_TIMEOUT_SECONDS;
+        $stdout = $this->drainFfprobePipes($handle, $deadline);
         $exit = proc_close($handle['proc']);
 
         return $this->extractDuration($stdout, $exit, strlen($bytes));
@@ -276,25 +285,84 @@ final class MetadataExtractor
     }
 
     /**
-     * Drain stdout/stderr from the open ffprobe pipes. Returns the
-     * stdout contents (or null when no pipes were attached).
+     * Drain stdout/stderr from the open ffprobe pipes with a hard
+     * deadline. Returns the accumulated stdout (or null when no pipes
+     * were attached or the deadline was hit). Stderr is drained and
+     * discarded — the JSON output on stdout is the source of truth.
+     *
+     * Pipes are switched to non-blocking for the duration of the drain;
+     * `stream_select()` is used with a remaining-budget timeout, and the
+     * ffprobe process is `proc_terminate()`d if we hit the deadline.
      *
      * @param array{proc: resource, pipes: resource[]} $handle
      */
-    private function drainFfprobePipes(array $handle): ?string
+    private function drainFfprobePipes(array $handle, float $deadline): ?string
     {
         $pipes = $handle['pipes'];
+        $stdout = $pipes[1] ?? null;
+        $stderr = $pipes[2] ?? null;
+        if (!is_resource($stdout) || !is_resource($stderr)) {
+            return null;
+        }
 
-        // Bounded wait: 5 s is generous for ffprobe on any sane file
-        // size; longer usually means the input is corrupt.
-        $stdout = stream_get_contents($pipes[1]);
-        // Drain stderr so the pipe buffer doesn't fill and block ffprobe.
-        // Discarded — the output format is the source of truth.
-        stream_get_contents($pipes[2]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
+        stream_set_blocking($stdout, false);
+        stream_set_blocking($stderr, false);
 
-        return is_string($stdout) ? $stdout : null;
+        $stdoutBuf = '';
+        try {
+            while (true) {
+                $remaining = $deadline - microtime(true);
+                if ($remaining <= 0) {
+                    proc_terminate($handle['proc']);
+                    $this->logger->warning('MetadataExtractor: ffprobe exceeded timeout; terminating', [
+                        'timeout_seconds' => self::FFPROBE_TIMEOUT_SECONDS,
+                    ]);
+                    return null;
+                }
+
+                $read = [];
+                if (!feof($stdout)) {
+                    $read[] = $stdout;
+                }
+                if (!feof($stderr)) {
+                    $read[] = $stderr;
+                }
+                if ($read === []) {
+                    break;
+                }
+
+                $except = null;
+                $write = null;
+                $ready = @stream_select($read, $write, $except, (int) floor($remaining), (int) (($remaining - floor($remaining)) * 1_000_000));
+                if ($ready === false || $ready === 0) {
+                    // 0 = timeout, false = select error — treat both as
+                    // "we ran out of time" and let the caller see null.
+                    proc_terminate($handle['proc']);
+                    $this->logger->warning('MetadataExtractor: ffprobe read timed out; terminating', [
+                        'timeout_seconds' => self::FFPROBE_TIMEOUT_SECONDS,
+                    ]);
+                    return null;
+                }
+
+                foreach ($read as $stream) {
+                    $chunk = stream_get_contents($stream);
+                    if ($stream === $stdout && is_string($chunk)) {
+                        $stdoutBuf .= $chunk;
+                    }
+                    // stderr is drained into the void — discarding keeps
+                    // the pipe buffer from filling and blocking ffprobe.
+                }
+            }
+        } finally {
+            if (is_resource($stdout)) {
+                fclose($stdout);
+            }
+            if (is_resource($stderr)) {
+                fclose($stderr);
+            }
+        }
+
+        return $stdoutBuf;
     }
 
     /**

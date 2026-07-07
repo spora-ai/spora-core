@@ -14,9 +14,7 @@ use Spora\Apps\VueAppInterface;
  */
 final class StubVueApp implements VueAppInterface
 {
-    public function __construct(private readonly string $entry = 'main.js')
-    {
-    }
+    public function __construct(private readonly string $entry = 'main.js') {}
 
     public function name(): string
     {

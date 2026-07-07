@@ -43,13 +43,19 @@ final readonly class MediaIngestRequest
         /** @var array<string, mixed>|null */
         public ?array $metadata = null,
     ) {
-        $sources = array_filter(
-            [isset($bytes), isset($hex), isset($base64), isset($url)],
-            static fn(bool $set): bool => $set,
-        );
-        if (count($sources) !== 1) {
+        // Empty strings are not a valid source — only non-empty payloads
+        // count toward the "exactly one" invariant. Matches the rest of
+        // the codebase's "empty payload is invalid" convention (e.g.
+        // {@see \Spora\Plugins\Concerns\StoresBinaryAssets::embedHex}).
+        $hasBytes  = is_string($bytes) && $bytes !== '';
+        $hasHex    = is_string($hex) && $hex !== '';
+        $hasBase64 = is_string($base64) && $base64 !== '';
+        $hasUrl    = is_string($url) && $url !== '';
+
+        $sourceCount = (int) $hasBytes + (int) $hasHex + (int) $hasBase64 + (int) $hasUrl;
+        if ($sourceCount !== 1) {
             throw new InvalidArgumentException(
-                'MediaIngestRequest requires exactly one of bytes, hex, base64, or url to be set.',
+                'MediaIngestRequest requires exactly one non-empty source among bytes, hex, base64, or url.',
             );
         }
     }

@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Models;
 
-use Spora\Services\MediaArchive\MediaType;
 use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\MediaType;
 
 /**
  * Direct unit coverage for {@see MediaAsset}. The model's only domain
