@@ -227,16 +227,16 @@ final class MediaArchiveService
     private function decodeInline(MediaIngestRequest $request): ?string
     {
         if ($request->bytes !== null && $request->bytes !== '') {
-            return $request->bytes;
-        }
-        if ($request->hex !== null && $request->hex !== '') {
-            return $this->decodeHex($request->hex);
-        }
-        if ($request->base64 !== null && $request->base64 !== '') {
-            return $this->decodeBase64($request->base64);
+            $bytes = $request->bytes;
+        } elseif ($request->hex !== null && $request->hex !== '') {
+            $bytes = $this->decodeHex($request->hex);
+        } elseif ($request->base64 !== null && $request->base64 !== '') {
+            $bytes = $this->decodeBase64($request->base64);
+        } else {
+            $bytes = null;
         }
 
-        return null;
+        return $bytes;
     }
 
     private function decodeHex(string $hex): string

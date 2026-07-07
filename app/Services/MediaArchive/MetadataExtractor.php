@@ -353,43 +353,47 @@ final class MetadataExtractor
      */
     private function drainOnce($stdout, $stderr, float $deadline, string &$stdoutBuf): int
     {
+        // Single return at the end; status defaults to timeout and is
+        // narrowed as we confirm EOF, pending reads, or a successful
+        // select pass.
+        $status = self::DRAIN_TIMEOUT;
+
         $remaining = $deadline - microtime(true);
-        if ($remaining <= 0) {
-            return self::DRAIN_TIMEOUT;
-        }
-
-        $read = [];
-        if (!feof($stdout)) {
-            $read[] = $stdout;
-        }
-        if (!feof($stderr)) {
-            $read[] = $stderr;
-        }
-        if ($read === []) {
-            return self::DRAIN_EOF;
-        }
-
-        $except = null;
-        $write = null;
-        $ready = @stream_select(
-            $read,
-            $write,
-            $except,
-            (int) floor($remaining),
-            (int) (($remaining - floor($remaining)) * 1_000_000),
-        );
-        if ($ready === false || $ready === 0) {
-            return self::DRAIN_TIMEOUT;
-        }
-
-        foreach ($read as $stream) {
-            $chunk = stream_get_contents($stream);
-            if ($stream === $stdout && is_string($chunk)) {
-                $stdoutBuf .= $chunk;
+        if ($remaining > 0) {
+            $read = [];
+            if (!feof($stdout)) {
+                $read[] = $stdout;
+            }
+            if (!feof($stderr)) {
+                $read[] = $stderr;
+            }
+            if ($read === []) {
+                $status = self::DRAIN_EOF;
+            } else {
+                $except = null;
+                $write = null;
+                $ready = @stream_select(
+                    $read,
+                    $write,
+                    $except,
+                    (int) floor($remaining),
+                    (int) (($remaining - floor($remaining)) * 1_000_000),
+                );
+                if ($ready === false || $ready === 0) {
+                    $status = self::DRAIN_TIMEOUT;
+                } else {
+                    foreach ($read as $stream) {
+                        $chunk = stream_get_contents($stream);
+                        if ($stream === $stdout && is_string($chunk)) {
+                            $stdoutBuf .= $chunk;
+                        }
+                    }
+                    $status = self::DRAIN_PROGRESS;
+                }
             }
         }
 
-        return self::DRAIN_PROGRESS;
+        return $status;
     }
 
     /**
