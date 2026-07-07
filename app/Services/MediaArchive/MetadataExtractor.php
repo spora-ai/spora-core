@@ -353,23 +353,22 @@ final class MetadataExtractor
      */
     private function drainOnce($stdout, $stderr, float $deadline, string &$stdoutBuf): int
     {
+        // Single return at the end; status defaults to DRAIN_TIMEOUT
+        // and is narrowed when we confirm EOF or a successful read.
+        $status = self::DRAIN_TIMEOUT;
+
         $remaining = $deadline - microtime(true);
-        if ($remaining <= 0) {
-            return self::DRAIN_TIMEOUT;
+        if ($remaining > 0) {
+            $read = $this->collectOpenPipes($stdout, $stderr);
+            if ($read === []) {
+                $status = self::DRAIN_EOF;
+            } elseif ($this->selectPipes($read, $remaining)) {
+                $this->accumulateChunks($read, $stdout, $stdoutBuf);
+                $status = self::DRAIN_PROGRESS;
+            }
         }
 
-        $read = $this->collectOpenPipes($stdout, $stderr);
-        if ($read === []) {
-            return self::DRAIN_EOF;
-        }
-
-        if (!$this->selectPipes($read, $remaining)) {
-            return self::DRAIN_TIMEOUT;
-        }
-
-        $this->accumulateChunks($read, $stdout, $stdoutBuf);
-
-        return self::DRAIN_PROGRESS;
+        return $status;
     }
 
     /**
