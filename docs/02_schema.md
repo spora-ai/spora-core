@@ -30,6 +30,7 @@
 | `user_preferences` | `Spora\Models\UserPreference` | Per-user LLM-driver preference (`preferred_llm_config_id` FK). One row per user. |
 | `mail_templates` | `Spora\Models\MailTemplate` | Editable email templates. Rendered with `{{var}}` placeholders. |
 | `memories` | `Spora\Models\Memory` | Per-agent (or global) persistent memory entries. `content` is LONGTEXT. |
+| `media_assets` | `Spora\Models\MediaAsset` | Plugin-archived media (images/audio/video/documents) — UUID PK, nullable FKs to `agents`/`tasks`/`tool_calls`, MIME sniff, dimensions, `storage_mode` ∈ {local, data_url, external}. Idempotent on `(tool_call_id, asset_url)`. See [docs/21_media_archive.md](21_media_archive.md). |
 
 ---
 

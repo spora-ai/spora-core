@@ -110,6 +110,10 @@ Mail transport itself is configured through the `SPORA_MAIL_*` env vars (read by
 | `SPORA_COMPOSER_BINARY` | `composer` | `composer_binary` | Path to the `composer` executable that the install/uninstall commands shell out to. Absolute paths ending in `.phar` are prefixed with `php` automatically. |
 | `SPORA_PLUGIN_CATALOG_ENABLED` | `true` | `plugin_catalog_enabled` | When `false`, the Browse tab in `/apps/plugins` is hidden and `GET /api/v1/plugins/catalog` returns `404`. Already-installed plugins are unaffected — only the discovery surface is gated. |
 | `SPORA_PLUGIN_CATALOG_TTL` | `3600` | `plugin_catalog_ttl` | Cache TTL (seconds) for the on-disk Packagist cache at `storage/.spora_plugin_catalog.json`. Different queries share the file but each gets its own entry keyed by a SHA-256 fingerprint of the query string. |
+| `SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL` | `true` | `media_archive.promote_external` | When `false`, URL inputs to `MediaArchiveService::ingest()` are stored as `storage_mode=external` without fetching the body. |
+| `SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT` | `30` | `media_archive.fetch_timeout_seconds` | Ceiling (seconds) for the HEAD + GET path used by URL ingest. |
+| `SPORA_MEDIA_ARCHIVE_MAX_PROMOTE_BYTES` | `104857600` (100 MiB) | `media_archive.max_promote_bytes` | CDN responses larger than this are recorded as `external` regardless of `promote_external`. |
+| `SPORA_MEDIA_ARCHIVE_FFPROBE_ENABLED` | `false` | `media_archive.ffprobe_enabled` | When `true` (and `ffprobe` is on PATH), audio/video duration is extracted via `ffprobe`. Off by default to avoid the hard dep. |
 
 See [18_plugin_author_guide.md](18_plugin_author_guide.md#2-plugin-catalog) for
 what authors need to ship so their plugin shows up under Browse, and

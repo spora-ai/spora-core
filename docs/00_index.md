@@ -17,6 +17,7 @@
 | [07_plugins.md](07_plugins.md) | Plugin manifest, auto-discovery, bundled deps, recipes, contributing tools/drivers |
 | [18_plugin_author_guide.md](18_plugin_author_guide.md) | End-to-end guide for plugin authors — `plugin.json`, entry-point class, tools/drivers/migrations/recipes, PSR-4 quirk, catalog keywords |
 | [19_media_assets.md](19_media_assets.md) | Embedding images/audio/video in tool results — `AssetStore`, `MediaEmbed`, `StoresBinaryAssets` trait |
+| [21_media_archive.md](21_media_archive.md) | Media Archive — opt-in `MediaArchiveService::ingest()`, retention, `promote_external` toggle |
 
 ## Operations
 

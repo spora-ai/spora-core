@@ -33,6 +33,7 @@ final class PluginsService
     {
         $plugins         = $this->pluginLoader->getPlugins();
         $directories     = $this->pluginLoader->getPluginDirectories();
+        $suggests        = $this->pluginLoader->suggestedPackages();
         $result          = [];
 
         foreach ($plugins as $slug => $plugin) {
@@ -40,6 +41,7 @@ final class PluginsService
                 $slug,
                 $plugin,
                 $directories[$slug] ?? null,
+                $suggests[$slug] ?? [],
             );
         }
 
@@ -49,7 +51,7 @@ final class PluginsService
     /**
      * @return array<string, mixed>
      */
-    private function buildPluginResource(string $slug, PluginInterface $plugin, ?string $directory): array
+    private function buildPluginResource(string $slug, PluginInterface $plugin, ?string $directory, array $suggests): array
     {
         $manifest          = $this->pluginLoader->getPluginManifest($slug) ?? [];
         $toolClasses       = $plugin->tools();
@@ -69,6 +71,7 @@ final class PluginsService
             'bundledDrivers'   => $this->buildDriverList($driverClasses),
             'recipePaths'      => array_values($recipePaths),
             'migrations'       => $this->buildMigrationStatus($slug, $schemaVersion, $migrationsPath),
+            'suggests'         => $suggests,
         ];
     }
 

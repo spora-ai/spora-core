@@ -9,7 +9,6 @@ use Spora\Core\Paths;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
@@ -29,7 +28,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
     name: 'assets:gc',
     description: 'Delete asset files whose embedded day-stamp is older than the configured max age.',
 )]
-final class AssetGcCommand extends Command
+final class AssetGcCommand extends AbstractGcCommand
 {
     public function __construct(
         private readonly Paths $paths,
@@ -37,34 +36,30 @@ final class AssetGcCommand extends Command
         parent::__construct();
     }
 
-    protected function configure(): void
+    protected function maxAgeDefault(): int
     {
-        $this
-            ->addOption(
-                'max-age-days',
-                null,
-                InputOption::VALUE_REQUIRED,
-                'Delete assets whose day-stamp is older than this many days.',
-                '7',
-            )
-            ->addOption(
-                'dry-run',
-                null,
-                InputOption::VALUE_NONE,
-                'Print what would be deleted without actually unlinking files.',
-            );
+        return 7;
+    }
+
+    protected function maxAgeDescription(): string
+    {
+        return 'Delete assets whose day-stamp is older than this many days.';
+    }
+
+    protected function dryRunDescription(): string
+    {
+        return 'Print what would be deleted without actually unlinking files.';
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
 
-        $maxAgeDays = (int) $input->getOption('max-age-days');
-        if ($maxAgeDays < 0) {
-            $io->error('--max-age-days must be >= 0');
+        $parsed = $this->parseGcOptions($io, $input);
+        if ($parsed === null) {
             return Command::FAILURE;
         }
-        $dryRun = (bool) $input->getOption('dry-run');
+        [$maxAgeDays, $dryRun] = $parsed;
 
         $dir = $this->paths->storage('assets');
         if (! is_dir($dir)) {
@@ -105,16 +100,6 @@ final class AssetGcCommand extends Command
             $deleted++;
         }
 
-        $io->success(sprintf(
-            '%s%d deleted, %d kept, %d errors (max-age=%d days, dry-run=%s)',
-            $dryRun ? '[dry-run] ' : '',
-            $deleted,
-            $kept,
-            $errors,
-            $maxAgeDays,
-            $dryRun ? 'yes' : 'no',
-        ));
-
-        return $errors === 0 ? Command::SUCCESS : Command::FAILURE;
+        return $this->emitGcSummary($io, $deleted, $kept, $errors, $maxAgeDays, $dryRun);
     }
 }

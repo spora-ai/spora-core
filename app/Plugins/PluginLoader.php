@@ -193,6 +193,80 @@ final class PluginLoader
     }
 
     /**
+     * Returns each loaded plugin's `composer.json` `suggest` field, keyed
+     * by the plugin's slug. Composer's `suggest` is reused as the
+     * "companion plugins" surface — no new field is invented in
+     * `plugin.json`.
+     *
+     * Result shape: `{ slug => { 'package-name' => 'description', ... } }`.
+     * Plugins without a `composer.json` or without a `suggest` field
+     * contribute nothing — the SPA hides the section for them.
+     *
+     * Cached per load — the `composer.json` is read once when the slug
+     * is first asked for.
+     *
+     * @return array<string, array<string, string>>
+     */
+    public function suggestedPackages(): array
+    {
+        if ($this->pluginManifests === []) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($this->pluginDirs as $slug => $dir) {
+            $suggest = $this->readComposerSuggest($dir);
+            if ($suggest !== []) {
+                $result[$slug] = $suggest;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Reads `composer.json` from the plugin directory and returns its
+     * `suggest` field. Errors (missing file, malformed JSON, non-object
+     * `suggest`) yield an empty array — failures are never surfaced
+     * because the suggestion list is purely informational.
+     *
+     * @return array<string, string>
+     */
+    private function readComposerSuggest(string $pluginDir): array
+    {
+        $path = rtrim($pluginDir, '/') . '/composer.json';
+        $raw = @file_get_contents($path);
+        if (!is_file($path) || $raw === false || $raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+        $suggest = is_array($decoded) ? ($decoded['suggest'] ?? null) : null;
+        if (!is_array($suggest)) {
+            return [];
+        }
+
+        return $this->filterSuggestEntries($suggest);
+    }
+
+    /**
+     * @param array<mixed, mixed> $suggest
+     * @return array<string, string>
+     */
+    private function filterSuggestEntries(array $suggest): array
+    {
+        $clean = [];
+        foreach ($suggest as $package => $description) {
+            if (!is_string($package) || $package === '' || !is_string($description)) {
+                continue;
+            }
+            $clean[$package] = $description;
+        }
+
+        return $clean;
+    }
+
+    /**
      * The raw parsed manifest for a given slug, or null if the slug is not loaded.
      * Useful for surfacing manifest-only metadata (e.g. `description`) that is not
      * part of PluginInterface.
