@@ -353,47 +353,85 @@ final class MetadataExtractor
      */
     private function drainOnce($stdout, $stderr, float $deadline, string &$stdoutBuf): int
     {
-        // Single return at the end; status defaults to timeout and is
-        // narrowed as we confirm EOF, pending reads, or a successful
-        // select pass.
-        $status = self::DRAIN_TIMEOUT;
-
         $remaining = $deadline - microtime(true);
-        if ($remaining > 0) {
-            $read = [];
-            if (!feof($stdout)) {
-                $read[] = $stdout;
-            }
-            if (!feof($stderr)) {
-                $read[] = $stderr;
-            }
-            if ($read === []) {
-                $status = self::DRAIN_EOF;
-            } else {
-                $except = null;
-                $write = null;
-                $ready = @stream_select(
-                    $read,
-                    $write,
-                    $except,
-                    (int) floor($remaining),
-                    (int) (($remaining - floor($remaining)) * 1_000_000),
-                );
-                if ($ready === false || $ready === 0) {
-                    $status = self::DRAIN_TIMEOUT;
-                } else {
-                    foreach ($read as $stream) {
-                        $chunk = stream_get_contents($stream);
-                        if ($stream === $stdout && is_string($chunk)) {
-                            $stdoutBuf .= $chunk;
-                        }
-                    }
-                    $status = self::DRAIN_PROGRESS;
-                }
-            }
+        if ($remaining <= 0) {
+            return self::DRAIN_TIMEOUT;
         }
 
-        return $status;
+        $read = $this->collectOpenPipes($stdout, $stderr);
+        if ($read === []) {
+            return self::DRAIN_EOF;
+        }
+
+        if (!$this->selectPipes($read, $remaining)) {
+            return self::DRAIN_TIMEOUT;
+        }
+
+        $this->accumulateChunks($read, $stdout, $stdoutBuf);
+
+        return self::DRAIN_PROGRESS;
+    }
+
+    /**
+     * Build the list of pipe handles that haven't hit EOF yet, so the
+     * caller only hands live reads to `stream_select()`.
+     *
+     * @param resource $stdout
+     * @param resource $stderr
+     *
+     * @return list<resource>
+     */
+    private function collectOpenPipes($stdout, $stderr): array
+    {
+        $read = [];
+        if (!feof($stdout)) {
+            $read[] = $stdout;
+        }
+        if (!feof($stderr)) {
+            $read[] = $stderr;
+        }
+
+        return $read;
+    }
+
+    /**
+     * Wait up to `$remaining` seconds for any handle in `$read` to
+     * become readable. Returns true if at least one stream is ready,
+     * false on timeout or `stream_select()` failure (both treated as
+     * "no progress" by the caller).
+     *
+     * @param list<resource> $read
+     */
+    private function selectPipes(array &$read, float $remaining): bool
+    {
+        $write = null;
+        $except = null;
+        $ready = @stream_select(
+            $read,
+            $write,
+            $except,
+            (int) floor($remaining),
+            (int) (($remaining - floor($remaining)) * 1_000_000),
+        );
+
+        return $ready !== false && $ready !== 0;
+    }
+
+    /**
+     * Drain the ready pipe handles into `$stdoutBuf`. Stderr is read
+     * and discarded so its buffer doesn't fill and block ffprobe.
+     *
+     * @param list<resource> $read
+     * @param resource       $stdout
+     */
+    private function accumulateChunks(array $read, $stdout, string &$stdoutBuf): void
+    {
+        foreach ($read as $stream) {
+            $chunk = stream_get_contents($stream);
+            if ($stream === $stdout && is_string($chunk)) {
+                $stdoutBuf .= $chunk;
+            }
+        }
     }
 
     /**
