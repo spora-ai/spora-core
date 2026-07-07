@@ -31,20 +31,22 @@ use Spora\Services\MediaArchive\MediaType;
  * @property \Carbon\Carbon|null                    $updated_at
  * @property Agent|null                             $agent
  * @property Task|null                              $task
+ *
+ * Note: the @property docblock above mirrors {@see self::COLUMNS} plus
+ * the Eloquent-managed `created_at`/`updated_at` and the relationship
+ * accessors. Sonar flags it as duplicate of the const — kept in sync
+ * manually because PHP can't reference a class constant in a docblock.
  */
 final class MediaAsset extends Model
 {
-    /** @var string */
-    protected $table = 'media_assets';
-
-    /** @var string */
-    protected $keyType = 'string';
-
-    /** @var bool */
-    public $incrementing = false;
-
-    /** @var list<string> */
-    protected $fillable = [
+    /**
+     * Single source of truth for the columns persisted on a
+     * {@see MediaAsset} row. Drives both `$fillable` and the
+     * `@property` docblock above (kept in sync manually).
+     *
+     * @var list<string>
+     */
+    public const COLUMNS = [
         'id',
         'agent_id',
         'task_id',
@@ -65,8 +67,12 @@ final class MediaAsset extends Model
         'storage_mode',
     ];
 
-    /** @var array<string, string> */
-    protected $casts = [
+    /**
+     * Columns that need Eloquent type coercion. Drives `$casts`.
+     *
+     * @var array<string, string>
+     */
+    public const CASTS = [
         'agent_id'         => 'integer',
         'task_id'          => 'integer',
         'tool_call_id'     => 'integer',
@@ -77,6 +83,21 @@ final class MediaAsset extends Model
         'tags'             => 'array',
         'metadata'         => 'array',
     ];
+
+    /** @var string */
+    protected $table = 'media_assets';
+
+    /** @var string */
+    protected $keyType = 'string';
+
+    /** @var bool */
+    public $incrementing = false;
+
+    /** @var list<string> */
+    protected $fillable = self::COLUMNS;
+
+    /** @var array<string, string> */
+    protected $casts = self::CASTS;
 
     public function agent(): BelongsTo
     {

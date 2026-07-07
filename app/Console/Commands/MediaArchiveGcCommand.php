@@ -10,7 +10,6 @@ use Spora\Services\MediaArchive\MediaArchiveService;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Throwable;
@@ -30,7 +29,7 @@ use Throwable;
     name: 'media:gc',
     description: 'Delete media_assets rows whose on-disk file is missing.',
 )]
-final class MediaArchiveGcCommand extends Command
+final class MediaArchiveGcCommand extends AbstractGcCommand
 {
     public function __construct(
         private readonly MediaArchiveService $service,
@@ -39,37 +38,32 @@ final class MediaArchiveGcCommand extends Command
         parent::__construct();
     }
 
-    protected function configure(): void
+    protected function maxAgeDefault(): int
     {
-        $this
-            ->addOption(
-                'max-age-days',
-                null,
-                InputOption::VALUE_REQUIRED,
-                'Only consider rows older than this many days (0 = all).',
-                '30',
-            )
-            ->addOption(
-                'dry-run',
-                null,
-                InputOption::VALUE_NONE,
-                'Print what would be deleted without actually deleting rows.',
-            );
+        return 30;
+    }
+
+    protected function maxAgeDescription(): string
+    {
+        return 'Only consider rows older than this many days (0 = all).';
+    }
+
+    protected function dryRunDescription(): string
+    {
+        return 'Print what would be deleted without actually deleting rows.';
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
 
-        $maxAgeDays = (int) $input->getOption('max-age-days');
-        if ($maxAgeDays < 0) {
-            $io->error('--max-age-days must be >= 0');
+        $parsed = $this->parseGcOptions($io, $input);
+        if ($parsed === null) {
             return Command::FAILURE;
         }
-        $dryRun = (bool) $input->getOption('dry-run');
+        [$maxAgeDays, $dryRun] = $parsed;
 
         $assetsDir = $this->paths->storage('assets');
-
         $cutoff = \Illuminate\Support\Carbon::now()->subDays($maxAgeDays);
 
         $query = MediaAsset::query()
@@ -101,17 +95,7 @@ final class MediaArchiveGcCommand extends Command
             }
         }
 
-        $io->success(sprintf(
-            '%s%d deleted, %d kept, %d errors (max-age=%d days, dry-run=%s)',
-            $dryRun ? '[dry-run] ' : '',
-            $deleted,
-            $kept,
-            $errors,
-            $maxAgeDays,
-            $dryRun ? 'yes' : 'no',
-        ));
-
-        return $errors === 0 ? Command::SUCCESS : Command::FAILURE;
+        return $this->emitGcSummary($io, $deleted, $kept, $errors, $maxAgeDays, $dryRun);
     }
 
     /**
