@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Feature\MediaArchive;
 
 use FilesystemIterator;
-use Psr\Log\NullLogger;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use Spora\Core\Paths;
@@ -18,12 +17,7 @@ use Spora\Security\CsrfTokenService;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\LocalAssetStore;
-use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaIngestRequest;
-use Spora\Services\MediaArchive\MetadataExtractor;
-use Spora\Services\MediaArchive\MimeSniffer;
-use Spora\Services\MediaArchive\RemoteMediaFetcher;
-use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -42,23 +36,11 @@ function mediaArchiveApiSetup(): array
 
     $paths     = new Paths(BASE_PATH);
     $security  = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $sniffer   = new MimeSniffer();
     $dataUrl   = new DataUrlAssetStore(50 * 1024 * 1024);
     $local     = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
     $assetStore = new AutoAssetStore($dataUrl, $local, 1_048_576);
-    $metadata  = new MetadataExtractor(new NullLogger(), false);
-    $logger    = new NullLogger();
-    $fetcher   = new RemoteMediaFetcher(new MockHttpClient([]), $logger, 30, 100 * 1024 * 1024);
 
-    $service = new MediaArchiveService(
-        $assetStore,
-        $fetcher,
-        $sniffer,
-        $metadata,
-        $logger,
-        true,
-        100 * 1024 * 1024,
-    );
+    $service = \Tests\Support\MediaArchiveTestSupport::buildService($assetStore);
 
     $controller = new MediaArchiveController($service);
 

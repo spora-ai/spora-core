@@ -87,6 +87,7 @@ use Spora\Services\LocalAssetStore;
 use Spora\Services\MailTemplateService;
 use Spora\Services\MailTemplateServiceInterface;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
@@ -447,16 +448,23 @@ final class ContainerDefinitions
                 );
             },
 
-            MediaArchiveService::class => static function (ContainerInterface $c): MediaArchiveService {
+            MediaArchiveUrlResolver::class => static function (ContainerInterface $c): MediaArchiveUrlResolver {
                 $cfg = $c->get('config')['media_archive'] ?? [];
-                return new MediaArchiveService(
-                    $c->get(AssetStore::class),
+                return new MediaArchiveUrlResolver(
                     $c->get(RemoteMediaFetcher::class),
                     $c->get(MimeSniffer::class),
-                    $c->get(MetadataExtractor::class),
                     $c->get(LoggerInterface::class),
                     (bool) ($cfg['promote_external'] ?? true),
                     (int) ($cfg['max_promote_bytes'] ?? (100 * 1024 * 1024)),
+                );
+            },
+
+            MediaArchiveService::class => static function (ContainerInterface $c): MediaArchiveService {
+                return new MediaArchiveService(
+                    $c->get(AssetStore::class),
+                    $c->get(MediaArchiveUrlResolver::class),
+                    $c->get(MimeSniffer::class),
+                    $c->get(MetadataExtractor::class),
                 );
             },
 

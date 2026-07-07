@@ -31,6 +31,15 @@ use Throwable;
  */
 final class MetadataExtractor
 {
+    /** Return code from {@see drainOnce()} — both pipes hit EOF. */
+    private const DRAIN_EOF = 1;
+
+    /** Return code from {@see drainOnce()} — deadline reached or stream_select timed out. */
+    private const DRAIN_TIMEOUT = 2;
+
+    /** Return code from {@see drainOnce()} — partial read; loop again. */
+    private const DRAIN_PROGRESS = 3;
+
     /**
      * Hard ceiling on how long we wait for ffprobe's stdout/stderr to
      * drain. Anything longer usually means the input is corrupt or ffprobe
@@ -309,60 +318,78 @@ final class MetadataExtractor
         stream_set_blocking($stderr, false);
 
         $stdoutBuf = '';
+        $terminated = self::DRAIN_PROGRESS;
         try {
-            while (true) {
-                $remaining = $deadline - microtime(true);
-                if ($remaining <= 0) {
-                    proc_terminate($handle['proc']);
-                    $this->logger->warning('MetadataExtractor: ffprobe exceeded timeout; terminating', [
-                        'timeout_seconds' => self::FFPROBE_TIMEOUT_SECONDS,
-                    ]);
-                    return null;
-                }
-
-                $read = [];
-                if (!feof($stdout)) {
-                    $read[] = $stdout;
-                }
-                if (!feof($stderr)) {
-                    $read[] = $stderr;
-                }
-                if ($read === []) {
-                    break;
-                }
-
-                $except = null;
-                $write = null;
-                $ready = @stream_select($read, $write, $except, (int) floor($remaining), (int) (($remaining - floor($remaining)) * 1_000_000));
-                if ($ready === false || $ready === 0) {
-                    // 0 = timeout, false = select error — treat both as
-                    // "we ran out of time" and let the caller see null.
-                    proc_terminate($handle['proc']);
-                    $this->logger->warning('MetadataExtractor: ffprobe read timed out; terminating', [
-                        'timeout_seconds' => self::FFPROBE_TIMEOUT_SECONDS,
-                    ]);
-                    return null;
-                }
-
-                foreach ($read as $stream) {
-                    $chunk = stream_get_contents($stream);
-                    if ($stream === $stdout && is_string($chunk)) {
-                        $stdoutBuf .= $chunk;
-                    }
-                    // stderr is drained into the void — discarding keeps
-                    // the pipe buffer from filling and blocking ffprobe.
-                }
+            while ($terminated === self::DRAIN_PROGRESS) {
+                $terminated = $this->drainOnce($stdout, $stderr, $deadline, $stdoutBuf);
             }
         } finally {
-            if (is_resource($stdout)) {
-                fclose($stdout);
-            }
-            if (is_resource($stderr)) {
-                fclose($stderr);
-            }
+            fclose($stdout);
+            fclose($stderr);
+        }
+
+        if ($terminated !== self::DRAIN_EOF) {
+            proc_terminate($handle['proc']);
+            $this->logger->warning('MetadataExtractor: ffprobe exceeded timeout; terminating', [
+                'timeout_seconds' => self::FFPROBE_TIMEOUT_SECONDS,
+            ]);
+            return null;
         }
 
         return $stdoutBuf;
+    }
+
+    /**
+     * One pass of the ffprobe drain loop. Returns {@see self::DRAIN_EOF}
+     * when both pipes have hit EOF, {@see self::DRAIN_TIMEOUT} when the
+     * deadline was reached or `stream_select()` reported a timeout, and
+     * {@see self::DRAIN_PROGRESS} otherwise (caller should loop again).
+     *
+     * Stdout chunks are appended to `$stdoutBuf`; stderr is drained and
+     * discarded so its pipe buffer doesn't fill and block ffprobe.
+     *
+     * @param resource $stdout
+     * @param resource $stderr
+     */
+    private function drainOnce($stdout, $stderr, float $deadline, string &$stdoutBuf): int
+    {
+        $remaining = $deadline - microtime(true);
+        if ($remaining <= 0) {
+            return self::DRAIN_TIMEOUT;
+        }
+
+        $read = [];
+        if (!feof($stdout)) {
+            $read[] = $stdout;
+        }
+        if (!feof($stderr)) {
+            $read[] = $stderr;
+        }
+        if ($read === []) {
+            return self::DRAIN_EOF;
+        }
+
+        $except = null;
+        $write = null;
+        $ready = @stream_select(
+            $read,
+            $write,
+            $except,
+            (int) floor($remaining),
+            (int) (($remaining - floor($remaining)) * 1_000_000),
+        );
+        if ($ready === false || $ready === 0) {
+            return self::DRAIN_TIMEOUT;
+        }
+
+        foreach ($read as $stream) {
+            $chunk = stream_get_contents($stream);
+            if ($stream === $stdout && is_string($chunk)) {
+                $stdoutBuf .= $chunk;
+            }
+        }
+
+        return self::DRAIN_PROGRESS;
     }
 
     /**

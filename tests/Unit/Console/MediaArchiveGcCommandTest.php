@@ -6,7 +6,6 @@ namespace Tests\Unit\Console;
 
 use Closure;
 use FilesystemIterator;
-use Psr\Log\NullLogger;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RuntimeException;
@@ -17,14 +16,10 @@ use Spora\Models\MediaAsset;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\LocalAssetStore;
-use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaIngestRequest;
-use Spora\Services\MediaArchive\MetadataExtractor;
-use Spora\Services\MediaArchive\MimeSniffer;
-use Spora\Services\MediaArchive\RemoteMediaFetcher;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
-use Symfony\Component\HttpClient\MockHttpClient;
+use Tests\Support\MediaArchiveTestSupport;
 
 /**
  * End-to-end coverage for `media:gc`. Boots the same in-memory service
@@ -61,23 +56,11 @@ function makeGcCommandTester(): array
 
     $paths      = new Paths(BASE_PATH);
     $security   = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $sniffer    = new MimeSniffer();
     $dataUrl    = new DataUrlAssetStore(50 * 1024 * 1024);
     $local      = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
     $assetStore = new AutoAssetStore($dataUrl, $local, 1_048_576);
-    $metadata   = new MetadataExtractor(new NullLogger(), false);
-    $logger     = new NullLogger();
-    $fetcher    = new RemoteMediaFetcher(new MockHttpClient([]), $logger, 30, 100 * 1024 * 1024);
 
-    $service = new MediaArchiveService(
-        $assetStore,
-        $fetcher,
-        $sniffer,
-        $metadata,
-        $logger,
-        true,
-        100 * 1024 * 1024,
-    );
+    $service = MediaArchiveTestSupport::buildService($assetStore);
 
     $command = new MediaArchiveGcCommand($service, $paths);
     $command->setName('media:gc');
@@ -168,13 +151,7 @@ it('deletes a row whose on-disk asset is missing', function (): void {
             $security   = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
             $dataUrl    = new DataUrlAssetStore(50 * 1024 * 1024);
             $local      = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
-            return new MediaArchiveService(
-                new AutoAssetStore($dataUrl, $local, 1_048_576),
-                new RemoteMediaFetcher(new MockHttpClient([]), new NullLogger(), 30, 100 * 1024 * 1024),
-                new MimeSniffer(),
-                new MetadataExtractor(new NullLogger(), false),
-                new NullLogger(),
-            );
+            return MediaArchiveTestSupport::buildService(new AutoAssetStore($dataUrl, $local, 1_048_576));
         })();
         $asset = $service->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
         // Force local mode + a /api/v1/assets/... URL whose file does not exist.
@@ -201,13 +178,7 @@ it('dry-run reports would-delete without removing the row', function (): void {
             $security   = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
             $dataUrl    = new DataUrlAssetStore(50 * 1024 * 1024);
             $local      = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
-            return new MediaArchiveService(
-                new AutoAssetStore($dataUrl, $local, 1_048_576),
-                new RemoteMediaFetcher(new MockHttpClient([]), new NullLogger(), 30, 100 * 1024 * 1024),
-                new MimeSniffer(),
-                new MetadataExtractor(new NullLogger(), false),
-                new NullLogger(),
-            );
+            return MediaArchiveTestSupport::buildService(new AutoAssetStore($dataUrl, $local, 1_048_576));
         })();
         $bytes = base64_decode(MEDIA_GC_PNG, strict: true);
         $asset = $service->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
@@ -231,24 +202,17 @@ it('skips rows with a non-local storage_mode (external rows are never GC\'d)', f
     [$tester, $restore] = makeGcCommandTester();
     try {
         $service = (function () {
-            return new MediaArchiveService(
-                new AutoAssetStore(
-                    new DataUrlAssetStore(50 * 1024 * 1024),
-                    new LocalAssetStore(
-                        new Paths(BASE_PATH),
-                        new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
-                        50 * 1024 * 1024,
-                    ),
-                    1_048_576,
+            $assetStore = new AutoAssetStore(
+                new DataUrlAssetStore(50 * 1024 * 1024),
+                new LocalAssetStore(
+                    new Paths(BASE_PATH),
+                    new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+                    50 * 1024 * 1024,
                 ),
-                new RemoteMediaFetcher(new MockHttpClient([]), new NullLogger(), 30, 100 * 1024 * 1024),
-                new MimeSniffer(),
-                new MetadataExtractor(new NullLogger(), false),
-                new NullLogger(),
-                false, // promoteExternal = false → external row
+                1_048_576,
             );
+            return MediaArchiveTestSupport::buildService($assetStore, promoteExternal: false);
         })();
-        $bytes = base64_decode(MEDIA_GC_PNG, strict: true);
         $service->ingest(new MediaIngestRequest(url: 'https://cdn.example/external.png'));
 
         $tester->execute(['--max-age-days' => '0']);
@@ -270,13 +234,7 @@ it('honours --max-age-days and skips rows younger than the cutoff', function ():
             $security   = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
             $dataUrl    = new DataUrlAssetStore(50 * 1024 * 1024);
             $local      = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
-            return new MediaArchiveService(
-                new AutoAssetStore($dataUrl, $local, 1_048_576),
-                new RemoteMediaFetcher(new MockHttpClient([]), new NullLogger(), 30, 100 * 1024 * 1024),
-                new MimeSniffer(),
-                new MetadataExtractor(new NullLogger(), false),
-                new NullLogger(),
-            );
+            return MediaArchiveTestSupport::buildService(new AutoAssetStore($dataUrl, $local, 1_048_576));
         })();
         $bytes = base64_decode(MEDIA_GC_PNG, strict: true);
         $asset = $service->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));

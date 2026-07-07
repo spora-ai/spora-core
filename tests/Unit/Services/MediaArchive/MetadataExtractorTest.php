@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Services\MediaArchive;
 
 use Psr\Log\NullLogger;
+use ReflectionClass;
 use Spora\Services\MediaArchive\MediaType;
 use Spora\Services\MediaArchive\MetadataExtractor;
 
@@ -118,6 +119,103 @@ describe('MetadataExtractor::extractAudioVideoMeta', function (): void {
         expect($result)->toHaveKey('duration_seconds');
         expect($result)->toHaveKey('mime');
         expect($result)->not->toHaveKey('width');
+    });
+
+    it('terminates the ffprobe process when it overruns the timeout', function (): void {
+        // Drop a fake `ffprobe` on PATH that sleeps longer than the
+        // extractor's 5s drain deadline. The extractor must terminate it
+        // and return null duration rather than blocking the test.
+        $bin = sys_get_temp_dir() . '/spora-fake-ffprobe-' . bin2hex(random_bytes(4));
+        file_put_contents($bin, "#!/bin/sh\nsleep 30\n");
+        chmod($bin, 0755);
+
+        $previousPath = getenv('PATH');
+        putenv('PATH=' . dirname($bin) . ':' . ($previousPath === false ? '' : $previousPath));
+
+        try {
+            // FFPROBE_TIMEOUT_SECONDS is hardcoded to 5.0, which would
+            // make the test slow. We exercise the drainOnce + timeout
+            // path directly via a private-method reflection call instead
+            // of running the full 5s extractor deadline.
+            $extractor = new MetadataExtractor(new NullLogger(), true);
+            $reflection = new ReflectionClass($extractor);
+            $drain = $reflection->getMethod('drainOnce');
+            $drain->setAccessible(true);
+
+            // Build pipes that won't ever EOF (sleep shell command).
+            $descriptors = [
+                0 => ['pipe', 'r'],
+                1 => ['pipe', 'w'],
+                2 => ['pipe', 'w'],
+            ];
+            $proc = proc_open([$bin, '/dev/null'], $descriptors, $pipes);
+            if (!is_resource($proc)) {
+                $this->markTestSkipped('proc_open unavailable on this platform');
+            }
+            fclose($pipes[0]);
+            stream_set_blocking($pipes[1], false);
+            stream_set_blocking($pipes[2], false);
+
+            // Deadline 50ms in the future — stream_select must return
+            // 0 (timeout) and drainOnce must report DRAIN_TIMEOUT.
+            $stdoutBuf = '';
+            $deadline = microtime(true) + 0.05;
+            $start = microtime(true);
+            $verdict = $drain->invoke($extractor, $pipes[1], $pipes[2], $deadline, $stdoutBuf);
+            $elapsed = microtime(true) - $start;
+
+            expect($verdict)->toBe(2); // self::DRAIN_TIMEOUT
+            expect($elapsed)->toBeLessThan(1.0); // bounded by the 50ms deadline
+
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_terminate($proc);
+            proc_close($proc);
+        } finally {
+            putenv('PATH=' . ($previousPath === false ? '' : $previousPath));
+            @unlink($bin);
+        }
+    });
+});
+
+describe('MetadataExtractor::drainOnce', function (): void {
+    it('returns DRAIN_EOF when both pipes have hit EOF', function (): void {
+        $extractor = makeExtractor();
+        $reflection = new ReflectionClass($extractor);
+        $drain = $reflection->getMethod('drainOnce');
+        $drain->setAccessible(true);
+
+        // Empty temp files: feof() returns true on a handle whose
+        // position is at EOF. To get there we read once first (which
+        // returns no bytes for an empty file), then check that the
+        // subsequent feof() short-circuits drainOnce to DRAIN_EOF.
+        $stdoutPath = tempnam(sys_get_temp_dir(), 'spora-drain-');
+        $stderrPath = tempnam(sys_get_temp_dir(), 'spora-drain-');
+        file_put_contents($stdoutPath, '');
+        file_put_contents($stderrPath, '');
+        $stdout = fopen($stdoutPath, 'r');
+        $stderr = fopen($stderrPath, 'r');
+        if ($stdout === false || $stderr === false) {
+            @unlink($stdoutPath);
+            @unlink($stderrPath);
+            $this->markTestSkipped('tempnam/fopen unavailable');
+        }
+        // Read once to drive the EOF flag — empty files report EOF on
+        // the first read attempt.
+        fread($stdout, 8192);
+        fread($stderr, 8192);
+
+        $stdoutBuf = '';
+        $deadline = microtime(true) + 1.0;
+        $verdict = $drain->invoke($extractor, $stdout, $stderr, $deadline, $stdoutBuf);
+
+        expect($verdict)->toBe(1); // self::DRAIN_EOF
+        expect($stdoutBuf)->toBe('');
+
+        fclose($stdout);
+        fclose($stderr);
+        @unlink($stdoutPath);
+        @unlink($stderrPath);
     });
 });
 

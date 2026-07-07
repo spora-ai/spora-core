@@ -23,6 +23,7 @@ use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\MediaArchiveException;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MediaType;
 use Spora\Services\MediaArchive\MetadataExtractor;
@@ -92,14 +93,19 @@ function makeMediaArchiveService(array $overrides = []): array
         100 * 1024 * 1024,
     );
 
-    $service = new MediaArchiveService(
-        $ctx['assetStore'],
+    $resolver = new MediaArchiveUrlResolver(
         $fetcher,
         $ctx['sniffer'],
-        $ctx['metadata'],
         $ctx['logger'],
         (bool) ($overrides['promoteExternal'] ?? true),
         (int) ($overrides['maxPromoteBytes'] ?? 100 * 1024 * 1024),
+    );
+
+    $service = new MediaArchiveService(
+        $ctx['assetStore'],
+        $resolver,
+        $ctx['sniffer'],
+        $ctx['metadata'],
     );
 
     return [
@@ -655,14 +661,18 @@ describe('MediaArchiveService::ingest local-mode failure surfaces MediaArchiveEx
 
         $ctx = makeMediaArchiveService();
         try {
-            $service = new MediaArchiveService(
-                $rejectingStore,
+            // Swap in a rejecting AssetStore — the service must surface
+            // the AssetTooLargeException as MediaArchiveException.
+            $resolver = new MediaArchiveUrlResolver(
                 $ctx['fetcher'],
                 $ctx['sniffer'],
-                $ctx['metadata'],
                 $ctx['logger'],
-                true,
-                100 * 1024 * 1024,
+            );
+            $service = new MediaArchiveService(
+                $rejectingStore,
+                $resolver,
+                $ctx['sniffer'],
+                $ctx['metadata'],
             );
             $png = base64_decode(
                 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',

@@ -7,13 +7,36 @@ namespace Tests\Unit\Plugins;
 use InvalidArgumentException;
 use LogicException;
 use Mockery;
+use Spora\Core\Paths;
+use Spora\Core\SecurityManager;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Concerns\StoresBinaryAssets;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
 use Spora\Services\AssetTooLargeException;
+use Spora\Services\AutoAssetStore;
+use Spora\Services\DataUrlAssetStore;
+use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaType;
+use Tests\Support\MediaArchiveTestSupport;
+
+/**
+ * Build a MediaArchiveService backed by the standard in-memory AutoAssetStore.
+ * Repeated across multiple tests in this file — kept inline rather than as a
+ * Pest dataset because each test wants its own instance (different agent IDs,
+ * ingested rows, etc.).
+ */
+function makeTraitArchiveService(): MediaArchiveService
+{
+    $paths     = new Paths(BASE_PATH);
+    $security  = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $dataUrl   = new DataUrlAssetStore(50 * 1024 * 1024);
+    $local     = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
+    $assetStore = new AutoAssetStore($dataUrl, $local, 1_048_576);
+
+    return MediaArchiveTestSupport::buildService($assetStore);
+}
 
 /**
  * Concrete host for the trait so we can exercise its protected methods
@@ -149,64 +172,15 @@ test('mediaArchive() throws if not injected', function (): void {
 test('mediaArchive() returns the injected service', function (): void {
     // MediaArchiveService is `final`, so Mockery can't subclass it. Use a
     // real service built with stubbed dependencies instead.
-    $paths    = new \Spora\Core\Paths(BASE_PATH);
-    $security = new \Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $archive  = new MediaArchiveService(
-        new \Spora\Services\AutoAssetStore(
-            new \Spora\Services\DataUrlAssetStore(50 * 1024 * 1024),
-            new \Spora\Services\LocalAssetStore($paths, $security, 50 * 1024 * 1024),
-            1_048_576,
-        ),
-        new \Spora\Services\MediaArchive\RemoteMediaFetcher(
-            new \Symfony\Component\HttpClient\MockHttpClient([]),
-            new \Psr\Log\NullLogger(),
-            30,
-            100 * 1024 * 1024,
-        ),
-        new \Spora\Services\MediaArchive\MimeSniffer(),
-        new \Spora\Services\MediaArchive\MetadataExtractor(new \Psr\Log\NullLogger(), false),
-        new \Psr\Log\NullLogger(),
-    );
+    $archive = makeTraitArchiveService();
     $host = new StoresBinaryAssetsTraitHost(null, $archive);
 
     expect($host->callMediaArchive())->toBe($archive);
 });
 
 test('setMediaArchive() can be re-invoked to swap the archive service', function (): void {
-    $paths    = new \Spora\Core\Paths(BASE_PATH);
-    $security = new \Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $a = new MediaArchiveService(
-        new \Spora\Services\AutoAssetStore(
-            new \Spora\Services\DataUrlAssetStore(50 * 1024 * 1024),
-            new \Spora\Services\LocalAssetStore($paths, $security, 50 * 1024 * 1024),
-            1_048_576,
-        ),
-        new \Spora\Services\MediaArchive\RemoteMediaFetcher(
-            new \Symfony\Component\HttpClient\MockHttpClient([]),
-            new \Psr\Log\NullLogger(),
-            30,
-            100 * 1024 * 1024,
-        ),
-        new \Spora\Services\MediaArchive\MimeSniffer(),
-        new \Spora\Services\MediaArchive\MetadataExtractor(new \Psr\Log\NullLogger(), false),
-        new \Psr\Log\NullLogger(),
-    );
-    $b = new MediaArchiveService(
-        new \Spora\Services\AutoAssetStore(
-            new \Spora\Services\DataUrlAssetStore(50 * 1024 * 1024),
-            new \Spora\Services\LocalAssetStore($paths, $security, 50 * 1024 * 1024),
-            1_048_576,
-        ),
-        new \Spora\Services\MediaArchive\RemoteMediaFetcher(
-            new \Symfony\Component\HttpClient\MockHttpClient([]),
-            new \Psr\Log\NullLogger(),
-            30,
-            100 * 1024 * 1024,
-        ),
-        new \Spora\Services\MediaArchive\MimeSniffer(),
-        new \Spora\Services\MediaArchive\MetadataExtractor(new \Psr\Log\NullLogger(), false),
-        new \Psr\Log\NullLogger(),
-    );
+    $a = makeTraitArchiveService();
+    $b = makeTraitArchiveService();
 
     $host = new StoresBinaryAssetsTraitHost(null, $a);
     expect($host->callMediaArchive())->toBe($a);
@@ -216,24 +190,7 @@ test('setMediaArchive() can be re-invoked to swap the archive service', function
 });
 
 test('archiveMedia() builds a MediaIngestRequest and delegates to the archive service', function (): void {
-    $paths    = new \Spora\Core\Paths(BASE_PATH);
-    $security = new \Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $service  = new MediaArchiveService(
-        new \Spora\Services\AutoAssetStore(
-            new \Spora\Services\DataUrlAssetStore(50 * 1024 * 1024),
-            new \Spora\Services\LocalAssetStore($paths, $security, 50 * 1024 * 1024),
-            1_048_576,
-        ),
-        new \Spora\Services\MediaArchive\RemoteMediaFetcher(
-            new \Symfony\Component\HttpClient\MockHttpClient([]),
-            new \Psr\Log\NullLogger(),
-            30,
-            100 * 1024 * 1024,
-        ),
-        new \Spora\Services\MediaArchive\MimeSniffer(),
-        new \Spora\Services\MediaArchive\MetadataExtractor(new \Psr\Log\NullLogger(), false),
-        new \Psr\Log\NullLogger(),
-    );
+    $service = makeTraitArchiveService();
 
     $host = new StoresBinaryAssetsTraitHost(null, $service);
     // No agent_id (FK to agents table) — pass everything else.
@@ -257,24 +214,7 @@ test('archiveMedia() builds a MediaIngestRequest and delegates to the archive se
 });
 
 test('archiveMedia() defaults the optional context fields to null when omitted', function (): void {
-    $paths    = new \Spora\Core\Paths(BASE_PATH);
-    $security = new \Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $service  = new MediaArchiveService(
-        new \Spora\Services\AutoAssetStore(
-            new \Spora\Services\DataUrlAssetStore(50 * 1024 * 1024),
-            new \Spora\Services\LocalAssetStore($paths, $security, 50 * 1024 * 1024),
-            1_048_576,
-        ),
-        new \Spora\Services\MediaArchive\RemoteMediaFetcher(
-            new \Symfony\Component\HttpClient\MockHttpClient([]),
-            new \Psr\Log\NullLogger(),
-            30,
-            100 * 1024 * 1024,
-        ),
-        new \Spora\Services\MediaArchive\MimeSniffer(),
-        new \Spora\Services\MediaArchive\MetadataExtractor(new \Psr\Log\NullLogger(), false),
-        new \Psr\Log\NullLogger(),
-    );
+    $service = makeTraitArchiveService();
 
     $host = new StoresBinaryAssetsTraitHost(null, $service);
     $asset = $host->callArchiveMedia('XX', 'image/png', null, MediaType::Image);
@@ -294,24 +234,7 @@ test('archiveMedia() defaults the optional context fields to null when omitted',
 });
 
 test('archiveMedia() coerces non-array tags/metadata context keys to null', function (): void {
-    $paths    = new \Spora\Core\Paths(BASE_PATH);
-    $security = new \Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $service  = new MediaArchiveService(
-        new \Spora\Services\AutoAssetStore(
-            new \Spora\Services\DataUrlAssetStore(50 * 1024 * 1024),
-            new \Spora\Services\LocalAssetStore($paths, $security, 50 * 1024 * 1024),
-            1_048_576,
-        ),
-        new \Spora\Services\MediaArchive\RemoteMediaFetcher(
-            new \Symfony\Component\HttpClient\MockHttpClient([]),
-            new \Psr\Log\NullLogger(),
-            30,
-            100 * 1024 * 1024,
-        ),
-        new \Spora\Services\MediaArchive\MimeSniffer(),
-        new \Spora\Services\MediaArchive\MetadataExtractor(new \Psr\Log\NullLogger(), false),
-        new \Psr\Log\NullLogger(),
-    );
+    $service = makeTraitArchiveService();
 
     $host = new StoresBinaryAssetsTraitHost(null, $service);
     // Non-array tags/metadata context keys should be coerced to null —

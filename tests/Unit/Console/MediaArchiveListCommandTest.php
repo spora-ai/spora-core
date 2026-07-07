@@ -6,7 +6,6 @@ namespace Tests\Unit\Console;
 
 use Closure;
 use FilesystemIterator;
-use Psr\Log\NullLogger;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use Spora\Console\Commands\MediaArchiveListCommand;
@@ -17,12 +16,9 @@ use Spora\Services\DataUrlAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaIngestRequest;
-use Spora\Services\MediaArchive\MetadataExtractor;
-use Spora\Services\MediaArchive\MimeSniffer;
-use Spora\Services\MediaArchive\RemoteMediaFetcher;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
-use Symfony\Component\HttpClient\MockHttpClient;
+use Tests\Support\MediaArchiveTestSupport;
 
 /**
  * Coverage for the `media:list` CLI command. Boots an in-memory service
@@ -61,23 +57,11 @@ function makeListCommandService(string $tmp): MediaArchiveService
 {
     $paths     = new Paths(BASE_PATH);
     $security  = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $sniffer   = new MimeSniffer();
     $dataUrl   = new DataUrlAssetStore(50 * 1024 * 1024);
     $local     = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
     $assetStore = new AutoAssetStore($dataUrl, $local, 1_048_576);
-    $metadata  = new MetadataExtractor(new NullLogger(), false);
-    $logger    = new NullLogger();
-    $fetcher   = new RemoteMediaFetcher(new MockHttpClient([]), $logger, 30, 100 * 1024 * 1024);
 
-    return new MediaArchiveService(
-        $assetStore,
-        $fetcher,
-        $sniffer,
-        $metadata,
-        $logger,
-        true,
-        100 * 1024 * 1024,
-    );
+    return MediaArchiveTestSupport::buildService($assetStore);
 }
 
 /**

@@ -9,7 +9,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use InvalidArgumentException;
-use Psr\Log\LoggerInterface;
 use Spora\Models\MediaAsset;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
@@ -47,17 +46,18 @@ use Spora\Services\AssetTooLargeException;
  *    ingest later if needed.
  *  - {@see AssetStore} refusal after a local-mode decision →
  *    {@see MediaArchiveException} (fatal — see class doc for rationale).
+ *
+ * The URL branch (steps 1-2 and the external-row MIME sniff) lives in
+ * {@see MediaArchiveUrlResolver} so this orchestrator stays under the
+ * 20-method Sonar threshold.
  */
 final class MediaArchiveService
 {
     public function __construct(
         private readonly AssetStore $assetStore,
-        private readonly RemoteMediaFetcher $fetcher,
+        private readonly MediaArchiveUrlResolver $urlResolver,
         private readonly MimeSniffer $sniffer,
         private readonly MetadataExtractor $metadata,
-        private readonly LoggerInterface $logger,
-        private readonly bool $promoteExternal = true,
-        private readonly int $maxPromoteBytes = 100 * 1024 * 1024,
     ) {}
 
     /**
@@ -68,9 +68,11 @@ final class MediaArchiveService
      */
     public function ingest(MediaIngestRequest $request): MediaAsset
     {
-        $existing = $this->findExisting($request);
-        if ($existing !== null) {
-            return $existing;
+        if ($request->toolCallId !== null && $request->url !== null) {
+            $existing = $this->findExisting($request->toolCallId, $request->url);
+            if ($existing !== null) {
+                return $existing;
+            }
         }
 
         return $this->ingestFresh($request);
@@ -143,38 +145,53 @@ final class MediaArchiveService
     }
 
     /**
-     * Idempotency: short-circuit when a row for this tool call + URL
-     * already exists. `asset_url` is what becomes the canonical URL on
-     * the row — for the URL branch it's the source URL until promotion,
-     * then the local /api/v1/assets/... URL after.
-     */
-    private function findExisting(MediaIngestRequest $request): ?MediaAsset
-    {
-        if ($request->url === null || $request->toolCallId === null) {
-            return null;
-        }
-
-        return MediaAsset::query()
-            ->where('tool_call_id', $request->toolCallId)
-            ->where('asset_url', $request->url)
-            ->first();
-    }
-
-    /**
-     * Body of {@see ingest()} for the non-idempotent case. The URL
-     * branch delegates to {@see resolveBytesAndSourceUrl()} to decide
-     * between local promotion and external fallback; the rest of the
-     * pipeline is shared across input forms.
+     * Body of {@see ingest()} for the non-idempotent case. Dispatches to
+     * the inline decoder or the URL resolver depending on which input
+     * form was supplied, then delegates to {@see ingestFromBytes()} for
+     * the shared bytes-to-row pipeline.
      */
     private function ingestFresh(MediaIngestRequest $request): MediaAsset
     {
-        [$bytes, $effectiveUrl] = $this->resolveBytesAndSourceUrl($request);
-
-        if ($bytes === null) {
-            // URL branch with external storage — no body to analyse.
-            return $this->persistExternal($request, $effectiveUrl);
+        $inline = $this->decodeInline($request);
+        if ($inline !== null) {
+            return $this->ingestFromBytes($request, $inline, null);
         }
 
+        $url = $request->url;
+        assert($url !== null);
+
+        [$bytes, $effectiveUrl] = $this->urlResolver->resolve($url);
+        if ($bytes === null) {
+            // URL branch with external storage — no body to analyse.
+            $sniffed = $this->urlResolver->sniffForExternal($request, $effectiveUrl);
+            $mediaType = $request->mediaType ?? MediaType::fromMime($sniffed);
+
+            return $this->persist(
+                $request,
+                new PersistedAssetFields(
+                    assetUrl: $effectiveUrl,
+                    sourceUrl: $url,
+                    storageMode: 'external',
+                    sniffedMime: $sniffed,
+                    mediaType: $mediaType,
+                    byteSize: $request->byteSize,
+                    width: $request->width,
+                    height: $request->height,
+                    durationSeconds: $request->durationSeconds,
+                ),
+            );
+        }
+
+        return $this->ingestFromBytes($request, $bytes, $url);
+    }
+
+    /**
+     * Shared bytes-to-row pipeline used by every ingest input form once
+     * the bytes are in hand. Sniffs MIME, extracts metadata, stores via
+     * AssetStore, and persists the row.
+     */
+    private function ingestFromBytes(MediaIngestRequest $request, string $bytes, ?string $sourceUrl): MediaAsset
+    {
         $sniffed = $this->sniffer->sniffFromBytes($bytes);
         $mediaType = $request->mediaType ?? MediaType::fromMime($sniffed);
         $extracted = $this->metadata->extract($bytes, $sniffed, $mediaType);
@@ -189,7 +206,7 @@ final class MediaArchiveService
             $request,
             new PersistedAssetFields(
                 assetUrl: $reference->url,
-                sourceUrl: $request->url,
+                sourceUrl: $sourceUrl,
                 storageMode: $reference->mode,
                 sniffedMime: $finalMime,
                 mediaType: $mediaType,
@@ -202,50 +219,20 @@ final class MediaArchiveService
     }
 
     /**
-     * @return array{0: ?string, 1: ?string}  [bytes, effectiveUrl]
-     */
-    private function resolveBytesAndSourceUrl(MediaIngestRequest $request): array
-    {
-        $inline = $this->decodeInlinePayload($request);
-        if ($inline !== null) {
-            return $inline;
-        }
-
-        return $this->resolveUrlPayload($request);
-    }
-
-    /**
      * Bytes / hex / base64 input forms are all "the caller already has
      * the bytes — store them as-is". Hex with odd length and any
      * non-strict-decodable base64 raise {@see InvalidArgumentException}
      * so the plugin can surface a meaningful error to the LLM.
-     *
-     * @return array{0: string, 1: null}|null
      */
-    private function decodeInlinePayload(MediaIngestRequest $request): ?array
+    private function decodeInline(MediaIngestRequest $request): ?string
     {
-        $bytes = $this->extractInlineBytes($request);
-        if ($bytes === null) {
-            return null;
-        }
-
-        return [$bytes, null];
-    }
-
-    private function extractInlineBytes(MediaIngestRequest $request): ?string
-    {
-        if ($request->bytes !== null) {
+        if ($request->bytes !== null && $request->bytes !== '') {
             return $request->bytes;
         }
-        return $this->decodeFromStringInputs($request);
-    }
-
-    private function decodeFromStringInputs(MediaIngestRequest $request): ?string
-    {
-        if ($request->hex !== null) {
+        if ($request->hex !== null && $request->hex !== '') {
             return $this->decodeHex($request->hex);
         }
-        if ($request->base64 !== null) {
+        if ($request->base64 !== null && $request->base64 !== '') {
             return $this->decodeBase64($request->base64);
         }
 
@@ -275,128 +262,6 @@ final class MediaArchiveService
         return $decoded;
     }
 
-    /**
-     * URL branch — decide between local/external before fetching.
-     *
-     * @return array{0: ?string, 1: string}  [bytes, effectiveUrl]
-     */
-    private function resolveUrlPayload(MediaIngestRequest $request): array
-    {
-        $url = $request->url;
-        assert($url !== null);
-
-        if (!$this->promoteExternal) {
-            return [null, $url];
-        }
-
-        if ($this->headSaysTooLarge($url)) {
-            return [null, $url];
-        }
-
-        return $this->fetchOrFallback($url);
-    }
-
-    /**
-     * Probe the URL via HEAD; if the upstream reports a body that
-     * exceeds the configured cap, skip the body fetch and stay
-     * external. Operators get a meaningful log line rather than a
-     * silent fallback.
-     */
-    private function headSaysTooLarge(string $url): bool
-    {
-        $probe = $this->fetcher->probe($url);
-        $declaredOversize = $probe['httpStatus'] >= 200
-            && $probe['httpStatus'] < 300
-            && $probe['contentLength'] !== null
-            && $probe['contentLength'] > $this->maxPromoteBytes;
-        if ($declaredOversize) {
-            $this->logger->info('MediaArchiveService: skipping fetch; content-length exceeds max_promote_bytes', [
-                'url' => $url,
-                'content_length' => $probe['contentLength'],
-                'max_promote_bytes' => $this->maxPromoteBytes,
-            ]);
-        }
-
-        return $declaredOversize;
-    }
-
-    /**
-     * Try to GET the body; on any fetch exception (non-2xx, oversized
-     * body, transport error) keep the row as `external` so the operator
-     * still has the metadata to act on. The original URL is preserved
-     * on both branches.
-     *
-     * @return array{0: ?string, 1: string}
-     */
-    private function fetchOrFallback(string $url): array
-    {
-        try {
-            $fetched = $this->fetcher->fetch($url);
-            return [$fetched['bytes'], $url];
-        } catch (RemoteMediaFetchException $e) {
-            $this->logger->warning('MediaArchiveService: fetch failed, falling back to external storage', [
-                'url'    => $url,
-                'status' => $e->httpStatus,
-                'error'  => $e->getMessage(),
-            ]);
-            return [null, $url];
-        }
-    }
-
-    private function persistExternal(MediaIngestRequest $request, string $url): MediaAsset
-    {
-        $sniffed = $this->sniffForExternal($request, $url);
-        $mediaType = $request->mediaType ?? MediaType::fromMime($sniffed);
-
-        return $this->persist(
-            $request,
-            new PersistedAssetFields(
-                assetUrl: $url,
-                sourceUrl: $url,
-                storageMode: 'external',
-                sniffedMime: $sniffed,
-                mediaType: $mediaType,
-                byteSize: $request->byteSize,
-                width: $request->width,
-                height: $request->height,
-                durationSeconds: $request->durationSeconds,
-            ),
-        );
-    }
-
-    /**
-     * For external rows, MIME is resolved cheapest-first:
-     *   1. URL extension sniff (no I/O). If the extension is recognised
-     *      we trust it and short-circuit — false positives are
-     *      recoverable downstream because the ingest pipeline only
-     *      classifies, it doesn't gate persistence on MIME.
-     *   2. HEAD probe's Content-Type.
-     *   3. The caller's `mime` hint.
-     *   4. `application/octet-stream` as the last-resort fallback.
-     */
-    private function sniffForExternal(MediaIngestRequest $request, string $url): string
-    {
-        $sniffed = $this->sniffer->sniffFromExtension($url);
-        if ($sniffed !== MimeSniffer::OCTET_STREAM) {
-            return $sniffed;
-        }
-
-        return $this->probeOrHint($request, $url, $sniffed);
-    }
-
-    private function probeOrHint(MediaIngestRequest $request, string $url, string $fallback): string
-    {
-        $probe = $this->fetcher->probe($url);
-        if (is_string($probe['contentType']) && $probe['contentType'] !== '') {
-            return $probe['contentType'];
-        }
-        if (is_string($request->mime) && $request->mime !== '') {
-            return $request->mime;
-        }
-
-        return $fallback;
-    }
-
     private function storeAsset(string $bytes, string $mime, ?string $filename): AssetReference
     {
         try {
@@ -421,7 +286,7 @@ final class MediaArchiveService
         // unique index matches, update the mutable fields instead of
         // inserting a duplicate.
         if ($request->toolCallId !== null) {
-            $existing = $this->findExistingForAsset($request->toolCallId, $fields->assetUrl);
+            $existing = $this->findExisting($request->toolCallId, $fields->assetUrl);
             if ($existing !== null) {
                 $this->applyFieldsToExisting($existing, $fields);
                 return $existing;
@@ -431,7 +296,7 @@ final class MediaArchiveService
         return $this->insertNew($request, $fields);
     }
 
-    private function findExistingForAsset(int $toolCallId, string $assetUrl): ?MediaAsset
+    private function findExisting(int $toolCallId, string $assetUrl): ?MediaAsset
     {
         return MediaAsset::query()
             ->where('tool_call_id', $toolCallId)
