@@ -64,6 +64,7 @@ describe('PluginsController', function (): void {
         $plugin = $body['data']['plugins'][0];
         expect($plugin['slug'])->toBe('inventory-plugin');
         expect($plugin['name'])->toBe('Inventory Plugin');
+        expect($plugin['package'])->toBe('spora-ai/spora-plugin-inventory-test');
         expect($plugin['description'])->toBe('A test plugin for the inventory API.');
         expect($plugin['icon'])->toBe('M12 2L2 22h20L12 2z');
         expect($plugin['version'])->toBe(1);
@@ -197,6 +198,99 @@ describe('PluginsController', function (): void {
         } finally {
             @unlink($dir . '/' . $slug . '/Plugin.php');
             @unlink($dir . '/' . $slug . '/plugin.json');
+            @rmdir($dir . '/' . $slug);
+            @rmdir($dir);
+        }
+    });
+
+    // Copilot review on #128: parseComposerName() used to return the raw
+    // composer.json `name` string. A plugin whose composer.json declared
+    // an invalid name (uppercase, no slash, surrounding whitespace) would
+    // surface a `package` that the DELETE/PATCH routes reject. The
+    // parser now validates against PluginPackageName — these fixtures
+    // cover the rejection paths so the inventory never exposes a string
+    // the server wouldn't accept.
+    it('returns package: null when composer.json name is uppercase', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('upper-name@example.com', 'ValidPass1!', 'UpperName');
+        simulateLoggedInSession($userId, 'upper-name@example.com');
+
+        $dir = sys_get_temp_dir() . '/spora_upper_name_' . uniqid();
+        $slug = 'upper-name-plugin';
+        mkdir($dir . '/' . $slug, 0o777, true);
+        file_put_contents(
+            $dir . '/' . $slug . '/plugin.json',
+            json_encode(['slug' => $slug, 'class' => 'Tests\\Fixtures\\Plugins\\InventoryPlugin\\Plugin']),
+        );
+        file_put_contents(
+            $dir . '/' . $slug . '/composer.json',
+            json_encode(['name' => 'Invalid-Case/spora-plugin-upper-name']),
+        );
+        symlink(
+            BASE_PATH . '/tests/Fixtures/plugins_inventory/InventoryPlugin/Plugin.php',
+            $dir . '/' . $slug . '/Plugin.php',
+        );
+
+        try {
+            $loader = new PluginLoader([$dir], null);
+            $loader->boot();
+            $controller = new PluginsController(new PluginsService($loader, new PluginMetadataExtractor()), null, false, null, true);
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+
+            $request = jsonRequest('GET', '/api/v1/plugins');
+            $response = callController($controller, 'index', $request, [$authMw, $csrfMw]);
+            $body = json_decode($response->getContent(), true);
+
+            expect($body['data']['plugins'][0]['package'])->toBeNull();
+        } finally {
+            @unlink($dir . '/' . $slug . '/Plugin.php');
+            @unlink($dir . '/' . $slug . '/plugin.json');
+            @unlink($dir . '/' . $slug . '/composer.json');
+            @rmdir($dir . '/' . $slug);
+            @rmdir($dir);
+        }
+    });
+
+    it('trims whitespace around composer.json name before validating', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('trim-name@example.com', 'ValidPass1!', 'TrimName');
+        simulateLoggedInSession($userId, 'trim-name@example.com');
+
+        $dir = sys_get_temp_dir() . '/spora_trim_name_' . uniqid();
+        $slug = 'trim-name-plugin';
+        mkdir($dir . '/' . $slug, 0o777, true);
+        file_put_contents(
+            $dir . '/' . $slug . '/plugin.json',
+            json_encode(['slug' => $slug, 'class' => 'Tests\\Fixtures\\Plugins\\InventoryPlugin\\Plugin']),
+        );
+        file_put_contents(
+            $dir . '/' . $slug . '/composer.json',
+            json_encode(['name' => '  spora-ai/spora-plugin-trim-name  ']),
+        );
+        symlink(
+            BASE_PATH . '/tests/Fixtures/plugins_inventory/InventoryPlugin/Plugin.php',
+            $dir . '/' . $slug . '/Plugin.php',
+        );
+
+        try {
+            $loader = new PluginLoader([$dir], null);
+            $loader->boot();
+            $controller = new PluginsController(new PluginsService($loader, new PluginMetadataExtractor()), null, false, null, true);
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+
+            $request = jsonRequest('GET', '/api/v1/plugins');
+            $response = callController($controller, 'index', $request, [$authMw, $csrfMw]);
+            $body = json_decode($response->getContent(), true);
+
+            // Trimmed form passes PluginPackageName::isValid; the value
+            // surfaced in the inventory is the trimmed one, not the raw.
+            expect($body['data']['plugins'][0]['package'])->toBe('spora-ai/spora-plugin-trim-name');
+        } finally {
+            @unlink($dir . '/' . $slug . '/Plugin.php');
+            @unlink($dir . '/' . $slug . '/plugin.json');
+            @unlink($dir . '/' . $slug . '/composer.json');
             @rmdir($dir . '/' . $slug);
             @rmdir($dir);
         }

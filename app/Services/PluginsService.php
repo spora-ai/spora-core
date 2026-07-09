@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Core\Extension\PluginPackageName;
 use Spora\Plugins\PluginInterface;
 use Spora\Plugins\PluginLoader;
 
@@ -63,6 +64,7 @@ final class PluginsService
         return [
             'slug'             => $slug,
             'name'             => $plugin->getName(),
+            'package'          => $this->readComposerPackageName($directory),
             'description'      => is_string($manifest['description'] ?? null) ? (string) $manifest['description'] : '',
             'icon'             => $this->resolveIcon($manifest),
             'version'          => $schemaVersion,
@@ -73,6 +75,37 @@ final class PluginsService
             'migrations'       => $this->buildMigrationStatus($slug, $schemaVersion, $migrationsPath),
             'suggests'         => $suggests,
         ];
+    }
+
+    /** Composer `vendor/name` from `<pluginDir>/composer.json`, or null when the plugin has no composer sidecar. Required by the DELETE / PATCH routes' vendor/name regex. */
+    private function readComposerPackageName(?string $pluginDir): ?string
+    {
+        if ($pluginDir === null || $pluginDir === '') {
+            return null;
+        }
+
+        $path = rtrim($pluginDir, '/') . '/composer.json';
+        return is_file($path) ? $this->parseComposerName($path) : null;
+    }
+
+    /** Extracts `name` from a composer.json file path. Returns null on any read / parse / shape failure — like `PluginLoader::readComposerSuggest`, errors are not surfaced. */
+    private function parseComposerName(string $path): ?string
+    {
+        $raw = @file_get_contents($path);
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+
+        $decoded = json_decode($raw, true);
+        $name    = is_array($decoded) ? ($decoded['name'] ?? null) : null;
+        if (!is_string($name)) {
+            return null;
+        }
+
+        $trimmed = trim($name);
+        // Validate against the same shape the DELETE/PATCH routes require
+        // so the inventory never exposes a `package` the server would reject.
+        return PluginPackageName::isValid($trimmed) ? $trimmed : null;
     }
 
     /**
