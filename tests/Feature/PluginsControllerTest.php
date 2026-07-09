@@ -64,6 +64,7 @@ describe('PluginsController', function (): void {
         $plugin = $body['data']['plugins'][0];
         expect($plugin['slug'])->toBe('inventory-plugin');
         expect($plugin['name'])->toBe('Inventory Plugin');
+        expect($plugin['package'])->toBe('spora-ai/spora-plugin-inventory-test');
         expect($plugin['description'])->toBe('A test plugin for the inventory API.');
         expect($plugin['icon'])->toBe('M12 2L2 22h20L12 2z');
         expect($plugin['version'])->toBe(1);

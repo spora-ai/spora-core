@@ -63,6 +63,7 @@ final class PluginsService
         return [
             'slug'             => $slug,
             'name'             => $plugin->getName(),
+            'package'          => $this->readComposerPackageName($directory),
             'description'      => is_string($manifest['description'] ?? null) ? (string) $manifest['description'] : '',
             'icon'             => $this->resolveIcon($manifest),
             'version'          => $schemaVersion,
@@ -73,6 +74,44 @@ final class PluginsService
             'migrations'       => $this->buildMigrationStatus($slug, $schemaVersion, $migrationsPath),
             'suggests'         => $suggests,
         ];
+    }
+
+    /**
+     * Reads the `name` field from `<pluginDir>/composer.json`. This is the
+     * Composer `vendor/name` the operator passes to `composer require` /
+     * `composer remove`, and the same identifier the DELETE / PATCH routes
+     * validate against the vendor/name regex. Surfacing it on the inventory
+     * resource means the Web UI can drive uninstall / update without an
+     * extra slug → package lookup round-trip.
+     *
+     * Null when:
+     *  - the plugin has no recorded directory (sidecar-loaded, no `path`)
+     *  - the directory has no `composer.json` (hand-rolled plugins)
+     *  - the file is malformed JSON, missing `name`, or `name` is not a string
+     *
+     * Errors are never surfaced — like `readComposerSuggest()` in the loader,
+     * a missing package name is informational, not a failure of `listPlugins()`.
+     */
+    private function readComposerPackageName(?string $pluginDir): ?string
+    {
+        if ($pluginDir === null || $pluginDir === '') {
+            return null;
+        }
+
+        $path = rtrim($pluginDir, '/') . '/composer.json';
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $raw = @file_get_contents($path);
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+
+        $decoded = json_decode($raw, true);
+        $name    = is_array($decoded) ? ($decoded['name'] ?? null) : null;
+
+        return is_string($name) && $name !== '' ? $name : null;
     }
 
     /**
