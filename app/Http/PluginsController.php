@@ -8,6 +8,7 @@ use JsonException;
 use LogicException;
 use Spora\Core\Extension\PluginInstallRequest;
 use Spora\Core\Extension\PluginManager;
+use Spora\Core\Extension\PluginPackageName;
 use Spora\Http\Exceptions\FeatureDisabledException;
 use Spora\Http\Exceptions\PluginCatalogNotWiredException;
 use Spora\Services\PluginCatalogService;
@@ -35,9 +36,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class PluginsController
 {
-    /** Composer vendor/name — same shape as Packagist enforces. */
-    private const PACKAGE_REGEX = '/^[a-z0-9]([_.\-a-z0-9]*[a-z0-9])?\/[a-z0-9]([_.\-a-z0-9]*[a-z0-9])?$/';
-
     public function __construct(
         private readonly PluginsService $pluginsService,
         private readonly ?PluginManager $pluginManager,
@@ -153,7 +151,7 @@ final class PluginsController
         if ($package === null) {
             return $this->error('VALIDATION_FAILED', 'Missing required field: package.', Response::HTTP_BAD_REQUEST);
         }
-        if (preg_match(self::PACKAGE_REGEX, $package) !== 1) {
+        if (!PluginPackageName::isValid($package)) {
             return $this->error(
                 'VALIDATION_FAILED',
                 'Field `package` must be a Composer vendor/name (e.g. "spora-ai/spora-plugin-tavily").',
@@ -197,7 +195,7 @@ final class PluginsController
     {
         $this->requireInstallEnabled();
 
-        if (preg_match(self::PACKAGE_REGEX, $package) !== 1) {
+        if (!PluginPackageName::isValid($package)) {
             return $this->error(
                 'VALIDATION_FAILED',
                 'Path segment `package` must be a Composer vendor/name.',
@@ -219,7 +217,7 @@ final class PluginsController
     {
         $this->requireInstallEnabled();
 
-        if (preg_match(self::PACKAGE_REGEX, $package) !== 1) {
+        if (!PluginPackageName::isValid($package)) {
             return $this->error(
                 'VALIDATION_FAILED',
                 'Path segment `package` must be a Composer vendor/name.',

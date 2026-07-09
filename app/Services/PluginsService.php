@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Core\Extension\PluginPackageName;
 use Spora\Plugins\PluginInterface;
 use Spora\Plugins\PluginLoader;
 
@@ -97,8 +98,14 @@ final class PluginsService
 
         $decoded = json_decode($raw, true);
         $name    = is_array($decoded) ? ($decoded['name'] ?? null) : null;
+        if (!is_string($name)) {
+            return null;
+        }
 
-        return is_string($name) && $name !== '' ? $name : null;
+        $trimmed = trim($name);
+        // Validate against the same shape the DELETE/PATCH routes require
+        // so the inventory never exposes a `package` the server would reject.
+        return PluginPackageName::isValid($trimmed) ? $trimmed : null;
     }
 
     /**
