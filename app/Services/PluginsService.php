@@ -76,22 +76,7 @@ final class PluginsService
         ];
     }
 
-    /**
-     * Reads the `name` field from `<pluginDir>/composer.json`. This is the
-     * Composer `vendor/name` the operator passes to `composer require` /
-     * `composer remove`, and the same identifier the DELETE / PATCH routes
-     * validate against the vendor/name regex. Surfacing it on the inventory
-     * resource means the Web UI can drive uninstall / update without an
-     * extra slug → package lookup round-trip.
-     *
-     * Null when:
-     *  - the plugin has no recorded directory (sidecar-loaded, no `path`)
-     *  - the directory has no `composer.json` (hand-rolled plugins)
-     *  - the file is malformed JSON, missing `name`, or `name` is not a string
-     *
-     * Errors are never surfaced — like `readComposerSuggest()` in the loader,
-     * a missing package name is informational, not a failure of `listPlugins()`.
-     */
+    /** Composer `vendor/name` from `<pluginDir>/composer.json`, or null when the plugin has no composer sidecar. Required by the DELETE / PATCH routes' vendor/name regex. */
     private function readComposerPackageName(?string $pluginDir): ?string
     {
         if ($pluginDir === null || $pluginDir === '') {
@@ -99,10 +84,12 @@ final class PluginsService
         }
 
         $path = rtrim($pluginDir, '/') . '/composer.json';
-        if (!is_file($path)) {
-            return null;
-        }
+        return is_file($path) ? $this->parseComposerName($path) : null;
+    }
 
+    /** Extracts `name` from a composer.json file path. Returns null on any read / parse / shape failure — like `PluginLoader::readComposerSuggest`, errors are not surfaced. */
+    private function parseComposerName(string $path): ?string
+    {
         $raw = @file_get_contents($path);
         if (!is_string($raw) || $raw === '') {
             return null;
