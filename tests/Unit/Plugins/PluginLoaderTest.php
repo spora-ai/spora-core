@@ -623,3 +623,15 @@ test('suggestedPackages() ignores an empty composer.json file', function (): voi
         @rmdir($dir);
     }
 });
+
+test('getSlugForApp() returns the slug of the plugin that owns the app class', function (): void {
+    $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_app'], null);
+    $loader->boot();
+    expect($loader->getSlugForApp(new Tests\Fixtures\StubVueApp()))->toBe('app-plugin');
+});
+
+test('getSlugForApp() returns null for an app not claimed by any loaded plugin', function (): void {
+    $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_app'], null);
+    $loader->boot();
+    expect($loader->getSlugForApp(new Tests\Fixtures\StubMemoriesApp()))->toBeNull();
+});

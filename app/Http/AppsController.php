@@ -47,6 +47,7 @@ final class AppsController
     private function serializeApp(AppInterface $app): array
     {
         $entry = $this->resolveFrontendEntry($app);
+        $slug = $this->pluginLoader !== null ? $this->pluginLoader->getSlugForApp($app) : null;
 
         $payload = [
             'name'        => $app->name(),
@@ -61,6 +62,13 @@ final class AppsController
         // the hard-coded core routes").
         if ($entry !== null) {
             $payload['frontendEntry'] = $entry;
+        }
+
+        // `slug` is the on-disk bundle directory, distinct from `name` (the
+        // route key). Core-owned apps ship no bundle, so the key is
+        // deliberately omitted rather than emitted as null.
+        if ($slug !== null) {
+            $payload['slug'] = $slug;
         }
 
         return $payload;
@@ -78,8 +86,9 @@ final class AppsController
             return $value !== '' ? $value : null;
         }
 
-        if ($this->pluginLoader !== null) {
-            $manifest = $this->pluginLoader->getPluginManifest($app->name());
+        $slug = $this->pluginLoader?->getSlugForApp($app);
+        if ($slug !== null) {
+            $manifest = $this->pluginLoader->getPluginManifest($slug);
             if (is_array($manifest)) {
                 $value = $manifest['frontendEntry'] ?? null;
                 return is_string($value) && $value !== '' ? $value : null;
