@@ -631,7 +631,7 @@ test('getSlugForApp() returns the slug of the plugin that owns the app class', f
     // /api/v1/apps response so the host SPA can build the bundle URL.
     $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_app'], null);
     $loader->boot();
-    expect($loader->getSlugForApp(new \Tests\Fixtures\StubVueApp()))->toBe('app-plugin');
+    expect($loader->getSlugForApp(new Tests\Fixtures\StubVueApp()))->toBe('app-plugin');
 });
 
 test('getSlugForApp() returns null for an app not claimed by any loaded plugin', function (): void {
@@ -640,5 +640,5 @@ test('getSlugForApp() returns null for an app not claimed by any loaded plugin',
     // null so the controller can omit the slug from the response.
     $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_app'], null);
     $loader->boot();
-    expect($loader->getSlugForApp(new \Tests\Fixtures\StubMemoriesApp()))->toBeNull();
+    expect($loader->getSlugForApp(new Tests\Fixtures\StubMemoriesApp()))->toBeNull();
 });

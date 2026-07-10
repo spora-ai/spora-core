@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Spora\Plugins;
 
 use DI\ContainerBuilder;
-use Spora\Core\MiddlewareRouteCollector;
 use Spora\Apps\AppInterface;
+use Spora\Core\MiddlewareRouteCollector;
 use Spora\Plugins\Exceptions\PluginLoadFailedException;
 use Throwable;
 
