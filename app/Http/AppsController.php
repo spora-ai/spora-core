@@ -47,6 +47,7 @@ final class AppsController
     private function serializeApp(AppInterface $app): array
     {
         $entry = $this->resolveFrontendEntry($app);
+        $slug = $this->pluginLoader !== null ? $this->pluginLoader->getSlugForApp($app) : null;
 
         $payload = [
             'name'        => $app->name(),
@@ -61,6 +62,16 @@ final class AppsController
         // the hard-coded core routes").
         if ($entry !== null) {
             $payload['frontendEntry'] = $entry;
+        }
+
+        // The slug is the on-disk bundle directory (`public/plugins/<slug>/`)
+        // — distinct from `name` (the route key). The host SPA needs it
+        // to construct the bundle URL; without it the dev-mode proxy
+        // can't route `/plugins/<slug>/main.js` to the plugin's Vite.
+        // Core-owned apps (memories, plugins) have no slug — they don't
+        // ship a Vue bundle, so the absence here is harmless.
+        if ($slug !== null) {
+            $payload['slug'] = $slug;
         }
 
         return $payload;

@@ -623,3 +623,22 @@ test('suggestedPackages() ignores an empty composer.json file', function (): voi
         @rmdir($dir);
     }
 });
+
+test('getSlugForApp() returns the slug of the plugin that owns the app class', function (): void {
+    // The app-plugin fixture's `apps()` returns [StubVueApp::class];
+    // getSlugForApp should map that class back to the manifest slug
+    // "app-plugin". Used by AppsController to emit the slug in the
+    // /api/v1/apps response so the host SPA can build the bundle URL.
+    $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_app'], null);
+    $loader->boot();
+    expect($loader->getSlugForApp(new \Tests\Fixtures\StubVueApp()))->toBe('app-plugin');
+});
+
+test('getSlugForApp() returns null for an app not claimed by any loaded plugin', function (): void {
+    // Core-owned apps (memories, plugins) are registered directly with
+    // AppRegistry and aren't tied to a plugin. The lookup must return
+    // null so the controller can omit the slug from the response.
+    $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_app'], null);
+    $loader->boot();
+    expect($loader->getSlugForApp(new \Tests\Fixtures\StubMemoriesApp()))->toBeNull();
+});

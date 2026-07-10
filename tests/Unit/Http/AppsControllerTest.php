@@ -131,4 +131,62 @@ describe('AppsController', function (): void {
         $body = json_decode($response->getContent(), true);
         expect($body['data']['apps'][0])->not->toHaveKey('frontendEntry');
     });
+
+    it('emits the plugin slug for plugin-owned apps', function (): void {
+        // The host SPA constructs the bundle URL as
+        // `/plugins/<slug>/<entry>`; the slug is the on-disk directory
+        // emitted by SporaPluginFrontendInstaller. It's distinct from
+        // `name` (the route key) and the controller must surface it
+        // for the dev-mode proxy to route correctly.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('slug@example.com', 'ValidPass1!', 'Slug');
+        simulateLoggedInSession($userId, 'slug@example.com');
+
+        $registry = new AppRegistry();
+        $registry->register(StubVueApp::class);
+
+        $loader = new PluginLoader(
+            [BASE_PATH . '/tests/Fixtures/plugins_with_app'],
+            null,
+        );
+        $loader->boot();
+
+        [$controller, $authMiddleware, $csrfMiddleware] = makeAppsController($registry, $loader);
+
+        $request = jsonRequest('GET', '/api/v1/apps');
+        $response = callController($controller, 'index', $request, [$authMiddleware, $csrfMiddleware]);
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['apps'][0])->toHaveKey('slug');
+        expect($body['data']['apps'][0]['slug'])->toBe('app-plugin');
+    });
+
+    it('omits the slug for core-owned apps not registered by any plugin', function (): void {
+        // Core apps (memories, plugins) are registered directly with
+        // AppRegistry and ship no Vue bundle. The slug key must be
+        // absent — not null, not an empty string — so the host's
+        // `mountableApps` filter (which checks `typeof a.slug === 'string'`)
+        // correctly excludes them.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('noslug@example.com', 'ValidPass1!', 'NoSlug');
+        simulateLoggedInSession($userId, 'noslug@example.com');
+
+        $registry = new AppRegistry();
+        $registry->register(StubMemoriesApp::class);
+
+        // PluginLoader is loaded but contains no plugin that claims
+        // StubMemoriesApp — getSlugForApp returns null.
+        $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_tools'], null);
+        $loader->boot();
+
+        [$controller, $authMiddleware, $csrfMiddleware] = makeAppsController($registry, $loader);
+
+        $request = jsonRequest('GET', '/api/v1/apps');
+        $response = callController($controller, 'index', $request, [$authMiddleware, $csrfMiddleware]);
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['apps'][0])->not->toHaveKey('slug');
+    });
 });

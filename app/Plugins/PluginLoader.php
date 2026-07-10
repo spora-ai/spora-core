@@ -6,6 +6,7 @@ namespace Spora\Plugins;
 
 use DI\ContainerBuilder;
 use Spora\Core\MiddlewareRouteCollector;
+use Spora\Apps\AppInterface;
 use Spora\Plugins\Exceptions\PluginLoadFailedException;
 use Throwable;
 
@@ -180,6 +181,31 @@ final class PluginLoader
     public function getPlugins(): array
     {
         return $this->plugins;
+    }
+
+    /**
+     * Resolve the plugin slug that owns a given app instance.
+     *
+     * Iterates `getPlugins()` and checks each plugin's `apps()` list for
+     * the app's class. Used by the apps API to emit the slug the host
+     * SPA needs to construct the bundle URL (`/plugins/<slug>/<entry>`);
+     * the app's own `name()` is the route key, not the on-disk bundle
+     * directory, and the two are not guaranteed to match.
+     *
+     * Returns null when no plugin claims the class (e.g. core-owned
+     * apps registered directly with the AppRegistry without a plugin).
+     */
+    public function getSlugForApp(AppInterface $app): ?string
+    {
+        $class = $app::class;
+        foreach ($this->plugins as $slug => $plugin) {
+            foreach ($plugin->apps() as $appClass) {
+                if ($appClass === $class) {
+                    return $slug;
+                }
+            }
+        }
+        return null;
     }
 
     /**
