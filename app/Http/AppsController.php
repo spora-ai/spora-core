@@ -86,8 +86,9 @@ final class AppsController
             return $value !== '' ? $value : null;
         }
 
-        if ($this->pluginLoader !== null) {
-            $manifest = $this->pluginLoader->getPluginManifest($app->name());
+        $slug = $this->pluginLoader?->getSlugForApp($app);
+        if ($slug !== null) {
+            $manifest = $this->pluginLoader->getPluginManifest($slug);
             if (is_array($manifest)) {
                 $value = $manifest['frontendEntry'] ?? null;
                 return is_string($value) && $value !== '' ? $value : null;
