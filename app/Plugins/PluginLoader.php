@@ -184,16 +184,14 @@ final class PluginLoader
     }
 
     /**
-     * Resolve the plugin slug that owns a given app instance.
+     * Resolve the plugin slug that owns a given app instance, or null
+     * if no plugin claims the class (e.g. core-owned apps registered
+     * directly with the AppRegistry).
      *
-     * Iterates `getPlugins()` and checks each plugin's `apps()` list for
-     * the app's class. Used by the apps API to emit the slug the host
-     * SPA needs to construct the bundle URL (`/plugins/<slug>/<entry>`);
-     * the app's own `name()` is the route key, not the on-disk bundle
-     * directory, and the two are not guaranteed to match.
-     *
-     * Returns null when no plugin claims the class (e.g. core-owned
-     * apps registered directly with the AppRegistry without a plugin).
+     * `slug` is the on-disk bundle directory, distinct from the app's
+     * `name()` (which is the route key) — the SPA uses it to build the
+     * `/plugins/<slug>/<entry>` bundle URL, so the two are not
+     * interchangeable.
      */
     public function getSlugForApp(AppInterface $app): ?string
     {

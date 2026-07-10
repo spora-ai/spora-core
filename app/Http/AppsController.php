@@ -64,12 +64,9 @@ final class AppsController
             $payload['frontendEntry'] = $entry;
         }
 
-        // The slug is the on-disk bundle directory (`public/plugins/<slug>/`)
-        // — distinct from `name` (the route key). The host SPA needs it
-        // to construct the bundle URL; without it the dev-mode proxy
-        // can't route `/plugins/<slug>/main.js` to the plugin's Vite.
-        // Core-owned apps (memories, plugins) have no slug — they don't
-        // ship a Vue bundle, so the absence here is harmless.
+        // `slug` is the on-disk bundle directory, distinct from `name` (the
+        // route key). Core-owned apps ship no bundle, so the key is
+        // deliberately omitted rather than emitted as null.
         if ($slug !== null) {
             $payload['slug'] = $slug;
         }
