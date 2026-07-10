@@ -159,6 +159,12 @@ final class ContainerDefinitions
                     'app_env'             => 'production',
                     'log_level'           => 'WARNING',
                     'log_path'            => $paths->storage('spora.log'),
+                    // Sync mode when no env is set. The shipped spora/.env.example
+                    // overrides this to `false` (queue mode) for operators who
+                    // run a worker. The dual defaults are intentional — see
+                    // env-vars.md in spora-docs: the safe fallback for env-less
+                    // LAMP/FTP deploys is sync (no worker); the safe choice for
+                    // .env-using deploys is queue (worker drains it).
                     'worker_mode'         => true,
                     'worker_stale_minutes' => 60,
                     'max_workers'         => 0,
