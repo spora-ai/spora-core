@@ -13,7 +13,11 @@ use RecursiveIteratorIterator;
 use RuntimeException;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
+use Spora\Models\Agent;
+use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\MediaAsset;
+use Spora\Models\Task;
+use Spora\Models\ToolCall;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
 use Spora\Services\AssetTooLargeException;
@@ -505,6 +509,91 @@ describe('MediaArchiveService::ingest idempotency without tool_call_id', functio
             // (tool_call_id, asset_url) key can't match, so each ingest
             // hits the insert path.
             expect(MediaAsset::query()->count())->toBe(2);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+});
+
+// ----- Idempotency: tool_call_id present ------------------------------------
+
+describe('MediaArchiveService::ingest idempotency with tool_call_id', function (): void {
+    it('returns the existing row when the same (tool_call_id, url) is re-ingested', function (): void {
+        // Set up the FK chain so the tool_call_id FK on media_assets passes.
+        // The idempotency short-circuit at the top of `ingest()` looks up
+        // `(tool_call_id, url)` and returns the existing MediaAsset instead
+        // of going through the URL branch and persisting a duplicate.
+        $userId = bootAuthLayer()->register('idem@example.com', 'Password1!', 'Idem');
+
+        $config = LLMDriverConfiguration::create([
+            'user_id'          => null,
+            'name'             => 'Idem Config',
+            'driver_class'     => \Spora\Drivers\OpenAICompatibleDriver::class,
+            'settings'         => json_encode(['api_key' => 'test']),
+            'is_global'        => true,
+            'is_default'       => true,
+            'context_window'   => 128000,
+            'max_tokens_output' => 4096,
+        ]);
+
+        $agent = Agent::create([
+            'user_id'              => $userId,
+            'name'                 => 'idem-agent',
+            'llm_driver_config_id' => $config->id,
+            'max_steps'            => 10,
+            'is_active'            => true,
+        ]);
+        $task = Task::create([
+            'user_id'     => $userId,
+            'agent_id'    => $agent->id,
+            'status'      => 'RUNNING',
+            'user_prompt' => 'idem test',
+            'max_steps'   => 10,
+        ]);
+        $toolCall = ToolCall::create([
+            'task_id'             => $task->id,
+            'agent_id'            => $agent->id,
+            'provider_call_id'    => 'call_idem',
+            'tool_name'           => 'idem_tool',
+            'tool_class'          => 'IdemTool',
+            'tool_type'           => 'function',
+            'operation'           => 'do',
+            'operation_description' => 'do',
+            'proposed_arguments'  => ['x' => 1],
+            'status'              => 'EXECUTED',
+        ]);
+
+        $ctx = makeMediaArchiveService(['promoteExternal' => false]);
+        try {
+            // Seed a row whose `asset_url` matches the URL the ingest
+            // service will look up. The short-circuit at the top of
+            // `ingest()` is keyed on `(tool_call_id, request->url)` and
+            // the persist() helper re-checks via `findExisting()`. Both
+            // paths converge on `asset_url`, so planting a row with the
+            // raw CDN URL as `asset_url` exercises the dedup.
+            $existing = MediaAsset::create([
+                'id'                       => '11111111-2222-3333-4444-555555555555',
+                'asset_url'                => 'https://cdn.example/idem.png',
+                'storage_mode'             => 'external',
+                'mime_type'                => 'image/png',
+                'media_type'               => 'image',
+                'byte_size'                => 1024,
+                'tool_call_id'             => $toolCall->id,
+                'agent_id'                 => $agent->id,
+                'task_id'                  => $task->id,
+                'asset_token'              => str_repeat('a', 32),
+                'migrated_from_inline_data_url' => false,
+            ]);
+
+            $second = $ctx['service']->ingest(new MediaIngestRequest(
+                url: 'https://cdn.example/idem.png',
+                toolCallId: $toolCall->id,
+            ));
+
+            // The short-circuit returns the pre-seeded row by id; no
+            // second row is created.
+            expect($second->id)->toBe($existing->id);
+            expect(MediaAsset::query()->where('tool_call_id', $toolCall->id)->count())->toBe(1);
         } finally {
             $ctx['restore']();
         }
