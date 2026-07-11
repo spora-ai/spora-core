@@ -6,8 +6,10 @@ namespace Tests\Feature;
 
 use DI\ContainerBuilder;
 use FilesystemIterator;
+use Mockery;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use Spora\Auth\AuthService;
 use Spora\Core\MiddlewareRouteCollector;
 use Spora\Core\Paths;
 use Spora\Core\Router;
@@ -34,7 +36,7 @@ use Symfony\Component\HttpFoundation\Request;
  * real bytes through the service (which writes the row + file), then GET
  * the opaque URL the chat would actually emit.
  */
-function assetTestSetup(): array
+function assetTestSetup(bool $asAdmin = true): array
 {
     $tmp = sys_get_temp_dir() . '/spora-asset-ctrl-' . bin2hex(random_bytes(4));
     mkdir($tmp, 0755, recursive: true);
@@ -68,7 +70,15 @@ function assetTestSetup(): array
         new MetadataExtractor($logger, false),
     );
 
-    $controller = new AssetController($archive, $database, $local);
+    // Auth mock — by default, the test requester is treated as an admin
+    // so the existing tests (which don't set up an owning user) still
+    // reach the streaming path. Tests that want a non-admin scenario
+    // can construct their own mock and pass it via this helper's return.
+    $auth = Mockery::mock(AuthService::class);
+    $auth->allows('isAdmin')->andReturn($asAdmin);
+    $auth->allows('currentUserId')->andReturn($asAdmin ? 1 : null);
+
+    $controller = new AssetController($archive, $database, $local, $auth);
 
     $container = (new ContainerBuilder())->build();
     $container->set(LocalAssetStore::class, $local);
@@ -199,6 +209,76 @@ test('GET /api/v1/assets/{uuid} sends a Cache-Control header', function (): void
         $response = $router->dispatch($request);
 
         expect($response->headers->get('Cache-Control'))->toContain('max-age');
+    } finally {
+        assetTestTeardown($tmp);
+        $restore();
+    }
+});
+
+test('GET /api/v1/assets/{uuid} returns 404 when the requester is not the owner and not an admin', function (): void {
+    // assetTestSetup() with $asAdmin=false: the mock returns isAdmin=false
+    // and currentUserId=null, so canAccessAsset denies the request even
+    // though the row exists. The 404 is the standard envelope — never a
+    // 403, to avoid leaking the UUID's existence.
+    [$router, $archive, $tmp, $restore] = assetTestSetup(asAdmin: false);
+
+    try {
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            bytes: 'secret-image-bytes',
+            mime: 'image/png',
+            filename: 'test.png',
+        ));
+
+        $path = parse_url($asset->asset_url, PHP_URL_PATH);
+
+        $request  = Request::create($path, 'GET');
+        $response = $router->dispatch($request);
+
+        expect($response->getStatusCode())->toBe(404);
+        expect($response->headers->get('Content-Type'))->toContain('application/json');
+    } finally {
+        assetTestTeardown($tmp);
+        $restore();
+    }
+});
+
+test('GET /api/v1/assets/{uuid} lets the owning user through', function (): void {
+    [$router, $archive, $tmp, $restore] = assetTestSetup();
+
+    try {
+        // The admin mock returns currentUserId=1 — create that user, an
+        // agent, and a task, then ingest an asset tied to them. The
+        // controller's ownership check finds asset.task.user_id == 1
+        // and lets the request through.
+        $userId = \bootAuthLayer()->register('asset-owner@example.com', 'Password1!', 'Owner');
+
+        $agent = \Spora\Models\Agent::create([
+            'user_id'   => $userId,
+            'name'      => 'asset-owner-test',
+            'max_steps' => 5,
+            'is_active' => true,
+        ]);
+        $task = \Spora\Models\Task::create([
+            'user_id'     => $userId,
+            'agent_id'    => $agent->id,
+            'status'      => 'RUNNING',
+            'user_prompt' => 'test',
+        ]);
+
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            bytes: "\x89PNG\r\n\x1a\n" . 'owned-bytes',
+            mime: 'image/png',
+            filename: 'owned.png',
+            agentId: $agent->id,
+            taskId: $task->id,
+        ));
+
+        $path = parse_url($asset->asset_url, PHP_URL_PATH);
+
+        $request  = Request::create($path, 'GET');
+        $response = $router->dispatch($request);
+
+        expect($response->getStatusCode())->toBe(200);
     } finally {
         assetTestTeardown($tmp);
         $restore();

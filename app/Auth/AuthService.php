@@ -28,8 +28,12 @@ use Spora\Services\MailerInterface;
  * This class is the entry point used by HTTP controllers; the collaborators are
  * not part of the public API. Splitting keeps this facade under the S1448
  * (≤20 methods) limit (php:S1448).
+ *
+ * Not declared `final` because Mockery needs to construct a named mock
+ * for HTTP-handler tests (e.g. {@see \Tests\Feature\AssetControllerTest}).
+ * Subclassing is still discouraged — instantiate via the container.
  */
-final class AuthService
+class AuthService
 {
     private readonly AuthEmailFlow $emailFlow;
     private readonly AuthRoleAdmin $roleAdmin;
