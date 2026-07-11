@@ -47,7 +47,12 @@ final class AssetController
 
     public function show(string $filename): Response
     {
-        $asset = $this->archive->find($filename);
+        // Accept both `/api/v1/assets/<uuid>` and `/api/v1/assets/<uuid>.<ext>`.
+        // UUIDs never contain dots, so a trailing `.<ext>` is safe to strip
+        // here without affecting the legacy HMAC-token fallback path.
+        $uuid = $this->stripExtension($filename);
+
+        $asset = $this->archive->find($uuid);
         if ($asset !== null) {
             return $this->streamOwnedAsset($asset);
         }
@@ -60,6 +65,21 @@ final class AssetController
         }
 
         return $this->notFound();
+    }
+
+    /**
+     * Return the UUID portion of a public asset filename, stripping any
+     * `.ext` suffix the browser appended for filename hints. UUIDs match
+     * `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` (36 chars); anything after
+     * the 36th char is treated as the extension. Inputs without a `.`
+     * are returned unchanged.
+     */
+    private function stripExtension(string $filename): string
+    {
+        if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(.+)$/i', $filename) === 1) {
+            return substr($filename, 0, 36);
+        }
+        return $filename;
     }
 
     /**

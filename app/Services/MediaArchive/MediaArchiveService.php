@@ -43,6 +43,39 @@ class MediaArchiveService
     /** Prefix used by every persisted `asset_url`. */
     public const OPAQUE_ASSET_URL_PREFIX = '/api/v1/assets/';
 
+    /**
+     * Map a MIME type to a file extension used in the public asset URL.
+     * Returns null for unknown / null mimes — caller omits the extension
+     * entirely rather than fabricating a guess that could mislead browsers.
+     */
+    public static function extensionForMime(?string $mime): ?string
+    {
+        if (!is_string($mime) || $mime === '') {
+            return null;
+        }
+        $map = [
+            'audio/mpeg'       => 'mp3',
+            'audio/mp3'        => 'mp3',
+            'audio/wav'        => 'wav',
+            'audio/x-wav'      => 'wav',
+            'audio/ogg'        => 'ogg',
+            'audio/mp4'        => 'm4a',
+            'audio/x-m4a'      => 'm4a',
+            'audio/flac'       => 'flac',
+            'video/mp4'        => 'mp4',
+            'video/webm'       => 'webm',
+            'video/quicktime'  => 'mov',
+            'image/jpeg'       => 'jpg',
+            'image/png'        => 'png',
+            'image/gif'        => 'gif',
+            'image/webp'       => 'webp',
+            'image/svg+xml'    => 'svg',
+            'application/pdf'  => 'pdf',
+            'text/plain'       => 'txt',
+        ];
+        return $map[strtolower($mime)] ?? null;
+    }
+
     public function __construct(
         private readonly AssetStore $assetStore,
         private readonly MediaArchiveUrlResolver $urlResolver,
@@ -369,8 +402,11 @@ class MediaArchiveService
         // `$fields->assetUrl` from the resolver is internal routing
         // metadata (e.g., the upstream CDN URL for external mode, or the
         // pre-refactor token URL); we override it here so chat bubbles
-        // and LLM context always see a short URL.
-        $asset->asset_url = self::OPAQUE_ASSET_URL_PREFIX . $asset->id;
+        // and LLM context always see a short URL. The extension is
+        // appended when the sniffed mime maps to a known type, so
+        // browsers use the right filename on download.
+        $ext  = self::extensionForMime($fields->sniffedMime);
+        $asset->asset_url = self::OPAQUE_ASSET_URL_PREFIX . $asset->id . ($ext !== null ? '.' . $ext : '');
         $asset->source_url = $fields->sourceUrl;
         $asset->storage_mode = $fields->storageMode;
         // `asset_token` ties the row to its on-disk file (local mode) or

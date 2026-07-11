@@ -332,10 +332,12 @@ describe('MediaArchiveService::ingest URL branch', function (): void {
         try {
             $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/test.png'));
             expect($asset->storage_mode)->toBe('external');
-            // Asset URL is always the opaque `/api/v1/assets/<uuid>` form
+            // Asset URL is always the opaque `/api/v1/assets/<uuid>.<ext>` form
             // after fix/opaque-asset-urls — the upstream CDN URL is now
-            // preserved in `source_url` for operator audit.
-            expect($asset->asset_url)->toBe('/api/v1/assets/' . $asset->id);
+            // preserved in `source_url` for operator audit. The sniffed
+            // mime (image/png from the .png extension) maps to .png so
+            // browsers use the right filename on download.
+            expect($asset->asset_url)->toBe('/api/v1/assets/' . $asset->id . '.png');
             expect($asset->source_url)->toBe('https://cdn.example/test.png');
         } finally {
             $ctx['restore']();
@@ -729,7 +731,7 @@ describe('MediaArchiveService::ingest URL branch — extension/head interaction'
         try {
             $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/broken.png'));
             expect($asset->storage_mode)->toBe('external');
-            expect($asset->asset_url)->toBe('/api/v1/assets/' . $asset->id);
+            expect($asset->asset_url)->toBe('/api/v1/assets/' . $asset->id . '.png');
             expect($asset->source_url)->toBe('https://cdn.example/broken.png');
         } finally {
             $ctx['restore']();

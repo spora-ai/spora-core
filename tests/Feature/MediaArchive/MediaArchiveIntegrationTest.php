@@ -243,7 +243,9 @@ test('media archive: full pipeline from URL ingest → REST → CLI orphan sweep
             url: 'https://cdn.example/missing.png',
         ));
         expect($external->storage_mode)->toBe('external');
-        expect($external->asset_url)->toBe('/api/v1/assets/' . $external->id);
+        // The sniffed mime (image/png from the .png extension) appends .png
+        // to the opaque URL — browsers use the right filename on download.
+        expect($external->asset_url)->toBe('/api/v1/assets/' . $external->id . '.png');
         expect($external->source_url)->toBe('https://cdn.example/missing.png');
 
         // ----- 9. Delete one on-disk file so gc() has an orphan --------

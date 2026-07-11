@@ -133,7 +133,7 @@ test('GET /api/v1/assets/{uuid} serves an opaque-URL row from the MediaArchive',
             mime: 'image/png',
             filename: 'test.png',
         ));
-        expect($asset->asset_url)->toBe('/api/v1/assets/' . $asset->id);
+        expect($asset->asset_url)->toBe('/api/v1/assets/' . $asset->id . '.png');
 
         $path = parse_url($asset->asset_url, PHP_URL_PATH);
 
@@ -187,6 +187,35 @@ test('GET /api/v1/assets/{filename} returns 404 for a forged HMAC token (legacy 
         $response = $router->dispatch($request);
 
         expect($response->getStatusCode())->toBe(404);
+    } finally {
+        assetTestTeardown($tmp);
+        $restore();
+    }
+});
+
+test('GET /api/v1/assets/{uuid}.{ext} resolves to the same row as {uuid}', function (): void {
+    // Browsers fetch the asset URL with an `.ext` suffix so the saved
+    // filename has the right extension. The controller strips the suffix
+    // before the UUID lookup, so both forms resolve identically.
+    [$router, $archive, $tmp, $restore] = assetTestSetup();
+
+    try {
+        $png = "\x89PNG\r\n\x1a\n" . 'with-extension';
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            bytes: $png,
+            mime: 'image/png',
+            filename: 'test.png',
+        ));
+        expect($asset->asset_url)->toEndWith('.png');
+
+        $pathWithExt = parse_url($asset->asset_url, PHP_URL_PATH);
+        expect($pathWithExt)->toMatch('/\.png$/');
+
+        $request  = Request::create($pathWithExt, 'GET');
+        $response = $router->dispatch($request);
+
+        expect($response->getStatusCode())->toBe(200);
+        expect($response->headers->get('Content-Type'))->toBe('image/png');
     } finally {
         assetTestTeardown($tmp);
         $restore();
