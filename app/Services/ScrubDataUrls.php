@@ -16,8 +16,17 @@ final class ScrubDataUrls
 
     public static function scrub(string $content): string
     {
+        // Case-insensitive on both the scheme and the `base64` marker so
+        // uppercase `DATA:...;BASE64,...` payloads (some upstream
+        // generators do emit them) are still scrubbed. The `(?:;...)*`
+        // group matches zero or more `;key=value` parameters between the
+        // MIME and `;base64,` — e.g. `data:text/plain;charset=utf-8;base64,...`
+        // — so character-set / boundary hints don't slip a payload past
+        // the regex. The `base64,` literal stays lowercase-after-scrub
+        // because the pattern requires the canonical base64 marker, not
+        // because the URI itself can't be uppercase.
         return preg_replace_callback(
-            '#data:[a-zA-Z0-9.\-+/]+;base64,[A-Za-z0-9+/=]+#',
+            '#data:[a-zA-Z0-9.\-+/]+(?:;[a-zA-Z0-9=.\-]+)*;base64,[A-Za-z0-9+/=]+#i',
             static fn(array $m): string => self::PLACEHOLDER,
             $content,
         ) ?? $content;

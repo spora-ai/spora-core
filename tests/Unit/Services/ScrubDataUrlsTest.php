@@ -24,6 +24,27 @@ test('scrub replaces a single base64 data URI with the placeholder', function ()
     expect($scrubbed)->not->toContain('iVBORw0KGgo');
 });
 
+test('scrub replaces data URIs with charset parameters between the mime and base64', function (): void {
+    // RFC 2397 allows `data:<mime>;<param>=<value>;base64,<payload>` —
+    // some upstreams emit `charset=utf-8` between the mime and the
+    // base64 marker. The regex must match the URI anyway.
+    $uri = 'data:text/plain;charset=utf-8;base64,SGVsbG8gd29ybGQ=';
+    $text = "payload: {$uri}";
+
+    $scrubbed = ScrubDataUrls::scrub($text);
+    expect($scrubbed)->toContain(ScrubDataUrls::PLACEHOLDER);
+    expect($scrubbed)->not->toContain('SGVsbG8gd29ybGQ=');
+});
+
+test('scrub replaces uppercase DATA URIs (case-insensitive)', function (): void {
+    $uri = 'DATA:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    $text = "uppercase: {$uri}";
+
+    $scrubbed = ScrubDataUrls::scrub($text);
+    expect($scrubbed)->toContain(ScrubDataUrls::PLACEHOLDER);
+    expect($scrubbed)->not->toContain('iVBORw0KGgo');
+});
+
 test('scrub replaces multiple base64 data URIs in the same string', function (): void {
     $uri1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
     $uri2 = 'data:audio/mpeg;base64,SUQzAwAAAAACc1RL';

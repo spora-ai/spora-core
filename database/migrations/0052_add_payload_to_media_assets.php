@@ -20,8 +20,15 @@ return new class extends Migration
             // LocalAssetStore (filesystem).
             $table->binary('payload')->nullable();
 
-            // Opaque token used in the public URL. Distinct from the row
-            // UUID so the URL never leaks the internal primary key.
+            // 32-hex random token used for filesystem correlation, NOT
+            // the public URL. LocalAssetStore mints a token as the
+            // on-disk filename (`LocalAssetStore::readFromAsset()` resolves
+            // a UUID lookup back to a file via this column). DB-mode rows
+            // also carry a token to keep the column uniform, but they
+            // don't use it — the row's `payload` BLOB is the source of
+            // truth. The public URL is the opaque
+            // `/api/v1/assets/<uuid>.<ext>` form built from the row PK,
+            // not from this token.
             $table->string('asset_token', 64)->nullable()->unique();
         });
     }
