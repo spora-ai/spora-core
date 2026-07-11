@@ -32,6 +32,14 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 final class AssetController
 {
+    /**
+     * 24h browser cache: asset URLs are stable per the daily HMAC rotation
+     * (legacy mode) or per row UUID (opaque mode), and the underlying
+     * bytes don't change post-ingest. Same constant used in three
+     * response paths so Sonar's S1192 doesn't flag the duplication.
+     */
+    private const CACHE_HEADER = 'private, max-age=86400';
+
     public function __construct(
         private readonly MediaArchiveService $archive,
         private readonly DatabaseAssetStore $database,
@@ -50,7 +58,7 @@ final class AssetController
         $resolved = $this->local->resolve($filename);
         if ($resolved !== null) {
             $response = new BinaryFileResponse($resolved['path'], 200, ['Content-Type' => $resolved['mime']]);
-            $response->headers->set('Cache-Control', 'private, max-age=86400');
+            $response->headers->set('Cache-Control', self::CACHE_HEADER);
             return $response;
         }
 
@@ -93,14 +101,13 @@ final class AssetController
             // memory twice (once via read(), once via echo).
             $bytes = (string) $payload['bytes'];
             $mime  = (string) $payload['mime'];
-            $response = new StreamedResponse(static function () use ($bytes): void {
+            return new StreamedResponse(static function () use ($bytes): void {
                 echo $bytes;
             }, 200, [
                 'Content-Type'   => $mime,
                 'Content-Length' => (string) strlen($bytes),
-                'Cache-Control'  => 'private, max-age=86400',
+                'Cache-Control'  => self::CACHE_HEADER,
             ]);
-            return $response;
         }
 
         // Local mode: hand off to BinaryFileResponse which streams from
@@ -108,7 +115,7 @@ final class AssetController
         $path = (string) $payload['path'];
         $mime = (string) $payload['mime'];
         $response = new BinaryFileResponse($path, 200, ['Content-Type' => $mime]);
-        $response->headers->set('Cache-Control', 'private, max-age=86400');
+        $response->headers->set('Cache-Control', self::CACHE_HEADER);
         return $response;
     }
 }

@@ -418,7 +418,6 @@ final class ContainerDefinitions
             AssetStore::class => static function (ContainerInterface $c): AssetStore {
                 $cfg  = $c->get('config')['asset_store'] ?? [];
                 $mode = is_string($cfg['mode'] ?? null) ? $cfg['mode'] : 'auto';
-                $max  = (int) ($cfg['max_bytes'] ?? 50 * 1024 * 1024);
                 return match ($mode) {
                     'local'    => $c->get(LocalAssetStore::class),
                     'data_url' => $c->get(DatabaseAssetStore::class),

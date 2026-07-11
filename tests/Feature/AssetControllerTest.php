@@ -15,7 +15,6 @@ use Spora\Core\SecurityManager;
 use Spora\Http\AssetController;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
-use Spora\Services\DataUrlAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
