@@ -435,9 +435,12 @@ final class ContainerDefinitions
             // Concrete DB-backed store, bound by name so the AssetController
             // can read BLOBs out of `media_assets.payload` for the
             // `/api/v1/assets/<uuid>` URL without going through the
-            // AssetStore composite.
+            // AssetStore composite. The default 64 KiB is MySQL/MariaDB's
+            // stock BLOB ceiling — operators with multi-MiB media should
+            // set `asset_store.mode = "local"` so the ceiling is
+            // filesystem-bound instead.
             DatabaseAssetStore::class => static function (ContainerInterface $c): DatabaseAssetStore {
-                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 50 * 1024 * 1024);
+                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 64 * 1024);
                 return new DatabaseAssetStore($max);
             },
 
