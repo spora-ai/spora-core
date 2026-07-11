@@ -158,7 +158,7 @@ final class MediaArchiveController
             'prompt'          => $asset->prompt,
             'tags'            => $asset->tags,
             'metadata'        => $asset->metadata,
-            'asset_url'       => $asset->asset_url,
+            'asset_url'       => $asset->publicUrl(),
             'source_url'      => $asset->source_url,
             'storage_mode'    => $asset->storage_mode,
             'created_at'      => $asset->created_at?->toIso8601String(),

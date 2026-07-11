@@ -128,4 +128,21 @@ final class MediaAsset extends Model
         }
         return MediaType::tryFrom($raw) ?? MediaType::Unknown;
     }
+
+    /**
+     * Canonical public URL for this row. Always `/api/v1/assets/<uuid>.<ext>`
+     * — the extension comes from the sniffed mime, with a null mime or an
+     * unknown type falling back to no suffix.
+     *
+     * Computed on read so that pre-extension rows (those created before
+     * commit 288807b) also serve the new shape. The `asset_url` DB column
+     * remains authoritative for what was persisted to chat history; this
+     * accessor is the canonical "what's in the URL right now" view.
+     */
+    public function publicUrl(): string
+    {
+        $base = \Spora\Services\MediaArchive\MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $this->id;
+        $ext  = \Spora\Services\MediaArchive\MediaArchiveService::extensionForMime($this->mime_type);
+        return $ext !== null ? $base . '.' . $ext : $base;
+    }
 }
