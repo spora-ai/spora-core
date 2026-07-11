@@ -69,12 +69,7 @@ final class AssetController
         // UUID lookup first (new opaque-URL scheme).
         $asset = $this->archive->find($filename);
         if ($asset !== null) {
-            // Ownership check — return 404 to non-owners so we don't leak
-            // which UUIDs exist in the archive.
-            if (!$this->canAccessAsset($asset)) {
-                return $this->notFound();
-            }
-            return $this->streamAsset($asset);
+            return $this->streamOwnedAsset($asset);
         }
 
         // Fallback: legacy HMAC-token URLs from pre-refactor rows.
@@ -91,6 +86,19 @@ final class AssetController
     }
 
     /**
+     * Resolve an opaque-URL row to an HTTP response, enforcing the
+     * ownership check first. Non-owners get the standard 404 envelope
+     * so we don't leak which UUIDs exist in the archive.
+     */
+    private function streamOwnedAsset(MediaAsset $asset): Response
+    {
+        if (!$this->canAccessAsset($asset)) {
+            return $this->notFound();
+        }
+        return $this->streamAsset($asset);
+    }
+
+    /**
      * Return true if the current requester is allowed to read this row's
      * bytes. Admins bypass the check; everyone else must own the task
      * that produced the asset.
@@ -101,21 +109,13 @@ final class AssetController
      */
     private function canAccessAsset(MediaAsset $asset): bool
     {
-        if ($this->auth->isAdmin()) {
-            return true;
-        }
-
-        if ($asset->task_id === null) {
-            return false;
-        }
-
         $userId = $this->auth->currentUserId();
-        if ($userId === null) {
-            return false;
-        }
+        $task   = $asset->task_id !== null ? (new Task())->find($asset->task_id) : null;
 
-        $task = (new Task())->find($asset->task_id);
-        return $task !== null && (int) $task->user_id === $userId;
+        return $this->auth->isAdmin()
+            || ($userId !== null
+                && $task !== null
+                && (int) $task->user_id === $userId);
     }
 
     /**
