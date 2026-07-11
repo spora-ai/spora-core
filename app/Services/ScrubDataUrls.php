@@ -22,11 +22,11 @@ final class ScrubDataUrls
         // group matches zero or more `;key=value` parameters between the
         // MIME and `;base64,` — e.g. `data:text/plain;charset=utf-8;base64,...`
         // — so character-set / boundary hints don't slip a payload past
-        // the regex. The `base64,` literal stays lowercase-after-scrub
-        // because the pattern requires the canonical base64 marker, not
-        // because the URI itself can't be uppercase.
+        // the regex. `-` at the end of each class is a literal (not a
+        // range); no backslash-escapes inside the classes since `.` is
+        // already literal inside `[...]`.
         return preg_replace_callback(
-            '#data:[a-zA-Z0-9.\-+/]+(?:;[a-zA-Z0-9=.\-]+)*;base64,[A-Za-z0-9+/=]+#i',
+            '#data:[a-zA-Z0-9./+-]+(?:;[a-zA-Z0-9=.-]+)*;base64,[A-Za-z0-9+/=]+#i',
             static fn(array $m): string => self::PLACEHOLDER,
             $content,
         ) ?? $content;
