@@ -284,3 +284,55 @@ test('GET /api/v1/assets/{uuid} lets the owning user through', function (): void
         $restore();
     }
 });
+
+test('GET /api/v1/assets/{uuid} returns 404 for external-mode rows (no Spora-side bytes)', function (): void {
+    [$router, $archive, $tmp, $restore] = assetTestSetup();
+
+    try {
+        // Ingest a URL that the resolver can't fetch → external mode,
+        // no payload bytes. The controller's streamAsset() falls into
+        // the 'external' branch which throws AssetStorageException,
+        // caught and returned as 404.
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            url: 'https://unreachable.invalid/missing.png',
+        ));
+        expect($asset->storage_mode)->toBe('external');
+
+        $path = parse_url($asset->asset_url, PHP_URL_PATH);
+
+        $request  = Request::create($path, 'GET');
+        $response = $router->dispatch($request);
+
+        expect($response->getStatusCode())->toBe(404);
+    } finally {
+        assetTestTeardown($tmp);
+        $restore();
+    }
+});
+
+test('GET /api/v1/assets/{uuid} returns 404 when storage_mode is unsupported', function (): void {
+    [$router, $archive, $tmp, $restore] = assetTestSetup();
+
+    try {
+        // Manually craft a row with an unsupported storage_mode to hit
+        // the `default` arm of the match in streamAsset(). This branch
+        // exists as a defense-in-depth guard — any new storage_mode
+        // value lands here until AssetController is updated.
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            bytes: 'whatever',
+            mime: 'text/plain',
+        ));
+        \Spora\Models\MediaAsset::query()
+            ->where('id', $asset->id)
+            ->update(['storage_mode' => 'mystery_mode']);
+
+        $path = '/api/v1/assets/' . $asset->id;
+        $request  = Request::create($path, 'GET');
+        $response = $router->dispatch($request);
+
+        expect($response->getStatusCode())->toBe(404);
+    } finally {
+        assetTestTeardown($tmp);
+        $restore();
+    }
+});
