@@ -14,6 +14,7 @@ use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Task;
 use Spora\Models\ToolCall as ToolCallModel;
+use Spora\Services\ScrubDataUrls;
 use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
@@ -142,7 +143,7 @@ final class ApprovedBatchExecutor
         $this->orchestrator->appendHistory(
             taskId: $task->id,
             role: 'tool',
-            content: $result->content,
+            content: ScrubDataUrls::scrub($result->content),
             context: new HistoryMessageContext(
                 toolCallId: $pendingToolCall->providerCallId,
                 toolName: $pendingToolCall->toolName,
@@ -153,7 +154,7 @@ final class ApprovedBatchExecutor
             ->where('provider_call_id', $pendingToolCall->providerCallId)
             ->update([
                 'status'         => 'APPROVED',
-                'result_content' => $result->content,
+                'result_content' => ScrubDataUrls::scrub($result->content),
                 'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
     }
@@ -170,7 +171,7 @@ final class ApprovedBatchExecutor
             ->update([
                 'status'             => 'APPROVED',
                 'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
-                'result_content'     => $result->content,
+                'result_content'     => ScrubDataUrls::scrub($result->content),
                 'result_data'        => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
                 'executed_at'        => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
@@ -179,7 +180,7 @@ final class ApprovedBatchExecutor
         $this->orchestrator->appendHistory(
             taskId: $task->id,
             role: 'tool',
-            content: $result->content,
+            content: ScrubDataUrls::scrub($result->content),
             context: new HistoryMessageContext(
                 toolCallId: $pendingToolCall->providerCallId,
                 toolName: $pendingToolCall->toolName,

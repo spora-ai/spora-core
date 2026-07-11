@@ -27,6 +27,8 @@ use Spora\Services\MediaArchive\MediaType;
  * @property string                                 $asset_url
  * @property string|null                            $source_url
  * @property string                                 $storage_mode
+ * @property string|null                            $asset_token
+ * @property string|null                            $payload
  * @property \Carbon\Carbon|null                    $created_at
  * @property \Carbon\Carbon|null                    $updated_at
  * @property Agent|null                             $agent
@@ -65,6 +67,9 @@ final class MediaAsset extends Model
         'asset_url',
         'source_url',
         'storage_mode',
+        'asset_token',
+        'payload',
+        'migrated_from_inline_data_url',
     ];
 
     /**
@@ -73,15 +78,16 @@ final class MediaAsset extends Model
      * @var array<string, string>
      */
     public const CASTS = [
-        'agent_id'         => 'integer',
-        'task_id'          => 'integer',
-        'tool_call_id'     => 'integer',
-        'byte_size'        => 'integer',
-        'width'            => 'integer',
-        'height'           => 'integer',
-        'duration_seconds' => 'float',
-        'tags'             => 'array',
-        'metadata'         => 'array',
+        'agent_id'                       => 'integer',
+        'task_id'                        => 'integer',
+        'tool_call_id'                   => 'integer',
+        'byte_size'                      => 'integer',
+        'width'                          => 'integer',
+        'height'                         => 'integer',
+        'duration_seconds'               => 'float',
+        'tags'                           => 'array',
+        'metadata'                       => 'array',
+        'migrated_from_inline_data_url'  => 'boolean',
     ];
 
     /** @var string */

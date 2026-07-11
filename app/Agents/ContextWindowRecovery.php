@@ -11,6 +11,7 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Services\NotificationService;
+use Spora\Services\ScrubDataUrls;
 use Throwable;
 
 /**
@@ -94,10 +95,20 @@ final class ContextWindowRecovery
         $summaryMessages = [];
         foreach ($toSummarizeRows as $row) {
             $content = $row->content ?? '';
+            // Strip base64 data URIs BEFORE sending to the summarizer.
+            // Even a single multi-MB image could overflow the
+            // summarizer's own context window. Then rephrase `role:'tool'`
+            // → `role:'user'` with a `[tool:name]` prefix — the upstream
+            // API rejects tool messages without tool_call_id pairing
+            // ("tool result's tool id() not found", error 2013) because
+            // the summarizer request has no prior `tool_calls` to anchor
+            // against. The summarizer only needs the textual content, not
+            // the structured tool-call pairing, so the rephrase is safe.
+            $content = ScrubDataUrls::scrub($content);
             if ($row->role === 'tool') {
-                $content = "[{$row->tool_name}]: " . $content;
-            }
-            if ($content !== '') {
+                $content = '[tool:' . ($row->tool_name ?? '?') . '] ' . $content;
+                $summaryMessages[] = ['role' => 'user', 'content' => $content];
+            } elseif ($content !== '') {
                 $summaryMessages[] = ['role' => $row->role, 'content' => $content];
             }
         }

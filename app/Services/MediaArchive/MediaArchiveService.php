@@ -50,9 +50,18 @@ use Spora\Services\AssetTooLargeException;
  * The URL branch (steps 1-2 and the external-row MIME sniff) lives in
  * {@see MediaArchiveUrlResolver} so this orchestrator stays under the
  * 20-method Sonar threshold.
+ *
+ * Not declared `final` because Mockery needs to construct a named mock
+ * for HTTP-handler tests (e.g. {@see \Tests\Feature\AssetControllerTest}).
+ * Subclassing is still discouraged — instantiate via PHP-DI.
  */
-final class MediaArchiveService
+class MediaArchiveService
 {
+    /** Prefix used by every persisted `asset_url`. Chat bubbles and LLM
+     *  context always see `<prefix><uuid>` regardless of underlying mode.
+     */
+    public const OPAQUE_ASSET_URL_PREFIX = '/api/v1/assets/';
+
     public function __construct(
         private readonly AssetStore $assetStore,
         private readonly MediaArchiveUrlResolver $urlResolver,
@@ -188,7 +197,10 @@ final class MediaArchiveService
     /**
      * Shared bytes-to-row pipeline used by every ingest input form once
      * the bytes are in hand. Sniffs MIME, extracts metadata, stores via
-     * AssetStore, and persists the row.
+     * AssetStore, persists the row, and finally writes the payload
+     * (DB BLOB or no-op for local) once the UUID is known — so the
+     * opaque URL is in place before any bytes land and concurrent
+     * readers never see a half-loaded row.
      */
     private function ingestFromBytes(MediaIngestRequest $request, string $bytes, ?string $sourceUrl): MediaAsset
     {
@@ -202,7 +214,7 @@ final class MediaArchiveService
 
         $reference = $this->storeAsset($bytes, $finalMime, $request->filename);
 
-        return $this->persist(
+        $asset = $this->persist(
             $request,
             new PersistedAssetFields(
                 assetUrl: $reference->url,
@@ -214,8 +226,33 @@ final class MediaArchiveService
                 width: $extracted->width ?? $request->width,
                 height: $extracted->height ?? $request->height,
                 durationSeconds: $extracted->durationSeconds ?? $request->durationSeconds,
+                token: $reference->token,
             ),
         );
+
+        // DB mode: write BLOB now that the UUID exists. Local mode: the
+        // LocalAssetStore::store() call above already wrote to disk using
+        // its own token; nothing further to do. External mode: no bytes
+        // owned by us — fetch happens client-side at view time.
+        if ($reference->mode === 'data_url') {
+            $this->writePayloadToAsset($asset, $bytes);
+        }
+
+        return $asset;
+    }
+
+    /**
+     * Persist the raw payload bytes to a {@see MediaAsset} row's `payload`
+     * BLOB column. Called from {@see self::ingestFromBytes()} for DB-mode
+     * rows AFTER the row UUID is allocated, so the public
+     * `/api/v1/assets/<uuid>` URL is already in place when the bytes land.
+     * A concurrent reader can therefore never see a row with a URL that
+     * resolves to an empty/corrupt payload.
+     */
+    public function writePayloadToAsset(MediaAsset $asset, string $bytes): void
+    {
+        $asset->payload = $bytes;
+        $asset->save();
     }
 
     /**
@@ -298,10 +335,22 @@ final class MediaArchiveService
 
     private function findExisting(int $toolCallId, string $assetUrl): ?MediaAsset
     {
-        return MediaAsset::query()
+        $row = MediaAsset::query()
             ->where('tool_call_id', $toolCallId)
             ->where('asset_url', $assetUrl)
             ->first();
+
+        // Defense-in-depth: rows that predate the
+        // `migrated_from_inline_data_url` column add (or that snuck
+        // in via a DB whose migration only partially applied) can
+        // land here with `asset_token` still NULL. Allocate one so
+        // `/api/v1/assets/<uuid>` always resolves to a file.
+        if ($row !== null && ($row->asset_token === null || $row->asset_token === '')) {
+            $row->asset_token = bin2hex(random_bytes(16));
+            $row->save();
+        }
+
+        return $row;
     }
 
     private function applyFieldsToExisting(MediaAsset $existing, PersistedAssetFields $fields): void
@@ -314,6 +363,7 @@ final class MediaArchiveService
             'height' => $fields->height,
             'duration_seconds' => $fields->durationSeconds,
             'storage_mode' => $fields->storageMode,
+            'asset_token' => $fields->token ?? $existing->asset_token,
         ]);
         $existing->save();
     }
@@ -336,9 +386,22 @@ final class MediaArchiveService
         $asset->prompt = $request->prompt;
         $asset->tags = $request->tags;
         $asset->metadata = $request->metadata;
-        $asset->asset_url = $fields->assetUrl;
+        // Asset URL is always an opaque `/api/v1/assets/<uuid>` form. The
+        // `$fields->assetUrl` from the resolver is internal routing
+        // metadata (e.g., the upstream CDN URL for external mode, or the
+        // pre-refactor token URL); we override it here so chat bubbles
+        // and LLM context always see a short URL.
+        $asset->asset_url = self::OPAQUE_ASSET_URL_PREFIX . $asset->id;
         $asset->source_url = $fields->sourceUrl;
         $asset->storage_mode = $fields->storageMode;
+        // `asset_token` ties the row to its on-disk file (local mode) or
+        // is just an opaque correlation id (DB mode). `LocalAssetStore`
+        // mints a 32-hex token as the on-disk filename; we reuse that
+        // token verbatim so `LocalAssetStore::readFromAsset()` can find
+        // the file from a UUID lookup. DB-mode rows get a freshly
+        // generated token; it's not load-bearing but keeps the unique
+        // index uniform.
+        $asset->asset_token = $fields->token ?? bin2hex(random_bytes(16));
         $asset->save();
 
         return $asset;

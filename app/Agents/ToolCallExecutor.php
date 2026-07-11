@@ -10,6 +10,7 @@ use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\ToolCall as ToolCallModel;
+use Spora\Services\ScrubDataUrls;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -158,15 +159,16 @@ final class ToolCallExecutor
         $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
 
         \Illuminate\Database\Capsule\Manager::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
+            $scrubbed = ScrubDataUrls::scrub($result->content);
             $toolCallRecord->update([
                 'status'         => 'APPROVED',
-                'result_content' => $result->content,
+                'result_content' => $scrubbed,
                 'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
             $this->orchestrator->appendHistory(
                 taskId: $task->id,
                 role: 'tool',
-                content: $result->content,
+                content: $scrubbed,
                 context: new HistoryMessageContext(
                     toolCallId: $toolCall->providerCallId,
                     toolName: $toolCall->toolName,
@@ -191,16 +193,17 @@ final class ToolCallExecutor
         );
 
         \Illuminate\Database\Capsule\Manager::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
+            $scrubbed = ScrubDataUrls::scrub($result->content);
             $toolCallRecord->update([
                 'status'         => 'APPROVED',
-                'result_content' => $result->content,
+                'result_content' => $scrubbed,
                 'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
                 'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
             $this->orchestrator->appendHistory(
                 taskId: $task->id,
                 role: 'tool',
-                content: $result->content,
+                content: $scrubbed,
                 context: new HistoryMessageContext(
                     toolCallId: $toolCall->providerCallId,
                     toolName: $toolCall->toolName,

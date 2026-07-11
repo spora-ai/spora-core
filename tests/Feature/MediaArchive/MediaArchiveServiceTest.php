@@ -328,7 +328,10 @@ describe('MediaArchiveService::ingest URL branch', function (): void {
         try {
             $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/test.png'));
             expect($asset->storage_mode)->toBe('external');
-            expect($asset->asset_url)->toBe('https://cdn.example/test.png');
+            // Asset URL is always the opaque `/api/v1/assets/<uuid>` form
+            // after fix/opaque-asset-urls — the upstream CDN URL is now
+            // preserved in `source_url` for operator audit.
+            expect($asset->asset_url)->toBe('/api/v1/assets/' . $asset->id);
             expect($asset->source_url)->toBe('https://cdn.example/test.png');
         } finally {
             $ctx['restore']();
@@ -637,7 +640,8 @@ describe('MediaArchiveService::ingest URL branch — extension/head interaction'
         try {
             $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/broken.png'));
             expect($asset->storage_mode)->toBe('external');
-            expect($asset->asset_url)->toBe('https://cdn.example/broken.png');
+            expect($asset->asset_url)->toBe('/api/v1/assets/' . $asset->id);
+            expect($asset->source_url)->toBe('https://cdn.example/broken.png');
         } finally {
             $ctx['restore']();
         }

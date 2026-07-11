@@ -76,6 +76,7 @@ use Spora\Services\AssetStore;
 use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
 use Spora\Services\AutoAssetStore;
+use Spora\Services\DatabaseAssetStore;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\EmailTemplateLoader;
 use Spora\Services\HandoverService;
@@ -420,9 +421,9 @@ final class ContainerDefinitions
                 $max  = (int) ($cfg['max_bytes'] ?? 50 * 1024 * 1024);
                 return match ($mode) {
                     'local'    => $c->get(LocalAssetStore::class),
-                    'data_url' => new DataUrlAssetStore($max),
+                    'data_url' => $c->get(DatabaseAssetStore::class),
                     'auto'     => new AutoAssetStore(
-                        new DataUrlAssetStore($max),
+                        $c->get(DatabaseAssetStore::class),
                         $c->get(LocalAssetStore::class),
                         (int) ($cfg['auto_threshold_bytes'] ?? 1_048_576),
                     ),
@@ -430,6 +431,15 @@ final class ContainerDefinitions
                         "Unknown asset_store.mode: {$mode}",
                     ),
                 };
+            },
+
+            // Concrete DB-backed store, bound by name so the AssetController
+            // can read BLOBs out of `media_assets.payload` for the
+            // `/api/v1/assets/<uuid>` URL without going through the
+            // AssetStore composite.
+            DatabaseAssetStore::class => static function (ContainerInterface $c): DatabaseAssetStore {
+                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 50 * 1024 * 1024);
+                return new DatabaseAssetStore($max);
             },
 
             // MediaArchive service stack — see app/Services/MediaArchive.

@@ -114,15 +114,20 @@ test('LocalAssetStore writes a file and returns a local URL', function (): void 
     }
 });
 
-test('LocalAssetStore::resolve() returns path+mime for a valid token', function (): void {
+test('LocalAssetStore::readFromAsset() looks up the file via the row asset_token', function (): void {
     [$store, $dir, $restore] = buildLocalStore();
     try {
         $ref = $store->store('payload', mime: 'audio/mpeg', filename: 'speech.mp3');
+        expect($ref->token)->not->toBeNull();
 
-        $filename = basename($ref->url);
-        $resolved = $store->resolve($filename);
+        $asset = new \Spora\Models\MediaAsset();
+        $asset->id           = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+        $asset->asset_url    = '/api/v1/assets/' . $asset->id;
+        $asset->asset_token  = $ref->token;
+        $asset->mime_type    = 'audio/mpeg';
+        $asset->storage_mode = 'local';
 
-        expect($resolved)->not->toBeNull();
+        $resolved = $store->readFromAsset($asset);
         expect($resolved['mime'])->toBe('audio/mpeg');
         expect(file_get_contents($resolved['path']))->toBe('payload');
     } finally {

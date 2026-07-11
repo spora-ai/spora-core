@@ -13,12 +13,27 @@ use Spora\Core\Paths;
 use Spora\Core\Router;
 use Spora\Core\SecurityManager;
 use Spora\Http\AssetController;
+use Spora\Services\AutoAssetStore;
+use Spora\Services\DatabaseAssetStore;
+use Spora\Services\DataUrlAssetStore;
 use Spora\Services\LocalAssetStore;
+use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
+use Spora\Services\MediaArchive\MetadataExtractor;
+use Spora\Services\MediaArchive\MimeSniffer;
+use Spora\Services\MediaArchive\RemoteMediaFetcher;
+use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
  * End-to-end: build a fresh LocalAssetStore in a tmp dir, register the
  * asset route on a router, dispatch requests, and assert on the response.
+ *
+ * After the opaque-URL refactor, the chat bubble holds `/api/v1/assets/<uuid>`,
+ * the controller resolves by UUID via MediaArchiveService::find(), and the
+ * on-disk file is found via the row's `asset_token`. Tests below ingest
+ * real bytes through the service (which writes the row + file), then GET
+ * the opaque URL the chat would actually emit.
  */
 function assetTestSetup(): array
 {
@@ -33,13 +48,34 @@ function assetTestSetup(): array
     $_ENV['SPORA_STORAGE_DIR']    = $tmp;
     $_SERVER['SPORA_STORAGE_DIR'] = $tmp;
 
-    $paths = new Paths(BASE_PATH);
+    $paths   = new Paths(BASE_PATH);
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $store    = new LocalAssetStore($paths, $security);
+    $local    = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
+    $database = new DatabaseAssetStore(50 * 1024 * 1024);
+    $assetStore = new AutoAssetStore($database, $local, 1_048_576);
+
+    $sniffer = new MimeSniffer();
+    $logger  = new \Psr\Log\NullLogger();
+    $archive = new MediaArchiveService(
+        $assetStore,
+        new MediaArchiveUrlResolver(
+            new RemoteMediaFetcher(HttpClient::create(), $logger, 30, 100 * 1024 * 1024),
+            $sniffer,
+            $logger,
+            true,
+            100 * 1024 * 1024,
+        ),
+        $sniffer,
+        new MetadataExtractor($logger, false),
+    );
+
+    $controller = new AssetController($archive, $database, $local);
 
     $container = (new ContainerBuilder())->build();
-    $container->set(LocalAssetStore::class, $store);
-    $container->set(AssetController::class, new AssetController($store));
+    $container->set(LocalAssetStore::class, $local);
+    $container->set(DatabaseAssetStore::class, $database);
+    $container->set(MediaArchiveService::class, $archive);
+    $container->set(AssetController::class, $controller);
 
     $router = new Router($container, static function (MiddlewareRouteCollector $r): void {
         $r->addRoute('GET', '/api/v1/assets/{filename}', [AssetController::class, 'show'], []);
@@ -56,7 +92,7 @@ function assetTestSetup(): array
         }
     };
 
-    return [$router, $store, $tmp, $restore];
+    return [$router, $archive, $tmp, $restore];
 }
 
 function assetTestTeardown(string $tmp): void
@@ -74,34 +110,48 @@ function assetTestTeardown(string $tmp): void
     @rmdir($tmp);
 }
 
-test('GET /api/v1/assets/{filename} serves a file minted by LocalAssetStore', function (): void {
-    [$router, $store, $tmp, $restore] = assetTestSetup();
+test('GET /api/v1/assets/{uuid} serves an opaque-URL row from the MediaArchive', function (): void {
+    [$router, $archive, $tmp, $restore] = assetTestSetup();
 
     try {
-        $ref = $store->store('hello-world', mime: 'audio/mpeg', filename: 'speech.mp3');
-        $url = $ref->url;
-        $path = parse_url($url, PHP_URL_PATH);
-        expect($path)->toStartWith('/api/v1/assets/');
+        // Real ingest through the service: bytes → row + on-disk file.
+        // Use the PNG magic-byte header so the MimeSniffer returns
+        // 'image/png' (not the hinted 'audio/mpeg') and the controller's
+        // Content-Type header matches what the test asserts.
+        $png = "\x89PNG\r\n\x1a\n" . 'hello-world';
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            bytes: $png,
+            mime: 'image/png',
+            filename: 'test.png',
+        ));
+        expect($asset->asset_url)->toBe('/api/v1/assets/' . $asset->id);
 
-        $request = Request::create($path, 'GET');
+        $path = parse_url($asset->asset_url, PHP_URL_PATH);
+
+        $request  = Request::create($path, 'GET');
         $response = $router->dispatch($request);
 
         expect($response->getStatusCode())->toBe(200);
-        expect($response->headers->get('Content-Type'))->toBe('audio/mpeg');
-        // BinaryFileResponse::getContent() returns false unless sendContent()
-        // has been called; read the underlying file directly instead.
-        expect(file_get_contents($response->getFile()->getPathname()))->toBe('hello-world');
+        expect($response->headers->get('Content-Type'))->toBe('image/png');
+        // Bytes might be served as BinaryFileResponse (local mode) or
+        // StreamedResponse (DB mode, since the payload is < 1MiB and
+        // AutoAssetStore routes small payloads to the DB BLOB). Drain
+        // the response body either way.
+        ob_start();
+        $response->sendContent();
+        $body = ob_get_clean();
+        expect($body)->toBe($png);
     } finally {
         assetTestTeardown($tmp);
         $restore();
     }
 });
 
-test('GET /api/v1/assets/{filename} returns 404 for an unknown filename', function (): void {
+test('GET /api/v1/assets/{uuid} returns 404 for an unknown UUID', function (): void {
     [$router, , $tmp, $restore] = assetTestSetup();
 
     try {
-        $request = Request::create('/api/v1/assets/does-not-exist.mp3', 'GET');
+        $request = Request::create('/api/v1/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'GET');
         $response = $router->dispatch($request);
 
         expect($response->getStatusCode())->toBe(404);
@@ -111,13 +161,15 @@ test('GET /api/v1/assets/{filename} returns 404 for an unknown filename', functi
     }
 });
 
-test('GET /api/v1/assets/{filename} returns 404 for a forged token', function (): void {
+test('GET /api/v1/assets/{filename} returns 404 for a forged HMAC token (legacy fallback)', function (): void {
     [$router, , $tmp, $restore] = assetTestSetup();
     $assetsDir = $tmp . '/assets';
 
     try {
-        // Plant a file with a syntactically-valid-but-bogus token; the HMAC
-        // check must reject it.
+        // Plant a file with a syntactically-valid-but-bogus legacy HMAC
+        // token; the controller's fallback path must reject it. The legacy
+        // `<hmac-32hex>.<random-16hex>.<ext>` form is no longer minted
+        // post-refactor, but pre-refactor rows continue to be served.
         @mkdir($assetsDir, 0755, recursive: true);
         $forgedToken = str_repeat('a', 32) . '.' . str_repeat('b', 16);
         file_put_contents($assetsDir . "/{$forgedToken}.mp3", 'forged');
@@ -132,14 +184,19 @@ test('GET /api/v1/assets/{filename} returns 404 for a forged token', function ()
     }
 });
 
-test('GET /api/v1/assets/{filename} sends a Cache-Control header', function (): void {
-    [$router, $store, $tmp, $restore] = assetTestSetup();
+test('GET /api/v1/assets/{uuid} sends a Cache-Control header', function (): void {
+    [$router, $archive, $tmp, $restore] = assetTestSetup();
 
     try {
-        $ref = $store->store('x', mime: 'audio/mpeg', filename: 'speech.mp3');
-        $path = parse_url($ref->url, PHP_URL_PATH);
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            bytes: 'x',
+            mime: 'audio/mpeg',
+            filename: 'speech.mp3',
+        ));
 
-        $request = Request::create($path, 'GET');
+        $path = parse_url($asset->asset_url, PHP_URL_PATH);
+
+        $request  = Request::create($path, 'GET');
         $response = $router->dispatch($request);
 
         expect($response->headers->get('Cache-Control'))->toContain('max-age');

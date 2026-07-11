@@ -24,6 +24,7 @@ use Spora\Plugins\PluginLoader;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\ScrubDataUrls;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
@@ -208,7 +209,7 @@ final class Orchestrator implements OrchestratorInterface
                 $this->appendHistory(
                     taskId: $task->id,
                     role: 'tool',
-                    content: "Action rejected by user: {$reason}",
+                    content: ScrubDataUrls::scrub("Action rejected by user: {$reason}"),
                     context: new HistoryMessageContext(
                         toolCallId: $model->provider_call_id,
                         toolName: $model->tool_name,
