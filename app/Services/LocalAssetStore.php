@@ -10,19 +10,12 @@ use Spora\Models\MediaAsset;
 
 /**
  * Disk-backed {@see AssetStore}. Writes the payload to
- * `<storage>/assets/<asset_token>.<ext>`.
+ * `<storage>/assets/<asset_token>.<ext>`; the row's `asset_token` (32 hex
+ * chars of random bytes) is what {@see self::readFromAsset()} looks up.
  *
- * New rows store `asset_token` (32 hex chars of random bytes) on the row
- * itself; {@see self::readFromAsset()} looks up the file from that
- * column. The pre-refactor HMAC-token scheme ({@see self::resolve()})
- * is kept intact so legacy rows whose URL was returned to the LLM
- * before the migration continue to serve until they age out.
- *
- * Pros: stable URLs that survive message history; multi-megabyte payloads
- *       don't bloat the chat HTML; no auth middleware required on the
- *       serving route (cookies still attach for same-origin requests).
- * Cons: depends on the storage directory being writable; on disk space
- *       and on inode limits for high-volume agents.
+ * The pre-refactor {@see self::resolve()} HMAC-token scheme is kept for
+ * legacy rows whose URL was returned to the LLM before the migration
+ * — those keep serving until they age out.
  */
 final class LocalAssetStore implements AssetStore
 {
@@ -68,26 +61,18 @@ final class LocalAssetStore implements AssetStore
         if (! is_dir($dir) && ! @mkdir($dir, 0755, recursive: true) && ! is_dir($dir)) {
             throw new AssetStorageException("Failed to create asset directory: {$dir}");
         }
-        // World-readable is fine: the URL is unguessable. PHP-FPM and the
-        // web server may run as different users; 0700 would break that.
-        chmod($dir, 0755); // NOSONAR — intentional; see docblock above.
+        // World-readable: PHP-FPM and the web server may run as different
+        // users; 0700 would break that. Authorization is the unguessable
+        // URL filename, not filesystem perms.
+        chmod($dir, 0755); // NOSONAR
 
-        // 32-hex-char token. Stored as `asset_token` on the row by
-        // {@see \Spora\Services\MediaArchive\MediaArchiveService::insertNew()}
-        // so {@see self::readFromAsset()} can find the file from a UUID
-        // lookup. The URL MediaArchiveService persists is the opaque
-        // `/api/v1/assets/<uuid>` form — this `$token` is filesystem-only.
         $token = bin2hex(random_bytes(16));
         $path  = $dir . '/' . $token . '.' . $ext;
 
         if (file_put_contents($path, $bytes, LOCK_EX) === false) {
             throw new AssetStorageException("Failed to write asset to {$path}");
         }
-        // World-readable is intentional: authorization for these files
-        // is the unguessable URL filename, not filesystem perms. PHP-FPM
-        // and the web server may run as different users; 0644 lets both
-        // read.
-        chmod($path, 0644); // NOSONAR — intentional; see docblock above.
+        chmod($path, 0644); // NOSONAR
 
         return new AssetReference(
             url: '/api/v1/assets/' . $token . '.' . $ext,

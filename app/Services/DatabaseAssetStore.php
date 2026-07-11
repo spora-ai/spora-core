@@ -7,17 +7,15 @@ namespace Spora\Services;
 use Spora\Models\MediaAsset;
 
 /**
- * Database-backed {@see AssetStore}. The `store()` step is just a size
- * validation — the actual BLOB write is performed by
+ * DB-backed {@see AssetStore}. The `store()` call validates size only;
+ * the actual BLOB write happens later via
  * {@see MediaArchive\MediaArchiveService::writePayloadToAsset()}
- * once the row has its UUID, so the opaque `/api/v1/assets/<uuid>` URL
- * can be set on the row before the payload lands (a concurrent reader
- * never sees a half-loaded state).
+ * after the row UUID is allocated, so the opaque URL is in place before
+ * the payload lands and a concurrent reader never sees a half-loaded row.
  *
- * The 50 MiB default is a ceiling for the DB path; MySQL/MariaDB's stock
- * BLOB is 64 KiB, so {@see AutoAssetStore} routes larger payloads to
- * {@see LocalAssetStore} instead. SQLite has no intrinsic cap, so this
- * limit is a soft defense against runaway tool output, not a hard driver.
+ * 50 MiB default is the practical DB ceiling — MySQL/MariaDB's stock BLOB
+ * is 64 KiB; payloads above the threshold are routed to
+ * {@see LocalAssetStore} by {@see AutoAssetStore}.
  */
 final class DatabaseAssetStore implements AssetStore
 {
@@ -37,15 +35,14 @@ final class DatabaseAssetStore implements AssetStore
             ));
         }
 
-        // Advisory only — MediaArchiveService overwrites this with
-        // `/api/v1/assets/<uuid>` so the URL is always opaque.
+        // URL is advisory — MediaArchiveService overrides it with the
+        // opaque /api/v1/assets/<uuid> form on persist.
         return new AssetReference(url: '', mode: 'data_url');
     }
 
     /**
-     * Read raw bytes back from a {@see MediaAsset} row. Throws if the
-     * payload is missing (legacy external rows or pre-refactor rows whose
-     * DB write failed mid-migration).
+     * @throws AssetStorageException when the row has no payload (legacy
+     *         external rows or pre-refactor rows whose BLOB write failed).
      *
      * @return array{bytes: string, mime: string, length: int, filename: ?string}
      */

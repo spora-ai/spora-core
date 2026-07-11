@@ -15,51 +15,32 @@ use Spora\Services\AssetStore;
 use Spora\Services\AssetTooLargeException;
 
 /**
- * The single entry point for ingesting, listing, and deleting archived
- * media. Plugins opt in explicitly via {@see MediaIngestRequest}.
+ * Single entry point for ingesting, listing, and deleting archived media.
+ * Plugins opt in via {@see MediaIngestRequest}.
  *
- * **Ingest pipeline (URL is primary):**
+ * Ingest pipeline (URL form): HEAD probe → (optional) GET with timeout
+ * → {@see AssetStore::store()} → MIME sniff → metadata extract
+ * (`getimagesize`, optional `ffprobe`) → persist. Idempotent on
+ * `(tool_call_id, asset_url)`. Bytes / hex / base64 inputs skip the URL
+ * branch and feed straight into the byte-processing steps.
  *
- *  1. Probe `Content-Type` / `Content-Length` via HEAD.
- *  2. If `media_archive.max_promote_bytes` would be exceeded, or
- *     `promote_external = false`, store the row as `external`
- *     (the URL becomes `asset_url`; no bytes are fetched).
- *  3. Otherwise GET the body with a configurable timeout and stream
- *     it through {@see AssetStore::store()}.
- *  4. Sniff MIME from the bytes (`finfo` + magic-byte table). The sniff
- *     wins over the caller's hint.
- *  5. Derive image dimensions via `getimagesize()`. Best-effort
- *     `ffprobe` for audio/video (gated on
- *     `media_archive.ffprobe_enabled` + binary on PATH).
- *  6. Persist the row. Idempotent on `(tool_call_id, asset_url)`.
+ * Failures: `hex` / `base64` decode → {@see InvalidArgumentException}.
+ * URL fetch non-2xx / oversized / transport → translated to `external`
+ * mode with the original URL preserved, so the row still exists when
+ * the CDN goes away. AssetStore refusal after local-mode decision →
+ * {@see MediaArchiveException} (fatal — the operator asked us to keep
+ * the bytes, so a soft downgrade isn't safe).
  *
- * For the `bytes` / `hex` / `base64` input forms, the URL branch is
- * skipped — the bytes are processed the same way from step 3 onwards.
- *
- * **Failure modes:**
- *
- *  - `hex` / `base64` decode failure → {@see InvalidArgumentException}.
- *  - URL fetch non-2xx, oversized body, transport failure →
- *    {@see RemoteMediaFetchException}; the service translates this to
- *    `external` mode with the original URL preserved, so the row still
- *    has *some* record even when the CDN goes away. Operators can retry
- *    ingest later if needed.
- *  - {@see AssetStore} refusal after a local-mode decision →
- *    {@see MediaArchiveException} (fatal — see class doc for rationale).
- *
- * The URL branch (steps 1-2 and the external-row MIME sniff) lives in
- * {@see MediaArchiveUrlResolver} so this orchestrator stays under the
- * 20-method Sonar threshold.
+ * The URL branch lives in {@see MediaArchiveUrlResolver} so this
+ * orchestrator stays under the 20-method Sonar threshold.
  *
  * Not declared `final` because Mockery needs to construct a named mock
- * for HTTP-handler tests (e.g. {@see \Tests\Feature\AssetControllerTest}).
- * Subclassing is still discouraged — instantiate via PHP-DI.
+ * for HTTP-handler tests; subclassing is still discouraged — instantiate
+ * via PHP-DI.
  */
 class MediaArchiveService
 {
-    /** Prefix used by every persisted `asset_url`. Chat bubbles and LLM
-     *  context always see `<prefix><uuid>` regardless of underlying mode.
-     */
+    /** Prefix used by every persisted `asset_url`. */
     public const OPAQUE_ASSET_URL_PREFIX = '/api/v1/assets/';
 
     public function __construct(
@@ -208,8 +189,8 @@ class MediaArchiveService
         $mediaType = $request->mediaType ?? MediaType::fromMime($sniffed);
         $extracted = $this->metadata->extract($bytes, $sniffed, $mediaType);
 
-        // `getimagesize` can correct the sniffed MIME; trust that when
-        // the caller labelled the asset as an image.
+        // `getimagesize` can correct the sniffed MIME when the caller labelled
+        // the asset as an image — prefer it over `finfo`'s guess.
         $finalMime = $extracted->mime !== null && $extracted->mime !== '' ? $extracted->mime : $sniffed;
 
         $reference = $this->storeAsset($bytes, $finalMime, $request->filename);
@@ -230,10 +211,8 @@ class MediaArchiveService
             ),
         );
 
-        // DB mode: write BLOB now that the UUID exists. Local mode: the
-        // LocalAssetStore::store() call above already wrote to disk using
-        // its own token; nothing further to do. External mode: no bytes
-        // owned by us — fetch happens client-side at view time.
+        // DB mode needs the BLOB written now (Local mode already wrote to
+        // disk in `storeAsset()`; External mode owns no bytes).
         if ($reference->mode === 'data_url') {
             $this->writePayloadToAsset($asset, $bytes);
         }
