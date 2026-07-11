@@ -405,8 +405,9 @@ describe('MediaArchiveService::ingest idempotency', function (): void {
                 mime: 'image/png',
             ));
             // Two separate bytes ingests are NOT idempotent — the
-            // (tool_call_id, asset_url) unique index requires a
-            // tool_call_id. Without one, each call lands a fresh row.
+            // (tool_call_id, source_url) dedup key requires both fields,
+            // and bytes inputs have no `source_url` by definition.
+            // Without one, each call lands a fresh row.
             expect(MediaAsset::query()->count())->toBe(2);
         } finally {
             $ctx['restore']();
@@ -508,7 +509,7 @@ describe('MediaArchiveService::ingest idempotency without tool_call_id', functio
                 url: 'https://cdn.example/no-tool.png',
             ));
             // Two separate external rows — without a toolCallId the
-            // (tool_call_id, asset_url) key can't match, so each ingest
+            // (tool_call_id, source_url) key can't match, so each ingest
             // hits the insert path.
             expect(MediaAsset::query()->count())->toBe(2);
         } finally {
@@ -963,7 +964,7 @@ describe('MediaArchiveService::ingest URL branch — Content-Length absent', fun
     });
 });
 
-// ----- Bytes branch: idempotency on (tool_call_id, asset_url) ---------------
+// ----- Bytes branch: idempotency on (tool_call_id, source_url) ---------------
 
 describe('MediaArchiveService::ingest bytes branch — repeated bytes without toolCallId', function (): void {
     it('persists two separate rows when the same bytes are ingested without a toolCallId', function (): void {
@@ -981,6 +982,92 @@ describe('MediaArchiveService::ingest bytes branch — repeated bytes without to
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png'));
 
             expect(MediaAsset::query()->count())->toBe(2);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+});
+
+// ----- Dedup by (tool_call_id, source_url) post refactor --------------------
+
+describe('MediaArchiveService::ingest idempotency by source_url', function (): void {
+    it('returns the existing row when the same URL is re-ingested against the same toolCallId (matches by source_url)', function (): void {
+        // After the opaque-URL refactor, the dedup key is
+        // `(tool_call_id, source_url)` (migration 0054). The seeded row
+        // carries the rewritten `/api/v1/assets/<uuid>` form in
+        // `asset_url` but the upstream CDN URL in `source_url`. A
+        // re-ingest of the same upstream URL with the same toolCallId
+        // must still short-circuit to the existing row.
+        $userId = bootAuthLayer()->register('idem2@example.com', 'Password1!', 'Idem2');
+
+        $config = LLMDriverConfiguration::create([
+            'user_id'          => null,
+            'name'             => 'Idem2 Config',
+            'driver_class'     => \Spora\Drivers\OpenAICompatibleDriver::class,
+            'settings'         => json_encode(['api_key' => 'test']),
+            'is_global'        => true,
+            'is_default'       => true,
+            'context_window'   => 128000,
+            'max_tokens_output' => 4096,
+        ]);
+
+        $agent = Agent::create([
+            'user_id'              => $userId,
+            'name'                 => 'idem2-agent',
+            'llm_driver_config_id' => $config->id,
+            'max_steps'            => 10,
+            'is_active'            => true,
+        ]);
+        $task = Task::create([
+            'user_id'     => $userId,
+            'agent_id'    => $agent->id,
+            'status'      => 'RUNNING',
+            'user_prompt' => 'idem2 test',
+            'max_steps'   => 10,
+        ]);
+        $toolCall = ToolCall::create([
+            'task_id'             => $task->id,
+            'agent_id'            => $agent->id,
+            'provider_call_id'    => 'call_idem2',
+            'tool_name'           => 'idem2_tool',
+            'tool_class'          => 'Idem2Tool',
+            'tool_type'           => 'function',
+            'operation'           => 'do',
+            'operation_description' => 'do',
+            'proposed_arguments'  => ['x' => 1],
+            'status'              => 'EXECUTED',
+        ]);
+
+        $ctx = makeMediaArchiveService(['promoteExternal' => false]);
+        try {
+            // Seed a row in the post-refactor shape: source_url is the
+            // upstream CDN URL the operator asked us to archive, asset_url
+            // is the rewritten opaque form.
+            $existing = MediaAsset::create([
+                'id'                       => '22222222-3333-4444-5555-666666666666',
+                'asset_url'                => '/api/v1/assets/22222222-3333-4444-5555-666666666666.png',
+                'source_url'               => 'https://cdn.example/idem2.png',
+                'storage_mode'             => 'external',
+                'mime_type'                => 'image/png',
+                'media_type'               => 'image',
+                'byte_size'                => 1024,
+                'tool_call_id'             => $toolCall->id,
+                'agent_id'                 => $agent->id,
+                'task_id'                  => $task->id,
+                'asset_token'              => str_repeat('b', 32),
+                'migrated_from_inline_data_url' => false,
+            ]);
+
+            $second = $ctx['service']->ingest(new MediaIngestRequest(
+                url: 'https://cdn.example/idem2.png',
+                toolCallId: $toolCall->id,
+            ));
+
+            // The short-circuit must hit on `source_url` (the new dedup
+            // key), even though `asset_url` no longer matches the URL
+            // the caller passed.
+            expect($second->id)->toBe($existing->id);
+            expect(MediaAsset::query()->where('tool_call_id', $toolCall->id)->count())->toBe(1);
         } finally {
             $ctx['restore']();
         }

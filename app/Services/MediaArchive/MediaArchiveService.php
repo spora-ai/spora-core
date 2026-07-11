@@ -21,8 +21,10 @@ use Spora\Services\AssetTooLargeException;
  * Ingest pipeline (URL form): HEAD probe → (optional) GET with timeout
  * → {@see AssetStore::store()} → MIME sniff → metadata extract
  * (`getimagesize`, optional `ffprobe`) → persist. Idempotent on
- * `(tool_call_id, asset_url)`. Bytes / hex / base64 inputs skip the URL
- * branch and feed straight into the byte-processing steps.
+ * `(tool_call_id, source_url)` — the upstream CDN URL the operator
+ * supplied, with a legacy `asset_url` fallback for rows predating the
+ * opaque-URL refactor (migration 0053). Bytes / hex / base64 inputs
+ * skip the URL branch and feed straight into the byte-processing steps.
  *
  * Failures: `hex` / `base64` decode → {@see InvalidArgumentException}.
  * URL fetch non-2xx / oversized / transport → translated to `external`
@@ -85,7 +87,8 @@ class MediaArchiveService
 
     /**
      * Ingest a single asset. Returns the persisted row (existing row
-     * returned unchanged when `(tool_call_id, asset_url)` already exists).
+     * returned unchanged when a row with the same `tool_call_id` and
+     * `source_url` already exists).
      *
      * @throws InvalidArgumentException When `hex`/`base64` decoding fails.
      */
@@ -331,11 +334,14 @@ class MediaArchiveService
 
     private function persist(MediaIngestRequest $request, PersistedAssetFields $fields): MediaAsset
     {
-        // Idempotent upsert keyed on (tool_call_id, asset_url) — when the
-        // unique index matches, update the mutable fields instead of
-        // inserting a duplicate.
-        if ($request->toolCallId !== null) {
-            $existing = $this->findExisting($request->toolCallId, $fields->assetUrl);
+        // Idempotent upsert keyed on `(tool_call_id, source_url)` (with a
+        // legacy `asset_url` fallback inside {@see findExisting()}) — when
+        // the lookup hits, update the mutable fields instead of inserting
+        // a duplicate. The dedup key is the upstream CDN URL the caller
+        // asked us to archive, not the opaque `/api/v1/assets/<uuid>`
+        // form we rewrite at insert time.
+        if ($request->toolCallId !== null && $fields->sourceUrl !== null) {
+            $existing = $this->findExisting($request->toolCallId, $fields->sourceUrl);
             if ($existing !== null) {
                 $this->applyFieldsToExisting($existing, $fields);
                 return $existing;
@@ -345,12 +351,25 @@ class MediaArchiveService
         return $this->insertNew($request, $fields);
     }
 
-    private function findExisting(int $toolCallId, string $assetUrl): ?MediaAsset
+    private function findExisting(int $toolCallId, string $sourceUrl): ?MediaAsset
     {
+        // Idempotent re-ingest: the canonical dedup key is
+        // `(tool_call_id, source_url)` after asset_url was rewritten to
+        // the opaque UUID form (see migration 0054's index). For rows
+        // that predate the refactor — where `asset_url` still holds the
+        // upstream URL — fall back to that lookup so a partial
+        // deployment doesn't break dedup for legacy rows.
         $row = MediaAsset::query()
             ->where('tool_call_id', $toolCallId)
-            ->where('asset_url', $assetUrl)
+            ->where('source_url', $sourceUrl)
             ->first();
+
+        if ($row === null) {
+            $row = MediaAsset::query()
+                ->where('tool_call_id', $toolCallId)
+                ->where('asset_url', $sourceUrl)
+                ->first();
+        }
 
         // Defense-in-depth: rows that predate the
         // `migrated_from_inline_data_url` column add (or that snuck
