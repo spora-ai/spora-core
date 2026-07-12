@@ -23,5 +23,6 @@ final class PersistedAssetFields
         public ?int $width,
         public ?int $height,
         public ?float $durationSeconds,
+        public ?string $token = null,
     ) {}
 }

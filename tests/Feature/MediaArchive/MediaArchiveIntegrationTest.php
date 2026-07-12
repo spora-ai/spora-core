@@ -175,11 +175,12 @@ test('media archive: full pipeline from URL ingest → REST → CLI orphan sweep
         expect($first->mime_type)->toBe('image/png');
         expect($first->media_type)->toBe('image');
         expect($first->byte_size)->toBe(strlen($png));
-        // The asset_url points at the local-mode path; the actual file
-        // must exist on disk under SPORA_STORAGE_DIR/assets/.
+        // Asset URL is always the opaque `/api/v1/assets/<uuid>` form
+        // after fix/opaque-asset-urls. The on-disk file lives at
+        // `<storage>/assets/<asset_token>.<ext>` — looked up by the
+        // row's `asset_token` column rather than parsed from the URL.
         expect($first->asset_url)->toStartWith('/api/v1/assets/');
-        $assetFilename = basename(parse_url($first->asset_url, PHP_URL_PATH) ?? '');
-        expect(is_file($ctx['tmp'] . '/assets/' . $assetFilename))->toBeTrue();
+        expect(is_file($ctx['tmp'] . '/assets/' . $first->asset_token . '.png'))->toBeTrue();
 
         // ----- 3. List via service (filter by pluginSlug) ------------------
         $list = $service->list(new \Spora\Services\MediaArchive\ListMediaQuery(
@@ -225,7 +226,7 @@ test('media archive: full pipeline from URL ingest → REST → CLI orphan sweep
         // Local-mode destroy removes the row but leaves the on-disk file
         // — gc() is what sweeps orphans. That's the documented contract
         // (see MediaArchiveGcCommand docblock).
-        expect(is_file($ctx['tmp'] . '/assets/' . $assetFilename))->toBeTrue();
+        expect(is_file($ctx['tmp'] . '/assets/' . $first->asset_token . '.png'))->toBeTrue();
 
         // ----- 7. Ingest a second URL → fresh row -------------------------
         $second = $service->ingest(new MediaIngestRequest(
@@ -235,19 +236,21 @@ test('media archive: full pipeline from URL ingest → REST → CLI orphan sweep
         ));
         expect($second->mime_type)->toBe('image/jpeg');
         expect($second->media_type)->toBe(MediaType::Image->value);
-        $assetFilename2 = basename(parse_url($second->asset_url, PHP_URL_PATH) ?? '');
-        expect(is_file($ctx['tmp'] . '/assets/' . $assetFilename2))->toBeTrue();
+        expect(is_file($ctx['tmp'] . '/assets/' . $second->asset_token . '.jpg'))->toBeTrue();
 
         // ----- 8. Ingest an external-fallback URL (404 → external mode) -
         $external = $service->ingest(new MediaIngestRequest(
             url: 'https://cdn.example/missing.png',
         ));
         expect($external->storage_mode)->toBe('external');
-        expect($external->asset_url)->toBe('https://cdn.example/missing.png');
+        // The sniffed mime (image/png from the .png extension) appends .png
+        // to the opaque URL — browsers use the right filename on download.
+        expect($external->asset_url)->toBe('/api/v1/assets/' . $external->id . '.png');
+        expect($external->source_url)->toBe('https://cdn.example/missing.png');
 
         // ----- 9. Delete one on-disk file so gc() has an orphan --------
-        @unlink($ctx['tmp'] . '/assets/' . $assetFilename2);
-        expect(is_file($ctx['tmp'] . '/assets/' . $assetFilename2))->toBeFalse();
+        @unlink($ctx['tmp'] . '/assets/' . $second->asset_token . '.jpg');
+        expect(is_file($ctx['tmp'] . '/assets/' . $second->asset_token . '.jpg'))->toBeFalse();
 
         // ----- 10. Run media:gc via CLI ---------------------------------
         $tester = new CommandTester($ctx['gcCommand']);

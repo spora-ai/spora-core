@@ -15,44 +15,69 @@ use Spora\Services\AssetStore;
 use Spora\Services\AssetTooLargeException;
 
 /**
- * The single entry point for ingesting, listing, and deleting archived
- * media. Plugins opt in explicitly via {@see MediaIngestRequest}.
+ * Single entry point for ingesting, listing, and deleting archived media.
+ * Plugins opt in via {@see MediaIngestRequest}.
  *
- * **Ingest pipeline (URL is primary):**
+ * Ingest pipeline (URL form): HEAD probe → (optional) GET with timeout
+ * → {@see AssetStore::store()} → MIME sniff → metadata extract
+ * (`getimagesize`, optional `ffprobe`) → persist. Idempotent on
+ * `(tool_call_id, source_url)` — the upstream CDN URL the operator
+ * supplied, with a legacy `asset_url` fallback for rows predating the
+ * opaque-URL refactor (migration 0053). Bytes / hex / base64 inputs
+ * skip the URL branch and feed straight into the byte-processing steps.
  *
- *  1. Probe `Content-Type` / `Content-Length` via HEAD.
- *  2. If `media_archive.max_promote_bytes` would be exceeded, or
- *     `promote_external = false`, store the row as `external`
- *     (the URL becomes `asset_url`; no bytes are fetched).
- *  3. Otherwise GET the body with a configurable timeout and stream
- *     it through {@see AssetStore::store()}.
- *  4. Sniff MIME from the bytes (`finfo` + magic-byte table). The sniff
- *     wins over the caller's hint.
- *  5. Derive image dimensions via `getimagesize()`. Best-effort
- *     `ffprobe` for audio/video (gated on
- *     `media_archive.ffprobe_enabled` + binary on PATH).
- *  6. Persist the row. Idempotent on `(tool_call_id, asset_url)`.
+ * Failures: `hex` / `base64` decode → {@see InvalidArgumentException}.
+ * URL fetch non-2xx / oversized / transport → translated to `external`
+ * mode with the original URL preserved, so the row still exists when
+ * the CDN goes away. AssetStore refusal after local-mode decision →
+ * {@see MediaArchiveException} (fatal — the operator asked us to keep
+ * the bytes, so a soft downgrade isn't safe).
  *
- * For the `bytes` / `hex` / `base64` input forms, the URL branch is
- * skipped — the bytes are processed the same way from step 3 onwards.
+ * The URL branch lives in {@see MediaArchiveUrlResolver} so this
+ * orchestrator stays under the 20-method Sonar threshold.
  *
- * **Failure modes:**
- *
- *  - `hex` / `base64` decode failure → {@see InvalidArgumentException}.
- *  - URL fetch non-2xx, oversized body, transport failure →
- *    {@see RemoteMediaFetchException}; the service translates this to
- *    `external` mode with the original URL preserved, so the row still
- *    has *some* record even when the CDN goes away. Operators can retry
- *    ingest later if needed.
- *  - {@see AssetStore} refusal after a local-mode decision →
- *    {@see MediaArchiveException} (fatal — see class doc for rationale).
- *
- * The URL branch (steps 1-2 and the external-row MIME sniff) lives in
- * {@see MediaArchiveUrlResolver} so this orchestrator stays under the
- * 20-method Sonar threshold.
+ * Not declared `final` because Mockery needs to construct a named mock
+ * for HTTP-handler tests; subclassing is still discouraged — instantiate
+ * via PHP-DI.
  */
-final class MediaArchiveService
+class MediaArchiveService
 {
+    /** Prefix used by every persisted `asset_url`. */
+    public const OPAQUE_ASSET_URL_PREFIX = '/api/v1/assets/';
+
+    /**
+     * Map a MIME type to a file extension used in the public asset URL.
+     * Returns null for unknown / null mimes — caller omits the extension
+     * entirely rather than fabricating a guess that could mislead browsers.
+     */
+    public static function extensionForMime(?string $mime): ?string
+    {
+        if (!is_string($mime) || $mime === '') {
+            return null;
+        }
+        $map = [
+            'audio/mpeg'       => 'mp3',
+            'audio/mp3'        => 'mp3',
+            'audio/wav'        => 'wav',
+            'audio/x-wav'      => 'wav',
+            'audio/ogg'        => 'ogg',
+            'audio/mp4'        => 'm4a',
+            'audio/x-m4a'      => 'm4a',
+            'audio/flac'       => 'flac',
+            'video/mp4'        => 'mp4',
+            'video/webm'       => 'webm',
+            'video/quicktime'  => 'mov',
+            'image/jpeg'       => 'jpg',
+            'image/png'        => 'png',
+            'image/gif'        => 'gif',
+            'image/webp'       => 'webp',
+            'image/svg+xml'    => 'svg',
+            'application/pdf'  => 'pdf',
+            'text/plain'       => 'txt',
+        ];
+        return $map[strtolower($mime)] ?? null;
+    }
+
     public function __construct(
         private readonly AssetStore $assetStore,
         private readonly MediaArchiveUrlResolver $urlResolver,
@@ -62,7 +87,8 @@ final class MediaArchiveService
 
     /**
      * Ingest a single asset. Returns the persisted row (existing row
-     * returned unchanged when `(tool_call_id, asset_url)` already exists).
+     * returned unchanged when a row with the same `tool_call_id` and
+     * `source_url` already exists).
      *
      * @throws InvalidArgumentException When `hex`/`base64` decoding fails.
      */
@@ -188,7 +214,10 @@ final class MediaArchiveService
     /**
      * Shared bytes-to-row pipeline used by every ingest input form once
      * the bytes are in hand. Sniffs MIME, extracts metadata, stores via
-     * AssetStore, and persists the row.
+     * AssetStore, persists the row, and finally writes the payload
+     * (DB BLOB or no-op for local) once the UUID is known — so the
+     * opaque URL is in place before any bytes land and concurrent
+     * readers never see a half-loaded row.
      */
     private function ingestFromBytes(MediaIngestRequest $request, string $bytes, ?string $sourceUrl): MediaAsset
     {
@@ -196,13 +225,13 @@ final class MediaArchiveService
         $mediaType = $request->mediaType ?? MediaType::fromMime($sniffed);
         $extracted = $this->metadata->extract($bytes, $sniffed, $mediaType);
 
-        // `getimagesize` can correct the sniffed MIME; trust that when
-        // the caller labelled the asset as an image.
+        // `getimagesize` can correct the sniffed MIME when the caller labelled
+        // the asset as an image — prefer it over `finfo`'s guess.
         $finalMime = $extracted->mime !== null && $extracted->mime !== '' ? $extracted->mime : $sniffed;
 
         $reference = $this->storeAsset($bytes, $finalMime, $request->filename);
 
-        return $this->persist(
+        $asset = $this->persist(
             $request,
             new PersistedAssetFields(
                 assetUrl: $reference->url,
@@ -214,8 +243,31 @@ final class MediaArchiveService
                 width: $extracted->width ?? $request->width,
                 height: $extracted->height ?? $request->height,
                 durationSeconds: $extracted->durationSeconds ?? $request->durationSeconds,
+                token: $reference->token,
             ),
         );
+
+        // DB mode needs the BLOB written now (Local mode already wrote to
+        // disk in `storeAsset()`; External mode owns no bytes).
+        if ($reference->mode === 'data_url') {
+            $this->writePayloadToAsset($asset, $bytes);
+        }
+
+        return $asset;
+    }
+
+    /**
+     * Persist the raw payload bytes to a {@see MediaAsset} row's `payload`
+     * BLOB column. Called from {@see self::ingestFromBytes()} for DB-mode
+     * rows AFTER the row UUID is allocated, so the public
+     * `/api/v1/assets/<uuid>` URL is already in place when the bytes land.
+     * A concurrent reader can therefore never see a row with a URL that
+     * resolves to an empty/corrupt payload.
+     */
+    public function writePayloadToAsset(MediaAsset $asset, string $bytes): void
+    {
+        $asset->payload = $bytes;
+        $asset->save();
     }
 
     /**
@@ -282,11 +334,14 @@ final class MediaArchiveService
 
     private function persist(MediaIngestRequest $request, PersistedAssetFields $fields): MediaAsset
     {
-        // Idempotent upsert keyed on (tool_call_id, asset_url) — when the
-        // unique index matches, update the mutable fields instead of
-        // inserting a duplicate.
-        if ($request->toolCallId !== null) {
-            $existing = $this->findExisting($request->toolCallId, $fields->assetUrl);
+        // Idempotent upsert keyed on `(tool_call_id, source_url)` (with a
+        // legacy `asset_url` fallback inside {@see findExisting()}) — when
+        // the lookup hits, update the mutable fields instead of inserting
+        // a duplicate. The dedup key is the upstream CDN URL the caller
+        // asked us to archive, not the opaque `/api/v1/assets/<uuid>`
+        // form we rewrite at insert time.
+        if ($request->toolCallId !== null && $fields->sourceUrl !== null) {
+            $existing = $this->findExisting($request->toolCallId, $fields->sourceUrl);
             if ($existing !== null) {
                 $this->applyFieldsToExisting($existing, $fields);
                 return $existing;
@@ -296,12 +351,37 @@ final class MediaArchiveService
         return $this->insertNew($request, $fields);
     }
 
-    private function findExisting(int $toolCallId, string $assetUrl): ?MediaAsset
+    private function findExisting(int $toolCallId, string $sourceUrl): ?MediaAsset
     {
-        return MediaAsset::query()
+        // Idempotent re-ingest: the canonical dedup key is
+        // `(tool_call_id, source_url)` after asset_url was rewritten to
+        // the opaque UUID form (see migration 0054's index). For rows
+        // that predate the refactor — where `asset_url` still holds the
+        // upstream URL — fall back to that lookup so a partial
+        // deployment doesn't break dedup for legacy rows.
+        $row = MediaAsset::query()
             ->where('tool_call_id', $toolCallId)
-            ->where('asset_url', $assetUrl)
+            ->where('source_url', $sourceUrl)
             ->first();
+
+        if ($row === null) {
+            $row = MediaAsset::query()
+                ->where('tool_call_id', $toolCallId)
+                ->where('asset_url', $sourceUrl)
+                ->first();
+        }
+
+        // Defense-in-depth: rows that predate the
+        // `migrated_from_inline_data_url` column add (or that snuck
+        // in via a DB whose migration only partially applied) can
+        // land here with `asset_token` still NULL. Allocate one so
+        // `/api/v1/assets/<uuid>` always resolves to a file.
+        if ($row !== null && ($row->asset_token === null || $row->asset_token === '')) {
+            $row->asset_token = bin2hex(random_bytes(16));
+            $row->save();
+        }
+
+        return $row;
     }
 
     private function applyFieldsToExisting(MediaAsset $existing, PersistedAssetFields $fields): void
@@ -314,6 +394,7 @@ final class MediaArchiveService
             'height' => $fields->height,
             'duration_seconds' => $fields->durationSeconds,
             'storage_mode' => $fields->storageMode,
+            'asset_token' => $fields->token ?? $existing->asset_token,
         ]);
         $existing->save();
     }
@@ -336,9 +417,25 @@ final class MediaArchiveService
         $asset->prompt = $request->prompt;
         $asset->tags = $request->tags;
         $asset->metadata = $request->metadata;
-        $asset->asset_url = $fields->assetUrl;
+        // Asset URL is always an opaque `/api/v1/assets/<uuid>` form. The
+        // `$fields->assetUrl` from the resolver is internal routing
+        // metadata (e.g., the upstream CDN URL for external mode, or the
+        // pre-refactor token URL); we override it here so chat bubbles
+        // and LLM context always see a short URL. The extension is
+        // appended when the sniffed mime maps to a known type, so
+        // browsers use the right filename on download.
+        $ext  = self::extensionForMime($fields->sniffedMime);
+        $asset->asset_url = self::OPAQUE_ASSET_URL_PREFIX . $asset->id . ($ext !== null ? '.' . $ext : '');
         $asset->source_url = $fields->sourceUrl;
         $asset->storage_mode = $fields->storageMode;
+        // `asset_token` ties the row to its on-disk file (local mode) or
+        // is just an opaque correlation id (DB mode). `LocalAssetStore`
+        // mints a 32-hex token as the on-disk filename; we reuse that
+        // token verbatim so `LocalAssetStore::readFromAsset()` can find
+        // the file from a UUID lookup. DB-mode rows get a freshly
+        // generated token; it's not load-bearing but keeps the unique
+        // index uniform.
+        $asset->asset_token = $fields->token ?? bin2hex(random_bytes(16));
         $asset->save();
 
         return $asset;

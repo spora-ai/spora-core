@@ -52,9 +52,13 @@ final class RouteDefinitions
         $r->addRoute('GET', '/health', [HealthController::class, 'check'], []);
         $r->addRoute('GET', '/api/v1/config', [ConfigController::class, 'index'], []);
 
-        // Asset serving — public, no middleware. The HMAC token in the URL
-        // is the only authorization (S3-presigned-URL pattern).
-        $r->addRoute('GET', '/api/v1/assets/{filename}', [AssetController::class, 'show'], []);
+        // Asset serving — authenticated; the controller enforces ownership
+        // (asset.task.user_id == currentUserId, with admin bypass). The
+        // URL is no longer the authorization token because the new
+        // opaque-URL form (`/api/v1/assets/<uuid>`) uses the row's
+        // primary key as the URL component, so anyone with the URL
+        // could otherwise fetch the bytes.
+        $r->addRoute('GET', '/api/v1/assets/{filename}', [AssetController::class, 'show'], [AuthMiddleware::class]);
         $r->addRoute('GET', '/api/v1/apps', [AppsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/plugins', [PluginsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         // Plugin catalog (Packagist browse) — Auth only. Read-only, so no Csrf.

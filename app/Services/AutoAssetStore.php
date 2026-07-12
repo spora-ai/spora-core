@@ -17,7 +17,7 @@ namespace Spora\Services;
 final class AutoAssetStore implements AssetStore
 {
     public function __construct(
-        private readonly DataUrlAssetStore $dataUrl,
+        private readonly AssetStore $dataUrl,
         private readonly LocalAssetStore $local,
         private readonly int $thresholdBytes,
     ) {}

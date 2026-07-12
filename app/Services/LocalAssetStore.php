@@ -6,25 +6,16 @@ namespace Spora\Services;
 
 use Spora\Core\Paths;
 use Spora\Core\SecurityManagerInterface;
+use Spora\Models\MediaAsset;
 
 /**
  * Disk-backed {@see AssetStore}. Writes the payload to
- * `<storage>/assets/<token>.<ext>` and returns a URL pointing at
- * `GET /api/v1/assets/<token>.<ext>`.
+ * `<storage>/assets/<asset_token>.<ext>`; the row's `asset_token` (32 hex
+ * chars of random bytes) is what {@see self::readFromAsset()} looks up.
  *
- * Authorization is the URL itself: tokens are HMAC-SHA256 over
- * `<ext>|<YYYYMMDD>` truncated to 32 hex chars, signed with the master
- * key from {@see SecurityManagerInterface::masterKey()}. The day stamp
- * means a token from yesterday stops working — no separate token table,
- * no DB lookup. Files become unrecoverable after the day rolls over; a
- * separate {@see \Spora\Console\Commands\AssetGcCommand} sweeps the
- * orphaned bytes lazily.
- *
- * Pros: stable URLs that survive message history; multi-megabyte payloads
- *       don't bloat the chat HTML; no auth middleware required on the
- *       serving route (cookies still attach for same-origin requests).
- * Cons: depends on the storage directory being writable and on
- *       {@see SecurityManagerInterface} being available.
+ * The pre-refactor {@see self::resolve()} HMAC-token scheme is kept for
+ * legacy rows whose URL was returned to the LLM before the migration
+ * — those keep serving until they age out.
  */
 final class LocalAssetStore implements AssetStore
 {
@@ -70,20 +61,18 @@ final class LocalAssetStore implements AssetStore
         if (! is_dir($dir) && ! @mkdir($dir, 0755, recursive: true) && ! is_dir($dir)) {
             throw new AssetStorageException("Failed to create asset directory: {$dir}");
         }
-        // World-readable is fine: the URL is unguessable. PHP-FPM and the
-        // web server may run as different users; 0700 would break that.
-        chmod($dir, 0755); // NOSONAR — intentional; see docblock above.
+        // World-readable: PHP-FPM and the web server may run as different
+        // users; 0700 would break that. Authorization is the unguessable
+        // URL filename, not filesystem perms.
+        chmod($dir, 0755); // NOSONAR
 
-        $token = $this->mintToken($ext);
+        $token = bin2hex(random_bytes(16));
         $path  = $dir . '/' . $token . '.' . $ext;
 
         if (file_put_contents($path, $bytes, LOCK_EX) === false) {
             throw new AssetStorageException("Failed to write asset to {$path}");
         }
-        // Same rationale as the directory: world-readable is the intent.
-        // Authorization for these files is the HMAC-signed daily URL token,
-        // not filesystem perms. See {@see self::signToken()}.
-        chmod($path, 0644); // NOSONAR — intentional; see docblock above.
+        chmod($path, 0644); // NOSONAR
 
         return new AssetReference(
             url: '/api/v1/assets/' . $token . '.' . $ext,
@@ -93,13 +82,15 @@ final class LocalAssetStore implements AssetStore
     }
 
     /**
-     * Resolves a public-facing filename (e.g. `abc123def….mp3`) back to the
-     * absolute path and MIME type, after verifying the HMAC. Returns null
-     * when the token is invalid or the file is missing — callers should
-     * respond with 404 in that case.
+     * Resolves a legacy HMAC-token filename (e.g. `abc123….<random-hex>.mp3`)
+     * back to the absolute path and MIME type, after verifying the daily
+     * HMAC. Returns null when the token is invalid or the file is missing —
+     * callers should respond with 404 in that case. Kept for backwards
+     * compatibility with rows created before `fix/opaque-asset-urls`;
+     * new local-mode rows are served by {@see self::readFromAsset()}.
      *
-     * Security note: `$filename` arrives URL-decoded from the router (FastRoute
-     * calls `urldecode()` on path vars), so a request like
+     * Security note: `$filename` arrives URL-decoded from the router
+     * (FastRoute calls `urldecode()` on path vars), so a request like
      * `…%2F..%2F..%2Fconfig.php` would resolve to a path outside
      * `<storage>/assets/`. We defend in depth by validating the full
      * filename against a strict regex of `[a-f0-9.]+` BEFORE doing any
@@ -145,6 +136,33 @@ final class LocalAssetStore implements AssetStore
         ];
     }
 
+    /**
+     * Resolve a {@see MediaAsset} row's local-mode payload to its on-disk
+     * file. Used by {@see \Spora\Http\AssetController} after a UUID lookup
+     * so that the `/api/v1/assets/<uuid>` opaque URL resolves without
+     * exposing the underlying HMAC-token filename.
+     *
+     * @return array{path: string, mime: string, length: int}
+     */
+    public function readFromAsset(MediaAsset $asset): array
+    {
+        $token = $asset->asset_token;
+        if (!is_string($token) || $token === '') {
+            throw new AssetStorageException("MediaAsset {$asset->id} has no asset_token");
+        }
+        $ext = $this->pickExtension($asset->mime_type, null);
+        $path = $this->paths->storage('assets') . '/' . $token . '.' . $ext;
+        if (!is_file($path)) {
+            throw new AssetStorageException("Local asset file missing: {$path}");
+        }
+
+        return [
+            'path'   => $path,
+            'mime'   => self::MIME_FOR_EXT[$ext] ?? 'application/octet-stream',
+            'length' => (int) filesize($path),
+        ];
+    }
+
     private function pickExtension(?string $mime, ?string $filename): string
     {
         if (is_string($filename) && $filename !== '') {
@@ -179,11 +197,6 @@ final class LocalAssetStore implements AssetStore
             }
         }
         return 'bin';
-    }
-
-    private function mintToken(string $ext): string
-    {
-        return $this->signToken($ext) . '.' . bin2hex(random_bytes(8));
     }
 
     private function signToken(string $ext): string

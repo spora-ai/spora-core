@@ -7,8 +7,11 @@ namespace Tests\Unit\Services;
 use RuntimeException;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
+use Spora\Models\MediaAsset;
+use Spora\Services\AssetStorageException;
 use Spora\Services\AssetTooLargeException;
 use Spora\Services\AutoAssetStore;
+use Spora\Services\DatabaseAssetStore;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\LocalAssetStore;
 
@@ -114,15 +117,20 @@ test('LocalAssetStore writes a file and returns a local URL', function (): void 
     }
 });
 
-test('LocalAssetStore::resolve() returns path+mime for a valid token', function (): void {
+test('LocalAssetStore::readFromAsset() looks up the file via the row asset_token', function (): void {
     [$store, $dir, $restore] = buildLocalStore();
     try {
         $ref = $store->store('payload', mime: 'audio/mpeg', filename: 'speech.mp3');
+        expect($ref->token)->not->toBeNull();
 
-        $filename = basename($ref->url);
-        $resolved = $store->resolve($filename);
+        $asset = new MediaAsset();
+        $asset->id           = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+        $asset->asset_url    = '/api/v1/assets/' . $asset->id;
+        $asset->asset_token  = $ref->token;
+        $asset->mime_type    = 'audio/mpeg';
+        $asset->storage_mode = 'local';
 
-        expect($resolved)->not->toBeNull();
+        $resolved = $store->readFromAsset($asset);
         expect($resolved['mime'])->toBe('audio/mpeg');
         expect(file_get_contents($resolved['path']))->toBe('payload');
     } finally {
@@ -203,7 +211,7 @@ test('AssetTooLargeException is the documented public storage-failure type', fun
     // (a subclass of AssetStorageException) for size validation. Storage
     // failures inside LocalAssetStore::store() throw the sibling
     // AssetStorageException so callers can catch one base type.
-    expect(new AssetTooLargeException('x'))->toBeInstanceOf(\Spora\Services\AssetStorageException::class);
+    expect(new AssetTooLargeException('x'))->toBeInstanceOf(AssetStorageException::class);
 });
 
 test('AutoAssetStore dispatches small payloads to DataUrlAssetStore', function (): void {
@@ -241,6 +249,45 @@ test('AutoAssetStore dispatches payloads exactly at the threshold to DataUrlAsse
         $ref = $auto->store('abcd', mime: 'audio/mpeg'); // exactly 4 bytes
 
         expect($ref->mode)->toBe('data_url');
+    } finally {
+        $restore();
+    }
+});
+
+test('DatabaseAssetStore::read() throws AssetStorageException when the row payload is null', function (): void {
+    // Legacy rows that predate the payload-column migration land with
+    // `payload = null`. The read() path must surface a hard failure so the
+    // upstream controller can return 404 instead of streaming a corrupt
+    // file. We construct a MediaAsset directly (no DB seed needed — the
+    // method reads from the in-memory model instance, not the DB).
+    $asset = new MediaAsset();
+    $asset->id          = 'legacy-row-uuid';
+    $asset->payload     = null;
+    $asset->mime_type   = 'image/png';
+    $asset->byte_size   = 0;
+
+    $store = new DatabaseAssetStore();
+
+    expect(static fn() => $store->read($asset))
+        ->toThrow(AssetStorageException::class, 'legacy-row-uuid');
+});
+
+test('LocalAssetStore::readFromAsset() throws when the row has no asset_token', function (): void {
+    // The controller's UUID → file lookup relies on `asset_token`. Rows
+    // created via the legacy data-url migration never had a token; reading
+    // them through the new path must throw rather than silently miss the
+    // disk file with a confusing "file missing" error.
+    [$store, , $restore] = buildLocalStore();
+    try {
+        $asset = new MediaAsset();
+        $asset->id          = 'no-token-row';
+        $asset->asset_url   = '/api/v1/assets/no-token-row';
+        $asset->asset_token = null;
+        $asset->mime_type   = 'image/png';
+        $asset->storage_mode = 'local';
+
+        expect(static fn() => $store->readFromAsset($asset))
+            ->toThrow(AssetStorageException::class, 'no asset_token');
     } finally {
         $restore();
     }
