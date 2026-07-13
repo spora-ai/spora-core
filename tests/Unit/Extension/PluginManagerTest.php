@@ -163,12 +163,10 @@ test('update() without a package argument updates every installed plugin', funct
 });
 
 test('list() scans the plugins directory for plugin.json manifests and reports name+version from sibling composer.json', function (): void {
-    // Build a fake plugins dir with two plugins + a sibling non-plugin dir
-    // that should be ignored.
     $base = sys_get_temp_dir() . '/spora-list-test-' . uniqid();
     mkdir($base . '/plugins/tavily', 0o755, true);
     mkdir($base . '/plugins/semantics', 0o755, true);
-    mkdir($base . '/plugins/_scratch', 0o755, true); // no plugin.json — must be skipped
+    mkdir($base . '/plugins/_scratch', 0o755, true); // no plugin.json → must be skipped
     file_put_contents($base . '/plugins/tavily/plugin.json', json_encode(['slug' => 'tavily', 'class' => 'X']));
     file_put_contents($base . '/plugins/tavily/composer.json', json_encode(['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0']));
     file_put_contents($base . '/plugins/semantics/plugin.json', json_encode(['slug' => 'semantics', 'class' => 'Y']));
@@ -178,8 +176,6 @@ test('list() scans the plugins directory for plugin.json manifests and reports n
         $factory = new FakeProcessFactory();
         $manager = makeManager($factory, basePath: $base);
 
-        // list() does no composer subprocess — the factory has no scripted responses,
-        // and we explicitly assert no calls below.
         $entries = $manager->list();
 
         expect($factory->calls)->toBe([]);
@@ -208,7 +204,7 @@ test('list() returns [] when no plugin.json files exist in the plugins dir', fun
         $manager = makeManager($factory, basePath: $base);
 
         expect($manager->list())->toBe([]);
-        expect($factory->calls)->toBe([]); // confirm no composer subprocess
+        expect($factory->calls)->toBe([]);
     } finally {
         @rmdir($base . '/plugins');
         @rmdir($base);
@@ -216,8 +212,8 @@ test('list() returns [] when no plugin.json files exist in the plugins dir', fun
 });
 
 test('list() returns [] when the plugins directory does not exist (fresh install)', function (): void {
+    // No $base/plugins — fresh `composer install` never creates the dir.
     $base = sys_get_temp_dir() . '/spora-list-test-' . uniqid();
-    // Intentionally do NOT mkdir $base/plugins — fresh `composer install` never created it.
 
     $factory = new FakeProcessFactory();
     $manager = makeManager($factory, basePath: $base);
@@ -232,7 +228,7 @@ test('list() surfaces plugins with missing or malformed composer.json (tolerant 
     $base = sys_get_temp_dir() . '/spora-list-test-' . uniqid();
     mkdir($base . '/plugins/tavily', 0o755, true);
     file_put_contents($base . '/plugins/tavily/plugin.json', json_encode(['slug' => 'tavily', 'class' => 'X']));
-    // No composer.json sibling — version should fall back to null, name to slug.
+    // No composer.json sibling → version falls back to null, name to slug.
 
     try {
         $factory = new FakeProcessFactory();

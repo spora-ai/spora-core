@@ -130,21 +130,12 @@ final class PluginManager
     /**
      * Enumerate every plugin currently loadable by the framework.
      *
-     * Walks the configured plugin directories for `plugin.json` manifests,
-     * the same data source {@see \Spora\Plugins\PluginLoaderCache} uses at
-     * boot time. Mirroring the runtime data source means the CLI inventory
-     * and the runtime inventory can never drift — every plugin the loader
-     * would actually mount shows up in `plugin:list`, and only those.
-     *
-     * For each `<dir>/<slug>/plugin.json`:
-     * - The slug is the directory name.
-     * - `name` and `version` come from the sibling `<dir>/<slug>/composer.json`
-     *   when present; absent / malformed values fall back to empty / null,
-     *   matching {@see \Spora\Console\Commands\PluginListCommand}'s tolerant display.
-     * - `path` is the absolute plugin directory — more accurate than the
-     *   `vendor/.../<name>` install path the previous Composer-shell-out
-     *   implementation returned, since `spora-installer` symlinks path
-     *   repos into `plugins/<slug>/`.
+     * Walks the same data source {@see \Spora\Plugins\PluginLoaderCache}
+     * uses at boot so the CLI inventory and the runtime inventory can never
+     * drift — every plugin the loader would actually mount shows up here,
+     * and only those. The previous implementation shelled out to
+     * `composer show --installed` and filtered on a `type` field that bulk
+     * composer output doesn't emit, silently returning empty.
      *
      * @return list<array{name: string, version: ?string, path: ?string}>
      */
@@ -166,7 +157,6 @@ final class PluginManager
             }
         }
 
-        // Stable order across runs so the rendered table doesn't reshuffle.
         usort(
             $plugins,
             static fn(array $a, array $b): int => strcmp((string) $a['name'], (string) $b['name']),
@@ -176,10 +166,9 @@ final class PluginManager
     }
 
     /**
-     * Build a list-entry from a single plugin.json manifest path. Returns
-     * the slug's directory name as `name` and null for `version` when the
-     * sibling composer.json is missing or unreadable — a partial install is
-     * still surfaced (the CLI shows `(unknown)`) rather than silently dropped.
+     * Partial installs (plugin.json present, sibling composer.json missing
+     * or unreadable) still surface as a row — the CLI shows `(unknown)`
+     * for the version rather than silently dropping the plugin.
      *
      * @return array{name: string, version: ?string, path: ?string}
      */
@@ -210,13 +199,7 @@ final class PluginManager
         ];
     }
 
-    /**
-     * Plugin directory the framework scans at boot. Matches what
-     * {@see \Spora\Plugins\PluginLoaderCache::collectManifests()} walks so
-     * the CLI inventory and the runtime inventory see the same set.
-     *
-     * @return list<string>
-     */
+    /** @return list<string> */
     private function pluginDirectories(): array
     {
         return [$this->paths->plugins()];

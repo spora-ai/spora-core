@@ -31,8 +31,8 @@ function buildPluginsTree(array $plugins): string
         );
     }
 
-    // Resolve symlinks (macOS /tmp is a symlink to /private/tmp) so callers
-    // can compare plugin paths verbatim against what list() returns.
+    // realpath collapses macOS /tmp → /private/tmp symlink so callers can
+    // compare plugin paths verbatim against what list() returns.
     $resolved = realpath($base);
     return $resolved === false ? $base : $resolved;
 }
@@ -55,9 +55,6 @@ function removePluginsTree(string $base): void
 
 function makePluginListTester(string $basePath): CommandTester
 {
-    // No FakeProcessFactory needed — PluginManager::list() no longer shells
-    // out. We pass an empty factory for symmetry with the other command
-    // tests; list() never invokes it.
     $manager = new PluginManager(
         new NullLogger(),
         Closure::fromCallable(new FakeProcessFactory()),
@@ -110,7 +107,7 @@ it('renders a table with one row per installed plugin', function (): void {
 
 it('renders (unknown) for plugins whose composer.json has no version', function (): void {
     $base = buildPluginsTree([
-        'tavily' => ['name' => 'spora-ai/spora-plugin-tavily'], // no version key
+        'tavily' => ['name' => 'spora-ai/spora-plugin-tavily'],
     ]);
 
     try {
