@@ -249,6 +249,44 @@ final class PluginLoader
     }
 
     /**
+     * Resolve a plugin slug to its Composer package name (e.g.
+     * `spora-ai/spora-plugin-media-archive`). Reads the plugin's
+     * `composer.json#name` from the on-disk plugin directory.
+     *
+     * The slug alone is a filesystem identifier — it isn't a Packagist
+     * identifier, so a template exporter that emits slugs leaves the
+     * importer unable to resolve the requirement. The package name is
+     * what `composer require <name>` and Packagist's search API both
+     * understand.
+     *
+     * Returns null when the slug isn't loaded, the plugin directory has
+     * no readable `composer.json`, or the `name` field is missing —
+     * callers should treat null as "skip; the operator will see the
+     * missing plugin at import time".
+     */
+    public function getComposerNameForSlug(string $slug): ?string
+    {
+        $dir = $this->pluginDirs[$slug] ?? null;
+        if ($dir === null) {
+            return null;
+        }
+        $composerFile = $dir . '/composer.json';
+        if (!is_file($composerFile)) {
+            return null;
+        }
+        $raw = @file_get_contents($composerFile);
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+        $name = $decoded['name'] ?? null;
+        return is_string($name) && $name !== '' ? $name : null;
+    }
+
+    /**
      * Map of plugin slug => absolute plugin directory, for plugins that were loaded.
      *
      * @return array<string, string>

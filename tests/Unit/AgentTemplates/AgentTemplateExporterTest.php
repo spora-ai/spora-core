@@ -183,12 +183,18 @@ test('export() emits required_plugins: [] when the agent uses only core tools', 
     expect($exported['template']->raw()['required_plugins'])->toBe([]);
 });
 
-test('export() lists every owning plugin slug in required_plugins', function (): void {
-    // The existing Tests\Fixtures\Plugins\ToolsPlugin fixture contributes
-    // TestTool. The empty loader returns null for any other tool_class,
-    // so the exporter's required_plugins ends up [tools-plugin] only when
-    // the agent uses TestTool.
+test('export() lists every owning plugin\'s Composer package name in required_plugins', function (): void {
+    // The ToolsPlugin fixture ships composer.json#name =
+    // 'spora-ai/spora-fixture-tools-plugin' (added in this change).
+    // The exporter must emit the package name, NOT the slug — the slug
+    // is a directory name and won't resolve against Packagist; only the
+    // Composer package name (vendor/name) does.
     $loader = makeToolsPluginLoader();
+
+    // Sanity check the new helper: it reads composer.json from the plugin
+    // directory and returns the package name.
+    expect($loader->getComposerNameForSlug('tools-plugin'))
+        ->toBe('spora-ai/spora-fixture-tools-plugin');
 
     $agent = Agent::create([
         'user_id'   => $this->userId,
@@ -209,16 +215,15 @@ test('export() lists every owning plugin slug in required_plugins', function ():
 
     $exported = makeExporter($loader)->export($agent);
 
-    expect($exported['template']->raw()['required_plugins'])->toBe(['tools-plugin']);
+    expect($exported['template']->raw()['required_plugins'])
+        ->toBe(['spora-ai/spora-fixture-tools-plugin']);
 });
 
 test('export() deduplicates required_plugins when two agent_tools share a plugin', function (): void {
-    // Same fixture plugin, but with two AgentTool rows for two tools
-    // the plugin claims. Exporter must produce ['tools-plugin'] exactly
-    // once, not twice.
     $loader = makeToolsPluginLoader();
 
-    // Sanity check: the helper returns null for an unknown class.
+    // Sanity check on the helper chain: unknown tool → null slug →
+    // null package → dropped.
     expect($loader->getSlugForToolClass('Spora\\Tools\\NonExistent'))->toBeNull();
 
     $agent = Agent::create([
@@ -239,24 +244,52 @@ test('export() deduplicates required_plugins when two agent_tools share a plugin
     ]);
 
     $exported = makeExporter($loader)->export($agent);
-    expect($exported['template']->raw()['required_plugins'])->toBe(['tools-plugin']);
+    expect($exported['template']->raw()['required_plugins'])
+        ->toBe(['spora-ai/spora-fixture-tools-plugin']);
 });
 
-test('export() omits plugin slugs for tool_classes that no loaded plugin owns', function (): void {
-    $loader = makeToolsPluginLoader();
+test('export() omits plugins whose composer.json is missing or has no name', function (): void {
+    // Exposes the `getComposerNameForSlug()` code path that returns null
+    // when the manifest is registered but composer.json is malformed.
+    // We don't boot a plugin here because every loadable plugin must
+    // declare its class via the PSR-4 manifest autoload; we exercise the
+    // null-return branch directly on the helper.
+    $tmp = sys_get_temp_dir() . '/spora-plugin-loader-null-' . uniqid();
+    mkdir($tmp, 0o755, true);
+    file_put_contents($tmp . '/composer.json', json_encode(['type' => 'spora-plugin']));
 
-    $agent = Agent::create([
-        'user_id'   => $this->userId,
-        'name'      => 'Core Only',
-        'max_steps' => 5,
-        'is_active' => true,
-    ]);
-    Spora\Models\AgentTool::create([
-        'agent_id'   => $agent->id,
-        'tool_class' => 'Spora\\Tools\\CurrentTimeTool', // built-in, no plugin owner
-        'tool_name'  => 'current_time',
-    ]);
+    $loader = new PluginLoader([]);
+    // Inject the directory via reflection — production code paths populate
+    // this map during boot(), but for unit-test coverage of the helper's
+    // null-return branch we don't need a real plugin instance.
+    $ref = new ReflectionClass($loader);
+    $prop = $ref->getProperty('pluginDirs');
+    $prop->setAccessible(true);
+    $prop->setValue($loader, ['no-name' => $tmp]);
 
-    $exported = makeExporter($loader)->export($agent);
-    expect($exported['template']->raw()['required_plugins'])->toBe([]);
+    expect($loader->getComposerNameForSlug('no-name'))->toBeNull();
+
+    @unlink($tmp . '/composer.json');
+    @rmdir($tmp);
+});
+
+test('PluginLoader::getComposerNameForSlug() returns null for unknown slugs', function (): void {
+    $loader = new PluginLoader([]);
+    expect($loader->getComposerNameForSlug('does-not-exist'))->toBeNull();
+});
+
+test('PluginLoader::getComposerNameForSlug() returns null when composer.json is unreadable', function (): void {
+    // No composer.json at the path → null (treated the same as missing).
+    $tmp = sys_get_temp_dir() . '/spora-plugin-loader-no-json-' . uniqid();
+    mkdir($tmp, 0o755, true);
+
+    $loader = new PluginLoader([]);
+    $ref = new ReflectionClass($loader);
+    $prop = $ref->getProperty('pluginDirs');
+    $prop->setAccessible(true);
+    $prop->setValue($loader, ['no-json' => $tmp]);
+
+    expect($loader->getComposerNameForSlug('no-json'))->toBeNull();
+
+    @rmdir($tmp);
 });

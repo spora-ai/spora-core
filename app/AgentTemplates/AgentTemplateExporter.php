@@ -147,29 +147,41 @@ final class AgentTemplateExporter
     }
 
     /**
-     * Walk the exported tools and collect the slugs of every plugin that
-     * owns at least one of them. Built-in core tools (no owning plugin)
-     * are silently dropped — the re-import operator already has core.
-     * Deduplicated; sorted for stable output across runs (so a round-trip
-     * through this exporter + the file system is deterministic).
+     * Walk the exported tools and collect the Composer package names of
+     * every plugin that owns at least one of them. Built-in core tools
+     * (no owning plugin) and tools whose plugin can't be resolved to a
+     * package name (missing composer.json, uninstalled, …) are silently
+     * dropped — the re-import operator already has core, and broken
+     * entries would block the import entirely. Deduplicated; sorted for
+     * stable output across runs (so a round-trip through this exporter
+     * + the file system is deterministic).
+     *
+     * The output is `vendor/name` Composer identifiers (e.g.
+     * `spora-ai/spora-plugin-media-archive`) — NOT the filesystem
+     * slug. The slug is a directory name; only the package name
+     * resolves against Packagist via `composer require <name>`.
      *
      * @param  list<array<string, mixed>>  $tools
      * @return list<string>
      */
     private function buildRequiredPlugins(array $tools): array
     {
-        $slugs = [];
+        $names = [];
         foreach ($tools as $tool) {
             $toolClass = is_string($tool['tool_class'] ?? null) ? $tool['tool_class'] : null;
             if ($toolClass === null) {
                 continue;
             }
             $slug = $this->pluginLoader->getSlugForToolClass($toolClass);
-            if ($slug !== null) {
-                $slugs[$slug] = true;
+            if ($slug === null) {
+                continue;
+            }
+            $package = $this->pluginLoader->getComposerNameForSlug($slug);
+            if ($package !== null) {
+                $names[$package] = true;
             }
         }
-        $list = array_keys($slugs);
+        $list = array_keys($names);
         sort($list);
         return $list;
     }
