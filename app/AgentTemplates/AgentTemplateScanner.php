@@ -75,7 +75,7 @@ final class AgentTemplateScanner
         if ($raw === null) {
             // loadFileData already captured the parse error into the
             // returned placeholder; no further action needed.
-            return $this->errorTemplate($path, $filename, $dir);
+            return $this->errorTemplate($filename, $dir);
         }
 
         // loadFileData returns array<string, mixed>|null; after the null
@@ -99,7 +99,6 @@ final class AgentTemplateScanner
     }
 
     private function errorTemplate(
-        string $path,
         string $filename,
         string $dir,
         string $code = 'PARSE_ERROR',

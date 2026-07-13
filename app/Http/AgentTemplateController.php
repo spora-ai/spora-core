@@ -31,6 +31,8 @@ final class AgentTemplateController
 {
     use JsonControllerHelpers;
 
+    private const MSG_AUTH_REQUIRED = 'Authentication required.';
+
     public function __construct(
         private readonly AuthService $auth,
         private readonly AgentTemplateScanner $scanner,
@@ -45,8 +47,9 @@ final class AgentTemplateController
      */
     public function index(): JsonResponse
     {
-        if ($this->auth->currentUserId() === null) {
-            return $this->unprocessable('UNAUTHENTICATED', 'Authentication required.');
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            return $this->unauthenticated();
         }
 
         $templates = $this->scanner->scan();
@@ -63,8 +66,9 @@ final class AgentTemplateController
      */
     public function show(Request $request): JsonResponse
     {
-        if ($this->auth->currentUserId() === null) {
-            return $this->unprocessable('UNAUTHENTICATED', 'Authentication required.');
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            return $this->unauthenticated();
         }
 
         $id = (string) $request->attributes->get('id', '');
@@ -89,8 +93,9 @@ final class AgentTemplateController
      */
     public function validatePayload(Request $request): JsonResponse
     {
-        if ($this->auth->currentUserId() === null) {
-            return $this->unprocessable('UNAUTHENTICATED', 'Authentication required.');
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            return $this->unauthenticated();
         }
 
         try {
@@ -105,36 +110,39 @@ final class AgentTemplateController
 
     /**
      * POST /api/v1/agent-templates/import
+     *
+     * Single-return shape: every branch assigns `$response`, then the
+     * function returns it. Keeps S1142 (≤ 3 returns) happy and makes the
+     * happy / sad paths scannable in one place.
      */
     public function import(Request $request): JsonResponse
     {
+        $response = null;
+
         $userId = $this->auth->currentUserId();
         if ($userId === null) {
-            return $this->unprocessable('UNAUTHENTICATED', 'Authentication required.');
+            $response = $this->unauthenticated();
+        } else {
+            $body = $this->decodeJsonOrNull($request);
+            if ($body === null) {
+                $response = $this->invalidJson();
+            } else {
+                $validation = $this->validator->validate($body);
+                $response = $validation->isValid()
+                    ? $this->buildImportSuccess($userId, $body)
+                    : $this->buildImportValidationError($validation);
+            }
         }
 
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
-        }
+        return $response;
+    }
 
-        $result = $this->validator->validate($body);
-        if (!$result->isValid()) {
-            return new JsonResponse(
-                [
-                    'error' => [
-                        'code'     => 'VALIDATION_ERROR',
-                        'message'  => 'Template payload is invalid.',
-                        'details'  => $result->toArray(),
-                    ],
-                ],
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        }
-
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function buildImportSuccess(int $userId, array $body): JsonResponse
+    {
         $import = $this->importer->importPayload($userId, $body);
-
         return new JsonResponse(
             [
                 'data' => [
@@ -147,6 +155,20 @@ final class AgentTemplateController
         );
     }
 
+    private function buildImportValidationError(\Spora\AgentTemplates\ValidationResult $validation): JsonResponse
+    {
+        return new JsonResponse(
+            [
+                'error' => [
+                    'code'    => 'VALIDATION_ERROR',
+                    'message' => 'Template payload is invalid.',
+                    'details' => $validation->toArray(),
+                ],
+            ],
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+        );
+    }
+
     /**
      * GET /api/v1/agents/{id}/export
      */
@@ -154,7 +176,7 @@ final class AgentTemplateController
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null) {
-            return $this->unprocessable('UNAUTHENTICATED', 'Authentication required.');
+            return $this->unauthenticated();
         }
 
         $agentId = (int) $request->attributes->get('id', 0);
@@ -171,6 +193,31 @@ final class AgentTemplateController
                 'inline_warning' => $exported['inline_warning'],
             ],
         ]);
+    }
+
+    private function unauthenticated(): JsonResponse
+    {
+        return $this->unprocessable('UNAUTHENTICATED', self::MSG_AUTH_REQUIRED);
+    }
+
+    private function invalidJson(): JsonResponse
+    {
+        return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+    }
+
+    /**
+     * Decode the request body, returning the assoc array on success or
+     * `null` on JSON error.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function decodeJsonOrNull(Request $request): ?array
+    {
+        try {
+            return $this->decodeJson($request);
+        } catch (JsonException) {
+            return null;
+        }
     }
 
     /**

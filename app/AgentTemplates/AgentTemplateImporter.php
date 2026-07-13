@@ -6,7 +6,8 @@ namespace Spora\AgentTemplates;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use ReflectionClass;
-use RuntimeException;
+use Spora\AgentTemplates\Exceptions\AgentImportFailedException;
+use Spora\AgentTemplates\Exceptions\AgentTemplateNotFoundException;
 use Spora\Core\Paths;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
@@ -49,7 +50,7 @@ final class AgentTemplateImporter
     /**
      * Look up a built-in template by id and apply it.
      *
-     * @throws RuntimeException when the template id is unknown.
+     * @throws AgentTemplateNotFoundException when the template id is unknown.
      */
     public function applyTemplate(int $userId, string $templateId): ImportResult
     {
@@ -63,7 +64,7 @@ final class AgentTemplateImporter
             }
         }
 
-        throw new RuntimeException("Agent template '{$templateId}' not found.");
+        throw new AgentTemplateNotFoundException("Agent template '{$templateId}' not found.");
     }
 
     /**
@@ -79,8 +80,11 @@ final class AgentTemplateImporter
     }
 
     /**
-     * Internal: apply an AgentTemplate to the database. Wrapped in a
-     * transaction so a partial failure rolls back the whole import.
+     * Internal: apply an AgentTemplate to the database. The implementation
+     * is split into small helpers so each method stays under the cognitive
+     * complexity ceiling; the orchestration lives here.
+     *
+     * @throws AgentImportFailedException when the post-insert sanity check fails.
      */
     private function apply(int $userId, AgentTemplate $template): ImportResult
     {
@@ -88,118 +92,18 @@ final class AgentTemplateImporter
         $toolsEnabled = [];
 
         $registeredTools = $this->toolConfig->getRegisteredToolClasses();
-        $installedPlugins = array_keys($this->plugins->getPlugins());
 
-        // Aggregate plugin-missing warnings for required_plugins
-        foreach ($template->requiredPlugins() as $slug) {
-            if (!in_array($slug, $installedPlugins, true)) {
-                $warnings[] = [
-                    'code'     => 'PLUGIN_MISSING',
-                    'severity' => 'warning',
-                    'message'  => sprintf("Plugin '%s' is required but not installed.", $slug),
-                    'path'     => 'required_plugins',
-                ];
-            }
-        }
+        $this->collectPluginWarnings($template, $warnings);
 
         $agentId = Capsule::connection()->transaction(function () use ($userId, $template, $registeredTools, &$warnings, &$toolsEnabled): int {
             $agentId = $this->createAgent($userId, $template);
-
-            foreach ($template->tools() as $toolEntry) {
-                $toolClass = (string) ($toolEntry['tool_class'] ?? '');
-                if ($toolClass === '') {
-                    continue;
-                }
-
-                if (!in_array($toolClass, $registeredTools, true)) {
-                    $warnings[] = [
-                        'code'     => 'TOOL_PLUGIN_MISSING',
-                        'severity' => 'warning',
-                        'message'  => sprintf("Tool '%s' is not currently registered (plugin missing or unloaded). Skipping.", $toolClass),
-                        'path'     => 'tools[].tool_class',
-                    ];
-                    continue;
-                }
-
-                $enabled = (bool) ($toolEntry['enabled'] ?? false);
-                if (!$enabled) {
-                    continue;
-                }
-
-                $now = date(self::DATETIME_FORMAT);
-                AgentTool::updateOrCreate(
-                    ['agent_id' => $agentId, 'tool_class' => $toolClass],
-                    [
-                        'tool_name'  => $this->resolveToolName($toolClass),
-                        'created_at' => $now,
-                        'updated_at' => $now,
-                    ],
-                );
-
-                $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId);
-                $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
-
-                $toolWarnings = [];
-                if ($missing !== []) {
-                    $toolWarnings[] = [
-                        'code'     => 'TOOL_NEEDS_CONFIGURATION',
-                        'severity' => 'warning',
-                        'message'  => sprintf(
-                            "Tool '%s' is enabled but missing required settings: %s.",
-                            $toolClass,
-                            implode(', ', $missing),
-                        ),
-                        'path'     => 'tools[].tool_class',
-                    ];
-                    $warnings = array_merge($warnings, $toolWarnings);
-                }
-
-                $opsApplied = 0;
-                foreach (($toolEntry['operations'] ?? []) as $op) {
-                    if (!is_array($op)) {
-                        continue;
-                    }
-                    $opName = (string) ($op['name'] ?? '');
-                    if ($opName === '' || !$this->isKnownOperation($toolClass, $opName)) {
-                        continue;
-                    }
-
-                    $row = ['agent_id' => $agentId, 'tool_class' => $toolClass, 'operation' => $opName];
-
-                    // Preserve created_at on existing rows so the upsert
-                    // doesn't reset the timestamp; on insert we set both.
-                    $existing = AgentToolOperationOverride::where($row)->first();
-                    $update = ['updated_at' => $now];
-                    if (array_key_exists('enabled', $op)) {
-                        $update['enabled'] = $op['enabled'] ? 1 : 0;
-                    }
-                    if (array_key_exists('auto_approve', $op)) {
-                        // auto_approve=true → no approval required → default_requires_approval=0
-                        $update['default_requires_approval'] = $op['auto_approve'] ? 0 : 1;
-                    }
-
-                    if ($existing === null) {
-                        $update['created_at'] = $now;
-                    }
-
-                    AgentToolOperationOverride::updateOrCreate($row, $update);
-                    $opsApplied++;
-                }
-
-                $toolsEnabled[] = [
-                    'tool_class'         => $toolClass,
-                    'enabled'            => true,
-                    'operations_applied' => $opsApplied,
-                    'warnings'           => $toolWarnings,
-                ];
-            }
-
+            $this->applyTools($agentId, $template, $registeredTools, $warnings, $toolsEnabled);
             return $agentId;
         });
 
         $agent = Agent::find($agentId);
         if ($agent === null) {
-            throw new RuntimeException("Agent {$agentId} disappeared mid-import.");
+            throw new AgentImportFailedException("Agent {$agentId} disappeared mid-import.");
         }
 
         return new ImportResult(
@@ -207,6 +111,183 @@ final class AgentTemplateImporter
             toolsEnabled: $toolsEnabled,
             warnings: $warnings,
         );
+    }
+
+    /**
+     * Aggregate PLUGIN_MISSING warnings for any `required_plugins` slug that
+     * is not currently loaded. Non-fatal — operators install plugins manually.
+     *
+     * @param list<array{code: string, severity: string, message: string, path?: string}> $warnings
+     */
+    private function collectPluginWarnings(AgentTemplate $template, array &$warnings): void
+    {
+        $installedPlugins = array_keys($this->plugins->getPlugins());
+        foreach ($template->requiredPlugins() as $slug) {
+            if (in_array($slug, $installedPlugins, true)) {
+                continue;
+            }
+            $warnings[] = [
+                'code'     => 'PLUGIN_MISSING',
+                'severity' => 'warning',
+                'message'  => sprintf("Plugin '%s' is required but not installed.", $slug),
+                'path'     => 'required_plugins',
+            ];
+        }
+    }
+
+    /**
+     * Walk the template's tools array. For each entry:
+     * - tool_class not registered → TOOL_PLUGIN_MISSING warning, no row.
+     * - tool disabled → no row.
+     * - tool enabled + missing global config → row + TOOL_NEEDS_CONFIGURATION warning.
+     *
+     * @param list<string> $registeredTools
+     * @param list<array{code: string, severity: string, message: string, path?: string}> $warnings
+     * @param array<int, array{tool_class: string, enabled: bool, operations_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}> $toolsEnabled
+     */
+    private function applyTools(
+        int $agentId,
+        AgentTemplate $template,
+        array $registeredTools,
+        array &$warnings,
+        array &$toolsEnabled,
+    ): void {
+        foreach ($template->tools() as $toolEntry) {
+            $result = $this->applyTool($agentId, $toolEntry, $registeredTools);
+            if ($result['skipped']) {
+                if ($result['warning'] !== null) {
+                    $warnings[] = $result['warning'];
+                }
+                continue;
+            }
+            if ($result['enabled']) {
+                $toolsEnabled[] = $result['summary'];
+                if ($result['warning'] !== null) {
+                    $warnings[] = $result['warning'];
+                }
+            }
+        }
+    }
+
+    /**
+     * Apply a single tool entry. Returns the per-tool outcome so the
+     * caller can update warnings[] / toolsEnabled[] without nesting
+     * conditionals. Keeping the logic here keeps `applyTools` flat.
+     *
+     * @param array<string, mixed> $toolEntry
+     * @param list<string> $registeredTools
+     * @return array{skipped: bool, enabled: bool, warning: ?array{code: string, severity: string, message: string, path?: string}, summary: ?array{tool_class: string, enabled: bool, operations_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}}
+     */
+    private function applyTool(int $agentId, array $toolEntry, array $registeredTools): array
+    {
+        $empty = ['skipped' => false, 'enabled' => false, 'warning' => null, 'summary' => null];
+
+        $toolClass = (string) ($toolEntry['tool_class'] ?? '');
+        if ($toolClass === '') {
+            return $empty;
+        }
+
+        if (!in_array($toolClass, $registeredTools, true)) {
+            return [
+                'skipped'  => true,
+                'enabled'  => false,
+                'warning'  => [
+                    'code'     => 'TOOL_PLUGIN_MISSING',
+                    'severity' => 'warning',
+                    'message'  => sprintf("Tool '%s' is not currently registered (plugin missing or unloaded). Skipping.", $toolClass),
+                    'path'     => 'tools[].tool_class',
+                ],
+                'summary'  => null,
+            ];
+        }
+
+        if (!(bool) ($toolEntry['enabled'] ?? false)) {
+            return $empty;
+        }
+
+        $now = date(self::DATETIME_FORMAT);
+        AgentTool::updateOrCreate(
+            ['agent_id' => $agentId, 'tool_class' => $toolClass],
+            [
+                'tool_name'  => $this->resolveToolName($toolClass),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+        );
+
+        $missing = $this->toolConfig->getMissingRequiredSettings(
+            $toolClass,
+            $this->toolConfig->getEffectiveSettings($toolClass, $agentId),
+        );
+
+        $toolWarning = null;
+        if ($missing !== []) {
+            $toolWarning = [
+                'code'     => 'TOOL_NEEDS_CONFIGURATION',
+                'severity' => 'warning',
+                'message'  => sprintf(
+                    "Tool '%s' is enabled but missing required settings: %s.",
+                    $toolClass,
+                    implode(', ', $missing),
+                ),
+                'path'     => 'tools[].tool_class',
+            ];
+        }
+
+        $opsApplied = $this->applyOperations($agentId, $toolClass, $toolEntry['operations'] ?? []);
+
+        return [
+            'skipped'  => false,
+            'enabled'  => true,
+            'warning'  => $toolWarning,
+            'summary'  => [
+                'tool_class'         => $toolClass,
+                'enabled'            => true,
+                'operations_applied' => $opsApplied,
+                'warnings'           => $toolWarning === null ? [] : [$toolWarning],
+            ],
+        ];
+    }
+
+    /**
+     * Upsert per-operation overrides for an enabled tool. Operations whose
+     * name is not declared by the tool are silently skipped — they would
+     * be a no-op at runtime anyway. Returns the count of operations actually
+     * applied so the caller can report it in `tools_enabled[].operations_applied`.
+     *
+     * @param array<int, mixed> $operations
+     */
+    private function applyOperations(int $agentId, string $toolClass, array $operations): int
+    {
+        $applied = 0;
+        foreach ($operations as $op) {
+            if (!is_array($op)) {
+                continue;
+            }
+            $opName = (string) ($op['name'] ?? '');
+            if ($opName === '' || !$this->isKnownOperation($toolClass, $opName)) {
+                continue;
+            }
+
+            $row = ['agent_id' => $agentId, 'tool_class' => $toolClass, 'operation' => $opName];
+            $existing = AgentToolOperationOverride::where($row)->first();
+
+            $update = ['updated_at' => date(self::DATETIME_FORMAT)];
+            if (array_key_exists('enabled', $op)) {
+                $update['enabled'] = $op['enabled'] ? 1 : 0;
+            }
+            if (array_key_exists('auto_approve', $op)) {
+                // auto_approve=true → no approval required → default_requires_approval=0
+                $update['default_requires_approval'] = $op['auto_approve'] ? 0 : 1;
+            }
+            if ($existing === null) {
+                $update['created_at'] = date(self::DATETIME_FORMAT);
+            }
+
+            AgentToolOperationOverride::updateOrCreate($row, $update);
+            $applied++;
+        }
+        return $applied;
     }
 
     private function createAgent(int $userId, AgentTemplate $template): int

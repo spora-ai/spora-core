@@ -201,111 +201,193 @@ final class AgentTemplateValidator
 
         $seenClasses = [];
         foreach ($tools as $index => $tool) {
-            $path = "tools[{$index}]";
-            if (!is_array($tool)) {
-                $result->addError([
-                    'code'     => 'TOOL_NOT_OBJECT',
-                    'severity' => 'error',
-                    'message'  => "Tool entry must be an object.",
-                    'path'     => $path,
-                ]);
-                continue;
-            }
+            $this->validateToolEntry($tool, $index, $seenClasses, $result);
+        }
+    }
 
-            $toolClass = $tool['tool_class'] ?? null;
-            if (!is_string($toolClass) || $toolClass === '') {
-                $result->addError([
-                    'code'     => 'TOOL_CLASS_REQUIRED',
-                    'severity' => 'error',
-                    'message'  => "Tool entry is missing 'tool_class'.",
-                    'path'     => "{$path}.tool_class",
-                ]);
-            } else {
-                if (isset($seenClasses[$toolClass])) {
-                    $result->addError([
-                        'code'     => 'TOOL_CLASS_DUPLICATE',
-                        'severity' => 'error',
-                        'message'  => sprintf("Duplicate tool_class '%s'.", $toolClass),
-                        'path'     => "{$path}.tool_class",
-                    ]);
-                }
-                $seenClasses[$toolClass] = true;
-            }
+    /**
+     * @param array<string, bool> $seenClasses
+     */
+    private function validateToolEntry(mixed $tool, int $index, array &$seenClasses, ValidationResult $result): void
+    {
+        $path = "tools[{$index}]";
 
-            if (!array_key_exists('enabled', $tool) || !is_bool($tool['enabled'])) {
-                $result->addError([
-                    'code'     => 'TOOL_ENABLED_REQUIRED',
-                    'severity' => 'error',
-                    'message'  => "Tool entry is missing boolean 'enabled'.",
-                    'path'     => "{$path}.enabled",
-                ]);
-            }
+        // After the outer loop in validateTools() filters out non-list
+        // payloads, every $tool entry is either an array or a non-array
+        // (a scalar). The !is_array branch handles the latter.
+        if (!is_array($tool)) {
+            $result->addError([
+                'code'     => 'TOOL_NOT_OBJECT',
+                'severity' => 'error',
+                'message'  => "Tool entry must be an object.",
+                'path'     => $path,
+            ]);
+            return;
+        }
 
-            $operations = $tool['operations'] ?? null;
-            if (!is_array($operations) || !array_is_list($operations)) {
-                $result->addError([
-                    'code'     => 'OPERATIONS_NOT_LIST',
-                    'severity' => 'error',
-                    'message'  => "Field 'operations' must be an array.",
-                    'path'     => "{$path}.operations",
-                ]);
-                continue;
-            }
+        $toolClass = $this->validateToolClass($tool, $path, $seenClasses, $result);
+        $this->validateToolEnabledFlag($tool, $path, $result);
+        $this->validateToolOperations($tool, $toolClass, $path, $result);
+    }
 
-            $knownOps = is_string($toolClass) ? $this->knownOperationNames($toolClass) : null;
-            foreach ($operations as $opIndex => $op) {
-                $opPath = "{$path}.operations[{$opIndex}]";
-                if (!is_array($op)) {
-                    $result->addError([
-                        'code'     => 'OPERATION_NOT_OBJECT',
-                        'severity' => 'error',
-                        'message'  => "Operation entry must be an object.",
-                        'path'     => $opPath,
-                    ]);
-                    continue;
-                }
+    /**
+     * @param array<string, mixed> $tool
+     * @param array<string, bool> $seenClasses
+     * @return string The validated tool_class (or '' when missing/invalid).
+     */
+    private function validateToolClass(array $tool, string $path, array &$seenClasses, ValidationResult $result): string
+    {
+        $toolClass = $tool['tool_class'] ?? null;
+        if (!is_string($toolClass) || $toolClass === '') {
+            $result->addError([
+                'code'     => 'TOOL_CLASS_REQUIRED',
+                'severity' => 'error',
+                'message'  => "Tool entry is missing 'tool_class'.",
+                'path'     => "{$path}.tool_class",
+            ]);
+            return '';
+        }
 
-                $opName = $op['name'] ?? null;
-                if (!is_string($opName) || $opName === '') {
-                    $result->addError([
-                        'code'     => 'OPERATION_NAME_REQUIRED',
-                        'severity' => 'error',
-                        'message'  => "Operation entry is missing 'name'.",
-                        'path'     => "{$opPath}.name",
-                    ]);
-                    continue;
-                }
+        if (isset($seenClasses[$toolClass])) {
+            $result->addError([
+                'code'     => 'TOOL_CLASS_DUPLICATE',
+                'severity' => 'error',
+                'message'  => sprintf("Duplicate tool_class '%s'.", $toolClass),
+                'path'     => "{$path}.tool_class",
+            ]);
+        }
+        $seenClasses[$toolClass] = true;
+        return $toolClass;
+    }
 
-                if ($knownOps !== null && $knownOps !== [] && !in_array($opName, $knownOps, true)) {
-                    $result->addWarning([
-                        'code'     => 'OPERATION_UNKNOWN',
-                        'severity' => 'warning',
-                        'message'  => sprintf(
-                            "Operation '%s' is not declared by tool '%s'. Import will be skipped.",
-                            $opName,
-                            $toolClass,
-                        ),
-                        'path'     => "{$opPath}.name",
-                    ]);
-                }
+    /**
+     * @param array<string, mixed> $tool
+     */
+    private function validateToolEnabledFlag(array $tool, string $path, ValidationResult $result): void
+    {
+        if (!array_key_exists('enabled', $tool) || !is_bool($tool['enabled'])) {
+            $result->addError([
+                'code'     => 'TOOL_ENABLED_REQUIRED',
+                'severity' => 'error',
+                'message'  => "Tool entry is missing boolean 'enabled'.",
+                'path'     => "{$path}.enabled",
+            ]);
+        }
+    }
 
-                if (array_key_exists('auto_approve', $op) && !is_bool($op['auto_approve'])) {
-                    $result->addError([
-                        'code'     => 'AUTO_APPROVE_TYPE',
-                        'severity' => 'error',
-                        'message'  => "Field 'auto_approve' must be a boolean.",
-                        'path'     => "{$opPath}.auto_approve",
-                    ]);
-                }
-                if (array_key_exists('enabled', $op) && !is_bool($op['enabled'])) {
-                    $result->addError([
-                        'code'     => 'OPERATION_ENABLED_TYPE',
-                        'severity' => 'error',
-                        'message'  => "Field 'enabled' must be a boolean.",
-                        'path'     => "{$opPath}.enabled",
-                    ]);
-                }
-            }
+    /**
+     * @param array<string, mixed> $tool
+     */
+    private function validateToolOperations(array $tool, string $toolClass, string $path, ValidationResult $result): void
+    {
+        $operations = $tool['operations'] ?? null;
+        if (!is_array($operations) || !array_is_list($operations)) {
+            $result->addError([
+                'code'     => 'OPERATIONS_NOT_LIST',
+                'severity' => 'error',
+                'message'  => "Field 'operations' must be an array.",
+                'path'     => "{$path}.operations",
+            ]);
+            return;
+        }
+
+        $knownOps = $toolClass !== '' ? $this->knownOperationNames($toolClass) : null;
+        foreach ($operations as $opIndex => $op) {
+            $this->validateOperationEntry($op, $opIndex, $path, $toolClass, $knownOps, $result);
+        }
+    }
+
+    /**
+     * @param list<string>|null $knownOps
+     */
+    private function validateOperationEntry(
+        mixed $op,
+        int $opIndex,
+        string $parentPath,
+        string $toolClass,
+        ?array $knownOps,
+        ValidationResult $result,
+    ): void {
+        $opPath = "{$parentPath}.operations[{$opIndex}]";
+
+        if (!is_array($op)) {
+            $result->addError([
+                'code'     => 'OPERATION_NOT_OBJECT',
+                'severity' => 'error',
+                'message'  => "Operation entry must be an object.",
+                'path'     => $opPath,
+            ]);
+            return;
+        }
+
+        $opName = $this->validateOperationName($op, $opPath, $result);
+        if ($opName === '') {
+            return;
+        }
+
+        $this->validateOperationAgainstKnownOps($opName, $toolClass, $knownOps, $opPath, $result);
+        $this->validateOperationBooleanField($op, 'auto_approve', $opPath, $result);
+        $this->validateOperationBooleanField($op, 'enabled', $opPath, $result);
+    }
+
+    /**
+     * @param array<string, mixed> $op
+     */
+    private function validateOperationName(array $op, string $opPath, ValidationResult $result): string
+    {
+        $opName = $op['name'] ?? null;
+        if (!is_string($opName) || $opName === '') {
+            $result->addError([
+                'code'     => 'OPERATION_NAME_REQUIRED',
+                'severity' => 'error',
+                'message'  => "Operation entry is missing 'name'.",
+                'path'     => "{$opPath}.name",
+            ]);
+            return '';
+        }
+        return $opName;
+    }
+
+    /**
+     * @param list<string>|null $knownOps
+     */
+    private function validateOperationAgainstKnownOps(
+        string $opName,
+        string $toolClass,
+        ?array $knownOps,
+        string $opPath,
+        ValidationResult $result,
+    ): void {
+        if ($knownOps === null || $knownOps === [] || in_array($opName, $knownOps, true)) {
+            return;
+        }
+        $result->addWarning([
+            'code'     => 'OPERATION_UNKNOWN',
+            'severity' => 'warning',
+            'message'  => sprintf(
+                "Operation '%s' is not declared by tool '%s'. Import will be skipped.",
+                $opName,
+                $toolClass,
+            ),
+            'path'     => "{$opPath}.name",
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $op
+     */
+    private function validateOperationBooleanField(array $op, string $field, string $opPath, ValidationResult $result): void
+    {
+        if (!array_key_exists($field, $op)) {
+            return;
+        }
+        if (!is_bool($op[$field])) {
+            $result->addError([
+                'code'     => strtoupper($field) . '_TYPE',
+                'severity' => 'error',
+                'message'  => sprintf("Field '%s' must be a boolean.", $field),
+                'path'     => "{$opPath}.{$field}",
+            ]);
         }
     }
 
