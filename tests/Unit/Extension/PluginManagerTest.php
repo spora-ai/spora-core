@@ -171,8 +171,6 @@ test('list() scans the plugins directory for plugin.json manifests and reports n
         $factory = new FakeProcessFactory();
         $manager = makeManager($factory, basePath: $base);
 
-        // list() does no composer subprocess — the factory has no scripted responses,
-        // and we explicitly assert no calls below.
         $entries = $manager->list();
 
         expect($factory->calls)->toBe([]);
@@ -184,10 +182,8 @@ test('list() scans the plugins directory for plugin.json manifests and reports n
 });
 
 test('list() ignores directories under plugins/ that do not ship a plugin.json', function (): void {
-    // The glob filter is `plugins/*/plugin.json` — a directory without that
-    // file (e.g. scratch space, future plugins not yet populated) must not
-    // surface as a row. We can't express that shape with PluginFixtures
-    // alone, so the scratch dir is added inline and cleaned up after.
+    // buildTree() can't express the "directory without plugin.json" shape,
+    // so the scratch dir is added inline and cleaned up after.
     $base = PluginFixtures::buildTree([
         'tavily' => ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0'],
     ], tag: 'spora-list-scratch');
@@ -212,13 +208,12 @@ test('list() returns [] when no plugin.json files exist in the plugins dir', fun
         $manager = makeManager($factory, basePath: $base);
 
         expect($manager->list())->toBe([]);
-        expect($factory->calls)->toBe([]); // confirm no composer subprocess
+        expect($factory->calls)->toBe([]);
     }, tag: 'spora-list-empty');
 });
 
 test('list() returns [] when the plugins directory does not exist (fresh install)', function (): void {
     // No $base/plugins — fresh `composer install` never creates the dir.
-    // Hand-built base; withTree() would create the dir for us.
     $base = sys_get_temp_dir() . '/spora-list-test-fresh-' . uniqid();
 
     $factory = new FakeProcessFactory();
@@ -229,8 +224,8 @@ test('list() returns [] when the plugins directory does not exist (fresh install
 });
 
 test('list() surfaces plugins with missing or malformed composer.json (tolerant of partial installs)', function (): void {
-    // PluginFixtures always writes composer.json; this corner case needs
-    // a plugin.json-only sibling so the version-fallback path runs.
+    // buildTree() always writes composer.json; this case needs only a
+    // plugin.json sibling so the version-fallback path runs.
     $base = PluginFixtures::buildTree([], tag: 'spora-list-partial');
     mkdir($base . '/plugins/tavily', 0o755, true);
     file_put_contents(

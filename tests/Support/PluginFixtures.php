@@ -5,32 +5,12 @@ declare(strict_types=1);
 namespace Tests\Support;
 
 /**
- * Builders + cleanup for temp `<base>/plugins/<slug>/` trees used by
- * {@see \Spora\Core\Extension\PluginManager::list()} and the matching
- * `plugin:list` command test.
- *
- * Extracted from the two duplicated inline copies in
- * {@see \Tests\Unit\Extension\PluginManagerTest} and
- * {@see \Tests\Unit\Console\PluginListCommandTest} after the
- * filesystem-scanning rewrite of `PluginManager::list()`.
+ * Builders + cleanup for temp `<base>/plugins/<slug>/` trees used by the
+ * `PluginManager::list()` tests.
  */
 final class PluginFixtures
 {
     /**
-     * Build a fresh `<base>/plugins/<slug>/{plugin.json, composer.json}` tree
-     * and return the resolved base path.
-     *
-     * The base is created under `sys_get_temp_dir()` with the supplied
-     * `tag` prefix (so concurrent test runs don't collide), then resolved
-     * through `realpath()`. On macOS `/tmp` is a symlink to `/private/tmp`,
-     * so the returned value is canonicalised — callers can compare plugin
-     * paths verbatim against what `PluginManager::list()` produces.
-     *
-     * Each `plugin.json` is written with `slug` and a placeholder `class`
-     * (`X\<slug>`); the manifest is never validated by `list()`, so the
-     * shape is irrelevant to the tests — the file just needs to exist so
-     * the glob in `PluginManager::list()` picks it up.
-     *
      * @param  array<string, array<string, mixed>>  $plugins  slug => composer.json body
      */
     public static function buildTree(array $plugins, string $tag = 'spora-plugins'): string
@@ -51,16 +31,13 @@ final class PluginFixtures
             );
         }
 
+        // realpath collapses macOS /tmp → /private/tmp so callers can
+        // compare plugin paths verbatim against what list() returns.
         $resolved = realpath($base);
         return $resolved === false ? $base : $resolved;
     }
 
-    /**
-     * Remove a tree previously built by {@see self::buildTree()}. Walks two
-     * levels deep (plugin dir + its immediate files) — sufficient for the
-     * flat fixtures the tests produce. Best-effort: any leftover files
-     * survive silently rather than aborting the cleanup.
-     */
+    /** Best-effort cleanup of a tree from {@see self::buildTree()}. */
     public static function removeTree(string $base): void
     {
         if (!is_dir($base . '/plugins')) {
@@ -79,8 +56,7 @@ final class PluginFixtures
     }
 
     /**
-     * Convenience wrapper: build a tree, run `$body($base)`, clean up.
-     * Always cleans up, even when `$body` throws.
+     * Build a tree, run `$body($base)`, clean up — even on throw.
      *
      * @param  array<string, array<string, mixed>>  $plugins
      * @return mixed Whatever `$body` returns.

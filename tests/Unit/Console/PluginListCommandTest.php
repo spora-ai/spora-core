@@ -11,9 +11,6 @@ use Tests\Support\PluginManagerFactory;
 
 function makePluginListTester(string $basePath): CommandTester
 {
-    // No FakeProcessFactory needed — PluginManager::list() no longer shells
-    // out. We pass an empty factory for symmetry with the other command
-    // tests; list() never invokes it.
     $manager = PluginManagerFactory::build(new FakeProcessFactory(), basePath: $basePath);
 
     $command = new PluginListCommand($manager);
@@ -54,7 +51,7 @@ it('renders a table with one row per installed plugin', function (): void {
 
 it('renders (unknown) for plugins whose composer.json has no version', function (): void {
     PluginFixtures::withTree([
-        'tavily' => ['name' => 'spora-ai/spora-plugin-tavily'], // no version key
+        'tavily' => ['name' => 'spora-ai/spora-plugin-tavily'],
     ], function (string $base): void {
         $tester = makePluginListTester($base);
         $tester->execute([]);
@@ -65,13 +62,6 @@ it('renders (unknown) for plugins whose composer.json has no version', function 
 });
 
 it('survives macOS /tmp symlink resolution (path column matches what list() returns)', function (): void {
-    // Regression guard: PluginManager::list() applies realpath() to each
-    // manifest, so the `path` column in the rendered table is the resolved
-    // path. On macOS /tmp → /private/tmp; the test base must be the same
-    // canonical form so callers can compare plugin paths verbatim. The
-    // helper now returns the resolved base — verify a plugin in it
-    // appears under the resolved directory, and that the unresolved prefix
-    // does not.
     PluginFixtures::withTree([
         'tavily' => ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0'],
     ], function (string $base): void {

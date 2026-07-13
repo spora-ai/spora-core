@@ -131,17 +131,9 @@ final class PluginManager
      * Enumerate every plugin currently loadable by the framework.
      *
      * Walks the same data source {@see \Spora\Plugins\PluginLoaderCache}
-     * uses at boot so the CLI inventory and the runtime inventory can never
-     * drift — every plugin the loader would actually mount shows up here,
-     * and only those. The previous implementation shelled out to
-     * `composer show --installed` and filtered on a `type` field that bulk
-     * composer output doesn't emit, silently returning empty.
-     *
-     * The `path` field is the symlink-resolved absolute directory
-     * (`realpath()` of the manifest's parent). For plugins installed via a
-     * Composer path repo, that is the source checkout rather than the
-     * `plugins/<slug>/` symlink the operator created — same dir, different
-     * canonical path.
+     * uses at boot, so the CLI inventory and the runtime inventory cannot
+     * drift. `path` is `realpath()`-resolved — for path-repo installs, that
+     * is the source checkout rather than the `plugins/<slug>/` symlink.
      *
      * @return list<array{name: string, version: ?string, path: ?string}>
      */
@@ -174,19 +166,12 @@ final class PluginManager
     /**
      * Build a list-entry from a single plugin.json manifest path.
      *
-     * Precedence for the surfaced `name`:
-     *  1. `composer.json#name` — the canonical vendor-qualified id
-     *     (e.g. `spora-ai/spora-plugin-tavily`), matching what
-     *     {@see \Spora\Plugins\PluginLoader} keys on at boot.
-     *  2. Directory basename — used when the sibling `composer.json` is
-     *     missing or unreadable (partial install); the CLI shows
-     *     `(unknown)` for the version rather than dropping the row.
-     *
-     * `plugin.json` itself is treated as an existence marker only — its
-     * `slug` field is not read here. This keeps the CLI inventory
-     * permissive: a plugin with a malformed manifest or a slug that
-     * doesn't match the runtime regex still surfaces here, even though
-     * {@see \Spora\Plugins\PluginLoader::boot()} will reject it later.
+     * `name` prefers `composer.json#name`; the directory basename is the
+     * fallback for partial installs (no sibling `composer.json`). The
+     * manifest itself is treated as an existence marker — its `slug` is
+     * not read here, so malformed manifests still surface with
+     * `(unknown)` version even though {@see \Spora\Plugins\PluginLoader}
+     * would reject them on boot.
      *
      * @return array{name: string, version: ?string, path: ?string}
      */
