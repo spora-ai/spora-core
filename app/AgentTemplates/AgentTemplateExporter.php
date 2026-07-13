@@ -7,6 +7,7 @@ namespace Spora\AgentTemplates;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
+use Spora\Plugins\PluginLoader;
 
 /**
  * Builds an {@see AgentTemplate} payload from a persisted Agent.
@@ -22,6 +23,10 @@ use Spora\Models\AgentToolOperationOverride;
  */
 final class AgentTemplateExporter
 {
+    public function __construct(
+        private readonly PluginLoader $pluginLoader,
+    ) {}
+
     /**
      * @return array{
      *     template: AgentTemplate,
@@ -40,7 +45,7 @@ final class AgentTemplateExporter
             'version'  => '1.0.0',
             'agent'    => $agentBlock,
             'tools'    => $tools,
-            'required_plugins' => [],
+            'required_plugins' => $this->buildRequiredPlugins($tools),
             'metadata' => [
                 'category' => 'general',
                 'icon'     => 'puzzle',
@@ -126,18 +131,46 @@ final class AgentTemplateExporter
     }
 
     /**
-     * Derive a template id from the agent name. Exports use the
-     * `core/` namespace so a re-imported file slots into the
-     * framework-shipped source bucket (the user can edit the
-     * file before import if they want a different namespace).
-     * Recipes don't have canonical ids — they're files on disk —
-     * so the id is a stable slug from the agent's display name.
+     * Derive a template id from the agent name. The `core/` namespace is
+     * reserved for Spora-shipped templates that ship with the framework;
+     * a re-imported user export must NOT claim that namespace — operators
+     * who want a different id can edit the file before import.
+     *
+     * Recipes don't have canonical ids (they're files on disk), so the
+     * id here is a stable slug from the agent's display name.
      */
     private function resolveTemplateId(Agent $agent): string
     {
         $slug = strtolower(preg_replace('/[^a-z0-9]+/i', '-', $agent->name) ?? '');
         $slug = trim($slug, '-');
-        $body = $slug !== '' ? substr($slug, 0, 64) : 'exported-agent';
-        return 'core/' . $body;
+        return substr($slug !== '' ? $slug : 'exported-agent', 0, 64);
+    }
+
+    /**
+     * Walk the exported tools and collect the slugs of every plugin that
+     * owns at least one of them. Built-in core tools (no owning plugin)
+     * are silently dropped — the re-import operator already has core.
+     * Deduplicated; sorted for stable output across runs (so a round-trip
+     * through this exporter + the file system is deterministic).
+     *
+     * @param  list<array<string, mixed>>  $tools
+     * @return list<string>
+     */
+    private function buildRequiredPlugins(array $tools): array
+    {
+        $slugs = [];
+        foreach ($tools as $tool) {
+            $toolClass = is_string($tool['tool_class'] ?? null) ? $tool['tool_class'] : null;
+            if ($toolClass === null) {
+                continue;
+            }
+            $slug = $this->pluginLoader->getSlugForToolClass($toolClass);
+            if ($slug !== null) {
+                $slugs[$slug] = true;
+            }
+        }
+        $list = array_keys($slugs);
+        sort($list);
+        return $list;
     }
 }

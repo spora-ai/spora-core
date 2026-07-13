@@ -1035,7 +1035,9 @@ final class ContainerDefinitions
                 );
             },
 
-            AgentTemplateExporter::class => static fn(): AgentTemplateExporter => new AgentTemplateExporter(),
+            AgentTemplateExporter::class => static fn(ContainerInterface $c): AgentTemplateExporter => new AgentTemplateExporter(
+                $c->get(PluginLoader::class),
+            ),
 
             MemoryServiceInterface::class => static fn(): MemoryServiceInterface => new MemoryService(),
             MailTemplateServiceInterface::class => static fn(): MailTemplateServiceInterface => new MailTemplateService(),

@@ -227,6 +227,28 @@ final class PluginLoader
     }
 
     /**
+     * Map a tool FQCN to the slug of the plugin that ships it, or null
+     * when no loaded plugin owns it (built-in core tool, or a tool that
+     * was uninstalled after the agent was last edited).
+     *
+     * Symmetric to {@see getSlugForApp()}; both walk the loaded plugin
+     * graph to answer a class-name lookup. The template exporter uses
+     * this to populate `required_plugins` so a re-import on another
+     * instance lists exactly which plugins must be installed.
+     */
+    public function getSlugForToolClass(string $toolClass): ?string
+    {
+        foreach ($this->plugins as $slug => $plugin) {
+            foreach ($plugin->tools() as $class) {
+                if ($class === $toolClass) {
+                    return $slug;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
      * Map of plugin slug => absolute plugin directory, for plugins that were loaded.
      *
      * @return array<string, string>

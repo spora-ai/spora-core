@@ -38,7 +38,7 @@ function makeController(): AgentTemplateController
     );
     $validator = new AgentTemplateValidator();
     $importer = new AgentTemplateImporter($toolConfig, $plugins, $paths);
-    $exporter = new AgentTemplateExporter();
+    $exporter = new AgentTemplateExporter($plugins);
     $agentService = new AgentService(
         $toolConfig,
         new LLMConfigService($security, []),
