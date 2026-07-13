@@ -128,8 +128,11 @@ final class RouteDefinitions
         $r->addRoute('DELETE', '/api/v1/media/{id}', [MediaArchiveController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         // Agent Templates — list/show/validate/import + per-agent export.
+        // The {id:.+} regex lets the captured id contain slashes (the
+        // namespaced form `<source>/<slug>`), so the API can be called
+        // with the slash percent-encoded (e.g. core%2Fcore-assistant).
         $r->addRoute('GET', '/api/v1/agent-templates', [AgentTemplateController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', '/api/v1/agent-templates/{id}', [AgentTemplateController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/agent-templates/{id:.+}', [AgentTemplateController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/agent-templates/validate', [AgentTemplateController::class, 'validatePayload'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/agent-templates/import', [AgentTemplateController::class, 'import'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/agents/{id}/export', [AgentTemplateController::class, 'exportAgent'], [AuthMiddleware::class, CsrfMiddleware::class]);

@@ -13,10 +13,10 @@
     },
     "id": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "pattern": "^([a-z0-9][a-z0-9_-]{0,63}/)?[a-z0-9][a-z0-9_-]{0,63}$",
       "minLength": 1,
-      "maxLength": 64,
-      "description": "Stable machine identifier for the template. Templates are files on disk; this slug is used for matching, source resolution, and the default download filename. It is NOT a foreign key — there is no Recipe entity in the database."
+      "maxLength": 130,
+      "description": "Namespaced template id. Format `<source>/<slug>`: built-in templates use `core/<name>`, plugin templates use `<plugin-slug>/<name>`. The namespace prefix is enforced by the scanner against the file's source directory, so two plugins can never accidentally use the same id. A bare slug is accepted for user-exported templates."
     },
     "name": {
       "type": "string",

@@ -50,7 +50,7 @@ it('seeds the admin user and agent successfully', function () {
     $output = ob_get_clean();
 
     expect($output)->toContain('Created Admin User')
-        ->toContain("Created Spora Core Agent from 'core-assistant' template")
+        ->toContain("Created Spora Core Agent from 'core/core-assistant' template")
         ->toContain('4 tools');
 
     // Assert database state

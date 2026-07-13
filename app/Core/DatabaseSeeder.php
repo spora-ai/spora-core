@@ -17,8 +17,10 @@ use Spora\Services\EmailTemplateLoader;
  * Useful for bootstrapping the local development environment for the frontend.
  *
  * The "Spora Core Agent" is no longer hard-coded — it's installed from the
- * built-in `core-assistant` template so the seed stays in sync with whatever
+ * built-in `core/core-assistant` template so the seed stays in sync with whatever
  * the upstream template declares. Update the template to evolve the seed.
+ * The id is namespaced by source (`core/...`) so it can never collide
+ * with a plugin template.
  */
 final class DatabaseSeeder
 {
@@ -27,7 +29,7 @@ final class DatabaseSeeder
      * yet. The template must be shippable from one of the directories
      * {@see Paths::agentTemplatesPaths()} reports.
      */
-    public const CORE_AGENT_TEMPLATE_ID = 'core-assistant';
+    public const CORE_AGENT_TEMPLATE_ID = 'core/core-assistant';
 
     public function __construct(
         private readonly AuthService $authService,

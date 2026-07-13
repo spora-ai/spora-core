@@ -40,8 +40,8 @@ beforeEach(function (): void {
     $this->userId = bootAuth(bootAuthLayer(), 'template-importer@example.com');
 });
 
-test('applyTemplate("core-assistant") creates the Agent and 4 enabled tool rows', function (): void {
-    $result = $this->importer->applyTemplate($this->userId, 'core-assistant');
+test('applyTemplate("core/core-assistant") creates the Agent and 4 enabled tool rows', function (): void {
+    $result = $this->importer->applyTemplate($this->userId, 'core/core-assistant');
 
     expect($result->agent)->toBeInstanceOf(Agent::class);
     expect((int) $result->agent->user_id)->toBe($this->userId);
@@ -55,8 +55,8 @@ test('applyTemplate("core-assistant") creates the Agent and 4 enabled tool rows'
     expect(count($tools))->toBe(4);
 });
 
-test('applyTemplate("core-assistant") persists per-operation auto_approve overrides', function (): void {
-    $result = $this->importer->applyTemplate($this->userId, 'core-assistant');
+test('applyTemplate("core/core-assistant") persists per-operation auto_approve overrides', function (): void {
+    $result = $this->importer->applyTemplate($this->userId, 'core/core-assistant');
 
     $saveOverride = AgentToolOperationOverride::where('agent_id', $result->agent->id)
         ->where('tool_class', 'Spora\\Tools\\AgentMemoryTool')
@@ -76,7 +76,7 @@ test('applyTemplate("core-assistant") persists per-operation auto_approve overri
 });
 
 test('applyTemplate maps allow_continuation to allow_followup on the Agent row', function (): void {
-    $result = $this->importer->applyTemplate($this->userId, 'core-assistant');
+    $result = $this->importer->applyTemplate($this->userId, 'core/core-assistant');
     expect((bool) $result->agent->allow_followup)->toBeTrue();
 });
 

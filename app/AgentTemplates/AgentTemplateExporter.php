@@ -126,16 +126,18 @@ final class AgentTemplateExporter
     }
 
     /**
-     * Derive a template id from the agent name. Recipes don't have
-     * canonical ids (they're files on disk) so the exported payload
-     * gets a stable slug from the agent's display name. Used as the
-     * template's `id` field on re-import and as the default
-     * download filename.
+     * Derive a template id from the agent name. Exports use the
+     * `core/` namespace so a re-imported file slots into the
+     * framework-shipped source bucket (the user can edit the
+     * file before import if they want a different namespace).
+     * Recipes don't have canonical ids — they're files on disk —
+     * so the id is a stable slug from the agent's display name.
      */
     private function resolveTemplateId(Agent $agent): string
     {
         $slug = strtolower(preg_replace('/[^a-z0-9]+/i', '-', $agent->name) ?? '');
         $slug = trim($slug, '-');
-        return $slug !== '' ? substr($slug, 0, 64) : 'exported-agent';
+        $body = $slug !== '' ? substr($slug, 0, 64) : 'exported-agent';
+        return 'core/' . $body;
     }
 }

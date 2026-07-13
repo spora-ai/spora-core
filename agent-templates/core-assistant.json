@@ -1,6 +1,6 @@
 {
   "$schema": "https://spora.dev/agent-template.schema.json",
-  "id": "core-assistant",
+  "id": "core/core-assistant",
   "name": "Spora Core Agent",
   "description": "Default Spora agent with time, math, and memory tools.",
   "version": "1.0.0",

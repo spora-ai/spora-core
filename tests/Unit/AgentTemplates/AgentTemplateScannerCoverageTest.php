@@ -92,3 +92,74 @@ test('scan() marks a file whose basename matches the core slugs list as source=c
         @rmdir($dir);
     }
 });
+
+test('scan() emits a NAMESPACE_MISMATCH warning when a plugin file id lacks the source prefix', function (): void {
+    // The scanner derives source from the directory basename, so we
+    // use a fixed directory name that will resolve to source `weather`.
+    // The file's id `unscoped` carries no namespace, so the scanner
+    // flags the mismatch.
+    $dir = sys_get_temp_dir() . '/weather';
+    @mkdir($dir, 0777, true);
+    $file = $dir . '/broken-' . uniqid() . '.json';
+    file_put_contents($file, json_encode([
+        'id' => 'unscoped',
+        'name' => 'Broken',
+        'version' => '1.0.0',
+        'agent' => ['max_steps' => 5],
+        'tools' => [],
+        'required_plugins' => [],
+        'metadata' => ['category' => 'general', 'icon' => 'puzzle'],
+    ]));
+
+    try {
+        $scanner = new AgentTemplateScanner(
+            directories: [$dir],
+            coreSlugs: [],
+        );
+        $templates = $scanner->scan();
+
+        expect($templates)->toHaveCount(1);
+        $codes = array_column($templates[0]->warnings(), 'code');
+        expect($codes)->toContain('NAMESPACE_MISMATCH');
+    } finally {
+        @unlink($file);
+        @rmdir($dir);
+    }
+});
+
+test('scan() accepts a plugin file id with the matching source prefix (no warning)', function (): void {
+    // The scanner derives the source from the directory basename, so
+    // the temp dir name must match the namespace in the file's id.
+    // Uniqid suffix on the path can't break the comparison, so the
+    // directory basename needs to exactly match the id's namespace.
+    $dir = sys_get_temp_dir() . '/weather-' . uniqid('', true);
+    // Re-create the dir under a basename that matches the namespace.
+    @rmdir($dir);
+    $dir = sys_get_temp_dir() . '/weather';
+    @mkdir($dir, 0777, true);
+    $file = $dir . '/ok-' . uniqid() . '.json';
+    file_put_contents($file, json_encode([
+        'id' => 'weather/ok',
+        'name' => 'OK',
+        'version' => '1.0.0',
+        'agent' => ['max_steps' => 5],
+        'tools' => [],
+        'required_plugins' => [],
+        'metadata' => ['category' => 'general', 'icon' => 'puzzle'],
+    ]));
+
+    try {
+        $scanner = new AgentTemplateScanner(
+            directories: [$dir],
+            coreSlugs: [],
+        );
+        $templates = $scanner->scan();
+
+        expect($templates)->toHaveCount(1);
+        $codes = array_column($templates[0]->warnings(), 'code');
+        expect($codes)->not->toContain('NAMESPACE_MISMATCH');
+    } finally {
+        @unlink($file);
+        @rmdir($dir);
+    }
+});

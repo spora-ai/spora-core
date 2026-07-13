@@ -50,12 +50,12 @@ test('export() surfaces the SETTINGS_NOT_EXPORTED_WARNING inline', function (): 
 
 test('export() round-trips an agent created from core-assistant', function (): void {
     $importer = makeImporter(); // helper from AgentTemplateImporterTest.php
-    $created = $importer->applyTemplate($this->userId, 'core-assistant');
+    $created = $importer->applyTemplate($this->userId, 'core/core-assistant');
 
     $exported = makeExporter()->export($created->agent);
     $payload = $exported['template']->raw();
 
-    expect($payload['id'])->toBe('spora-core-agent');
+    expect($payload['id'])->toBe('core/spora-core-agent');
     expect($payload['name'])->toBe('Spora Core Agent');
     expect(count($payload['tools']))->toBe(4);
 

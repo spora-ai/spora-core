@@ -108,6 +108,7 @@ test('import returns 201 with an Agent payload + warnings on success', function 
     $data = json_decode($response->getContent(), true)['data'];
     expect($data['agent']['name'])->toBe('Simple');
     expect($data['agent']['id'])->toBe(1);
+    expect($data['agent']['name'])->toBe('Simple');
     expect(count($data['tools_enabled']))->toBe(1);
 });
 
@@ -156,5 +157,27 @@ test('index lists the built-in core-assistant template', function (): void {
     expect($response->getStatusCode())->toBe(200);
     $templates = json_decode($response->getContent(), true)['data']['templates'];
     $ids = array_column($templates, 'id');
-    expect($ids)->toContain('core-assistant');
+    expect($ids)->toContain('core/core-assistant');
+});
+
+test('show() returns the full template for a namespaced id', function (): void {
+    $request = Symfony\Component\HttpFoundation\Request::create(
+        '/api/v1/agent-templates/core/core-assistant',
+        'GET',
+    );
+    $request->attributes->set('id', 'core/core-assistant');
+    $response = $this->controller->show($request);
+    expect($response->getStatusCode())->toBe(200);
+    $data = json_decode($response->getContent(), true)['data'];
+    expect($data['template']['id'])->toBe('core/core-assistant');
+});
+
+test('show() returns 404 for a missing id', function (): void {
+    $request = Symfony\Component\HttpFoundation\Request::create(
+        '/api/v1/agent-templates/does-not-exist',
+        'GET',
+    );
+    $request->attributes->set('id', 'does-not-exist');
+    $response = $this->controller->show($request);
+    expect($response->getStatusCode())->toBe(404);
 });

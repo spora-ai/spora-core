@@ -23,7 +23,13 @@ use Spora\Tools\ToolInterface;
  */
 final class AgentTemplateValidator
 {
-    private const ID_PATTERN = '/^[a-z0-9][a-z0-9_-]{0,63}$/';
+    /**
+     * Accepts both namespaced (`<source>/<slug>`) and bare (`<slug>`)
+     * template ids. The scanner additionally enforces that built-in /
+     * plugin templates carry a matching namespace; the validator
+     * accepts a bare slug so user-exported files round-trip cleanly.
+     */
+    private const ID_PATTERN = '/^([a-z0-9][a-z0-9_-]{0,63}\/)?[a-z0-9][a-z0-9_-]{0,63}$/';
     private const SLUG_PATTERN = '/^[a-z0-9][a-z0-9_-]*$/';
     private const VERSION_PATTERN = '/^[0-9]+\.[0-9]+\.[0-9]+([+-].+)?$/';
 

@@ -90,6 +90,29 @@ final class AgentTemplateScanner
 
         $source = $this->resolveSource($filename, $dir);
 
+        // Namespace enforcement: built-in and plugin-shipped templates
+        // must declare an id whose namespace prefix matches the file's
+        // source directory. Two plugins shipping the same short id can
+        // never collide because their namespaces differ. User-exported
+        // uploads (no source) keep whatever id they declared.
+        $declaredId = is_string($raw['id'] ?? null) ? (string) $raw['id'] : '';
+        if ($declaredId !== '' && $source !== 'core' && $source !== 'uploaded') {
+            $namespace = strstr($declaredId, '/', true);
+            if ($namespace === false || $namespace !== $source) {
+                $warnings[] = [
+                    'code'     => 'NAMESPACE_MISMATCH',
+                    'severity' => 'warning',
+                    'message'  => sprintf(
+                        "Template id '%s' does not start with the source namespace '%s/'. Expected format: '%s/<name>'.",
+                        $declaredId,
+                        $source,
+                        $source,
+                    ),
+                    'path'     => 'id',
+                ];
+            }
+        }
+
         return new AgentTemplate(
             raw: $raw,
             initialWarnings: $warnings,
