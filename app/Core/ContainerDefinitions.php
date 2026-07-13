@@ -175,10 +175,6 @@ final class ContainerDefinitions
                     'mercure_jwt_key'     => null,
                     'app_url'             => RequestOrigin::detect(),
 
-                    // Plugin directories scanned by PluginLoader. The in-repo BASE_PATH/plugins
-                    // is always appended; this list holds any additional external paths
-                    // (e.g. sibling git checkouts of community plugins).
-                    'plugins_paths'       => [],
                     'plugin_install_enabled' => false,
 
                     // Path/name of the composer executable PluginManager shells out to.
@@ -276,14 +272,6 @@ final class ContainerDefinitions
         $apply('SPORA_MERCURE_JWT_KEY', 'mercure_jwt_key', static fn($v) => $v);
         $apply('SPORA_MERCURE_PUBLISH_URL', 'mercure_publish_url', static fn($v) => $v);
         $apply('SPORA_APP_URL', 'app_url', static fn($v) => $v);
-        $apply('SPORA_PLUGINS_PATHS', 'plugins_paths', static function (string $v): array {
-            // Comma-separated absolute paths. Whitespace trimmed, empties dropped.
-            $parts = array_filter(
-                array_map('trim', explode(',', $v)),
-                static fn(string $p): bool => $p !== '',
-            );
-            return array_values($parts);
-        });
         $apply('SPORA_COMPOSER_BINARY', 'composer_binary', static fn($v) => $v);
         $apply('SPORA_PLUGIN_INSTALL_ENABLED', 'plugin_install_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_ASSET_STORE_MODE', 'asset_store.mode', static fn($v) => $v);
