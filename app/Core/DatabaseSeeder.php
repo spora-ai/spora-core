@@ -66,7 +66,7 @@ final class DatabaseSeeder
         ]);
 
         // 3. Install the Spora Core Agent from the built-in template, if missing.
-        //    `recipe_id` would be the canonical trace, but we key on the
+        //    Recipes are files, not database entities, so we key on the
         //    agent name to keep this seeder resilient to template renames.
         $existing = \Spora\Models\Agent::where('user_id', $userId)
             ->where('name', 'Spora Core Agent')

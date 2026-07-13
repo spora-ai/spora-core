@@ -309,7 +309,6 @@ final class AgentTemplateImporter
             'user_id'             => $userId,
             'name'                => $this->resolveAgentName($template),
             'description'         => $this->nullIfEmpty($agent['description'] ?? null),
-            'recipe_id'           => $template->id(),
             'system_prompt'       => $this->nullIfEmpty($agent['system_prompt'] ?? null),
             'max_steps'           => (int) ($agent['max_steps'] ?? 10),
             'allow_followup'      => $allowFollowup ? 1 : 0,

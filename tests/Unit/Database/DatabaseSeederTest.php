@@ -59,8 +59,7 @@ it('seeds the admin user and agent successfully', function () {
 
     $agent = Agent::where('user_id', $user->id)->first();
     expect($agent)->not->toBeNull()
-        ->and($agent->name)->toBe('Spora Core Agent')
-        ->and($agent->recipe_id)->toBe('core-assistant');
+        ->and($agent->name)->toBe('Spora Core Agent');
 
     $tools = AgentTool::where('agent_id', $agent->id)->get();
     expect($tools)->toHaveCount(4);

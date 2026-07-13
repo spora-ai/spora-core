@@ -181,7 +181,6 @@ final class AgentController
             'id'                   => (int) $agent->id,
             'name'                 => $agent->name,
             'description'          => $agent->description,
-            'recipe_id'            => $agent->recipe_id,
             'system_prompt'        => $agent->system_prompt,
             'llm_driver_config_id' => $agent->llm_driver_config_id,
             'max_steps'            => (int) $agent->max_steps,

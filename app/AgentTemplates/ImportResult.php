@@ -12,7 +12,9 @@ use Spora\Models\Agent;
  *
  * Carries the created Agent, the per-tool summary (so the UI can
  * present a "what we did" report), and the aggregated warning list.
- * The Agent's `recipe_id` is set to the template's `id` for traceability.
+ * Traceability of which template the agent came from is logged
+ * separately by the seeder / importer — agents.recipe_id was
+ * removed because Agent Templates are files, not database entities.
  */
 final class ImportResult
 {

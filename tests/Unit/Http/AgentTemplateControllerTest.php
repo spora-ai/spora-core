@@ -107,7 +107,7 @@ test('import returns 201 with an Agent payload + warnings on success', function 
     expect($response->getStatusCode())->toBe(201);
     $data = json_decode($response->getContent(), true)['data'];
     expect($data['agent']['name'])->toBe('Simple');
-    expect($data['agent']['recipe_id'])->toBe('simple');
+    expect($data['agent']['id'])->toBe(1);
     expect(count($data['tools_enabled']))->toBe(1);
 });
 

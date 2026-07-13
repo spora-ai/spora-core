@@ -19,7 +19,6 @@ class StubAgentService implements AgentServiceInterface
             'user_id'                => $userId,
             'name'                   => 'Stub Agent',
             'description'            => null,
-            'recipe_id'              => null,
             'system_prompt'          => null,
             'llm_driver_config_id'   => null,
             'max_steps'              => 10,
@@ -36,7 +35,6 @@ class StubAgentService implements AgentServiceInterface
         $agent->user_id = $userId;
         $agent->name = $data['name'] ?? 'New';
         $agent->description = $data['description'] ?? null;
-        $agent->recipe_id = null;
         $agent->system_prompt = $data['system_prompt'] ?? null;
         $agent->llm_driver_config_id = $data['llm_driver_config_id'] ?? null;
         $agent->max_steps = $data['max_steps'] ?? 10;
@@ -57,7 +55,6 @@ class StubAgentService implements AgentServiceInterface
         $agent->user_id = $userId;
         $agent->name = 'Stub Agent';
         $agent->description = null;
-        $agent->recipe_id = null;
         $agent->system_prompt = null;
         $agent->llm_driver_config_id = null;
         $agent->max_steps = 10;

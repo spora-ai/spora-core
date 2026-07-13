@@ -55,7 +55,7 @@ test('export() round-trips an agent created from core-assistant', function (): v
     $exported = makeExporter()->export($created->agent);
     $payload = $exported['template']->raw();
 
-    expect($payload['id'])->toBe('core-assistant');
+    expect($payload['id'])->toBe('spora-core-agent');
     expect($payload['name'])->toBe('Spora Core Agent');
     expect(count($payload['tools']))->toBe(4);
 

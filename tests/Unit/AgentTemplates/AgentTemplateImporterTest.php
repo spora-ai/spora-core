@@ -46,7 +46,6 @@ test('applyTemplate("core-assistant") creates the Agent and 4 enabled tool rows'
     expect($result->agent)->toBeInstanceOf(Agent::class);
     expect((int) $result->agent->user_id)->toBe($this->userId);
     expect($result->agent->name)->toBe('Spora Core Agent');
-    expect($result->agent->recipe_id)->toBe('core-assistant');
 
     $tools = AgentTool::where('agent_id', $result->agent->id)->get()->pluck('tool_class')->all();
     expect($tools)->toContain('Spora\\Tools\\CurrentTimeTool');
