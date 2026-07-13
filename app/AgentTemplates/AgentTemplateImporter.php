@@ -89,17 +89,20 @@ final class AgentTemplateImporter
     private function apply(int $userId, AgentTemplate $template): ImportResult
     {
         $warnings = $template->warnings();
-        $toolsEnabled = [];
-
         $registeredTools = $this->toolConfig->getRegisteredToolClasses();
 
         $this->collectPluginWarnings($template, $warnings);
 
-        $agentId = Capsule::connection()->transaction(function () use ($userId, $template, $registeredTools, &$warnings, &$toolsEnabled): int {
-            $agentId = $this->createAgent($userId, $template);
-            $this->applyTools($agentId, $template, $registeredTools, $warnings, $toolsEnabled);
-            return $agentId;
-        });
+        // Transaction returns the tuple (agentId, toolsEnabled) so we
+        // avoid needing a by-ref parameter on applyTools. The outer
+        // unpack keeps the closure signature simple.
+        [$agentId, $toolsEnabled] = Capsule::connection()->transaction(
+            function () use ($userId, $template, $registeredTools, &$warnings): array {
+                $agentId = $this->createAgent($userId, $template);
+                $toolsEnabled = $this->applyTools($agentId, $template, $registeredTools, $warnings);
+                return [$agentId, $toolsEnabled];
+            },
+        );
 
         $agent = Agent::find($agentId);
         if ($agent === null) {
@@ -117,7 +120,7 @@ final class AgentTemplateImporter
      * Aggregate PLUGIN_MISSING warnings for any `required_plugins` slug that
      * is not currently loaded. Non-fatal — operators install plugins manually.
      *
-     * @param list<array{code: string, severity: string, message: string, path?: string}> $warnings
+     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
      */
     private function collectPluginWarnings(AgentTemplate $template, array &$warnings): void
     {
@@ -136,22 +139,27 @@ final class AgentTemplateImporter
     }
 
     /**
-     * Walk the template's tools array. For each entry:
+     * Walk the template's tools array and return the per-tool summary.
+     * For each entry:
      * - tool_class not registered → TOOL_PLUGIN_MISSING warning, no row.
      * - tool disabled → no row.
      * - tool enabled + missing global config → row + TOOL_NEEDS_CONFIGURATION warning.
      *
+     * Returns the tools-enabled list and pushes any per-tool warnings
+     * onto $warnings. Returning (instead of using a by-ref parameter)
+     * keeps PHPStan's type inference simple for the nested array shape.
+     *
      * @param list<string> $registeredTools
-     * @param list<array{code: string, severity: string, message: string, path?: string}> $warnings
-     * @param array<int, array{tool_class: string, enabled: bool, operations_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}> $toolsEnabled
+     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
+     * @return list<array{tool_class: string, enabled: bool, operations_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}>
      */
     private function applyTools(
         int $agentId,
         AgentTemplate $template,
         array $registeredTools,
         array &$warnings,
-        array &$toolsEnabled,
-    ): void {
+    ): array {
+        $toolsEnabled = [];
         foreach ($template->tools() as $toolEntry) {
             $result = $this->applyTool($agentId, $toolEntry, $registeredTools);
             if ($result['skipped']) {
@@ -167,6 +175,7 @@ final class AgentTemplateImporter
                 }
             }
         }
+        return $toolsEnabled;
     }
 
     /**
