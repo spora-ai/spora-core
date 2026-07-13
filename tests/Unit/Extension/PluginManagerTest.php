@@ -13,6 +13,7 @@ use Spora\Core\Extension\PluginManager;
 use Spora\Core\Paths;
 use Tests\Support\FakeProcessFactory;
 use Tests\Support\InMemoryProcess;
+use Tests\Support\PluginFixtures;
 
 function makeManager(
     FakeProcessFactory $factory,
@@ -163,85 +164,91 @@ test('update() without a package argument updates every installed plugin', funct
 });
 
 test('list() scans the plugins directory for plugin.json manifests and reports name+version from sibling composer.json', function (): void {
-    $base = sys_get_temp_dir() . '/spora-list-test-' . uniqid();
-    mkdir($base . '/plugins/tavily', 0o755, true);
-    mkdir($base . '/plugins/semantics', 0o755, true);
-    mkdir($base . '/plugins/_scratch', 0o755, true); // no plugin.json → must be skipped
-    file_put_contents($base . '/plugins/tavily/plugin.json', json_encode(['slug' => 'tavily', 'class' => 'X']));
-    file_put_contents($base . '/plugins/tavily/composer.json', json_encode(['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0']));
-    file_put_contents($base . '/plugins/semantics/plugin.json', json_encode(['slug' => 'semantics', 'class' => 'Y']));
-    file_put_contents($base . '/plugins/semantics/composer.json', json_encode(['name' => 'spora-ai/spora-plugin-semantic-scholar', 'version' => '0.2.3']));
-
-    try {
+    PluginFixtures::withTree([
+        'tavily'    => ['name' => 'spora-ai/spora-plugin-tavily',           'version' => '0.1.0'],
+        'semantics' => ['name' => 'spora-ai/spora-plugin-semantic-scholar', 'version' => '0.2.3'],
+    ], function (string $base): void {
         $factory = new FakeProcessFactory();
         $manager = makeManager($factory, basePath: $base);
 
+        // list() does no composer subprocess — the factory has no scripted responses,
+        // and we explicitly assert no calls below.
         $entries = $manager->list();
 
         expect($factory->calls)->toBe([]);
         expect($entries)->toBe([
-            ['name' => 'spora-ai/spora-plugin-semantic-scholar', 'version' => '0.2.3', 'path' => realpath($base . '/plugins/semantics')],
-            ['name' => 'spora-ai/spora-plugin-tavily',           'version' => '0.1.0', 'path' => realpath($base . '/plugins/tavily')],
+            ['name' => 'spora-ai/spora-plugin-semantic-scholar', 'version' => '0.2.3', 'path' => $base . '/plugins/semantics'],
+            ['name' => 'spora-ai/spora-plugin-tavily',           'version' => '0.1.0', 'path' => $base . '/plugins/tavily'],
         ]);
-    } finally {
-        foreach ([$base . '/plugins/tavily/plugin.json', $base . '/plugins/tavily/composer.json', $base . '/plugins/semantics/plugin.json', $base . '/plugins/semantics/composer.json'] as $f) {
-            @unlink($f);
-        }
-        @rmdir($base . '/plugins/tavily');
-        @rmdir($base . '/plugins/semantics');
-        @rmdir($base . '/plugins/_scratch');
-        @rmdir($base . '/plugins');
-        @rmdir($base);
-    }
+    }, tag: 'spora-list-test');
 });
 
-test('list() returns [] when no plugin.json files exist in the plugins dir', function (): void {
-    $base = sys_get_temp_dir() . '/spora-list-test-' . uniqid();
-    mkdir($base . '/plugins', 0o755, true);
-
-    try {
-        $factory = new FakeProcessFactory();
-        $manager = makeManager($factory, basePath: $base);
-
-        expect($manager->list())->toBe([]);
-        expect($factory->calls)->toBe([]);
-    } finally {
-        @rmdir($base . '/plugins');
-        @rmdir($base);
-    }
-});
-
-test('list() returns [] when the plugins directory does not exist (fresh install)', function (): void {
-    // No $base/plugins — fresh `composer install` never creates the dir.
-    $base = sys_get_temp_dir() . '/spora-list-test-' . uniqid();
-
-    $factory = new FakeProcessFactory();
-    $manager = makeManager($factory, basePath: $base);
-
-    expect($manager->list())->toBe([]);
-    expect($factory->calls)->toBe([]);
-
-    @rmdir($base);
-});
-
-test('list() surfaces plugins with missing or malformed composer.json (tolerant of partial installs)', function (): void {
-    $base = sys_get_temp_dir() . '/spora-list-test-' . uniqid();
-    mkdir($base . '/plugins/tavily', 0o755, true);
-    file_put_contents($base . '/plugins/tavily/plugin.json', json_encode(['slug' => 'tavily', 'class' => 'X']));
-    // No composer.json sibling → version falls back to null, name to slug.
+test('list() ignores directories under plugins/ that do not ship a plugin.json', function (): void {
+    // The glob filter is `plugins/*/plugin.json` — a directory without that
+    // file (e.g. scratch space, future plugins not yet populated) must not
+    // surface as a row. We can't express that shape with PluginFixtures
+    // alone, so the scratch dir is added inline and cleaned up after.
+    $base = PluginFixtures::buildTree([
+        'tavily' => ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0'],
+    ], tag: 'spora-list-scratch');
+    mkdir($base . '/plugins/_scratch', 0o755, true);
 
     try {
         $factory = new FakeProcessFactory();
         $manager = makeManager($factory, basePath: $base);
 
         expect($manager->list())->toBe([
-            ['name' => 'tavily', 'version' => null, 'path' => realpath($base . '/plugins/tavily')],
+            ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0', 'path' => $base . '/plugins/tavily'],
+        ]);
+    } finally {
+        @rmdir($base . '/plugins/_scratch');
+        PluginFixtures::removeTree($base);
+    }
+});
+
+test('list() returns [] when no plugin.json files exist in the plugins dir', function (): void {
+    PluginFixtures::withTree([], function (string $base): void {
+        $factory = new FakeProcessFactory();
+        $manager = makeManager($factory, basePath: $base);
+
+        expect($manager->list())->toBe([]);
+        expect($factory->calls)->toBe([]); // confirm no composer subprocess
+    }, tag: 'spora-list-empty');
+});
+
+test('list() returns [] when the plugins directory does not exist (fresh install)', function (): void {
+    // No $base/plugins — fresh `composer install` never creates the dir.
+    // Hand-built base; withTree() would create the dir for us.
+    $base = sys_get_temp_dir() . '/spora-list-test-fresh-' . uniqid();
+
+    $factory = new FakeProcessFactory();
+    $manager = makeManager($factory, basePath: $base);
+
+    expect($manager->list())->toBe([]);
+    expect($factory->calls)->toBe([]);
+});
+
+test('list() surfaces plugins with missing or malformed composer.json (tolerant of partial installs)', function (): void {
+    // PluginFixtures always writes composer.json; this corner case needs
+    // a plugin.json-only sibling so the version-fallback path runs.
+    $base = PluginFixtures::buildTree([], tag: 'spora-list-partial');
+    mkdir($base . '/plugins/tavily', 0o755, true);
+    file_put_contents(
+        $base . '/plugins/tavily/plugin.json',
+        json_encode(['slug' => 'tavily', 'class' => 'X'], JSON_THROW_ON_ERROR),
+    );
+
+    try {
+        $factory = new FakeProcessFactory();
+        $manager = makeManager($factory, basePath: $base);
+
+        expect($manager->list())->toBe([
+            ['name' => 'tavily', 'version' => null, 'path' => $base . '/plugins/tavily'],
         ]);
     } finally {
         @unlink($base . '/plugins/tavily/plugin.json');
         @rmdir($base . '/plugins/tavily');
-        @rmdir($base . '/plugins');
-        @rmdir($base);
+        PluginFixtures::removeTree($base);
     }
 });
 
