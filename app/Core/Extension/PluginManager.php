@@ -128,69 +128,98 @@ final class PluginManager
     }
 
     /**
-     * Enumerate every package installed via Composer whose composer.json declares
-     * `type: spora-plugin`. Returns an array of {name, version, path} entries.
+     * Enumerate every plugin currently loadable by the framework.
      *
-     * Returns [] when `composer show` fails or returns undecodable JSON — the
-     * CLI "list" command should treat that as "no plugins installed" rather
-     * than surfacing a confusing composer error to the operator.
+     * Walks the configured plugin directories for `plugin.json` manifests,
+     * the same data source {@see \Spora\Plugins\PluginLoaderCache} uses at
+     * boot time. Mirroring the runtime data source means the CLI inventory
+     * and the runtime inventory can never drift — every plugin the loader
+     * would actually mount shows up in `plugin:list`, and only those.
      *
-     * Composer wraps its JSON under an `installed` key (`{"installed": [...]}`)
-     * since v2. A defensive top-level array fallback is included for older
-     * Composer releases and forks that emit a bare list.
+     * For each `<dir>/<slug>/plugin.json`:
+     * - The slug is the directory name.
+     * - `name` and `version` come from the sibling `<dir>/<slug>/composer.json`
+     *   when present; absent / malformed values fall back to empty / null,
+     *   matching {@see \Spora\Console\Commands\PluginListCommand}'s tolerant display.
+     * - `path` is the absolute plugin directory — more accurate than the
+     *   `vendor/.../<name>` install path the previous Composer-shell-out
+     *   implementation returned, since `spora-installer` symlinks path
+     *   repos into `plugins/<slug>/`.
      *
      * @return list<array{name: string, version: ?string, path: ?string}>
      */
     public function list(): array
     {
-        $argv = $this->composerArgv(['show', '--installed', '--direct', '--format=json']);
-
-        try {
-            $output = $this->runProcess($argv);
-        } catch (PluginInstallFailedException $e) {
-            $this->logger->info('Plugin list: composer show failed, returning empty list', [
-                'exitCode' => $e->exitCode,
-            ]);
-            return [];
-        }
-
-        $entries = $this->parseComposerShowOutput($output);
-
         $plugins = [];
-        foreach ($entries as $entry) {
-            if (is_array($entry) && ($entry['type'] ?? null) === 'spora-plugin') {
-                $plugins[] = [
-                    'name'    => (string) ($entry['name'] ?? ''),
-                    'version' => isset($entry['version']) ? (string) $entry['version'] : null,
-                    'path'    => isset($entry['path']) ? (string) $entry['path'] : null,
-                ];
+
+        foreach ($this->pluginDirectories() as $dir) {
+            if ($dir === '' || !is_dir($dir)) {
+                continue;
+            }
+
+            foreach (glob(rtrim($dir, '/') . '/*/plugin.json') ?: [] as $manifestFile) {
+                $real = realpath($manifestFile);
+                if ($real === false) {
+                    continue;
+                }
+                $plugins[] = $this->pluginFromManifest($real);
             }
         }
+
+        // Stable order across runs so the rendered table doesn't reshuffle.
+        usort(
+            $plugins,
+            static fn(array $a, array $b): int => strcmp((string) $a['name'], (string) $b['name']),
+        );
 
         return $plugins;
     }
 
     /**
-     * Decode `composer show --installed --direct --format=json` output into the
-     * underlying package-entry array.
+     * Build a list-entry from a single plugin.json manifest path. Returns
+     * the slug's directory name as `name` and null for `version` when the
+     * sibling composer.json is missing or unreadable — a partial install is
+     * still surfaced (the CLI shows `(unknown)`) rather than silently dropped.
      *
-     * Composer v2 wraps its JSON under an `installed` key (`{"installed": [...]}`).
-     * Older Composer releases and some forks emit a bare top-level list, so
-     * this helper accepts both shapes — preferring the `installed` key when
-     * present and falling back to the decoded value itself otherwise.
-     *
-     * @return list<mixed> Empty when the output isn't a JSON object/list at all.
+     * @return array{name: string, version: ?string, path: ?string}
      */
-    private function parseComposerShowOutput(string $output): array
+    private function pluginFromManifest(string $manifestFile): array
     {
-        $decoded = json_decode($output, true);
-        if (!is_array($decoded)) {
-            return [];
+        $pluginDir = dirname($manifestFile);
+        $slug      = basename($pluginDir);
+
+        $composerFile = $pluginDir . '/composer.json';
+        $raw          = @file_get_contents($composerFile);
+        $decoded      = is_string($raw) && $raw !== ''
+            ? json_decode($raw, true)
+            : null;
+
+        $name    = '';
+        $version = null;
+        if (is_array($decoded)) {
+            $name    = (string) ($decoded['name'] ?? '');
+            $version = isset($decoded['version']) && is_string($decoded['version']) && $decoded['version'] !== ''
+                ? $decoded['version']
+                : null;
         }
-        if (is_array($decoded['installed'] ?? null)) {
-            return $decoded['installed'];
-        }
-        return $decoded;
+
+        return [
+            'name'    => $name !== '' ? $name : $slug,
+            'version' => $version,
+            'path'    => $pluginDir,
+        ];
+    }
+
+    /**
+     * Plugin directory the framework scans at boot. Matches what
+     * {@see \Spora\Plugins\PluginLoaderCache::collectManifests()} walks so
+     * the CLI inventory and the runtime inventory see the same set.
+     *
+     * @return list<string>
+     */
+    private function pluginDirectories(): array
+    {
+        return [$this->paths->plugins()];
     }
 
     private function installFromRegistry(PluginInstallRequest $req): PluginInstallResult

@@ -162,64 +162,91 @@ test('update() without a package argument updates every installed plugin', funct
     ]);
 });
 
-test('list() filters composer show output to packages with type: spora-plugin', function (): void {
-    // Real Composer wraps the package list under an `installed` key since v2.
-    $json = json_encode(['installed' => [
-        ['name' => 'spora-ai/spora-plugin-tavily',     'version' => '0.1.0', 'type' => 'spora-plugin', 'path' => '/srv/spora/plugins/tavily'],
-        ['name' => 'symfony/console',                  'version' => '8.0.0', 'type' => 'library'],
-        ['name' => 'spora-ai/spora-plugin-semantics',  'version' => '0.2.0', 'type' => 'spora-plugin', 'path' => '/srv/spora/plugins/semantics'],
-    ]]);
-    $factory = new FakeProcessFactory([
-        'composer show --installed --direct --format=json' => new InMemoryProcess([], '', $json),
-    ]);
-    $manager = makeManager($factory);
+test('list() scans the plugins directory for plugin.json manifests and reports name+version from sibling composer.json', function (): void {
+    // Build a fake plugins dir with two plugins + a sibling non-plugin dir
+    // that should be ignored.
+    $base = sys_get_temp_dir() . '/spora-list-test-' . uniqid();
+    mkdir($base . '/plugins/tavily', 0o755, true);
+    mkdir($base . '/plugins/semantics', 0o755, true);
+    mkdir($base . '/plugins/_scratch', 0o755, true); // no plugin.json — must be skipped
+    file_put_contents($base . '/plugins/tavily/plugin.json', json_encode(['slug' => 'tavily', 'class' => 'X']));
+    file_put_contents($base . '/plugins/tavily/composer.json', json_encode(['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0']));
+    file_put_contents($base . '/plugins/semantics/plugin.json', json_encode(['slug' => 'semantics', 'class' => 'Y']));
+    file_put_contents($base . '/plugins/semantics/composer.json', json_encode(['name' => 'spora-ai/spora-plugin-semantic-scholar', 'version' => '0.2.3']));
 
-    expect($manager->list())->toBe([
-        ['name' => 'spora-ai/spora-plugin-tavily',    'version' => '0.1.0', 'path' => '/srv/spora/plugins/tavily'],
-        ['name' => 'spora-ai/spora-plugin-semantics', 'version' => '0.2.0', 'path' => '/srv/spora/plugins/semantics'],
-    ]);
+    try {
+        $factory = new FakeProcessFactory();
+        $manager = makeManager($factory, basePath: $base);
+
+        // list() does no composer subprocess — the factory has no scripted responses,
+        // and we explicitly assert no calls below.
+        $entries = $manager->list();
+
+        expect($factory->calls)->toBe([]);
+        expect($entries)->toBe([
+            ['name' => 'spora-ai/spora-plugin-semantic-scholar', 'version' => '0.2.3', 'path' => realpath($base . '/plugins/semantics')],
+            ['name' => 'spora-ai/spora-plugin-tavily',           'version' => '0.1.0', 'path' => realpath($base . '/plugins/tavily')],
+        ]);
+    } finally {
+        foreach ([$base . '/plugins/tavily/plugin.json', $base . '/plugins/tavily/composer.json', $base . '/plugins/semantics/plugin.json', $base . '/plugins/semantics/composer.json'] as $f) {
+            @unlink($f);
+        }
+        @rmdir($base . '/plugins/tavily');
+        @rmdir($base . '/plugins/semantics');
+        @rmdir($base . '/plugins/_scratch');
+        @rmdir($base . '/plugins');
+        @rmdir($base);
+    }
 });
 
-test('list() also accepts a bare top-level array (older Composer / forks)', function (): void {
-    $json = json_encode([
-        ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0', 'type' => 'spora-plugin', 'path' => '/srv/spora/plugins/tavily'],
-    ]);
-    $factory = new FakeProcessFactory([
-        'composer show --installed --direct --format=json' => new InMemoryProcess([], '', $json),
-    ]);
-    $manager = makeManager($factory);
+test('list() returns [] when no plugin.json files exist in the plugins dir', function (): void {
+    $base = sys_get_temp_dir() . '/spora-list-test-' . uniqid();
+    mkdir($base . '/plugins', 0o755, true);
 
-    expect($manager->list())->toBe([
-        ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0', 'path' => '/srv/spora/plugins/tavily'],
-    ]);
+    try {
+        $factory = new FakeProcessFactory();
+        $manager = makeManager($factory, basePath: $base);
+
+        expect($manager->list())->toBe([]);
+        expect($factory->calls)->toBe([]); // confirm no composer subprocess
+    } finally {
+        @rmdir($base . '/plugins');
+        @rmdir($base);
+    }
 });
 
-test('list() returns [] when composer show emits undecodable JSON', function (): void {
-    $factory = new FakeProcessFactory([
-        'composer show --installed --direct --format=json' => new InMemoryProcess([], '', 'not json'),
-    ]);
-    $manager = makeManager($factory);
+test('list() returns [] when the plugins directory does not exist (fresh install)', function (): void {
+    $base = sys_get_temp_dir() . '/spora-list-test-' . uniqid();
+    // Intentionally do NOT mkdir $base/plugins — fresh `composer install` never created it.
+
+    $factory = new FakeProcessFactory();
+    $manager = makeManager($factory, basePath: $base);
 
     expect($manager->list())->toBe([]);
+    expect($factory->calls)->toBe([]);
+
+    @rmdir($base);
 });
 
-test('list() returns [] when composer show exits non-zero', function (): void {
-    $factory = new FakeProcessFactory([
-        'composer show --installed --direct --format=json' =>
-            new InMemoryProcess([], '', '', 'No composer.json found', 1),
-    ]);
-    $manager = makeManager($factory);
+test('list() surfaces plugins with missing or malformed composer.json (tolerant of partial installs)', function (): void {
+    $base = sys_get_temp_dir() . '/spora-list-test-' . uniqid();
+    mkdir($base . '/plugins/tavily', 0o755, true);
+    file_put_contents($base . '/plugins/tavily/plugin.json', json_encode(['slug' => 'tavily', 'class' => 'X']));
+    // No composer.json sibling — version should fall back to null, name to slug.
 
-    expect($manager->list())->toBe([]);
-});
+    try {
+        $factory = new FakeProcessFactory();
+        $manager = makeManager($factory, basePath: $base);
 
-test('list() returns [] when composer show emits empty output', function (): void {
-    $factory = new FakeProcessFactory([
-        'composer show --installed --direct --format=json' => new InMemoryProcess([], '', ''),
-    ]);
-    $manager = makeManager($factory);
-
-    expect($manager->list())->toBe([]);
+        expect($manager->list())->toBe([
+            ['name' => 'tavily', 'version' => null, 'path' => realpath($base . '/plugins/tavily')],
+        ]);
+    } finally {
+        @unlink($base . '/plugins/tavily/plugin.json');
+        @rmdir($base . '/plugins/tavily');
+        @rmdir($base . '/plugins');
+        @rmdir($base);
+    }
 });
 
 test('failed composer process translates to PluginInstallFailedException with stderr and exit code', function (): void {
@@ -300,18 +327,18 @@ test('a .phar composer binary is prefixed with PHP_BINARY so it executes via the
     ]);
 });
 
-test('phar prefix applies to every operation (install, uninstall, update, list)', function (): void {
-    $factory = new FakeProcessFactory([
-        'composer.phar show --installed --direct --format=json' => new InMemoryProcess([], '', '[]'),
-    ]);
+test('phar prefix applies to every composer-spawning operation (install, uninstall, update)', function (): void {
+    // list() no longer shells out to `composer show` — it walks the
+    // filesystem directly — so the phar prefix only applies to the
+    // three operations that still spawn a Composer subprocess.
+    $factory = new FakeProcessFactory();
     $manager = makeManager($factory, composerBinary: 'composer.phar');
 
     $manager->install(new PluginInstallRequest('spora-ai/spora-plugin-x'));
     $manager->uninstall('spora-ai/spora-plugin-x');
     $manager->update('spora-ai/spora-plugin-x');
-    $manager->list();
 
-    expect($factory->calls)->toHaveCount(4);
+    expect($factory->calls)->toHaveCount(3);
     foreach ($factory->calls as $call) {
         expect($call['argv'][0])->toBe(PHP_BINARY);
         expect($call['argv'][1])->toBe('composer.phar');
