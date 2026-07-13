@@ -1,0 +1,14 @@
+{
+  "$schema": "https://spora.dev/agent-template.schema.json",
+  "id": "needs-weather",
+  "name": "Weather Helper",
+  "description": "Template that requires the weather plugin — used to verify PLUGIN_MISSING warning.",
+  "version": "1.0.0",
+  "agent": {
+    "system_prompt": "Use weather data when relevant.",
+    "max_steps": 10
+  },
+  "tools": [],
+  "required_plugins": ["weather"],
+  "metadata": { "category": "research", "icon": "sun" }
+}

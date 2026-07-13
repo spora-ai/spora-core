@@ -98,6 +98,7 @@ final class AgentController
             'system_prompt' => trim((string) ($body['system_prompt'] ?? '')) ?: null,
             'llm_driver_config_id' => isset($body['llm_driver_config_id']) ? (int) $body['llm_driver_config_id'] : null,
             'max_steps'     => (int) ($body['max_steps'] ?? 10),
+            'allow_followup' => array_key_exists('allow_followup', $body) ? (bool) $body['allow_followup'] : true,
         ];
 
         $agent = $this->agentService->createAgent($userId, $data);
@@ -139,7 +140,7 @@ final class AgentController
             return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
-        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'retry_after_minutes', 'max_retries'];
+        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries'];
         $data = array_intersect_key($body, array_flip($allowed));
 
         $agent = $this->agentService->updateAgent($agentId, $userId, $data);
@@ -185,6 +186,7 @@ final class AgentController
             'llm_driver_config_id' => $agent->llm_driver_config_id,
             'max_steps'            => (int) $agent->max_steps,
             'is_active'            => (bool) $agent->is_active,
+            'allow_followup'       => (bool) $agent->allow_followup,
             'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),
             'max_retries'          => (int) ($agent->max_retries ?? 0),
             'tools' => $tools->map(static fn(AgentTool $t) => [

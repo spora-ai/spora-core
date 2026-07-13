@@ -16,6 +16,10 @@ use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
+use Spora\AgentTemplates\AgentTemplateExporter;
+use Spora\AgentTemplates\AgentTemplateImporter;
+use Spora\AgentTemplates\AgentTemplateScanner;
+use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Apps\AppRegistry;
 use Spora\Apps\MemoriesApp;
 use Spora\Apps\PluginsApp;
@@ -42,6 +46,7 @@ use Spora\Extensions\AppLoader;
 use Spora\Http\AgentController;
 use Spora\Http\AgentMemoryController;
 use Spora\Http\AgentOverrideController;
+use Spora\Http\AgentTemplateController;
 use Spora\Http\AgentToolController;
 use Spora\Http\AppsController;
 use Spora\Http\AuthController;
@@ -58,7 +63,6 @@ use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\NotificationController;
 use Spora\Http\PluginsController;
 use Spora\Http\PromptTemplateController;
-use Spora\Http\RecipeController;
 use Spora\Http\ScheduledRunController;
 use Spora\Http\SseController;
 use Spora\Http\TaskController;
@@ -68,7 +72,6 @@ use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
 use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
-use Spora\Recipes\RecipeScanner;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentService;
 use Spora\Services\AgentServiceInterface;
@@ -792,10 +795,14 @@ final class ContainerDefinitions
                 );
             },
 
-            RecipeController::class => static function (ContainerInterface $c): RecipeController {
-                return new RecipeController(
+            AgentTemplateController::class => static function (ContainerInterface $c): AgentTemplateController {
+                return new AgentTemplateController(
                     $c->get(AuthService::class),
-                    $c->get(RecipeScanner::class),
+                    $c->get(AgentTemplateScanner::class),
+                    $c->get(AgentTemplateValidator::class),
+                    $c->get(AgentTemplateImporter::class),
+                    $c->get(AgentTemplateExporter::class),
+                    $c->get(AgentServiceInterface::class),
                 );
             },
 
@@ -1001,20 +1008,34 @@ final class ContainerDefinitions
             // builder there. The AppRegistry factory above consumes it via
             // `$c->get(PluginLoader::class)->appClasses()`.
 
-            RecipeScanner::class => static function (ContainerInterface $c): RecipeScanner {
+            AgentTemplateScanner::class => static function (ContainerInterface $c): AgentTemplateScanner {
                 $pluginLoader = $c->get(PluginLoader::class);
-                $appRecipePaths = $c->has(AppLoader::class)
-                    ? ($c->get(AppLoader::class)->getApp()?->recipePaths() ?? [])
+                $paths = $c->get(Paths::class);
+
+                $appPaths = $c->has(AppLoader::class)
+                    ? ($c->get(AppLoader::class)->getApp()?->agentTemplatePaths() ?? [])
                     : [];
 
                 $directories = array_merge(
-                    [$c->get(Paths::class)->recipes()],
-                    $pluginLoader->recipePaths(),
-                    $appRecipePaths,
+                    $paths->agentTemplatesPaths(),
+                    $pluginLoader->agentTemplatePaths(),
+                    $appPaths,
                 );
 
-                return new RecipeScanner($directories);
+                return new AgentTemplateScanner($directories);
             },
+
+            AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
+
+            AgentTemplateImporter::class => static function (ContainerInterface $c): AgentTemplateImporter {
+                return new AgentTemplateImporter(
+                    $c->get(ToolConfigService::class),
+                    $c->get(PluginLoader::class),
+                    $c->get(Paths::class),
+                );
+            },
+
+            AgentTemplateExporter::class => static fn(): AgentTemplateExporter => new AgentTemplateExporter(),
 
             MemoryServiceInterface::class => static fn(): MemoryServiceInterface => new MemoryService(),
             MailTemplateServiceInterface::class => static fn(): MailTemplateServiceInterface => new MailTemplateService(),
@@ -1041,6 +1062,7 @@ final class ContainerDefinitions
                     $c->get(DatabaseSchemaInstaller::class),
                     $c->get(AuthService::class),
                     $c->get(EmailTemplateLoader::class),
+                    $c->get(AgentTemplateImporter::class),
                 );
             },
 
@@ -1049,6 +1071,7 @@ final class ContainerDefinitions
                     $c->get(Database::class),
                     static fn(): AuthService => $c->get(AuthService::class),
                     $c->get(EmailTemplateLoader::class),
+                    $c->get(AgentTemplateImporter::class),
                     $c->get(Paths::class),
                 );
             },

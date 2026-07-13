@@ -58,6 +58,7 @@ final class AgentService implements AgentServiceInterface
             'system_prompt'          => $data['system_prompt'] ?? null,
             'llm_driver_config_id'   => $data['llm_driver_config_id'] ?? null,
             'max_steps'              => (int) ($data['max_steps'] ?? 10),
+            'allow_followup'         => (bool) ($data['allow_followup'] ?? true) ? 1 : 0,
             'is_active'              => 1,
             'created_at'            => date(self::DATETIME_FORMAT),
             'updated_at'            => date(self::DATETIME_FORMAT),

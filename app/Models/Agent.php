@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int|null $llm_driver_config_id
  * @property int|null $max_steps
  * @property bool $is_active
+ * @property bool $allow_followup
  * @property int $retry_after_minutes
  * @property int $max_retries
  */

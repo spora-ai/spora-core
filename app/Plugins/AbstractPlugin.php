@@ -93,6 +93,20 @@ abstract class AbstractPlugin implements PluginInterface
     }
 
     /**
+     * Absolute paths to agent-template files (.json / .yaml / .yml) this
+     * plugin ships. The scanner reads depth-0 from each path. Templates
+     * declare tool activations and per-operation auto-approve defaults;
+     * settings (passwords, secrets) are NEVER exported or imported —
+     * recipients must configure them in Settings → Tools after import.
+     *
+     * @return string[]
+     */
+    public function agentTemplatePaths(): array
+    {
+        return [];
+    }
+
+    /**
      * Bump whenever new migration files are added under {@see migrationsPath()}.
      * Return 0 (the default) if the plugin has no database schema.
      */

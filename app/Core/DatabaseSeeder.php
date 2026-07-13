@@ -5,27 +5,34 @@ declare(strict_types=1);
 namespace Spora\Core;
 
 use Delight\Auth\Role;
-use ReflectionClass;
+use RuntimeException;
+use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Auth\AuthService;
-use Spora\Models\Agent;
-use Spora\Models\AgentTool;
 use Spora\Models\MailTemplate;
 use Spora\Models\User;
 use Spora\Services\EmailTemplateLoader;
-use Spora\Tools\AgentMemoryTool;
-use Spora\Tools\CalculatorTool;
-use Spora\Tools\CurrentTimeTool;
-use Spora\Tools\GlobalMemoryTool;
 
 /**
  * Seeds the database with a default Admin user and an integrated Agent.
  * Useful for bootstrapping the local development environment for the frontend.
+ *
+ * The "Spora Core Agent" is no longer hard-coded — it's installed from the
+ * built-in `core-assistant` template so the seed stays in sync with whatever
+ * the upstream template declares. Update the template to evolve the seed.
  */
 final class DatabaseSeeder
 {
+    /**
+     * Template id installed by {@see run()} when no Spora Core Agent exists
+     * yet. The template must be shippable from one of the directories
+     * {@see Paths::agentTemplatesPaths()} reports.
+     */
+    public const CORE_AGENT_TEMPLATE_ID = 'core-assistant';
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly EmailTemplateLoader $templateLoader,
+        private readonly AgentTemplateImporter $templateImporter,
     ) {}
 
     public function run(): void
@@ -54,44 +61,31 @@ final class DatabaseSeeder
         // 2b. Grant ADMIN role to the user and mark as verified (seeder admin bypasses email verification).
         User::where('id', $userId)->update([
             'roles_mask' => Role::ADMIN,
-            'verified' => 1,
-            'status' => 1,
+            'verified'   => 1,
+            'status'     => 1,
         ]);
 
-        // 3. Create or ensure default Agent exists.
-        $agent = Agent::where('user_id', $userId)->where('name', 'Spora Core Agent')->first();
-        if ($agent === null) {
-            $agent = Agent::create([
-                'user_id'      => $userId,
-                'name'         => 'Spora Core Agent',
-                'max_steps'    => 10,
-                'is_active'    => true,
-            ]);
-            echo "Created Default Agent.\n";
+        // 3. Install the Spora Core Agent from the built-in template, if missing.
+        //    `recipe_id` would be the canonical trace, but we key on the
+        //    agent name to keep this seeder resilient to template renames.
+        $existing = \Spora\Models\Agent::where('user_id', $userId)
+            ->where('name', 'Spora Core Agent')
+            ->first();
+
+        if ($existing === null) {
+            try {
+                $result = $this->templateImporter->applyTemplate($userId, self::CORE_AGENT_TEMPLATE_ID);
+                echo "Created Spora Core Agent from '" . self::CORE_AGENT_TEMPLATE_ID . "' template with "
+                    . count($result->toolsEnabled) . " tools.\n";
+                foreach ($result->warnings as $w) {
+                    echo "  - [{$w['code']}] {$w['message']}\n";
+                }
+            } catch (RuntimeException $e) {
+                echo "Could not apply template '" . self::CORE_AGENT_TEMPLATE_ID . "': {$e->getMessage()}\n";
+            }
         } else {
-            echo "Default Agent already exists.\n";
+            echo "Spora Core Agent already exists.\n";
         }
-
-        // 4. Define the base tools every functional agent needs.
-        $toolsToEnable = [
-            CurrentTimeTool::class,
-            CalculatorTool::class,
-            AgentMemoryTool::class,
-            GlobalMemoryTool::class,
-        ];
-
-        foreach ($toolsToEnable as $toolClass) {
-            $ref = new ReflectionClass($toolClass);
-            $attrs = $ref->getAttributes(\Spora\Tools\Attributes\Tool::class);
-            $toolName = $attrs[0]->newInstance()->name;
-
-            AgentTool::updateOrCreate(
-                ['agent_id' => $agent->id, 'tool_class' => $toolClass],
-                ['tool_name' => $toolName],
-            );
-        }
-
-        echo "Enabled " . count($toolsToEnable) . " Base Tools for the Agent.\n";
 
         echo "Database Seeding Complete!\n";
     }

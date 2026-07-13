@@ -55,6 +55,17 @@ interface SporaExtensionInterface
     public function recipePaths(): array;
 
     /**
+     * Absolute paths to agent-template files (.json / .yaml / .yml) this
+     * extension ships. The scanner reads depth-0 from each path. Templates
+     * declare tool activations and per-operation auto-approve defaults;
+     * settings (passwords, secrets) are NEVER exported or imported —
+     * recipients must configure them in Settings → Tools after import.
+     *
+     * @return string[]
+     */
+    public function agentTemplatePaths(): array;
+
+    /**
      * Schema version for this extension's database migrations.
      * Return 0 (default) if the extension has no database schema.
      * Increment whenever new migration files are added.

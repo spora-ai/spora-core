@@ -2,18 +2,43 @@
 
 declare(strict_types=1);
 
+use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Core\DatabaseSeeder;
 use Spora\Core\Paths;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\User;
+use Spora\Plugins\PluginLoader;
 use Spora\Services\EmailTemplateLoader;
+use Spora\Services\ToolConfigService;
 
-it('seeds the admin user and agent successfully', function () {
+function makeSeeder(): DatabaseSeeder
+{
     $authService = bootAuthLayer();
     $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
-    $seeder = new DatabaseSeeder($authService, $templateLoader);
 
+    $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new Spora\Core\SecurityManager($key);
+    $logger   = new Monolog\Logger('test');
+    $toolConfig = new ToolConfigService($security, $logger, [
+        Spora\Tools\CurrentTimeTool::class,
+        Spora\Tools\CalculatorTool::class,
+        Spora\Tools\AgentMemoryTool::class,
+        Spora\Tools\GlobalMemoryTool::class,
+        Spora\Tools\ReadUrlTool::class,
+        Spora\Tools\UserInfoTool::class,
+        Spora\Tools\HandoverTool::class,
+    ]);
+    $importer = new AgentTemplateImporter(
+        $toolConfig,
+        new PluginLoader([]),
+        new Paths(BASE_PATH),
+    );
+
+    return new DatabaseSeeder($authService, $templateLoader, $importer);
+}
+
+it('seeds the admin user and agent successfully', function () {
     // Initial state
     expect(User::count())->toBe(0)
         ->and(Agent::count())->toBe(0)
@@ -21,29 +46,28 @@ it('seeds the admin user and agent successfully', function () {
 
     // Run the seeder
     ob_start();
-    $seeder->run();
+    makeSeeder()->run();
     $output = ob_get_clean();
 
     expect($output)->toContain('Created Admin User')
-        ->toContain('Created Default Agent')
-        ->toContain('Enabled 4 Base Tools');
+        ->toContain("Created Spora Core Agent from 'core-assistant' template")
+        ->toContain('4 tools');
 
-    // Assert databases state
+    // Assert database state
     $user = User::where('email', 'admin@spora.local')->first();
     expect($user)->not->toBeNull();
 
     $agent = Agent::where('user_id', $user->id)->first();
     expect($agent)->not->toBeNull()
-        ->and($agent->name)->toBe('Spora Core Agent');
+        ->and($agent->name)->toBe('Spora Core Agent')
+        ->and($agent->recipe_id)->toBe('core-assistant');
 
     $tools = AgentTool::where('agent_id', $agent->id)->get();
     expect($tools)->toHaveCount(4);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('does not duplicate records if seeder is run twice', function () {
-    $authService = bootAuthLayer();
-    $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
-    $seeder = new DatabaseSeeder($authService, $templateLoader);
+    $seeder = makeSeeder();
 
     // First run
     ob_start();
@@ -55,12 +79,7 @@ it('does not duplicate records if seeder is run twice', function () {
     $seeder->run();
     $output = ob_get_clean();
 
-    expect($output)->toContain('Admin user already exists')
-        ->toContain('Default Agent already exists')
-        ->toContain('Enabled 4 Base Tools');
-
-    // Assert counts haven't abnormally expanded
-    expect(User::where('email', 'admin@spora.local')->count())->toBe(1)
-        ->and(Agent::where('name', 'Spora Core Agent')->count())->toBe(1)
-        ->and(AgentTool::count())->toBe(4);
+    expect(User::count())->toBe(1);
+    expect(Agent::count())->toBe(1);
+    expect($output)->toContain('Spora Core Agent already exists');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());

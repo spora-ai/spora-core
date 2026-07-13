@@ -50,6 +50,22 @@ final class Paths
         return $this->join($this->overrideOrDefault('SPORA_RECIPES_DIR', 'recipes'), $sub);
     }
 
+    /**
+     * Agent templates: project overrides win over framework defaults.
+     * Returns the list of directories to scan, in priority order (highest first).
+     * Mirrors {@see emailTemplatesPaths()}.
+     *
+     * @return list<string>
+     */
+    public function agentTemplatesPaths(): array
+    {
+        $project = $this->base('agent-templates');
+        $framework = $this->framework('agent-templates');
+        $paths = is_dir($project) ? [$project] : [];
+        $paths[] = $framework;
+        return $paths;
+    }
+
     public function config(string $sub = ''): string
     {
         return $this->join($this->overrideOrDefault('SPORA_CONFIG_FILE', 'config.php'), $sub);

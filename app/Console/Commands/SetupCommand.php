@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Console\Commands;
 
+use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
@@ -28,6 +29,7 @@ final class SetupCommand extends Command
         private readonly DatabaseSchemaInstaller $installer,
         private readonly AuthService $authService,
         private readonly EmailTemplateLoader $templateLoader,
+        private readonly AgentTemplateImporter $templateImporter,
     ) {
         parent::__construct();
     }
@@ -47,7 +49,7 @@ final class SetupCommand extends Command
 
             if ($userCount === 0 && $agentCount === 0) {
                 $output->writeln('<info>Fresh installation — running seeder...</info>');
-                $seeder = new DatabaseSeeder($this->authService, $this->templateLoader);
+                $seeder = new DatabaseSeeder($this->authService, $this->templateLoader, $this->templateImporter);
                 $seeder->run();
             } else {
                 $output->writeln('<info>Existing installation detected. Skipping seeding.</info>');

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://spora.dev/agent-template.schema.json",
+  "id": "minimal",
+  "name": "Minimal Template",
+  "description": "Smallest valid agent template — one tool, one operation.",
+  "version": "1.0.0",
+  "agent": {
+    "description": "Tiny.",
+    "system_prompt": "Be brief.",
+    "max_steps": 5,
+    "allow_continuation": true,
+    "retry_after_minutes": 0,
+    "max_retries": 0
+  },
+  "tools": [
+    {
+      "tool_class": "Spora\\Tools\\CurrentTimeTool",
+      "enabled": true,
+      "operations": [
+        { "name": "now", "enabled": true, "auto_approve": true }
+      ]
+    }
+  ],
+  "required_plugins": [],
+  "metadata": { "category": "general", "icon": "puzzle" }
+}

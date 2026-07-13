@@ -1,0 +1,9 @@
+{
+  "name": "Missing ID",
+  "description": "Template without an id field — must fail validation.",
+  "version": "1.0.0",
+  "agent": { "system_prompt": "x", "max_steps": 5 },
+  "tools": [],
+  "required_plugins": [],
+  "metadata": { "category": "general", "icon": "puzzle" }
+}

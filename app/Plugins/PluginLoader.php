@@ -155,6 +155,26 @@ final class PluginLoader
     }
 
     /**
+     * All agent-template directory paths contributed by loaded plugins.
+     * Mirrors {@see recipePaths()}; the scanner aggregates these alongside
+     * core-shipped and app-contributed templates.
+     *
+     * @return string[]
+     */
+    public function agentTemplatePaths(): array
+    {
+        $paths = [];
+
+        foreach ($this->plugins as $plugin) {
+            foreach ($plugin->agentTemplatePaths() as $path) {
+                $paths[] = $path;
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
      * All admin-panel App class FQCNs contributed by loaded plugins.
      * Merged into the host AppRegistry at container build time.
      *
