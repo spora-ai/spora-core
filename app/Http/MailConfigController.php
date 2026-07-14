@@ -40,7 +40,7 @@ final class MailConfigController
         $mailConfig = [
             'driver'       => $this->config['mail_driver']     ?? 'php_mail',
             'host'         => $this->config['mail_host']       ?? null,
-            'port'         => $this->config['mail_port']       ?? 587,
+            'port'         => $this->config['mail_port']       ?? 465,
             'username'     => $this->config['mail_username']   ?? null,
             'password'     => $this->config['mail_password']   ?? null,
             'from_address' => $this->config['mail_from']       ?? null,
@@ -91,7 +91,7 @@ final class MailConfigController
         $updatedConfig = [
             'driver'       => $body['driver']       ?? $this->config['mail_driver']     ?? 'php_mail',
             'host'         => $body['host']         ?? $this->config['mail_host']       ?? null,
-            'port'         => isset($body['port']) ? (int) $body['port'] : ($this->config['mail_port']       ?? 587),
+            'port'         => isset($body['port']) ? (int) $body['port'] : ($this->config['mail_port']       ?? 465),
             'username'     => $body['username']     ?? $this->config['mail_username']   ?? null,
             'password'     => '***',
             'from_address' => $body['from_address'] ?? $this->config['mail_from']       ?? null,
