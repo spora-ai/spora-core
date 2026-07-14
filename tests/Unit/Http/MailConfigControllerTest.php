@@ -73,7 +73,7 @@ test('index() uses sane defaults when config keys are missing', function (): voi
 
     $body = json_decode($response->getContent(), true);
     expect($body['data']['mail_config']['driver'])->toBe('php_mail');
-    expect($body['data']['mail_config']['port'])->toBe(587);
+    expect($body['data']['mail_config']['port'])->toBe(465);
     expect($body['data']['mail_config']['encryption'])->toBe('tls');
     expect($body['data']['mail_config']['from_name'])->toBe('Spora');
 });

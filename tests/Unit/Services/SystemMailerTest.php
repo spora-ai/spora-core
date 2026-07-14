@@ -6,6 +6,7 @@ namespace Tests\Unit\Services;
 
 use InvalidArgumentException;
 use Psr\Log\NullLogger;
+use ReflectionMethod;
 use Spora\Models\MailTemplate;
 use Spora\Models\User;
 use Spora\Services\SystemMailer;
@@ -84,6 +85,57 @@ test('buildMailer with smtp driver and missing host error message mentions host'
     expect($caught)->toBeInstanceOf(InvalidArgumentException::class);
     expect($caught->getMessage())->toContain('SPORA_MAIL_HOST');
     expect($caught->getMessage())->toContain('mail_host');
+});
+
+test('buildMailer with smtp driver and encryption=none throws InvalidArgumentException', function (): void {
+    $mailer = new SystemMailer([
+        'mail_driver'     => 'smtp',
+        'mail_host'       => 'smtp.example.com',
+        'mail_encryption' => 'none',
+    ]);
+
+    $mailer->buildMailer();
+})->throws(InvalidArgumentException::class, 'SMTP mail encryption "none" is insecure');
+
+test('buildMailer with smtp driver produces an smtps:// DSN', function (): void {
+    // Inspect the private buildSmtpDsn() via reflection to confirm the scheme.
+    $mailer = new SystemMailer([
+        'mail_driver'     => 'smtp',
+        'mail_host'       => 'smtp.example.com',
+        'mail_port'       => 465,
+        'mail_username'   => 'user',
+        'mail_password'   => 'secret',
+        'mail_encryption' => 'tls',
+    ]);
+
+    $reflection = new ReflectionMethod($mailer, 'buildSmtpDsn');
+    $reflection->setAccessible(true);
+    $dsn = $reflection->invoke($mailer, [
+        'mail_host'       => 'smtp.example.com',
+        'mail_port'       => 465,
+        'mail_username'   => 'user',
+        'mail_password'   => 'secret',
+        'mail_encryption' => 'tls',
+    ]);
+
+    expect($dsn)->toStartWith('smtps://');
+    expect($dsn)->not->toContain('?encryption=');
+    expect($dsn)->toContain(':465');
+});
+
+test('buildMailer with smtp driver uses default port 465 when not specified', function (): void {
+    $mailer = new SystemMailer([
+        'mail_driver' => 'smtp',
+        'mail_host'   => 'smtp.example.com',
+    ]);
+
+    $reflection = new ReflectionMethod($mailer, 'buildSmtpDsn');
+    $reflection->setAccessible(true);
+    $dsn = $reflection->invoke($mailer, [
+        'mail_host' => 'smtp.example.com',
+    ]);
+
+    expect($dsn)->toBe('smtps://smtp.example.com:465');
 });
 
 test('buildMailer with smtp driver and username only (no password) returns Mailer', function (): void {
