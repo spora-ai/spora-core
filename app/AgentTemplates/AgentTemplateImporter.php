@@ -249,12 +249,23 @@ final class AgentTemplateImporter
             'skipped'  => false,
             'enabled'  => true,
             'warning'  => $toolWarning,
-            'summary'  => [
-                'tool_class'         => $toolClass,
-                'enabled'            => true,
-                'operations_applied' => $opsApplied,
-                'warnings'           => $toolWarning === null ? [] : [$toolWarning],
-            ],
+            'summary'  => $this->buildEnabledSummary($toolClass, $opsApplied, $toolWarning),
+        ];
+    }
+
+    /**
+     * Build the per-tool summary entry for an enabled tool. Extracted to keep
+     * `applyTool`'s return-count under the S1142 ceiling.
+     *
+     * @return array{tool_class: string, enabled: bool, operations_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}
+     */
+    private function buildEnabledSummary(string $toolClass, int $opsApplied, ?array $toolWarning): array
+    {
+        return [
+            'tool_class'         => $toolClass,
+            'enabled'            => true,
+            'operations_applied' => $opsApplied,
+            'warnings'           => $toolWarning === null ? [] : [$toolWarning],
         ];
     }
 
@@ -270,33 +281,61 @@ final class AgentTemplateImporter
     {
         $applied = 0;
         foreach ($operations as $op) {
-            if (!is_array($op)) {
-                continue;
-            }
-            $opName = (string) ($op['name'] ?? '');
-            if ($opName === '' || !$this->isKnownOperation($toolClass, $opName)) {
+            if ($this->shouldSkipOperation($op, $toolClass)) {
                 continue;
             }
 
-            $row = ['agent_id' => $agentId, 'tool_class' => $toolClass, 'operation' => $opName];
-            $existing = AgentToolOperationOverride::where($row)->first();
-
-            $update = ['updated_at' => date(self::DATETIME_FORMAT)];
-            if (array_key_exists('enabled', $op)) {
-                $update['enabled'] = $op['enabled'] ? 1 : 0;
-            }
-            if (array_key_exists('auto_approve', $op)) {
-                // auto_approve=true → no approval required → default_requires_approval=0
-                $update['default_requires_approval'] = $op['auto_approve'] ? 0 : 1;
-            }
-            if ($existing === null) {
-                $update['created_at'] = date(self::DATETIME_FORMAT);
-            }
-
-            AgentToolOperationOverride::updateOrCreate($row, $update);
+            $opName = (string) $op['name'];
+            $this->persistOperationOverride($agentId, $toolClass, $opName, $op);
             $applied++;
         }
         return $applied;
+    }
+
+    /**
+     * True when the operation entry is not a map, has no name, or names a
+     * operation the tool doesn't actually declare. Extracted so the
+     * `applyOperations` loop stays under the cognitive-complexity ceiling.
+     *
+     * @param mixed $op
+     */
+    private function shouldSkipOperation(mixed $op, string $toolClass): bool
+    {
+        if (!is_array($op)) {
+            return true;
+        }
+        $opName = (string) ($op['name'] ?? '');
+        if ($opName === '' || !$this->isKnownOperation($toolClass, $opName)) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Build the upsert payload for a single operation override and write it.
+     * Splits the conditional column updates out of the loop body to keep
+     * the caller's cognitive complexity below the S3776 ceiling.
+     *
+     * @param array<string, mixed> $op
+     */
+    private function persistOperationOverride(int $agentId, string $toolClass, string $opName, array $op): void
+    {
+        $row = ['agent_id' => $agentId, 'tool_class' => $toolClass, 'operation' => $opName];
+        $existing = AgentToolOperationOverride::where($row)->first();
+
+        $update = ['updated_at' => date(self::DATETIME_FORMAT)];
+        if (array_key_exists('enabled', $op)) {
+            $update['enabled'] = $op['enabled'] ? 1 : 0;
+        }
+        if (array_key_exists('auto_approve', $op)) {
+            // auto_approve=true → no approval required → default_requires_approval=0
+            $update['default_requires_approval'] = $op['auto_approve'] ? 0 : 1;
+        }
+        if ($existing === null) {
+            $update['created_at'] = date(self::DATETIME_FORMAT);
+        }
+
+        AgentToolOperationOverride::updateOrCreate($row, $update);
     }
 
     private function createAgent(int $userId, AgentTemplate $template): int

@@ -270,20 +270,27 @@ final class PluginLoader
         if ($dir === null) {
             return null;
         }
-        $composerFile = $dir . '/composer.json';
-        if (!is_file($composerFile)) {
-            return null;
-        }
-        $raw = @file_get_contents($composerFile);
-        if (!is_string($raw) || $raw === '') {
-            return null;
-        }
-        $decoded = json_decode($raw, true);
+        $decoded = $this->readComposerJson($dir);
         if (!is_array($decoded)) {
             return null;
         }
         $name = $decoded['name'] ?? null;
         return is_string($name) && $name !== '' ? $name : null;
+    }
+
+    /** @return array<string, mixed>|null */
+    private function readComposerJson(string $dir): ?array
+    {
+        $path = $dir . '/composer.json';
+        if (!is_file($path)) {
+            return null;
+        }
+        $raw = @file_get_contents($path);
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : null;
     }
 
     /**

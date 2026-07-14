@@ -127,7 +127,7 @@ final class AgentTemplateScanner
         string $code = 'PARSE_ERROR',
         ?string $message = null,
     ): AgentTemplate {
-        $template = new AgentTemplate(
+        return new AgentTemplate(
             raw: [],
             initialWarnings: [
                 [
@@ -140,7 +140,6 @@ final class AgentTemplateScanner
             source: $this->resolveSource($filename, $dir),
             filename: $filename,
         );
-        return $template;
     }
 
     /**
