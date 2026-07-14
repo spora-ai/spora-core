@@ -192,28 +192,57 @@ final class AgentTemplateImporter
         $empty = ['skipped' => false, 'enabled' => false, 'warning' => null, 'summary' => null];
 
         $toolClass = (string) ($toolEntry['tool_class'] ?? '');
-        if ($toolClass === '') {
-            return $empty;
-        }
+        $missingWarning = $this->buildToolPluginMissingWarning($toolClass, $registeredTools);
 
-        if (!in_array($toolClass, $registeredTools, true)) {
+        if ($missingWarning !== null) {
             return [
-                'skipped'  => true,
-                'enabled'  => false,
-                'warning'  => [
-                    'code'     => 'TOOL_PLUGIN_MISSING',
-                    'severity' => 'warning',
-                    'message'  => sprintf("Tool '%s' is not currently registered (plugin missing or unloaded). Skipping.", $toolClass),
-                    'path'     => 'tools[].tool_class',
-                ],
-                'summary'  => null,
+                'skipped' => true,
+                'enabled' => false,
+                'warning' => $missingWarning,
+                'summary' => null,
             ];
         }
 
-        if (!(bool) ($toolEntry['enabled'] ?? false)) {
-            return $empty;
+        if ($toolClass === '' || !(bool) ($toolEntry['enabled'] ?? false)) {
+            $result = $empty;
+        } else {
+            $result = $this->applyEnabledTool($agentId, $toolClass, $toolEntry);
         }
 
+        return $result;
+    }
+
+    /**
+     * Build the TOOL_PLUGIN_MISSING warning when the tool's class isn't
+     * currently registered with ToolConfigService. Returns null when the
+     * class is empty or registered (caller should fall through to the
+     * next gate).
+     *
+     * @param list<string> $registeredTools
+     * @return ?array{code: string, severity: string, message: string, path?: string}
+     */
+    private function buildToolPluginMissingWarning(string $toolClass, array $registeredTools): ?array
+    {
+        if ($toolClass === '' || in_array($toolClass, $registeredTools, true)) {
+            return null;
+        }
+        return [
+            'code'     => 'TOOL_PLUGIN_MISSING',
+            'severity' => 'warning',
+            'message'  => sprintf("Tool '%s' is not currently registered (plugin missing or unloaded). Skipping.", $toolClass),
+            'path'     => 'tools[].tool_class',
+        ];
+    }
+
+    /**
+     * Persist the agent_tool row, evaluate missing-required-config, and
+     * upsert per-operation overrides. Returns the enabled-shape result.
+     *
+     * @param array<string, mixed> $toolEntry
+     * @return array{skipped: bool, enabled: bool, warning: ?array{code: string, severity: string, message: string, path?: string}, summary: ?array{tool_class: string, enabled: bool, operations_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}}
+     */
+    private function applyEnabledTool(int $agentId, string $toolClass, array $toolEntry): array
+    {
         $now = date(self::DATETIME_FORMAT);
         AgentTool::updateOrCreate(
             ['agent_id' => $agentId, 'tool_class' => $toolClass],
