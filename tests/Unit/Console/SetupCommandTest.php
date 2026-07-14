@@ -2,11 +2,14 @@
 
 declare(strict_types=1);
 
+use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Console\Commands\SetupCommand;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Core\Paths;
+use Spora\Plugins\PluginLoader;
 use Spora\Services\EmailTemplateLoader;
+use Spora\Services\ToolConfigService;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -20,11 +23,31 @@ function makeSetupTester(): CommandTester
 
     $authService    = bootAuthLayer();
     $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
+
+    $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new Spora\Core\SecurityManager($key);
+    $logger   = new Monolog\Logger('test');
+    $toolConfig = new ToolConfigService($security, $logger, [
+        Spora\Tools\CurrentTimeTool::class,
+        Spora\Tools\CalculatorTool::class,
+        Spora\Tools\AgentMemoryTool::class,
+        Spora\Tools\GlobalMemoryTool::class,
+        Spora\Tools\ReadUrlTool::class,
+        Spora\Tools\UserInfoTool::class,
+        Spora\Tools\HandoverTool::class,
+    ]);
+    $importer = new AgentTemplateImporter(
+        $toolConfig,
+        new PluginLoader([]),
+        new Paths(BASE_PATH),
+    );
+
     $command = new SetupCommand(
         $db,
         new DatabaseSchemaInstaller(null, null),
         $authService,
         $templateLoader,
+        $importer,
     );
     $command->setName('spora:setup');
 

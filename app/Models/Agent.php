@@ -14,11 +14,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property-read User|null $user
  * @property string $name
  * @property string|null $description
- * @property string|null $recipe_id
  * @property string|null $system_prompt
  * @property int|null $llm_driver_config_id
  * @property int|null $max_steps
  * @property bool $is_active
+ * @property bool $allow_followup
  * @property int $retry_after_minutes
  * @property int $max_retries
  */
@@ -30,7 +30,6 @@ final class Agent extends Model
         'user_id',
         'name',
         'description',
-        'recipe_id',
         'system_prompt',
         'llm_driver_config_id',
         'max_steps',

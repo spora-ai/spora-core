@@ -65,6 +65,18 @@ abstract class AbstractExtension implements SporaExtensionInterface
         return [];
     }
 
+    /**
+     * See {@see SporaExtensionInterface::agentTemplatePaths()}. Default
+     * to no templates shipped; subclasses (plugins and apps) override
+     * to contribute their own.
+     *
+     * @return string[]
+     */
+    public function agentTemplatePaths(): array
+    {
+        return [];
+    }
+
     public function schemaVersion(): int
     {
         return 0;

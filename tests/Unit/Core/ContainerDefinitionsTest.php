@@ -442,7 +442,7 @@ it('apiTaskControllerDefinitions includes task/workflow controllers', function (
 
     expect($def)->toHaveKey(Spora\Http\TaskController::class);
     expect($def)->toHaveKey(Spora\Services\TaskServiceInterface::class);
-    expect($def)->toHaveKey(Spora\Http\RecipeController::class);
+    expect($def)->toHaveKey(Spora\Http\AgentTemplateController::class);
     expect($def)->toHaveKey(Spora\Http\PromptTemplateController::class);
     expect($def)->toHaveKey(Spora\Http\NotificationController::class);
     expect($def)->toHaveKey(Spora\Http\SseController::class);
@@ -480,7 +480,7 @@ it('orchestratorDefinitions includes orchestrator, plugins, and facades', functi
     // not by ContainerDefinitions::orchestratorDefinitions. The AppRegistry
     // factory (in this same method) consumes it via $c->get(PluginLoader::class).
     expect($def)->not->toHaveKey(PluginLoader::class);
-    expect($def)->toHaveKey(Spora\Recipes\RecipeScanner::class);
+    expect($def)->toHaveKey(Spora\AgentTemplates\AgentTemplateScanner::class);
     expect($def)->toHaveKey(Spora\Services\MemoryServiceInterface::class);
     expect($def)->toHaveKey(Spora\Services\MailTemplateServiceInterface::class);
     expect($def)->toHaveKey(Spora\Services\PromptTemplateServiceInterface::class);

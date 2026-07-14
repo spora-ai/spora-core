@@ -40,6 +40,12 @@ test('recipePaths() defaults to an empty array', function (): void {
     expect($plugin->recipePaths())->toBe([]);
 });
 
+test('agentTemplatePaths() defaults to an empty array', function (): void {
+    $plugin = new DemoPlugin();
+
+    expect($plugin->agentTemplatePaths())->toBe([]);
+});
+
 test('schemaVersion() defaults to 0', function (): void {
     $plugin = new DemoPlugin();
 
@@ -78,6 +84,7 @@ test('subclass can override only getName() and tools(), leaving every other meth
     expect($plugin->autoload())->toBe([]);
     expect($plugin->drivers())->toBe([]);
     expect($plugin->recipePaths())->toBe([]);
+    expect($plugin->agentTemplatePaths())->toBe([]);
     expect($plugin->schemaVersion())->toBe(0);
     expect($plugin->migrationsPath())->toBeNull();
 });

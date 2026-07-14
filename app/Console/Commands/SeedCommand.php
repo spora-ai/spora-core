@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Console\Commands;
 
 use Closure;
+use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSeeder;
@@ -29,6 +30,7 @@ final class SeedCommand extends Command
         private readonly Database $database,
         private readonly Closure $authServiceFactory,
         private readonly EmailTemplateLoader $templateLoader,
+        private readonly AgentTemplateImporter $templateImporter,
         private readonly Paths $paths,
     ) {
         parent::__construct('db:seed');
@@ -58,7 +60,7 @@ final class SeedCommand extends Command
 
             /** @var AuthService $authService */
             $authService = ($this->authServiceFactory)();
-            $seeder = new DatabaseSeeder($authService, $this->templateLoader);
+            $seeder = new DatabaseSeeder($authService, $this->templateLoader, $this->templateImporter);
             $seeder->run();
 
             $output->writeln('<info>Seeding finished successfully.</info>');

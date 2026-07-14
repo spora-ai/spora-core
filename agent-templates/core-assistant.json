@@ -1,0 +1,56 @@
+{
+  "$schema": "https://spora.dev/agent-template.schema.json",
+  "id": "core/core-assistant",
+  "name": "Spora Core Agent",
+  "description": "Default Spora agent with time, math, and memory tools.",
+  "version": "1.0.0",
+  "agent": {
+    "description": "Spora's general-purpose starter agent.",
+    "system_prompt": "You are a helpful AI assistant. Use the tools available to you when appropriate, and explain your reasoning before taking action.",
+    "max_steps": 10,
+    "allow_continuation": true,
+    "retry_after_minutes": 0,
+    "max_retries": 0
+  },
+  "tools": [
+    {
+      "tool_class": "Spora\\Tools\\CurrentTimeTool",
+      "enabled": true,
+      "operations": [
+        { "name": "now", "enabled": true, "auto_approve": true }
+      ]
+    },
+    {
+      "tool_class": "Spora\\Tools\\CalculatorTool",
+      "enabled": true,
+      "operations": [
+        { "name": "calculate", "enabled": true, "auto_approve": true }
+      ]
+    },
+    {
+      "tool_class": "Spora\\Tools\\AgentMemoryTool",
+      "enabled": true,
+      "operations": [
+        { "name": "list", "enabled": true, "auto_approve": true },
+        { "name": "get", "enabled": true, "auto_approve": true },
+        { "name": "save", "enabled": true, "auto_approve": false },
+        { "name": "delete", "enabled": true, "auto_approve": false }
+      ]
+    },
+    {
+      "tool_class": "Spora\\Tools\\GlobalMemoryTool",
+      "enabled": true,
+      "operations": [
+        { "name": "list", "enabled": true, "auto_approve": true },
+        { "name": "get", "enabled": true, "auto_approve": true },
+        { "name": "save", "enabled": true, "auto_approve": false },
+        { "name": "delete", "enabled": true, "auto_approve": false }
+      ]
+    }
+  ],
+  "required_plugins": [],
+  "metadata": {
+    "category": "general",
+    "icon": "puzzle"
+  }
+}

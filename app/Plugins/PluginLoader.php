@@ -155,6 +155,26 @@ final class PluginLoader
     }
 
     /**
+     * All agent-template directory paths contributed by loaded plugins.
+     * Mirrors {@see recipePaths()}; the scanner aggregates these alongside
+     * core-shipped and app-contributed templates.
+     *
+     * @return string[]
+     */
+    public function agentTemplatePaths(): array
+    {
+        $paths = [];
+
+        foreach ($this->plugins as $plugin) {
+            foreach ($plugin->agentTemplatePaths() as $path) {
+                $paths[] = $path;
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
      * All admin-panel App class FQCNs contributed by loaded plugins.
      * Merged into the host AppRegistry at container build time.
      *
@@ -204,6 +224,73 @@ final class PluginLoader
             }
         }
         return null;
+    }
+
+    /**
+     * Map a tool FQCN to the slug of the plugin that ships it, or null
+     * when no loaded plugin owns it (built-in core tool, or a tool that
+     * was uninstalled after the agent was last edited).
+     *
+     * Symmetric to {@see getSlugForApp()}; both walk the loaded plugin
+     * graph to answer a class-name lookup. The template exporter uses
+     * this to populate `required_plugins` so a re-import on another
+     * instance lists exactly which plugins must be installed.
+     */
+    public function getSlugForToolClass(string $toolClass): ?string
+    {
+        foreach ($this->plugins as $slug => $plugin) {
+            foreach ($plugin->tools() as $class) {
+                if ($class === $toolClass) {
+                    return $slug;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Resolve a plugin slug to its Composer package name (e.g.
+     * `spora-ai/spora-plugin-media-archive`). Reads the plugin's
+     * `composer.json#name` from the on-disk plugin directory.
+     *
+     * The slug alone is a filesystem identifier — it isn't a Packagist
+     * identifier, so a template exporter that emits slugs leaves the
+     * importer unable to resolve the requirement. The package name is
+     * what `composer require <name>` and Packagist's search API both
+     * understand.
+     *
+     * Returns null when the slug isn't loaded, the plugin directory has
+     * no readable `composer.json`, or the `name` field is missing —
+     * callers should treat null as "skip; the operator will see the
+     * missing plugin at import time".
+     */
+    public function getComposerNameForSlug(string $slug): ?string
+    {
+        $dir = $this->pluginDirs[$slug] ?? null;
+        if ($dir === null) {
+            return null;
+        }
+        $decoded = $this->readComposerJson($dir);
+        if (!is_array($decoded)) {
+            return null;
+        }
+        $name = $decoded['name'] ?? null;
+        return is_string($name) && $name !== '' ? $name : null;
+    }
+
+    /** @return array<string, mixed>|null */
+    private function readComposerJson(string $dir): ?array
+    {
+        $path = $dir . '/composer.json';
+        if (!is_file($path)) {
+            return null;
+        }
+        $raw = @file_get_contents($path);
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : null;
     }
 
     /**

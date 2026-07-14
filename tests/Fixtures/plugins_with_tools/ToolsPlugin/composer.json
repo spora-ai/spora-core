@@ -1,0 +1,7 @@
+{
+    "name": "spora-ai/spora-fixture-tools-plugin",
+    "type": "spora-plugin",
+    "require": {
+        "php": "^8.4.1"
+    }
+}

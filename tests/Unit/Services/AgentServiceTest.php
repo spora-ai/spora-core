@@ -151,12 +151,10 @@ describe('AgentService::getAgent / updateAgent / deleteAgent', function (): void
         $updated = $service->updateAgent($agent->id, $userId, [
             'name'      => 'After',
             'max_steps' => 7,
-            'recipe_id' => 'should-be-ignored',
         ]);
 
         expect($updated->name)->toBe('After');
         expect($updated->max_steps)->toBe(7);
-        expect($updated->recipe_id)->not->toBe('should-be-ignored');
     });
 
     it('returns null when updating a non-existent agent', function (): void {

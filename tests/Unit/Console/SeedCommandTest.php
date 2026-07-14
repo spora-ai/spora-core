@@ -2,15 +2,18 @@
 
 declare(strict_types=1);
 
+use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\SeedCommand;
 use Spora\Core\Database;
 use Spora\Core\Paths;
+use Spora\Plugins\PluginLoader;
 use Spora\Services\EmailTemplateLoader;
+use Spora\Services\ToolConfigService;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
-function makeSeedTester(): CommandTester
+function makeSeedTester(?Closure $authFactoryOverride = null): CommandTester
 {
     // The connection is already booted by tests/Pest.php beforeEach; do NOT
     // resetBootState() here, that would create a fresh in-memory SQLite that
@@ -19,9 +22,27 @@ function makeSeedTester(): CommandTester
     $db->bootDatabaseConnectionOnly(); // no-op: already booted
 
     $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
-    $authFactory = static fn(): AuthService => bootAuthLayer();
+    $authFactory = $authFactoryOverride ?? static fn(): AuthService => bootAuthLayer();
 
-    $command = new SeedCommand($db, $authFactory, $templateLoader, new Paths(BASE_PATH));
+    $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new Spora\Core\SecurityManager($key);
+    $logger   = new Monolog\Logger('test');
+    $toolConfig = new ToolConfigService($security, $logger, [
+        Spora\Tools\CurrentTimeTool::class,
+        Spora\Tools\CalculatorTool::class,
+        Spora\Tools\AgentMemoryTool::class,
+        Spora\Tools\GlobalMemoryTool::class,
+        Spora\Tools\ReadUrlTool::class,
+        Spora\Tools\UserInfoTool::class,
+        Spora\Tools\HandoverTool::class,
+    ]);
+    $importer = new AgentTemplateImporter(
+        $toolConfig,
+        new PluginLoader([]),
+        new Paths(BASE_PATH),
+    );
+
+    $command = new SeedCommand($db, $authFactory, $templateLoader, $importer, new Paths(BASE_PATH));
     $command->setName('db:seed');
 
     return new CommandTester($command);
@@ -80,7 +101,17 @@ it('reports failure and exits with FAILURE when the factory throws', function ()
         throw new RuntimeException('factory exploded');
     };
 
-    $command = new SeedCommand($db, $authFactory, $templateLoader, new Paths(BASE_PATH));
+    $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new Spora\Core\SecurityManager($key);
+    $logger   = new Monolog\Logger('test');
+    $toolConfig = new ToolConfigService($security, $logger, []);
+    $importer = new AgentTemplateImporter(
+        $toolConfig,
+        new PluginLoader([]),
+        new Paths(BASE_PATH),
+    );
+
+    $command = new SeedCommand($db, $authFactory, $templateLoader, $importer, new Paths(BASE_PATH));
     $command->setName('db:seed');
     $tester = new CommandTester($command);
 
