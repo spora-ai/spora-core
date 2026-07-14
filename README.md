@@ -1,6 +1,6 @@
 <!-- Spora Logo -->
 <p align="center">
-  <img src="public/logo.png" alt="Spora">
+  <img src="docs/assets/logo.svg" alt="Spora" width="320">
 </p>
 
 <!-- Badges -->
