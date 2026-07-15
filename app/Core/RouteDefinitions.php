@@ -49,7 +49,7 @@ final class RouteDefinitions
 
     public static function register(MiddlewareRouteCollector $r): void
     {
-        $r->addRoute('GET', '/health', [HealthController::class, 'check'], []);
+        $r->addRoute('GET', '/api/health', [HealthController::class, 'check'], []);
         $r->addRoute('GET', '/api/v1/config', [ConfigController::class, 'index'], []);
 
         // Asset serving — authenticated; the controller enforces ownership
