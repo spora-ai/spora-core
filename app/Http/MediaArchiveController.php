@@ -79,42 +79,11 @@ final class MediaArchiveController
         }
 
         $body = $this->jsonBody($request);
-        $dirty = [];
+        $dirty = $this->extractUpdatableFields($body);
 
-        if (array_key_exists('filename', $body)) {
-            $filename = $body['filename'];
-            if ($filename !== null && (!is_string($filename) || strlen($filename) > 255)) {
-                return $this->badRequest('filename must be a string up to 255 characters.');
-            }
-            $dirty['filename'] = $filename;
-        }
-        if (array_key_exists('tags', $body)) {
-            $tags = $body['tags'];
-            if ($tags !== null && !is_array($tags)) {
-                return $this->badRequest('tags must be an array of strings.');
-            }
-            $dirty['tags'] = $tags;
-        }
-        if (array_key_exists('metadata', $body)) {
-            $metadata = $body['metadata'];
-            if ($metadata !== null && !is_array($metadata)) {
-                return $this->badRequest('metadata must be an object.');
-            }
-            $dirty['metadata'] = $metadata;
-        }
-        if (array_key_exists('prompt', $body)) {
-            $prompt = $body['prompt'];
-            if ($prompt !== null && !is_string($prompt)) {
-                return $this->badRequest('prompt must be a string.');
-            }
-            $dirty['prompt'] = $prompt;
-        }
-        if (array_key_exists('public_access_enabled', $body)) {
-            $enabled = $body['public_access_enabled'];
-            if (!is_bool($enabled)) {
-                return $this->badRequest('public_access_enabled must be a boolean.');
-            }
-            $dirty['public_access_token'] = $enabled === true ? bin2hex(random_bytes(32)) : null;
+        $validation = $this->validateUpdatableFields($body);
+        if ($validation instanceof JsonResponse) {
+            return $validation;
         }
 
         if ($dirty !== []) {
@@ -123,6 +92,51 @@ final class MediaArchiveController
         }
 
         return new JsonResponse(['data' => self::serialize($asset, $this->requestHost($request))]);
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function extractUpdatableFields(array $body): array
+    {
+        $dirty = [];
+        foreach (['filename', 'tags', 'metadata', 'prompt'] as $field) {
+            if (array_key_exists($field, $body)) {
+                $dirty[$field] = $body[$field];
+            }
+        }
+        if (array_key_exists('public_access_enabled', $body)) {
+            $enabled = $body['public_access_enabled'];
+            $dirty['public_access_token'] = $enabled === true ? bin2hex(random_bytes(32)) : null;
+        }
+        return $dirty;
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function validateUpdatableFields(array $body): ?JsonResponse
+    {
+        if (array_key_exists('filename', $body)) {
+            $filename = $body['filename'];
+            if ($filename !== null && (!is_string($filename) || strlen($filename) > 255)) {
+                return $this->badRequest('filename must be a string up to 255 characters.');
+            }
+        }
+        if (array_key_exists('tags', $body) && $body['tags'] !== null && !is_array($body['tags'])) {
+            return $this->badRequest('tags must be an array of strings.');
+        }
+        if (array_key_exists('metadata', $body) && $body['metadata'] !== null && !is_array($body['metadata'])) {
+            return $this->badRequest('metadata must be an object.');
+        }
+        if (array_key_exists('prompt', $body) && $body['prompt'] !== null && !is_string($body['prompt'])) {
+            return $this->badRequest('prompt must be a string.');
+        }
+        if (array_key_exists('public_access_enabled', $body) && !is_bool($body['public_access_enabled'])) {
+            return $this->badRequest('public_access_enabled must be a boolean.');
+        }
+        return null;
     }
 
     public function destroy(string $id): JsonResponse

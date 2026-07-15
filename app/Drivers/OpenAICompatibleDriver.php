@@ -191,25 +191,39 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
             if (!is_array($b)) {
                 continue;
             }
-            $type = $b['type'] ?? null;
-            if ($type === 'text') {
-                $parts[] = ['type' => 'text', 'text' => (string) ($b['text'] ?? '')];
-                continue;
-            }
-            if ($type === 'image') {
-                if (isset($b['base64']) && is_string($b['base64']) && $b['base64'] !== '' && isset($b['mediaType'])) {
-                    $parts[] = [
-                        'type'     => 'image_url',
-                        'image_url' => ['url' => 'data:' . $b['mediaType'] . ';base64,' . $b['base64']],
-                    ];
-                } elseif (isset($b['url']) && is_string($b['url']) && $b['url'] !== '') {
-                    $parts[] = [
-                        'type'     => 'image_url',
-                        'image_url' => ['url' => $b['url']],
-                    ];
-                }
+            $part = self::contentBlockToPart($b);
+            if ($part !== null) {
+                $parts[] = $part;
             }
         }
         return $parts === [] ? '' : $parts;
+    }
+
+    /**
+     * @param array<string, mixed> $block
+     * @return array<string, mixed>|null
+     */
+    private static function contentBlockToPart(array $block): ?array
+    {
+        $type = $block['type'] ?? null;
+        if ($type === 'text') {
+            return ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
+        }
+        if ($type !== 'image') {
+            return null;
+        }
+        if (isset($block['base64']) && is_string($block['base64']) && $block['base64'] !== '' && isset($block['mediaType'])) {
+            return [
+                'type'     => 'image_url',
+                'image_url' => ['url' => 'data:' . $block['mediaType'] . ';base64,' . $block['base64']],
+            ];
+        }
+        if (isset($block['url']) && is_string($block['url']) && $block['url'] !== '') {
+            return [
+                'type'     => 'image_url',
+                'image_url' => ['url' => $block['url']],
+            ];
+        }
+        return null;
     }
 }

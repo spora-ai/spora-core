@@ -311,30 +311,44 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
             if (!is_array($b)) {
                 continue;
             }
-            $type = $b['type'] ?? null;
-            if ($type === 'text') {
-                $blocks[] = ['type' => 'text', 'text' => (string) ($b['text'] ?? '')];
-                continue;
-            }
-            if ($type === 'image') {
-                if (isset($b['base64']) && is_string($b['base64']) && $b['base64'] !== '' && isset($b['mediaType'])) {
-                    $blocks[] = [
-                        'type'   => 'image',
-                        'source' => [
-                            'type'       => 'base64',
-                            'media_type' => (string) $b['mediaType'],
-                            'data'       => $b['base64'],
-                        ],
-                    ];
-                } elseif (isset($b['url']) && is_string($b['url']) && $b['url'] !== '') {
-                    $blocks[] = [
-                        'type'   => 'image',
-                        'source' => ['type' => 'url', 'url' => $b['url']],
-                    ];
-                }
+            $block = $this->contentBlockToAnthropic($b);
+            if ($block !== null) {
+                $blocks[] = $block;
             }
         }
         return $blocks === [] ? '' : $blocks;
+    }
+
+    /**
+     * @param array<string, mixed> $block
+     * @return array<string, mixed>|null
+     */
+    private function contentBlockToAnthropic(array $block): ?array
+    {
+        $type = $block['type'] ?? null;
+        if ($type === 'text') {
+            return ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
+        }
+        if ($type !== 'image') {
+            return null;
+        }
+        if (isset($block['base64']) && is_string($block['base64']) && $block['base64'] !== '' && isset($block['mediaType'])) {
+            return [
+                'type'   => 'image',
+                'source' => [
+                    'type'       => 'base64',
+                    'media_type' => (string) $block['mediaType'],
+                    'data'       => $block['base64'],
+                ],
+            ];
+        }
+        if (isset($block['url']) && is_string($block['url']) && $block['url'] !== '') {
+            return [
+                'type'   => 'image',
+                'source' => ['type' => 'url', 'url' => $block['url']],
+            ];
+        }
+        return null;
     }
 
     /**

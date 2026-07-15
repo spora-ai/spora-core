@@ -176,52 +176,69 @@ final class MessageHistoryBuilder
     {
         $supportsImages = $this->driver !== null && $this->driver->supportsImageInput();
         $blocks = [];
-
         foreach ($row->attachments as $ref) {
-            if (!is_array($ref) || !isset($ref['media_id'])) {
-                continue;
+            $block = $this->attachmentBlock($ref, $supportsImages);
+            if ($block !== null) {
+                $blocks[] = $block;
             }
-            $kind = (string) ($ref['kind'] ?? 'text');
-            $asset = MediaAsset::query()->find((string) $ref['media_id']);
-            if ($asset === null) {
-                continue;
-            }
-            if ($kind === 'image') {
-                if (!$supportsImages) {
-                    continue;
-                }
-                $bytes = $this->loadAssetBytes($asset);
-                if ($bytes === null) {
-                    continue;
-                }
-                $blocks[] = [
-                    'type'      => 'image',
-                    'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
-                    'base64'    => base64_encode($bytes),
-                ];
-                continue;
-            }
-            // Default: text-kind
-            $text = $asset->markdown_content !== null && $asset->markdown_content !== ''
-                ? $asset->markdown_content
-                : ($asset->filename ?? $asset->id);
-            $displayName = $asset->filename ?? $asset->id;
-            $blocks[] = [
-                'type' => 'text',
-                'text' => "Attached file ({$displayName}):\n\n" . $text,
-            ];
-        }
-
-        if ($blocks === []) {
-            return [
-                'role'    => 'user',
-                'content' => $row->content ?? '',
-            ];
         }
 
         return [
             'role'    => 'user',
-            'content' => $blocks,
+            'content' => $blocks !== [] ? $blocks : ($row->content ?? ''),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $ref
+     * @return array<string, mixed>|null
+     */
+    private function attachmentBlock(array $ref, bool $supportsImages): ?array
+    {
+        if (!isset($ref['media_id']) || !is_string($ref['media_id'])) {
+            return null;
+        }
+        $asset = MediaAsset::query()->find($ref['media_id']);
+        if ($asset === null) {
+            return null;
+        }
+        $kind = (string) ($ref['kind'] ?? 'text');
+        return $kind === 'image'
+            ? $this->imageAttachmentBlock($asset, $supportsImages)
+            : $this->textAttachmentBlock($asset);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function imageAttachmentBlock(MediaAsset $asset, bool $supportsImages): ?array
+    {
+        if (!$supportsImages) {
+            return null;
+        }
+        $bytes = $this->loadAssetBytes($asset);
+        if ($bytes === null) {
+            return null;
+        }
+        return [
+            'type'      => 'image',
+            'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
+            'base64'    => base64_encode($bytes),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function textAttachmentBlock(MediaAsset $asset): array
+    {
+        $text = $asset->markdown_content !== null && $asset->markdown_content !== ''
+            ? $asset->markdown_content
+            : ($asset->filename ?? $asset->id);
+        $displayName = $asset->filename ?? $asset->id;
+        return [
+            'type' => 'text',
+            'text' => "Attached file ({$displayName}):\n\n" . $text,
         ];
     }
 
