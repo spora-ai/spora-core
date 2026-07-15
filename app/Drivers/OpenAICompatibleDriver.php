@@ -55,7 +55,30 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 
     public function complete(LLMRequest $request): LLMResponse
     {
-        $messages = array_merge(
+        $messages = $this->buildMessages($request);
+        $body = $this->buildRequestBody($request, $messages);
+        $url = rtrim($this->baseUrl, '/') . '/chat/completions';
+        $this->logger?->debug('LLM Request (OpenAI)', ['url' => $url, 'payload' => $body]);
+
+        $response = $this->httpClient->request('POST', $url, [
+            'headers' => $this->buildHeaders(),
+            'json' => $body,
+            'timeout' => $this->timeout ?? 300,
+        ]);
+
+        $this->throwIfError($response);
+        /** @var array<string, mixed> $data */
+        $data = $response->toArray();
+        $this->logger?->debug('LLM Response (OpenAI)', ['status' => $response->getStatusCode(), 'data' => $data]);
+        return $this->parseResponse($data);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function buildMessages(LLMRequest $request): array
+    {
+        return array_merge(
             [['role' => 'system', 'content' => $request->systemPrompt]],
             array_map(
                 static function (array $msg): array {
@@ -69,97 +92,114 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
                 $request->messages,
             ),
         );
+    }
 
+    /**
+     * @param list<array<string, mixed>> $messages
+     * @return array<string, mixed>
+     */
+    private function buildRequestBody(LLMRequest $request, array $messages): array
+    {
         $body = [
-            'model' => $this->model,
-            'messages' => $messages,
-            'max_tokens' => $request->maxTokens,
+            'model'       => $this->model,
+            'messages'    => $messages,
+            'max_tokens'  => $request->maxTokens,
             'temperature' => $request->temperature,
         ];
-
         if ($request->tools !== []) {
             $body['tools'] = $request->tools;
             $body['tool_choice'] = 'auto';
         }
+        return $body;
+    }
 
-        $url = rtrim($this->baseUrl, '/') . '/chat/completions';
-        $this->logger?->debug('LLM Request (OpenAI)', ['url' => $url, 'payload' => $body]);
-
+    /**
+     * @return array<string, string>
+     */
+    private function buildHeaders(): array
+    {
         $headers = ['Content-Type' => 'application/json'];
         if ($this->apiKey !== '') {
             $headers['Authorization'] = 'Bearer ' . $this->apiKey;
         }
+        return $headers;
+    }
 
-        $response = $this->httpClient->request('POST', $url, [
-            'headers' => $headers,
-            'json' => $body,
-            'timeout' => $this->timeout ?? 300,
-        ]);
-
+    /**
+     * @param \Symfony\Contracts\HttpClient\ResponseInterface $response
+     */
+    private function throwIfError($response): void
+    {
         $statusCode = $response->getStatusCode();
-
         if ($statusCode === 429) {
             throw new LLMRateLimitException('OpenAI rate limit exceeded (HTTP 429).');
         }
-
         if ($statusCode >= 500) {
             $body = $response->getContent(throw: false);
             throw new LLMRetryableException("OpenAI API error {$statusCode}: {$body}");
         }
-
         if ($statusCode >= 400) {
             $body = $response->getContent(throw: false);
             throw new LLMProviderException("OpenAI API error {$statusCode}: {$body}");
         }
+    }
 
-        /** @var array<string, mixed> $data */
-        $data = $response->toArray();
-        $this->logger?->debug('LLM Response (OpenAI)', ['status' => $statusCode, 'data' => $data]);
-
-        $completionId = (string) ($data['id'] ?? '');
-        $inputTokens = (int) ($data['usage']['prompt_tokens'] ?? 0);
-        $outputTokens = (int) ($data['usage']['completion_tokens'] ?? 0);
-
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function parseResponse(array $data): LLMResponse
+    {
         $choice = $data['choices'][0] ?? [];
-        $finishReason = $choice['finish_reason'] ?? '';
+        $finishReason = (string) ($choice['finish_reason'] ?? '');
         $message = $choice['message'] ?? [];
-
         $parsedContent = LLMContentParser::parse($message['content'] ?? null);
 
         if ($finishReason === 'tool_calls') {
-            $toolCalls = [];
-
-            foreach (($message['tool_calls'] ?? []) as $tc) {
-                $rawArguments = $tc['function']['arguments'] ?? '{}';
-                $arguments = is_string($rawArguments)
-                    ? (json_decode($rawArguments, true) ?? [])
-                    : (array) $rawArguments;
-
-                $toolCalls[] = new ToolCall(
-                    providerCallId: (string) ($tc['id'] ?? ''),
-                    toolName: (string) ($tc['function']['name'] ?? ''),
-                    arguments: $arguments,
-                );
-            }
-
-            return new LLMResponse(
-                content: $parsedContent['content'] !== '' ? $parsedContent['content'] : null,
-                toolCalls: $toolCalls,
-                inputTokens: $inputTokens,
-                outputTokens: $outputTokens,
-                completionId: $completionId,
-                reasoning: $parsedContent['reasoning'],
-            );
+            return $this->buildToolCallsResponse($data, $message, $parsedContent);
         }
 
         return new LLMResponse(
             content: $parsedContent['content'],
             toolCalls: [],
-            inputTokens: $inputTokens,
-            outputTokens: $outputTokens,
-            completionId: $completionId,
-            reasoning: $parsedContent['reasoning'],
+            inputTokens: (int) ($data['usage']['prompt_tokens'] ?? 0),
+            outputTokens: (int) ($data['usage']['completion_tokens'] ?? 0),
+            completionId: (string) ($data['id'] ?? ''),
         );
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $message
+     * @param array<string, mixed> $parsedContent
+     */
+    private function buildToolCallsResponse(array $data, array $message, array $parsedContent): LLMResponse
+    {
+        $toolCalls = [];
+        foreach (($message['tool_calls'] ?? []) as $tc) {
+            $toolCalls[] = new ToolCall(
+                providerCallId: (string) ($tc['id'] ?? ''),
+                toolName: (string) ($tc['function']['name'] ?? ''),
+                arguments: $this->parseToolArguments($tc['function']['arguments'] ?? '{}'),
+            );
+        }
+        return new LLMResponse(
+            content: $parsedContent['content'],
+            toolCalls: $toolCalls,
+            inputTokens: (int) ($data['usage']['prompt_tokens'] ?? 0),
+            outputTokens: (int) ($data['usage']['completion_tokens'] ?? 0),
+            completionId: (string) ($data['id'] ?? ''),
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function parseToolArguments(mixed $rawArguments): array
+    {
+        if (is_string($rawArguments)) {
+            return json_decode($rawArguments, true) ?? [];
+        }
+        return (array) $rawArguments;
     }
 
     public static function getName(): string
