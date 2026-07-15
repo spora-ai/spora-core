@@ -661,3 +661,24 @@ test('unknown route returns 404 even when unauthenticated', function (): void {
 
     $kernel->__destruct();
 });
+
+test('Kernel falls open when a plugin manifest in the project plugins/ dir is broken', function (): void {
+    // Stale or partially-installed plugin.json (e.g. an aborted
+    // `composer require` left behind) must not crash boot. PluginLoader itself
+    // stays strict — Kernel is the boundary that swallows and moves on.
+    $base = sys_get_temp_dir() . '/spora-kernel-stale-plugin-' . uniqid('', true);
+    mkdir($base, 0o777, true);
+    mkdir($base . '/plugins/stale', 0o777, true);
+    file_put_contents(
+        $base . '/plugins/stale/plugin.json',
+        json_encode(['slug' => 'stale', 'class' => 'Spora\\Plugins\\Stale\\StalePlugin']),
+    );
+
+    $kernel = new Kernel(new Spora\Core\Paths($base));
+    $loader = $kernel->getContainer()->get(Spora\Plugins\PluginLoader::class);
+
+    expect($loader->getPlugins())->toHaveCount(0);
+
+    $kernel->__destruct();
+    gc_collect_cycles();
+});

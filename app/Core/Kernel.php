@@ -35,6 +35,7 @@ final class Kernel implements KernelInterface
      */
     private Container $container;
     private bool $errorHandlerInstalled = false;
+    private ?string $pluginBootError = null;
 
     private readonly Paths $paths;
     private readonly AppLoader $appLoader;
@@ -66,13 +67,25 @@ final class Kernel implements KernelInterface
             [$this->paths->plugins()],
             $this->paths->storage('.plugins_stamp'),
         );
-        $this->pluginLoader->boot();
+        // A bad manifest should not crash boot — fall through with an empty
+        // loader. Mirrors registerPlugins()' per-plugin tolerance below.
+        try {
+            $this->pluginLoader->boot();
+        } catch (\Spora\Plugins\Exceptions\PluginLoadFailedException) {
+            $this->pluginBootError = 'Plugin manifest in ' . $this->paths->plugins()
+                . ' is not loadable; plugin boot was skipped.';
+        }
         $this->pluginLoader->registerPlugins($builder);
         $builder->addDefinitions([PluginLoader::class => $this->pluginLoader]);
 
         $this->container = $builder->build();
 
         $this->configureErrorHandling($this->container->get('config')['app_env'] ?? 'production');
+
+        if ($this->pluginBootError !== null) {
+            $this->container->get(LoggerInterface::class)->warning($this->pluginBootError);
+            $this->pluginBootError = null;
+        }
     }
 
     public function __destruct()
@@ -231,7 +244,7 @@ final class Kernel implements KernelInterface
                 ['error' => ['code' => 'FEATURE_DISABLED', 'message' => $e->getMessage()]],
                 Response::HTTP_FORBIDDEN,
             ),
-            $e instanceof PluginInstallFailedException => $this->mapPluginInstallFailureToResponse($e),
+            $e instanceof PluginInstallFailedException => self::mapPluginInstallFailureToResponse($e),
             default => null,
         };
     }
@@ -243,8 +256,11 @@ final class Kernel implements KernelInterface
      * Stderr is truncated to a hard 8 KiB ceiling (suffix included) so a
      * runaway Composer error doesn't blow up the response. The full output
      * is in storage/spora.log.
+     *
+     * `public static` so unit tests verify the mapping without booting a
+     * full Kernel.
      */
-    private function mapPluginInstallFailureToResponse(PluginInstallFailedException $e): JsonResponse
+    public static function mapPluginInstallFailureToResponse(PluginInstallFailedException $e): JsonResponse
     {
         $stderr = $e->stderr;
         $suffix = '… [truncated; see storage/spora.log]';

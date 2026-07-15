@@ -272,15 +272,12 @@ test('update() with constraint re-pins via PluginManager::install()', function (
 // PluginInstallFailedException → 500 mapping (Kernel)
 
 test('PluginInstallFailedException maps to PLUGIN_INSTALL_FAILED via Kernel', function (): void {
-    $kernel = new Spora\Core\Kernel();
-    $method = new ReflectionMethod($kernel, 'mapPluginInstallFailureToResponse');
-
     $exception = new PluginInstallFailedException(
         'composer require failed',
         exitCode: 2,
         stderr: 'Could not find package spora-ai/spora-plugin-typo.',
     );
-    $response = $method->invoke($kernel, $exception);
+    $response = Spora\Core\Kernel::mapPluginInstallFailureToResponse($exception);
 
     expect($response->getStatusCode())->toBe(500);
     $body = json_decode($response->getContent(), true);
@@ -290,16 +287,13 @@ test('PluginInstallFailedException maps to PLUGIN_INSTALL_FAILED via Kernel', fu
 });
 
 test('PluginInstallFailedException truncates stderr at 8 KiB', function (): void {
-    $kernel = new Spora\Core\Kernel();
-    $method = new ReflectionMethod($kernel, 'mapPluginInstallFailureToResponse');
-
     $bigStderr = str_repeat('A', 12_000);
     $exception = new PluginInstallFailedException(
         'composer failed',
         exitCode: 1,
         stderr: $bigStderr,
     );
-    $response = $method->invoke($kernel, $exception);
+    $response = Spora\Core\Kernel::mapPluginInstallFailureToResponse($exception);
 
     $body = json_decode($response->getContent(), true);
     expect(strlen($body['details']['stderr']))->toBeLessThan(strlen($bigStderr));
