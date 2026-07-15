@@ -178,7 +178,7 @@ final class TaskService implements TaskServiceInterface
             throw new InvalidArgumentException('Only failed tasks can be retried.');
         }
 
-        $newTask = $this->orchestrator->start($task->agent_id, $task->user_prompt, $task->max_steps);
+        $newTask = $this->orchestrator->start($task->agent_id, $task->user_prompt, $task->max_steps, null, null, []);
 
         $resource = $this->taskResource($newTask);
         $this->mercure->publish($newTask->id, $newTask->user_id, $resource);

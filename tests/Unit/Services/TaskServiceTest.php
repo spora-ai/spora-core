@@ -320,8 +320,8 @@ describe('TaskService — startTask', function (): void {
 
         $orchestrator->shouldReceive('start')
             ->once()
-            ->with($agent->id, 'do the thing', 7, null)
-            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent) use ($userId): Task {
+            ->with($agent->id, 'do the thing', 7, null, null, [])
+            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, ?int $runId, array $mediaIds) use ($userId): Task {
                 return Task::create([
                     'user_id'     => $userId,
                     'agent_id'    => $agentId,
@@ -358,8 +358,8 @@ describe('TaskService — startTask', function (): void {
 
         $orchestrator->shouldReceive('start')
             ->once()
-            ->with($agent->id, 'p', 12, null) // 12 = agent.max_steps
-            ->andReturnUsing(fn(int $a, string $p, int $m) => Task::create([
+            ->with($agent->id, 'p', 12, null, null, []) // 12 = agent.max_steps
+            ->andReturnUsing(fn(int $a, string $p, int $m, ?int $parent, ?int $runId, array $mediaIds) => Task::create([
                 'user_id' => $userId, 'agent_id' => $a, 'status' => 'RUNNING',
                 'user_prompt' => $p, 'max_steps' => $m, 'step_count' => 0,
             ]));
@@ -749,8 +749,8 @@ describe('TaskService — retryTask', function (): void {
 
         $orchestrator->shouldReceive('start')
             ->once()
-            ->with($agent->id, 'please try again', 8)
-            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps) use ($userId): Task {
+            ->with($agent->id, 'please try again', 8, null, null, [])
+            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, ?int $runId, array $mediaIds) use ($userId): Task {
                 return Task::create([
                     'user_id'     => $userId,
                     'agent_id'    => $agentId,
@@ -834,8 +834,8 @@ describe('TaskService — continueTask', function (): void {
 
         $orchestrator->shouldReceive('continue')
             ->once()
-            ->with($task->id, 'more please', 10)
-            ->andReturnUsing(function (int $taskId) use ($userId): Task {
+            ->with($task->id, 'more please', 10, [])
+            ->andReturnUsing(function (int $taskId, string $prompt, ?int $steps, array $mediaIds) use ($userId): Task {
                 return Task::create([
                     'user_id'     => $userId,
                     'agent_id'    => 1,

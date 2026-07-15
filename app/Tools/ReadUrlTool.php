@@ -36,8 +36,8 @@ use Throwable;
     displayName: 'Read URL',
     category: 'data',
 )]
-#[ToolOperation(name: 'fetch', description: 'Fetch and read the contents of a URL', enabledByDefault: true, requiresApprovalByDefault: false)]
-#[ToolOperation(name: 'fetch_pdf', description: 'Fetch a remote PDF and return its text as Markdown', enabledByDefault: true, requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'fetch', description: 'Fetch and read the contents of a URL', enabledByDefault: true, requiresApprovalByDefault: false, discriminatorKey: 'op')]
+#[ToolOperation(name: 'fetch_pdf', description: 'Fetch a remote PDF and return its text as Markdown', enabledByDefault: true, requiresApprovalByDefault: false, discriminatorKey: 'op')]
 #[ToolSetting(
     key: 'http_timeout',
     label: 'HTTP Timeout',
@@ -49,12 +49,6 @@ use Throwable;
     type: 'string',
     description: 'The absolute http:// or https:// URL to read.',
     required: true,
-)]
-#[ToolParameter(
-    name: 'action',
-    type: 'string',
-    description: '`fetch` (default) reads HTML/XML/JSON; `fetch_pdf` downloads a PDF and returns Markdown.',
-    required: false,
 )]
 final class ReadUrlTool extends AbstractTool
 {
@@ -90,15 +84,15 @@ final class ReadUrlTool extends AbstractTool
 
     public function describeAction(array $arguments): string
     {
-        $url    = trim((string) ($arguments['url'] ?? ''));
-        $action = (string) ($arguments['action'] ?? 'fetch');
-        return "{$action} URL: {$url}";
+        $url = trim((string) ($arguments['url'] ?? ''));
+        $op  = (string) ($arguments['op'] ?? 'fetch');
+        return "{$op} URL: {$url}";
     }
 
     private function dispatch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $url = trim((string) ($arguments['url'] ?? ''));
-        $action = (string) ($arguments['action'] ?? 'fetch');
+        $op = (string) ($arguments['op'] ?? 'fetch');
 
         $validation = $this->validateUrl($url);
         if ($validation instanceof ToolResult) {
@@ -108,12 +102,12 @@ final class ReadUrlTool extends AbstractTool
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
 
         try {
-            return match ($action) {
+            return match ($op) {
                 'fetch_pdf' => $this->processFetchedPdfContent($url, $settings),
                 default     => $this->processFetchedContent($url, $settings),
             };
         } catch (Throwable $e) {
-            $this->logger?->error('ReadUrlTool Exception', ['url' => $url, 'action' => $action, 'exception' => $e]);
+            $this->logger?->error('ReadUrlTool Exception', ['url' => $url, 'op' => $op, 'exception' => $e]);
             return new ToolResult(false, 'Failed to read URL: ' . $e->getMessage());
         }
     }

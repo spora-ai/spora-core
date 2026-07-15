@@ -92,7 +92,7 @@ it('store creates task via orchestrator and returns 201', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('startTask')
         ->once()
-        ->with(1, 1, 'Hello', null, null)
+        ->with(1, 1, 'Hello', null, null, [])
         ->andReturn($taskResource);
 
     [$controller, $authService] = makeTaskController($taskService);
@@ -923,7 +923,7 @@ it('continue returns 200 and resets task for completed task', function (): void 
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('continueTask')
         ->once()
-        ->with(1, 1, 'continue prompt', null)
+        ->with(1, 1, 'continue prompt', null, [])
         ->andReturn($taskResource);
 
     [$controller, $authService] = makeTaskController($taskService);
@@ -961,7 +961,7 @@ it('continue returns 200 and resets task for failed task', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('continueTask')
         ->once()
-        ->with(1, 1, 'retry prompt', 20)
+        ->with(1, 1, 'retry prompt', 20, [])
         ->andReturn($taskResource);
 
     [$controller, $authService] = makeTaskController($taskService);
@@ -1039,7 +1039,7 @@ it('continue returns 409 when task is not completed or failed', function (): voi
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('continueTask')
         ->once()
-        ->with(1, 1, 'test', null)
+        ->with(1, 1, 'test', null, [])
         ->andThrow(new InvalidArgumentException('Can only continue completed or failed tasks.'));
 
     [$controller, $authService] = makeTaskController($taskService);
@@ -1065,7 +1065,7 @@ it('continue returns 404 for unknown task', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('continueTask')
         ->once()
-        ->with(99999, 1, 'test', null)
+        ->with(99999, 1, 'test', null, [])
         ->andThrow(new InvalidArgumentException(TASK_NOT_FOUND_MESSAGE));
 
     [$controller, $authService] = makeTaskController($taskService);

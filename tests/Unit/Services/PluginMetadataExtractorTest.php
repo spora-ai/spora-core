@@ -13,7 +13,7 @@ test('extract() reads the #[Tool] attribute from a class via reflection (no inst
     expect($result)->toBe([
         [
             'name'        => 'read_url',
-            'description' => 'Fetch and read the contents of a URL. Can parse HTML pages into Markdown, and can read XML/RSS feeds. Only http:// and https:// URLs are supported.',
+            'description' => 'Fetch and read the contents of a URL. Parses HTML pages into Markdown, can read XML/RSS/JSON, and can fetch remote PDFs and convert them to Markdown. Only http:// and https:// URLs are supported.',
         ],
     ]);
 });
