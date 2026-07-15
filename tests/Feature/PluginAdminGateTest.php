@@ -31,6 +31,21 @@ const PLUGIN_ADMIN_GATE_PASSWORD = 'Password1!';
 const PLUGIN_ADMIN_GATE_INSTALL_PATH = '/api/v1/plugins';
 const PLUGIN_ADMIN_GATE_PKG = 'spora-ai/spora-plugin-tavily';
 
+/**
+ * Build an isolated {@see Spora\Core\Paths} rooted in a fresh tmp directory
+ * so the end-to-end kernel tests below don't see whatever plugins happen to be
+ * in the project's `plugins/` directory on the runner. Discovery there could
+ * throw {@see Spora\Plugins\Exceptions\PluginLoadFailedException} if a stale
+ * manifest's class isn't autoloadable — and that has nothing to do with the
+ * admin-gate behaviour these tests are locking in.
+ */
+function pluginAdminGate_cleanPaths(): Spora\Core\Paths
+{
+    $base = sys_get_temp_dir() . '/spora-plugin-admin-gate-' . uniqid('', true);
+    mkdir($base, 0o777, true);
+    return new Spora\Core\Paths($base);
+}
+
 beforeEach(function (): void {
     Spora\Core\Database::resetBootState();
     (new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->boot();
@@ -202,7 +217,7 @@ test('PATCH /api/v1/plugins/{package} is registered with AdminMiddleware in its 
 test('POST /api/v1/plugins returns 403 FORBIDDEN for a logged-in non-admin (end-to-end)', function (): void {
     pluginAdminGate_makeUser('non-admin-post@example.com', admin: false);
 
-    $kernel   = new Kernel();
+    $kernel   = new Kernel(pluginAdminGate_cleanPaths());
     $response = $kernel->handle(pluginAdminGate_stateChangeRequest(
         'POST',
         PLUGIN_ADMIN_GATE_INSTALL_PATH,
@@ -225,7 +240,7 @@ test('AdminMiddleware runs BEFORE the feature flag gate (non-admin gets FORBIDDE
     $_ENV['SPORA_PLUGIN_INSTALL_ENABLED'] = 'false';
     pluginAdminGate_makeUser('non-admin-feature-off@example.com', admin: false);
 
-    $kernel   = new Kernel();
+    $kernel   = new Kernel(pluginAdminGate_cleanPaths());
     $response = $kernel->handle(pluginAdminGate_stateChangeRequest(
         'POST',
         PLUGIN_ADMIN_GATE_INSTALL_PATH,
@@ -246,7 +261,7 @@ test('POST /api/v1/plugins reaches the controller for a logged-in admin (no 403)
     // container) — the assertion is only that the admin gate passed.
     pluginAdminGate_makeUser('admin-reaches@example.com', admin: true);
 
-    $kernel   = new Kernel();
+    $kernel   = new Kernel(pluginAdminGate_cleanPaths());
     $response = $kernel->handle(pluginAdminGate_stateChangeRequest(
         'POST',
         PLUGIN_ADMIN_GATE_INSTALL_PATH,
@@ -277,7 +292,7 @@ test('Admin POST returns 403 FEATURE_DISABLED when the install flag is off (the 
     $_ENV['SPORA_PLUGIN_INSTALL_ENABLED'] = 'false';
     pluginAdminGate_makeUser('admin-feature-off@example.com', admin: true);
 
-    $kernel   = new Kernel();
+    $kernel   = new Kernel(pluginAdminGate_cleanPaths());
     $response = $kernel->handle(pluginAdminGate_stateChangeRequest(
         'POST',
         PLUGIN_ADMIN_GATE_INSTALL_PATH,

@@ -66,7 +66,19 @@ final class Kernel implements KernelInterface
             [$this->paths->plugins()],
             $this->paths->storage('.plugins_stamp'),
         );
-        $this->pluginLoader->boot();
+        try {
+            $this->pluginLoader->boot();
+        } catch (\Spora\Plugins\Exceptions\PluginLoadFailedException $e) {
+            // A stale or partially-installed plugin.json (e.g. left behind on a
+            // CI runner by an aborted `composer require`) must not take down the
+            // whole framework. Log via the framework error handler (if installed)
+            // and fall through with the loader empty — operators can remove the
+            // bad manifest, run `bin/spora plugin:install` cleanly, and restart.
+            // PluginLoader itself stays strict (throws for invalid manifests) so
+            // its unit tests verify the error contract end-to-end; Kernel is the
+            // boundary that decides "production should keep serving".
+            error_log('[spora] plugin boot skipped: ' . $e->getMessage());
+        }
         $this->pluginLoader->registerPlugins($builder);
         $builder->addDefinitions([PluginLoader::class => $this->pluginLoader]);
 
@@ -231,7 +243,7 @@ final class Kernel implements KernelInterface
                 ['error' => ['code' => 'FEATURE_DISABLED', 'message' => $e->getMessage()]],
                 Response::HTTP_FORBIDDEN,
             ),
-            $e instanceof PluginInstallFailedException => $this->mapPluginInstallFailureToResponse($e),
+            $e instanceof PluginInstallFailedException => self::mapPluginInstallFailureToResponse($e),
             default => null,
         };
     }
@@ -244,7 +256,12 @@ final class Kernel implements KernelInterface
      * runaway Composer error doesn't blow up the response. The full output
      * is in storage/spora.log.
      */
-    private function mapPluginInstallFailureToResponse(PluginInstallFailedException $e): JsonResponse
+    /**
+     * Map {@see PluginInstallFailedException} to its JSON envelope. Exposed as
+     * `public static` so unit tests verify the mapping without paying the cost
+     * of booting a full Kernel (PluginsController, plugin loader, etc.).
+     */
+    public static function mapPluginInstallFailureToResponse(PluginInstallFailedException $e): JsonResponse
     {
         $stderr = $e->stderr;
         $suffix = '… [truncated; see storage/spora.log]';
