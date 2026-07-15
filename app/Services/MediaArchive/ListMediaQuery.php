@@ -35,6 +35,7 @@ final readonly class ListMediaQuery
     public function __construct(
         public ?MediaType $mediaType = null,
         public ?int $agentId = null,
+        public ?int $userId = null,
         public ?string $pluginSlug = null,
         public ?string $toolName = null,
         public ?DateTimeInterface $from = null,
@@ -66,6 +67,7 @@ final readonly class ListMediaQuery
         return [
             'mediaType'  => $this->mediaType?->value,
             'agentId'    => $this->agentId,
+            'userId'     => $this->userId,
             'pluginSlug' => $this->pluginSlug,
             'toolName'   => $this->toolName,
             'search'     => $this->search,

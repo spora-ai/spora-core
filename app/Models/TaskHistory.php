@@ -21,6 +21,7 @@ use Illuminate\Support\Carbon;
  * @property int|null    $input_tokens
  * @property int|null    $output_tokens
  * @property string|null $summarized_sequence_range
+ * @property array<string, mixed>|null $attachments
  * @property Carbon|null $created_at
  */
 final class TaskHistory extends Model
@@ -44,6 +45,12 @@ final class TaskHistory extends Model
         'input_tokens',
         'output_tokens',
         'summarized_sequence_range',
+        'attachments',
+    ];
+
+    /** @var array<string, string> */
+    protected $casts = [
+        'attachments' => 'array',
     ];
 
     public function task(): BelongsTo

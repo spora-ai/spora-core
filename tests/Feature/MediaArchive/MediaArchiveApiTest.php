@@ -42,7 +42,8 @@ function mediaArchiveApiSetup(): array
 
     $service = \Tests\Support\MediaArchiveTestSupport::buildService($assetStore);
 
-    $controller = new MediaArchiveController($service);
+    $auth = \Tests\Support\MediaArchiveTestSupport::buildAuth();
+    $controller = new MediaArchiveController($service, $auth);
 
     $restore = static function () use ($tmp): void {
         putenv('SPORA_STORAGE_DIR');

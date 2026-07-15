@@ -110,6 +110,7 @@ function makeMediaArchiveService(array $overrides = []): array
         $resolver,
         $ctx['sniffer'],
         $ctx['metadata'],
+        \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
     );
 
     return [
@@ -769,6 +770,7 @@ describe('MediaArchiveService::ingest local-mode failure surfaces MediaArchiveEx
                 $resolver,
                 $ctx['sniffer'],
                 $ctx['metadata'],
+                \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
             );
             $png = base64_decode(
                 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',

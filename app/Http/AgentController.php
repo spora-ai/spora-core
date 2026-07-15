@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use JsonException;
 use Spora\Auth\AuthService;
+use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Services\AgentServiceInterface;
@@ -36,6 +37,7 @@ final class AgentController
     public function __construct(
         private readonly AuthService $authService,
         private readonly AgentServiceInterface $agentService,
+        private readonly ?DriverFactory $driverFactory = null,
     ) {}
 
     /**
@@ -188,10 +190,24 @@ final class AgentController
             'allow_followup'       => (bool) $agent->allow_followup,
             'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),
             'max_retries'          => (int) ($agent->max_retries ?? 0),
+            'llm_supports_image_input' => $this->resolveSupportsImageInput($agent),
             'tools' => $tools->map(static fn(AgentTool $t) => [
                 'tool_class' => $t->tool_class,
                 'tool_name'  => $t->tool_name,
             ])->values()->toArray(),
         ];
+    }
+
+    private function resolveSupportsImageInput(Agent $agent): bool
+    {
+        if ($this->driverFactory === null) {
+            return false;
+        }
+        try {
+            $driver = $this->driverFactory->makeFromAgent($agent);
+        } catch (\Throwable) {
+            return false;
+        }
+        return $driver->supportsImageInput();
     }
 }

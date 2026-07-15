@@ -55,7 +55,10 @@ use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
 use Spora\Http\MailTemplateController;
+use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
+use Spora\Http\MediaUploadController;
+use Spora\Http\PublicMediaController;
 use Spora\Http\MemoryController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -90,8 +93,13 @@ use Spora\Services\LlmConfigValidator;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MailTemplateService;
 use Spora\Services\MailTemplateServiceInterface;
+use Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter;
+use Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter;
+use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
+use Spora\Services\MediaArchive\MediaConverterDiscovery;
+use Spora\Services\MediaArchive\MediaConverterRegistry;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
@@ -120,6 +128,7 @@ use Spora\Tools\CalculatorTool;
 use Spora\Tools\CurrentTimeTool;
 use Spora\Tools\GlobalMemoryTool;
 use Spora\Tools\HandoverTool;
+use Spora\Tools\GetPublicMediaUrlTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\UserInfoTool;
 use Symfony\Component\HttpClient\HttpClient;
@@ -130,6 +139,13 @@ final class ContainerDefinitions
 {
     public static function all(): array
     {
+        // Self-register the core media converters with the static discovery
+        // list. Plugins add their own converters in their `register(ContainerBuilder)`
+        // hook (see docs/07_plugins.md). The list is read by
+        // MediaConverterRegistry at construction time.
+        MediaConverterDiscovery::add(PdfToMarkdownConverter::class);
+        MediaConverterDiscovery::add(PlainTextPassthroughConverter::class);
+
         return array_merge(
             self::configDefinition(),
             self::coreServiceDefinitions(),
@@ -474,8 +490,29 @@ final class ContainerDefinitions
                     $c->get(MediaArchiveUrlResolver::class),
                     $c->get(MimeSniffer::class),
                     $c->get(MetadataExtractor::class),
+                    $c->get(MediaConverterRegistry::class),
                 );
             },
+
+            // Core converters self-register with the static discovery list
+            // before the registry resolves them. Plugins add their own
+            // converters in their `register(ContainerBuilder)` hook.
+            PdfToMarkdownConverter::class => static function (ContainerInterface $c): PdfToMarkdownConverter {
+                return new PdfToMarkdownConverter(
+                    $c->get(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class),
+                );
+            },
+            \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class => static fn (): \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser
+                => new \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser(),
+            PlainTextPassthroughConverter::class => static fn (): PlainTextPassthroughConverter
+                => new PlainTextPassthroughConverter(),
+            MediaConverterRegistry::class => static fn (ContainerInterface $c): MediaConverterRegistry
+                => new MediaConverterRegistry($c),
+            MediaAllowedTypesService::class => static fn (ContainerInterface $c): MediaAllowedTypesService
+                => new MediaAllowedTypesService(
+                    $c->get(MediaConverterRegistry::class),
+                    $c->get(\Spora\Drivers\DriverFactory::class),
+                ),
 
             DriverFactory::class => static function (ContainerInterface $c): DriverFactory {
                 return new DriverFactory(
@@ -595,6 +632,7 @@ final class ContainerDefinitions
                 ReadUrlTool::class,
                 UserInfoTool::class,
                 HandoverTool::class,
+                GetPublicMediaUrlTool::class,
             ],
 
             LLMConfigService::class => static function (ContainerInterface $c): LLMConfigService {
@@ -737,6 +775,7 @@ final class ContainerDefinitions
                 return new AgentController(
                     $c->get(AuthService::class),
                     $c->get(AgentServiceInterface::class),
+                    $c->get(DriverFactory::class),
                 );
             },
 
@@ -772,6 +811,28 @@ final class ContainerDefinitions
             MediaArchiveController::class => static function (ContainerInterface $c): MediaArchiveController {
                 return new MediaArchiveController(
                     $c->get(MediaArchiveService::class),
+                    $c->get(\Spora\Auth\AuthService::class),
+                );
+            },
+
+            MediaUploadController::class => static function (ContainerInterface $c): MediaUploadController {
+                return new MediaUploadController(
+                    $c->get(MediaArchiveService::class),
+                    $c->get(MediaAllowedTypesService::class),
+                    $c->get(\Spora\Auth\AuthService::class),
+                );
+            },
+
+            MediaAllowedTypesController::class => static function (ContainerInterface $c): MediaAllowedTypesController {
+                return new MediaAllowedTypesController(
+                    $c->get(MediaAllowedTypesService::class),
+                );
+            },
+
+            PublicMediaController::class => static function (ContainerInterface $c): PublicMediaController {
+                return new PublicMediaController(
+                    $c->get(\Spora\Services\DatabaseAssetStore::class),
+                    $c->get(\Spora\Services\LocalAssetStore::class),
                 );
             },
         ];
@@ -905,6 +966,16 @@ final class ContainerDefinitions
                     $c->get(HttpClientInterface::class),
                     $c->get(ToolConfigService::class),
                     $c->get(LoggerInterface::class),
+                    $c->get(MediaConverterRegistry::class),
+                );
+            },
+
+            GetPublicMediaUrlTool::class => static function (ContainerInterface $c): GetPublicMediaUrlTool {
+                return new GetPublicMediaUrlTool(
+                    $c->get(\Spora\Auth\AuthService::class),
+                    $c->has(\Symfony\Component\HttpFoundation\Request::class)
+                        ? $c->get(\Symfony\Component\HttpFoundation\Request::class)
+                        : null,
                 );
             },
 

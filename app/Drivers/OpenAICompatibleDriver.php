@@ -29,11 +29,45 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
         return self::PROVIDER_KEY;
     }
 
+    /**
+     * Vision-capable OpenAI-family model names. Conservative allowlist:
+     *   - gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-4-vision*
+     *   - o1, o1-pro, o3, o3-mini, o4-mini
+     *   - chatgpt-4o*
+     *
+     * `gpt-3.5*`, `gpt-4` (non-vision), `o1-mini` are explicitly excluded.
+     * Custom OpenAI-compatible endpoints (e.g. a private deployment) are
+     * treated as text-only unless the operator overrides via a subclass.
+     */
+    public function supportsImageInput(): bool
+    {
+        $m = strtolower($this->model);
+        if ($m === '' || $m === 'gpt-3.5-turbo' || $m === 'gpt-4' || $m === 'o1-mini') {
+            return false;
+        }
+        return str_starts_with($m, 'gpt-4o')
+            || str_starts_with($m, 'gpt-4-vision')
+            || str_starts_with($m, 'o1')
+            || str_starts_with($m, 'o3')
+            || str_starts_with($m, 'o4')
+            || str_starts_with($m, 'chatgpt-4o');
+    }
+
     public function complete(LLMRequest $request): LLMResponse
     {
         $messages = array_merge(
             [['role' => 'system', 'content' => $request->systemPrompt]],
-            $request->messages,
+            array_map(
+                static function (array $msg): array {
+                    $content = $msg['content'] ?? null;
+                    if ($content === null || is_string($content)) {
+                        return $msg;
+                    }
+                    $msg['content'] = self::normalizeContent($content);
+                    return $msg;
+                },
+                $request->messages,
+            ),
         );
 
         $body = [
@@ -136,5 +170,46 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     public static function getDisplayName(): string
     {
         return 'OpenAI Compatible';
+    }
+
+    /**
+     * Translate a message's `content` to OpenAI's wire shape. Strings
+     * pass through; ContentBlock lists become OpenAI's content-part
+     * format: `{type:"text", text}` and
+     * `{type:"image_url", image_url:{url:"data:..." | <url>}}`.
+     */
+    private static function normalizeContent(mixed $content): mixed
+    {
+        if ($content === null || is_string($content)) {
+            return $content;
+        }
+        if (!is_array($content)) {
+            return (string) $content;
+        }
+        $parts = [];
+        foreach ($content as $b) {
+            if (!is_array($b)) {
+                continue;
+            }
+            $type = $b['type'] ?? null;
+            if ($type === 'text') {
+                $parts[] = ['type' => 'text', 'text' => (string) ($b['text'] ?? '')];
+                continue;
+            }
+            if ($type === 'image') {
+                if (isset($b['base64']) && is_string($b['base64']) && $b['base64'] !== '' && isset($b['mediaType'])) {
+                    $parts[] = [
+                        'type'     => 'image_url',
+                        'image_url' => ['url' => 'data:' . $b['mediaType'] . ';base64,' . $b['base64']],
+                    ];
+                } elseif (isset($b['url']) && is_string($b['url']) && $b['url'] !== '') {
+                    $parts[] = [
+                        'type'     => 'image_url',
+                        'image_url' => ['url' => $b['url']],
+                    ];
+                }
+            }
+        }
+        return $parts === [] ? '' : $parts;
     }
 }

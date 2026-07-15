@@ -88,6 +88,7 @@ final class TaskController
         $agentId = isset($body['agent_id']) ? (int) $body['agent_id'] : null;
         $maxSteps = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
         $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
+        $mediaIds = $this->parseMediaIds($body['media_ids'] ?? null);
 
         $result = null;
         if ($prompt === '') {
@@ -102,7 +103,7 @@ final class TaskController
             );
         } else {
             try {
-                $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId);
+                $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
                 $result = new JsonResponse(
                     ['data' => ['task' => $task]],
                     Response::HTTP_CREATED,
@@ -116,6 +117,21 @@ final class TaskController
         }
 
         return $result;
+    }
+
+    /** @return list<string> */
+    private function parseMediaIds(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $id) {
+            if (is_string($id) && $id !== '') {
+                $out[] = $id;
+            }
+        }
+        return $out;
     }
 
     /**
@@ -388,8 +404,9 @@ final class TaskController
             if (isset($body['additional_steps'])) {
                 $additionalSteps = $body['additional_steps'];
             }
+            $mediaIds = $this->parseMediaIds($body['media_ids'] ?? null);
             try {
-                $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps);
+                $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
                 $result = new JsonResponse(
                     ['data' => ['task' => $task]],
                     Response::HTTP_OK,

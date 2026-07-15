@@ -42,6 +42,7 @@ final class Orchestrator implements OrchestratorInterface
     private const ISO8601_UTC = 'Y-m-d\TH:i:s\Z';
 
     /** Package-private extracted services; read by `TickPhaseRunner` and the other extracted services via the orchestrator. */
+    public readonly DriverFactory $driverFactory;
     public readonly ErrorClassifier $errorClassifier;
     public readonly ToolDefinitionBuilder $toolDefinitionBuilder;
     public readonly LlmConfigResolver $llmConfigResolver;
@@ -77,6 +78,7 @@ final class Orchestrator implements OrchestratorInterface
         $this->toolCallSerializer    = $config->toolCallSerializer;
         $this->llmConfigService      = $config->llmConfigService;
         $this->pluginLoader          = $config->pluginLoader;
+        $this->driverFactory         = $driverFactory;
         $this->errorClassifier       = new ErrorClassifier();
         $this->llmConfigResolver     = new LlmConfigResolver($config->llmConfigService);
         $this->toolDefinitionBuilder = new ToolDefinitionBuilder(
@@ -102,7 +104,7 @@ final class Orchestrator implements OrchestratorInterface
 
     // Public API
 
-    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null): Task
+    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = []): Task
     {
         $agent = Agent::findOrFail($agentId);
 
@@ -121,6 +123,10 @@ final class Orchestrator implements OrchestratorInterface
 
         $this->appendHistory($task->id, 'user', $userPrompt);
 
+        if ($mediaIds !== []) {
+            $this->appendAttachmentRow($task->id, $mediaIds);
+        }
+
         if ($this->workerMode === WorkerMode::Sync) {
             $this->tick($task->id);
         }
@@ -128,7 +134,7 @@ final class Orchestrator implements OrchestratorInterface
         return $task->fresh();
     }
 
-    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null): Task
+    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = []): Task
     {
         $task = Task::findOrFail($taskId);
 
@@ -137,6 +143,10 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         $this->appendHistory($task->id, 'user', $newPrompt);
+
+        if ($mediaIds !== []) {
+            $this->appendAttachmentRow($task->id, $mediaIds);
+        }
 
         $task->status = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
         $task->step_count = 0;
@@ -153,6 +163,42 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         return $task->fresh();
+    }
+
+    /**
+     * Resolve media IDs to asset rows (with ownership check) and write
+     * an `attachment` row to the task history. The MessageHistoryBuilder
+     * expands this row into content blocks.
+     *
+     * @param list<string> $mediaIds
+     */
+    private function appendAttachmentRow(int $taskId, array $mediaIds): void
+    {
+        $userId = (int) (Task::find($taskId)?->user_id ?: 0);
+        $refs = [];
+        foreach ($mediaIds as $mid) {
+            if ($mid === '') {
+                continue;
+            }
+            $asset = \Spora\Models\MediaAsset::query()->find($mid);
+            if ($asset === null) {
+                continue;
+            }
+            if ($asset->user_id !== null && $userId !== 0 && (int) $asset->user_id !== $userId) {
+                throw new \InvalidArgumentException("Media asset {$mid} is not owned by the current user.");
+            }
+            $kind = str_starts_with((string) $asset->mime_type, 'image/') ? 'image' : 'text';
+            $refs[] = ['media_id' => $asset->id, 'kind' => $kind];
+        }
+        if ($refs === []) {
+            return;
+        }
+        $this->appendHistory(
+            $taskId,
+            'attachment',
+            '',
+            new \Spora\Agents\ValueObjects\HistoryMessageContext(attachments: $refs),
+        );
     }
 
     public function tick(int $taskId): void
@@ -347,7 +393,16 @@ final class Orchestrator implements OrchestratorInterface
 
     public function buildMessages(int $taskId): array
     {
-        return (new MessageHistoryBuilder())->build($taskId);
+        $driver = null;
+        $task = Task::find($taskId);
+        if ($task !== null && $task->agent_id) {
+            try {
+                $driver = $this->driverFactory->makeFromAgent(Agent::findOrFail($task->agent_id));
+            } catch (\Throwable) {
+                $driver = null;
+            }
+        }
+        return (new MessageHistoryBuilder($driver))->build($taskId);
     }
 
     /**
@@ -442,6 +497,10 @@ final class Orchestrator implements OrchestratorInterface
         // Write reasoning unconditionally as the column is now part of the base schema
         if ($context->reasoning !== null) {
             $row['reasoning'] = $context->reasoning;
+        }
+
+        if ($context->attachments !== null) {
+            $row['attachments'] = json_encode($context->attachments, JSON_THROW_ON_ERROR);
         }
 
         Capsule::connection()->transaction(function () use ($taskId, $row) {

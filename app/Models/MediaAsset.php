@@ -13,6 +13,7 @@ use Spora\Services\MediaArchive\MediaType;
  * @property int|null                               $agent_id
  * @property int|null                               $task_id
  * @property int|null                               $tool_call_id
+ * @property int|null                               $user_id
  * @property string|null                            $plugin_slug
  * @property string|null                            $tool_name
  * @property string|null                            $media_type
@@ -22,17 +23,22 @@ use Spora\Services\MediaArchive\MediaType;
  * @property int|null                               $height
  * @property float|null                             $duration_seconds
  * @property string|null                            $prompt
+ * @property string|null                            $filename
+ * @property string|null                            $markdown_content
  * @property array<string>|null                      $tags
  * @property array<string, mixed>|null              $metadata
  * @property string                                 $asset_url
  * @property string|null                            $source_url
  * @property string                                 $storage_mode
  * @property string|null                            $asset_token
+ * @property string|null                            $public_access_token
  * @property string|null                            $payload
+ * @property string|null                            $upload_source
  * @property \Carbon\Carbon|null                    $created_at
  * @property \Carbon\Carbon|null                    $updated_at
  * @property Agent|null                             $agent
  * @property Task|null                              $task
+ * @property User|null                              $user
  *
  * Note: the @property docblock above mirrors {@see self::COLUMNS} plus
  * the Eloquent-managed `created_at`/`updated_at` and the relationship
@@ -53,6 +59,7 @@ final class MediaAsset extends Model
         'agent_id',
         'task_id',
         'tool_call_id',
+        'user_id',
         'plugin_slug',
         'tool_name',
         'media_type',
@@ -62,14 +69,18 @@ final class MediaAsset extends Model
         'height',
         'duration_seconds',
         'prompt',
+        'filename',
+        'markdown_content',
         'tags',
         'metadata',
         'asset_url',
         'source_url',
         'storage_mode',
         'asset_token',
+        'public_access_token',
         'payload',
         'migrated_from_inline_data_url',
+        'upload_source',
     ];
 
     /**
@@ -81,6 +92,7 @@ final class MediaAsset extends Model
         'agent_id'                       => 'integer',
         'task_id'                        => 'integer',
         'tool_call_id'                   => 'integer',
+        'user_id'                        => 'integer',
         'byte_size'                      => 'integer',
         'width'                          => 'integer',
         'height'                         => 'integer',
@@ -113,6 +125,11 @@ final class MediaAsset extends Model
     public function task(): BelongsTo
     {
         return $this->belongsTo(Task::class);
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     /**

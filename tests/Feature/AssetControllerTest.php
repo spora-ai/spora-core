@@ -68,6 +68,7 @@ function assetTestSetup(bool $asAdmin = true): array
         ),
         $sniffer,
         new MetadataExtractor($logger, false),
+        \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
     );
 
     // Auth mock — by default, the test requester is treated as an admin

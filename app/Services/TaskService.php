@@ -68,7 +68,10 @@ final class TaskService implements TaskServiceInterface
     /**
      * @inheritDoc
      */
-    public function startTask(int $userId, int $agentId, string $prompt, ?int $maxSteps = null, ?int $parentTaskId = null): array
+    /**
+     * @param list<string> $mediaIds
+     */
+    public function startTask(int $userId, int $agentId, string $prompt, ?int $maxSteps = null, ?int $parentTaskId = null, array $mediaIds = []): array
     {
         $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
         if ($agent === null) {
@@ -83,7 +86,7 @@ final class TaskService implements TaskServiceInterface
         }
 
         $steps = $maxSteps ?? $agent->max_steps;
-        $task = $this->orchestrator->start($agentId, $prompt, $steps, $parentTaskId);
+        $task = $this->orchestrator->start($agentId, $prompt, $steps, $parentTaskId, null, $mediaIds);
 
         $resource = $this->taskResource($task);
         $this->mercure->publish($task->id, $userId, $resource);
@@ -186,7 +189,10 @@ final class TaskService implements TaskServiceInterface
     /**
      * @inheritDoc
      */
-    public function continueTask(int $taskId, int $userId, string $prompt, ?int $additionalSteps = null): array
+    /**
+     * @param list<string> $mediaIds
+     */
+    public function continueTask(int $taskId, int $userId, string $prompt, ?int $additionalSteps = null, array $mediaIds = []): array
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
@@ -201,7 +207,7 @@ final class TaskService implements TaskServiceInterface
             throw new InvalidArgumentException('additional_steps must be an integer between 1 and 100.');
         }
 
-        $continuedTask = $this->orchestrator->continue($task->id, $prompt, $additionalSteps);
+        $continuedTask = $this->orchestrator->continue($task->id, $prompt, $additionalSteps, $mediaIds);
 
         $resource = $this->taskResource($continuedTask);
         $this->mercure->publish($continuedTask->id, $continuedTask->user_id, $resource);

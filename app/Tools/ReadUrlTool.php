@@ -6,6 +6,7 @@ namespace Spora\Tools;
 
 use League\HTMLToMarkdown\HtmlConverter;
 use Psr\Log\LoggerInterface;
+use Spora\Services\MediaArchive\MediaConverterRegistry;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
@@ -17,15 +18,26 @@ use Throwable;
 
 /**
  * Fetches and parses web content from HTTP(S) URLs.
- * Converts HTML pages to Markdown and handles XML/RSS feeds directly.
+ *
+ * Two operations:
+ *   - `fetch`      — HTML pages converted to Markdown, plus raw XML/RSS
+ *                    and JSON passthroughs.
+ *   - `fetch_pdf`  — fetches a remote PDF, runs the registered PDF
+ *                    converter (`PdfToMarkdownConverter` by default),
+ *                    returns the markdown text. Uses the same
+ *                    HttpClient and `validateUrl()` as `fetch`.
+ *
+ * Both share the URL-validation guard (http/https only) and the
+ * 40 000-character output cap (`MAX_OUTPUT_CHARS`).
  */
 #[Tool(
     name: 'read_url',
-    description: 'Fetch and read the contents of a URL. Can parse HTML pages into Markdown, and can read XML/RSS feeds. Only http:// and https:// URLs are supported.',
+    description: 'Fetch and read the contents of a URL. Parses HTML pages into Markdown, can read XML/RSS/JSON, and can fetch remote PDFs and convert them to Markdown. Only http:// and https:// URLs are supported.',
     displayName: 'Read URL',
     category: 'data',
 )]
 #[ToolOperation(name: 'fetch', description: 'Fetch and read the contents of a URL', enabledByDefault: true, requiresApprovalByDefault: false)]
+#[ToolOperation(name: 'fetch_pdf', description: 'Fetch a remote PDF and return its text as Markdown', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolSetting(
     key: 'http_timeout',
     label: 'HTTP Timeout',
@@ -38,6 +50,12 @@ use Throwable;
     description: 'The absolute http:// or https:// URL to read.',
     required: true,
 )]
+#[ToolParameter(
+    name: 'action',
+    type: 'string',
+    description: '`fetch` (default) reads HTML/XML/JSON; `fetch_pdf` downloads a PDF and returns Markdown.',
+    required: false,
+)]
 final class ReadUrlTool extends AbstractTool
 {
     /** Maximum output length in characters before truncation. */
@@ -46,10 +64,14 @@ final class ReadUrlTool extends AbstractTool
     /** Permitted URL schemes — restricts SSRF via file://, gopher://, cloud metadata endpoints, etc. */
     private const ALLOWED_SCHEMES = ['http', 'https'];
 
+    /** Hard cap on PDF bytes — protects against multi-hundred-MB PDFs. */
+    private const MAX_PDF_BYTES = 50 * 1024 * 1024;
+
     public function __construct(
         private readonly HttpClientInterface $httpClient,
         private readonly ToolConfigService   $configService,
         private readonly ?LoggerInterface    $logger = null,
+        private readonly ?MediaConverterRegistry $converters = null,
     ) {}
 
     private function effectiveTimeout(array $settings): int
@@ -63,18 +85,20 @@ final class ReadUrlTool extends AbstractTool
 
     public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
-        return $this->fetch($arguments, $agentId, $userId);
+        return $this->dispatch($arguments, $agentId, $userId);
     }
 
     public function describeAction(array $arguments): string
     {
-        $url = trim((string) ($arguments['url'] ?? ''));
-        return "Fetch content from URL: {$url}";
+        $url    = trim((string) ($arguments['url'] ?? ''));
+        $action = (string) ($arguments['action'] ?? 'fetch');
+        return "{$action} URL: {$url}";
     }
 
-    public function fetch(array $arguments, int $agentId, ?int $userId): ToolResult
+    private function dispatch(array $arguments, int $agentId, ?int $userId): ToolResult
     {
         $url = trim((string) ($arguments['url'] ?? ''));
+        $action = (string) ($arguments['action'] ?? 'fetch');
 
         $validation = $this->validateUrl($url);
         if ($validation instanceof ToolResult) {
@@ -84,9 +108,12 @@ final class ReadUrlTool extends AbstractTool
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
 
         try {
-            return $this->processFetchedContent($url, $settings);
+            return match ($action) {
+                'fetch_pdf' => $this->processFetchedPdfContent($url, $settings),
+                default     => $this->processFetchedContent($url, $settings),
+            };
         } catch (Throwable $e) {
-            $this->logger?->error('ReadUrlTool Exception', ['url' => $url, 'exception' => $e]);
+            $this->logger?->error('ReadUrlTool Exception', ['url' => $url, 'action' => $action, 'exception' => $e]);
             return new ToolResult(false, 'Failed to read URL: ' . $e->getMessage());
         }
     }
@@ -131,12 +158,6 @@ final class ReadUrlTool extends AbstractTool
         ]);
 
         $statusCode = $response->getStatusCode();
-        $this->logger?->debug('ReadUrlTool: HTTP response', [
-            'status_code'  => $statusCode,
-            'url'          => $url,
-            'content_type' => $response->getHeaders()['content-type'][0] ?? 'unknown',
-        ]);
-
         if ($statusCode >= 400) {
             return new ToolResult(false, "Failed to fetch URL. HTTP Status: {$statusCode}");
         }
@@ -145,6 +166,55 @@ final class ReadUrlTool extends AbstractTool
         $content     = $response->getContent(false);
 
         return $this->buildContentResult($contentType, $content);
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     */
+    private function processFetchedPdfContent(string $url, array $settings): ToolResult
+    {
+        if ($this->converters === null) {
+            return new ToolResult(false, 'PDF fetching is unavailable: no converter registry is wired.');
+        }
+        $converter = $this->converters->findFor('application/pdf', basename(parse_url($url, PHP_URL_PATH) ?? ''));
+        if ($converter === null) {
+            return new ToolResult(false, 'No PDF converter is registered. Install a plugin that provides one.');
+        }
+
+        $timeout = $this->effectiveTimeout($settings);
+        $this->logger?->debug('ReadUrlTool: fetching PDF', ['url' => $url, 'timeout' => $timeout]);
+
+        $response = $this->httpClient->request('GET', $url, [
+            'timeout' => $timeout,
+            'headers' => [
+                'User-Agent' => 'Spora Agent/1.0 (+https://github.com/spora/spora)',
+                'Accept'     => 'application/pdf',
+            ],
+        ]);
+        $statusCode = $response->getStatusCode();
+        if ($statusCode >= 400) {
+            return new ToolResult(false, "Failed to fetch PDF. HTTP Status: {$statusCode}");
+        }
+
+        $bytes = $response->getContent(false);
+        if (strlen($bytes) > self::MAX_PDF_BYTES) {
+            return new ToolResult(false, sprintf(
+                'PDF too large (%.1f MiB; cap is %d MiB).',
+                strlen($bytes) / 1024 / 1024,
+                self::MAX_PDF_BYTES / 1024 / 1024,
+            ));
+        }
+
+        try {
+            $markdown = $converter->toMarkdown($bytes, 'application/pdf', basename(parse_url($url, PHP_URL_PATH) ?? null));
+        } catch (Throwable $e) {
+            $this->logger?->error('ReadUrlTool: PDF conversion failed', ['url' => $url, 'exception' => $e]);
+            return new ToolResult(false, 'PDF conversion failed: ' . $e->getMessage());
+        }
+        if (trim($markdown) === '') {
+            return new ToolResult(false, 'URL was fetched but no readable text was extracted from the PDF.');
+        }
+        return new ToolResult(true, "Fetched PDF Content (Markdown):\n\n" . $this->truncate($markdown));
     }
 
     private function buildContentResult(string $contentType, string $content): ToolResult

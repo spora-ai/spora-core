@@ -17,7 +17,10 @@ use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
 use Spora\Http\MailTemplateController;
+use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
+use Spora\Http\MediaUploadController;
+use Spora\Http\PublicMediaController;
 use Spora\Http\MemoryController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -124,8 +127,17 @@ final class RouteDefinitions
         // tools write rows via MediaArchiveService::ingest(); this route
         // set is for browsing and cleanup.
         $r->addRoute('GET', '/api/v1/media', [MediaArchiveController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/media/allowed-types', [MediaAllowedTypesController::class, 'index'], [AuthMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/media', [MediaUploadController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/media/{id}', [MediaArchiveController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', '/api/v1/media/{id}', [MediaArchiveController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/media/{id}/public-token/refresh', [MediaArchiveController::class, 'refreshPublicToken'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/media/{id}', [MediaArchiveController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // Public, token-gated media access. No auth middleware — the token
+        // itself is the credential. The id is always a UUID shape; the
+        // controller returns 404 on any mismatch.
+        $r->addRoute('GET', '/api/v1/public/media/{id}', [PublicMediaController::class, 'show'], []);
 
         // Agent Templates — list/show/validate/import + per-agent export.
         // The {id:.+} regex lets the captured id contain slashes (the

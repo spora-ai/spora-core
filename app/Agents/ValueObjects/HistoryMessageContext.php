@@ -11,6 +11,11 @@ namespace Spora\Agents\ValueObjects;
  */
 final readonly class HistoryMessageContext
 {
+    /**
+     * @param array<int, array{media_id: string, kind: string}>|null $attachments
+     *        Carried on `role=attachment` rows; expanded by
+     *        {@see \Spora\Agents\MessageHistoryBuilder} into LLM content blocks.
+     */
     public function __construct(
         public ?string $toolCallId      = null,
         public ?string $toolName        = null,
@@ -18,5 +23,6 @@ final readonly class HistoryMessageContext
         public int     $inputTokens     = 0,
         public int     $outputTokens    = 0,
         public ?string $reasoning       = null,
+        public ?array  $attachments     = null,
     ) {}
 }

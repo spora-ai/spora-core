@@ -48,6 +48,17 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
         $this->thinkingBudget = $options?->thinkingBudget;
     }
 
+    /**
+     * Claude 3 / 4 family models all accept image content blocks on the
+     * Anthropic Messages API. Older models (Claude 2, Claude Instant)
+     * did not — keep the allowlist conservative.
+     */
+    public function supportsImageInput(): bool
+    {
+        return str_starts_with($this->model, 'claude-3-')
+            || str_starts_with($this->model, 'claude-4-');
+    }
+
     public function getProviderName(): string
     {
         return self::PROVIDER_KEY;
@@ -267,7 +278,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
                 $toolResults = [];
             }
 
-            $converted[] = ['role' => $role, 'content' => $msg['content'] ?? ''];
+            $converted[] = ['role' => $role, 'content' => $this->normalizeMessageContent($msg['content'] ?? null)];
         }
 
         // Flush any trailing tool results
@@ -276,6 +287,54 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
         }
 
         return $converted;
+    }
+
+    /**
+     * Translate a message's `content` field into Anthropic's wire shape.
+     * Three input forms:
+     *   - null / string     → return as-is (text).
+     *   - list<ContentBlock> (the new multi-modal shape) → translate to
+     *     Anthropic blocks: `{type:"text", text}` for text and
+     *     `{type:"image", source:{type, media_type, data|url}}` for
+     *     image blocks.
+     */
+    private function normalizeMessageContent(mixed $content): string|array
+    {
+        if ($content === null || is_string($content)) {
+            return $content ?? '';
+        }
+        if (!is_array($content)) {
+            return (string) $content;
+        }
+        $blocks = [];
+        foreach ($content as $b) {
+            if (!is_array($b)) {
+                continue;
+            }
+            $type = $b['type'] ?? null;
+            if ($type === 'text') {
+                $blocks[] = ['type' => 'text', 'text' => (string) ($b['text'] ?? '')];
+                continue;
+            }
+            if ($type === 'image') {
+                if (isset($b['base64']) && is_string($b['base64']) && $b['base64'] !== '' && isset($b['mediaType'])) {
+                    $blocks[] = [
+                        'type'   => 'image',
+                        'source' => [
+                            'type'       => 'base64',
+                            'media_type' => (string) $b['mediaType'],
+                            'data'       => $b['base64'],
+                        ],
+                    ];
+                } elseif (isset($b['url']) && is_string($b['url']) && $b['url'] !== '') {
+                    $blocks[] = [
+                        'type'   => 'image',
+                        'source' => ['type' => 'url', 'url' => $b['url']],
+                    ];
+                }
+            }
+        }
+        return $blocks === [] ? '' : $blocks;
     }
 
     /**

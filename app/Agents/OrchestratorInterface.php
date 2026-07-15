@@ -22,7 +22,7 @@ interface OrchestratorInterface
      * @param  int|null $runId       Optional scheduled run ID for tracking.
      * @return Task                  The newly created Task (status: RUNNING).
      */
-    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null): Task;
+    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = []): Task;
 
     /**
      * One iteration of the loop. Called by the Symfony Messenger handler.
@@ -54,5 +54,5 @@ interface OrchestratorInterface
      * @param  int|null $additionalSteps  Override max_steps for this continuation.
      * @return Task
      */
-    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null): Task;
+    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = []): Task;
 }
