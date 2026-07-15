@@ -26,6 +26,20 @@ interface AgentServiceInterface
 
     public function deleteAgent(int $agentId, int $userId): bool;
 
+    /**
+     * Pin or unpin an agent for the given user.
+     *
+     * @throws Exceptions\AgentNotFoundException If the agent does not exist or is not owned by $userId
+     */
+    public function setPinned(int $userId, int $agentId, bool $pinned): Agent;
+
+    /**
+     * Archive or unarchive an agent for the given user.
+     *
+     * @throws Exceptions\AgentNotFoundException If the agent does not exist or is not owned by $userId
+     */
+    public function setArchived(int $userId, int $agentId, bool $archived): Agent;
+
     // ── Tool management ─────────────────────────────────────────────────────────
 
     /**

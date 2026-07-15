@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Http;
 
+use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Services\AgentServiceInterface;
 
@@ -25,6 +26,9 @@ class StubAgentService implements AgentServiceInterface
             'is_active'              => true,
             'retry_after_minutes'    => 0,
             'max_retries'            => 0,
+            'is_pinned'              => false,
+            'is_archived'            => false,
+            'created_at'             => null,
         ]];
     }
 
@@ -41,6 +45,8 @@ class StubAgentService implements AgentServiceInterface
         $agent->is_active = true;
         $agent->retry_after_minutes = 0;
         $agent->max_retries = 0;
+        $agent->is_pinned = false;
+        $agent->is_archived = false;
 
         return $agent;
     }
@@ -61,18 +67,55 @@ class StubAgentService implements AgentServiceInterface
         $agent->is_active = true;
         $agent->retry_after_minutes = 0;
         $agent->max_retries = 0;
+        $agent->is_pinned = false;
+        $agent->is_archived = false;
 
         return $agent;
     }
 
     public function updateAgent(int $agentId, int $userId, array $data): ?Agent
     {
-        return $this->getAgent($agentId, $userId);
+        $agent = $this->getAgent($agentId, $userId);
+        if ($agent === null) {
+            return null;
+        }
+        // Reflect the partial-update payload onto the returned model so the
+        // controller's resource serialization picks up the new values.
+        if (array_key_exists('is_pinned', $data)) {
+            $agent->is_pinned = (bool) $data['is_pinned'];
+        }
+        if (array_key_exists('is_archived', $data)) {
+            $agent->is_archived = (bool) $data['is_archived'];
+        }
+
+        return $agent;
     }
 
     public function deleteAgent(int $agentId, int $userId): bool
     {
         return $agentId !== 999999;
+    }
+
+    public function setPinned(int $userId, int $agentId, bool $pinned): Agent
+    {
+        if ($agentId === 999999) {
+            throw new RuntimeException('Agent not found');
+        }
+        $agent = $this->getAgent($agentId, $userId);
+        $agent->is_pinned = $pinned;
+
+        return $agent;
+    }
+
+    public function setArchived(int $userId, int $agentId, bool $archived): Agent
+    {
+        if ($agentId === 999999) {
+            throw new RuntimeException('Agent not found');
+        }
+        $agent = $this->getAgent($agentId, $userId);
+        $agent->is_archived = $archived;
+
+        return $agent;
     }
 
     public function enableTool(int $agentId, int $userId, string $toolClass): array

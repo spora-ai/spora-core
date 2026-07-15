@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use DateTimeInterface;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use ReflectionClass;
 use Spora\Models\Agent;
@@ -12,6 +13,7 @@ use Spora\Models\AgentToolOverride;
 use Spora\Services\Agents\AgentToolInstanceResolver;
 use Spora\Services\Agents\AgentToolOperationsResolver;
 use Spora\Services\Agents\AgentToolOverrideResolver;
+use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Tools\Attributes\Tool;
 
 /**
@@ -79,7 +81,7 @@ final class AgentService implements AgentServiceInterface
             return null;
         }
 
-        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'retry_after_minutes', 'max_retries'];
+        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived'];
         $filtered = array_intersect_key($data, array_flip($allowed));
 
         if ($filtered !== []) {
@@ -102,6 +104,44 @@ final class AgentService implements AgentServiceInterface
         Capsule::table('agents')->where('id', $agentId)->delete();
 
         return true;
+    }
+
+    public function setPinned(int $userId, int $agentId, bool $pinned): Agent
+    {
+        $agent = $this->getAgent($agentId, $userId);
+        if ($agent === null) {
+            throw new AgentNotFoundException('Agent not found.');
+        }
+
+        Capsule::table('agents')
+            ->where('id', $agentId)
+            ->update([
+                'is_pinned'  => $pinned ? 1 : 0,
+                'updated_at' => date(self::DATETIME_FORMAT),
+            ]);
+
+        $agent->refresh();
+
+        return $agent;
+    }
+
+    public function setArchived(int $userId, int $agentId, bool $archived): Agent
+    {
+        $agent = $this->getAgent($agentId, $userId);
+        if ($agent === null) {
+            throw new AgentNotFoundException('Agent not found.');
+        }
+
+        Capsule::table('agents')
+            ->where('id', $agentId)
+            ->update([
+                'is_archived' => $archived ? 1 : 0,
+                'updated_at'  => date(self::DATETIME_FORMAT),
+            ]);
+
+        $agent->refresh();
+
+        return $agent;
     }
 
 
@@ -291,6 +331,11 @@ final class AgentService implements AgentServiceInterface
             'is_active'            => (bool) $agent->is_active,
             'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),
             'max_retries'          => (int) ($agent->max_retries ?? 0),
+            'is_pinned'            => (bool) ($agent->is_pinned ?? false),
+            'is_archived'          => (bool) ($agent->is_archived ?? false),
+            'created_at'           => $agent->created_at !== null
+                ? $agent->created_at->format(DateTimeInterface::ATOM)
+                : null,
             'tools' => $tools->map(static fn(AgentTool $t) => [
                 'tool_class' => $t->tool_class,
                 'tool_name'  => $t->tool_name,

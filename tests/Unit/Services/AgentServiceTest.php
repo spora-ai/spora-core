@@ -11,6 +11,7 @@ use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\Agents\AgentToolInstanceResolver;
 use Spora\Services\Agents\AgentToolOverrideResolver;
 use Spora\Services\AgentService;
+use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\CalculatorTool;
@@ -655,5 +656,75 @@ describe('AgentService::maskLlmConfig via public API', function (): void {
         expect($result['api_key'])->toBe('***');
         // Non-password field is plain
         expect($result['model'])->toBe('gpt-4o-mini');
+    });
+});
+
+describe('AgentService::setPinned / setArchived', function (): void {
+
+    it('newly created agents default to is_pinned=false and is_archived=false', function (): void {
+        [$service, $userId] = makeAgentServiceWithUser();
+
+        $agent = $service->createAgent($userId, ['name' => 'Defaults']);
+
+        expect($agent->is_pinned)->toBeFalse();
+        expect($agent->is_archived)->toBeFalse();
+    });
+
+    it('setPinned persists and returns the agent', function (): void {
+        [$service, $userId] = makeAgentServiceWithUser();
+        $agent = $service->createAgent($userId, ['name' => 'Pin me']);
+
+        $result = $service->setPinned($userId, (int) $agent->getKey(), true);
+
+        expect($result)->toBeInstanceOf(Agent::class);
+        expect($result->id)->toBe($agent->id);
+        expect($result->is_pinned)->toBeTrue();
+
+        // Refreshed from DB — read again to confirm persistence
+        $fresh = Agent::find($agent->id);
+        expect($fresh->is_pinned)->toBeTrue();
+    });
+
+    it('setArchived persists and returns the agent', function (): void {
+        [$service, $userId] = makeAgentServiceWithUser();
+        $agent = $service->createAgent($userId, ['name' => 'Archive me']);
+
+        $result = $service->setArchived($userId, (int) $agent->getKey(), true);
+
+        expect($result)->toBeInstanceOf(Agent::class);
+        expect($result->id)->toBe($agent->id);
+        expect($result->is_archived)->toBeTrue();
+
+        // Refreshed from DB — read again to confirm persistence
+        $fresh = Agent::find($agent->id);
+        expect($fresh->is_archived)->toBeTrue();
+    });
+
+    it('setPinned can flip back to false', function (): void {
+        [$service, $userId] = makeAgentServiceWithUser();
+        $agent = $service->createAgent($userId, ['name' => 'Toggle pin']);
+
+        $service->setPinned($userId, (int) $agent->getKey(), true);
+        $result = $service->setPinned($userId, (int) $agent->getKey(), false);
+
+        expect($result->is_pinned)->toBeFalse();
+    });
+
+    it('setPinned throws AgentNotFoundException when the agent is owned by another user', function (): void {
+        [$service, $userIdA] = makeAgentServiceWithUser();
+        $agent = $service->createAgent($userIdA, ['name' => 'Not yours']);
+
+        $auth = bootAuthLayer();
+        $userIdB = bootAuth($auth, 'agent-svc-pin-foreign@example.com', AGENT_TEST_PASSWORD);
+
+        expect(fn() => $service->setPinned($userIdB, (int) $agent->getKey(), true))
+            ->toThrow(AgentNotFoundException::class, 'Agent not found.');
+    });
+
+    it('setArchived throws AgentNotFoundException when the agent does not exist', function (): void {
+        [$service, $userId] = makeAgentServiceWithUser();
+
+        expect(fn() => $service->setArchived($userId, 999999, true))
+            ->toThrow(AgentNotFoundException::class, 'Agent not found.');
     });
 });

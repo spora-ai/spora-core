@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use DateTimeInterface;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\Agent;
@@ -140,8 +141,18 @@ final class AgentController
             return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
-        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries'];
+        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived'];
         $data = array_intersect_key($body, array_flip($allowed));
+
+        // Booleans arrive as either real bools or boolean-strings (the form
+        // layer + curl both send 'true'/'false'). Coerce via FILTER_VALIDATE_BOOLEAN
+        // so the service receives a real bool regardless of transport.
+        if (array_key_exists('is_pinned', $data)) {
+            $data['is_pinned'] = filter_var($data['is_pinned'], FILTER_VALIDATE_BOOLEAN);
+        }
+        if (array_key_exists('is_archived', $data)) {
+            $data['is_archived'] = filter_var($data['is_archived'], FILTER_VALIDATE_BOOLEAN);
+        }
 
         $agent = $this->agentService->updateAgent($agentId, $userId, $data);
 
@@ -188,6 +199,11 @@ final class AgentController
             'allow_followup'       => (bool) $agent->allow_followup,
             'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),
             'max_retries'          => (int) ($agent->max_retries ?? 0),
+            'is_pinned'            => (bool) ($agent->is_pinned ?? false),
+            'is_archived'          => (bool) ($agent->is_archived ?? false),
+            'created_at'           => $agent->created_at !== null
+                ? $agent->created_at->format(DateTimeInterface::ATOM)
+                : null,
             'tools' => $tools->map(static fn(AgentTool $t) => [
                 'tool_class' => $t->tool_class,
                 'tool_name'  => $t->tool_name,
