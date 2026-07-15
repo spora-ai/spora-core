@@ -61,6 +61,9 @@ final class ReadUrlTool extends AbstractTool
     /** Hard cap on PDF bytes — protects against multi-hundred-MB PDFs. */
     private const MAX_PDF_BYTES = 50 * 1024 * 1024;
 
+    /** PDF MIME type — referenced by the registry lookup and Accept header. */
+    private const PDF_MIME = 'application/pdf';
+
     public function __construct(
         private readonly HttpClientInterface $httpClient,
         private readonly ToolConfigService   $configService,
@@ -170,7 +173,7 @@ final class ReadUrlTool extends AbstractTool
         if ($this->converters === null) {
             return new ToolResult(false, 'PDF fetching is unavailable: no converter registry is wired.');
         }
-        $converter = $this->converters->findFor('application/pdf', basename(parse_url($url, PHP_URL_PATH) ?? ''));
+        $converter = $this->converters->findFor(self::PDF_MIME, basename(parse_url($url, PHP_URL_PATH) ?? ''));
         if ($converter === null) {
             return new ToolResult(false, 'No PDF converter is registered. Install a plugin that provides one.');
         }
@@ -182,7 +185,7 @@ final class ReadUrlTool extends AbstractTool
             'timeout' => $timeout,
             'headers' => [
                 'User-Agent' => 'Spora Agent/1.0 (+https://github.com/spora/spora)',
-                'Accept'     => 'application/pdf',
+                'Accept'     => self::PDF_MIME,
             ],
         ]);
         $statusCode = $response->getStatusCode();
@@ -200,7 +203,7 @@ final class ReadUrlTool extends AbstractTool
         }
 
         try {
-            $markdown = $converter->toMarkdown($bytes, 'application/pdf', basename(parse_url($url, PHP_URL_PATH) ?? null));
+            $markdown = $converter->toMarkdown($bytes, self::PDF_MIME, basename(parse_url($url, PHP_URL_PATH) ?? null));
         } catch (Throwable $e) {
             $this->logger?->error('ReadUrlTool: PDF conversion failed', ['url' => $url, 'exception' => $e]);
             return new ToolResult(false, 'PDF conversion failed: ' . $e->getMessage());
