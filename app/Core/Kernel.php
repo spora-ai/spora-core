@@ -69,14 +69,12 @@ final class Kernel implements KernelInterface
         try {
             $this->pluginLoader->boot();
         } catch (\Spora\Plugins\Exceptions\PluginLoadFailedException $e) {
-            // A stale or partially-installed plugin.json (e.g. left behind on a
-            // CI runner by an aborted `composer require`) must not take down the
-            // whole framework. Log via the framework error handler (if installed)
-            // and fall through with the loader empty — operators can remove the
-            // bad manifest, run `bin/spora plugin:install` cleanly, and restart.
-            // PluginLoader itself stays strict (throws for invalid manifests) so
-            // its unit tests verify the error contract end-to-end; Kernel is the
-            // boundary that decides "production should keep serving".
+            // Stale or partially-installed plugin.json (e.g. an aborted
+            // `composer require` left behind) must not take down the whole
+            // framework. PluginLoader stays strict (its unit tests verify the
+            // throw contract); Kernel is the production boundary that falls
+            // open. registerPlugins() already swallows per-plugin register()
+            // exceptions the same way.
             error_log('[spora] plugin boot skipped: ' . $e->getMessage());
         }
         $this->pluginLoader->registerPlugins($builder);
@@ -255,11 +253,9 @@ final class Kernel implements KernelInterface
      * Stderr is truncated to a hard 8 KiB ceiling (suffix included) so a
      * runaway Composer error doesn't blow up the response. The full output
      * is in storage/spora.log.
-     */
-    /**
-     * Map {@see PluginInstallFailedException} to its JSON envelope. Exposed as
-     * `public static` so unit tests verify the mapping without paying the cost
-     * of booting a full Kernel (PluginsController, plugin loader, etc.).
+     *
+     * `public static` so unit tests verify the mapping without booting a
+     * full Kernel.
      */
     public static function mapPluginInstallFailureToResponse(PluginInstallFailedException $e): JsonResponse
     {

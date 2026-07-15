@@ -32,12 +32,10 @@ const PLUGIN_ADMIN_GATE_INSTALL_PATH = '/api/v1/plugins';
 const PLUGIN_ADMIN_GATE_PKG = 'spora-ai/spora-plugin-tavily';
 
 /**
- * Build an isolated {@see Spora\Core\Paths} rooted in a fresh tmp directory
- * so the end-to-end kernel tests below don't see whatever plugins happen to be
- * in the project's `plugins/` directory on the runner. Discovery there could
- * throw {@see Spora\Plugins\Exceptions\PluginLoadFailedException} if a stale
- * manifest's class isn't autoloadable — and that has nothing to do with the
- * admin-gate behaviour these tests are locking in.
+ * Isolated {@see Spora\Core\Paths} rooted in a fresh tmp dir so the end-to-end
+ * tests below don't see whatever sits in the project's `plugins/` directory
+ * on the runner. The admin-gate behaviour has nothing to do with plugin
+ * discovery, so we test it without that interference.
  */
 function pluginAdminGate_cleanPaths(): Spora\Core\Paths
 {
