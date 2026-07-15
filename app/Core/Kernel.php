@@ -35,6 +35,7 @@ final class Kernel implements KernelInterface
      */
     private Container $container;
     private bool $errorHandlerInstalled = false;
+    private ?string $pluginBootError = null;
 
     private readonly Paths $paths;
     private readonly AppLoader $appLoader;
@@ -66,16 +67,13 @@ final class Kernel implements KernelInterface
             [$this->paths->plugins()],
             $this->paths->storage('.plugins_stamp'),
         );
+        // A bad manifest should not crash boot — fall through with an empty
+        // loader. Mirrors registerPlugins()' per-plugin tolerance below.
         try {
             $this->pluginLoader->boot();
-        } catch (\Spora\Plugins\Exceptions\PluginLoadFailedException $e) {
-            // Stale or partially-installed plugin.json (e.g. an aborted
-            // `composer require` left behind) must not take down the whole
-            // framework. PluginLoader stays strict (its unit tests verify the
-            // throw contract); Kernel is the production boundary that falls
-            // open. registerPlugins() already swallows per-plugin register()
-            // exceptions the same way.
-            error_log('[spora] plugin boot skipped: ' . $e->getMessage());
+        } catch (\Spora\Plugins\Exceptions\PluginLoadFailedException) {
+            $this->pluginBootError = 'Plugin manifest in ' . $this->paths->plugins()
+                . ' is not loadable; plugin boot was skipped.';
         }
         $this->pluginLoader->registerPlugins($builder);
         $builder->addDefinitions([PluginLoader::class => $this->pluginLoader]);
@@ -83,6 +81,11 @@ final class Kernel implements KernelInterface
         $this->container = $builder->build();
 
         $this->configureErrorHandling($this->container->get('config')['app_env'] ?? 'production');
+
+        if ($this->pluginBootError !== null) {
+            $this->container->get(LoggerInterface::class)->warning($this->pluginBootError);
+            $this->pluginBootError = null;
+        }
     }
 
     public function __destruct()
