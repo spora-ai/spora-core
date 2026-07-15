@@ -164,6 +164,7 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
             inputTokens: (int) ($data['usage']['prompt_tokens'] ?? 0),
             outputTokens: (int) ($data['usage']['completion_tokens'] ?? 0),
             completionId: (string) ($data['id'] ?? ''),
+            reasoning: $parsedContent['reasoning'],
         );
     }
 
@@ -183,7 +184,7 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
             );
         }
         return new LLMResponse(
-            content: $parsedContent['content'],
+            content: $parsedContent['content'] !== '' ? $parsedContent['content'] : null,
             toolCalls: $toolCalls,
             inputTokens: (int) ($data['usage']['prompt_tokens'] ?? 0),
             outputTokens: (int) ($data['usage']['completion_tokens'] ?? 0),
