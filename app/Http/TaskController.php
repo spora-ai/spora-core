@@ -458,62 +458,104 @@ final class TaskController
 
         $body = json_decode($request->getContent(), true) ?? [];
 
-        $prompt = $body['prompt'] ?? null;
-        $additionalSteps = null;
-
-        $result = null;
-        if (!is_string($prompt) || trim($prompt) === '') {
-            $result = new JsonResponse(
-                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'prompt is required and must be a non-empty string.']],
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        } elseif (isset($body['additional_steps'])
-            && (!is_int($body['additional_steps']) || $body['additional_steps'] < 1 || $body['additional_steps'] > 100)
-        ) {
-            $result = new JsonResponse(
-                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'additional_steps must be an integer between 1 and 100.']],
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        } else {
-            if (isset($body['additional_steps'])) {
-                $additionalSteps = $body['additional_steps'];
-            }
-            $mediaIds = $this->parseMediaIds($body['media_ids'] ?? null);
-            $existing = $this->taskService->getTask($taskId, $userId);
-            if ($existing === null) {
-                return new JsonResponse(
-                    ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
-                    Response::HTTP_NOT_FOUND,
-                );
-            }
-            try {
-                $this->ensureMediaCapabilityCompatible((int) $existing['agent_id'], $mediaIds);
-            } catch (MediaCapabilityMismatchException $e) {
-                return new JsonResponse(
-                    ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
-                    Response::HTTP_BAD_REQUEST,
-                );
-            }
-            try {
-                $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
-                $result = new JsonResponse(
-                    ['data' => ['task' => $task]],
-                    Response::HTTP_OK,
-                );
-            } catch (InvalidArgumentException $e) {
-                $result = $e->getMessage() === self::ERR_TASK_NOT_FOUND
-                    ? new JsonResponse(
-                        ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
-                        Response::HTTP_NOT_FOUND,
-                    )
-                    : new JsonResponse(
-                        ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
-                        Response::HTTP_CONFLICT,
-                    );
-            }
+        $validation = $this->validateContinueBody($body);
+        if ($validation['result'] !== null) {
+            return $validation['result'];
         }
 
-        return $result;
+        return $this->dispatchContinue(
+            $taskId,
+            $userId,
+            $validation['prompt'],
+            $validation['additionalSteps'],
+            $validation['mediaIds'],
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array{result: ?JsonResponse, prompt: ?string, additionalSteps: ?int, mediaIds: list<string>}
+     */
+    private function validateContinueBody(array $body): array
+    {
+        $prompt = $body['prompt'] ?? null;
+        if (!is_string($prompt) || trim($prompt) === '') {
+            return [
+                'result' => new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'prompt is required and must be a non-empty string.']],
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                ),
+                'prompt' => null,
+                'additionalSteps' => null,
+                'mediaIds' => [],
+            ];
+        }
+
+        if (isset($body['additional_steps'])
+            && (!is_int($body['additional_steps']) || $body['additional_steps'] < 1 || $body['additional_steps'] > 100)
+        ) {
+            return [
+                'result' => new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'additional_steps must be an integer between 1 and 100.']],
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                ),
+                'prompt' => null,
+                'additionalSteps' => null,
+                'mediaIds' => [],
+            ];
+        }
+
+        return [
+            'result' => null,
+            'prompt' => $prompt,
+            'additionalSteps' => isset($body['additional_steps']) ? $body['additional_steps'] : null,
+            'mediaIds' => $this->parseMediaIds($body['media_ids'] ?? null),
+        ];
+    }
+
+    /**
+     * @param list<string> $mediaIds
+     */
+    private function dispatchContinue(
+        int $taskId,
+        int $userId,
+        string $prompt,
+        ?int $additionalSteps,
+        array $mediaIds,
+    ): JsonResponse {
+        $existing = $this->taskService->getTask($taskId, $userId);
+        if ($existing === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+        try {
+            $this->ensureMediaCapabilityCompatible((int) $existing['agent_id'], $mediaIds);
+        } catch (MediaCapabilityMismatchException $e) {
+            return new JsonResponse(
+                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
+                Response::HTTP_BAD_REQUEST,
+            );
+        }
+        try {
+            $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
+
+            return new JsonResponse(
+                ['data' => ['task' => $task]],
+                Response::HTTP_OK,
+            );
+        } catch (InvalidArgumentException $e) {
+            return $e->getMessage() === self::ERR_TASK_NOT_FOUND
+                ? new JsonResponse(
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
+                    Response::HTTP_NOT_FOUND,
+                )
+                : new JsonResponse(
+                    ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
+                    Response::HTTP_CONFLICT,
+                );
+        }
     }
 
     /**
