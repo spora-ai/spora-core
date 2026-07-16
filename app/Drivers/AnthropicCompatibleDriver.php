@@ -61,7 +61,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 
     public function getProviderName(): string
     {
-        return self::PROVIDER_KEY;
+        return static::getName();
     }
 
     public function complete(LLMRequest $request): LLMResponse

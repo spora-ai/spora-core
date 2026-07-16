@@ -26,7 +26,7 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 
     public function getProviderName(): string
     {
-        return self::PROVIDER_KEY;
+        return static::getName();
     }
 
     /**
