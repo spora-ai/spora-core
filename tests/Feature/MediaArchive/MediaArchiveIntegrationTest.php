@@ -79,7 +79,7 @@ function mediaArchiveIntegrationSetup(): array
         $assetStore,
         http: new MockHttpClient([]),
     );
-    $controller = new MediaArchiveController($service);
+    $controller = new MediaArchiveController($service, \Tests\Support\MediaArchiveTestSupport::buildAuth());
     $gcCommand  = new MediaArchiveGcCommand($service, $paths);
     $gcCommand->setName('media:gc');
 
@@ -156,7 +156,7 @@ test('media archive: full pipeline from URL ingest → REST → CLI orphan sweep
             ]),
         );
 
-        $controller = new MediaArchiveController($service);
+        $controller = new MediaArchiveController($service, \Tests\Support\MediaArchiveTestSupport::buildAuth());
 
         // ----- 2. Ingest via URL → local promotion --------------------------
         // No tool_call_id here — that FK chains through agents → tasks

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Agents;
 
+use Spora\Drivers\LLMDriverInterface;
+use Spora\Models\MediaAsset;
 use Spora\Models\TaskHistory;
 
 /**
@@ -14,12 +16,26 @@ use Spora\Models\TaskHistory;
  *      summary row itself.
  *   2. {@see messageFromHistoryRow()} — maps a single row into the LLM wire
  *      shape (`tool`, `assistant+tool_calls`, plain role+content), normalising
- *      empty tool-call arguments to `'{}'` along the way.
+ *      empty tool-call arguments to `'{}'` along the way. Rows with
+ *      `role=attachment` are expanded into a `user` message whose `content`
+ *      is a list of `ContentBlock`s (text + image), filtered against the
+ *      LLM's `supportsImageInput()` capability.
  *   3. {@see stripScaffoldingKeys()} — removes the internal `_seq` bookkeeping
  *      key so the scaffolding never leaks to the provider.
  */
 final class MessageHistoryBuilder
 {
+    /**
+     * Hard cap on inline image bytes. A 4K photo can exceed 20 MiB
+     * after MIME decode; without a cap, a single oversized attachment
+     * blows up the LLM context window and the request payload.
+     */
+    private const MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024;
+
+    public function __construct(
+        private readonly ?LLMDriverInterface $driver = null,
+    ) {}
+
     /**
      * @return list<array<string, mixed>>  OpenAI-compatible messages, in `sequence` order.
      */
@@ -126,27 +142,143 @@ final class MessageHistoryBuilder
      */
     private function messageFromHistoryRow(TaskHistory $row): array
     {
+        $message = [
+            'role'    => $row->role,
+            'content' => $row->content,
+        ];
+
         if ($row->role === 'tool') {
-            return [
+            $message = [
                 'role'         => 'tool',
                 'tool_call_id' => $row->tool_call_id,
                 'name'         => $row->tool_name,
                 'content'      => $row->content,
             ];
-        }
-
-        if ($row->role === 'assistant' && $row->tool_call_payload !== null) {
-            return [
+        } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
+            $message = [
                 'role'       => 'assistant',
                 'content'    => null,
                 'tool_calls' => $this->decodeToolCallPayload($row->tool_call_payload),
             ];
+        } elseif ($row->role === 'attachment' && is_array($row->attachments) && $row->attachments !== []) {
+            $message = $this->attachmentMessage($row);
+        }
+
+        return $message;
+    }
+
+    /**
+     * Expand an `attachment` row into a `user` message whose `content` is
+     * a list of ContentBlock dicts. Text-kind attachments become `text`
+     * blocks (the asset's `markdown_content` or a fallback note when no
+     * extraction succeeded). Image-kind attachments become `image` blocks
+     * (the asset's bytes, base64-embedded) — but only when the agent's
+     * LLM reports `supportsImageInput() === true`; otherwise the image
+     * block is dropped (defense in depth — the controller should have
+     * already rejected the request).
+     */
+    private function attachmentMessage(TaskHistory $row): array
+    {
+        $supportsImages = $this->driver !== null && $this->driver->supportsImageInput();
+        $blocks = [];
+        foreach ($row->attachments as $ref) {
+            $block = $this->attachmentBlock($ref, $supportsImages);
+            if ($block !== null) {
+                $blocks[] = $block;
+            }
         }
 
         return [
-            'role'    => $row->role,
-            'content' => $row->content,
+            'role'    => 'user',
+            'content' => $blocks !== [] ? $blocks : ($row->content ?? ''),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $ref
+     * @return array<string, mixed>|null
+     */
+    private function attachmentBlock(array $ref, bool $supportsImages): ?array
+    {
+        if (!isset($ref['media_id']) || !is_string($ref['media_id'])) {
+            return null;
+        }
+        $asset = MediaAsset::query()->find($ref['media_id']);
+        if ($asset === null) {
+            return null;
+        }
+        $kind = (string) ($ref['kind'] ?? 'text');
+        return $kind === 'image'
+            ? $this->imageAttachmentBlock($asset, $supportsImages)
+            : $this->textAttachmentBlock($asset);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function imageAttachmentBlock(MediaAsset $asset, bool $supportsImages): ?array
+    {
+        if (!$supportsImages) {
+            return null;
+        }
+        $bytes = $this->loadInlineImageBytes($asset);
+        if ($bytes === null) {
+            return null;
+        }
+        return [
+            'type'      => 'image',
+            'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
+            'base64'    => base64_encode($bytes),
+        ];
+    }
+
+    /**
+     * Returns the asset bytes when they fit within the inline-image cap,
+     * otherwise null. The cap (20 MiB) prevents a single oversized
+     * attachment from OOM-ing the LLM request — see
+     * {@see self::MAX_INLINE_IMAGE_BYTES}.
+     */
+    private function loadInlineImageBytes(MediaAsset $asset): ?string
+    {
+        $bytes = $this->loadAssetBytes($asset);
+        if ($bytes === null || strlen($bytes) > self::MAX_INLINE_IMAGE_BYTES) {
+            return null;
+        }
+
+        return $bytes;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function textAttachmentBlock(MediaAsset $asset): array
+    {
+        $text = $asset->markdown_content !== null && $asset->markdown_content !== ''
+            ? $asset->markdown_content
+            : ($asset->filename ?? $asset->id);
+        $displayName = $asset->filename ?? $asset->id;
+        return [
+            'type' => 'text',
+            'text' => "Attached file ({$displayName}):\n\n" . $text,
+        ];
+    }
+
+    private function loadAssetBytes(MediaAsset $asset): ?string
+    {
+        if ($asset->storage_mode === 'data_url') {
+            return is_string($asset->payload) ? $asset->payload : null;
+        }
+        if ($asset->storage_mode === 'local' && $asset->asset_token !== null && $asset->asset_token !== '') {
+            $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);
+            $paths = new \Spora\Core\Paths($basePath);
+            $path = $paths->storage('assets') . '/' . $asset->asset_token;
+            $ext  = \Spora\Services\MediaArchive\MediaArchiveService::extensionForMime($asset->mime_type);
+            if ($ext !== null) {
+                $path .= '.' . $ext;
+            }
+            return is_file($path) ? (string) file_get_contents($path) : null;
+        }
+        return null;
     }
 
     /**

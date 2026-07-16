@@ -9,10 +9,12 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use InvalidArgumentException;
+use Psr\Log\LoggerInterface;
 use Spora\Models\MediaAsset;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
 use Spora\Services\AssetTooLargeException;
+use Throwable;
 
 /**
  * Single entry point for ingesting, listing, and deleting archived media.
@@ -35,15 +37,22 @@ use Spora\Services\AssetTooLargeException;
  *
  * The URL branch lives in {@see MediaArchiveUrlResolver} so this
  * orchestrator stays under the 20-method Sonar threshold.
- *
- * Not declared `final` because Mockery needs to construct a named mock
- * for HTTP-handler tests; subclassing is still discouraged — instantiate
- * via PHP-DI.
  */
-class MediaArchiveService
+final class MediaArchiveService
 {
     /** Prefix used by every persisted `asset_url`. */
     public const OPAQUE_ASSET_URL_PREFIX = '/api/v1/assets/';
+
+    /**
+     * Mint a 64-character hex public-access token. Length matches the
+     * `public_access_token` column (64 chars), giving 256 bits of
+     * entropy — enough that the token is unguessable even for a row
+     * referenced by an attacker-known UUID.
+     */
+    public static function mintPublicAccessToken(): string
+    {
+        return bin2hex(random_bytes(32));
+    }
 
     /**
      * Map a MIME type to a file extension used in the public asset URL.
@@ -83,6 +92,9 @@ class MediaArchiveService
         private readonly MediaArchiveUrlResolver $urlResolver,
         private readonly MimeSniffer $sniffer,
         private readonly MetadataExtractor $metadata,
+        private readonly MediaConverterRegistry $converters,
+        private readonly MediaIngestDecoder $decoder,
+        private readonly ?LoggerInterface $logger = null,
     ) {}
 
     /**
@@ -115,6 +127,9 @@ class MediaArchiveService
         if ($query->agentId !== null) {
             $builder->where('agent_id', $query->agentId);
         }
+        if ($query->userId !== null) {
+            $builder->where('user_id', $query->userId);
+        }
         if ($query->pluginSlug !== null) {
             $builder->where('plugin_slug', $query->pluginSlug);
         }
@@ -131,6 +146,7 @@ class MediaArchiveService
             $term = '%' . trim($query->search) . '%';
             $builder->where(function (Builder $q) use ($term): void {
                 $q->where('prompt', 'like', $term)
+                    ->orWhere('filename', 'like', $term)
                     ->orWhere('asset_url', 'like', $term)
                     ->orWhere('source_url', 'like', $term);
             });
@@ -178,7 +194,7 @@ class MediaArchiveService
      */
     private function ingestFresh(MediaIngestRequest $request): MediaAsset
     {
-        $inline = $this->decodeInline($request);
+        $inline = $this->decoder->decodeInline($request);
         if ($inline !== null) {
             return $this->ingestFromBytes($request, $inline, null);
         }
@@ -204,6 +220,9 @@ class MediaArchiveService
                     width: $request->width,
                     height: $request->height,
                     durationSeconds: $request->durationSeconds,
+                    filename: $request->filename,
+                    userId: $request->userId,
+                    uploadSource: $request->uploadSource,
                 ),
             );
         }
@@ -214,10 +233,10 @@ class MediaArchiveService
     /**
      * Shared bytes-to-row pipeline used by every ingest input form once
      * the bytes are in hand. Sniffs MIME, extracts metadata, stores via
-     * AssetStore, persists the row, and finally writes the payload
-     * (DB BLOB or no-op for local) once the UUID is known — so the
-     * opaque URL is in place before any bytes land and concurrent
-     * readers never see a half-loaded row.
+     * AssetStore, persists the row, runs the conversion pipeline, and
+     * finally writes the payload (DB BLOB or no-op for local) once the
+     * UUID is known — so the opaque URL is in place before any bytes
+     * land and concurrent readers never see a half-loaded row.
      */
     private function ingestFromBytes(MediaIngestRequest $request, string $bytes, ?string $sourceUrl): MediaAsset
     {
@@ -244,6 +263,9 @@ class MediaArchiveService
                 height: $extracted->height ?? $request->height,
                 durationSeconds: $extracted->durationSeconds ?? $request->durationSeconds,
                 token: $reference->token,
+                filename: $request->filename,
+                userId: $request->userId,
+                uploadSource: $request->uploadSource,
             ),
         );
 
@@ -251,6 +273,13 @@ class MediaArchiveService
         // disk in `storeAsset()`; External mode owns no bytes).
         if ($reference->mode === 'data_url') {
             $this->writePayloadToAsset($asset, $bytes);
+        }
+
+        // Run the conversion pipeline (PDF → markdown, text passthrough, …)
+        // against the bytes in hand. Best-effort — failures don't roll back
+        // the upload. Skipped for External mode (no bytes).
+        if ($reference->mode !== 'external') {
+            $this->runConversionPipeline($asset, $bytes);
         }
 
         return $asset;
@@ -274,46 +303,9 @@ class MediaArchiveService
      * Bytes / hex / base64 input forms are all "the caller already has
      * the bytes — store them as-is". Hex with odd length and any
      * non-strict-decodable base64 raise {@see InvalidArgumentException}
-     * so the plugin can surface a meaningful error to the LLM.
+     * via {@see MediaIngestDecoder}, so the plugin can surface a
+     * meaningful error to the LLM.
      */
-    private function decodeInline(MediaIngestRequest $request): ?string
-    {
-        if ($request->bytes !== null && $request->bytes !== '') {
-            $bytes = $request->bytes;
-        } elseif ($request->hex !== null && $request->hex !== '') {
-            $bytes = $this->decodeHex($request->hex);
-        } elseif ($request->base64 !== null && $request->base64 !== '') {
-            $bytes = $this->decodeBase64($request->base64);
-        } else {
-            $bytes = null;
-        }
-
-        return $bytes;
-    }
-
-    private function decodeHex(string $hex): string
-    {
-        if (strlen($hex) % 2 !== 0) {
-            throw new InvalidArgumentException('Hex payload has odd length.');
-        }
-        $decoded = @hex2bin($hex);
-        if ($decoded === false) {
-            throw new InvalidArgumentException('Hex payload is not valid hex.');
-        }
-
-        return $decoded;
-    }
-
-    private function decodeBase64(string $payload): string
-    {
-        $decoded = base64_decode($payload, strict: true);
-        if ($decoded === false) {
-            throw new InvalidArgumentException('Base64 payload is not valid base64.');
-        }
-
-        return $decoded;
-    }
-
     private function storeAsset(string $bytes, string $mime, ?string $filename): AssetReference
     {
         try {
@@ -395,6 +387,9 @@ class MediaArchiveService
             'duration_seconds' => $fields->durationSeconds,
             'storage_mode' => $fields->storageMode,
             'asset_token' => $fields->token ?? $existing->asset_token,
+            'filename' => $fields->filename ?? $existing->filename,
+            'user_id' => $fields->userId ?? $existing->user_id,
+            'upload_source' => $fields->uploadSource ?: ($existing->upload_source ?? 'tool'),
         ]);
         $existing->save();
     }
@@ -406,6 +401,7 @@ class MediaArchiveService
         $asset->agent_id = $request->agentId;
         $asset->task_id = $request->taskId;
         $asset->tool_call_id = $request->toolCallId;
+        $asset->user_id = $fields->userId ?? $request->userId;
         $asset->plugin_slug = $request->pluginSlug;
         $asset->tool_name = $request->toolName;
         $asset->media_type = $fields->mediaType->value;
@@ -415,6 +411,8 @@ class MediaArchiveService
         $asset->height = $fields->height;
         $asset->duration_seconds = $fields->durationSeconds;
         $asset->prompt = $request->prompt;
+        $asset->filename = $fields->filename;
+        $asset->upload_source = $fields->uploadSource ?: 'tool';
         $asset->tags = $request->tags;
         $asset->metadata = $request->metadata;
         // Asset URL is always an opaque `/api/v1/assets/<uuid>` form. The
@@ -428,6 +426,9 @@ class MediaArchiveService
         $asset->asset_url = self::OPAQUE_ASSET_URL_PREFIX . $asset->id . ($ext !== null ? '.' . $ext : '');
         $asset->source_url = $fields->sourceUrl;
         $asset->storage_mode = $fields->storageMode;
+        if ($request->publicAccessToken !== null && $request->publicAccessToken !== '') {
+            $asset->public_access_token = $request->publicAccessToken;
+        }
         // `asset_token` ties the row to its on-disk file (local mode) or
         // is just an opaque correlation id (DB mode). `LocalAssetStore`
         // mints a 32-hex token as the on-disk filename; we reuse that
@@ -439,6 +440,43 @@ class MediaArchiveService
         $asset->save();
 
         return $asset;
+    }
+
+    /**
+     * Run the {@see MediaConverterRegistry} against an asset and write the
+     * extracted markdown into `markdown_content`. Best-effort: a converter
+     * throw is logged and swallowed so the upload itself never fails on
+     * extraction problems (e.g. a corrupt PDF, an unsupported variant).
+     *
+     * Skipped when `markdown_content` is already populated — that protects
+     * idempotent re-ingest from re-running the pipeline.
+     */
+    public function runConversionPipeline(MediaAsset $asset, string $bytes): void
+    {
+        if (!$this->shouldConvert($asset)) {
+            return;
+        }
+        try {
+            $markdown = $this->converters->convert($bytes, $asset->mime_type, $asset->filename);
+        } catch (Throwable $e) {
+            $this->logger?->warning('MediaArchiveService: converter failed', [
+                'asset_id' => $asset->id,
+                'mime'     => $asset->mime_type,
+                'error'    => $e->getMessage(),
+            ]);
+            return;
+        }
+        if ($markdown !== null) {
+            $asset->markdown_content = $markdown;
+            $asset->save();
+        }
+    }
+
+    private function shouldConvert(MediaAsset $asset): bool
+    {
+        return ($asset->markdown_content === null || $asset->markdown_content === '')
+            && $asset->mime_type !== null
+            && $asset->mime_type !== '';
     }
 
     /**

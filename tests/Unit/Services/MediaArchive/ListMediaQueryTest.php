@@ -84,6 +84,7 @@ describe('ListMediaQuery::toArray()', function (): void {
         expect($query->toArray())->toBe([
             'mediaType'  => 'image',
             'agentId'    => 42,
+            'userId'     => null,
             'pluginSlug' => 'foo',
             'toolName'   => 'tavily',
             'search'     => 'hello',

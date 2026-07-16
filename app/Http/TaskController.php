@@ -8,10 +8,15 @@ use Carbon\Carbon;
 use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
+use Spora\Drivers\DriverFactory;
+use Spora\Models\Agent;
+use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\TaskServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
  * Handles task listing, status updates, cancellation, and real-time SSE streaming.
@@ -25,6 +30,7 @@ final class TaskController
     public function __construct(
         private readonly AuthService $authService,
         private readonly TaskServiceInterface $taskService,
+        private readonly ?DriverFactory $driverFactory = null,
     ) {}
 
     /**
@@ -88,6 +94,7 @@ final class TaskController
         $agentId = isset($body['agent_id']) ? (int) $body['agent_id'] : null;
         $maxSteps = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
         $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
+        $mediaIds = $this->parseMediaIds($body['media_ids'] ?? null);
 
         $result = null;
         if ($prompt === '') {
@@ -102,7 +109,15 @@ final class TaskController
             );
         } else {
             try {
-                $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId);
+                $this->ensureMediaCapabilityCompatible($agentId, $mediaIds);
+            } catch (MediaCapabilityMismatchException $e) {
+                return new JsonResponse(
+                    ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
+                    Response::HTTP_BAD_REQUEST,
+                );
+            }
+            try {
+                $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
                 $result = new JsonResponse(
                     ['data' => ['task' => $task]],
                     Response::HTTP_CREATED,
@@ -116,6 +131,81 @@ final class TaskController
         }
 
         return $result;
+    }
+
+    /** @return list<string> */
+    private function parseMediaIds(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $id) {
+            if (is_string($id) && $id !== '') {
+                $out[] = $id;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Reject an image attachment when the agent's LLM cannot consume image
+     * blocks. Plan §8.3 / §12 require a 400 at the request boundary rather
+     * than a silent image-strip during the first tick. {@see MessageHistoryBuilder}
+     * still strips defensively — this pre-flight gives the caller a useful error.
+     *
+     * @param list<string> $mediaIds
+     * @throws MediaCapabilityMismatchException
+     */
+    private function ensureMediaCapabilityCompatible(int $agentId, array $mediaIds): void
+    {
+        if ($mediaIds === [] || $this->driverFactory === null) {
+            return;
+        }
+        if (!$this->mediaIdsIncludeImage($mediaIds)) {
+            return;
+        }
+        if (!$this->agentSupportsImages($agentId)) {
+            throw new MediaCapabilityMismatchException(
+                'One or more attachments are images but the agent\'s LLM does not support image input.',
+            );
+        }
+    }
+
+    /**
+     * @param list<string> $mediaIds
+     */
+    private function mediaIdsIncludeImage(array $mediaIds): bool
+    {
+        foreach ($mediaIds as $mid) {
+            if ($mid === '') {
+                continue;
+            }
+            $asset = MediaAsset::query()->find($mid);
+            if ($asset === null) {
+                continue;
+            }
+            if (is_string($asset->mime_type) && str_starts_with(strtolower($asset->mime_type), 'image/')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function agentSupportsImages(int $agentId): bool
+    {
+        $agent = Agent::query()->find($agentId);
+        if ($agent === null) {
+            return false;
+        }
+        try {
+            $driver = $this->driverFactory->makeFromAgent($agent);
+        } catch (Throwable) {
+            return false;
+        }
+
+        return $driver->supportsImageInput();
     }
 
     /**
@@ -368,46 +458,104 @@ final class TaskController
 
         $body = json_decode($request->getContent(), true) ?? [];
 
-        $prompt = $body['prompt'] ?? null;
-        $additionalSteps = null;
-
-        $result = null;
-        if (!is_string($prompt) || trim($prompt) === '') {
-            $result = new JsonResponse(
-                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'prompt is required and must be a non-empty string.']],
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        } elseif (isset($body['additional_steps'])
-            && (!is_int($body['additional_steps']) || $body['additional_steps'] < 1 || $body['additional_steps'] > 100)
-        ) {
-            $result = new JsonResponse(
-                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'additional_steps must be an integer between 1 and 100.']],
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        } else {
-            if (isset($body['additional_steps'])) {
-                $additionalSteps = $body['additional_steps'];
-            }
-            try {
-                $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps);
-                $result = new JsonResponse(
-                    ['data' => ['task' => $task]],
-                    Response::HTTP_OK,
-                );
-            } catch (InvalidArgumentException $e) {
-                $result = $e->getMessage() === self::ERR_TASK_NOT_FOUND
-                    ? new JsonResponse(
-                        ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
-                        Response::HTTP_NOT_FOUND,
-                    )
-                    : new JsonResponse(
-                        ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
-                        Response::HTTP_CONFLICT,
-                    );
-            }
+        $validation = $this->validateContinueBody($body);
+        if ($validation['result'] !== null) {
+            return $validation['result'];
         }
 
-        return $result;
+        return $this->dispatchContinue(
+            $taskId,
+            $userId,
+            $validation['prompt'],
+            $validation['additionalSteps'],
+            $validation['mediaIds'],
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array{result: ?JsonResponse, prompt: ?string, additionalSteps: ?int, mediaIds: list<string>}
+     */
+    private function validateContinueBody(array $body): array
+    {
+        $prompt = $body['prompt'] ?? null;
+        if (!is_string($prompt) || trim($prompt) === '') {
+            return [
+                'result' => new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'prompt is required and must be a non-empty string.']],
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                ),
+                'prompt' => null,
+                'additionalSteps' => null,
+                'mediaIds' => [],
+            ];
+        }
+
+        if (isset($body['additional_steps'])
+            && (!is_int($body['additional_steps']) || $body['additional_steps'] < 1 || $body['additional_steps'] > 100)
+        ) {
+            return [
+                'result' => new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'additional_steps must be an integer between 1 and 100.']],
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                ),
+                'prompt' => null,
+                'additionalSteps' => null,
+                'mediaIds' => [],
+            ];
+        }
+
+        return [
+            'result' => null,
+            'prompt' => $prompt,
+            'additionalSteps' => isset($body['additional_steps']) ? $body['additional_steps'] : null,
+            'mediaIds' => $this->parseMediaIds($body['media_ids'] ?? null),
+        ];
+    }
+
+    /**
+     * @param list<string> $mediaIds
+     */
+    private function dispatchContinue(
+        int $taskId,
+        int $userId,
+        string $prompt,
+        ?int $additionalSteps,
+        array $mediaIds,
+    ): JsonResponse {
+        $existing = $this->taskService->getTask($taskId, $userId);
+        if ($existing === null) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+        try {
+            $this->ensureMediaCapabilityCompatible((int) $existing['agent_id'], $mediaIds);
+        } catch (MediaCapabilityMismatchException $e) {
+            return new JsonResponse(
+                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
+                Response::HTTP_BAD_REQUEST,
+            );
+        }
+        try {
+            $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
+
+            return new JsonResponse(
+                ['data' => ['task' => $task]],
+                Response::HTTP_OK,
+            );
+        } catch (InvalidArgumentException $e) {
+            return $e->getMessage() === self::ERR_TASK_NOT_FOUND
+                ? new JsonResponse(
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
+                    Response::HTTP_NOT_FOUND,
+                )
+                : new JsonResponse(
+                    ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
+                    Response::HTTP_CONFLICT,
+                );
+        }
     }
 
     /**

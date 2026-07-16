@@ -22,6 +22,7 @@
         "chriskonnertz/string-calc": "^2.0",
         "delight-im/auth": "^9.0",
         "dragonmantank/cron-expression": "^3.6",
+        "iamgerwin/php-pdf-to-markdown-parser": "^0.0",
         "illuminate/database": "^13.0",
         "illuminate/filesystem": "^13.0",
         "illuminate/pagination": "^13.0",

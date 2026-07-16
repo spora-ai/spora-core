@@ -42,7 +42,8 @@ function mediaArchiveApiSetup(): array
 
     $service = \Tests\Support\MediaArchiveTestSupport::buildService($assetStore);
 
-    $controller = new MediaArchiveController($service);
+    $auth = \Tests\Support\MediaArchiveTestSupport::buildAuth();
+    $controller = new MediaArchiveController($service, $auth);
 
     $restore = static function () use ($tmp): void {
         putenv('SPORA_STORAGE_DIR');
@@ -67,7 +68,7 @@ function mediaArchiveApiSetup(): array
     ];
 }
 
-const MEDIA_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+const MEDIA_PNG_BYTES = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
 describe('MediaArchiveController', function (): void {
     it('rejects anonymous requests with 401', function (): void {
@@ -91,7 +92,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media@example.com', 'ValidPass1!', 'Media');
             simulateLoggedInSession($userId, 'media@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', filename: 'pixel.png'));
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', filename: 'pixel2.png'));
 
@@ -116,7 +117,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media2@example.com', 'ValidPass1!', 'Media2');
             simulateLoggedInSession($userId, 'media2@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $asset = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
 
             $authMw = new AuthMiddleware($authService);
@@ -140,7 +141,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media3@example.com', 'ValidPass1!', 'Media3');
             simulateLoggedInSession($userId, 'media3@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $asset = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
 
             $csrfService = new CsrfTokenService();
@@ -209,7 +210,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media-type@example.com', 'ValidPass1!', 'MediaType');
             simulateLoggedInSession($userId, 'media-type@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
 
             $authMw = new AuthMiddleware($authService);
@@ -232,7 +233,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media-bogus-type@example.com', 'ValidPass1!', 'BogusType');
             simulateLoggedInSession($userId, 'media-bogus-type@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
 
             $authMw = new AuthMiddleware($authService);
@@ -257,7 +258,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media-filter@example.com', 'ValidPass1!', 'MediaFilter');
             simulateLoggedInSession($userId, 'media-filter@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', pluginSlug: 'foo', toolName: 'tavily'));
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', pluginSlug: 'bar', toolName: 'serper'));
 
@@ -282,7 +283,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media-agent@example.com', 'ValidPass1!', 'MediaAgent');
             simulateLoggedInSession($userId, 'media-agent@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
 
             $authMw = new AuthMiddleware($authService);
@@ -307,7 +308,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media-q@example.com', 'ValidPass1!', 'MediaQ');
             simulateLoggedInSession($userId, 'media-q@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', prompt: 'a fluffy cat'));
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', prompt: 'a sleepy dog'));
 
@@ -330,7 +331,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media-sort@example.com', 'ValidPass1!', 'MediaSort');
             simulateLoggedInSession($userId, 'media-sort@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $first  = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
             $second = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
 
@@ -355,7 +356,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media-bogus-sort@example.com', 'ValidPass1!', 'BogusSort');
             simulateLoggedInSession($userId, 'media-bogus-sort@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $first  = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
             // Force the older row's created_at back in time so the desc sort is
             // deterministic regardless of SQLite's timestamp precision.
@@ -385,7 +386,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media-pagination@example.com', 'ValidPass1!', 'Pagination');
             simulateLoggedInSession($userId, 'media-pagination@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             for ($i = 0; $i < 5; $i++) {
                 $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
             }
@@ -413,7 +414,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media-baddate@example.com', 'ValidPass1!', 'BadDate');
             simulateLoggedInSession($userId, 'media-baddate@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
 
             $authMw = new AuthMiddleware($authService);
@@ -435,7 +436,7 @@ describe('MediaArchiveController', function (): void {
             $userId = $authService->register('media-serialize@example.com', 'ValidPass1!', 'Serialize');
             simulateLoggedInSession($userId, 'media-serialize@example.com');
 
-            $bytes = base64_decode(MEDIA_PNG, strict: true);
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $asset = $ctx['service']->ingest(new MediaIngestRequest(
                 bytes: $bytes,
                 mime: 'image/png',

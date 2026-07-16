@@ -123,7 +123,7 @@ final class MediaArchiveListCommand extends Command
         $payload = [
             'data' => [
                 'assets'   => array_map(
-                    static fn($asset) => \Spora\Http\MediaArchiveController::serialize($asset),
+                    static fn($asset) => (new \Spora\Services\MediaArchive\MediaAssetSerializer())->serialize($asset),
                     $paginated->items(),
                 ),
                 'page'     => $paginated->currentPage(),

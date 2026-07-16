@@ -19,14 +19,22 @@ use Spora\Models\AgentTool;
 final class AgentResource
 {
     /**
+     * @param bool|null $supportsImageInput  Whether the agent's configured LLM
+     *     accepts image blocks. `null` means the caller could not resolve the
+     *     driver (no factory injected, agent has no `llm_driver_config_id`,
+     *     or driver construction threw); the field is then omitted from the
+     *     response rather than reported as `false` to avoid misleading the
+     *     frontend. Pass a real bool from AgentController where the
+     *     DriverFactory is available.
+     *
      * @return array<string, mixed>
      */
-    public static function toArray(Agent $agent): array
+    public static function toArray(Agent $agent, ?bool $supportsImageInput = null): array
     {
         /** @var \Illuminate\Database\Eloquent\Collection<int, AgentTool> $tools */
         $tools = $agent->agentTools;
 
-        return [
+        $payload = [
             'id'                   => (int) $agent->id,
             'name'                 => $agent->name,
             'description'          => $agent->description,
@@ -47,5 +55,11 @@ final class AgentResource
                 'tool_name'  => $t->tool_name,
             ])->values()->toArray(),
         ];
+
+        if ($supportsImageInput !== null) {
+            $payload['llm_supports_image_input'] = $supportsImageInput;
+        }
+
+        return $payload;
     }
 }

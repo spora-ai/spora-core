@@ -128,20 +128,40 @@ final class AssetController
             // twice (once via read(), once via echo).
             $bytes = (string) $payload['bytes'];
             $mime  = (string) $payload['mime'];
-            return new StreamedResponse(static function () use ($bytes): void {
+            $response = new StreamedResponse(static function () use ($bytes): void {
                 echo $bytes;
             }, 200, [
                 'Content-Type'   => $mime,
                 'Content-Length' => (string) strlen($bytes),
                 'Cache-Control'  => self::CACHE_HEADER,
             ]);
+            $this->applyContentDisposition($response, $asset);
+            return $response;
         }
 
         $path = (string) $payload['path'];
         $mime = (string) $payload['mime'];
         $response = new BinaryFileResponse($path, 200, ['Content-Type' => $mime]);
         $response->headers->set('Cache-Control', self::CACHE_HEADER);
+        $this->applyContentDisposition($response, $asset);
         return $response;
+    }
+
+    /**
+     * Set `Content-Disposition: attachment; filename="..."` when the row
+     * carries a user-facing `filename`. Falls back to the opaque UUID +
+     * extension so the browser still gets a sensible default download
+     * name for legacy rows.
+     */
+    private function applyContentDisposition(Response $response, MediaAsset $asset): void
+    {
+        $name = $asset->filename !== null && $asset->filename !== ''
+            ? $asset->filename
+            : $asset->publicUrl();
+        $response->headers->set(
+            'Content-Disposition',
+            sprintf('attachment; filename="%s"', addcslashes(basename($name), '"\\')),
+        );
     }
 
     private function notFound(): JsonResponse

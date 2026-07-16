@@ -48,6 +48,17 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
         $this->thinkingBudget = $options?->thinkingBudget;
     }
 
+    /**
+     * Claude 3 / 4 family models all accept image content blocks on the
+     * Anthropic Messages API. Older models (Claude 2, Claude Instant)
+     * did not — keep the allowlist conservative.
+     */
+    public function supportsImageInput(): bool
+    {
+        return str_starts_with($this->model, 'claude-3-')
+            || str_starts_with($this->model, 'claude-4-');
+    }
+
     public function getProviderName(): string
     {
         return self::PROVIDER_KEY;
@@ -267,7 +278,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
                 $toolResults = [];
             }
 
-            $converted[] = ['role' => $role, 'content' => $msg['content'] ?? ''];
+            $converted[] = ['role' => $role, 'content' => $this->normalizeMessageContent($msg['content'] ?? null)];
         }
 
         // Flush any trailing tool results
@@ -276,6 +287,79 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
         }
 
         return $converted;
+    }
+
+    /**
+     * Translate a message's `content` field into Anthropic's wire shape.
+     * Three input forms:
+     *   - null / string     → return as-is (text).
+     *   - list<ContentBlock> (the new multi-modal shape) → translate to
+     *     Anthropic blocks: `{type:"text", text}` for text and
+     *     `{type:"image", source:{type, media_type, data|url}}` for
+     *     image blocks.
+     */
+    private function normalizeMessageContent(mixed $content): string|array
+    {
+        if ($content === null || is_string($content)) {
+            return $content ?? '';
+        }
+        if (!is_array($content)) {
+            return (string) $content;
+        }
+        $blocks = [];
+        foreach ($content as $b) {
+            if (!is_array($b)) {
+                continue;
+            }
+            $block = $this->contentBlockToAnthropic($b);
+            if ($block !== null) {
+                $blocks[] = $block;
+            }
+        }
+        return $blocks === [] ? '' : $blocks;
+    }
+
+    /**
+     * @param array<string, mixed> $block
+     * @return array<string, mixed>|null
+     */
+    private function contentBlockToAnthropic(array $block): ?array
+    {
+        $type = $block['type'] ?? null;
+        $result = null;
+        if ($type === 'text') {
+            $result = ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
+        } elseif ($type === 'image') {
+            $result = $this->imageBlockToAnthropic($block);
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param array<string, mixed> $block
+     * @return array<string, mixed>|null
+     */
+    private function imageBlockToAnthropic(array $block): ?array
+    {
+        if (isset($block['base64']) && is_string($block['base64']) && $block['base64'] !== '' && isset($block['mediaType'])) {
+            return [
+                'type'   => 'image',
+                'source' => [
+                    'type'       => 'base64',
+                    'media_type' => (string) $block['mediaType'],
+                    'data'       => $block['base64'],
+                ],
+            ];
+        }
+        if (isset($block['url']) && is_string($block['url']) && $block['url'] !== '') {
+            return [
+                'type'   => 'image',
+                'source' => ['type' => 'url', 'url' => $block['url']],
+            ];
+        }
+
+        return null;
     }
 
     /**

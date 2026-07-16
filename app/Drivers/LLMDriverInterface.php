@@ -23,4 +23,15 @@ interface LLMDriverInterface
 
     /** e.g. "gpt-4o" or "claude-3-5-sonnet-20241022" */
     public function getModelName(): string;
+
+    /**
+     * Whether the *currently configured model* (not just the driver protocol)
+     * accepts image content blocks. The driver protocol may support images
+     * on the wire (e.g. Anthropic Messages API, OpenAI Chat Completions),
+     * but a specific model — say, a smaller or older one — might not.
+     *
+     * Drives the upload UI's image gate (see MediaAllowedTypesService) and
+     * the runtime strip in {@see \Spora\Agents\TickPhaseRunner}.
+     */
+    public function supportsImageInput(): bool;
 }

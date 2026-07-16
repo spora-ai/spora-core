@@ -73,7 +73,10 @@ interface TaskServiceInterface
      *     retry_after?: string
      * }
      */
-    public function startTask(int $userId, int $agentId, string $prompt, ?int $maxSteps = null, ?int $parentTaskId = null): array;
+    /**
+     * @param list<string> $mediaIds
+     */
+    public function startTask(int $userId, int $agentId, string $prompt, ?int $maxSteps = null, ?int $parentTaskId = null, array $mediaIds = []): array;
 
     /**
      * @return array{
@@ -232,7 +235,10 @@ interface TaskServiceInterface
      *     retry_after?: string
      * }
      */
-    public function continueTask(int $taskId, int $userId, string $prompt, ?int $additionalSteps = null): array;
+    /**
+     * @param list<string> $mediaIds
+     */
+    public function continueTask(int $taskId, int $userId, string $prompt, ?int $additionalSteps = null, array $mediaIds = []): array;
 
     public function deleteTask(int $taskId, int $userId): bool;
 

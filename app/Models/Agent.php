@@ -8,6 +8,8 @@ use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Spora\Drivers\DriverFactory;
+use Throwable;
 
 /**
  * @property int $id
@@ -80,5 +82,26 @@ final class Agent extends Model
     public function toolCalls(): HasMany
     {
         return $this->hasMany(ToolCall::class);
+    }
+
+    /**
+     * Image-input capability for the agent's configured LLM.
+     *
+     * Pass `null` (the default) when no DriverFactory is wired — e.g.
+     * in tests that haven't built the full app container. Returns
+     * `false` on any error (no driver, decrypt failure, …) so the call
+     * site never has to translate exceptions into capability flags.
+     */
+    public function supportsImageInput(?DriverFactory $factory = null): bool
+    {
+        if ($factory === null) {
+            return false;
+        }
+        try {
+            $driver = $factory->makeFromAgent($this);
+        } catch (Throwable) {
+            return false;
+        }
+        return $driver->supportsImageInput();
     }
 }

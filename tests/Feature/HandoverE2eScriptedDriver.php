@@ -42,4 +42,9 @@ final class HandoverE2eScriptedDriver implements LLMDriverInterface
     {
         return 'mock-model';
     }
+
+    public function supportsImageInput(): bool
+    {
+        return false;
+    }
 }

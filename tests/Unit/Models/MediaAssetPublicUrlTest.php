@@ -62,3 +62,68 @@ test('publicUrl() covers the canonical mime→ext map', function (): void {
             ->and($asset->publicUrl())->toEndWith(".{$ext}");
     }
 });
+
+test('publicUrl() always starts with the opaque asset URL prefix', function (): void {
+    $asset = new MediaAsset();
+    $asset->id        = '11111111-2222-3333-4444-555555555555';
+    $asset->mime_type = 'image/png';
+
+    expect($asset->publicUrl())->toStartWith('/api/v1/assets/');
+});
+
+test('publicUrl() reflects the row id verbatim in the path', function (): void {
+    $asset = new MediaAsset();
+    $asset->id        = 'deadbeef-cafe-babe-1234-fedcba987654';
+    $asset->mime_type = null;
+
+    expect($asset->publicUrl())->toBe('/api/v1/assets/deadbeef-cafe-babe-1234-fedcba987654');
+});
+
+test('publicUrl() uppercase mime falls back to no extension', function (): void {
+    $asset = new MediaAsset();
+    $asset->id        = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    $asset->mime_type = 'IMAGE/PNG-UPPERCASE'; // not in the canonical map
+
+    expect($asset->publicUrl())->toBe('/api/v1/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+});
+
+test('typedMediaType() returns Unknown for null', function (): void {
+    $asset = new MediaAsset();
+    $asset->media_type = null;
+
+    expect($asset->typedMediaType())->toBe(Spora\Services\MediaArchive\MediaType::Unknown);
+});
+
+test('typedMediaType() returns Unknown for empty string', function (): void {
+    $asset = new MediaAsset();
+    $asset->media_type = '';
+
+    expect($asset->typedMediaType())->toBe(Spora\Services\MediaArchive\MediaType::Unknown);
+});
+
+test('typedMediaType() returns Unknown for invalid enum value', function (): void {
+    $asset = new MediaAsset();
+    $asset->media_type = 'not-a-known-media-type';
+
+    expect($asset->typedMediaType())->toBe(Spora\Services\MediaArchive\MediaType::Unknown);
+});
+
+test('typedMediaType() returns the matching enum for known values', function (): void {
+    foreach (Spora\Services\MediaArchive\MediaType::cases() as $case) {
+        $asset = new MediaAsset();
+        $asset->media_type = $case->value;
+        expect($asset->typedMediaType())->toBe($case);
+    }
+});
+
+test('agent(), task(), and user() return the named BelongsTo relation', function (): void {
+    $asset = new MediaAsset();
+
+    $agent = $asset->agent();
+    $task  = $asset->task();
+    $user  = $asset->user();
+
+    expect($agent)->toBeInstanceOf(Illuminate\Database\Eloquent\Relations\BelongsTo::class)
+        ->and($task)->toBeInstanceOf(Illuminate\Database\Eloquent\Relations\BelongsTo::class)
+        ->and($user)->toBeInstanceOf(Illuminate\Database\Eloquent\Relations\BelongsTo::class);
+});

@@ -24,5 +24,8 @@ final class PersistedAssetFields
         public ?int $height,
         public ?float $durationSeconds,
         public ?string $token = null,
+        public ?string $filename = null,
+        public ?int $userId = null,
+        public string $uploadSource = 'tool',
     ) {}
 }

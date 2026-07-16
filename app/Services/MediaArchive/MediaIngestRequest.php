@@ -31,6 +31,7 @@ final readonly class MediaIngestRequest
         public ?int $agentId = null,
         public ?int $taskId = null,
         public ?int $toolCallId = null,
+        public ?int $userId = null,
         public ?string $pluginSlug = null,
         public ?string $toolName = null,
         public ?string $prompt = null,
@@ -42,6 +43,14 @@ final readonly class MediaIngestRequest
         public ?array $tags = null,
         /** @var array<string, mixed>|null */
         public ?array $metadata = null,
+        /**
+         * Source of the ingest — `'upload'` for user uploads, `'tool'` for
+         * plugin-generated media. Defaults to `'tool'` to preserve the
+         * historical contract with existing plugin callers; the upload
+         * controller passes `'upload'`.
+         */
+        public string $uploadSource = 'tool',
+        public ?string $publicAccessToken = null,
     ) {
         // Empty strings are not a valid source — only non-empty payloads
         // count toward the "exactly one" invariant. Matches the rest of

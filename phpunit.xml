@@ -23,5 +23,10 @@
         <!-- A valid 32-byte key base64-encoded for tests -->
         <env name="SPORA_SECRET_KEY" value="ZGVhZGJlZWZkZWFkYmVlZmRlYWRiZWVmZGVhZGJlZWY="/>
         <env name="SPORA_APP_ENV" value="testing"/>
+        <!-- Raise the per-process memory limit so the full ~2504-test
+             suite (which forks per pest workers) finishes without the
+             PHPUnit "Premature end of PHP process" error that the
+             default 128M hits on the longest test groups. -->
+        <ini name="memory_limit" value="1G"/>
     </php>
 </phpunit>

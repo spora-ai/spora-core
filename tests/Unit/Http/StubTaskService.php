@@ -26,7 +26,7 @@ class StubTaskService implements TaskServiceInterface
         ];
     }
 
-    public function startTask(int $userId, int $agentId, string $prompt, ?int $maxSteps = null, ?int $parentTaskId = null): array
+    public function startTask(int $userId, int $agentId, string $prompt, ?int $maxSteps = null, ?int $parentTaskId = null, array $mediaIds = []): array
     {
         $this->startCalls++;
         if ($this->startShouldThrow) {
@@ -47,7 +47,20 @@ class StubTaskService implements TaskServiceInterface
 
     public function getTask(int $taskId, int $userId): ?array
     {
-        return null;
+        if ($taskId === 999999) {
+            return null;
+        }
+        return [
+            'id' => $taskId,
+            'agent_id' => 10,
+            'status' => 'COMPLETED',
+            'user_prompt' => 'p',
+            'final_response' => 'r',
+            'step_count' => 1,
+            'max_steps' => 10,
+            'created_at' => null,
+            'updated_at' => null,
+        ];
     }
 
     public function getTaskWithHistory(int $taskId, int $userId, ?int $sinceSequence = null): ?array
@@ -124,7 +137,7 @@ class StubTaskService implements TaskServiceInterface
         ];
     }
 
-    public function continueTask(int $taskId, int $userId, string $prompt, ?int $additionalSteps = null): array
+    public function continueTask(int $taskId, int $userId, string $prompt, ?int $additionalSteps = null, array $mediaIds = []): array
     {
         if ($taskId === 999999) {
             throw new InvalidArgumentException('Task not found.');

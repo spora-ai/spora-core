@@ -6,12 +6,14 @@ namespace Spora\Http;
 
 use JsonException;
 use Spora\Auth\AuthService;
+use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
  * Agent CRUD endpoints.
@@ -36,6 +38,7 @@ final class AgentController
     public function __construct(
         private readonly AuthService $authService,
         private readonly AgentServiceInterface $agentService,
+        private readonly ?DriverFactory $driverFactory = null,
     ) {}
 
     /**
@@ -104,7 +107,7 @@ final class AgentController
         $agent = $this->agentService->createAgent($userId, $data);
 
         return new JsonResponse(
-            ['data' => ['agent' => $this->agentResource($agent)]],
+            ['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent))]],
             Response::HTTP_CREATED,
         );
     }
@@ -123,7 +126,7 @@ final class AgentController
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['agent' => $this->agentResource($agent)]]);
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent))]]);
     }
 
     /**
@@ -158,7 +161,7 @@ final class AgentController
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['agent' => $this->agentResource($agent)]]);
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent))]]);
     }
 
     /**
@@ -178,11 +181,16 @@ final class AgentController
         return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function agentResource(Agent $agent): array
+    private function resolveSupportsImageInput(Agent $agent): bool
     {
-        return AgentResource::toArray($agent);
+        if ($this->driverFactory === null) {
+            return false;
+        }
+        try {
+            $driver = $this->driverFactory->makeFromAgent($agent);
+        } catch (Throwable) {
+            return false;
+        }
+        return $driver->supportsImageInput();
     }
 }

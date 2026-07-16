@@ -20,6 +20,7 @@ use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
+use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
@@ -68,6 +69,8 @@ function assetTestSetup(bool $asAdmin = true): array
         ),
         $sniffer,
         new MetadataExtractor($logger, false),
+        \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+        new MediaIngestDecoder(),
     );
 
     // Auth mock — by default, the test requester is treated as an admin

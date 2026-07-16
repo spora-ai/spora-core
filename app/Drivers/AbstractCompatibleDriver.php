@@ -35,6 +35,16 @@ abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriver
         return $this->model;
     }
 
+    /**
+     * Default: false. Subclasses override based on the configured model
+     * name — see {@see AnthropicCompatibleDriver::supportsImageInput()}
+     * and {@see OpenAICompatibleDriver::supportsImageInput()}.
+     */
+    public function supportsImageInput(): bool
+    {
+        return false;
+    }
+
     /** @return list<class-string> */
     public static function getDefaultTools(): array
     {
