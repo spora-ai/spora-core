@@ -50,6 +50,7 @@ final readonly class MediaIngestRequest
          * controller passes `'upload'`.
          */
         public string $uploadSource = 'tool',
+        public ?string $publicAccessToken = null,
     ) {
         // Empty strings are not a valid source — only non-empty payloads
         // count toward the "exactly one" invariant. Matches the rest of

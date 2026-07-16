@@ -46,6 +46,7 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
             return false;
         }
         return str_starts_with($m, 'gpt-4o')
+            || str_starts_with($m, 'gpt-4-turbo')
             || str_starts_with($m, 'gpt-4-vision')
             || str_starts_with($m, 'o1')
             || str_starts_with($m, 'o3')

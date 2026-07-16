@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use Spora\Core\Paths;
 use Spora\Models\MediaAsset;
 use Spora\Services\AssetStorageException;
 use Spora\Services\DatabaseAssetStore;
@@ -86,16 +87,34 @@ final class PublicMediaController
             return new StreamedResponse(static function () use ($bytes): void {
                 echo $bytes;
             }, 200, [
-                'Content-Type'   => $mime,
-                'Content-Length' => (string) strlen($bytes),
-                'Cache-Control'  => 'private, max-age=86400',
+                'Content-Type'    => $mime,
+                'Content-Length'  => (string) strlen($bytes),
+                'Cache-Control'   => 'private, max-age=86400',
+                'Referrer-Policy' => 'no-referrer',
             ]);
         }
 
         $path = (string) $payload['path'];
-        $response = new BinaryFileResponse($path, 200, ['Content-Type' => $mime]);
+        // Defense in depth: refuse paths that resolve outside the storage
+        // root. BinaryFileResponse would happily stream an arbitrary file
+        // if a misbehaving asset store returned one.
+        $root = $this->storageRoot();
+        $realPath = realpath($path);
+        $realRoot = realpath($root);
+        if ($realPath === false || $realRoot === false || !str_starts_with($realPath, $realRoot . DIRECTORY_SEPARATOR)) {
+            return $this->notFound();
+        }
+
+        $response = new BinaryFileResponse($realPath, 200, ['Content-Type' => $mime]);
         $response->headers->set('Cache-Control', 'private, max-age=86400');
+        $response->headers->set('Referrer-Policy', 'no-referrer');
         return $response;
+    }
+
+    private function storageRoot(): string
+    {
+        $paths = new Paths(defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3));
+        return $paths->storage('assets');
     }
 
     private function isUuid(string $id): bool

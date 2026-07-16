@@ -455,6 +455,9 @@ class MediaArchiveService
         $asset->asset_url = self::OPAQUE_ASSET_URL_PREFIX . $asset->id . ($ext !== null ? '.' . $ext : '');
         $asset->source_url = $fields->sourceUrl;
         $asset->storage_mode = $fields->storageMode;
+        if ($request->publicAccessToken !== null && $request->publicAccessToken !== '') {
+            $asset->public_access_token = $request->publicAccessToken;
+        }
         // `asset_token` ties the row to its on-disk file (local mode) or
         // is just an opaque correlation id (DB mode). `LocalAssetStore`
         // mints a 32-hex token as the on-disk filename; we reuse that
