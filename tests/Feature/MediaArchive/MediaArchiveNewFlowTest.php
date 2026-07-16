@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature\MediaArchive;
 
-use Spora\Models\MediaAsset;
+use Mockery;
 use Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter;
 use Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
-use Spora\Services\MediaArchive\MediaConverterRegistry;
 use Tests\Support\MediaArchiveTestSupport;
 
 /**
@@ -25,7 +24,7 @@ afterEach(function (): void {
 test('PdfToMarkdownConverter advertises application/pdf and pdf (via Mockery)', function (): void {
     // The real ctor requires a parser; use a mock to assert the
     // interface contract.
-    $parser = \Mockery::mock(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class);
+    $parser = Mockery::mock(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class);
     $converter = new PdfToMarkdownConverter($parser);
     expect($converter->supportedMimeTypes())->toBe(['application/pdf']);
     expect($converter->supportedExtensions())->toBe(['pdf']);
@@ -42,7 +41,7 @@ test('PlainTextPassthroughConverter advertises the static text allowlist', funct
 });
 
 test('PdfToMarkdownConverter trims and returns text from bytes (mocked parser)', function (): void {
-    $parser = \Mockery::mock(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class);
+    $parser = Mockery::mock(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class);
     $parser->shouldReceive('parseContent')
         ->once()
         ->with("  hello world\n\n")

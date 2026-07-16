@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Drivers;
 
+use ReflectionMethod;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Symfony\Component\HttpClient\MockHttpClient;
@@ -34,7 +35,7 @@ test('text block renders with type:text', function (): void {
         maxTokens: 1024,
         temperature: 0.7,
     );
-    $ref = new \ReflectionMethod($driver, 'convertMessages');
+    $ref = new ReflectionMethod($driver, 'convertMessages');
     $ref->setAccessible(true);
     $messages = $ref->invoke($driver, $request->messages);
     expect($messages[0]['content'])->toBe('describe');
@@ -45,7 +46,7 @@ test('image block renders with type:image and source:{type:base64,...}', functio
     // The convertMessages() path expects ContentBlock value-objects
     // (since the LLMRequest typing has tightened) — build the message
     // as a plain array via reflection to exercise the renderer directly.
-    $ref = new \ReflectionMethod($driver, 'convertMessages');
+    $ref = new ReflectionMethod($driver, 'convertMessages');
     $ref->setAccessible(true);
     $messages = $ref->invoke($driver, [[
         'role' => 'user',
@@ -63,7 +64,7 @@ test('image block renders with type:image and source:{type:base64,...}', functio
 
 test('null content is converted to empty string for Anthropic', function (): void {
     $driver = makeAnthropicRequestDriver('claude-3-5-sonnet-20241022');
-    $ref = new \ReflectionMethod($driver, 'convertMessages');
+    $ref = new ReflectionMethod($driver, 'convertMessages');
     $ref->setAccessible(true);
     $messages = $ref->invoke($driver, [
         ['role' => 'assistant', 'content' => null],

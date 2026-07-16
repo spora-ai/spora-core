@@ -6,6 +6,7 @@ namespace Tests\Unit\Services\MediaArchive\Converters;
 
 use Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser;
 use Mockery;
+use RuntimeException;
 use Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter;
 
 /**
@@ -32,10 +33,10 @@ test('PdfToMarkdownConverter throws when the parser throws', function (): void {
     $parser = Mockery::mock(PdfToMarkdownParser::class);
     $parser->shouldReceive('parseContent')
         ->once()
-        ->andThrow(new \RuntimeException('corrupt pdf'));
+        ->andThrow(new RuntimeException('corrupt pdf'));
     $converter = new PdfToMarkdownConverter($parser);
     expect(static fn(): string => $converter->toMarkdown('PDF-BYTES', 'application/pdf', null))
-        ->toThrow(\RuntimeException::class, 'corrupt pdf');
+        ->toThrow(RuntimeException::class, 'corrupt pdf');
 });
 
 test('PdfToMarkdownConverter rejects bad bytes via the parser facade', function (): void {
@@ -43,8 +44,8 @@ test('PdfToMarkdownConverter rejects bad bytes via the parser facade', function 
     $parser->shouldReceive('parseContent')
         ->once()
         ->with('NOT-A-PDF')
-        ->andThrow(new \RuntimeException('not a pdf'));
+        ->andThrow(new RuntimeException('not a pdf'));
     $converter = new PdfToMarkdownConverter($parser);
     expect(static fn(): string => $converter->toMarkdown('NOT-A-PDF', 'application/pdf', null))
-        ->toThrow(\RuntimeException::class, 'not a pdf');
+        ->toThrow(RuntimeException::class, 'not a pdf');
 });

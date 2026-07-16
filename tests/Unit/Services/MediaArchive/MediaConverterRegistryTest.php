@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services\MediaArchive;
 
+use RuntimeException;
 use Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
-use Spora\Services\MediaArchive\MediaConverterInterface;
 use Spora\Services\MediaArchive\MediaConverterRegistry;
 use Tests\Support\MediaArchiveTestSupport;
 
@@ -48,7 +48,7 @@ test('findFor returns null when the registry is empty', function (): void {
     $registry = new MediaConverterRegistry(new class implements \Psr\Container\ContainerInterface {
         public function get(string $id): mixed
         {
-            throw new \RuntimeException("Not registered: {$id}");
+            throw new RuntimeException("Not registered: {$id}");
         }
         public function has(string $id): bool
         {

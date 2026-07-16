@@ -4,22 +4,18 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services\MediaArchive;
 
-use Mockery;
 use Psr\Log\NullLogger;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
-use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
-use Spora\Models\User;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaConverterRegistry;
-use Symfony\Component\HttpClient\MockHttpClient;
 use Tests\Support\MediaArchiveTestSupport;
 
 /**

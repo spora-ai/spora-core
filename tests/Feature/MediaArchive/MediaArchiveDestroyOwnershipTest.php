@@ -13,7 +13,6 @@ use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaIngestRequest;
-use Symfony\Component\HttpFoundation\Request;
 use Tests\Support\MediaArchiveTestSupport;
 
 afterEach(function (): void {
@@ -31,7 +30,8 @@ afterEach(function (): void {
 test('DELETE returns 403 when the asset is owned by a different user', function (): void {
     [$ingesterCtrl, $service] = buildDestroyFixtures(new class extends AuthService {
         public function __construct()
-        { /* no-op */ }
+        { /* no-op */
+        }
         public function currentUserId(): int
         {
             return 1;
@@ -51,7 +51,8 @@ test('DELETE returns 403 when the asset is owned by a different user', function 
 
     [$controller] = buildDestroyFixtures(new class extends AuthService {
         public function __construct()
-        { /* no-op */ }
+        { /* no-op */
+        }
         public function currentUserId(): int
         {
             return 1;
@@ -70,7 +71,8 @@ test('DELETE returns 403 when the asset is owned by a different user', function 
 test('DELETE returns 200 for the owner', function (): void {
     [$controller, $service] = buildDestroyFixtures(new class extends AuthService {
         public function __construct()
-        { /* no-op */ }
+        { /* no-op */
+        }
         public function currentUserId(): int
         {
             return 7;
@@ -99,7 +101,8 @@ test('DELETE returns 200 for the owner', function (): void {
 test('DELETE returns 200 for an admin even when the asset is owned by another user', function (): void {
     [, $service] = buildDestroyFixtures(new class extends AuthService {
         public function __construct()
-        { /* no-op */ }
+        { /* no-op */
+        }
         public function currentUserId(): int
         {
             return 7;
@@ -119,7 +122,8 @@ test('DELETE returns 200 for an admin even when the asset is owned by another us
 
     [$controller] = buildDestroyFixtures(new class extends AuthService {
         public function __construct()
-        { /* no-op */ }
+        { /* no-op */
+        }
         public function currentUserId(): int
         {
             return 1;

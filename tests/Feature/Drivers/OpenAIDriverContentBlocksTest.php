@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Drivers;
 
+use ReflectionMethod;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\ToolCall;
@@ -45,7 +46,7 @@ test('text blocks render as {type:text, text}', function (): void {
     // Use reflection to invoke the private buildMessages via complete();
     // since complete() requires a real HTTP response, we inspect via the
     // protected path instead.
-    $ref = new \ReflectionMethod($driver, 'buildMessages');
+    $ref = new ReflectionMethod($driver, 'buildMessages');
     $ref->setAccessible(true);
     $messages = $ref->invoke($driver, $request);
     expect($messages[1]['content'])->toBeArray();
@@ -58,7 +59,7 @@ test('image blocks render as {type:image_url, image_url:{url:data:...}}', functi
         ['type' => 'text', 'text' => 'describe'],
         ['type' => 'image', 'mediaType' => 'image/png', 'base64' => 'AAAA'],
     ]);
-    $ref = new \ReflectionMethod($driver, 'buildMessages');
+    $ref = new ReflectionMethod($driver, 'buildMessages');
     $ref->setAccessible(true);
     $messages = $ref->invoke($driver, $request);
     $parts = $messages[1]['content'];
@@ -69,7 +70,7 @@ test('image blocks render as {type:image_url, image_url:{url:data:...}}', functi
 
 test('null content on a tool_calls response is preserved', function (): void {
     $driver = makeOpenAIRequestDriver('gpt-4o');
-    $ref = new \ReflectionMethod($driver, 'buildToolCallsResponse');
+    $ref = new ReflectionMethod($driver, 'buildToolCallsResponse');
     $ref->setAccessible(true);
     $response = $ref->invoke($driver, [
         'id' => 'chatcmpl-1',

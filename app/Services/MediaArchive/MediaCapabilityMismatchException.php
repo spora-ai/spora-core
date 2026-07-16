@@ -17,6 +17,4 @@ use RuntimeException;
  * the caller gets an actionable error rather than a silent image-strip
  * during the first tick.
  */
-final class MediaCapabilityMismatchException extends RuntimeException
-{
-}
+final class MediaCapabilityMismatchException extends RuntimeException {}

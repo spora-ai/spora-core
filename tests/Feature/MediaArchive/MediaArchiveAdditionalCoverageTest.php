@@ -7,24 +7,20 @@ namespace Tests\Feature\MediaArchive;
 use Psr\Log\NullLogger;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
+use Spora\Drivers\DriverFactory;
 use Spora\Http\MediaArchiveController;
 use Spora\Http\MediaUploadController;
 use Spora\Http\PublicMediaController;
-use Spora\Models\MediaAsset;
-use Spora\Services\AssetStorageException;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
+use Spora\Services\LLMConfigService;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\ListMediaQueryBuilder;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
-use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MediaType;
 use Spora\Services\MediaArchive\MimeSniffer;
-use Spora\Drivers\DriverFactory;
-use Spora\Services\LLMConfigService;
-use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Tests\Support\MediaArchiveTestSupport;
 
@@ -105,8 +101,11 @@ test('ListMediaQueryBuilder defaults sort to created_at_desc when missing', func
 test('PublicMediaController streams a data_url asset to the client', function (): void {
     [, $service, , , , , , $publicCtrl] = mediaArchiveStack();
     $asset = $service->ingest(new MediaIngestRequest(
-        bytes: 'hello world', mime: 'text/plain', filename: 'sample.txt',
-        userId: 1, uploadSource: 'upload',
+        bytes: 'hello world',
+        mime: 'text/plain',
+        filename: 'sample.txt',
+        userId: 1,
+        uploadSource: 'upload',
     ));
     $asset->public_access_token = 'tkn-' . $asset->id;
     $asset->save();

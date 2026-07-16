@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Http;
 
-use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;

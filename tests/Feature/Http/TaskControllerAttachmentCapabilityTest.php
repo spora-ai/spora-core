@@ -4,30 +4,25 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Http;
 
-use Mockery;
 use Psr\Log\NullLogger;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
-use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Http\TaskController;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\MediaAsset;
 use Spora\Models\Task;
-use Spora\Models\User;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
-use Spora\Services\LocalAssetStore;
 use Spora\Services\LLMConfigService;
+use Spora\Services\LocalAssetStore;
+use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaIngestRequest;
-use Spora\Services\MediaArchive\MediaArchiveService;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpClient\MockHttpClient;
 use Tests\Support\MediaArchiveTestSupport;
 use Tests\Unit\Http\StubTaskService;
 
@@ -93,7 +88,12 @@ test('store returns 201 when no media_ids are attached even on a non-vision agen
 test('continue returns 400 when an image is attached to a non-vision agent', function (): void {
     [$controller, $stub] = buildCapabilityController('gpt-3.5-turbo', OpenAICompatibleDriver::class);
     $asset = ingestImageAsset('agent-continue');
-    $request = Request::create('/api/v1/tasks/1/continue', 'POST', [], [], [],
+    $request = Request::create(
+        '/api/v1/tasks/1/continue',
+        'POST',
+        [],
+        [],
+        [],
         ['CONTENT_TYPE' => 'application/json'],
         json_encode(['prompt' => 'follow-up', 'media_ids' => [$asset->id]]),
     );

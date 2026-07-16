@@ -96,7 +96,7 @@ function buildSharingController(bool $isAdmin = true, int $userId = 1): array
     $local    = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
     $assetStore = new AutoAssetStore($database, $local, 1_048_576);
     $service = MediaArchiveTestSupport::buildService($assetStore);
-    $auth = new class($userId, $isAdmin) extends \Spora\Auth\AuthService {
+    $auth = new class ($userId, $isAdmin) extends \Spora\Auth\AuthService {
         public function __construct(private readonly int $uid, private readonly bool $admin) {}
         public function currentUserId(): int
         {

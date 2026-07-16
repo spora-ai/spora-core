@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\MediaArchive;
 
-use Spora\Auth\AuthService;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Http\MediaAllowedTypesController;
@@ -47,7 +46,7 @@ function buildUploadHttpFixtures(): array
 
     $allowed = new MediaAllowedTypesService($registry, new \Spora\Drivers\DriverFactory(
         new \Psr\Log\NullLogger(),
-        new \Spora\Services\LLMConfigService(new \Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), []),
+        new \Spora\Services\LLMConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), []),
         300,
     ));
     return [
@@ -80,7 +79,11 @@ test('MediaUploadController returns 415 on a disallowed MIME', function (): void
     file_put_contents($tmpFile, "MZ" . str_repeat("\0", 100));
     $request = Request::create('/api/v1/media', 'POST', files: [
         'file' => new \Symfony\Component\HttpFoundation\File\UploadedFile(
-            $tmpFile, 'whatever.exe', 'application/x-msdownload', null, true
+            $tmpFile,
+            'whatever.exe',
+            'application/x-msdownload',
+            null,
+            true,
         ),
     ]);
     $resp = $uploadCtrl->store($request);

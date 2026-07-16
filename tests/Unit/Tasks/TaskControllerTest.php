@@ -921,6 +921,8 @@ it('continue returns 200 and resets task for completed task', function (): void 
     ];
 
     $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTask')
+        ->andReturn(['id' => 1, 'agent_id' => 1, 'status' => 'COMPLETED', 'user_prompt' => 'p', 'final_response' => 'r', 'step_count' => 1, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null]);
     $taskService->expects('continueTask')
         ->once()
         ->with(1, 1, 'continue prompt', null, [])
@@ -959,6 +961,8 @@ it('continue returns 200 and resets task for failed task', function (): void {
     ];
 
     $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTask')
+        ->andReturn(['id' => 1, 'agent_id' => 1, 'status' => 'FAILED', 'user_prompt' => 'p', 'final_response' => null, 'step_count' => 5, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null]);
     $taskService->expects('continueTask')
         ->once()
         ->with(1, 1, 'retry prompt', 20, [])
@@ -1037,6 +1041,8 @@ it('continue returns 422 when additional_steps is out of range', function (): vo
 
 it('continue returns 409 when task is not completed or failed', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTask')
+        ->andReturn(['id' => 1, 'agent_id' => 1, 'status' => 'RUNNING', 'user_prompt' => 'p', 'final_response' => null, 'step_count' => 5, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null]);
     $taskService->expects('continueTask')
         ->once()
         ->with(1, 1, 'test', null, [])
@@ -1063,10 +1069,9 @@ it('continue returns 409 when task is not completed or failed', function (): voi
 
 it('continue returns 404 for unknown task', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
-    $taskService->expects('continueTask')
-        ->once()
-        ->with(99999, 1, 'test', null, [])
-        ->andThrow(new InvalidArgumentException(TASK_NOT_FOUND_MESSAGE));
+    $taskService->expects('getTask')
+        ->with(99999, 1)
+        ->andReturn(null);
 
     [$controller, $authService] = makeTaskController($taskService);
     seedUserAndAgent($authService);

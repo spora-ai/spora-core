@@ -14,6 +14,4 @@ use RuntimeException;
  *
  * Mapped to HTTP 403 by {@see \Spora\Core\Kernel::mapKnownExceptionToResponse()}.
  */
-final class MediaNotOwnedException extends RuntimeException
-{
-}
+final class MediaNotOwnedException extends RuntimeException {}

@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Support;
 
+use Mockery;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use ReflectionClass;
+use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Services\AssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
@@ -80,9 +83,9 @@ final class MediaArchiveTestSupport
             public function get(string $id): mixed
             {
                 if (!class_exists($id)) {
-                    throw new \RuntimeException("Not registered: {$id}");
+                    throw new RuntimeException("Not registered: {$id}");
                 }
-                $reflection = new \ReflectionClass($id);
+                $reflection = new ReflectionClass($id);
                 $constructor = $reflection->getConstructor();
                 if ($constructor === null) {
                     return $reflection->newInstance();
@@ -94,14 +97,17 @@ final class MediaArchiveTestSupport
                         continue;
                     }
                     if (\Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter::class === $id) {
-                        $args[] = \Mockery::mock(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class);
+                        $args[] = Mockery::mock(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class);
                         continue;
                     }
-                    throw new \RuntimeException("Cannot auto-construct {$id}: parameter {$param->getName()} has no default value.");
+                    throw new RuntimeException("Cannot auto-construct {$id}: parameter {$param->getName()} has no default value.");
                 }
                 return $reflection->newInstanceArgs($args);
             }
-            public function has(string $id): bool { return class_exists($id); }
+            public function has(string $id): bool
+            {
+                return class_exists($id);
+            }
         };
         // Core converters are available in the application container; mirror
         // that registration in the lightweight test container.
@@ -116,9 +122,17 @@ final class MediaArchiveTestSupport
         // Tests run without a real auth session; the controller's
         // canEdit() is only consulted in PATCH/refresh flows.
         return new class extends AuthService {
-            public function __construct() { /* no-op */ }
-            public function currentUserId(): int { return 1; }
-            public function isAdmin(): bool { return true; }
+            public function __construct()
+            { /* no-op */
+            }
+            public function currentUserId(): int
+            {
+                return 1;
+            }
+            public function isAdmin(): bool
+            {
+                return true;
+            }
         };
     }
 }

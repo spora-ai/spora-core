@@ -132,7 +132,8 @@ function buildAnonAuth(): \Spora\Auth\AuthService
 {
     return new class extends \Spora\Auth\AuthService {
         public function __construct()
-        { /* no-op */ }
+        { /* no-op */
+        }
         public function currentUserId(): ?int
         {
             return null;

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Http;
 
 use Psr\Log\NullLogger;
+use RuntimeException;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
@@ -59,14 +60,14 @@ function buildAgentController(): AgentController
     // returns a hand-constructed Agent model that ignores
     // llm_driver_config_id — show() needs the real DB row so the
     // DriverFactory can resolve the configured LLM.
-    $agentService = new class implements \Spora\Services\AgentServiceInterface {
+    $agentService = new class implements AgentServiceInterface {
         public function getAgentsForUser(int $userId): array
         {
             return [];
         }
         public function createAgent(int $userId, array $data): Agent
         {
-            throw new \RuntimeException('not implemented in test');
+            throw new RuntimeException('not implemented in test');
         }
         public function getAgent(int $agentId, int $userId): ?Agent
         {
@@ -85,9 +86,7 @@ function buildAgentController(): AgentController
         {
             return ['tool' => [], 'warning' => ''];
         }
-        public function disableTool(int $agentId, int $userId, string $toolClass): void
-        {
-        }
+        public function disableTool(int $agentId, int $userId, string $toolClass): void {}
         public function getToolStatus(int $agentId, int $userId, string $toolClass): ?array
         {
             return null;
@@ -104,9 +103,7 @@ function buildAgentController(): AgentController
         {
             return [];
         }
-        public function deleteOverride(int $agentId, int $userId, string $toolClass): void
-        {
-        }
+        public function deleteOverride(int $agentId, int $userId, string $toolClass): void {}
         public function getToolsOperations(int $agentId, int $userId): ?array
         {
             return null;

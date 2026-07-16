@@ -8,7 +8,6 @@ use Spora\Agents\MessageHistoryBuilder;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
-use Spora\Models\MediaAsset;
 use Spora\Models\TaskHistory;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
@@ -127,7 +126,8 @@ test('attachment with image asset expands to an image block when LLM supports im
         'attachments'  => [['media_id' => $asset->id, 'kind' => 'image']],
     ]);
     $driver = new AnthropicCompatibleDriver(
-        apiKey: 'test', model: 'claude-3-5-sonnet-20241022',
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
         baseUrl: 'https://api.anthropic.com',
         httpClient: new MockHttpClient(),
         logger: new \Psr\Log\NullLogger(),
@@ -165,7 +165,8 @@ test('attachment with image is dropped when the LLM does not support images', fu
         'attachments'  => [['media_id' => $asset->id, 'kind' => 'image']],
     ]);
     $driver = new \Spora\Drivers\OpenAICompatibleDriver(
-        apiKey: 'test', model: 'gpt-3.5-turbo',
+        apiKey: 'test',
+        model: 'gpt-3.5-turbo',
         baseUrl: 'https://api.openai.com/v1',
         httpClient: new MockHttpClient(),
         logger: new \Psr\Log\NullLogger(),
