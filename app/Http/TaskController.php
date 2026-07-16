@@ -159,13 +159,24 @@ final class TaskController
      */
     private function ensureMediaCapabilityCompatible(int $agentId, array $mediaIds): void
     {
-        if ($mediaIds === []) {
+        if ($mediaIds === [] || $this->driverFactory === null) {
             return;
         }
-        if ($this->driverFactory === null) {
+        if (!$this->mediaIdsIncludeImage($mediaIds)) {
             return;
         }
-        $hasImage = false;
+        if (!$this->agentSupportsImages($agentId)) {
+            throw new MediaCapabilityMismatchException(
+                'One or more attachments are images but the agent\'s LLM does not support image input.',
+            );
+        }
+    }
+
+    /**
+     * @param list<string> $mediaIds
+     */
+    private function mediaIdsIncludeImage(array $mediaIds): bool
+    {
         foreach ($mediaIds as $mid) {
             if ($mid === '') {
                 continue;
@@ -175,27 +186,26 @@ final class TaskController
                 continue;
             }
             if (is_string($asset->mime_type) && str_starts_with(strtolower($asset->mime_type), 'image/')) {
-                $hasImage = true;
-                break;
+                return true;
             }
         }
-        if (!$hasImage) {
-            return;
-        }
+
+        return false;
+    }
+
+    private function agentSupportsImages(int $agentId): bool
+    {
         $agent = Agent::query()->find($agentId);
         if ($agent === null) {
-            return;
+            return false;
         }
         try {
             $driver = $this->driverFactory->makeFromAgent($agent);
         } catch (Throwable) {
-            return;
+            return false;
         }
-        if (!$driver->supportsImageInput()) {
-            throw new MediaCapabilityMismatchException(
-                'One or more attachments are images but the agent\'s LLM does not support image input.',
-            );
-        }
+
+        return $driver->supportsImageInput();
     }
 
     /**
