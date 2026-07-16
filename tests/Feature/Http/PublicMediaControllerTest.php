@@ -4,12 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Http;
 
-use Mockery;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Http\PublicMediaController;
 use Spora\Models\MediaAsset;
-use Spora\Services\AssetStorageException;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;

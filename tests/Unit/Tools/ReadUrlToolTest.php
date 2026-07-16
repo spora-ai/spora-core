@@ -140,7 +140,7 @@ function pdfRegistry(MediaConverterInterface $converter): MediaConverterRegistry
 {
     MediaConverterDiscovery::reset();
     MediaConverterDiscovery::add(PlainTextPassthroughConverter::class);
-    $stub = new class($converter) implements \Psr\Container\ContainerInterface {
+    $stub = new class ($converter) implements Psr\Container\ContainerInterface {
         public function __construct(private readonly MediaConverterInterface $converter) {}
         public function get(string $id): mixed
         {
@@ -178,7 +178,7 @@ it('fetches a PDF and converts it to markdown via the registry', function () {
 it('returns an error when no PDF converter is registered', function () {
     $client = Mockery::mock(HttpClientInterface::class);
     MediaConverterDiscovery::reset();
-    $stub = new class implements \Psr\Container\ContainerInterface {
+    $stub = new class implements Psr\Container\ContainerInterface {
         public function get(string $id): mixed
         {
             throw new RuntimeException("no converters: {$id}");

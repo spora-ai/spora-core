@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Drivers\ValueObjects;
 
+use Error;
 use InvalidArgumentException;
 use Spora\Drivers\ValueObjects\ContentBlock;
 
@@ -63,10 +64,11 @@ test('accepts an empty string for imageUrl() — caller decides validity', funct
 test('properties are readonly — they cannot be reassigned', function (): void {
     $block = ContentBlock::text('hi');
 
-    $setType = static function () use ($block): void {
+    try {
         /** @phpstan-ignore-next-line intentional invalid write to assert readonly */
         $block->type = 'image';
-    };
-
-    expect($setType)->toThrow(Error::class);
+        test()->fail('Expected an Error when modifying a readonly property');
+    } catch (Error $e) {
+        expect($e->getMessage())->toContain('readonly');
+    }
 });

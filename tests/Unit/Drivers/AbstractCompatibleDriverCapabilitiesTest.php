@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Tests\Unit\Drivers;
 
 use Spora\Drivers\AbstractCompatibleDriver;
-use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\LLMDriverConfigInterface;
+use Spora\Drivers\LLMDriverInterface;
 use Symfony\Component\HttpClient\MockHttpClient;
 
 /**

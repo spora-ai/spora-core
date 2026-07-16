@@ -91,25 +91,25 @@ test('typedMediaType() returns Unknown for null', function (): void {
     $asset = new MediaAsset();
     $asset->media_type = null;
 
-    expect($asset->typedMediaType())->toBe(\Spora\Services\MediaArchive\MediaType::Unknown);
+    expect($asset->typedMediaType())->toBe(Spora\Services\MediaArchive\MediaType::Unknown);
 });
 
 test('typedMediaType() returns Unknown for empty string', function (): void {
     $asset = new MediaAsset();
     $asset->media_type = '';
 
-    expect($asset->typedMediaType())->toBe(\Spora\Services\MediaArchive\MediaType::Unknown);
+    expect($asset->typedMediaType())->toBe(Spora\Services\MediaArchive\MediaType::Unknown);
 });
 
 test('typedMediaType() returns Unknown for invalid enum value', function (): void {
     $asset = new MediaAsset();
     $asset->media_type = 'not-a-known-media-type';
 
-    expect($asset->typedMediaType())->toBe(\Spora\Services\MediaArchive\MediaType::Unknown);
+    expect($asset->typedMediaType())->toBe(Spora\Services\MediaArchive\MediaType::Unknown);
 });
 
 test('typedMediaType() returns the matching enum for known values', function (): void {
-    foreach (\Spora\Services\MediaArchive\MediaType::cases() as $case) {
+    foreach (Spora\Services\MediaArchive\MediaType::cases() as $case) {
         $asset = new MediaAsset();
         $asset->media_type = $case->value;
         expect($asset->typedMediaType())->toBe($case);
@@ -123,7 +123,7 @@ test('agent(), task(), and user() return the named BelongsTo relation', function
     $task  = $asset->task();
     $user  = $asset->user();
 
-    expect($agent)->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\BelongsTo::class)
-        ->and($task)->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\BelongsTo::class)
-        ->and($user)->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\BelongsTo::class);
+    expect($agent)->toBeInstanceOf(Illuminate\Database\Eloquent\Relations\BelongsTo::class)
+        ->and($task)->toBeInstanceOf(Illuminate\Database\Eloquent\Relations\BelongsTo::class)
+        ->and($user)->toBeInstanceOf(Illuminate\Database\Eloquent\Relations\BelongsTo::class);
 });
