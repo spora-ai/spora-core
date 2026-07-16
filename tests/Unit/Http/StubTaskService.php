@@ -47,7 +47,20 @@ class StubTaskService implements TaskServiceInterface
 
     public function getTask(int $taskId, int $userId): ?array
     {
-        return null;
+        if ($taskId === 999999) {
+            return null;
+        }
+        return [
+            'id' => $taskId,
+            'agent_id' => 10,
+            'status' => 'COMPLETED',
+            'user_prompt' => 'p',
+            'final_response' => 'r',
+            'step_count' => 1,
+            'max_steps' => 10,
+            'created_at' => null,
+            'updated_at' => null,
+        ];
     }
 
     public function getTaskWithHistory(int $taskId, int $userId, ?int $sinceSequence = null): ?array

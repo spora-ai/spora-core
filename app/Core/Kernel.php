@@ -18,6 +18,7 @@ use Spora\Http\Exceptions\PluginCatalogNotWiredException;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\Exceptions\CatalogUnavailableException;
+use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\Exceptions\MalformedCatalogException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -245,6 +246,10 @@ final class Kernel implements KernelInterface
                 Response::HTTP_FORBIDDEN,
             ),
             $e instanceof PluginInstallFailedException => self::mapPluginInstallFailureToResponse($e),
+            $e instanceof MediaCapabilityMismatchException => new JsonResponse(
+                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
+                Response::HTTP_BAD_REQUEST,
+            ),
             default => null,
         };
     }

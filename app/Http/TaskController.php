@@ -8,10 +8,15 @@ use Carbon\Carbon;
 use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
+use Spora\Drivers\DriverFactory;
+use Spora\Models\Agent;
+use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\TaskServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
  * Handles task listing, status updates, cancellation, and real-time SSE streaming.
@@ -25,6 +30,7 @@ final class TaskController
     public function __construct(
         private readonly AuthService $authService,
         private readonly TaskServiceInterface $taskService,
+        private readonly ?DriverFactory $driverFactory = null,
     ) {}
 
     /**
@@ -103,6 +109,14 @@ final class TaskController
             );
         } else {
             try {
+                $this->ensureMediaCapabilityCompatible($agentId, $mediaIds);
+            } catch (MediaCapabilityMismatchException $e) {
+                return new JsonResponse(
+                    ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
+                    Response::HTTP_BAD_REQUEST,
+                );
+            }
+            try {
                 $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
                 $result = new JsonResponse(
                     ['data' => ['task' => $task]],
@@ -132,6 +146,56 @@ final class TaskController
             }
         }
         return $out;
+    }
+
+    /**
+     * Reject an image attachment when the agent's LLM cannot consume image
+     * blocks. Plan §8.3 / §12 require a 400 at the request boundary rather
+     * than a silent image-strip during the first tick. {@see MessageHistoryBuilder}
+     * still strips defensively — this pre-flight gives the caller a useful error.
+     *
+     * @param list<string> $mediaIds
+     * @throws MediaCapabilityMismatchException
+     */
+    private function ensureMediaCapabilityCompatible(int $agentId, array $mediaIds): void
+    {
+        if ($mediaIds === []) {
+            return;
+        }
+        if ($this->driverFactory === null) {
+            return;
+        }
+        $hasImage = false;
+        foreach ($mediaIds as $mid) {
+            if ($mid === '') {
+                continue;
+            }
+            $asset = MediaAsset::query()->find($mid);
+            if ($asset === null) {
+                continue;
+            }
+            if (is_string($asset->mime_type) && str_starts_with(strtolower($asset->mime_type), 'image/')) {
+                $hasImage = true;
+                break;
+            }
+        }
+        if (!$hasImage) {
+            return;
+        }
+        $agent = Agent::query()->find($agentId);
+        if ($agent === null) {
+            return;
+        }
+        try {
+            $driver = $this->driverFactory->makeFromAgent($agent);
+        } catch (Throwable) {
+            return;
+        }
+        if (!$driver->supportsImageInput()) {
+            throw new MediaCapabilityMismatchException(
+                'One or more attachments are images but the agent\'s LLM does not support image input.',
+            );
+        }
     }
 
     /**
@@ -405,6 +469,21 @@ final class TaskController
                 $additionalSteps = $body['additional_steps'];
             }
             $mediaIds = $this->parseMediaIds($body['media_ids'] ?? null);
+            $existing = $this->taskService->getTask($taskId, $userId);
+            if ($existing === null) {
+                return new JsonResponse(
+                    ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
+                    Response::HTTP_NOT_FOUND,
+                );
+            }
+            try {
+                $this->ensureMediaCapabilityCompatible((int) $existing['agent_id'], $mediaIds);
+            } catch (MediaCapabilityMismatchException $e) {
+                return new JsonResponse(
+                    ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
+                    Response::HTTP_BAD_REQUEST,
+                );
+            }
             try {
                 $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
                 $result = new JsonResponse(
