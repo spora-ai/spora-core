@@ -108,24 +108,20 @@ final class AgentService implements AgentServiceInterface
 
     public function setPinned(int $userId, int $agentId, bool $pinned): Agent
     {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            throw new AgentNotFoundException('Agent not found.');
-        }
-
-        Capsule::table('agents')
-            ->where('id', $agentId)
-            ->update([
-                'is_pinned'  => $pinned ? 1 : 0,
-                'updated_at' => date(self::DATETIME_FORMAT),
-            ]);
-
-        $agent->refresh();
-
-        return $agent;
+        return $this->setFlag($userId, $agentId, 'is_pinned', $pinned);
     }
 
     public function setArchived(int $userId, int $agentId, bool $archived): Agent
+    {
+        return $this->setFlag($userId, $agentId, 'is_archived', $archived);
+    }
+
+    /**
+     * Shared flip-a-boolean-column path for setPinned / setArchived.
+     * Centralises the user-scoped ownership check + updated_at stamp so
+     * the public methods stay one-liners and the SQL shape stays in one place.
+     */
+    private function setFlag(int $userId, int $agentId, string $column, bool $value): Agent
     {
         $agent = $this->getAgent($agentId, $userId);
         if ($agent === null) {
@@ -135,7 +131,7 @@ final class AgentService implements AgentServiceInterface
         Capsule::table('agents')
             ->where('id', $agentId)
             ->update([
-                'is_archived' => $archived ? 1 : 0,
+                $column       => $value ? 1 : 0,
                 'updated_at'  => date(self::DATETIME_FORMAT),
             ]);
 

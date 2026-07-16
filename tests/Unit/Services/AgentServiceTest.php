@@ -670,35 +670,30 @@ describe('AgentService::setPinned / setArchived', function (): void {
         expect($agent->is_archived)->toBeFalse();
     });
 
-    it('setPinned persists and returns the agent', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'Pin me']);
+    /**
+     * Parameterised happy-path check: setPinned / setArchived each persist
+     * a single boolean column and return the refreshed agent. Pest runs the
+     * two datasets sequentially in the same describe block.
+     */
+    dataset('flagSetters', [
+        'setPinned'   => ['setPinned',   'is_pinned',   'Pin me'],
+        'setArchived' => ['setArchived', 'is_archived', 'Archive me'],
+    ]);
 
-        $result = $service->setPinned($userId, (int) $agent->getKey(), true);
+    it('persists and returns the agent', function (string $method, string $field, string $name): void {
+        [$service, $userId] = makeAgentServiceWithUser();
+        $agent = $service->createAgent($userId, ['name' => $name]);
+
+        $result = $service->$method($userId, (int) $agent->getKey(), true);
 
         expect($result)->toBeInstanceOf(Agent::class);
         expect($result->id)->toBe($agent->id);
-        expect($result->is_pinned)->toBeTrue();
+        expect($result->$field)->toBeTrue();
 
         // Refreshed from DB — read again to confirm persistence
         $fresh = Agent::find($agent->id);
-        expect($fresh->is_pinned)->toBeTrue();
-    });
-
-    it('setArchived persists and returns the agent', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'Archive me']);
-
-        $result = $service->setArchived($userId, (int) $agent->getKey(), true);
-
-        expect($result)->toBeInstanceOf(Agent::class);
-        expect($result->id)->toBe($agent->id);
-        expect($result->is_archived)->toBeTrue();
-
-        // Refreshed from DB — read again to confirm persistence
-        $fresh = Agent::find($agent->id);
-        expect($fresh->is_archived)->toBeTrue();
-    });
+        expect($fresh->$field)->toBeTrue();
+    })->with('flagSetters');
 
     it('setPinned can flip back to false', function (): void {
         [$service, $userId] = makeAgentServiceWithUser();
@@ -710,21 +705,30 @@ describe('AgentService::setPinned / setArchived', function (): void {
         expect($result->is_pinned)->toBeFalse();
     });
 
-    it('setPinned throws AgentNotFoundException when the agent is owned by another user', function (): void {
+    /**
+     * Parameterised ownership / not-found rejection: setPinned / setArchived
+     * each throw AgentNotFoundException when the agent is missing or owned
+     * by a different user.
+     */
+    dataset('notFoundScenarios', [
+        'setPinned:   foreign owner'   => ['setPinned',   'Not yours', 'agent-svc-pin-foreign@example.com'],
+        'setArchived: missing agent'   => ['setArchived', null,        null],
+    ]);
+
+    it('throws AgentNotFoundException when the agent is inaccessible', function (string $method, ?string $agentName, ?string $foreignEmail): void {
         [$service, $userIdA] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userIdA, ['name' => 'Not yours']);
 
-        $auth = bootAuthLayer();
-        $userIdB = bootAuth($auth, 'agent-svc-pin-foreign@example.com', AGENT_TEST_PASSWORD);
+        if ($agentName !== null) {
+            $agent = $service->createAgent($userIdA, ['name' => $agentName]);
+            $agentId = (int) $agent->getKey();
+            $auth = bootAuthLayer();
+            $userIdB = bootAuth($auth, $foreignEmail, AGENT_TEST_PASSWORD);
+        } else {
+            $agentId = 999999;
+            $userIdB = $userIdA;
+        }
 
-        expect(fn() => $service->setPinned($userIdB, (int) $agent->getKey(), true))
+        expect(fn() => $service->$method($userIdB, $agentId, true))
             ->toThrow(AgentNotFoundException::class, 'Agent not found.');
-    });
-
-    it('setArchived throws AgentNotFoundException when the agent does not exist', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-
-        expect(fn() => $service->setArchived($userId, 999999, true))
-            ->toThrow(AgentNotFoundException::class, 'Agent not found.');
-    });
+    })->with('notFoundScenarios');
 });

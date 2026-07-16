@@ -147,11 +147,10 @@ final class AgentController
         // Booleans arrive as either real bools or boolean-strings (the form
         // layer + curl both send 'true'/'false'). Coerce via FILTER_VALIDATE_BOOLEAN
         // so the service receives a real bool regardless of transport.
-        if (array_key_exists('is_pinned', $data)) {
-            $data['is_pinned'] = filter_var($data['is_pinned'], FILTER_VALIDATE_BOOLEAN);
-        }
-        if (array_key_exists('is_archived', $data)) {
-            $data['is_archived'] = filter_var($data['is_archived'], FILTER_VALIDATE_BOOLEAN);
+        foreach (['is_pinned', 'is_archived'] as $boolKey) {
+            if (array_key_exists($boolKey, $data)) {
+                $data[$boolKey] = filter_var($data[$boolKey], FILTER_VALIDATE_BOOLEAN);
+            }
         }
 
         $agent = $this->agentService->updateAgent($agentId, $userId, $data);

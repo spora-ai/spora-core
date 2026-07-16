@@ -42,11 +42,7 @@ class StubAgentService implements AgentServiceInterface
         $agent->system_prompt = $data['system_prompt'] ?? null;
         $agent->llm_driver_config_id = $data['llm_driver_config_id'] ?? null;
         $agent->max_steps = $data['max_steps'] ?? 10;
-        $agent->is_active = true;
-        $agent->retry_after_minutes = 0;
-        $agent->max_retries = 0;
-        $agent->is_pinned = false;
-        $agent->is_archived = false;
+        $this->seedAgentDefaults($agent);
 
         return $agent;
     }
@@ -64,11 +60,7 @@ class StubAgentService implements AgentServiceInterface
         $agent->system_prompt = null;
         $agent->llm_driver_config_id = null;
         $agent->max_steps = 10;
-        $agent->is_active = true;
-        $agent->retry_after_minutes = 0;
-        $agent->max_retries = 0;
-        $agent->is_pinned = false;
-        $agent->is_archived = false;
+        $this->seedAgentDefaults($agent);
 
         return $agent;
     }
@@ -81,11 +73,10 @@ class StubAgentService implements AgentServiceInterface
         }
         // Reflect the partial-update payload onto the returned model so the
         // controller's resource serialization picks up the new values.
-        if (array_key_exists('is_pinned', $data)) {
-            $agent->is_pinned = (bool) $data['is_pinned'];
-        }
-        if (array_key_exists('is_archived', $data)) {
-            $agent->is_archived = (bool) $data['is_archived'];
+        foreach (['is_pinned', 'is_archived'] as $boolKey) {
+            if (array_key_exists($boolKey, $data)) {
+                $agent->$boolKey = (bool) $data[$boolKey];
+            }
         }
 
         return $agent;
@@ -98,22 +89,39 @@ class StubAgentService implements AgentServiceInterface
 
     public function setPinned(int $userId, int $agentId, bool $pinned): Agent
     {
-        if ($agentId === 999999) {
-            throw new RuntimeException('Agent not found');
-        }
-        $agent = $this->getAgent($agentId, $userId);
-        $agent->is_pinned = $pinned;
-
-        return $agent;
+        return $this->setFlag($userId, $agentId, 'is_pinned', $pinned);
     }
 
     public function setArchived(int $userId, int $agentId, bool $archived): Agent
     {
-        if ($agentId === 999999) {
+        return $this->setFlag($userId, $agentId, 'is_archived', $archived);
+    }
+
+    /**
+     * Apply the static default scalars to a stubbed Agent. Mirrors the
+     * migration defaults for the new flag columns plus the long-standing
+     * scalar fields the test fixtures expect.
+     */
+    private function seedAgentDefaults(Agent $agent): void
+    {
+        $agent->is_active = true;
+        $agent->retry_after_minutes = 0;
+        $agent->max_retries = 0;
+        $agent->is_pinned = false;
+        $agent->is_archived = false;
+    }
+
+    /**
+     * Shared flag-flip body for setPinned / setArchived in the stub. Mirrors
+     * the production setFlag shape: 404-on-missing then mutate.
+     */
+    private function setFlag(int $userId, int $agentId, string $column, bool $value): Agent
+    {
+        $agent = $this->getAgent($agentId, $userId);
+        if ($agent === null) {
             throw new RuntimeException('Agent not found');
         }
-        $agent = $this->getAgent($agentId, $userId);
-        $agent->is_archived = $archived;
+        $agent->$column = $value;
 
         return $agent;
     }
