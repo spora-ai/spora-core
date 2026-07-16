@@ -12,6 +12,7 @@ use Spora\Models\AgentToolOverride;
 use Spora\Services\Agents\AgentToolInstanceResolver;
 use Spora\Services\Agents\AgentToolOperationsResolver;
 use Spora\Services\Agents\AgentToolOverrideResolver;
+use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Tools\Attributes\Tool;
 
 /**
@@ -42,6 +43,9 @@ final class AgentService implements AgentServiceInterface
 
     public function getAgentsForUser(int $userId): array
     {
+        // Dashboard ordering (pinned-first, archived-hidden) lives in
+        // spora-frontend PR #52; the backend stays filter-free so the same
+        // payload feeds every consumer.
         return Agent::where('user_id', $userId)
             ->orderByDesc('created_at')
             ->get()
@@ -79,7 +83,7 @@ final class AgentService implements AgentServiceInterface
             return null;
         }
 
-        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'retry_after_minutes', 'max_retries'];
+        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived'];
         $filtered = array_intersect_key($data, array_flip($allowed));
 
         if ($filtered !== []) {
@@ -102,6 +106,40 @@ final class AgentService implements AgentServiceInterface
         Capsule::table('agents')->where('id', $agentId)->delete();
 
         return true;
+    }
+
+    public function setPinned(int $userId, int $agentId, bool $pinned): Agent
+    {
+        return $this->setFlag($userId, $agentId, 'is_pinned', $pinned);
+    }
+
+    public function setArchived(int $userId, int $agentId, bool $archived): Agent
+    {
+        return $this->setFlag($userId, $agentId, 'is_archived', $archived);
+    }
+
+    /**
+     * Shared flip-a-boolean-column path for setPinned / setArchived.
+     * Centralises the user-scoped ownership check + updated_at stamp so
+     * the public methods stay one-liners and the SQL shape stays in one place.
+     */
+    private function setFlag(int $userId, int $agentId, string $column, bool $value): Agent
+    {
+        $agent = $this->getAgent($agentId, $userId);
+        if ($agent === null) {
+            throw new AgentNotFoundException('Agent not found.');
+        }
+
+        Capsule::table('agents')
+            ->where('id', $agentId)
+            ->update([
+                $column       => $value ? 1 : 0,
+                'updated_at'  => date(self::DATETIME_FORMAT),
+            ]);
+
+        $agent->refresh();
+
+        return $agent;
     }
 
 
@@ -279,22 +317,6 @@ final class AgentService implements AgentServiceInterface
 
     private function agentResource(Agent $agent): array
     {
-        $tools = AgentTool::where('agent_id', $agent->id)->get();
-
-        return [
-            'id'                   => (int) $agent->id,
-            'name'                 => $agent->name,
-            'description'          => $agent->description,
-            'system_prompt'        => $agent->system_prompt,
-            'llm_driver_config_id' => $agent->llm_driver_config_id,
-            'max_steps'            => (int) $agent->max_steps,
-            'is_active'            => (bool) $agent->is_active,
-            'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),
-            'max_retries'          => (int) ($agent->max_retries ?? 0),
-            'tools' => $tools->map(static fn(AgentTool $t) => [
-                'tool_class' => $t->tool_class,
-                'tool_name'  => $t->tool_name,
-            ])->values()->toArray(),
-        ];
+        return AgentResource::toArray($agent);
     }
 }

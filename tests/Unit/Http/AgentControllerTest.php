@@ -41,6 +41,23 @@ describe('AgentController::index', function (): void {
         $body = json_decode($response->getContent(), true);
         expect($body['data']['agents'])->toBeArray();
     });
+
+    test('emits is_pinned, is_archived, and created_at on every agent', function (): void {
+        [$controller, , , $authService] = makeAgentControllers();
+        bootAuth($authService);
+
+        $response = $controller->index();
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['agents'])->not->toBeEmpty();
+        foreach ($body['data']['agents'] as $agent) {
+            expect($agent)->toHaveKeys(['is_pinned', 'is_archived', 'created_at']);
+            // Pin / archive default to false; created_at may be null on a stub
+            expect($agent['is_pinned'])->toBeBool();
+            expect($agent['is_archived'])->toBeBool();
+        }
+    });
 });
 
 describe('AgentController::show', function (): void {
@@ -122,6 +139,23 @@ describe('AgentController::update', function (): void {
         $response = $controller->update($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
+    });
+
+    test('accepts is_pinned and is_archived in the body and surfaces them in the response', function (): void {
+        [$controller, , , $authService] = makeAgentControllers();
+        bootAuth($authService);
+
+        $request = jsonRequest('PATCH', '/api/v1/agents/1', [
+            'is_pinned'   => true,
+            'is_archived' => true,
+        ]);
+        $request->attributes->set('id', 1);
+        $response = $controller->update($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['agent']['is_pinned'])->toBeTrue();
+        expect($body['data']['agent']['is_archived'])->toBeTrue();
     });
 });
 
