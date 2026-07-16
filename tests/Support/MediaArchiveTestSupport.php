@@ -70,13 +70,44 @@ final class MediaArchiveTestSupport
 
     public static function buildConverterRegistry(): MediaConverterRegistry
     {
-        // Tests don't register real converters — the registry resolves
-        // to an empty list, so the conversion pipeline is a no-op.
+        // A minimal PSR-11 stub that materialises any class the
+        // discovery list points at via `new $id()`. Tests that want
+        // to exercise specific converters add them via MediaConverterDiscovery
+        // BEFORE calling this helper. Optional constructor parameters
+        // are left at their declared default; required parameters are
+        // intentionally fatal — tests must use Mockery for those.
         $stub = new class implements \Psr\Container\ContainerInterface {
-            public function get(string $id): mixed { throw new \RuntimeException("Not used in tests"); }
-            public function has(string $id): bool { return false; }
+            public function get(string $id): mixed
+            {
+                if (!class_exists($id)) {
+                    throw new \RuntimeException("Not registered: {$id}");
+                }
+                $reflection = new \ReflectionClass($id);
+                $constructor = $reflection->getConstructor();
+                if ($constructor === null) {
+                    return $reflection->newInstance();
+                }
+                $args = [];
+                foreach ($constructor->getParameters() as $param) {
+                    if ($param->isDefaultValueAvailable()) {
+                        $args[] = $param->getDefaultValue();
+                        continue;
+                    }
+                    if (\Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter::class === $id) {
+                        $args[] = \Mockery::mock(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class);
+                        continue;
+                    }
+                    throw new \RuntimeException("Cannot auto-construct {$id}: parameter {$param->getName()} has no default value.");
+                }
+                return $reflection->newInstanceArgs($args);
+            }
+            public function has(string $id): bool { return class_exists($id); }
         };
-        MediaConverterDiscovery::reset();
+        // Core converters are available in the application container; mirror
+        // that registration in the lightweight test container.
+        MediaConverterDiscovery::add(\Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter::class);
+        MediaConverterDiscovery::add(\Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter::class);
+
         return new MediaConverterRegistry($stub);
     }
 
