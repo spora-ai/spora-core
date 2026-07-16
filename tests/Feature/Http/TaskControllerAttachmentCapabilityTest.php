@@ -22,6 +22,7 @@ use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaIngestRequest;
+use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Symfony\Component\HttpFoundation\Request;
 use Tests\Support\MediaArchiveTestSupport;
 use Tests\Unit\Http\StubTaskService;
@@ -166,7 +167,7 @@ function buildCapabilityController(string $model, string $driverClass): array
     }
 
     $stub = new StubTaskService();
-    return [new TaskController($authService, $stub, $factory), $stub];
+    return [new TaskController($authService, $stub, new TaskMediaCapabilityService($factory)), $stub];
 }
 
 /**

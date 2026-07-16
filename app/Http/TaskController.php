@@ -8,15 +8,12 @@ use Carbon\Carbon;
 use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
-use Spora\Drivers\DriverFactory;
-use Spora\Models\Agent;
-use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
+use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\TaskServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Throwable;
 
 /**
  * Handles task listing, status updates, cancellation, and real-time SSE streaming.
@@ -30,7 +27,7 @@ final class TaskController
     public function __construct(
         private readonly AuthService $authService,
         private readonly TaskServiceInterface $taskService,
-        private readonly ?DriverFactory $driverFactory = null,
+        private readonly TaskMediaCapabilityService $mediaCapability,
     ) {}
 
     /**
@@ -48,7 +45,6 @@ final class TaskController
         $perPageRaw = $request->query->has('per_page') ? (int) $request->query->get('per_page') : null;
         $perPage = $perPageRaw !== null ? min(max(1, $perPageRaw), 100) : null;
 
-        // Compute server_time before querying to avoid gaps on next poll
         $serverTime = Carbon::now()->toIso8601String();
 
         // Agent ownership validation is done inside the service
@@ -94,118 +90,48 @@ final class TaskController
         $agentId = isset($body['agent_id']) ? (int) $body['agent_id'] : null;
         $maxSteps = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
         $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
-        $mediaIds = $this->parseMediaIds($body['media_ids'] ?? null);
+        $mediaIds = $this->mediaCapability->parseMediaIds($body['media_ids'] ?? null);
 
-        $result = null;
+        $validation = $this->validateStartTaskFields($prompt, $agentId);
+        if ($validation !== null) {
+            return $validation;
+        }
+
+        try {
+            $this->mediaCapability->ensureMediaCapabilityCompatible($agentId, $mediaIds);
+        } catch (MediaCapabilityMismatchException $e) {
+            return new JsonResponse(
+                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
+                Response::HTTP_BAD_REQUEST,
+            );
+        }
+
+        try {
+            $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
+            return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_CREATED);
+        } catch (InvalidArgumentException $e) {
+            return new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => $e->getMessage()]],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+    }
+
+    private function validateStartTaskFields(string $prompt, ?int $agentId): ?JsonResponse
+    {
         if ($prompt === '') {
-            $result = new JsonResponse(
+            return new JsonResponse(
                 ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'prompt is required.']],
                 Response::HTTP_UNPROCESSABLE_ENTITY,
             );
-        } elseif ($agentId === null) {
-            $result = new JsonResponse(
+        }
+        if ($agentId === null) {
+            return new JsonResponse(
                 ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'agent_id is required.']],
                 Response::HTTP_UNPROCESSABLE_ENTITY,
             );
-        } else {
-            try {
-                $this->ensureMediaCapabilityCompatible($agentId, $mediaIds);
-            } catch (MediaCapabilityMismatchException $e) {
-                return new JsonResponse(
-                    ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
-                    Response::HTTP_BAD_REQUEST,
-                );
-            }
-            try {
-                $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
-                $result = new JsonResponse(
-                    ['data' => ['task' => $task]],
-                    Response::HTTP_CREATED,
-                );
-            } catch (InvalidArgumentException $e) {
-                $result = new JsonResponse(
-                    ['error' => ['code' => 'NOT_FOUND', 'message' => $e->getMessage()]],
-                    Response::HTTP_NOT_FOUND,
-                );
-            }
         }
-
-        return $result;
-    }
-
-    /** @return list<string> */
-    private function parseMediaIds(mixed $raw): array
-    {
-        if (!is_array($raw)) {
-            return [];
-        }
-        $out = [];
-        foreach ($raw as $id) {
-            if (is_string($id) && $id !== '') {
-                $out[] = $id;
-            }
-        }
-        return $out;
-    }
-
-    /**
-     * Reject an image attachment when the agent's LLM cannot consume image
-     * blocks. Plan §8.3 / §12 require a 400 at the request boundary rather
-     * than a silent image-strip during the first tick. {@see MessageHistoryBuilder}
-     * still strips defensively — this pre-flight gives the caller a useful error.
-     *
-     * @param list<string> $mediaIds
-     * @throws MediaCapabilityMismatchException
-     */
-    private function ensureMediaCapabilityCompatible(int $agentId, array $mediaIds): void
-    {
-        if ($mediaIds === [] || $this->driverFactory === null) {
-            return;
-        }
-        if (!$this->mediaIdsIncludeImage($mediaIds)) {
-            return;
-        }
-        if (!$this->agentSupportsImages($agentId)) {
-            throw new MediaCapabilityMismatchException(
-                'One or more attachments are images but the agent\'s LLM does not support image input.',
-            );
-        }
-    }
-
-    /**
-     * @param list<string> $mediaIds
-     */
-    private function mediaIdsIncludeImage(array $mediaIds): bool
-    {
-        foreach ($mediaIds as $mid) {
-            if ($mid === '') {
-                continue;
-            }
-            $asset = MediaAsset::query()->find($mid);
-            if ($asset === null) {
-                continue;
-            }
-            if (is_string($asset->mime_type) && str_starts_with(strtolower($asset->mime_type), 'image/')) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function agentSupportsImages(int $agentId): bool
-    {
-        $agent = Agent::query()->find($agentId);
-        if ($agent === null) {
-            return false;
-        }
-        try {
-            $driver = $this->driverFactory->makeFromAgent($agent);
-        } catch (Throwable) {
-            return false;
-        }
-
-        return $driver->supportsImageInput();
+        return null;
     }
 
     /**
@@ -255,7 +181,12 @@ final class TaskController
             return $batch;
         }
 
-        return $this->performApproval($taskId, $userId, $batch);
+        try {
+            $task = $this->taskService->approveTask($taskId, $userId, $batch);
+            return new JsonResponse(['data' => ['task' => $task]]);
+        } catch (InvalidArgumentException $e) {
+            return $this->errorForException($e);
+        }
     }
 
     private function invalidJsonResponse(): JsonResponse
@@ -331,33 +262,6 @@ final class TaskController
     }
 
     /**
-     * @param list<array<string, mixed>> $batch
-     */
-    private function performApproval(int $taskId, int $userId, array $batch): JsonResponse
-    {
-        try {
-            $task = $this->taskService->approveTask($taskId, $userId, $batch);
-            return new JsonResponse(['data' => ['task' => $task]]);
-        } catch (InvalidArgumentException $e) {
-            return $this->approvalErrorResponse($e);
-        }
-    }
-
-    private function approvalErrorResponse(InvalidArgumentException $e): JsonResponse
-    {
-        if ($e->getMessage() === self::ERR_TASK_NOT_FOUND) {
-            return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
-                Response::HTTP_NOT_FOUND,
-            );
-        }
-        return new JsonResponse(
-            ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
-            Response::HTTP_CONFLICT,
-        );
-    }
-
-    /**
      * POST /api/v1/tasks/{taskId}/reject
      */
     public function reject(Request $request): JsonResponse
@@ -376,23 +280,12 @@ final class TaskController
 
         $reason = trim((string) ($body['reason'] ?? 'No reason provided.'));
 
-        $result = null;
         try {
             $task = $this->taskService->rejectTask($taskId, $userId, $reason);
-            $result = new JsonResponse(['data' => ['task' => $task]]);
+            return new JsonResponse(['data' => ['task' => $task]]);
         } catch (InvalidArgumentException $e) {
-            $result = $e->getMessage() === self::ERR_TASK_NOT_FOUND
-                ? new JsonResponse(
-                    ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
-                    Response::HTTP_NOT_FOUND,
-                )
-                : new JsonResponse(
-                    ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
-                    Response::HTTP_CONFLICT,
-                );
+            return $this->errorForException($e);
         }
-
-        return $result;
     }
 
     /**
@@ -427,16 +320,7 @@ final class TaskController
         try {
             $task = $this->taskService->retryTask($taskId, $userId);
         } catch (InvalidArgumentException $e) {
-            if ($e->getMessage() === self::ERR_TASK_NOT_FOUND) {
-                return new JsonResponse(
-                    ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
-                    Response::HTTP_NOT_FOUND,
-                );
-            }
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
-                Response::HTTP_CONFLICT,
-            );
+            return $this->errorForException($e);
         }
 
         return new JsonResponse(
@@ -509,7 +393,7 @@ final class TaskController
             'result' => null,
             'prompt' => $prompt,
             'additionalSteps' => isset($body['additional_steps']) ? $body['additional_steps'] : null,
-            'mediaIds' => $this->parseMediaIds($body['media_ids'] ?? null),
+            'mediaIds' => $this->mediaCapability->parseMediaIds($body['media_ids'] ?? null),
         ];
     }
 
@@ -525,37 +409,48 @@ final class TaskController
     ): JsonResponse {
         $existing = $this->taskService->getTask($taskId, $userId);
         if ($existing === null) {
-            return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
-                Response::HTTP_NOT_FOUND,
-            );
+            return $this->notFoundResponse();
         }
+
         try {
-            $this->ensureMediaCapabilityCompatible((int) $existing['agent_id'], $mediaIds);
+            $this->mediaCapability->ensureMediaCapabilityCompatible($existing['agent_id'], $mediaIds);
         } catch (MediaCapabilityMismatchException $e) {
             return new JsonResponse(
                 ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
                 Response::HTTP_BAD_REQUEST,
             );
         }
+
         try {
             $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
-
-            return new JsonResponse(
-                ['data' => ['task' => $task]],
-                Response::HTTP_OK,
-            );
+            return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_OK);
         } catch (InvalidArgumentException $e) {
-            return $e->getMessage() === self::ERR_TASK_NOT_FOUND
-                ? new JsonResponse(
-                    ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
-                    Response::HTTP_NOT_FOUND,
-                )
-                : new JsonResponse(
-                    ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
-                    Response::HTTP_CONFLICT,
-                );
+            return $this->errorForException($e);
         }
+    }
+
+    /**
+     * Map a service-layer {@see InvalidArgumentException} to the JSON
+     * error response the API contract uses for "task not found" and
+     * "invalid state" failures.
+     */
+    private function errorForException(InvalidArgumentException $e): JsonResponse
+    {
+        if ($e->getMessage() === self::ERR_TASK_NOT_FOUND) {
+            return $this->notFoundResponse();
+        }
+        return new JsonResponse(
+            ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
+            Response::HTTP_CONFLICT,
+        );
+    }
+
+    private function notFoundResponse(): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
+            Response::HTTP_NOT_FOUND,
+        );
     }
 
     /**
@@ -573,16 +468,7 @@ final class TaskController
         try {
             $this->taskService->cancelRetryChain($taskId, $userId);
         } catch (InvalidArgumentException $e) {
-            if ($e->getMessage() === self::ERR_TASK_NOT_FOUND) {
-                return new JsonResponse(
-                    ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
-                    Response::HTTP_NOT_FOUND,
-                );
-            }
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
-                Response::HTTP_CONFLICT,
-            );
+            return $this->errorForException($e);
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);
