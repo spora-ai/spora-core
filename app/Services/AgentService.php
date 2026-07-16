@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-use DateTimeInterface;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use ReflectionClass;
 use Spora\Models\Agent;
@@ -44,6 +43,9 @@ final class AgentService implements AgentServiceInterface
 
     public function getAgentsForUser(int $userId): array
     {
+        // Dashboard ordering (pinned-first, archived-hidden) lives in
+        // spora-frontend PR #52; the backend stays filter-free so the same
+        // payload feeds every consumer.
         return Agent::where('user_id', $userId)
             ->orderByDesc('created_at')
             ->get()
@@ -315,27 +317,6 @@ final class AgentService implements AgentServiceInterface
 
     private function agentResource(Agent $agent): array
     {
-        $tools = AgentTool::where('agent_id', $agent->id)->get();
-
-        return [
-            'id'                   => (int) $agent->id,
-            'name'                 => $agent->name,
-            'description'          => $agent->description,
-            'system_prompt'        => $agent->system_prompt,
-            'llm_driver_config_id' => $agent->llm_driver_config_id,
-            'max_steps'            => (int) $agent->max_steps,
-            'is_active'            => (bool) $agent->is_active,
-            'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),
-            'max_retries'          => (int) ($agent->max_retries ?? 0),
-            'is_pinned'            => (bool) ($agent->is_pinned ?? false),
-            'is_archived'          => (bool) ($agent->is_archived ?? false),
-            'created_at'           => $agent->created_at !== null
-                ? $agent->created_at->format(DateTimeInterface::ATOM)
-                : null,
-            'tools' => $tools->map(static fn(AgentTool $t) => [
-                'tool_class' => $t->tool_class,
-                'tool_name'  => $t->tool_name,
-            ])->values()->toArray(),
-        ];
+        return AgentResource::toArray($agent);
     }
 }

@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use DateTimeInterface;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\Agent;
-use Spora\Models\AgentTool;
+use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -184,29 +183,6 @@ final class AgentController
      */
     private function agentResource(Agent $agent): array
     {
-        /** @var \Illuminate\Database\Eloquent\Collection<int,AgentTool> $tools */
-        $tools = $agent->agentTools;
-
-        return [
-            'id'                   => (int) $agent->id,
-            'name'                 => $agent->name,
-            'description'          => $agent->description,
-            'system_prompt'        => $agent->system_prompt,
-            'llm_driver_config_id' => $agent->llm_driver_config_id,
-            'max_steps'            => (int) $agent->max_steps,
-            'is_active'            => (bool) $agent->is_active,
-            'allow_followup'       => (bool) $agent->allow_followup,
-            'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),
-            'max_retries'          => (int) ($agent->max_retries ?? 0),
-            'is_pinned'            => (bool) ($agent->is_pinned ?? false),
-            'is_archived'          => (bool) ($agent->is_archived ?? false),
-            'created_at'           => $agent->created_at !== null
-                ? $agent->created_at->format(DateTimeInterface::ATOM)
-                : null,
-            'tools' => $tools->map(static fn(AgentTool $t) => [
-                'tool_class' => $t->tool_class,
-                'tool_name'  => $t->tool_name,
-            ])->values()->toArray(),
-        ];
+        return AgentResource::toArray($agent);
     }
 }
