@@ -135,31 +135,29 @@ final class MessageHistoryBuilder
      */
     private function messageFromHistoryRow(TaskHistory $row): array
     {
+        $message = [
+            'role'    => $row->role,
+            'content' => $row->content,
+        ];
+
         if ($row->role === 'tool') {
-            return [
+            $message = [
                 'role'         => 'tool',
                 'tool_call_id' => $row->tool_call_id,
                 'name'         => $row->tool_name,
                 'content'      => $row->content,
             ];
-        }
-
-        if ($row->role === 'assistant' && $row->tool_call_payload !== null) {
-            return [
+        } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
+            $message = [
                 'role'       => 'assistant',
                 'content'    => null,
                 'tool_calls' => $this->decodeToolCallPayload($row->tool_call_payload),
             ];
+        } elseif ($row->role === 'attachment' && is_array($row->attachments) && $row->attachments !== []) {
+            $message = $this->attachmentMessage($row);
         }
 
-        if ($row->role === 'attachment' && is_array($row->attachments) && $row->attachments !== []) {
-            return $this->attachmentMessage($row);
-        }
-
-        return [
-            'role'    => $row->role,
-            'content' => $row->content,
-        ];
+        return $message;
     }
 
     /**

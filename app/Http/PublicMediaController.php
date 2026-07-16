@@ -39,23 +39,29 @@ final class PublicMediaController
 
     public function show(string $id, Request $request): Response
     {
-        if (!$this->isUuid($id)) {
-            return $this->notFound();
-        }
-        $token = (string) $request->query->get('token', '');
-        if ($token === '') {
-            return $this->notFound();
-        }
-
-        $asset = MediaAsset::query()->find($id);
+        $asset = $this->findSharedAsset($id, $request);
         if ($asset === null) {
-            return $this->notFound();
-        }
-        if (!is_string($asset->public_access_token) || !hash_equals($asset->public_access_token, $token)) {
             return $this->notFound();
         }
 
         return $this->stream($asset);
+    }
+
+    private function findSharedAsset(string $id, Request $request): ?MediaAsset
+    {
+        $asset = null;
+        $token = (string) $request->query->get('token', '');
+        if ($this->isUuid($id) && $token !== '') {
+            $candidate = MediaAsset::query()->find($id);
+            if ($candidate !== null
+                && is_string($candidate->public_access_token)
+                && hash_equals($candidate->public_access_token, $token)
+            ) {
+                $asset = $candidate;
+            }
+        }
+
+        return $asset;
     }
 
     private function stream(MediaAsset $asset): Response
@@ -64,7 +70,7 @@ final class PublicMediaController
             $payload = match ($asset->storage_mode) {
                 'data_url' => $this->database->read($asset),
                 'local'    => $this->local->readFromAsset($asset),
-                default    => throw new AssetStorageException("Public media requires local or data_url storage"),
+                default    => throw new AssetStorageException('Public media requires local or data_url storage'),
             };
         } catch (AssetStorageException) {
             return $this->notFound();
@@ -77,14 +83,13 @@ final class PublicMediaController
 
         if (array_key_exists('bytes', $payload)) {
             $bytes = (string) $payload['bytes'];
-            $response = new StreamedResponse(static function () use ($bytes): void {
+            return new StreamedResponse(static function () use ($bytes): void {
                 echo $bytes;
             }, 200, [
                 'Content-Type'   => $mime,
                 'Content-Length' => (string) strlen($bytes),
                 'Cache-Control'  => 'private, max-age=86400',
             ]);
-            return $response;
         }
 
         $path = (string) $payload['path'];

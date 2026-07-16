@@ -4,13 +4,10 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use DateTimeImmutable;
-use Exception;
 use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
-use Spora\Services\MediaArchive\ListMediaQuery;
+use Spora\Services\MediaArchive\ListMediaQueryBuilder;
 use Spora\Services\MediaArchive\MediaArchiveService;
-use Spora\Services\MediaArchive\MediaType;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -41,7 +38,7 @@ final class MediaArchiveController
 
     public function index(Request $request): JsonResponse
     {
-        $query = $this->buildListQuery($request);
+        $query = ListMediaQueryBuilder::fromRequest($request, $this->auth->currentUserId());
         $page  = $this->mediaArchive->list($query);
 
         return new JsonResponse([
@@ -70,6 +67,28 @@ final class MediaArchiveController
 
     public function update(string $id, Request $request): JsonResponse
     {
+        $editable = $this->findEditableAsset($id);
+        if ($editable instanceof JsonResponse) {
+            return $editable;
+        }
+
+        $body = $this->jsonBody($request);
+        $validation = $this->validateUpdatableFields($body);
+        if ($validation instanceof JsonResponse) {
+            return $validation;
+        }
+
+        $dirty = $this->extractUpdatableFields($body);
+        if ($dirty !== []) {
+            $editable->fill($dirty);
+            $editable->save();
+        }
+
+        return new JsonResponse(['data' => self::serialize($editable, $this->requestHost($request))]);
+    }
+
+    private function findEditableAsset(string $id): MediaAsset|JsonResponse
+    {
         $asset = $this->mediaArchive->find($id);
         if ($asset === null) {
             return $this->notFound();
@@ -78,21 +97,9 @@ final class MediaArchiveController
             return $this->forbidden();
         }
 
-        $body = $this->jsonBody($request);
-        $dirty = $this->extractUpdatableFields($body);
-
-        $validation = $this->validateUpdatableFields($body);
-        if ($validation instanceof JsonResponse) {
-            return $validation;
-        }
-
-        if ($dirty !== []) {
-            $asset->fill($dirty);
-            $asset->save();
-        }
-
-        return new JsonResponse(['data' => self::serialize($asset, $this->requestHost($request))]);
+        return $asset;
     }
+
 
     /**
      * @param array<string, mixed> $body
@@ -118,25 +125,42 @@ final class MediaArchiveController
      */
     private function validateUpdatableFields(array $body): ?JsonResponse
     {
+        $message = null;
         if (array_key_exists('filename', $body)) {
             $filename = $body['filename'];
             if ($filename !== null && (!is_string($filename) || strlen($filename) > 255)) {
-                return $this->badRequest('filename must be a string up to 255 characters.');
+                $message = 'filename must be a string up to 255 characters.';
             }
         }
-        if (array_key_exists('tags', $body) && $body['tags'] !== null && !is_array($body['tags'])) {
-            return $this->badRequest('tags must be an array of strings.');
+        if ($message === null
+            && array_key_exists('tags', $body)
+            && $body['tags'] !== null
+            && !is_array($body['tags'])
+        ) {
+            $message = 'tags must be an array of strings.';
         }
-        if (array_key_exists('metadata', $body) && $body['metadata'] !== null && !is_array($body['metadata'])) {
-            return $this->badRequest('metadata must be an object.');
+        if ($message === null
+            && array_key_exists('metadata', $body)
+            && $body['metadata'] !== null
+            && !is_array($body['metadata'])
+        ) {
+            $message = 'metadata must be an object.';
         }
-        if (array_key_exists('prompt', $body) && $body['prompt'] !== null && !is_string($body['prompt'])) {
-            return $this->badRequest('prompt must be a string.');
+        if ($message === null
+            && array_key_exists('prompt', $body)
+            && $body['prompt'] !== null
+            && !is_string($body['prompt'])
+        ) {
+            $message = 'prompt must be a string.';
         }
-        if (array_key_exists('public_access_enabled', $body) && !is_bool($body['public_access_enabled'])) {
-            return $this->badRequest('public_access_enabled must be a boolean.');
+        if ($message === null
+            && array_key_exists('public_access_enabled', $body)
+            && !is_bool($body['public_access_enabled'])
+        ) {
+            $message = 'public_access_enabled must be a boolean.';
         }
-        return null;
+
+        return $message === null ? null : $this->badRequest($message);
     }
 
     public function destroy(string $id): JsonResponse
@@ -200,76 +224,13 @@ final class MediaArchiveController
         return $request->getSchemeAndHttpHost();
     }
 
-    private function buildListQuery(Request $request): ListMediaQuery
-    {
-        $params = $request->query;
-
-        return new ListMediaQuery(
-            mediaType: $this->parseMediaType($params->get('type')),
-            agentId: $this->parseAgentId($params->get('agent_id')),
-            userId: $params->get('scope') === 'mine' ? $this->auth->currentUserId() : null,
-            pluginSlug: $this->parseString($params->get('plugin_slug')),
-            toolName: $this->parseString($params->get('tool_name')),
-            from: $this->parseDate($params->get('from')),
-            to: $this->parseDate($params->get('to')),
-            search: $this->parseString($params->get('q')),
-            sort: $this->parseSort($params->get('sort')),
-            page: $this->parseInt($params->get('page'), 1),
-            perPage: $this->parseInt($params->get('per_page'), ListMediaQuery::PER_PAGE_DEFAULT),
-        );
-    }
-
-    private function parseMediaType(mixed $raw): ?MediaType
-    {
-        if (!is_string($raw) || $raw === '') {
-            return null;
-        }
-
-        return MediaType::tryFrom(strtolower($raw));
-    }
-
-    private function parseDate(mixed $raw): ?DateTimeImmutable
-    {
-        if (!is_string($raw) || $raw === '') {
-            return null;
-        }
-        try {
-            return new DateTimeImmutable($raw);
-        } catch (Exception) {
-            return null;
-        }
-    }
-
-    private function parseAgentId(mixed $raw): ?int
-    {
-        if (!is_string($raw) || $raw === '' || !ctype_digit($raw)) {
-            return null;
-        }
-
-        return (int) $raw;
-    }
-
-    private function parseSort(mixed $raw): string
-    {
-        return is_string($raw) ? $raw : ListMediaQuery::SORT_CREATED_DESC;
-    }
-
-    private function parseString(mixed $raw): ?string
-    {
-        return is_string($raw) ? $raw : null;
-    }
-
-    private function parseInt(mixed $raw, int $default): int
-    {
-        return is_string($raw) && ctype_digit($raw) ? (int) $raw : $default;
-    }
 
     /**
      * @return array<string, mixed>
      */
     public static function serialize(MediaAsset $asset, ?string $host = null): array
     {
-        $row = [
+        return [
             'id'                => $asset->id,
             'agent_id'          => $asset->agent_id,
             'task_id'           => $asset->task_id,
@@ -297,7 +258,6 @@ final class MediaArchiveController
             'created_at'        => $asset->created_at?->toIso8601String(),
             'updated_at'        => $asset->updated_at?->toIso8601String(),
         ];
-        return $row;
     }
 
     private static function buildPublicUrl(MediaAsset $asset, ?string $host): ?string

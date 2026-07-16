@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace Spora\Tools;
 
 use Spora\Auth\AuthService;
+use Spora\Models\MediaAsset;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\ValueObjects\ToolResult;
-use Spora\Models\MediaAsset;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -60,6 +60,23 @@ final class GetPublicMediaUrlTool extends AbstractTool
 
     public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
+        $parsed = $this->parseArguments($arguments);
+        if ($parsed instanceof ToolResult) {
+            return $parsed;
+        }
+
+        [$mediaId, $action] = $parsed;
+        $asset = $this->loadOwnedAsset($mediaId, $userId);
+        if ($asset instanceof ToolResult) {
+            return $asset;
+        }
+
+        return $this->resultForAction($asset, $action);
+    }
+
+    /** @return array{0: string, 1: string}|ToolResult */
+    private function parseArguments(array $arguments): array|ToolResult
+    {
         $mediaId = trim((string) ($arguments['media_id'] ?? ''));
         if ($mediaId === '') {
             return ToolResult::fail('media_id is required.');
@@ -69,18 +86,30 @@ final class GetPublicMediaUrlTool extends AbstractTool
             return ToolResult::fail('action must be "get" or "share".');
         }
 
+        return [$mediaId, $action];
+    }
+
+    /** @return MediaAsset|ToolResult */
+    private function loadOwnedAsset(string $mediaId, ?int $userId): MediaAsset|ToolResult
+    {
         $asset = MediaAsset::query()->find($mediaId);
         if ($asset === null) {
             return ToolResult::fail('Media asset not found.');
         }
+
         $effectiveUserId = $userId ?? $this->auth->currentUserId();
+        $error = null;
         if ($effectiveUserId === null) {
-            return ToolResult::fail('You must be logged in to use this tool.');
-        }
-        if (!$this->auth->isAdmin() && (int) $asset->user_id !== $effectiveUserId) {
-            return ToolResult::fail('You do not own this media asset.');
+            $error = ToolResult::fail('You must be logged in to use this tool.');
+        } elseif (!$this->auth->isAdmin() && (int) $asset->user_id !== $effectiveUserId) {
+            $error = ToolResult::fail('You do not own this media asset.');
         }
 
+        return $error ?? $asset;
+    }
+
+    private function resultForAction(MediaAsset $asset, string $action): ToolResult
+    {
         if ($action === 'share') {
             if ($asset->public_access_token === null || $asset->public_access_token === '') {
                 $asset->public_access_token = bin2hex(random_bytes(32));
@@ -89,10 +118,10 @@ final class GetPublicMediaUrlTool extends AbstractTool
             return ToolResult::ok('Public sharing enabled. URL: ' . $this->publicUrl($asset));
         }
 
-        // action === 'get'
         if ($asset->public_access_token === null || $asset->public_access_token === '') {
             return ToolResult::fail('This media is not shared publicly. Ask the user to enable sharing in the Media Archive, or call this tool with action="share" (requires approval).');
         }
+
         return ToolResult::ok('Public URL: ' . $this->publicUrl($asset));
     }
 

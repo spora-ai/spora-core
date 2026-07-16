@@ -247,12 +247,22 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     private static function contentBlockToPart(array $block): ?array
     {
         $type = $block['type'] ?? null;
+        $result = null;
         if ($type === 'text') {
-            return ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
+            $result = ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
+        } elseif ($type === 'image') {
+            $result = self::imageBlockToPart($block);
         }
-        if ($type !== 'image') {
-            return null;
-        }
+
+        return $result;
+    }
+
+    /**
+     * @param array<string, mixed> $block
+     * @return array<string, mixed>|null
+     */
+    private static function imageBlockToPart(array $block): ?array
+    {
         if (isset($block['base64']) && is_string($block['base64']) && $block['base64'] !== '' && isset($block['mediaType'])) {
             return [
                 'type'     => 'image_url',
@@ -265,6 +275,7 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
                 'image_url' => ['url' => $block['url']],
             ];
         }
+
         return null;
     }
 }

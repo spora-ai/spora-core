@@ -404,52 +404,7 @@ final class ContainerDefinitions
                 return HttpClient::create();
             },
 
-            // AssetStore: binary blobs produced by tools (audio, video,
-            // images). Mode dispatched from `asset_store.mode` config; the
-            // concrete impls below own the disk and HTTP concerns, this
-            // entry just picks the strategy.
-            DataUrlAssetStore::class => static function (ContainerInterface $c): DataUrlAssetStore {
-                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 50 * 1024 * 1024);
-                return new DataUrlAssetStore($max);
-            },
-
-            LocalAssetStore::class => static function (ContainerInterface $c): LocalAssetStore {
-                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 50 * 1024 * 1024);
-                return new LocalAssetStore(
-                    $c->get(Paths::class),
-                    $c->get(SecurityManagerInterface::class),
-                    $max,
-                );
-            },
-
-            AssetStore::class => static function (ContainerInterface $c): AssetStore {
-                $cfg  = $c->get('config')['asset_store'] ?? [];
-                $mode = is_string($cfg['mode'] ?? null) ? $cfg['mode'] : 'auto';
-                return match ($mode) {
-                    'local'    => $c->get(LocalAssetStore::class),
-                    'data_url' => $c->get(DatabaseAssetStore::class),
-                    'auto'     => new AutoAssetStore(
-                        $c->get(DatabaseAssetStore::class),
-                        $c->get(LocalAssetStore::class),
-                        (int) ($cfg['auto_threshold_bytes'] ?? 1_048_576),
-                    ),
-                    default    => throw new InvalidArgumentException(
-                        "Unknown asset_store.mode: {$mode}",
-                    ),
-                };
-            },
-
-            // Concrete DB-backed store, bound by name so the AssetController
-            // can read BLOBs out of `media_assets.payload` for the
-            // `/api/v1/assets/<uuid>` URL without going through the
-            // AssetStore composite. The default 64 KiB is MySQL/MariaDB's
-            // stock BLOB ceiling — operators with multi-MiB media should
-            // set `asset_store.mode = "local"` so the ceiling is
-            // filesystem-bound instead.
-            DatabaseAssetStore::class => static function (ContainerInterface $c): DatabaseAssetStore {
-                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 64 * 1024);
-                return new DatabaseAssetStore($max);
-            },
+            ...self::assetStoreDefinitions(),
 
             // MediaArchive service stack — see app/Services/MediaArchive.
             // Config block lives under the `media_archive` key above.
@@ -531,6 +486,52 @@ final class ContainerDefinitions
                         $c->get(PluginLoader::class)->toolClasses(),
                     ))),
                 );
+            },
+        ];
+    }
+
+    /**
+     * Definitions for the selectable binary asset storage strategies.
+     *
+     * @return array<string, callable>
+     */
+    private static function assetStoreDefinitions(): array
+    {
+        return [
+            DataUrlAssetStore::class => static function (ContainerInterface $c): DataUrlAssetStore {
+                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 50 * 1024 * 1024);
+                return new DataUrlAssetStore($max);
+            },
+
+            LocalAssetStore::class => static function (ContainerInterface $c): LocalAssetStore {
+                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 50 * 1024 * 1024);
+                return new LocalAssetStore(
+                    $c->get(Paths::class),
+                    $c->get(SecurityManagerInterface::class),
+                    $max,
+                );
+            },
+
+            AssetStore::class => static function (ContainerInterface $c): AssetStore {
+                $cfg  = $c->get('config')['asset_store'] ?? [];
+                $mode = is_string($cfg['mode'] ?? null) ? $cfg['mode'] : 'auto';
+                return match ($mode) {
+                    'local'    => $c->get(LocalAssetStore::class),
+                    'data_url' => $c->get(DatabaseAssetStore::class),
+                    'auto'     => new AutoAssetStore(
+                        $c->get(DatabaseAssetStore::class),
+                        $c->get(LocalAssetStore::class),
+                        (int) ($cfg['auto_threshold_bytes'] ?? 1_048_576),
+                    ),
+                    default    => throw new InvalidArgumentException(
+                        "Unknown asset_store.mode: {$mode}",
+                    ),
+                };
+            },
+
+            DatabaseAssetStore::class => static function (ContainerInterface $c): DatabaseAssetStore {
+                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 64 * 1024);
+                return new DatabaseAssetStore($max);
             },
         ];
     }
@@ -820,6 +821,7 @@ final class ContainerDefinitions
                     $c->get(MediaArchiveService::class),
                     $c->get(MediaAllowedTypesService::class),
                     $c->get(\Spora\Auth\AuthService::class),
+                    $c->get(MimeSniffer::class),
                 );
             },
 

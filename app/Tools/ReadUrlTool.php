@@ -6,6 +6,7 @@ namespace Spora\Tools;
 
 use League\HTMLToMarkdown\HtmlConverter;
 use Psr\Log\LoggerInterface;
+use Spora\Services\MediaArchive\MediaConverterInterface;
 use Spora\Services\MediaArchive\MediaConverterRegistry;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
@@ -170,6 +171,21 @@ final class ReadUrlTool extends AbstractTool
      */
     private function processFetchedPdfContent(string $url, array $settings): ToolResult
     {
+        $converter = $this->resolvePdfConverter($url);
+        if ($converter instanceof ToolResult) {
+            return $converter;
+        }
+
+        $payload = $this->fetchPdfBytes($url, $settings);
+        if ($payload instanceof ToolResult) {
+            return $payload;
+        }
+
+        return $this->convertPdf($converter, $payload, $url);
+    }
+
+    private function resolvePdfConverter(string $url): MediaConverterInterface|ToolResult
+    {
         if ($this->converters === null) {
             return new ToolResult(false, 'PDF fetching is unavailable: no converter registry is wired.');
         }
@@ -178,6 +194,12 @@ final class ReadUrlTool extends AbstractTool
             return new ToolResult(false, 'No PDF converter is registered. Install a plugin that provides one.');
         }
 
+        return $converter;
+    }
+
+    /** @param array<string, mixed> $settings */
+    private function fetchPdfBytes(string $url, array $settings): string|ToolResult
+    {
         $timeout = $this->effectiveTimeout($settings);
         $this->logger?->debug('ReadUrlTool: fetching PDF', ['url' => $url, 'timeout' => $timeout]);
 
@@ -202,6 +224,11 @@ final class ReadUrlTool extends AbstractTool
             ));
         }
 
+        return $bytes;
+    }
+
+    private function convertPdf(MediaConverterInterface $converter, string $bytes, string $url): ToolResult
+    {
         try {
             $markdown = $converter->toMarkdown($bytes, self::PDF_MIME, basename(parse_url($url, PHP_URL_PATH) ?? null));
         } catch (Throwable $e) {
@@ -211,6 +238,7 @@ final class ReadUrlTool extends AbstractTool
         if (trim($markdown) === '') {
             return new ToolResult(false, 'URL was fetched but no readable text was extracted from the PDF.');
         }
+
         return new ToolResult(true, "Fetched PDF Content (Markdown):\n\n" . $this->truncate($markdown));
     }
 

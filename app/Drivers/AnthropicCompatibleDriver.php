@@ -326,12 +326,22 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
     private function contentBlockToAnthropic(array $block): ?array
     {
         $type = $block['type'] ?? null;
+        $result = null;
         if ($type === 'text') {
-            return ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
+            $result = ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
+        } elseif ($type === 'image') {
+            $result = $this->imageBlockToAnthropic($block);
         }
-        if ($type !== 'image') {
-            return null;
-        }
+
+        return $result;
+    }
+
+    /**
+     * @param array<string, mixed> $block
+     * @return array<string, mixed>|null
+     */
+    private function imageBlockToAnthropic(array $block): ?array
+    {
         if (isset($block['base64']) && is_string($block['base64']) && $block['base64'] !== '' && isset($block['mediaType'])) {
             return [
                 'type'   => 'image',
@@ -348,6 +358,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
                 'source' => ['type' => 'url', 'url' => $block['url']],
             ];
         }
+
         return null;
     }
 

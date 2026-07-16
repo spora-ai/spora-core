@@ -8,6 +8,8 @@ use Spora\Auth\AuthService;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaIngestRequest;
+use Spora\Services\MediaArchive\MimeSniffer;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -32,61 +34,39 @@ final class MediaUploadController
         private readonly MediaArchiveService $mediaArchive,
         private readonly MediaAllowedTypesService $allowedTypes,
         private readonly AuthService $auth,
+        private readonly MimeSniffer $sniffer,
     ) {}
 
     public function store(Request $request): JsonResponse
     {
-        $userId = $this->auth->currentUserId();
-        if ($userId === null) {
-            return $this->error(Response::HTTP_UNAUTHORIZED, 'UNAUTHORIZED', 'You must be logged in to upload.');
+        $validated = $this->validateUpload($request);
+        if ($validated instanceof JsonResponse) {
+            return $validated;
         }
 
-        $file = $request->files->get('file');
-        if ($file === null) {
-            return $this->error(Response::HTTP_BAD_REQUEST, 'BAD_REQUEST', 'No file uploaded under the "file" field.');
-        }
-        if (!$file->isValid()) {
-            return $this->error(Response::HTTP_BAD_REQUEST, 'BAD_REQUEST', 'Upload failed: ' . $file->getErrorMessage());
-        }
+        [$file, $bytes, $userId] = $validated;
+        $sniffedMime = $this->sniffer->sniffFromBytes($bytes);
 
-        $bytes = file_get_contents($file->getPathname());
-        if ($bytes === false) {
-            return $this->error(Response::HTTP_INTERNAL_SERVER_ERROR, 'READ_FAILED', 'Could not read uploaded file.');
-        }
-
-        $clientMime = (string) $file->getClientMimeType();
-        $filename    = (string) $file->getClientOriginalName();
-
-        // Validate against the dynamic allowlist. The agent context is
-        // optional; pass `agent_id` (string or int) to enable image MIME
-        // types when the agent's LLM supports them.
+        // The allowlist must use the sniffed MIME, never the client header.
         $agentIdRaw = $request->request->get('agent_id');
-        $agentId    = is_string($agentIdRaw) && ctype_digit($agentIdRaw) ? (int) $agentIdRaw : null;
-
-        // Use the client MIME as a first hint, then defer to the archive
-        // service's own sniffFromBytes. We only need the allowlist check
-        // here to give the user a clean 415 before we even start ingest.
-        $allowMime = $clientMime !== '' ? $clientMime : 'application/octet-stream';
-        if (!$this->allowedTypes->isAllowed($allowMime, $agentId)) {
+        $agentId = is_string($agentIdRaw) && ctype_digit($agentIdRaw) ? (int) $agentIdRaw : null;
+        if (!$this->allowedTypes->isAllowed($sniffedMime, $agentId)) {
             return $this->error(
                 Response::HTTP_UNSUPPORTED_MEDIA_TYPE,
                 'UNSUPPORTED_MEDIA_TYPE',
-                sprintf('MIME type "%s" is not in the upload allowlist.', $allowMime),
+                sprintf('MIME type "%s" is not in the upload allowlist.', $sniffedMime),
             );
         }
 
-        $tagsRaw     = $request->request->get('tags');
-        $metadataRaw = $request->request->get('metadata');
-        $prompt      = $request->request->get('prompt');
-
+        $prompt = $request->request->get('prompt');
         $asset = $this->mediaArchive->ingest(new MediaIngestRequest(
             bytes: $bytes,
-            mime: $allowMime,
-            filename: $filename !== '' ? $filename : null,
+            mime: $sniffedMime,
+            filename: $file->getClientOriginalName() !== '' ? $file->getClientOriginalName() : null,
             userId: $userId,
             prompt: is_string($prompt) ? $prompt : null,
-            tags: $this->parseJsonArray($tagsRaw),
-            metadata: $this->parseJsonObject($metadataRaw),
+            tags: $this->parseJsonArray($request->request->get('tags')),
+            metadata: $this->parseJsonObject($request->request->get('metadata')),
             uploadSource: 'upload',
         ));
 
@@ -94,6 +74,45 @@ final class MediaUploadController
             ['data' => MediaArchiveController::serialize($asset, $request->getSchemeAndHttpHost())],
             Response::HTTP_CREATED,
         );
+    }
+
+    /**
+     * @return array{0: UploadedFile, 1: string, 2: int}|JsonResponse
+     */
+    private function validateUpload(Request $request): array|JsonResponse
+    {
+        $userId = $this->auth->currentUserId();
+        $file = $request->files->get('file');
+        $error = $this->validateUploadError($userId, $file);
+
+        if ($error instanceof JsonResponse) {
+            return $error;
+        }
+
+        assert($file instanceof UploadedFile);
+        $bytes = file_get_contents($file->getPathname());
+        if ($bytes === false) {
+            return $this->error(Response::HTTP_INTERNAL_SERVER_ERROR, 'READ_FAILED', 'Could not read uploaded file.');
+        }
+
+        return [$file, $bytes, $userId];
+    }
+
+    /**
+     * @return JsonResponse|null
+     */
+    private function validateUploadError(?int $userId, mixed $file): ?JsonResponse
+    {
+        $error = null;
+        if ($userId === null) {
+            $error = $this->error(Response::HTTP_UNAUTHORIZED, 'UNAUTHORIZED', 'You must be logged in to upload.');
+        } elseif (!$file instanceof UploadedFile) {
+            $error = $this->error(Response::HTTP_BAD_REQUEST, 'BAD_REQUEST', 'No file uploaded under the "file" field.');
+        } elseif (!$file->isValid()) {
+            $error = $this->error(Response::HTTP_BAD_REQUEST, 'BAD_REQUEST', 'Upload failed: ' . $file->getErrorMessage());
+        }
+
+        return $error;
     }
 
     /** @return array<string>|null */

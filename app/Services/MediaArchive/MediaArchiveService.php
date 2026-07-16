@@ -200,7 +200,7 @@ class MediaArchiveService
             $sniffed = $this->urlResolver->sniffForExternal($request, $effectiveUrl);
             $mediaType = $request->mediaType ?? MediaType::fromMime($sniffed);
 
-            $asset = $this->persist(
+            return $this->persist(
                 $request,
                 new PersistedAssetFields(
                     assetUrl: $effectiveUrl,
@@ -217,7 +217,6 @@ class MediaArchiveService
                     uploadSource: $request->uploadSource,
                 ),
             );
-            return $asset;
         }
 
         return $this->ingestFromBytes($request, $bytes, $url);
@@ -480,10 +479,7 @@ class MediaArchiveService
      */
     public function runConversionPipeline(MediaAsset $asset, string $bytes): void
     {
-        if ($asset->markdown_content !== null && $asset->markdown_content !== '') {
-            return;
-        }
-        if ($asset->mime_type === null || $asset->mime_type === '') {
+        if (!$this->shouldConvert($asset)) {
             return;
         }
         try {
@@ -496,11 +492,17 @@ class MediaArchiveService
             ]);
             return;
         }
-        if ($markdown === null) {
-            return; // no converter handles this MIME — leave markdown_content NULL
+        if ($markdown !== null) {
+            $asset->markdown_content = $markdown;
+            $asset->save();
         }
-        $asset->markdown_content = $markdown;
-        $asset->save();
+    }
+
+    private function shouldConvert(MediaAsset $asset): bool
+    {
+        return ($asset->markdown_content === null || $asset->markdown_content === '')
+            && $asset->mime_type !== null
+            && $asset->mime_type !== '';
     }
 
     /**
