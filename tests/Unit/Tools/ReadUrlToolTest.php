@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use Psr\Log\LoggerInterface;
-use RuntimeException;
 use Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaConverterInterface;
