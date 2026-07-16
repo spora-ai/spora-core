@@ -185,7 +185,9 @@ final class Orchestrator implements OrchestratorInterface
                 continue;
             }
             if ($asset->user_id !== null && $userId !== 0 && (int) $asset->user_id !== $userId) {
-                throw new \InvalidArgumentException("Media asset {$mid} is not owned by the current user.");
+                throw new \Spora\Services\MediaArchive\MediaNotOwnedException(
+                    "Media asset {$mid} is not owned by the current user.",
+                );
             }
             $kind = str_starts_with((string) $asset->mime_type, 'image/') ? 'image' : 'text';
             $refs[] = ['media_id' => $asset->id, 'kind' => $kind];
@@ -197,7 +199,7 @@ final class Orchestrator implements OrchestratorInterface
             $taskId,
             'attachment',
             '',
-            new \Spora\Agents\ValueObjects\HistoryMessageContext(attachments: $refs),
+            new HistoryMessageContext(attachments: $refs),
         );
     }
 
@@ -398,7 +400,7 @@ final class Orchestrator implements OrchestratorInterface
         if ($task !== null && $task->agent_id) {
             try {
                 $driver = $this->driverFactory->makeFromAgent(Agent::findOrFail($task->agent_id));
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 $driver = null;
             }
         }

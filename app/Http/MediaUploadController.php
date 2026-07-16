@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -35,6 +37,7 @@ final class MediaUploadController
         private readonly MediaAllowedTypesService $allowedTypes,
         private readonly AuthService $auth,
         private readonly MimeSniffer $sniffer,
+        private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -71,7 +74,7 @@ final class MediaUploadController
         ));
 
         return new JsonResponse(
-            ['data' => MediaArchiveController::serialize($asset, $request->getSchemeAndHttpHost())],
+            ['data' => $this->serializer->serialize($asset, $request->getSchemeAndHttpHost())],
             Response::HTTP_CREATED,
         );
     }
@@ -123,7 +126,7 @@ final class MediaUploadController
         }
         try {
             $decoded = json_decode($raw, true, 8, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
+        } catch (JsonException) {
             return null;
         }
         return is_array($decoded) ? array_values(array_filter($decoded, 'is_string')) : null;
@@ -137,7 +140,7 @@ final class MediaUploadController
         }
         try {
             $decoded = json_decode($raw, true, 16, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
+        } catch (JsonException) {
             return null;
         }
         return is_array($decoded) ? $decoded : null;

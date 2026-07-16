@@ -6,6 +6,7 @@ namespace Spora\Services\MediaArchive;
 
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
+use Throwable;
 
 /**
  * Computes the dynamic set of MIME types accepted by the upload UI.
@@ -104,7 +105,7 @@ final class MediaAllowedTypesService
             }
         }
         // Add a few extensions whose MIME type doesn't round-trip cleanly.
-        foreach (['md' => 'text/markdown', 'json' => 'application/json', 'csv' => 'text/csv'] as $ext => $_) {
+        foreach (['md', 'json', 'csv'] as $ext) {
             $exts[$ext] = true;
         }
         return array_keys($exts);
@@ -123,7 +124,7 @@ final class MediaAllowedTypesService
         }
         try {
             $driver = $this->driverFactory->makeFromAgent($agent);
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return false;
         }
         return $driver->supportsImageInput();

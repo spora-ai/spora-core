@@ -65,6 +65,27 @@ final class ReadUrlTool extends AbstractTool
     /** PDF MIME type — referenced by the registry lookup and Accept header. */
     private const PDF_MIME = 'application/pdf';
 
+    /**
+     * RFC1918 / loopback / link-local ranges — denied at fetch_pdf to
+     * prevent SSRF pivots through the tool. `validateUrl()` already
+     * blocks non-http(s) schemes; this layer blocks http(s) URLs whose
+     * hostname resolves into a private range.
+     */
+    private const SSRF_DENY_PREFIXES = [
+        '10.',
+        '192.168.',
+        '169.254.',
+        '127.',
+        '0.',
+        '172.16.', '172.17.', '172.18.', '172.19.',
+        '172.20.', '172.21.', '172.22.', '172.23.',
+        '172.24.', '172.25.', '172.26.', '172.27.',
+        '172.28.', '172.29.', '172.30.', '172.31.',
+    ];
+
+    /** `localhost` and the IPv6 loopback `::1` are likewise denied. */
+    private const SSRF_DENY_HOSTS = ['localhost', '::1', '0.0.0.0'];
+
     public function __construct(
         private readonly HttpClientInterface $httpClient,
         private readonly ToolConfigService   $configService,
@@ -122,7 +143,7 @@ final class ReadUrlTool extends AbstractTool
             return new ToolResult(false, 'A valid absolute URL is required.');
         }
 
-        // #1 SSRF guard: allowlist only http/https — blocks file://, ftp://, gopher://,
+        // SSRF guard: allowlist only http/https — blocks file://, ftp://, gopher://,
         // cloud metadata endpoints (http://169.254.169.254), etc.
         $scheme = strtolower(parse_url($url, PHP_URL_SCHEME) ?? '');
         if (!in_array($scheme, self::ALLOWED_SCHEMES, true)) {
@@ -200,6 +221,12 @@ final class ReadUrlTool extends AbstractTool
     /** @param array<string, mixed> $settings */
     private function fetchPdfBytes(string $url, array $settings): string|ToolResult
     {
+        // SSRF deny-list: refuse URLs that resolve into loopback,
+        // link-local, or RFC1918 ranges before issuing the request.
+        $denied = $this->ssrfCheck($url);
+        if ($denied instanceof ToolResult) {
+            return $denied;
+        }
         $timeout = $this->effectiveTimeout($settings);
         $this->logger?->debug('ReadUrlTool: fetching PDF', ['url' => $url, 'timeout' => $timeout]);
 
@@ -225,6 +252,32 @@ final class ReadUrlTool extends AbstractTool
         }
 
         return $bytes;
+    }
+
+    private function ssrfCheck(string $url): ?ToolResult
+    {
+        $host = (string) (parse_url($url, PHP_URL_HOST) ?? '');
+        if ($host === '') {
+            return new ToolResult(false, 'Refusing to fetch a URL with no hostname.');
+        }
+        $lower = strtolower($host);
+        if (in_array($lower, self::SSRF_DENY_HOSTS, true)) {
+            return new ToolResult(false, 'Refusing to fetch a loopback or link-local hostname.');
+        }
+        // Bare IPv6 hostnames may include brackets — strip them.
+        $ip = trim($lower, '[]');
+        $resolved = filter_var($ip, FILTER_VALIDATE_IP) ? [$ip] : @gethostbynamel($host);
+        if (!is_array($resolved)) {
+            return null; // DNS lookup failed — let the request fail on its own.
+        }
+        foreach ($resolved as $candidate) {
+            foreach (self::SSRF_DENY_PREFIXES as $prefix) {
+                if (str_starts_with((string) $candidate, $prefix)) {
+                    return new ToolResult(false, 'Refusing to fetch a private or loopback IP.');
+                }
+            }
+        }
+        return null;
     }
 
     private function convertPdf(MediaConverterInterface $converter, string $bytes, string $url): ToolResult
@@ -266,7 +319,7 @@ final class ReadUrlTool extends AbstractTool
             return new ToolResult(false, 'URL was fetched successfully but no readable text content was found.');
         }
 
-        // #5 Size guard: cap output so large pages don't saturate the context window.
+        // Size guard: cap output so large pages don't saturate the context window.
         return new ToolResult(true, "Fetched URL Content (Markdown):\n\n" . $this->truncate($markdown));
     }
 

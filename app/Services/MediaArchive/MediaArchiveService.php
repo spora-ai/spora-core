@@ -37,15 +37,22 @@ use Throwable;
  *
  * The URL branch lives in {@see MediaArchiveUrlResolver} so this
  * orchestrator stays under the 20-method Sonar threshold.
- *
- * Not declared `final` because Mockery needs to construct a named mock
- * for HTTP-handler tests; subclassing is still discouraged — instantiate
- * via PHP-DI.
  */
-class MediaArchiveService
+final class MediaArchiveService
 {
     /** Prefix used by every persisted `asset_url`. */
     public const OPAQUE_ASSET_URL_PREFIX = '/api/v1/assets/';
+
+    /**
+     * Mint a 64-character hex public-access token. Length matches the
+     * `public_access_token` column (64 chars), giving 256 bits of
+     * entropy — enough that the token is unguessable even for a row
+     * referenced by an attacker-known UUID.
+     */
+    public static function mintPublicAccessToken(): string
+    {
+        return bin2hex(random_bytes(32));
+    }
 
     /**
      * Map a MIME type to a file extension used in the public asset URL.

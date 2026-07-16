@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Drivers\ValueObjects;
 
+use InvalidArgumentException;
+
 /**
  * One content block in a multi-modal message.
  *
@@ -34,7 +36,7 @@ final readonly class ContentBlock
         public ?string $url = null,
     ) {
         if ($type !== self::TYPE_TEXT && $type !== self::TYPE_IMAGE) {
-            throw new \InvalidArgumentException("Unknown content block type: {$type}");
+            throw new InvalidArgumentException("Unknown content block type: {$type}");
         }
     }
 

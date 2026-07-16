@@ -19,6 +19,7 @@ use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\Exceptions\CatalogUnavailableException;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
+use Spora\Services\MediaArchive\MediaNotOwnedException;
 use Spora\Services\Exceptions\MalformedCatalogException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -249,6 +250,10 @@ final class Kernel implements KernelInterface
             $e instanceof MediaCapabilityMismatchException => new JsonResponse(
                 ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
                 Response::HTTP_BAD_REQUEST,
+            ),
+            $e instanceof MediaNotOwnedException => new JsonResponse(
+                ['error' => ['code' => 'FORBIDDEN', 'message' => $e->getMessage()]],
+                Response::HTTP_FORBIDDEN,
             ),
             default => null,
         };

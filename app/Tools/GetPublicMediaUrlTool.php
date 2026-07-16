@@ -6,6 +6,7 @@ namespace Spora\Tools;
 
 use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
@@ -112,7 +113,7 @@ final class GetPublicMediaUrlTool extends AbstractTool
     {
         if ($action === 'share') {
             if ($asset->public_access_token === null || $asset->public_access_token === '') {
-                $asset->public_access_token = bin2hex(random_bytes(32));
+                $asset->public_access_token = MediaArchiveService::mintPublicAccessToken();
                 $asset->save();
             }
             return ToolResult::ok('Public sharing enabled. URL: ' . $this->publicUrl($asset));

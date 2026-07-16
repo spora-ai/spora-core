@@ -17,9 +17,7 @@ use Spora\Services\MediaArchive\MediaConverterInterface;
  */
 final class PdfToMarkdownConverter implements MediaConverterInterface
 {
-    public function __construct(private readonly PdfToMarkdownParser $parser)
-    {
-    }
+    public function __construct(private readonly PdfToMarkdownParser $parser) {}
 
     /** @return list<string> */
     public function supportedMimeTypes(): array

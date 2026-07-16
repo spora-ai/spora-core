@@ -13,6 +13,7 @@ use Spora\Services\AgentServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
  * Agent CRUD endpoints.
@@ -205,7 +206,7 @@ final class AgentController
         }
         try {
             $driver = $this->driverFactory->makeFromAgent($agent);
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return false;
         }
         return $driver->supportsImageInput();

@@ -9,6 +9,7 @@ use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\ListMediaQueryBuilder;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -35,6 +36,7 @@ final class MediaArchiveController
     public function __construct(
         private readonly MediaArchiveService $mediaArchive,
         private readonly AuthService $auth,
+        private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -45,7 +47,7 @@ final class MediaArchiveController
         return new JsonResponse([
             'data' => [
                 'assets'    => array_map(
-                    static fn(MediaAsset $asset): array => self::serialize($asset),
+                    fn(MediaAsset $asset): array => $this->serializer->serialize($asset),
                     $page->items(),
                 ),
                 'page'      => $page->currentPage(),
@@ -63,7 +65,7 @@ final class MediaArchiveController
             return $this->notFound();
         }
 
-        return new JsonResponse(['data' => self::serialize($asset)]);
+        return new JsonResponse(['data' => $this->serializer->serialize($asset)]);
     }
 
     public function update(string $id, Request $request): JsonResponse
@@ -85,7 +87,7 @@ final class MediaArchiveController
             $editable->save();
         }
 
-        return new JsonResponse(['data' => self::serialize($editable, $this->requestHost($request))]);
+        return new JsonResponse(['data' => $this->serializer->serialize($editable, $this->requestHost($request))]);
     }
 
     private function findEditableAsset(string $id): MediaAsset|JsonResponse
@@ -116,7 +118,7 @@ final class MediaArchiveController
         }
         if (array_key_exists('public_access_enabled', $body)) {
             $enabled = $body['public_access_enabled'];
-            $dirty['public_access_token'] = $enabled === true ? bin2hex(random_bytes(32)) : null;
+            $dirty['public_access_token'] = $enabled === true ? MediaArchiveService::mintPublicAccessToken() : null;
         }
         return $dirty;
     }
@@ -190,9 +192,9 @@ final class MediaArchiveController
         if (!$this->canEdit($asset)) {
             return $this->forbidden();
         }
-        $asset->public_access_token = bin2hex(random_bytes(32));
+        $asset->public_access_token = MediaArchiveService::mintPublicAccessToken();
         $asset->save();
-        return new JsonResponse(['data' => self::serialize($asset, $this->requestHost($request))]);
+        return new JsonResponse(['data' => $this->serializer->serialize($asset, $this->requestHost($request))]);
     }
 
     private function canEdit(MediaAsset $asset): bool
@@ -228,55 +230,7 @@ final class MediaArchiveController
 
 
     /**
-     * @return array<string, mixed>
      */
-    public static function serialize(MediaAsset $asset, ?string $host = null): array
-    {
-        return [
-            'id'                => $asset->id,
-            'agent_id'          => $asset->agent_id,
-            'task_id'           => $asset->task_id,
-            'tool_call_id'      => $asset->tool_call_id,
-            'user_id'           => $asset->user_id,
-            'plugin_slug'       => $asset->plugin_slug,
-            'tool_name'         => $asset->tool_name,
-            'media_type'        => $asset->media_type,
-            'mime_type'         => $asset->mime_type,
-            'byte_size'         => $asset->byte_size,
-            'width'             => $asset->width,
-            'height'            => $asset->height,
-            'duration_seconds'  => $asset->duration_seconds,
-            'prompt'            => $asset->prompt,
-            'filename'          => $asset->filename,
-            'tags'              => $asset->tags,
-            'metadata'          => $asset->metadata,
-            'asset_url'         => $asset->publicUrl(),
-            'source_url'        => $asset->source_url,
-            'storage_mode'      => $asset->storage_mode,
-            'upload_source'     => $asset->upload_source,
-            'public_access_token' => $asset->public_access_token,
-            'public_url'        => self::buildPublicUrl($asset, $host),
-            'has_markdown'      => $asset->markdown_content !== null && $asset->markdown_content !== '',
-            'created_at'        => $asset->created_at?->toIso8601String(),
-            'updated_at'        => $asset->updated_at?->toIso8601String(),
-        ];
-    }
-
-    private static function buildPublicUrl(MediaAsset $asset, ?string $host): ?string
-    {
-        if ($asset->public_access_token === null || $asset->public_access_token === '') {
-            return null;
-        }
-        $base = $host !== null && $host !== ''
-            ? rtrim($host, '/')
-            : rtrim((string) ($_SERVER['HTTP_HOST'] ?? ''), '/');
-        if ($base === '') {
-            return null;
-        }
-        $scheme = !empty($_SERVER['HTTPS']) ? 'https' : 'http';
-        return $scheme . '://' . $base . '/api/v1/public/media/' . $asset->id . '?token=' . $asset->public_access_token;
-    }
-
     private function notFound(): JsonResponse
     {
         return new JsonResponse(

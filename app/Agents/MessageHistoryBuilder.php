@@ -25,6 +25,16 @@ use Spora\Models\TaskHistory;
  */
 final class MessageHistoryBuilder
 {
+    /**
+     * Hard cap on the size of image bytes that {@see loadAssetBytes()}
+     * returns for an inline image block. A 4K photo can easily exceed
+     * 20 MiB after MIME decode; without a cap, a single oversized
+     * attachment blows up the LLM context window and the request
+     * payload. Set to 20 MiB — comfortably above a typical screenshot,
+     * well below context-window failure.
+     */
+    private const MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024;
+
     public function __construct(
         private readonly ?LLMDriverInterface $driver = null,
     ) {}
@@ -216,6 +226,14 @@ final class MessageHistoryBuilder
         }
         $bytes = $this->loadAssetBytes($asset);
         if ($bytes === null) {
+            return null;
+        }
+        // Cap inline image size — base64-embedding a 50 MiB photo into
+        // every LLM message would OOM the request and saturate the
+        // provider's context window. The block is silently dropped
+        // when oversized; the upstream capability check should have
+        // already surfaced an error to the caller.
+        if (strlen($bytes) > self::MAX_INLINE_IMAGE_BYTES) {
             return null;
         }
         return [

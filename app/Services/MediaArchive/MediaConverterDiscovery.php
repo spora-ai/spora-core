@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Services\MediaArchive;
 
+use InvalidArgumentException;
+
 /**
  * Static registry of {@see MediaConverterInterface} FQCNs.
  *
@@ -33,7 +35,7 @@ final class MediaConverterDiscovery
     public static function add(string $class): void
     {
         if (!is_subclass_of($class, MediaConverterInterface::class)) {
-            throw new \InvalidArgumentException(sprintf(
+            throw new InvalidArgumentException(sprintf(
                 'MediaConverterDiscovery::add: %s does not implement %s',
                 $class,
                 MediaConverterInterface::class,
