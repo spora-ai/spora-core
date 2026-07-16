@@ -8,7 +8,7 @@ use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
-use Spora\Models\AgentTool;
+use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -107,7 +107,7 @@ final class AgentController
         $agent = $this->agentService->createAgent($userId, $data);
 
         return new JsonResponse(
-            ['data' => ['agent' => $this->agentResource($agent)]],
+            ['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent))]],
             Response::HTTP_CREATED,
         );
     }
@@ -126,7 +126,7 @@ final class AgentController
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['agent' => $this->agentResource($agent)]]);
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent))]]);
     }
 
     /**
@@ -143,8 +143,17 @@ final class AgentController
             return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
-        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries'];
+        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived'];
         $data = array_intersect_key($body, array_flip($allowed));
+
+        // Booleans arrive as either real bools or boolean-strings (the form
+        // layer + curl both send 'true'/'false'). Coerce via FILTER_VALIDATE_BOOLEAN
+        // so the service receives a real bool regardless of transport.
+        foreach (['is_pinned', 'is_archived'] as $boolKey) {
+            if (array_key_exists($boolKey, $data)) {
+                $data[$boolKey] = filter_var($data[$boolKey], FILTER_VALIDATE_BOOLEAN);
+            }
+        }
 
         $agent = $this->agentService->updateAgent($agentId, $userId, $data);
 
@@ -152,7 +161,7 @@ final class AgentController
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['agent' => $this->agentResource($agent)]]);
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent))]]);
     }
 
     /**
@@ -170,33 +179,6 @@ final class AgentController
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function agentResource(Agent $agent): array
-    {
-        /** @var \Illuminate\Database\Eloquent\Collection<int,AgentTool> $tools */
-        $tools = $agent->agentTools;
-
-        return [
-            'id'                   => (int) $agent->id,
-            'name'                 => $agent->name,
-            'description'          => $agent->description,
-            'system_prompt'        => $agent->system_prompt,
-            'llm_driver_config_id' => $agent->llm_driver_config_id,
-            'max_steps'            => (int) $agent->max_steps,
-            'is_active'            => (bool) $agent->is_active,
-            'allow_followup'       => (bool) $agent->allow_followup,
-            'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),
-            'max_retries'          => (int) ($agent->max_retries ?? 0),
-            'llm_supports_image_input' => $this->resolveSupportsImageInput($agent),
-            'tools' => $tools->map(static fn(AgentTool $t) => [
-                'tool_class' => $t->tool_class,
-                'tool_name'  => $t->tool_name,
-            ])->values()->toArray(),
-        ];
     }
 
     private function resolveSupportsImageInput(Agent $agent): bool

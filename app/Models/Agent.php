@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Models;
 
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -23,6 +24,10 @@ use Throwable;
  * @property bool $allow_followup
  * @property int $retry_after_minutes
  * @property int $max_retries
+ * @property bool $is_pinned
+ * @property bool $is_archived
+ * @property DateTimeInterface|null $created_at
+ * @property DateTimeInterface|null $updated_at
  */
 final class Agent extends Model
 {
@@ -39,6 +44,8 @@ final class Agent extends Model
         'allow_followup',
         'retry_after_minutes',
         'max_retries',
+        'is_pinned',
+        'is_archived',
     ];
 
     protected $casts = [
@@ -46,6 +53,10 @@ final class Agent extends Model
         'max_steps' => 'integer',
         'llm_driver_config_id' => 'integer',
         'allow_followup' => 'boolean',
+        'is_pinned' => 'boolean',
+        'is_archived' => 'boolean',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     public function user(): BelongsTo

@@ -11,6 +11,7 @@ use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\Agents\AgentToolInstanceResolver;
 use Spora\Services\Agents\AgentToolOverrideResolver;
 use Spora\Services\AgentService;
+use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\CalculatorTool;
@@ -656,4 +657,78 @@ describe('AgentService::maskLlmConfig via public API', function (): void {
         // Non-password field is plain
         expect($result['model'])->toBe('gpt-4o-mini');
     });
+});
+
+describe('AgentService::setPinned / setArchived', function (): void {
+
+    it('newly created agents default to is_pinned=false and is_archived=false', function (): void {
+        [$service, $userId] = makeAgentServiceWithUser();
+
+        $agent = $service->createAgent($userId, ['name' => 'Defaults']);
+
+        expect($agent->is_pinned)->toBeFalse();
+        expect($agent->is_archived)->toBeFalse();
+    });
+
+    /**
+     * Parameterised happy-path check: setPinned / setArchived each persist
+     * a single boolean column and return the refreshed agent. Pest runs the
+     * two datasets sequentially in the same describe block.
+     */
+    dataset('flagSetters', [
+        'setPinned'   => ['setPinned',   'is_pinned',   'Pin me'],
+        'setArchived' => ['setArchived', 'is_archived', 'Archive me'],
+    ]);
+
+    it('persists and returns the agent', function (string $method, string $field, string $name): void {
+        [$service, $userId] = makeAgentServiceWithUser();
+        $agent = $service->createAgent($userId, ['name' => $name]);
+
+        $result = $service->$method($userId, (int) $agent->getKey(), true);
+
+        expect($result)->toBeInstanceOf(Agent::class);
+        expect($result->id)->toBe($agent->id);
+        expect($result->$field)->toBeTrue();
+
+        // Refreshed from DB — read again to confirm persistence
+        $fresh = Agent::find($agent->id);
+        expect($fresh->$field)->toBeTrue();
+    })->with('flagSetters');
+
+    it('setPinned can flip back to false', function (): void {
+        [$service, $userId] = makeAgentServiceWithUser();
+        $agent = $service->createAgent($userId, ['name' => 'Toggle pin']);
+
+        $service->setPinned($userId, (int) $agent->getKey(), true);
+        $result = $service->setPinned($userId, (int) $agent->getKey(), false);
+
+        expect($result->is_pinned)->toBeFalse();
+    });
+
+    /**
+     * Parameterised ownership / not-found rejection: setPinned / setArchived
+     * each throw AgentNotFoundException when the agent is missing or owned
+     * by a different user.
+     */
+    dataset('notFoundScenarios', [
+        'setPinned:   foreign owner'   => ['setPinned',   'Not yours', 'agent-svc-pin-foreign@example.com'],
+        'setArchived: missing agent'   => ['setArchived', null,        null],
+    ]);
+
+    it('throws AgentNotFoundException when the agent is inaccessible', function (string $method, ?string $agentName, ?string $foreignEmail): void {
+        [$service, $userIdA] = makeAgentServiceWithUser();
+
+        if ($agentName !== null) {
+            $agent = $service->createAgent($userIdA, ['name' => $agentName]);
+            $agentId = (int) $agent->getKey();
+            $auth = bootAuthLayer();
+            $userIdB = bootAuth($auth, $foreignEmail, AGENT_TEST_PASSWORD);
+        } else {
+            $agentId = 999999;
+            $userIdB = $userIdA;
+        }
+
+        expect(fn() => $service->$method($userIdB, $agentId, true))
+            ->toThrow(AgentNotFoundException::class, 'Agent not found.');
+    })->with('notFoundScenarios');
 });

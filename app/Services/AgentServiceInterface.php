@@ -26,6 +26,28 @@ interface AgentServiceInterface
 
     public function deleteAgent(int $agentId, int $userId): bool;
 
+    /**
+     * Pin or unpin an agent for the given user.
+     *
+     * Parameter order is (int $userId, int $agentId, bool $value) — read as
+     * "user N sets agent M's pinned flag to V". This differs from the rest
+     * of the service which takes (int $agentId, int $userId, ...).
+     *
+     * @throws Exceptions\AgentNotFoundException If the agent does not exist or is not owned by $userId
+     */
+    public function setPinned(int $userId, int $agentId, bool $pinned): Agent;
+
+    /**
+     * Archive or unarchive an agent for the given user.
+     *
+     * Parameter order is (int $userId, int $agentId, bool $value) — see
+     * setPinned() for the rationale on the deliberate flip away from the
+     * service-wide (int $agentId, int $userId, ...) convention.
+     *
+     * @throws Exceptions\AgentNotFoundException If the agent does not exist or is not owned by $userId
+     */
+    public function setArchived(int $userId, int $agentId, bool $archived): Agent;
+
     // ── Tool management ─────────────────────────────────────────────────────────
 
     /**
