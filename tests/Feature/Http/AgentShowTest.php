@@ -81,6 +81,14 @@ function buildAgentController(): AgentController
         {
             return true;
         }
+        public function setPinned(int $userId, int $agentId, bool $pinned): Agent
+        {
+            return Agent::query()->find($agentId) ?? throw new RuntimeException('agent not found');
+        }
+        public function setArchived(int $userId, int $agentId, bool $archived): Agent
+        {
+            return Agent::query()->find($agentId) ?? throw new RuntimeException('agent not found');
+        }
         /** @phpstan-ignore return.unusedType */
         public function enableTool(int $agentId, int $userId, string $toolClass): array
         {
