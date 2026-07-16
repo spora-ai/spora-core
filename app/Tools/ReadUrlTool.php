@@ -15,6 +15,7 @@ use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\HttpClient\ResponseInterface;
 use Throwable;
 
 /**
@@ -221,10 +222,8 @@ final class ReadUrlTool extends AbstractTool
     /** @param array<string, mixed> $settings */
     private function fetchPdfBytes(string $url, array $settings): string|ToolResult
     {
-        // Refuse URLs that resolve into loopback, link-local, or RFC1918
-        // ranges before issuing the request.
         $denied = $this->ssrfCheck($url);
-        if ($denied instanceof ToolResult) {
+        if ($denied !== null) {
             return $denied;
         }
         $timeout = $this->effectiveTimeout($settings);
@@ -237,6 +236,12 @@ final class ReadUrlTool extends AbstractTool
                 'Accept'     => self::PDF_MIME,
             ],
         ]);
+
+        return $this->validatePdfResponse($response);
+    }
+
+    private function validatePdfResponse(ResponseInterface $response): string|ToolResult
+    {
         $statusCode = $response->getStatusCode();
         if ($statusCode >= 400) {
             return new ToolResult(false, "Failed to fetch PDF. HTTP Status: {$statusCode}");
