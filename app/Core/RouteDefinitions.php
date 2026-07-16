@@ -35,6 +35,7 @@ use Spora\Http\ToolController;
 use Spora\Http\UserController;
 use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
+use Spora\OpenApi\RouteSpecCollector;
 
 final class RouteDefinitions
 {
@@ -52,7 +53,7 @@ final class RouteDefinitions
     public const ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID = '/api/v1/agents/{id}/templates/{templateId}';
     public const ROUTE_AGENTS_SCHEDULED_RUNS_RUN_ID = '/api/v1/agents/{id}/scheduled-runs/{runId}';
 
-    public static function register(MiddlewareRouteCollector $r): void
+    public static function register(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
         $r->addRoute('GET', '/api/health', [HealthController::class, 'check'], []);
         $r->addRoute('GET', '/api/v1/config', [ConfigController::class, 'index'], []);

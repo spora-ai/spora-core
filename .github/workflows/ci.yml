@@ -62,6 +62,9 @@ jobs:
       - name: Composer install
         run: composer install --no-interaction --prefer-dist
 
+      - name: OpenAPI drift check
+        run: php bin/spora spora:openapi --check
+
       - name: Run PHPStan
         run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=2G
 
