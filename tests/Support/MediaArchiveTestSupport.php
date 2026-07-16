@@ -15,6 +15,7 @@ use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaConverterRegistry;
+use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
@@ -67,6 +68,7 @@ final class MediaArchiveTestSupport
             $sniffer,
             $metadata,
             self::buildConverterRegistry(),
+            new MediaIngestDecoder(),
             $logger,
         );
     }

@@ -100,6 +100,7 @@ use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaConverterRegistry;
+use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
@@ -446,8 +447,11 @@ final class ContainerDefinitions
                     $c->get(MimeSniffer::class),
                     $c->get(MetadataExtractor::class),
                     $c->get(MediaConverterRegistry::class),
+                    $c->get(MediaIngestDecoder::class),
                 );
             },
+
+            MediaIngestDecoder::class => static fn(): MediaIngestDecoder => new MediaIngestDecoder(),
 
             // Core converters self-register with the static discovery list
             // before the registry resolves them. Plugins add their own

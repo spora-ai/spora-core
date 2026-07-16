@@ -93,6 +93,7 @@ final class MediaArchiveService
         private readonly MimeSniffer $sniffer,
         private readonly MetadataExtractor $metadata,
         private readonly MediaConverterRegistry $converters,
+        private readonly MediaIngestDecoder $decoder,
         private readonly ?LoggerInterface $logger = null,
     ) {}
 
@@ -193,7 +194,7 @@ final class MediaArchiveService
      */
     private function ingestFresh(MediaIngestRequest $request): MediaAsset
     {
-        $inline = $this->decodeInline($request);
+        $inline = $this->decoder->decodeInline($request);
         if ($inline !== null) {
             return $this->ingestFromBytes($request, $inline, null);
         }
@@ -302,46 +303,9 @@ final class MediaArchiveService
      * Bytes / hex / base64 input forms are all "the caller already has
      * the bytes — store them as-is". Hex with odd length and any
      * non-strict-decodable base64 raise {@see InvalidArgumentException}
-     * so the plugin can surface a meaningful error to the LLM.
+     * via {@see MediaIngestDecoder}, so the plugin can surface a
+     * meaningful error to the LLM.
      */
-    private function decodeInline(MediaIngestRequest $request): ?string
-    {
-        if ($request->bytes !== null && $request->bytes !== '') {
-            $bytes = $request->bytes;
-        } elseif ($request->hex !== null && $request->hex !== '') {
-            $bytes = $this->decodeHex($request->hex);
-        } elseif ($request->base64 !== null && $request->base64 !== '') {
-            $bytes = $this->decodeBase64($request->base64);
-        } else {
-            $bytes = null;
-        }
-
-        return $bytes;
-    }
-
-    private function decodeHex(string $hex): string
-    {
-        if (strlen($hex) % 2 !== 0) {
-            throw new InvalidArgumentException('Hex payload has odd length.');
-        }
-        $decoded = @hex2bin($hex);
-        if ($decoded === false) {
-            throw new InvalidArgumentException('Hex payload is not valid hex.');
-        }
-
-        return $decoded;
-    }
-
-    private function decodeBase64(string $payload): string
-    {
-        $decoded = base64_decode($payload, strict: true);
-        if ($decoded === false) {
-            throw new InvalidArgumentException('Base64 payload is not valid base64.');
-        }
-
-        return $decoded;
-    }
-
     private function storeAsset(string $bytes, string $mime, ?string $filename): AssetReference
     {
         try {
