@@ -110,6 +110,32 @@ test('returns false when DriverFactory throws a generic exception', function ():
     expect($agent->supportsImageInput($factory))->toBeFalse();
 });
 
+test('user(), tasks(), agentTools(), agentToolOverrides(), and toolCalls() return their Eloquent relations', function (): void {
+    $agent = new Agent();
+
+    expect($agent->user())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\BelongsTo::class)
+        ->and($agent->tasks())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class)
+        ->and($agent->agentTools())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class)
+        ->and($agent->agentToolOverrides())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class)
+        ->and($agent->toolCalls())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class);
+});
+
+test('user() relation targets the User model', function (): void {
+    $agent = new Agent();
+    /** @var \Illuminate\Database\Eloquent\Relations\BelongsTo $relation */
+    $relation = $agent->user();
+
+    expect($relation->getRelated()::class)->toBe(\Spora\Models\User::class);
+});
+
+test('tasks() relation targets the Task model', function (): void {
+    $agent = new Agent();
+    /** @var \Illuminate\Database\Eloquent\Relations\HasMany $relation */
+    $relation = $agent->tasks();
+
+    expect($relation->getRelated()::class)->toBe(\Spora\Models\Task::class);
+});
+
 /**
  * Minimal DriverFactory wired to a real LLMConfigService so the
  * production resolution path is exercised end-to-end.
