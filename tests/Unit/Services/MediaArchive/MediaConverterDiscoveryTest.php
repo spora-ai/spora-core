@@ -49,8 +49,15 @@ test('add() throws InvalidArgumentException for a class that does not implement 
     MediaConverterDiscovery::reset();
     // RuntimeException is a final class that does NOT implement the
     // converter interface — this exercises the validation guard.
-    expect(static fn(): string|InvalidArgumentException => MediaConverterDiscovery::add(RuntimeException::class))
-        ->toThrow(InvalidArgumentException::class, 'does not implement');
+    $threw = false;
+    try {
+        /** @phpstan-ignore-next-line argument.type */
+        MediaConverterDiscovery::add(RuntimeException::class);
+    } catch (InvalidArgumentException $e) {
+        $threw = true;
+        expect($e->getMessage())->toContain('does not implement');
+    }
+    expect($threw)->toBeTrue();
 });
 
 test('add() accepts an anonymous-class FQCN that implements the converter interface', function (): void {

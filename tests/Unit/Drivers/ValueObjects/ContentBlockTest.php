@@ -67,7 +67,7 @@ test('properties are readonly — they cannot be reassigned', function (): void 
     try {
         /** @phpstan-ignore-next-line intentional invalid write to assert readonly */
         $block->type = 'image';
-        test()->fail('Expected an Error when modifying a readonly property');
+        $this->fail('Expected an Error when modifying a readonly property');
     } catch (Error $e) {
         expect($e->getMessage())->toContain('readonly');
     }
