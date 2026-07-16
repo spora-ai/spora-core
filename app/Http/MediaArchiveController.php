@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\ListMediaQueryBuilder;
@@ -165,10 +166,11 @@ final class MediaArchiveController
 
     public function destroy(string $id): JsonResponse
     {
-        $asset = $this->mediaArchive->find($id);
-        if ($asset === null) {
-            return $this->notFound();
+        $editable = $this->findEditableAsset($id);
+        if ($editable instanceof JsonResponse) {
+            return $editable;
         }
+
         $this->mediaArchive->delete($id);
 
         return new JsonResponse(['data' => ['deleted' => true, 'id' => $id]]);
@@ -213,7 +215,7 @@ final class MediaArchiveController
         }
         try {
             $decoded = json_decode($raw, true, 32, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
+        } catch (JsonException) {
             return [];
         }
         return is_array($decoded) ? $decoded : [];
