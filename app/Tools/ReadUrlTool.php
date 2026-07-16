@@ -143,7 +143,7 @@ final class ReadUrlTool extends AbstractTool
             return new ToolResult(false, 'A valid absolute URL is required.');
         }
 
-        // SSRF guard: allowlist only http/https — blocks file://, ftp://, gopher://,
+        // Allowlist only http/https — blocks file://, ftp://, gopher://,
         // cloud metadata endpoints (http://169.254.169.254), etc.
         $scheme = strtolower(parse_url($url, PHP_URL_SCHEME) ?? '');
         if (!in_array($scheme, self::ALLOWED_SCHEMES, true)) {
@@ -221,8 +221,8 @@ final class ReadUrlTool extends AbstractTool
     /** @param array<string, mixed> $settings */
     private function fetchPdfBytes(string $url, array $settings): string|ToolResult
     {
-        // SSRF deny-list: refuse URLs that resolve into loopback,
-        // link-local, or RFC1918 ranges before issuing the request.
+        // Refuse URLs that resolve into loopback, link-local, or RFC1918
+        // ranges before issuing the request.
         $denied = $this->ssrfCheck($url);
         if ($denied instanceof ToolResult) {
             return $denied;
@@ -264,11 +264,26 @@ final class ReadUrlTool extends AbstractTool
         if (in_array($lower, self::SSRF_DENY_HOSTS, true)) {
             return new ToolResult(false, 'Refusing to fetch a loopback or link-local hostname.');
         }
+
+        return $this->checkResolvedIps($lower, $host);
+    }
+
+    /**
+     * Resolve the host (or treat the input as a literal IP, including
+     * bracketed IPv6) and deny the URL when any resolved address falls
+     * inside a private / loopback prefix.
+     *
+     * @return ?ToolResult null when the host cannot be resolved or no
+     *                    resolved address matches the deny-list — letting
+     *                    the request proceed to the HTTP layer.
+     */
+    private function checkResolvedIps(string $lowerHost, string $host): ?ToolResult
+    {
         // Bare IPv6 hostnames may include brackets — strip them.
-        $ip = trim($lower, '[]');
+        $ip = trim($lowerHost, '[]');
         $resolved = filter_var($ip, FILTER_VALIDATE_IP) ? [$ip] : @gethostbynamel($host);
         if (!is_array($resolved)) {
-            return null; // DNS lookup failed — let the request fail on its own.
+            return null;
         }
         foreach ($resolved as $candidate) {
             foreach (self::SSRF_DENY_PREFIXES as $prefix) {
@@ -277,6 +292,7 @@ final class ReadUrlTool extends AbstractTool
                 }
             }
         }
+
         return null;
     }
 
