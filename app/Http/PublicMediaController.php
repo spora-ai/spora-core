@@ -67,13 +67,8 @@ final class PublicMediaController
 
     private function stream(MediaAsset $asset): Response
     {
-        try {
-            $payload = match ($asset->storage_mode) {
-                'data_url' => $this->database->read($asset),
-                'local'    => $this->local->readFromAsset($asset),
-                default    => throw new AssetStorageException('Public media requires local or data_url storage'),
-            };
-        } catch (AssetStorageException) {
+        $payload = $this->loadPayload($asset);
+        if ($payload === null) {
             return $this->notFound();
         }
 
@@ -83,18 +78,49 @@ final class PublicMediaController
         }
 
         if (array_key_exists('bytes', $payload)) {
-            $bytes = (string) $payload['bytes'];
-            return new StreamedResponse(static function () use ($bytes): void {
-                echo $bytes;
-            }, 200, [
-                'Content-Type'    => $mime,
-                'Content-Length'  => (string) strlen($bytes),
-                'Cache-Control'   => 'private, max-age=86400',
-                'Referrer-Policy' => 'no-referrer',
-            ]);
+            return $this->buildBytesResponse($mime, (string) $payload['bytes']);
         }
 
-        $path = (string) $payload['path'];
+        return $this->buildFileResponse($mime, (string) $payload['path']);
+    }
+
+    /**
+     * Read the asset's payload bytes / path from its configured asset
+     * store. Returns null when the storage mode is anything other than
+     * `data_url` or `local`, or when the store refuses the read —
+     * callers map both to a 404 (the caller cannot tell the difference
+     * between "asset is in a mode we don't serve publicly" and "row
+     * was deleted under us").
+     *
+     * @return array{mime: string, bytes?: string, path?: string}|null
+     */
+    private function loadPayload(MediaAsset $asset): ?array
+    {
+        try {
+            return match ($asset->storage_mode) {
+                'data_url' => $this->database->read($asset),
+                'local'    => $this->local->readFromAsset($asset),
+                default    => throw new AssetStorageException('Public media requires local or data_url storage'),
+            };
+        } catch (AssetStorageException) {
+            return null;
+        }
+    }
+
+    private function buildBytesResponse(string $mime, string $bytes): StreamedResponse
+    {
+        return new StreamedResponse(static function () use ($bytes): void {
+            echo $bytes;
+        }, 200, [
+            'Content-Type'    => $mime,
+            'Content-Length'  => (string) strlen($bytes),
+            'Cache-Control'   => 'private, max-age=86400',
+            'Referrer-Policy' => 'no-referrer',
+        ]);
+    }
+
+    private function buildFileResponse(string $mime, string $path): Response
+    {
         // Defense in depth: refuse paths that resolve outside the storage
         // root. BinaryFileResponse would happily stream an arbitrary file
         // if a misbehaving asset store returned one.
@@ -108,6 +134,7 @@ final class PublicMediaController
         $response = new BinaryFileResponse($realPath, 200, ['Content-Type' => $mime]);
         $response->headers->set('Cache-Control', 'private, max-age=86400');
         $response->headers->set('Referrer-Policy', 'no-referrer');
+
         return $response;
     }
 
