@@ -26,14 +26,36 @@ final class MediaIngestDecoder
      */
     public function decodeInline(MediaIngestRequest $request): ?string
     {
-        if ($request->bytes !== null && $request->bytes !== '') {
-            return $request->bytes;
+        $source = $this->pickInlineSource($request);
+        if ($source === null) {
+            return null;
         }
-        if ($request->hex !== null && $request->hex !== '') {
-            return $this->decodeHex($request->hex);
-        }
-        if ($request->base64 !== null && $request->base64 !== '') {
-            return $this->decodeBase64($request->base64);
+
+        return match ($source['kind']) {
+            'bytes'  => $source['value'],
+            'hex'    => $this->decodeHex($source['value']),
+            'base64' => $this->decodeBase64($source['value']),
+        };
+    }
+
+    /**
+     * Identify which inline source field carries the payload, in priority
+     * order (bytes > hex > base64). Returns null when none is set, so
+     * the caller can branch to the URL pipeline.
+     *
+     * @return array{kind: 'bytes'|'hex'|'base64', value: string}|null
+     */
+    private function pickInlineSource(MediaIngestRequest $request): ?array
+    {
+        $candidates = [
+            ['kind' => 'bytes',  'value' => $request->bytes],
+            ['kind' => 'hex',    'value' => $request->hex],
+            ['kind' => 'base64', 'value' => $request->base64],
+        ];
+        foreach ($candidates as $candidate) {
+            if (is_string($candidate['value']) && $candidate['value'] !== '') {
+                return $candidate;
+            }
         }
 
         return null;

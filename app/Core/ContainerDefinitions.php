@@ -104,6 +104,7 @@ use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
+use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\MemoryService;
 use Spora\Services\MemoryServiceInterface;
 use Spora\Services\MercurePublisher;
@@ -452,6 +453,11 @@ final class ContainerDefinitions
             },
 
             MediaIngestDecoder::class => static fn(): MediaIngestDecoder => new MediaIngestDecoder(),
+
+            TaskMediaCapabilityService::class => static function (ContainerInterface $c): TaskMediaCapabilityService {
+                $factory = $c->has(DriverFactory::class) ? $c->get(DriverFactory::class) : null;
+                return new TaskMediaCapabilityService($factory);
+            },
 
             // Core converters self-register with the static discovery list
             // before the registry resolves them. Plugins add their own
@@ -851,6 +857,7 @@ final class ContainerDefinitions
                 return new TaskController(
                     $c->get(AuthService::class),
                     $c->get(TaskServiceInterface::class),
+                    $c->get(TaskMediaCapabilityService::class),
                 );
             },
 
