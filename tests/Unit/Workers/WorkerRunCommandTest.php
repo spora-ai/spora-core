@@ -765,7 +765,6 @@ describe('ScheduledRunProcessor substituteVariables', function (): void {
             $notification,
         );
         $ref = new ReflectionMethod($processor, 'substituteVariables');
-        $ref->setAccessible(true);
 
         return $ref->invoke($processor, $template, $variables, $agent);
     }
@@ -808,7 +807,6 @@ describe('ScheduledRunProcessor substituteVariables', function (): void {
             $notification,
         );
         $ref = new ReflectionMethod($processor, 'substituteVariables');
-        $ref->setAccessible(true);
         $result = $ref->invoke($processor, 'Hello {{agent_name}}', [], $agent);
 
         expect($result)->toBe('Hello WorkerTestAgent');
@@ -835,7 +833,6 @@ describe('ScheduledRunProcessor substituteVariables', function (): void {
             $notification,
         );
         $ref = new ReflectionMethod($processor, 'substituteVariables');
-        $ref->setAccessible(true);
         $result = $ref->invoke($processor, 'Owner: {{user_name}}', [], $agent);
 
         expect($result)->toBe('Owner: WorkerTestUser');
@@ -859,7 +856,6 @@ describe('ScheduledRunProcessor substituteVariables', function (): void {
             $notification,
         );
         $ref = new ReflectionMethod($processor, 'substituteVariables');
-        $ref->setAccessible(true);
         $result = $ref->invoke($processor, 'Owner: {{user_name}}', [], $agent);
 
         expect($result)->toBe('Owner: user_name');
@@ -902,7 +898,6 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
     function invokeProcessRetryQueue(WorkerQueueProcessor $processor): void
     {
         $ref = new ReflectionMethod($processor, 'processRetryQueue');
-        $ref->setAccessible(true);
         $ref->invoke($processor);
     }
 

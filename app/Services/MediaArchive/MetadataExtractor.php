@@ -145,7 +145,12 @@ final class MetadataExtractor
      */
     private function readImageInfo(string $bytes): ?array
     {
-        $raw = @getimagesizefromstring($bytes);
+        set_error_handler(static fn(): bool => true);
+        try {
+            $raw = getimagesizefromstring($bytes);
+        } finally {
+            restore_error_handler();
+        }
         if (!is_array($raw)) {
             return null;
         }

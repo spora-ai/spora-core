@@ -36,7 +36,6 @@ test('text block renders with type:text', function (): void {
         temperature: 0.7,
     );
     $ref = new ReflectionMethod($driver, 'convertMessages');
-    $ref->setAccessible(true);
     $messages = $ref->invoke($driver, $request->messages);
     expect($messages[0]['content'])->toBe('describe');
 });
@@ -47,7 +46,6 @@ test('image block renders with type:image and source:{type:base64,...}', functio
     // (since the LLMRequest typing has tightened) — build the message
     // as a plain array via reflection to exercise the renderer directly.
     $ref = new ReflectionMethod($driver, 'convertMessages');
-    $ref->setAccessible(true);
     $messages = $ref->invoke($driver, [[
         'role' => 'user',
         'content' => [
@@ -65,7 +63,6 @@ test('image block renders with type:image and source:{type:base64,...}', functio
 test('null content is converted to empty string for Anthropic', function (): void {
     $driver = makeAnthropicRequestDriver('claude-3-5-sonnet-20241022');
     $ref = new ReflectionMethod($driver, 'convertMessages');
-    $ref->setAccessible(true);
     $messages = $ref->invoke($driver, [
         ['role' => 'assistant', 'content' => null],
     ]);

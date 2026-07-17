@@ -44,10 +44,16 @@ final class MediaIngestDecoder
      */
     public function decodeHex(string $hex): string
     {
+        if ($hex === '') {
+            return '';
+        }
         if (strlen($hex) % 2 !== 0) {
             throw new InvalidArgumentException('Hex payload has odd length.');
         }
-        $decoded = @hex2bin($hex);
+        if (! ctype_xdigit($hex)) {
+            throw new InvalidArgumentException('Hex payload is not valid hex.');
+        }
+        $decoded = hex2bin($hex);
         if ($decoded === false) {
             throw new InvalidArgumentException('Hex payload is not valid hex.');
         }

@@ -137,7 +137,6 @@ it('loadTaskAndStateForResume throws TaskStateMissingException when the transact
     $capsule = Illuminate\Database\Capsule\Manager::class;
     $ref     = new ReflectionClass($capsule);
     $prop    = $ref->getProperty('instance');
-    $prop->setAccessible(true);
     $original = $prop->getValue();
 
     $mockConn = Mockery::mock();
@@ -164,7 +163,6 @@ it('reject throws TaskStateMissingException when the transaction exits without s
     $capsule = Illuminate\Database\Capsule\Manager::class;
     $ref     = new ReflectionClass($capsule);
     $prop    = $ref->getProperty('instance');
-    $prop->setAccessible(true);
     $original = $prop->getValue();
 
     $mockConn = Mockery::mock();

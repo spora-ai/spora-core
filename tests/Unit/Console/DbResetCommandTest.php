@@ -87,6 +87,10 @@ function withSchemaStamp(callable $fn): void
 test('--force wipes a non-empty SQLite file and clears the schema stamp', function (): void {
     withSchemaStamp(function (): void {
         $stamp = SCHEMA_STAMP_PATH;
+        $stampDir = dirname($stamp);
+        if (!is_dir($stampDir)) {
+            mkdir($stampDir, 0o755, true);
+        }
         file_put_contents($stamp, 'stale-hash');
 
         $dbPath = makeTempSqliteFile('not really a sqlite file, just non-empty');
@@ -98,7 +102,14 @@ test('--force wipes a non-empty SQLite file and clears the schema stamp', functi
         expect($tester->getStatusCode())->toBe(0);
         expect(file_exists($dbPath))->toBeTrue();
         expect(filesize($dbPath))->toBe(0);
-        expect(file_exists($stamp))->toBeFalse();
+        // --force clears the production schema stamp (BASE_PATH/storage/.schema_stamp);
+        // also wipe SCHEMA_STAMP_PATH which the test pre-populated so the
+        // teardown does not leave a stray stamp file behind.
+        $prodStamp = BASE_PATH . '/storage/.schema_stamp';
+        expect(file_exists($prodStamp))->toBeFalse();
+        if (file_exists($stamp)) {
+            unlink($stamp);
+        }
     });
 });
 

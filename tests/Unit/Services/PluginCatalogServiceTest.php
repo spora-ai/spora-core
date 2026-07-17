@@ -307,7 +307,9 @@ test('malformed cache entry falls back to the network', function (): void {
         // must be treated as a cache miss.
         $key = hash('sha256', '');
         $cachePath = $tmp . '/storage/.spora_plugin_catalog.json';
-        @mkdir(dirname($cachePath), 0o777, true);
+        if (!is_dir(dirname($cachePath))) {
+            mkdir(dirname($cachePath), 0o777, true);
+        }
         file_put_contents($cachePath, json_encode([
             'version' => PluginCatalogService::CACHE_VERSION,
             'entries' => [
