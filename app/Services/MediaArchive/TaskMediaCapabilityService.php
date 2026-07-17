@@ -47,6 +47,11 @@ final class TaskMediaCapabilityService
     }
 
     /**
+     * Reject an image attachment when the agent's LLM cannot consume image
+     * blocks. Plan §8.3 / §12 require a 400 at the request boundary rather
+     * than a silent image-strip during the first tick. {@see MessageHistoryBuilder}
+     * still strips defensively — this pre-flight gives the caller a useful error.
+     *
      * @param list<string> $mediaIds
      * @throws MediaCapabilityMismatchException
      */

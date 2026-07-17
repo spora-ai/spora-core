@@ -142,6 +142,12 @@ final class TaskController
                 Response::HTTP_UNPROCESSABLE_ENTITY,
             );
         }
+        if ($agentId <= 0) {
+            return new JsonResponse(
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'agent_id must be a positive integer.']],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
         return null;
     }
 
@@ -444,6 +450,10 @@ final class TaskController
         );
     }
 
+    /**
+     * Canonical 404 JSON response for "task not found", shared by every
+     * endpoint that resolves the task through the service layer.
+     */
     private function notFoundResponse(): JsonResponse
     {
         return new JsonResponse(
