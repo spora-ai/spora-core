@@ -63,7 +63,10 @@ jobs:
         run: composer install --no-interaction --prefer-dist
 
       - name: OpenAPI drift check
-        run: php bin/spora spora:openapi --check
+        # Bypasses `bin/spora` (and therefore the Kernel/DI/secret-key boot) via the
+        # static helper exposed on `OpenApiGenerateCommand`; no `storage/secret.key`
+        # is needed. Same command used by the `composer openapi:check` script locally.
+        run: composer openapi:check
 
       - name: Run PHPStan
         run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=2G

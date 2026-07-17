@@ -110,4 +110,62 @@ final class OpenApiGenerateCommand extends Command
             JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
         ) ?: '{}';
     }
+
+    /**
+     * Regenerate the spec to `$outputPath`. Bypasses `bin/spora` (and therefore the
+     * Kernel/DI/secret-key boot) so a CI step that lacks `storage/secret.key` can
+     * still produce the artifact. Returns `Command::SUCCESS`/`Command::FAILURE` so
+     * the entry path (`composer openapi`) can be used directly by CI too.
+     */
+    public static function regenerate(string $outputPath): int
+    {
+        $json = (new RouteToOpenApi())->build();
+        $serialised = json_encode(
+            $json,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+        ) ?: '{}';
+
+        $written = file_put_contents($outputPath, $serialised);
+        if ($written === false) {
+            fwrite(STDERR, sprintf("Failed to write spec to %s.\n", $outputPath));
+            return Command::FAILURE;
+        }
+
+        fwrite(STDOUT, sprintf("Wrote %d bytes to %s.\n", $written, $outputPath));
+        return Command::SUCCESS;
+    }
+
+    /**
+     * Standalone driver for the drift check. Bypasses `bin/spora` (and therefore the
+     * Kernel/DI/secret-key boot) so a CI step that lacks `storage/secret.key` can
+     * still verify the committed spec is up to date.
+     *
+     * Returns `Command::SUCCESS` (`0`) when the freshly-generated spec matches the
+     * committed file, `Command::FAILURE` (`1`) otherwise. Mirrors the behaviour of
+     * `php bin/spora spora:openapi --check` and is the entry path used by the
+     * `composer openapi:check` script and the `static-analysis` CI step.
+     */
+    public static function checkAgainstFile(string $outputPath): int
+    {
+        $json = (new RouteToOpenApi())->build();
+        $serialised = json_encode(
+            $json,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+        ) ?: '{}';
+
+        if (!is_file($outputPath)) {
+            fwrite(STDERR, sprintf("No committed spec at %s to compare against.\n", $outputPath));
+            return Command::FAILURE;
+        }
+        $committed = file_get_contents($outputPath);
+        if ($committed === $serialised) {
+            return Command::SUCCESS;
+        }
+
+        fwrite(STDERR, sprintf(
+            "Spec at %s is stale. Regenerate with `composer openapi`.\n",
+            $outputPath,
+        ));
+        return Command::FAILURE;
+    }
 }
