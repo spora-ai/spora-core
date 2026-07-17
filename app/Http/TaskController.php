@@ -136,15 +136,12 @@ final class TaskController
                 Response::HTTP_UNPROCESSABLE_ENTITY,
             );
         }
-        if ($agentId === null) {
+        if ($agentId === null || $agentId <= 0) {
+            $message = $agentId === null
+                ? 'agent_id is required.'
+                : 'agent_id must be a positive integer.';
             return new JsonResponse(
-                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'agent_id is required.']],
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        }
-        if ($agentId <= 0) {
-            return new JsonResponse(
-                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'agent_id must be a positive integer.']],
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $message]],
                 Response::HTTP_UNPROCESSABLE_ENTITY,
             );
         }
