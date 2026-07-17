@@ -97,22 +97,13 @@ final class TaskController
             return $validation;
         }
 
-        try {
-            $this->mediaCapability->ensureMediaCapabilityCompatible($agentId, $mediaIds);
-        } catch (MediaCapabilityMismatchException $e) {
-            return new JsonResponse(
-                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
-                Response::HTTP_BAD_REQUEST,
-            );
-        }
-
-        return $this->startTaskOrError($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
+        return $this->startTaskWithCapability($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
     }
 
     /**
      * @param list<string> $mediaIds
      */
-    private function startTaskOrError(
+    private function startTaskWithCapability(
         int $userId,
         int $agentId,
         string $prompt,
@@ -121,8 +112,14 @@ final class TaskController
         array $mediaIds,
     ): JsonResponse {
         try {
+            $this->mediaCapability->ensureMediaCapabilityCompatible($agentId, $mediaIds);
             $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
             return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_CREATED);
+        } catch (MediaCapabilityMismatchException $e) {
+            return new JsonResponse(
+                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
+                Response::HTTP_BAD_REQUEST,
+            );
         } catch (InvalidArgumentException $e) {
             return new JsonResponse(
                 ['error' => ['code' => 'NOT_FOUND', 'message' => $e->getMessage()]],
