@@ -676,6 +676,7 @@ final class ContainerDefinitions
                 return new AgentService(
                     $c->get(ToolConfigService::class),
                     $c->get(LLMConfigService::class),
+                    $c->get(ToolIconResolver::class),
                 );
             },
 

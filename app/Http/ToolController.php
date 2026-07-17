@@ -156,6 +156,8 @@ final class ToolController
     private function toolSchemaResource(string $toolClass): array
     {
         if (!class_exists($toolClass)) {
+            // No class to resolve against — the resolver would have no tool.icon
+            // attribute to read, so null on the wire is correct here.
             return ['tool_class' => $toolClass, 'tool_name' => basename(str_replace('\\', '/', $toolClass)), 'settings_schema' => [], 'operations' => [], 'icon' => null];
         }
 

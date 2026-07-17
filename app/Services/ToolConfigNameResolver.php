@@ -62,7 +62,7 @@ final class ToolConfigNameResolver
      * omits `icon`, or the class is not resolvable.
      *
      * Resolution is single-layer: just the per-class override. Plugin-level
-     * and default fallbacks are owned by {@see \Spora\Services\ToolIconResolver}.
+     * and default fallbacks are owned by {@see ToolIconResolver}.
      */
     public function getToolIcon(string $toolClass): ?string
     {

@@ -29,12 +29,12 @@ it('layer 2: falls back to the owning plugin\'s plugin.json icon when the tool h
     // For a true layer-2 test we need a tool class WITHOUT #[Tool(icon: ...)] that the
     // plugin owns. Reuse the existing TestTool fixture, declared without `icon:`.
     $resolver = makeIconResolverWithPlugin(
-        toolClasses: [\Tests\Fixtures\TestTool::class],
+        toolClasses: [Tests\Fixtures\TestTool::class],
         pluginLoader: $loader,
-        pluginToolClass: \Tests\Fixtures\TestTool::class,
+        pluginToolClass: Tests\Fixtures\TestTool::class,
     );
 
-    expect($resolver->resolve(\Tests\Fixtures\TestTool::class))->toBe('mail');
+    expect($resolver->resolve(Tests\Fixtures\TestTool::class))->toBe('mail');
 });
 
 it('layer 1 wins over layer 2 when both are set', function (): void {
@@ -61,12 +61,12 @@ it('layer 3: returns null when neither layer 1 nor layer 2 declares an icon', fu
     $loader->boot();
 
     $resolver = makeIconResolverWithPlugin(
-        toolClasses: [\Tests\Fixtures\TestTool::class],
+        toolClasses: [Tests\Fixtures\TestTool::class],
         pluginLoader: $loader,
-        pluginToolClass: \Tests\Fixtures\TestTool::class,
+        pluginToolClass: Tests\Fixtures\TestTool::class,
     );
 
-    expect($resolver->resolve(\Tests\Fixtures\TestTool::class))->toBeNull();
+    expect($resolver->resolve(Tests\Fixtures\TestTool::class))->toBeNull();
 });
 
 it('layer 3: returns null for a core (non-plugin) tool with no #[Tool(icon: ...)]', function (): void {

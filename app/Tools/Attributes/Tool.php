@@ -11,8 +11,17 @@ use InvalidArgumentException;
  * Marks a class as a Tool the agent can invoke.
  *
  * Usage:
- *   #[Tool(name: 'my_tool', description: 'Does something useful')]
+ *   #[Tool(
+ *       name: 'my_tool',
+ *       description: 'Does something useful',
+ *       displayName: 'My Tool',         // optional
+ *       category: 'general',             // optional; defaults to 'general'
+ *       icon: 'puzzle',                  // optional; bundled icon key
+ *                                        //   (e.g. 'calendar', 'mail', 'search')
+ *   )]
  *   final class MyTool implements ToolInterface { ... }
+ *
+ * Pass `icon: ''` to explicitly fall through to the plugin / default layer.
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final class Tool

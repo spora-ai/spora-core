@@ -95,7 +95,6 @@ it('omits the per-tool icon field when no ToolIconResolver is supplied (back-com
     $array = AgentResource::toArray($agent);
 
     expect($array['tools'])->toBe([]);
-    // tools is empty here — the omitted-icon path is exercised by the next test.
 });
 
 it('resolves per-tool icon via the supplied ToolIconResolver', function (): void {
@@ -107,14 +106,12 @@ it('resolves per-tool icon via the supplied ToolIconResolver', function (): void
         'max_steps' => 10,
     ]);
 
-    // Attach a tool row directly so we can assert the icon flows through.
     AgentTool::create([
         'agent_id'   => $agent->id,
         'tool_class' => 'Tests\\Fixtures\\Icons\\TestCalendarTool',
         'tool_name'  => 'Test Calendar',
     ]);
 
-    // Stub resolver: deterministic mapping for two tool classes, null for unknowns.
     $resolver = new class extends ToolIconResolver {
         public function __construct() {}
 
