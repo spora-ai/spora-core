@@ -346,18 +346,18 @@ final class PluginLoader
     private function readComposerSuggest(string $pluginDir): array
     {
         $path = rtrim($pluginDir, '/') . '/composer.json';
-        $raw = @file_get_contents($path);
-        if (!is_file($path) || $raw === false || $raw === '') {
+        if (!is_readable($path)) {
+            return [];
+        }
+        $raw = file_get_contents($path);
+        if ($raw === false || $raw === '') {
             return [];
         }
 
         $decoded = json_decode($raw, true);
         $suggest = is_array($decoded) ? ($decoded['suggest'] ?? null) : null;
-        if (!is_array($suggest)) {
-            return [];
-        }
 
-        return $this->filterSuggestEntries($suggest);
+        return is_array($suggest) ? $this->filterSuggestEntries($suggest) : [];
     }
 
     /**

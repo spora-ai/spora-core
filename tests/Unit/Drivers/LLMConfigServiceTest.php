@@ -787,7 +787,6 @@ describe('LLMConfigService facade → schema inspector (getPasswordKeys)', funct
         // Use the public facade to reach the inspector.
         $ref  = new ReflectionObject($service);
         $prop = $ref->getProperty('schemaInspector');
-        $prop->setAccessible(true);
         /** @var LLMConfigSchemaInspector $inspector */
         $inspector = $prop->getValue($service);
 
@@ -801,7 +800,6 @@ describe('LLMConfigService facade → schema inspector (getPasswordKeys)', funct
 
         $ref  = new ReflectionObject($service);
         $prop = $ref->getProperty('schemaInspector');
-        $prop->setAccessible(true);
         /** @var LLMConfigSchemaInspector $inspector */
         $inspector = $prop->getValue($service);
 
@@ -815,7 +813,6 @@ describe('LLMConfigService facade → schema inspector (getPasswordKeys)', funct
 
         $ref  = new ReflectionObject($service);
         $prop = $ref->getProperty('schemaInspector');
-        $prop->setAccessible(true);
         /** @var LLMConfigSchemaInspector $inspector */
         $inspector = $prop->getValue($service);
 

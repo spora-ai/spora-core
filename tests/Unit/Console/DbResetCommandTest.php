@@ -67,17 +67,26 @@ function makeTester(Database $db): CommandTester
 
 function withSchemaStamp(callable $fn): void
 {
-    $stamp = SCHEMA_STAMP_PATH;
-    $backup = null;
-    if (file_exists($stamp)) {
-        $backup = file_get_contents($stamp);
-        unlink($stamp);
+    $stamps = [SCHEMA_STAMP_PATH, BASE_PATH . '/storage/.schema_stamp'];
+    $backups = [];
+    foreach ($stamps as $stamp) {
+        $backups[$stamp] = null;
+        if (file_exists($stamp)) {
+            $backups[$stamp] = file_get_contents($stamp);
+            unlink($stamp);
+        }
     }
     try {
         $fn();
     } finally {
-        if ($backup !== null) {
-            file_put_contents($stamp, $backup);
+        foreach ($backups as $stamp => $backup) {
+            if ($backup !== null) {
+                $dir = dirname($stamp);
+                if (!is_dir($dir)) {
+                    mkdir($dir, 0o755, true);
+                }
+                file_put_contents($stamp, $backup);
+            }
         }
     }
 }
@@ -87,6 +96,10 @@ function withSchemaStamp(callable $fn): void
 test('--force wipes a non-empty SQLite file and clears the schema stamp', function (): void {
     withSchemaStamp(function (): void {
         $stamp = SCHEMA_STAMP_PATH;
+        $stampDir = dirname($stamp);
+        if (!is_dir($stampDir)) {
+            mkdir($stampDir, 0o755, true);
+        }
         file_put_contents($stamp, 'stale-hash');
 
         $dbPath = makeTempSqliteFile('not really a sqlite file, just non-empty');
@@ -98,7 +111,11 @@ test('--force wipes a non-empty SQLite file and clears the schema stamp', functi
         expect($tester->getStatusCode())->toBe(0);
         expect(file_exists($dbPath))->toBeTrue();
         expect(filesize($dbPath))->toBe(0);
-        expect(file_exists($stamp))->toBeFalse();
+        // --force clears the production schema stamp (BASE_PATH/storage/.schema_stamp).
+        // The withSchemaStamp() helper backs that file up before the test runs and
+        // restores it from the backup in its finally block.
+        $prodStamp = BASE_PATH . '/storage/.schema_stamp';
+        expect(file_exists($prodStamp))->toBeFalse();
     });
 });
 

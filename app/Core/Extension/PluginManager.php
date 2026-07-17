@@ -181,7 +181,7 @@ final class PluginManager
         $slug      = basename($pluginDir);
 
         $composerFile = $pluginDir . '/composer.json';
-        $raw          = @file_get_contents($composerFile);
+        $raw          = is_readable($composerFile) ? file_get_contents($composerFile) : false;
         $decoded      = is_string($raw) && $raw !== ''
             ? json_decode($raw, true)
             : null;

@@ -40,14 +40,23 @@ final class MediaIngestDecoder
     }
 
     /**
+     * Decode a hex string to its raw bytes. Returns the empty string when
+     * `$hex` is empty (deliberate round-trip contract); throws otherwise.
+     *
      * @throws InvalidArgumentException When the hex length is odd or the string is not valid hex.
      */
     public function decodeHex(string $hex): string
     {
+        if ($hex === '') {
+            return '';
+        }
         if (strlen($hex) % 2 !== 0) {
             throw new InvalidArgumentException('Hex payload has odd length.');
         }
-        $decoded = @hex2bin($hex);
+        if (! ctype_xdigit($hex)) {
+            throw new InvalidArgumentException('Hex payload is not valid hex.');
+        }
+        $decoded = hex2bin($hex);
         if ($decoded === false) {
             throw new InvalidArgumentException('Hex payload is not valid hex.');
         }

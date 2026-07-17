@@ -109,7 +109,6 @@ test('buildMailer with smtp driver produces an smtps:// DSN', function (): void 
     ]);
 
     $reflection = new ReflectionMethod($mailer, 'buildSmtpDsn');
-    $reflection->setAccessible(true);
     $dsn = $reflection->invoke($mailer, [
         'mail_host'       => 'smtp.example.com',
         'mail_port'       => 465,
@@ -130,7 +129,6 @@ test('buildMailer with smtp driver uses default port 465 when not specified', fu
     ]);
 
     $reflection = new ReflectionMethod($mailer, 'buildSmtpDsn');
-    $reflection->setAccessible(true);
     $dsn = $reflection->invoke($mailer, [
         'mail_host' => 'smtp.example.com',
     ]);

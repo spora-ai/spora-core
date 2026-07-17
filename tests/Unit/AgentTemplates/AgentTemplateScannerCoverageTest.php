@@ -134,9 +134,13 @@ test('scan() accepts a plugin file id with the matching source prefix (no warnin
     // directory basename needs to exactly match the id's namespace.
     $dir = sys_get_temp_dir() . '/weather-' . uniqid('', true);
     // Re-create the dir under a basename that matches the namespace.
-    @rmdir($dir);
+    if (is_dir($dir)) {
+        rmdir($dir);
+    }
     $dir = sys_get_temp_dir() . '/weather';
-    @mkdir($dir, 0777, true);
+    if (!is_dir($dir)) {
+        mkdir($dir, 0777, true);
+    }
     $file = $dir . '/ok-' . uniqid() . '.json';
     file_put_contents($file, json_encode([
         'id' => 'weather/ok',
