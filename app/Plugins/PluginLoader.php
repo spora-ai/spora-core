@@ -356,11 +356,8 @@ final class PluginLoader
 
         $decoded = json_decode($raw, true);
         $suggest = is_array($decoded) ? ($decoded['suggest'] ?? null) : null;
-        if (!is_array($suggest)) {
-            return [];
-        }
 
-        return $this->filterSuggestEntries($suggest);
+        return is_array($suggest) ? $this->filterSuggestEntries($suggest) : [];
     }
 
     /**
