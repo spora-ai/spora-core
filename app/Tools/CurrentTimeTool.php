@@ -19,6 +19,7 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'Returns the exact current date, time, and timezone. Use this whenever you need to know the current date to answer a question or schedule an event.',
     displayName: 'Current Time',
     category: 'productivity',
+    icon: 'clock',
 )]
 #[ToolOperation(name: 'now', description: 'Get the current date and time', enabledByDefault: true, requiresApprovalByDefault: false)]
 final class CurrentTimeTool extends AbstractTool

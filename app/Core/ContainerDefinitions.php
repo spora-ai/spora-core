@@ -122,7 +122,9 @@ use Spora\Services\SystemMailer;
 use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
+use Spora\Services\ToolConfigNameResolver;
 use Spora\Services\ToolConfigService;
+use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
 use Spora\Tools\AgentMemoryTool;
@@ -497,6 +499,19 @@ final class ContainerDefinitions
                     ))),
                 );
             },
+
+            ToolIconResolver::class => static function (ContainerInterface $c): ToolIconResolver {
+                return new ToolIconResolver(
+                    new ToolConfigNameResolver(
+                        $c->get(LoggerInterface::class),
+                        array_values(array_unique(array_merge(
+                            $c->get('tool_classes'),
+                            $c->get(PluginLoader::class)->toolClasses(),
+                        ))),
+                    ),
+                    $c->get(PluginLoader::class),
+                );
+            },
         ];
     }
 
@@ -661,6 +676,7 @@ final class ContainerDefinitions
                 return new AgentService(
                     $c->get(ToolConfigService::class),
                     $c->get(LLMConfigService::class),
+                    $c->get(ToolIconResolver::class),
                 );
             },
 
@@ -787,6 +803,7 @@ final class ContainerDefinitions
                     $c->get(AuthService::class),
                     $c->get(AgentServiceInterface::class),
                     $c->get(DriverFactory::class),
+                    $c->get(ToolIconResolver::class),
                 );
             },
 
@@ -816,6 +833,7 @@ final class ContainerDefinitions
                         $c->get('tool_classes'),
                         $c->get(PluginLoader::class)->toolClasses(),
                     ))),
+                    $c->get(ToolIconResolver::class),
                 );
             },
 

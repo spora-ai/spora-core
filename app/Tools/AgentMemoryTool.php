@@ -16,6 +16,7 @@ use Spora\Tools\Attributes\ToolOperation;
     description: 'Store and retrieve persistent memories scoped to this agent.',
     displayName: 'Agent Memory',
     category: 'productivity',
+    icon: 'brain',
 )]
 #[ToolOperation(name: 'list', description: 'List all memories with summaries', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolOperation(name: 'get', description: 'Get a single memory by name', enabledByDefault: true, requiresApprovalByDefault: false)]

@@ -8,6 +8,7 @@ use JsonException;
 use ReflectionClass;
 use Spora\Auth\AuthService;
 use Spora\Services\ToolConfigService;
+use Spora\Services\ToolIconResolver;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\Traits\HasOperations;
@@ -28,6 +29,7 @@ final class ToolController
         private readonly AuthService $authService,
         private readonly ToolConfigService $toolConfigService,
         private readonly array $toolClasses = [],
+        private readonly ?ToolIconResolver $toolIconResolver = null,
     ) {}
 
     public function index(): JsonResponse
@@ -154,7 +156,9 @@ final class ToolController
     private function toolSchemaResource(string $toolClass): array
     {
         if (!class_exists($toolClass)) {
-            return ['tool_class' => $toolClass, 'tool_name' => basename(str_replace('\\', '/', $toolClass)), 'settings_schema' => [], 'operations' => []];
+            // No class to resolve against — the resolver would have no tool.icon
+            // attribute to read, so null on the wire is correct here.
+            return ['tool_class' => $toolClass, 'tool_name' => basename(str_replace('\\', '/', $toolClass)), 'settings_schema' => [], 'operations' => [], 'icon' => null];
         }
 
         $reflection = new ReflectionClass($toolClass);
@@ -207,6 +211,7 @@ final class ToolController
             'tool_name'       => $toolName,
             'display_name'    => $displayName,
             'category'        => $category,
+            'icon'            => $this->toolIconResolver?->resolve($toolClass),
             'settings_schema' => $schema,
             'operations'      => $operations,
         ];

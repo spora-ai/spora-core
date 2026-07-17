@@ -36,6 +36,7 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'Transfer the current chat to another agent that the user has pre-approved. '
                . 'Pass context_summary describing the conversation so far. '
                . 'The new task inherits the source task as its parent.',
+    icon: 'arrow-right',
 )]
 #[ToolSetting(
     key: 'allowed_target_agents',

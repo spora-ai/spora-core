@@ -37,6 +37,7 @@ use Symfony\Component\HttpFoundation\Request;
     description: 'Get or enable the public URL of a media file. Public URLs are useful for handing media to third-party APIs that require a publicly-fetchable URL (e.g. social-media posters).',
     displayName: 'Public Media URL',
     category: 'media',
+    icon: 'image',
 )]
 #[ToolOperation(name: 'get', description: 'Get the public URL of a media file. Errors if sharing is not enabled.', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolOperation(name: 'share', description: 'Enable public sharing on a media file (mints a public_access_token). Requires user approval.', enabledByDefault: true, requiresApprovalByDefault: true)]

@@ -37,6 +37,7 @@ use Throwable;
     description: 'Fetch and read the contents of a URL. Parses HTML pages into Markdown, can read XML/RSS/JSON, and can fetch remote PDFs and convert them to Markdown. Only http:// and https:// URLs are supported.',
     displayName: 'Read URL',
     category: 'data',
+    icon: 'globe',
 )]
 #[ToolOperation(name: 'fetch', description: 'Fetch and read the contents of a URL', enabledByDefault: true, requiresApprovalByDefault: false, discriminatorKey: 'op')]
 #[ToolOperation(name: 'fetch_pdf', description: 'Fetch a remote PDF and return its text as Markdown', enabledByDefault: true, requiresApprovalByDefault: false, discriminatorKey: 'op')]

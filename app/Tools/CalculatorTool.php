@@ -20,6 +20,7 @@ use Throwable;
     description: 'Evaluates a mathematical expression safely. Use this to calculate exact results. Supports standard arithmetic operators (+, -, *, /) and parentheses.',
     displayName: 'Calculator',
     category: 'productivity',
+    icon: 'zap',
 )]
 #[ToolOperation(name: 'calculate', description: 'Evaluate a mathematical expression', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolParameter(

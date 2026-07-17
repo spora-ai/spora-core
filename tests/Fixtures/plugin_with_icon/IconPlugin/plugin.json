@@ -1,0 +1,5 @@
+{
+    "slug": "icon-plugin",
+    "class": "Tests\\Fixtures\\PluginWithIcon\\IconPlugin\\Plugin",
+    "icon": "mail"
+}
