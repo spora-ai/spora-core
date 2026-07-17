@@ -26,11 +26,20 @@ final class AgentResource
      *     response rather than reported as `false` to avoid misleading the
      *     frontend. Pass a real bool from AgentController where the
      *     DriverFactory is available.
+     * @param ?ToolIconResolver $iconResolver  Resolver for the per-tool icon
+     *     via the 3-layer chain (tool.icon → plugin.icon → null). Optional —
+     *     when null, the per-tool `icon` field is omitted from each tool
+     *     entry (callers without DI access can pass null and the wire payload
+     *     still parses; the frontend's <Icon> component falls back to
+     *     'puzzle' on missing keys).
      *
      * @return array<string, mixed>
      */
-    public static function toArray(Agent $agent, ?bool $supportsImageInput = null): array
-    {
+    public static function toArray(
+        Agent $agent,
+        ?bool $supportsImageInput = null,
+        ?ToolIconResolver $iconResolver = null,
+    ): array {
         /** @var \Illuminate\Database\Eloquent\Collection<int, AgentTool> $tools */
         $tools = $agent->agentTools;
 
@@ -50,10 +59,18 @@ final class AgentResource
             'created_at'           => $agent->created_at !== null
                 ? $agent->created_at->format(DateTimeInterface::ATOM)
                 : null,
-            'tools'                => $tools->map(static fn(AgentTool $t): array => [
-                'tool_class' => $t->tool_class,
-                'tool_name'  => $t->tool_name,
-            ])->values()->toArray(),
+            'tools'                => $tools->map(static function (AgentTool $t) use ($iconResolver): array {
+                $entry = [
+                    'tool_class' => $t->tool_class,
+                    'tool_name'  => $t->tool_name,
+                ];
+                // Per-tool icon resolved server-side via the 3-layer chain.
+                // null on the wire = frontend's <Icon> falls back to 'puzzle'.
+                if ($iconResolver !== null) {
+                    $entry['icon'] = $iconResolver->resolve($t->tool_class);
+                }
+                return $entry;
+            })->values()->toArray(),
         ];
 
         if ($supportsImageInput !== null) {

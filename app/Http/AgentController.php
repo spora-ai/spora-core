@@ -10,6 +10,7 @@ use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\ToolIconResolver;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -39,6 +40,7 @@ final class AgentController
         private readonly AuthService $authService,
         private readonly AgentServiceInterface $agentService,
         private readonly ?DriverFactory $driverFactory = null,
+        private readonly ?ToolIconResolver $toolIconResolver = null,
     ) {}
 
     /**
@@ -107,7 +109,7 @@ final class AgentController
         $agent = $this->agentService->createAgent($userId, $data);
 
         return new JsonResponse(
-            ['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent))]],
+            ['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver)]],
             Response::HTTP_CREATED,
         );
     }
@@ -126,7 +128,7 @@ final class AgentController
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent))]]);
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver)]]);
     }
 
     /**
@@ -161,7 +163,7 @@ final class AgentController
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent))]]);
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver)]]);
     }
 
     /**

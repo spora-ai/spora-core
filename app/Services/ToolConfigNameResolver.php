@@ -57,6 +57,33 @@ final class ToolConfigNameResolver
     }
 
     /**
+     * Read the icon key declared on the tool class via #[Tool(icon: ...)].
+     * Returns null when the class has no #[Tool] attribute, the attribute
+     * omits `icon`, or the class is not resolvable.
+     *
+     * Resolution is single-layer: just the per-class override. Plugin-level
+     * and default fallbacks are owned by {@see \Spora\Services\ToolIconResolver}.
+     */
+    public function getToolIcon(string $toolClass): ?string
+    {
+        if (!class_exists($toolClass)) {
+            return null;
+        }
+
+        $reflection = new ReflectionClass($toolClass);
+        $attrs      = $reflection->getAttributes(Tool::class);
+
+        if ($attrs === []) {
+            return null;
+        }
+
+        /** @var Tool $tool */
+        $tool = $attrs[0]->newInstance();
+
+        return $tool->icon;
+    }
+
+    /**
      * Resolve a tool identifier (from #[Tool(name:)]) to its fully-qualified PHP class name.
      */
     public function resolveToolClass(string $toolName): ?string
