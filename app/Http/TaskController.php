@@ -86,11 +86,11 @@ final class TaskController
             );
         }
 
-        $prompt = trim((string) ($body['prompt'] ?? ''));
-        $agentId = isset($body['agent_id']) ? (int) $body['agent_id'] : null;
-        $maxSteps = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
+        $prompt       = trim((string) ($body['prompt'] ?? ''));
+        $agentId      = isset($body['agent_id']) ? (int) $body['agent_id'] : null;
+        $maxSteps     = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
         $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
-        $mediaIds = $this->mediaCapability->parseMediaIds($body['media_ids'] ?? null);
+        $mediaIds     = $this->mediaCapability->parseMediaIds($body['media_ids'] ?? null);
 
         $validation = $this->validateStartTaskFields($prompt, $agentId);
         if ($validation !== null) {
@@ -106,6 +106,20 @@ final class TaskController
             );
         }
 
+        return $this->startTaskOrError($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
+    }
+
+    /**
+     * @param list<string> $mediaIds
+     */
+    private function startTaskOrError(
+        int $userId,
+        int $agentId,
+        string $prompt,
+        ?int $maxSteps,
+        ?int $parentTaskId,
+        array $mediaIds,
+    ): JsonResponse {
         try {
             $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
             return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_CREATED);
@@ -181,6 +195,14 @@ final class TaskController
             return $batch;
         }
 
+        return $this->approveTaskOrError($taskId, $userId, $batch);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $batch
+     */
+    private function approveTaskOrError(int $taskId, int $userId, array $batch): JsonResponse
+    {
         try {
             $task = $this->taskService->approveTask($taskId, $userId, $batch);
             return new JsonResponse(['data' => ['task' => $task]]);
@@ -207,43 +229,22 @@ final class TaskController
      */
     private function parseAndValidateApprovalBatch(array $body): array|JsonResponse
     {
-        $batch = $this->extractApprovalBatchItems($body);
-        if ($batch instanceof JsonResponse) {
-            return $batch;
-        }
-
-        $validation = $this->validateAndNormalizeApprovalBatch($batch);
-        return $validation ?? $batch;
-    }
-
-    /**
-     * @return list<array<string, mixed>>|JsonResponse
-     */
-    private function extractApprovalBatchItems(array $body): array|JsonResponse
-    {
         if (isset($body['approvals']) && is_array($body['approvals'])) {
-            return $body['approvals'];
+            $batch = $body['approvals'];
+        } else {
+            $providerId = trim((string) ($body['provider_call_id'] ?? ''));
+            if ($providerId === '') {
+                return new JsonResponse(
+                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required.']],
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                );
+            }
+            $batch = [[
+                'provider_call_id' => $providerId,
+                'arguments'        => (array) ($body['arguments'] ?? []),
+            ]];
         }
 
-        $providerId = trim((string) ($body['provider_call_id'] ?? ''));
-        if ($providerId === '') {
-            return new JsonResponse(
-                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required.']],
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        }
-
-        return [[
-            'provider_call_id' => $providerId,
-            'arguments'        => (array) ($body['arguments'] ?? []),
-        ]];
-    }
-
-    /**
-     * @param list<array<string, mixed>> $batch
-     */
-    private function validateAndNormalizeApprovalBatch(array &$batch): ?JsonResponse
-    {
         foreach ($batch as $item) {
             if (!isset($item['provider_call_id'])) {
                 return new JsonResponse(
@@ -258,7 +259,8 @@ final class TaskController
             }
         }
         unset($item);
-        return null;
+
+        return $batch;
     }
 
     /**
