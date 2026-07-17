@@ -80,7 +80,7 @@ final class PluginLoaderCache
             return false;
         }
 
-        $existing = is_file($this->stampPath) ? file_get_contents($this->stampPath) : false;
+        $existing = is_readable($this->stampPath) ? file_get_contents($this->stampPath) : false;
         return is_string($existing) && $existing === $this->computeStampHash($discovered);
     }
 
@@ -105,7 +105,7 @@ final class PluginLoaderCache
     private function decodeAndValidateSidecar(): ?array
     {
         $sidecarPath = $this->sidecarPath();
-        $raw = is_file($sidecarPath) ? file_get_contents($sidecarPath) : false;
+        $raw = is_readable($sidecarPath) ? file_get_contents($sidecarPath) : false;
         if (!is_string($raw) || $raw === '') {
             return null;
         }
@@ -146,9 +146,9 @@ final class PluginLoaderCache
             return;
         }
 
-        $stampDir = dirname($this->stampPath);
-        if (!is_dir($stampDir)) {
-            @mkdir($stampDir, 0o755, true);
+        $dir = dirname($this->stampPath);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0o755, true);
         }
         @file_put_contents($this->stampPath, $this->computeStampHash($discovered));
 
@@ -163,12 +163,7 @@ final class PluginLoaderCache
             return;
         }
 
-        $sidecarPath = $this->sidecarPath();
-        $sidecarDir  = dirname($sidecarPath);
-        if (!is_dir($sidecarDir)) {
-            @mkdir($sidecarDir, 0o755, true);
-        }
-        @file_put_contents($sidecarPath, $payload);
+        @file_put_contents($this->sidecarPath(), $payload);
     }
 
     /**

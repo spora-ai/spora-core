@@ -346,7 +346,7 @@ final class PluginLoader
     private function readComposerSuggest(string $pluginDir): array
     {
         $path = rtrim($pluginDir, '/') . '/composer.json';
-        if (!is_file($path)) {
+        if (!is_readable($path)) {
             return [];
         }
         $raw = file_get_contents($path);

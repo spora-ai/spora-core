@@ -40,6 +40,9 @@ final class MediaIngestDecoder
     }
 
     /**
+     * Decode a hex string to its raw bytes. Returns the empty string when
+     * `$hex` is empty (deliberate round-trip contract); throws otherwise.
+     *
      * @throws InvalidArgumentException When the hex length is odd or the string is not valid hex.
      */
     public function decodeHex(string $hex): string

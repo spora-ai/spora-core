@@ -184,6 +184,8 @@ describe('MetadataExtractor::drainOnce', function (): void {
         $extractor = makeExtractor();
         $reflection = new ReflectionClass($extractor);
         $drain = $reflection->getMethod('drainOnce');
+        // Bind as a closure so by-reference parameters survive the call.
+        $drain = $drain->getClosure($extractor);
 
         // Empty temp files: feof() returns true on a handle whose
         // position is at EOF. To get there we read once first (which
@@ -207,8 +209,6 @@ describe('MetadataExtractor::drainOnce', function (): void {
 
         $stdoutBuf = '';
         $deadline = microtime(true) + 1.0;
-        // Bind as a closure so by-reference parameters survive the call.
-        $drain = $drain->getClosure($extractor);
         $verdict = $drain($stdout, $stderr, $deadline, $stdoutBuf);
 
         expect($verdict)->toBe(1); // self::DRAIN_EOF
