@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "dev-main"
+        "version": "0.1.0"
     },
     "servers": [
         {

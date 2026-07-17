@@ -15,7 +15,6 @@ use OpenApi\Annotations\SecurityScheme;
 use OpenApi\Annotations\Server;
 use ReflectionMethod;
 use Spora\Core\RouteDefinitions;
-use Spora\Core\Version;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
@@ -69,10 +68,31 @@ final class RouteToOpenApi
     {
         return new Info([
             'title' => 'Spora API',
-            'version' => Version::current(),
+            // Read composer.json's version directly so the spec is deterministic across
+            // branches — `Composer\InstalledVersions` resolves branch refs as
+            // `dev-feat/...` / `dev-main`, which would make the openapi.json differ
+            // between local dev and the CI PR merge ref and trip the drift check.
+            'version' => $this->composerVersion(),
             'description' => 'HTTP API for the Spora AI agent orchestration platform. Paths are derived from `Spora\\Core\\RouteDefinitions`; body schemas are added incrementally via `#[\OpenApi\...]` attributes on controllers.',
             'contact' => new OA\Contact(['name' => 'Spora', 'url' => 'https://spora-ai.com']),
         ]);
+    }
+
+    private function composerVersion(): string
+    {
+        $path = dirname(__DIR__, 2) . '/composer.json';
+        if (!is_file($path)) {
+            return 'dev';
+        }
+
+        $contents = file_get_contents($path);
+        if ($contents === false) {
+            return 'dev';
+        }
+
+        $decoded = json_decode($contents, true);
+        $version = is_array($decoded) ? ($decoded['version'] ?? null) : null;
+        return is_string($version) && $version !== '' ? $version : 'dev';
     }
 
     private function buildServer(): Server
