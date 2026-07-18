@@ -137,7 +137,7 @@ final class RouteToOpenApi
      */
     private function normalisePath(string $route): string
     {
-        return preg_replace('/\{([a-zA-Z_][a-zA-Z0-9_]*):[^\}]+\}/', '{$1}', $route) ?? $route;
+        return preg_replace('/\{([a-zA-Z_]\w*):[^\}]+\}/', '{$1}', $route) ?? $route;
     }
 
     /**
@@ -252,7 +252,7 @@ final class RouteToOpenApi
      */
     private function parametersFromPath(array $entry): array
     {
-        preg_match_all('/\{([a-zA-Z_][a-zA-Z0-9_]*)(?::[^\}]+)?\}/', $entry['route'], $matches);
+        preg_match_all('/\{([a-zA-Z_]\w*)(?::[^\}]+)?\}/', $entry['route'], $matches);
 
         $names = $matches[1];
         $types = $this->resolveParamTypes($entry['handler']);
