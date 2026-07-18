@@ -59,30 +59,38 @@ final class OpenApiGenerateCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io       = new SymfonyStyle($input, $output);
+        $io         = new SymfonyStyle($input, $output);
         $outputPath = $this->resolvePath((string) $input->getOption('output'));
-        $checkOnly = (bool) $input->getOption('check');
-
-        $openapi = $this->builder->build();
-        $json    = $this->serialise($openapi);
+        $checkOnly  = (bool) $input->getOption('check');
+        $json       = $this->serialise($this->builder->build());
 
         if ($checkOnly) {
-            if (!is_file($outputPath)) {
-                $io->error(sprintf('No committed spec at %s to compare against.', $outputPath));
-                return Command::FAILURE;
-            }
-            $committed = file_get_contents($outputPath);
-            if ($committed === $json) {
-                $io->success(sprintf('Spec at %s is up to date.', $outputPath));
-                return Command::SUCCESS;
-            }
-            $io->error(sprintf(
-                'Spec at %s is stale. Regenerate with `php bin/spora spora:openapi`.',
-                $outputPath,
-            ));
-            return Command::FAILURE;
+            return $this->runCheck($io, $outputPath, $json);
         }
 
+        return $this->writeSpec($io, $outputPath, $json);
+    }
+
+    private function runCheck(SymfonyStyle $io, string $outputPath, string $json): int
+    {
+        if (!is_file($outputPath)) {
+            $io->error(sprintf('No committed spec at %s to compare against.', $outputPath));
+            return Command::FAILURE;
+        }
+        if ((string) file_get_contents($outputPath) === $json) {
+            $io->success(sprintf('Spec at %s is up to date.', $outputPath));
+            return Command::SUCCESS;
+        }
+
+        $io->error(sprintf(
+            'Spec at %s is stale. Regenerate with `php bin/spora spora:openapi`.',
+            $outputPath,
+        ));
+        return Command::FAILURE;
+    }
+
+    private function writeSpec(SymfonyStyle $io, string $outputPath, string $json): int
+    {
         $written = file_put_contents($outputPath, $json);
         if ($written === false) {
             $io->error(sprintf('Failed to write spec to %s.', $outputPath));
