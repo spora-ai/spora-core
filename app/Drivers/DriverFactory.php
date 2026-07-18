@@ -19,6 +19,12 @@ use Throwable;
  *   1. Agent has llm_driver_config_id → use that config
  *   2. Otherwise → use the global default LLMDriverConfiguration
  *   3. If neither exists → fall back to OpenAICompatibleDriver with minimal defaults
+ *
+ * The `supports_image_input` toggle is read from the decoded settings blob.
+ * The frontend round-trips booleans as the strings `"true"`/`"false"`,
+ * so a value of `"false"` (or any falsy string) decodes to `false`, and
+ * the absence of the key decodes to `null` so the driver falls back to
+ * the model-name heuristic for legacy rows.
  */
 class DriverFactory
 {
@@ -36,7 +42,7 @@ class DriverFactory
             return $this->makeDriverFromConfig($config);
         }
 
-        // Ultimate fallback: OpenAICompatibleDriver with empty settings
+        // Ultimate fallback: OpenAICompatibleDriver with empty settings.
         $this->logger->warning('No LLMDriverConfiguration found, using fallback OpenAI driver.');
 
         return new OpenAICompatibleDriver(
@@ -46,10 +52,11 @@ class DriverFactory
             httpClient: \Symfony\Component\HttpClient\HttpClient::create(),
             logger: $this->logger,
             timeout: $this->llmTimeout,
+            supportsImageInput: null,
         );
     }
 
-    private function makeDriverFromConfig(LLMDriverConfiguration $config): LLMDriverInterface
+    public function makeDriverFromConfig(LLMDriverConfiguration $config): LLMDriverInterface
     {
         $driverClass = $config->driver_class;
 
@@ -72,6 +79,8 @@ class DriverFactory
             ? (int) $settings['timeout']
             : $this->llmTimeout;
 
+        $supportsImageInput = $this->decodeSupportsImageInput($settings);
+
         $commonArgs = [
             'apiKey' => (string) ($settings['api_key'] ?? ''),
             'model' => (string) ($settings['model'] ?? ''),
@@ -79,6 +88,7 @@ class DriverFactory
             'httpClient' => \Symfony\Component\HttpClient\HttpClient::create(),
             'logger' => $this->logger,
             'timeout' => $timeout,
+            'supportsImageInput' => $supportsImageInput,
         ];
 
         if ($driverClass === AnthropicCompatibleDriver::class) {
@@ -89,10 +99,31 @@ class DriverFactory
                 thinkingBudget: isset($settings['thinking_budget']) && $settings['thinking_budget'] !== ''
                     ? (int) $settings['thinking_budget']
                     : null,
+                supportsImageInput: $supportsImageInput,
             );
-            return new AnthropicCompatibleDriver(...$commonArgs, options: $options);
+            // Anthropic folds supportsImageInput into AnthropicDriverOptions
+            // so its constructor stays at 7 params (S107 cap).
+            $argsForDriver = $commonArgs;
+            unset($argsForDriver['supportsImageInput']);
+            return new AnthropicCompatibleDriver(...$argsForDriver, options: $options);
         }
 
         return new $driverClass(...$commonArgs);
+    }
+
+    /**
+     * Decode the operator-controlled `supports_image_input` setting. The
+     * frontend form serialises booleans as the strings `"true"`/`"false"`,
+     * so we cast defensively. A missing key preserves the legacy null
+     * fallback (driver heuristic).
+     *
+     * @param array<string, mixed> $settings
+     */
+    private function decodeSupportsImageInput(array $settings): ?bool
+    {
+        if (!array_key_exists('supports_image_input', $settings)) {
+            return null;
+        }
+        return filter_var($settings['supports_image_input'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
     }
 }
