@@ -276,18 +276,23 @@ final class MessageHistoryBuilder
             return ['text' => $textBlocks, 'image' => $imageBlocks];
         }
         foreach ($row->attachments as $ref) {
-            $kind = (string) ($ref['kind'] ?? 'text');
-            $block = $kind === 'image'
-                ? $this->imageAttachmentBlockFromRef($ref, $supportsImages)
-                : $this->textAttachmentBlockFromRef($ref);
-            if ($block === null) {
+            $mediaId = $ref['media_id'] ?? null;
+            if (!is_string($mediaId) || $mediaId === '') {
                 continue;
             }
-            if ($kind === 'image') {
-                $imageBlocks[] = $block;
-            } else {
-                $textBlocks[] = $block;
+            $asset = MediaAsset::query()->find($mediaId);
+            if ($asset === null) {
+                continue;
             }
+            $kind = (string) ($ref['kind'] ?? 'text');
+            if ($kind === 'image') {
+                $block = $this->imageAttachmentBlock($asset, $supportsImages);
+                if ($block !== null) {
+                    $imageBlocks[] = $block;
+                }
+                continue;
+            }
+            $textBlocks[] = $this->textAttachmentBlock($asset);
         }
         return ['text' => $textBlocks, 'image' => $imageBlocks];
     }
@@ -304,12 +309,10 @@ final class MessageHistoryBuilder
     private function buildAttachmentContent(array $blocks, string $prompt): array
     {
         $combined = $this->composeTextContent($prompt, $blocks['text']);
-        $hasPrompt = $prompt !== '';
-        $hasSingleText = count($blocks['text']) === 1;
         $imageOnly = $blocks['text'] === [] && $blocks['image'] !== [];
         $textOnly = $blocks['image'] === [];
 
-        if ($textOnly && !$hasPrompt && $hasSingleText) {
+        if ($textOnly && $prompt === '' && count($blocks['text']) === 1) {
             return $blocks['text'];
         }
         if ($textOnly) {
@@ -318,13 +321,12 @@ final class MessageHistoryBuilder
                 array_slice($blocks['text'], 0),
             );
         }
-        if ($imageOnly) {
-            return $blocks['image'];
-        }
-        return array_merge(
-            [['type' => 'text', 'text' => $combined]],
-            $blocks['image'],
-        );
+        return $imageOnly
+            ? $blocks['image']
+            : array_merge(
+                [['type' => 'text', 'text' => $combined]],
+                $blocks['image'],
+            );
     }
 
     /**
@@ -350,35 +352,6 @@ final class MessageHistoryBuilder
             return $prompt;
         }
         return $prompt . "\n\n---\n\n" . $attachmentsText;
-    }
-
-    /**
-     * @param array<string, mixed> $ref
-     * @return array<string, mixed>|null
-     */
-    private function textAttachmentBlockFromRef(array $ref): ?array
-    {
-        if (!isset($ref['media_id']) || !is_string($ref['media_id'])) {
-            return null;
-        }
-        $asset = MediaAsset::query()->find($ref['media_id']);
-        return $asset === null ? null : $this->textAttachmentBlock($asset);
-    }
-
-    /**
-     * @param array<string, mixed> $ref
-     * @return array<string, mixed>|null
-     */
-    private function imageAttachmentBlockFromRef(array $ref, bool $supportsImages): ?array
-    {
-        if (!$supportsImages) {
-            return null;
-        }
-        if (!isset($ref['media_id']) || !is_string($ref['media_id'])) {
-            return null;
-        }
-        $asset = MediaAsset::query()->find($ref['media_id']);
-        return $asset === null ? null : $this->imageAttachmentBlock($asset, true);
     }
 
     /**
