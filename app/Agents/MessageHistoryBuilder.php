@@ -241,30 +241,10 @@ final class MessageHistoryBuilder
      */
     private function attachmentMessage(TaskHistory $row): array
     {
-        $supportsImages = $this->driver !== null && $this->driver->supportsImageInput();
-        $textBlocks = [];
-        $imageBlocks = [];
-        if (is_array($row->attachments)) {
-            foreach ($row->attachments as $ref) {
-                $kind = (string) ($ref['kind'] ?? 'text');
-                if ($kind === 'image') {
-                    $block = $this->imageAttachmentBlockFromRef($ref, $supportsImages);
-                    if ($block !== null) {
-                        $imageBlocks[] = $block;
-                    }
-                    continue;
-                }
-                $block = $this->textAttachmentBlockFromRef($ref);
-                if ($block !== null) {
-                    $textBlocks[] = $block;
-                }
-            }
-        }
-
+        $blocks = $this->collectAttachmentBlocks($row);
         $prompt = is_string($row->content) ? trim($row->content) : '';
-        $hasAttachments = $textBlocks !== [] || $imageBlocks !== [];
 
-        if (!$hasAttachments) {
+        if ($blocks['text'] === [] && $blocks['image'] === []) {
             // Defensive: legacy or malformed rows that have no resolvable
             // attachment still become a `user` message — never `attachment`.
             return [
@@ -273,37 +253,78 @@ final class MessageHistoryBuilder
             ];
         }
 
-        // Fold text blocks + the operator prompt into a single text block.
-        // The prompt leads; attachments follow, separated by a horizontal rule.
-        $combined = $this->composeTextContent($prompt, $textBlocks);
+        return [
+            'role'    => 'user',
+            'content' => $this->buildAttachmentContent($blocks, $prompt),
+        ];
+    }
 
-        if ($imageBlocks === []) {
-            // Text-only path: when the operator typed a prompt, lead with a
-            // text block carrying the merged content; otherwise emit the
-            // attachment text blocks verbatim. Content is always an array
-            // when attachments are present so the wire shape is uniform.
-            if ($prompt === '' && count($textBlocks) === 1) {
-                return ['role' => 'user', 'content' => $textBlocks];
+    /**
+     * Walk `$row->attachments` and split refs into text blocks and image
+     * blocks. Image blocks are null when the LLM does not support image
+     * input; those refs are dropped here (defense in depth alongside the
+     * controller's `MEDIA_CAPABILITY_MISMATCH` pre-flight).
+     *
+     * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>}
+     */
+    private function collectAttachmentBlocks(TaskHistory $row): array
+    {
+        $supportsImages = $this->driver !== null && $this->driver->supportsImageInput();
+        $textBlocks = [];
+        $imageBlocks = [];
+        if (!is_array($row->attachments)) {
+            return ['text' => $textBlocks, 'image' => $imageBlocks];
+        }
+        foreach ($row->attachments as $ref) {
+            $kind = (string) ($ref['kind'] ?? 'text');
+            $block = $kind === 'image'
+                ? $this->imageAttachmentBlockFromRef($ref, $supportsImages)
+                : $this->textAttachmentBlockFromRef($ref);
+            if ($block === null) {
+                continue;
             }
-            return ['role' => 'user', 'content' => array_merge(
+            if ($kind === 'image') {
+                $imageBlocks[] = $block;
+            } else {
+                $textBlocks[] = $block;
+            }
+        }
+        return ['text' => $textBlocks, 'image' => $imageBlocks];
+    }
+
+    /**
+     * Assemble the wire `content` for a user message that has at least one
+     * resolvable attachment. The prompt leads, followed by `---` and the
+     * filename header + extracted markdown. Image blocks (when present)
+     * follow a single leading text block.
+     *
+     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>} $blocks
+     * @return list<array<string, mixed>>
+     */
+    private function buildAttachmentContent(array $blocks, string $prompt): array
+    {
+        $combined = $this->composeTextContent($prompt, $blocks['text']);
+        $hasPrompt = $prompt !== '';
+        $hasSingleText = count($blocks['text']) === 1;
+        $imageOnly = $blocks['text'] === [] && $blocks['image'] !== [];
+        $textOnly = $blocks['image'] === [];
+
+        if ($textOnly && !$hasPrompt && $hasSingleText) {
+            return $blocks['text'];
+        }
+        if ($textOnly) {
+            return array_merge(
                 [['type' => 'text', 'text' => $combined]],
-                array_slice($textBlocks, 0),
-            )];
+                array_slice($blocks['text'], 0),
+            );
         }
-
-        // Image-only path (no prompt, no text attachments): emit the image
-        // blocks directly so the leading text block isn't an empty stub.
-        if ($combined === '') {
-            return ['role' => 'user', 'content' => $imageBlocks];
+        if ($imageOnly) {
+            return $blocks['image'];
         }
-
-        // Mixed text + images: leading text block carries the merged
-        // prompt + extracted text; image blocks follow.
-        $content = array_merge(
+        return array_merge(
             [['type' => 'text', 'text' => $combined]],
-            $imageBlocks,
+            $blocks['image'],
         );
-        return ['role' => 'user', 'content' => $content];
     }
 
     /**

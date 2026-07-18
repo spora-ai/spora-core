@@ -99,8 +99,13 @@ class DriverFactory
                 thinkingBudget: isset($settings['thinking_budget']) && $settings['thinking_budget'] !== ''
                     ? (int) $settings['thinking_budget']
                     : null,
+                supportsImageInput: $supportsImageInput,
             );
-            return new AnthropicCompatibleDriver(...$commonArgs, options: $options);
+            // Anthropic folds supportsImageInput into AnthropicDriverOptions
+            // so its constructor stays at 7 params (S107 cap).
+            $argsForDriver = $commonArgs;
+            unset($argsForDriver['supportsImageInput']);
+            return new AnthropicCompatibleDriver(...$argsForDriver, options: $options);
         }
 
         return new $driverClass(...$commonArgs);

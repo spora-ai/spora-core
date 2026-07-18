@@ -310,7 +310,7 @@ test('attachment + image + following user row merges text and image blocks', fun
         httpClient: new MockHttpClient(),
         logger: new \Psr\Log\NullLogger(),
         timeout: 60,
-        supportsImageInput: true,
+        options: new \Spora\Drivers\AnthropicDriverOptions(supportsImageInput: true),
     );
     $messages = (new MessageHistoryBuilder($driver))->build($task->id);
     expect($messages)->toHaveCount(1);
@@ -362,7 +362,7 @@ test('attachment with image is dropped when driver image capability is forced of
         httpClient: new MockHttpClient(),
         logger: new \Psr\Log\NullLogger(),
         timeout: 60,
-        supportsImageInput: false,
+        options: new \Spora\Drivers\AnthropicDriverOptions(supportsImageInput: false),
     );
     $messages = (new MessageHistoryBuilder($driver))->build($task->id);
     expect($messages)->toHaveCount(1);

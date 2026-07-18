@@ -42,9 +42,16 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
         ?LoggerInterface    $logger = null,
         ?int                $timeout = null,
         ?AnthropicDriverOptions $options = null,
-        ?bool               $supportsImageInput = null,
     ) {
-        parent::__construct($apiKey, $model, $baseUrl, $httpClient, $logger, $timeout, $supportsImageInput);
+        parent::__construct(
+            $apiKey,
+            $model,
+            $baseUrl,
+            $httpClient,
+            $logger,
+            $timeout,
+            $options?->supportsImageInput,
+        );
         $this->temperature    = $options?->temperature;
         $this->thinkingBudget = $options?->thinkingBudget;
     }

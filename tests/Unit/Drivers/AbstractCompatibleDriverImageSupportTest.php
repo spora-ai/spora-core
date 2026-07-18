@@ -101,7 +101,7 @@ test('Anthropic driver respects toggle override', function (): void {
         model: 'claude-3-5-sonnet-20241022',
         baseUrl: '',
         httpClient: new MockHttpClient(),
-        supportsImageInput: false,
+        options: new \Spora\Drivers\AnthropicDriverOptions(supportsImageInput: false),
     );
     expect($sonnet->supportsImageInput())->toBeFalse();
 
@@ -110,13 +110,13 @@ test('Anthropic driver respects toggle override', function (): void {
         model: 'claude-2.0',
         baseUrl: '',
         httpClient: new MockHttpClient(),
-        supportsImageInput: true,
+        options: new \Spora\Drivers\AnthropicDriverOptions(supportsImageInput: true),
     );
     expect($legacy->supportsImageInput())->toBeTrue();
 });
 
 test('Anthropic driver falls back to model heuristic when toggle is null', function (): void {
-    expect((new AnthropicCompatibleDriver(apiKey: '', model: 'claude-3-5-sonnet-20241022', baseUrl: '', httpClient: new MockHttpClient(), supportsImageInput: null))->supportsImageInput())->toBeTrue();
-    expect((new AnthropicCompatibleDriver(apiKey: '', model: 'claude-2.0', baseUrl: '', httpClient: new MockHttpClient(), supportsImageInput: null))->supportsImageInput())->toBeFalse();
-    expect((new AnthropicCompatibleDriver(apiKey: '', model: 'claude-4-opus', baseUrl: '', httpClient: new MockHttpClient(), supportsImageInput: null))->supportsImageInput())->toBeTrue();
+    expect((new AnthropicCompatibleDriver(apiKey: '', model: 'claude-3-5-sonnet-20241022', baseUrl: '', httpClient: new MockHttpClient()))->supportsImageInput())->toBeTrue();
+    expect((new AnthropicCompatibleDriver(apiKey: '', model: 'claude-2.0', baseUrl: '', httpClient: new MockHttpClient()))->supportsImageInput())->toBeFalse();
+    expect((new AnthropicCompatibleDriver(apiKey: '', model: 'claude-4-opus', baseUrl: '', httpClient: new MockHttpClient()))->supportsImageInput())->toBeTrue();
 });
