@@ -14,12 +14,12 @@ use Symfony\Component\Console\Tester\CommandTester;
  * directory and a real (not :memory:) SQLite file. The temp dir is auto-
  * cleaned by the OS once the test exits, no manual teardown needed.
  *
- * The schema-stamp path is read from the *real* BASE_PATH/./storage/.schema_stamp
- * (the command's behaviour matches the rest of Spora). Tests that exercise the
+ * The schema-stamp path the command actually clears is BASE_PATH/storage/.schema_stamp
+ * (Database::getStampPath() — see app/Core/Database.php). Tests that exercise the
  * stamp save/restore the file around the test run.
  */
 
-define('SCHEMA_STAMP_PATH', sys_get_temp_dir() . '/spora-test-storage/.schema_stamp');
+define('SCHEMA_STAMP_PATH', BASE_PATH . '/storage/.schema_stamp');
 
 function makeTempSqliteFile(string $contents = ''): string
 {
@@ -77,6 +77,7 @@ function withSchemaStamp(callable $fn): void
         $fn();
     } finally {
         if ($backup !== null) {
+            @mkdir(dirname($stamp), 0o755, true);
             file_put_contents($stamp, $backup);
         }
     }
@@ -87,6 +88,7 @@ function withSchemaStamp(callable $fn): void
 test('--force wipes a non-empty SQLite file and clears the schema stamp', function (): void {
     withSchemaStamp(function (): void {
         $stamp = SCHEMA_STAMP_PATH;
+        @mkdir(dirname($stamp), 0o755, true);
         file_put_contents($stamp, 'stale-hash');
 
         $dbPath = makeTempSqliteFile('not really a sqlite file, just non-empty');
