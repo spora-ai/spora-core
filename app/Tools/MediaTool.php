@@ -95,6 +95,9 @@ use Symfony\Component\HttpFoundation\Request;
 #[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset (required for get_media, get_public_url, and get_embed_code).', required: false)]
 final class MediaTool extends AbstractTool
 {
+    /** @var string  Single error string used for asset-not-found / not-in-scope responses. */
+    private const ERR_ASSET_NOT_FOUND = 'Media asset not found.';
+
     public function __construct(
         private readonly MediaArchiveService $archive,
         private readonly AuthService $auth,
@@ -179,7 +182,7 @@ final class MediaTool extends AbstractTool
 
         $asset = $this->archive->find($assetId);
         if ($asset === null || !$this->assetInScope($asset, $agentId, $userId)) {
-            return ToolResult::fail('Media asset not found.');
+            return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
         }
 
         return ToolResult::ok(
@@ -200,7 +203,7 @@ final class MediaTool extends AbstractTool
 
         $asset = $this->archive->find($assetId);
         if ($asset === null || !$this->assetInScope($asset, $agentId, $userId)) {
-            return ToolResult::fail('Media asset not found.');
+            return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
         }
 
         if ($asset->public_access_token === null || $asset->public_access_token === '') {
@@ -231,7 +234,7 @@ final class MediaTool extends AbstractTool
 
         $asset = $this->archive->find($assetId);
         if ($asset === null || !$this->assetInScope($asset, $agentId, $userId)) {
-            return ToolResult::fail('Media asset not found.');
+            return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
         }
 
         $assetUrl = $asset->publicUrl();
