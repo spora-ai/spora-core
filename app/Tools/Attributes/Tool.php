@@ -11,8 +11,17 @@ use InvalidArgumentException;
  * Marks a class as a Tool the agent can invoke.
  *
  * Usage:
- *   #[Tool(name: 'my_tool', description: 'Does something useful')]
+ *   #[Tool(
+ *       name: 'my_tool',
+ *       description: 'Does something useful',
+ *       displayName: 'My Tool',         // optional
+ *       category: 'general',             // optional; defaults to 'general'
+ *       icon: 'puzzle',                  // optional; bundled icon key
+ *                                        //   (e.g. 'calendar', 'mail', 'search')
+ *   )]
  *   final class MyTool implements ToolInterface { ... }
+ *
+ * Pass `icon: ''` to explicitly fall through to the plugin / default layer.
  */
 #[Attribute(Attribute::TARGET_CLASS)]
 final class Tool
@@ -28,6 +37,18 @@ final class Tool
         public readonly ?string $displayName = null,
         /** Category for grouping tools in the Settings UI, e.g. "research", "communication". Falls back to "general". */
         public readonly string $category = 'general',
+        /**
+         * Bundled-icon key (or full SVG / raw path) for the dashboard's tool row.
+         * Optional. Resolution chain (see {@see \Spora\Services\ToolIconResolver}):
+         *   1. tool.icon (this attribute — most specific)
+         *   2. owning plugin's plugin.json icon field (per-plugin default)
+         *   3. null on the wire; frontend's <Icon> component falls back to 'puzzle'.
+         *
+         * Same surface as plugin.json's icon field — accepts bundled names
+         * (e.g. 'calendar', 'mail', 'search'), full <svg> strings, or raw
+         * path 'd:' strings.
+         */
+        public readonly ?string $icon = null,
     ) {
         if (!preg_match(self::NAME_REGEX, $this->name)) {
             throw new InvalidArgumentException(

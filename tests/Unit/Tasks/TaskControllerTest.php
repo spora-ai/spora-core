@@ -8,6 +8,7 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall;
+use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\TaskServiceInterface;
 
 // Helpers
@@ -23,7 +24,7 @@ function makeTaskController(?TaskServiceInterface $taskService = null): array
 {
     $authService = bootAuthLayer();
     $taskService ??= Mockery::mock(TaskServiceInterface::class);
-    $controller  = new TaskController($authService, $taskService);
+    $controller  = new TaskController($authService, $taskService, new TaskMediaCapabilityService());
     $authMiddleware = new Spora\Http\Middleware\AuthMiddleware($authService);
     $csrfService = new Spora\Security\CsrfTokenService();
     $csrfMiddleware = new Spora\Http\Middleware\CsrfMiddleware($csrfService);

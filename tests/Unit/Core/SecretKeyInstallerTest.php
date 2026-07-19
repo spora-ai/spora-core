@@ -147,7 +147,12 @@ it('returns false when the parent directory cannot be created', function (): voi
     // /proc/0/secret.key — /proc/0 doesn't exist and cannot be created
     $badPath = '/proc/0/spora-' . uniqid('', true) . '/secret.key';
 
-    $generated = SecretKeyInstaller::ensureKeyFile($badPath);
+    set_error_handler(static fn(): bool => true, E_WARNING);
+    try {
+        $generated = SecretKeyInstaller::ensureKeyFile($badPath);
+    } finally {
+        restore_error_handler();
+    }
 
     expect($generated)->toBeFalse();
     expect(file_exists($badPath))->toBeFalse();
@@ -180,7 +185,12 @@ it('returns false when config.php exists but cannot be read', function (): void 
     file_put_contents($configPath, "<?php\n\nreturn ['key_path' => null];\n");
     chmod($configPath, 0o000);
 
-    $updated = SecretKeyInstaller::updateConfigKeyPath($configPath, $root . '/storage/secret.key');
+    set_error_handler(static fn(): bool => true, E_WARNING);
+    try {
+        $updated = SecretKeyInstaller::updateConfigKeyPath($configPath, $root . '/storage/secret.key');
+    } finally {
+        restore_error_handler();
+    }
 
     expect($updated)->toBeFalse();
     // Restore permissions so the afterEach cleanup can remove the directory.
@@ -206,7 +216,12 @@ it('returns false when ensureKeyFile cannot write the key file', function (): vo
     // so /private/0/spora/secret.key reliably fails the file_put_contents step.
     $badPath = '/private/0/spora-' . uniqid('', true) . '/secret.key';
 
-    $generated = SecretKeyInstaller::ensureKeyFile($badPath);
+    set_error_handler(static fn(): bool => true, E_WARNING);
+    try {
+        $generated = SecretKeyInstaller::ensureKeyFile($badPath);
+    } finally {
+        restore_error_handler();
+    }
 
     expect($generated)->toBeFalse();
     expect(file_exists($badPath))->toBeFalse();

@@ -80,7 +80,7 @@ final class PluginLoaderCache
             return false;
         }
 
-        $existing = @file_get_contents($this->stampPath);
+        $existing = is_readable($this->stampPath) ? file_get_contents($this->stampPath) : false;
         return is_string($existing) && $existing === $this->computeStampHash($discovered);
     }
 
@@ -104,7 +104,8 @@ final class PluginLoaderCache
      */
     private function decodeAndValidateSidecar(): ?array
     {
-        $raw = @file_get_contents($this->sidecarPath());
+        $sidecarPath = $this->sidecarPath();
+        $raw = is_readable($sidecarPath) ? file_get_contents($sidecarPath) : false;
         if (!is_string($raw) || $raw === '') {
             return null;
         }
@@ -145,6 +146,10 @@ final class PluginLoaderCache
             return;
         }
 
+        $dir = dirname($this->stampPath);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0o755, true);
+        }
         @file_put_contents($this->stampPath, $this->computeStampHash($discovered));
 
         try {

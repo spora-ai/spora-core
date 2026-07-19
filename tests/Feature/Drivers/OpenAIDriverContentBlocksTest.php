@@ -47,7 +47,6 @@ test('text blocks render as {type:text, text}', function (): void {
     // since complete() requires a real HTTP response, we inspect via the
     // protected path instead.
     $ref = new ReflectionMethod($driver, 'buildMessages');
-    $ref->setAccessible(true);
     $messages = $ref->invoke($driver, $request);
     expect($messages[1]['content'])->toBeArray();
     expect($messages[1]['content'][0])->toBe(['type' => 'text', 'text' => 'describe this']);
@@ -60,7 +59,6 @@ test('image blocks render as {type:image_url, image_url:{url:data:...}}', functi
         ['type' => 'image', 'mediaType' => 'image/png', 'base64' => 'AAAA'],
     ]);
     $ref = new ReflectionMethod($driver, 'buildMessages');
-    $ref->setAccessible(true);
     $messages = $ref->invoke($driver, $request);
     $parts = $messages[1]['content'];
     expect($parts[0])->toBe(['type' => 'text', 'text' => 'describe']);
@@ -71,7 +69,6 @@ test('image blocks render as {type:image_url, image_url:{url:data:...}}', functi
 test('null content on a tool_calls response is preserved', function (): void {
     $driver = makeOpenAIRequestDriver('gpt-4o');
     $ref = new ReflectionMethod($driver, 'buildToolCallsResponse');
-    $ref->setAccessible(true);
     $response = $ref->invoke($driver, [
         'id' => 'chatcmpl-1',
         'usage' => ['prompt_tokens' => 10, 'completion_tokens' => 0],

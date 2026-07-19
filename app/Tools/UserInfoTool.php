@@ -20,6 +20,7 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'Access the users personal information, locations, and health data.',
     displayName: 'User Info',
     category: 'data',
+    icon: 'user',
 )]
 #[ToolOperation(name: 'get_base_data', description: 'Get the users base profile data', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolOperation(name: 'get_locations', description: 'Get the users saved locations', enabledByDefault: true, requiresApprovalByDefault: false)]

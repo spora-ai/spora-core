@@ -43,7 +43,15 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
         ?int                $timeout = null,
         ?AnthropicDriverOptions $options = null,
     ) {
-        parent::__construct($apiKey, $model, $baseUrl, $httpClient, $logger, $timeout);
+        parent::__construct(
+            $apiKey,
+            $model,
+            $baseUrl,
+            $httpClient,
+            $logger,
+            $timeout,
+            $options?->supportsImageInput,
+        );
         $this->temperature    = $options?->temperature;
         $this->thinkingBudget = $options?->thinkingBudget;
     }
@@ -53,7 +61,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
      * Anthropic Messages API. Older models (Claude 2, Claude Instant)
      * did not — keep the allowlist conservative.
      */
-    public function supportsImageInput(): bool
+    protected function modelBasedSupportsImageInput(): bool
     {
         return str_starts_with($this->model, 'claude-3-')
             || str_starts_with($this->model, 'claude-4-');
@@ -61,7 +69,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 
     public function getProviderName(): string
     {
-        return self::PROVIDER_KEY;
+        return static::getName();
     }
 
     public function complete(LLMRequest $request): LLMResponse

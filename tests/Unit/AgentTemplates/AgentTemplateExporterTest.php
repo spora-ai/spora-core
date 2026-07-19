@@ -264,7 +264,6 @@ test('export() omits plugins whose composer.json is missing or has no name', fun
     // null-return branch we don't need a real plugin instance.
     $ref = new ReflectionClass($loader);
     $prop = $ref->getProperty('pluginDirs');
-    $prop->setAccessible(true);
     $prop->setValue($loader, ['no-name' => $tmp]);
 
     expect($loader->getComposerNameForSlug('no-name'))->toBeNull();
@@ -286,7 +285,6 @@ test('PluginLoader::getComposerNameForSlug() returns null when composer.json is 
     $loader = new PluginLoader([]);
     $ref = new ReflectionClass($loader);
     $prop = $ref->getProperty('pluginDirs');
-    $prop->setAccessible(true);
     $prop->setValue($loader, ['no-json' => $tmp]);
 
     expect($loader->getComposerNameForSlug('no-json'))->toBeNull();

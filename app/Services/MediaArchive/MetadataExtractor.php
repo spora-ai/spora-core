@@ -145,7 +145,15 @@ final class MetadataExtractor
      */
     private function readImageInfo(string $bytes): ?array
     {
-        $raw = @getimagesizefromstring($bytes);
+        // getimagesizefromstring() raises E_WARNING on bytes that are not a
+        // recognised image; this extractor is best-effort and silently
+        // falls back to null, so suppress only that one level.
+        set_error_handler(static fn(): bool => true, E_WARNING);
+        try {
+            $raw = getimagesizefromstring($bytes);
+        } finally {
+            restore_error_handler();
+        }
         if (!is_array($raw)) {
             return null;
         }

@@ -14,6 +14,7 @@ use Spora\Services\AgentService;
 use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
+use Spora\Services\ToolIconResolver;
 use Spora\Tools\CalculatorTool;
 
 defined('AGENT_TEST_PASSWORD') || define('AGENT_TEST_PASSWORD', 'Password1!');
@@ -91,6 +92,58 @@ describe('AgentService::getAgentsForUser', function (): void {
         expect($result)->toHaveCount(2);
         expect(array_column($result, 'name'))->toContain('A1', 'A2');
         expect(array_column($result, 'name'))->not->toContain('B1');
+    });
+
+    it('emits per-tool icons on every agent when a ToolIconResolver is supplied', function (): void {
+        // Stubbed resolver: deterministic mapping for known tool classes,
+        // null for anything else. Mirrors the pattern in AgentResourceTest
+        // so the wire-format contract stays identical through the service layer.
+        $resolver = new class extends ToolIconResolver {
+            public function __construct() {}
+
+            public function resolve(string $toolClass): ?string
+            {
+                return match ($toolClass) {
+                    CalculatorTool::class => 'stubbed-icon-key',
+                    default => null,
+                };
+            }
+        };
+
+        $key      = str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $security = new SecurityManager($key);
+        $logger   = new NullLogger();
+        $toolConfig = new ToolConfigService($security, $logger, [CalculatorTool::class]);
+        $llmConfig  = new LLMConfigService($security, []);
+        $service = new AgentService($toolConfig, $llmConfig, $resolver);
+
+        $auth = bootAuthLayer();
+        $userId = bootAuth($auth, 'agent-svc-icons@example.com', AGENT_TEST_PASSWORD);
+
+        $agent = $service->createAgent($userId, ['name' => 'Icon List Agent']);
+        $service->enableTool($agent->id, $userId, CalculatorTool::class);
+
+        $result = $service->getAgentsForUser($userId);
+
+        expect($result)->toHaveCount(1);
+        expect($result[0]['tools'])->toHaveCount(1);
+        expect($result[0]['tools'][0]['icon'])->toBe('stubbed-icon-key');
+    });
+
+    it('omits the per-tool icon key when no ToolIconResolver is supplied (back-compat)', function (): void {
+        // Mirrors AgentResourceTest's contract: when the service is constructed
+        // without a resolver, each tools[i] entry has no `icon` key. The
+        // frontend's <Icon> falls back to 'puzzle' on missing keys.
+        [$service, $userId] = makeAgentServiceWithUser();
+
+        $agent = $service->createAgent($userId, ['name' => 'Backcompat Agent']);
+        $service->enableTool($agent->id, $userId, CalculatorTool::class);
+
+        $result = $service->getAgentsForUser($userId);
+
+        expect($result)->toHaveCount(1);
+        expect($result[0]['tools'])->toHaveCount(1);
+        expect($result[0]['tools'][0])->not->toHaveKey('icon');
     });
 });
 

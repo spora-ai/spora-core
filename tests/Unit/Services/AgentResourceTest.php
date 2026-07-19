@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use Spora\Models\Agent;
+use Spora\Models\AgentTool;
 use Spora\Services\AgentResource;
+use Spora\Services\ToolIconResolver;
 
 it('maps every wire-format field for an agent', function (): void {
     $userId = bootAuthLayer()->register('agent-resource@example.com', 'Password1!', 'AR');
@@ -79,4 +81,85 @@ it('formats created_at as ATOM and emits an empty tools list when the relationsh
     expect($array['created_at'])
         ->toMatch('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[\+\-]\d{2}:\d{2}$/')
         ->and($array['tools'])->toBe([]);
+});
+
+it('omits the per-tool icon field when no ToolIconResolver is supplied (back-compat)', function (): void {
+    // Callers without DI access (e.g. a custom resource renderer) can pass null for
+    // the resolver. The wire payload still parses; the frontend's <Icon> falls back
+    // to 'puzzle' on missing keys. This test pins that contract.
+    $agent = new Agent();
+    $agent->name = 'No Resolver';
+    $agent->max_steps = 10;
+    $agent->allow_followup = false;
+
+    $array = AgentResource::toArray($agent);
+
+    expect($array['tools'])->toBe([]);
+});
+
+it('resolves per-tool icon via the supplied ToolIconResolver', function (): void {
+    $userId = bootAuthLayer()->register('agent-resource-icon@example.com', 'Password1!', 'AR');
+
+    $agent = Agent::create([
+        'user_id'   => $userId,
+        'name'      => 'Icon Agent',
+        'max_steps' => 10,
+    ]);
+
+    AgentTool::create([
+        'agent_id'   => $agent->id,
+        'tool_class' => 'Tests\\Fixtures\\Icons\\TestCalendarTool',
+        'tool_name'  => 'Test Calendar',
+    ]);
+
+    $resolver = new class extends ToolIconResolver {
+        public function __construct() {}
+
+        public function resolve(string $toolClass): ?string
+        {
+            return match ($toolClass) {
+                'Tests\\Fixtures\\Icons\\TestCalendarTool' => 'calendar',
+                'Tests\\Fixtures\\TestTool' => 'mail',
+                default => null,
+            };
+        }
+    };
+
+    $array = AgentResource::toArray($agent, null, $resolver);
+
+    expect($array['tools'])->toHaveCount(1)
+        ->and($array['tools'][0]['tool_class'])->toBe('Tests\\Fixtures\\Icons\\TestCalendarTool')
+        ->and($array['tools'][0]['tool_name'])->toBe('Test Calendar')
+        ->and($array['tools'][0]['icon'])->toBe('calendar');
+});
+
+it('emits icon: null when the resolver returns null (frontend falls back to puzzle)', function (): void {
+    $userId = bootAuthLayer()->register('agent-resource-noicon@example.com', 'Password1!', 'AR');
+
+    $agent = Agent::create([
+        'user_id'   => $userId,
+        'name'      => 'No-Icon Agent',
+        'max_steps' => 10,
+    ]);
+
+    AgentTool::create([
+        'agent_id'   => $agent->id,
+        'tool_class' => 'Tests\\Fixtures\\TestTool',
+        'tool_name'  => 'Test Tool',
+    ]);
+
+    $resolver = new class extends ToolIconResolver {
+        public function __construct() {}
+
+        public function resolve(string $toolClass): ?string
+        {
+            return null;
+        }
+    };
+
+    $array = AgentResource::toArray($agent, null, $resolver);
+
+    expect($array['tools'])->toHaveCount(1)
+        ->and($array['tools'][0])->toHaveKey('icon')
+        ->and($array['tools'][0]['icon'])->toBeNull();
 });

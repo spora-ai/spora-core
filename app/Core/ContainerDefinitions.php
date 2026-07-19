@@ -104,6 +104,7 @@ use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
+use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\MemoryService;
 use Spora\Services\MemoryServiceInterface;
 use Spora\Services\MercurePublisher;
@@ -121,7 +122,9 @@ use Spora\Services\SystemMailer;
 use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
+use Spora\Services\ToolConfigNameResolver;
 use Spora\Services\ToolConfigService;
+use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
 use Spora\Tools\AgentMemoryTool;
@@ -453,6 +456,11 @@ final class ContainerDefinitions
 
             MediaIngestDecoder::class => static fn(): MediaIngestDecoder => new MediaIngestDecoder(),
 
+            TaskMediaCapabilityService::class => static function (ContainerInterface $c): TaskMediaCapabilityService {
+                $factory = $c->has(DriverFactory::class) ? $c->get(DriverFactory::class) : null;
+                return new TaskMediaCapabilityService($factory);
+            },
+
             // Core converters self-register with the static discovery list
             // before the registry resolves them. Plugins add their own
             // converters in their `register(ContainerBuilder)` hook.
@@ -489,6 +497,19 @@ final class ContainerDefinitions
                         $c->get('tool_classes'),
                         $c->get(PluginLoader::class)->toolClasses(),
                     ))),
+                );
+            },
+
+            ToolIconResolver::class => static function (ContainerInterface $c): ToolIconResolver {
+                return new ToolIconResolver(
+                    new ToolConfigNameResolver(
+                        $c->get(LoggerInterface::class),
+                        array_values(array_unique(array_merge(
+                            $c->get('tool_classes'),
+                            $c->get(PluginLoader::class)->toolClasses(),
+                        ))),
+                    ),
+                    $c->get(PluginLoader::class),
                 );
             },
         ];
@@ -655,6 +676,7 @@ final class ContainerDefinitions
                 return new AgentService(
                     $c->get(ToolConfigService::class),
                     $c->get(LLMConfigService::class),
+                    $c->get(ToolIconResolver::class),
                 );
             },
 
@@ -781,6 +803,7 @@ final class ContainerDefinitions
                     $c->get(AuthService::class),
                     $c->get(AgentServiceInterface::class),
                     $c->get(DriverFactory::class),
+                    $c->get(ToolIconResolver::class),
                 );
             },
 
@@ -810,6 +833,7 @@ final class ContainerDefinitions
                         $c->get('tool_classes'),
                         $c->get(PluginLoader::class)->toolClasses(),
                     ))),
+                    $c->get(ToolIconResolver::class),
                 );
             },
 
@@ -851,6 +875,7 @@ final class ContainerDefinitions
                 return new TaskController(
                     $c->get(AuthService::class),
                     $c->get(TaskServiceInterface::class),
+                    $c->get(TaskMediaCapabilityService::class),
                 );
             },
 

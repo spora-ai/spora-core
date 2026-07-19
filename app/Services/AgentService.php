@@ -34,6 +34,7 @@ final class AgentService implements AgentServiceInterface
     public function __construct(
         private readonly ToolConfigService $toolConfig,
         LLMConfigService $llmConfig,
+        private readonly ?ToolIconResolver $toolIconResolver = null,
     ) {
         $this->instanceResolver    = new AgentToolInstanceResolver();
         $this->overrideResolver    = new AgentToolOverrideResolver($toolConfig, $llmConfig, $this->instanceResolver);
@@ -317,6 +318,6 @@ final class AgentService implements AgentServiceInterface
 
     private function agentResource(Agent $agent): array
     {
-        return AgentResource::toArray($agent);
+        return AgentResource::toArray($agent, null, $this->toolIconResolver);
     }
 }

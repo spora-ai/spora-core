@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Drivers;
 
+use Psr\Log\LoggerInterface;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
@@ -12,6 +13,7 @@ use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
 use Spora\Tools\Attributes\ToolSetting;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', description: 'API key for the OpenAI-compatible endpoint. Leave empty for local models.', required: false, )]
 #[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.openai.com/v1).', required: false, default: 'https://api.openai.com/v1')]
@@ -24,9 +26,21 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 {
     private const PROVIDER_KEY = 'openai_compatible';
 
+    public function __construct(
+        string              $apiKey,
+        string              $model,
+        string              $baseUrl,
+        HttpClientInterface $httpClient,
+        ?LoggerInterface    $logger = null,
+        ?int                $timeout = null,
+        ?bool               $supportsImageInput = null,
+    ) {
+        parent::__construct($apiKey, $model, $baseUrl, $httpClient, $logger, $timeout, $supportsImageInput);
+    }
+
     public function getProviderName(): string
     {
-        return self::PROVIDER_KEY;
+        return static::getName();
     }
 
     /**
@@ -37,9 +51,10 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
      *
      * `gpt-3.5*`, `gpt-4` (non-vision), `o1-mini` are explicitly excluded.
      * Custom OpenAI-compatible endpoints (e.g. a private deployment) are
-     * treated as text-only unless the operator overrides via a subclass.
+     * treated as text-only unless the operator overrides via the
+     * `supports_image_input` setting on the LLM driver config.
      */
-    public function supportsImageInput(): bool
+    protected function modelBasedSupportsImageInput(): bool
     {
         $m = strtolower($this->model);
         if ($m === '' || $m === 'gpt-3.5-turbo' || $m === 'gpt-4' || $m === 'o1-mini') {
