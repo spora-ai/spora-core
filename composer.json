@@ -89,8 +89,8 @@
         "test:coverage:clover": "./vendor/bin/pest --coverage-clover=coverage.xml",
         "analyse": "./vendor/bin/phpstan analyse --memory-limit=2G",
         "format": "./vendor/bin/php-cs-fixer fix",
-        "openapi": "@php bin/openapi-generate.php",
-        "openapi-check": "@php bin/openapi-check.php"
+        "openapi": "@php bin/spora-build openapi:generate",
+        "openapi-check": "@php bin/spora-build openapi:check"
     },
     "config": {
         "optimize-autoloader": true,
