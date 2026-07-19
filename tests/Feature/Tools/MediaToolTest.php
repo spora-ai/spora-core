@@ -180,10 +180,11 @@ describe('MediaTool::search', function (): void {
     });
 
     it('accepts a mime_type argument without erroring', function (): void {
-        // The MediaTool maps the LLM-facing `mime_type` argument onto the
-        // underlying ListMediaQuery. The underlying service filters on a
-        // coarse `media_type` bucket, not on the full mime string, so this
-        // test just locks in that passing a non-empty mime_type does not
+        // `mime_type` is accepted for LLM ergonomics (the assistant usually
+        // has it on hand from prior tool results) but is NOT used as a
+        // filter on the underlying ListMediaQuery. The coarse media_type
+        // bucket (image/audio/video/document) is what actually filters.
+        // This test locks in that passing a non-empty mime_type does not
         // break the query.
         $agentA = seedMediaToolAgent();
         seedMediaAsset(agentId: $agentA, userId: 99);

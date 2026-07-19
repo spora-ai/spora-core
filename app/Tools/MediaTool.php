@@ -151,7 +151,12 @@ final class MediaTool extends AbstractTool
             agentId: $scope === 'agent' ? $agentId : null,
             userId: $scope === 'user' && $userId !== null ? $userId : null,
             pluginSlug: isset($arguments['plugin_slug']) ? (string) $arguments['plugin_slug'] : null,
-            search: isset($arguments['mime_type']) ? (string) $arguments['mime_type'] : null,
+            // `mime_type` is accepted for LLM ergonomics (the assistant
+            // usually has it on hand from prior tool results) but is NOT
+            // passed into `search` — ListMediaQuery's `search` is a LIKE
+            // over prompt|filename|asset_url|source_url, not a mime filter.
+            // The coarse media_type bucket above is what actually filters.
+            search: null,
             sort: ListMediaQuery::SORT_CREATED_DESC,
             page: $page,
             perPage: $perPage,
