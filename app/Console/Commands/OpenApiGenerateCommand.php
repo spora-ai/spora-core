@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Console\Commands;
 
+use JsonException;
 use OpenApi\Annotations\OpenApi;
 use Spora\OpenApi\RouteToOpenApi;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -14,16 +15,14 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * Usage:
- *   php bin/spora spora:openapi --output=openapi.json
- *   php bin/spora spora:openapi --check
+ * `spora:openapi` — emits the OpenAPI 3.0 spec from `RouteDefinitions`.
  *
- * `--check` exits non-zero if the committed spec is stale so it can be wired as a CI step
- * that fails the build when routes change without a regenerated spec.
- *
- * The builder is built lazily inside `execute()` so the command doesn't pull the rest of
- * the DI graph (orchestrator, DB, secret key) at registration time — `spora:openapi` only
- * needs the route table and the swagger-php library.
+ * Two entry paths share the work:
+ *  - `bin/spora spora:openapi [--output=…] [--check]` (this class, with full Symfony
+ *    Console integration; `--check` makes it a CI-style drift guard).
+ *  - `bin/spora-build openapi:generate|openapi:check` (build-time companion; same
+ *    static helpers, but skips the Kernel/DI boot so a clean checkout with no
+ *    `storage/secret.key` can still produce the spec).
  */
 #[AsCommand(
     name: 'spora:openapi',
@@ -53,7 +52,7 @@ final class OpenApiGenerateCommand extends Command
                 'check',
                 null,
                 InputOption::VALUE_NONE,
-                'Exit non-zero if the committed spec is stale; do not write.',
+                'Exit non-zero if the reference spec differs from a fresh regeneration; do not write.',
             );
     }
 
@@ -74,7 +73,7 @@ final class OpenApiGenerateCommand extends Command
     private function runCheck(SymfonyStyle $io, string $outputPath, string $json): int
     {
         if (!is_file($outputPath)) {
-            $io->error(sprintf('No committed spec at %s to compare against.', $outputPath));
+            $io->error(sprintf('No reference spec at %s to compare against.', $outputPath));
             return Command::FAILURE;
         }
         if ((string) file_get_contents($outputPath) === $json) {
@@ -115,25 +114,29 @@ final class OpenApiGenerateCommand extends Command
     {
         return json_encode(
             $openapi,
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-        ) ?: '{}';
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+        );
     }
 
     /**
-     * Regenerate the spec to `$outputPath`. Bypasses `bin/spora` (and therefore the
-     * Kernel/DI/secret-key boot) so a CI step that lacks `storage/secret.key` can
-     * still produce the artifact. Returns `Command::SUCCESS`/`Command::FAILURE` so
-     * the entry path (`composer openapi`) can be used directly by CI too.
+     * Bypasses `bin/spora` (and therefore the Kernel/DI/secret-key boot) so a
+     * CI step that lacks `storage/secret.key` can still produce the artifact.
+     * Returns `Command::SUCCESS`/`Command::FAILURE` so the entry path can be
+     * used directly by CI.
+     *
+     * @return int Command::SUCCESS on write, Command::FAILURE on I/O or encode failure.
      */
     public static function regenerate(string $outputPath): int
     {
-        $json = (new RouteToOpenApi())->build();
-        $serialised = json_encode(
-            $json,
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-        ) ?: '{}';
+        try {
+            $json = (new RouteToOpenApi())->build();
+            $serialised = self::encode($json);
+        } catch (JsonException $e) {
+            fwrite(STDERR, sprintf("Failed to encode OpenAPI document as JSON: %s\n", $e->getMessage()));
+            return Command::FAILURE;
+        }
 
-        $written = file_put_contents($outputPath, $serialised);
+        $written = @file_put_contents($outputPath, $serialised);
         if ($written === false) {
             fwrite(STDERR, sprintf("Failed to write spec to %s.\n", $outputPath));
             return Command::FAILURE;
@@ -144,36 +147,45 @@ final class OpenApiGenerateCommand extends Command
     }
 
     /**
-     * Standalone driver for the drift check. Bypasses `bin/spora` (and therefore the
-     * Kernel/DI/secret-key boot) so a CI step that lacks `storage/secret.key` can
-     * still verify the committed spec is up to date.
+     * Bypasses `bin/spora` (and therefore the Kernel/DI/secret-key boot) so a
+     * CI step that lacks `storage/secret.key` can still verify the reference
+     * spec is up to date.
      *
-     * Returns `Command::SUCCESS` (`0`) when the freshly-generated spec matches the
-     * committed file, `Command::FAILURE` (`1`) otherwise. Mirrors the behaviour of
-     * `php bin/spora spora:openapi --check` and is the entry path used by the
-     * `composer openapi:check` script and the `static-analysis` CI step.
+     * Returns `Command::SUCCESS` when the freshly-generated spec matches the
+     * reference file, `Command::FAILURE` otherwise (or when the reference is
+     * missing, or when JSON encoding fails).
      */
-    public static function checkAgainstFile(string $outputPath): int
+    public static function checkAgainstFile(string $referencePath): int
     {
-        $json = (new RouteToOpenApi())->build();
-        $serialised = json_encode(
-            $json,
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-        ) ?: '{}';
-
-        if (!is_file($outputPath)) {
-            fwrite(STDERR, sprintf("No committed spec at %s to compare against.\n", $outputPath));
+        try {
+            $json = (new RouteToOpenApi())->build();
+            $serialised = self::encode($json);
+        } catch (JsonException $e) {
+            fwrite(STDERR, sprintf("Failed to encode OpenAPI document as JSON: %s\n", $e->getMessage()));
             return Command::FAILURE;
         }
-        $committed = file_get_contents($outputPath);
+
+        if (!is_file($referencePath)) {
+            fwrite(STDERR, sprintf("No reference spec at %s to compare against.\n", $referencePath));
+            return Command::FAILURE;
+        }
+        $committed = file_get_contents($referencePath);
         if ($committed === $serialised) {
             return Command::SUCCESS;
         }
 
         fwrite(STDERR, sprintf(
             "Spec at %s is stale. Regenerate with `composer openapi`.\n",
-            $outputPath,
+            $referencePath,
         ));
         return Command::FAILURE;
+    }
+
+    private static function encode(OpenApi $openapi): string
+    {
+        return json_encode(
+            $openapi,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+        );
     }
 }

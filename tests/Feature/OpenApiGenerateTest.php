@@ -98,6 +98,42 @@ describe('OpenAPI specification generation', function (): void {
         expect($op->security)->toBe([]);
     });
 
+    it('omits csrfToken on safe HTTP methods even when CsrfMiddleware is registered', function (): void {
+        $spec = openApiTestSpec();
+
+        // /api/v1/auth/me carries [AuthMiddleware, CsrfMiddleware] but is a GET;
+        // runtime CsrfMiddleware is a no-op on safe methods, so the spec must not
+        // advertise a CSRF requirement the middleware itself does not enforce.
+        $op = openApiTestFindOperation($spec, 'GET', '/api/v1/auth/me');
+        expect($op)->not->toBeNull();
+        expect(array_column($op->security, 'cookieAuth'))->not->toBe([]);
+        expect(array_column($op->security, 'csrfToken'))->toBe([]);
+    });
+
+    it('requires cookieAuth on every authenticated session route, not just CsrfMiddleware-only ones', function (): void {
+        $spec = openApiTestSpec();
+
+        // These five routes previously had only CsrfMiddleware in their middleware list
+        // but their controllers dereference the current user. AuthMiddleware is now
+        // registered for each so the spec accurately reflects the auth requirement.
+        $authRoutes = [
+            ['POST',  '/api/v1/auth/logout'],
+            ['GET',   '/api/v1/auth/me'],
+            ['PATCH', '/api/v1/auth/password'],
+            ['PATCH', '/api/v1/auth/account'],
+            ['POST',  '/api/v1/auth/email/change-request'],
+        ];
+
+        foreach ($authRoutes as [$method, $path]) {
+            $op = openApiTestFindOperation($spec, $method, $path);
+            expect($op)->not->toBeNull(sprintf('%s %s should be in the spec', $method, $path));
+            expect(array_column($op->security, 'cookieAuth'))->not->toBe(
+                [],
+                sprintf('%s %s should advertise cookieAuth', $method, $path),
+            );
+        }
+    });
+
     it('tags operations by the first /api/v1/ segment', function (): void {
         $spec = openApiTestSpec();
 
@@ -195,7 +231,7 @@ describe('OpenApiGenerateCommand::regenerate', function (): void {
 });
 
 describe('OpenApiGenerateCommand::checkAgainstFile', function (): void {
-    it('returns SUCCESS when the committed spec matches the freshly generated one', function (): void {
+    it('returns SUCCESS when the reference spec matches the freshly generated one', function (): void {
         $path = tempnam(sys_get_temp_dir(), 'openapi-check-ok-');
         expect($path)->not->toBeFalse();
 
@@ -207,12 +243,12 @@ describe('OpenApiGenerateCommand::checkAgainstFile', function (): void {
         }
     });
 
-    it('returns FAILURE when the committed spec is missing', function (): void {
+    it('returns FAILURE when the reference spec is missing', function (): void {
         $status = OpenApiGenerateCommand::checkAgainstFile('/nonexistent/path/spec.json');
         expect($status)->toBe(Command::FAILURE);
     });
 
-    it('returns FAILURE when the committed spec is stale', function (): void {
+    it('returns FAILURE when the reference spec is stale', function (): void {
         $path = tempnam(sys_get_temp_dir(), 'openapi-check-stale-');
         expect($path)->not->toBeFalse();
 
@@ -267,7 +303,7 @@ describe('OpenApiGenerateCommand::execute', function (): void {
         }
     });
 
-    it('reports FAILURE from --check when no committed spec exists', function (): void {
+    it('reports FAILURE from --check when no reference spec exists', function (): void {
         $tester = new CommandTester(new OpenApiGenerateCommand());
         $exit = $tester->execute([
             '--output' => '/nonexistent/openapi-exec/spec.json',
@@ -275,10 +311,10 @@ describe('OpenApiGenerateCommand::execute', function (): void {
         ]);
 
         expect($exit)->toBe(Command::FAILURE);
-        expect($tester->getDisplay())->toContain('No committed spec');
+        expect($tester->getDisplay())->toContain('No reference spec');
     });
 
-    it('reports SUCCESS from --check when the committed spec is current', function (): void {
+    it('reports SUCCESS from --check when the reference spec is current', function (): void {
         $path = tempnam(sys_get_temp_dir(), 'openapi-exec-check-');
         expect($path)->not->toBeFalse();
 
@@ -295,7 +331,7 @@ describe('OpenApiGenerateCommand::execute', function (): void {
         }
     });
 
-    it('reports FAILURE from --check when the committed spec is stale', function (): void {
+    it('reports FAILURE from --check when the reference spec is stale', function (): void {
         $path = tempnam(sys_get_temp_dir(), 'openapi-exec-stale-');
         expect($path)->not->toBeFalse();
 

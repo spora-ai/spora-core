@@ -3,8 +3,7 @@
     "description": "A portable, zero-configuration AI agent orchestration platform that runs on any shared host (cPanel/FTP) without system dependencies beyond PHP 8.4+.",
     "type": "library",
     "license": "MIT",
-    "version": "0.1.0",
-    "bin": ["bin/spora"],
+    "bin": ["bin/spora", "bin/spora-build"],
     "require": {
         "php": "^8.4.1",
         "ext-curl": "*",
@@ -89,8 +88,7 @@
         "test:coverage:clover": "./vendor/bin/pest --coverage-clover=coverage.xml",
         "analyse": "./vendor/bin/phpstan analyse --memory-limit=2G",
         "format": "./vendor/bin/php-cs-fixer fix",
-        "openapi": "@php bin/spora-build openapi:generate",
-        "openapi-check": "@php bin/spora-build openapi:check"
+        "openapi": "@php bin/spora-build openapi:generate"
     },
     "config": {
         "optimize-autoloader": true,

@@ -25,9 +25,8 @@ use Spora\Http\Middleware\CsrfMiddleware;
  *
  * This is the bridge that lets `RouteDefinitions` stay the only place routes are declared
  * while the OpenAPI spec reflects them without duplication. Body detail (`#[OA\RequestBody]`,
- * `#[OA\Response]`, `#[OA\Schema]`) is intended to be added per-controller via a future
- * scan-and-merge step; the present change ships the path/method/auth surface that covers
- * ~95% of the route catalog already.
+ * `#[OA\Response]`, `#[OA\Schema]`) is added per-controller via attributes on the
+ * controller methods themselves.
  */
 final class RouteToOpenApi
 {
@@ -68,31 +67,26 @@ final class RouteToOpenApi
     {
         return new Info([
             'title' => 'Spora API',
-            // Read composer.json's version directly so the spec is deterministic across
-            // branches — `Composer\InstalledVersions` resolves branch refs as
-            // `dev-feat/...` / `dev-main`, which would make the openapi.json differ
-            // between local dev and the CI PR merge ref and trip the drift check.
-            'version' => $this->composerVersion(),
+            'version' => $this->buildVersion(),
             'description' => 'HTTP API for the Spora AI agent orchestration platform. Paths are derived from `Spora\\Core\\RouteDefinitions`; body schemas are added incrementally via `#[\OpenApi\...]` attributes on controllers.',
             'contact' => new OA\Contact(['name' => 'Spora', 'url' => 'https://spora-ai.com']),
         ]);
     }
 
-    private function composerVersion(): string
+    /**
+     * Returns a version string for the `info.version` field. `git describe` is the
+     * preferred source because it tracks tags across both the merge commit and the
+     * branch ref; falls back to `'dev'` for tarball checkouts without tags.
+     */
+    private function buildVersion(): string
     {
-        $path = dirname(__DIR__, 2) . '/composer.json';
-        if (!is_file($path)) {
-            return 'dev';
+        $root = dirname(__DIR__, 2);
+        $describe = @shell_exec(sprintf('cd %s && git describe --tags --always 2>/dev/null', escapeshellarg($root)));
+        if (is_string($describe) && ($describe = trim($describe)) !== '') {
+            return ltrim($describe, 'v');
         }
 
-        $contents = file_get_contents($path);
-        if ($contents === false) {
-            return 'dev';
-        }
-
-        $decoded = json_decode($contents, true);
-        $version = is_array($decoded) ? ($decoded['version'] ?? null) : null;
-        return is_string($version) && $version !== '' ? $version : 'dev';
+        return 'dev';
     }
 
     private function buildServer(): Server
@@ -153,7 +147,7 @@ final class RouteToOpenApi
         $summary = $this->humaniseHandler($entry['handler']);
         $tags = $this->tagsFromPath($entry['route']);
         $parameters = $this->parametersFromPath($entry);
-        $security = $this->securityFromMiddleware($entry['middleware']);
+        $security = $this->securityFromMiddleware($entry['middleware'], $entry['method']);
         $responses = $this->defaultResponses();
 
         match ($entry['method']) {
@@ -300,14 +294,17 @@ final class RouteToOpenApi
      * @param list<string> $middleware
      * @return list<array<string, list<string>>>
      */
-    private function securityFromMiddleware(array $middleware): array
+    private function securityFromMiddleware(array $middleware, string $method): array
     {
         $schemes = [];
 
         foreach ($middleware as $class) {
             $name = match ($class) {
                 AuthMiddleware::class => 'cookieAuth',
-                CsrfMiddleware::class => 'csrfToken',
+                // CsrfMiddleware is a no-op on safe methods (see CsrfMiddleware::SAFE_METHODS);
+                // mirror that here so the spec doesn't advertise a requirement that the
+                // middleware itself enforces as a skip.
+                CsrfMiddleware::class => $this->isSafeMethod($method) ? null : 'csrfToken',
                 AdminMiddleware::class => 'cookieAuth',
                 default => null,
             };
@@ -322,6 +319,11 @@ final class RouteToOpenApi
         }
 
         return $out;
+    }
+
+    private function isSafeMethod(string $method): bool
+    {
+        return in_array(strtoupper($method), ['GET', 'HEAD', 'OPTIONS'], true);
     }
 
     /**
