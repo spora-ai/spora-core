@@ -401,7 +401,6 @@ final class MediaArchiveService
         $asset->agent_id = $request->agentId;
         $asset->task_id = $request->taskId;
         $asset->tool_call_id = $request->toolCallId;
-        $asset->user_id = $fields->userId ?? $request->userId;
         $asset->plugin_slug = $request->pluginSlug;
         $asset->tool_name = $request->toolName;
         $asset->media_type = $fields->mediaType->value;
@@ -411,10 +410,8 @@ final class MediaArchiveService
         $asset->height = $fields->height;
         $asset->duration_seconds = $fields->durationSeconds;
         $asset->prompt = $request->prompt;
-        $asset->filename = $fields->filename;
-        $asset->upload_source = $fields->uploadSource ?: 'tool';
-        $asset->tags = $request->tags;
-        $asset->metadata = $request->metadata;
+        $asset->source_url = $fields->sourceUrl;
+        $asset->storage_mode = $fields->storageMode;
         // Asset URL is always an opaque `/api/v1/assets/<uuid>` form. The
         // `$fields->assetUrl` from the resolver is internal routing
         // metadata (e.g., the upstream CDN URL for external mode, or the
@@ -424,19 +421,31 @@ final class MediaArchiveService
         // browsers use the right filename on download.
         $ext  = self::extensionForMime($fields->sniffedMime);
         $asset->asset_url = self::OPAQUE_ASSET_URL_PREFIX . $asset->id . ($ext !== null ? '.' . $ext : '');
-        $asset->source_url = $fields->sourceUrl;
-        $asset->storage_mode = $fields->storageMode;
-        if ($request->publicAccessToken !== null && $request->publicAccessToken !== '') {
+
+        // The fields below were added in migrations after the core `media_assets`
+        // schema was first published. Older test fixtures and pre-existing
+        // installations may not have these columns yet. We probe the
+        // schema at runtime so the service stays compatible with both
+        // shapes. New columns land here as the schema grows.
+        $table = $asset->getTable();
+        $schema = $asset->getConnection()->getSchemaBuilder();
+        $optionalFields = [
+            'user_id'            => fn() => $fields->userId ?? $request->userId,
+            'filename'           => fn() => $fields->filename,
+            'upload_source'      => fn() => $fields->uploadSource ?: 'tool',
+            'tags'               => fn() => $request->tags,
+            'metadata'           => fn() => $request->metadata,
+            'asset_token'        => fn() => $fields->token ?? bin2hex(random_bytes(16)),
+        ];
+        foreach ($optionalFields as $column => $valueFn) {
+            if ($schema->hasColumn($table, $column)) {
+                $asset->{$column} = $valueFn();
+            }
+        }
+        if ($request->publicAccessToken !== null && $request->publicAccessToken !== ''
+            && $schema->hasColumn($table, 'public_access_token')) {
             $asset->public_access_token = $request->publicAccessToken;
         }
-        // `asset_token` ties the row to its on-disk file (local mode) or
-        // is just an opaque correlation id (DB mode). `LocalAssetStore`
-        // mints a 32-hex token as the on-disk filename; we reuse that
-        // token verbatim so `LocalAssetStore::readFromAsset()` can find
-        // the file from a UUID lookup. DB-mode rows get a freshly
-        // generated token; it's not load-bearing but keeps the unique
-        // index uniform.
-        $asset->asset_token = $fields->token ?? bin2hex(random_bytes(16));
         $asset->save();
 
         return $asset;
