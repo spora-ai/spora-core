@@ -20,28 +20,33 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * Built-in tool for reading the media library.
  *
- * Three operations:
+ * Four operations:
  *
- *   - `search`        — paginated list of `media_assets` rows (auto-approved read)
- *   - `get_media`     — fetch one asset + its opaque `/api/v1/assets/<uuid>` URL
- *                       (auto-approved read)
+ *   - `search`         — paginated list of `media_assets` rows (auto-approved read)
+ *   - `get_media`      — fetch one asset + its opaque `/api/v1/assets/<uuid>` URL
+ *                        (auto-approved read)
  *   - `get_public_url` — mint or fetch the public shareable URL of a single
  *                        asset. Hidden by default (`enabledByDefault: false`)
  *                        and always requires approval. Operators opt the
  *                        operation in via a per-agent override.
+ *   - `get_embed_code` — return a markdown snippet (image / audio / video /
+ *                        link) the assistant can drop into its reply,
+ *                        pointing at the local archive URL. Auto-approved
+ *                        read-only operation.
  *
  * Scope behavior (`scope` setting, default `agent`):
  *
- *   - `agent` (default): `search` filters by `agent_id`, `get_media` and
- *     `get_public_url` require `asset->agent_id === $agentId`.
- *   - `user`: `search` filters by `user_id`, the two single-asset ops
+ *   - `agent` (default): `search` filters by `agent_id`, `get_media`,
+ *     `get_public_url` and `get_embed_code` require
+ *     `asset->agent_id === $agentId`.
+ *   - `user`: `search` filters by `user_id`, the three single-asset ops
  *     require `asset->user_id === $userId`.
  *   - Admins (`AuthService::isAdmin()`) bypass scope and see all rows.
  */
 #[Tool(
     name: 'media',
     displayName: 'Media Library',
-    description: 'Search, retrieve, and share media from the media library. Reads use the local /api/v1/assets/<uuid> URL; use get_public_url to mint a shareable link.',
+    description: 'Search, retrieve, and share media from the media library. Reads use the local /api/v1/assets/<uuid> URL; use get_public_url to mint a shareable link, or get_embed_code to render the asset inline.',
     category: 'data',
     icon: 'image',
 )]
@@ -74,12 +79,20 @@ use Symfony\Component\HttpFoundation\Request;
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
+#[ToolOperation(
+    name: 'get_embed_code',
+    description: 'Return a markdown snippet (image / audio / video) for a single '
+               . 'asset that the assistant can include in its reply. Uses the '
+               . 'local archive URL by default.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
 #[ToolParameter(name: 'plugin_slug', type: 'string', description: 'Filter by media_assets.plugin_slug.', required: false)]
 #[ToolParameter(name: 'mime_type', type: 'string', description: 'Filter by media_assets.mime_type (case-insensitive LIKE).', required: false)]
 #[ToolParameter(name: 'task_id', type: 'integer', description: 'Filter by media_assets.task_id.', required: false)]
 #[ToolParameter(name: 'limit', type: 'integer', description: 'Maximum items to return (default 24, capped at 100).', required: false, default: 24)]
 #[ToolParameter(name: 'offset', type: 'integer', description: 'Items to skip (default 0).', required: false, default: 0)]
-#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset (required for get_media and get_public_url).', required: false)]
+#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset (required for get_media, get_public_url, and get_embed_code).', required: false)]
 final class MediaTool extends AbstractTool
 {
     public function __construct(
@@ -97,7 +110,8 @@ final class MediaTool extends AbstractTool
             'search'         => $this->search($arguments, $agentId, $userId),
             'get_media'      => $this->getMedia($arguments, $agentId, $userId),
             'get_public_url' => $this->getPublicUrl($arguments, $agentId, $userId),
-            default          => ToolResult::fail('Invalid action. Must be search, get_media, or get_public_url.'),
+            'get_embed_code' => $this->getEmbedCode($arguments, $agentId, $userId),
+            default          => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, or get_embed_code.'),
         };
     }
 
@@ -110,6 +124,7 @@ final class MediaTool extends AbstractTool
             'search'         => 'Media library search',
             'get_media'      => "Media get_media({$assetId})",
             'get_public_url' => "Media get_public_url({$assetId})",
+            'get_embed_code' => "Media get_embed_code({$assetId})",
             default          => "Media {$op}",
         };
     }
@@ -202,6 +217,60 @@ final class MediaTool extends AbstractTool
                 'public_url' => $url,
             ],
         );
+    }
+
+    /**
+     * @param  array<string, mixed> $arguments
+     */
+    private function getEmbedCode(array $arguments, int $agentId, ?int $userId): ToolResult
+    {
+        $assetId = trim((string) ($arguments['asset_id'] ?? ''));
+        if ($assetId === '') {
+            return ToolResult::fail('asset_id is required for get_embed_code.');
+        }
+
+        $asset = $this->archive->find($assetId);
+        if ($asset === null || !$this->assetInScope($asset, $agentId, $userId)) {
+            return ToolResult::fail('Media asset not found.');
+        }
+
+        $assetUrl = $asset->publicUrl();
+        $mediaType = $asset->typedMediaType();
+        $filename = (string) ($asset->filename ?? '');
+
+        $embed = match ($mediaType) {
+            MediaType::Image => MediaEmbed::image($assetUrl, $filename !== '' ? $filename : $asset->id),
+            MediaType::Audio => MediaEmbed::audioFromUrl($assetUrl),
+            MediaType::Video => MediaEmbed::videoFromUrl(
+                $assetUrl,
+                $asset->width !== null ? (int) $asset->width : null,
+                $asset->height !== null ? (int) $asset->height : null,
+            ),
+            default => self::markdownLink($assetUrl, $filename !== '' ? $filename : $asset->id),
+        };
+
+        return ToolResult::ok(
+            $embed,
+            [
+                'asset_id'   => $asset->id,
+                'asset_url'  => $assetUrl,
+                'media_type' => $mediaType->value,
+                'embed'      => $embed,
+            ],
+        );
+    }
+
+    /**
+     * Markdown link with the link text escaped against `\`/`[`/`]` injection,
+     * mirroring {@see MediaEmbed::image()}'s alt escaping. URLs are HTML-escaped.
+     */
+    private static function markdownLink(string $url, string $text): string
+    {
+        $safeText = htmlspecialchars($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $mdEsc    = strtr($safeText, ['\\' => '\\\\', ']' => '\\]', '[' => '\\[']);
+        $safeUrl  = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+
+        return "[{$mdEsc}]({$safeUrl})";
     }
 
     private function resolveScope(int $agentId, ?int $userId): string

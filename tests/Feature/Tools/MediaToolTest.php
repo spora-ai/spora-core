@@ -545,6 +545,246 @@ describe('MediaTool::get_public_url', function (): void {
     });
 });
 
+describe('MediaTool::get_embed_code', function (): void {
+    it('returns an <img> markdown snippet for image media', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(
+            agentId: $agentA,
+            userId: 99,
+            mime: 'image/png',
+            idOverride: 'aaaaaaaa-1111-2222-3333-444444444444',
+        );
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_embed_code', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->content)->toBe(
+                '![sample.png](/api/v1/assets/aaaaaaaa-1111-2222-3333-444444444444.png)',
+            );
+            expect($result->data['embed'])->toBe($result->content);
+            expect($result->data['asset_id'])->toBe($asset->id);
+            expect($result->data['asset_url'])->toBe('/api/v1/assets/aaaaaaaa-1111-2222-3333-444444444444.png');
+            expect($result->data['media_type'])->toBe('image');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('returns an <audio> snippet for audio media', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(
+            agentId: $agentA,
+            userId: 99,
+            mime: 'audio/mpeg',
+            idOverride: 'bbbbbbbb-1111-2222-3333-444444444444',
+        );
+        // Override media_type via direct DB update (the seed helper hardcodes 'image').
+        Illuminate\Database\Capsule\Manager::table('media_assets')
+            ->where('id', $asset->id)
+            ->update(['media_type' => 'audio']);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_embed_code', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->content)->toBe(
+                '<audio controls preload="metadata" src="/api/v1/assets/bbbbbbbb-1111-2222-3333-444444444444.mp3"></audio>',
+            );
+            expect($result->data['media_type'])->toBe('audio');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('returns a <video> snippet for video media with width/height', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(
+            agentId: $agentA,
+            userId: 99,
+            mime: 'video/mp4',
+            idOverride: 'cccccccc-1111-2222-3333-444444444444',
+        );
+        Illuminate\Database\Capsule\Manager::table('media_assets')
+            ->where('id', $asset->id)
+            ->update([
+                'media_type' => 'video',
+                'width'      => 1280,
+                'height'     => 720,
+            ]);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_embed_code', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->content)->toBe(
+                '<video controls preload="metadata" playsinline width="1280" height="720" '
+                . 'src="/api/v1/assets/cccccccc-1111-2222-3333-444444444444.mp4"></video>',
+            );
+            expect($result->data['media_type'])->toBe('video');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('returns a markdown link for document media', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(
+            agentId: $agentA,
+            userId: 99,
+            mime: 'application/pdf',
+            idOverride: 'dddddddd-1111-2222-3333-444444444444',
+        );
+        Illuminate\Database\Capsule\Manager::table('media_assets')
+            ->where('id', $asset->id)
+            ->update(['media_type' => 'document']);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_embed_code', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->content)->toBe(
+                '[sample.png](/api/v1/assets/dddddddd-1111-2222-3333-444444444444.pdf)',
+            );
+            expect($result->data['media_type'])->toBe('document');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('returns a markdown link for unknown media_type', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(
+            agentId: $agentA,
+            userId: 99,
+            mime: 'application/octet-stream',
+            idOverride: 'eeeeeeee-1111-2222-3333-444444444444',
+        );
+        Illuminate\Database\Capsule\Manager::table('media_assets')
+            ->where('id', $asset->id)
+            ->update(['media_type' => 'unknown']);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_embed_code', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->success)->toBeTrue();
+            // application/octet-stream has no extension map, so the URL has no suffix.
+            expect($result->content)->toBe(
+                '[sample.png](/api/v1/assets/eeeeeeee-1111-2222-3333-444444444444)',
+            );
+            expect($result->data['media_type'])->toBe('unknown');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('falls back to the asset_id when filename is null', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(
+            agentId: $agentA,
+            userId: 99,
+            mime: 'application/pdf',
+            idOverride: 'ffffffff-1111-2222-3333-444444444444',
+        );
+        Illuminate\Database\Capsule\Manager::table('media_assets')
+            ->where('id', $asset->id)
+            ->update(['media_type' => 'document', 'filename' => null]);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_embed_code', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->content)->toBe(
+                '[ffffffff-1111-2222-3333-444444444444](/api/v1/assets/ffffffff-1111-2222-3333-444444444444.pdf)',
+            );
+        } finally {
+            $restore();
+        }
+    });
+
+    it('returns 404 when asset_id is missing', function (): void {
+        $agentA = seedMediaToolAgent();
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(['action' => 'get_embed_code'], agentId: $agentA, userId: 99);
+
+            expect($result->success)->toBeFalse();
+            expect($result->content)->toContain('asset_id is required');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('returns 404 when the asset does not exist', function (): void {
+        $agentA = seedMediaToolAgent();
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_embed_code', 'asset_id' => '99999999-9999-9999-9999-999999999999'],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->success)->toBeFalse();
+            expect($result->content)->toContain('Media asset not found');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('returns 404 for an asset owned by another agent', function (): void {
+        $ownerAgent = seedMediaToolAgent();
+        $otherAgent = seedMediaToolAgent();
+        $asset = seedMediaAsset(agentId: $ownerAgent, userId: 99);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_embed_code', 'asset_id' => $asset->id],
+                agentId: $otherAgent,
+                userId: 99,
+            );
+
+            expect($result->success)->toBeFalse();
+            expect($result->content)->toContain('Media asset not found');
+        } finally {
+            $restore();
+        }
+    });
+});
+
 describe('MediaTool routing', function (): void {
     it('rejects unknown action values', function (): void {
         $agentA = seedMediaToolAgent();

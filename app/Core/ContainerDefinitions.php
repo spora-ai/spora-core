@@ -130,7 +130,6 @@ use Spora\Services\UserServiceInterface;
 use Spora\Tools\AgentMemoryTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\CurrentTimeTool;
-use Spora\Tools\GetPublicMediaUrlTool;
 use Spora\Tools\GlobalMemoryTool;
 use Spora\Tools\HandoverTool;
 use Spora\Tools\ReadUrlTool;
@@ -658,7 +657,6 @@ final class ContainerDefinitions
                 ReadUrlTool::class,
                 UserInfoTool::class,
                 HandoverTool::class,
-                GetPublicMediaUrlTool::class,
             ],
 
             LLMConfigService::class => static function (ContainerInterface $c): LLMConfigService {
@@ -998,15 +996,6 @@ final class ContainerDefinitions
                     $c->get(ToolConfigService::class),
                     $c->get(LoggerInterface::class),
                     $c->get(MediaConverterRegistry::class),
-                );
-            },
-
-            GetPublicMediaUrlTool::class => static function (ContainerInterface $c): GetPublicMediaUrlTool {
-                return new GetPublicMediaUrlTool(
-                    $c->get(AuthService::class),
-                    $c->has(\Symfony\Component\HttpFoundation\Request::class)
-                        ? $c->get(\Symfony\Component\HttpFoundation\Request::class)
-                        : null,
                 );
             },
 
