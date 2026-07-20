@@ -166,6 +166,13 @@ final class ApprovedBatchExecutor
         array $approvedArgs,
         ToolResult $result,
     ): void {
+        // Query-builder update() intentionally bypasses Eloquent casts
+        // — writing the JSON string here lands the right shape on disk
+        // and the `array` cast decodes it back to an array on read.
+        // Do NOT 'simplify' this to ToolCall::create()/update(): those
+        // paths re-encode through the cast and would double-encode the
+        // value (the same anti-pattern PR #150 fixed in
+        // Orchestrator::appendHistory and ToolCallExecutor).
         ToolCallModel::where('task_id', $taskId)
             ->where('provider_call_id', $pendingToolCall->providerCallId)
             ->update([

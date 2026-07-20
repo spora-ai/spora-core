@@ -19,6 +19,7 @@ use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Models\MediaAsset;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
@@ -79,6 +80,7 @@ function mockLlm(LLMResponse $response): LLMDriverInterface
     $mock->allows('complete')->andReturn($response);
     $mock->allows('getProviderName')->andReturn('mock');
     $mock->allows('getModelName')->andReturn('mock-model');
+    $mock->allows('supportsImageInput')->andReturn(false);
 
     return $mock;
 }
@@ -3128,5 +3130,86 @@ describe('Orchestrator::buildMessages — tool role', function (): void {
         // The _seq scaffolding key must NOT leak into the final output.
         expect($toolMsg)->not->toHaveKey('_seq');
         expect($capturedMessages[0])->not->toHaveKey('_seq');
+    })->afterEach(fn() => Spora\Core\Database::resetBootState());
+});
+
+//
+// Regression test for the writer-side bug where appendHistory() called
+// json_encode() on the attachment refs before assignment. The `attachments`
+// column is already `cast => 'array'`, so the manual encode produced a
+// double-encoded string. On hydration, the cast decoded the outer JSON
+// and returned a STRING, not a list — leaving
+// MessageHistoryBuilder::collectAttachmentBlocks unable to iterate, and
+// silently dropping the file content. The LLM saw '[attachment]' instead.
+
+describe('Orchestrator::start — attachment serialization round-trip', function (): void {
+    function seedTextAsset(int $agentId, int $userId, string $body): MediaAsset
+    {
+        return MediaAsset::create([
+            'id'                => sprintf('%08x-%04x-%04x-%04x-%012x', random_int(0, 0xffffffff), random_int(0, 0xffff), random_int(0, 0xffff), random_int(0, 0xffff), random_int(0, 0xffffffffffff)),
+            'asset_url'         => '/api/v1/assets/' . bin2hex(random_bytes(16)) . '.pdf',
+            'storage_mode'      => 'data_url',
+            'mime_type'         => 'application/pdf',
+            'media_type'        => 'text',
+            'byte_size'         => strlen($body),
+            'agent_id'          => $agentId,
+            'user_id'           => $userId,
+            'plugin_slug'       => null,
+            'asset_token'       => bin2hex(random_bytes(16)),
+            'public_access_token' => null,
+            'filename'          => 'cv.pdf',
+            'markdown_content'  => $body,
+            'migrated_from_inline_data_url' => false,
+        ]);
+    }
+
+    it('stores attachments as a JSON list (not a double-encoded string) so MessageHistoryBuilder emits the file content', function (): void {
+        [$agentId, $userId] = seedAgent();
+
+        $asset   = seedTextAsset($agentId, $userId, 'CV body — keep me in the loop');
+        $assetId = $asset->id;
+
+        $llm  = mockLlm(new LLMResponse('Done.', [], 10, 5, 'cmp_1'));
+        $orch = makeOrchestrator(mockDriverFactory($llm));
+
+        // start() goes through appendHistory with non-null attachments, which
+        // is the exact code path that double-encoded the JSON before the fix.
+        $task = $orch->start($agentId, 'Summarize the attached CV', maxSteps: 5, mediaIds: [$assetId]);
+
+        // Refetching from a fresh query (not the in-memory model) is
+        // important — it forces Eloquent to apply the `array` cast on
+        // raw read.
+        $attachmentRow = TaskHistory::where('task_id', $task->id)
+            ->where('role', 'attachment')
+            ->first();
+
+        expect($attachmentRow)->not->toBeNull();
+
+        // PHPStan can't prove the cast value is a list — reindex so
+        // $refs[0] is statically typed.
+        $refs = array_values((array) $attachmentRow->attachments);
+        expect($refs)->toHaveCount(1)
+            ->and($refs[0])->toMatchArray([
+                'media_id' => $assetId,
+                'kind'     => 'text',
+            ]);
+
+        // Before the fix this came back as the literal '[attachment]' fallback.
+        $messages = (new Spora\Agents\MessageHistoryBuilder())->build($task->id);
+
+        $userMessage = null;
+        foreach ($messages as $msg) {
+            if (($msg['role'] ?? null) === 'user' && is_array($msg['content'] ?? null)) {
+                $userMessage = $msg;
+                break;
+            }
+        }
+
+        expect($userMessage)->not->toBeNull();
+        $blocks = $userMessage['content'];
+        $joinedText = implode("\n", array_map(static fn(array $b): string => (string) ($b['text'] ?? ''), $blocks));
+
+        expect($joinedText)->toContain('CV body — keep me in the loop')
+            ->and($joinedText)->not->toBe('[attachment]');
     })->afterEach(fn() => Spora\Core\Database::resetBootState());
 });

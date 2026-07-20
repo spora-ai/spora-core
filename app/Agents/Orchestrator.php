@@ -501,8 +501,12 @@ final class Orchestrator implements OrchestratorInterface
             $row['reasoning'] = $context->reasoning;
         }
 
+        // TaskHistory::$casts['attachments'] => 'array' handles JSON
+        // encoding. Pre-encoding here would double-encode the value
+        // and leave MessageHistoryBuilder unable to iterate the
+        // resulting string — the LLM would see '[attachment]'.
         if ($context->attachments !== null) {
-            $row['attachments'] = json_encode($context->attachments, JSON_THROW_ON_ERROR);
+            $row['attachments'] = $context->attachments;
         }
 
         Capsule::connection()->transaction(function () use ($taskId, $row) {

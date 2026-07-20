@@ -112,7 +112,10 @@ final class ToolCallExecutor
             'operation'             => $operationName,
             'operation_description' => $operationDescription,
             'status'                => 'PENDING_APPROVAL',
-            'proposed_arguments'    => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
+            // ToolCall::$casts['proposed_arguments'] => 'array' encodes
+            // on save. Pre-encoding here double-encodes (the same
+            // pattern PR #150 fixed in Orchestrator::appendHistory).
+            'proposed_arguments'    => $toolCall->arguments,
             'human_description'     => $toolInstance->describeAction($toolCall->arguments),
         ]);
     }
@@ -135,7 +138,10 @@ final class ToolCallExecutor
             'operation'             => $operationName,
             'operation_description' => $operationDescription,
             'status'                => 'DISABLED',
-            'proposed_arguments'    => json_encode($toolCall->arguments, JSON_THROW_ON_ERROR),
+            // ToolCall::$casts['proposed_arguments'] => 'array' encodes
+            // on save. Pre-encoding here double-encodes (the same
+            // pattern PR #150 fixed in Orchestrator::appendHistory).
+            'proposed_arguments'    => $toolCall->arguments,
             'human_description'     => $operationDescription,
         ]);
 
@@ -197,7 +203,10 @@ final class ToolCallExecutor
             $toolCallRecord->update([
                 'status'         => 'APPROVED',
                 'result_content' => $scrubbed,
-                'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
+                // ToolCall::$casts['result_data'] => 'array' encodes on
+                // save. Pre-encoding double-encodes (same pattern PR
+                // #150 fixed in Orchestrator::appendHistory).
+                'result_data'    => $result->data,
                 'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
             $this->orchestrator->appendHistory(
