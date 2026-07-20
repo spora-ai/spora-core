@@ -22,55 +22,12 @@ concurrency:
 
 jobs:
   test:
-    name: Pest (PHP ${{ matrix.php }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        php: ['8.4', '8.5']
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
-        with:
-          php-version: ${{ matrix.php }}
-          extensions: pdo_mysql, zip
-          coverage: none
-          tools: composer
-
-      - name: Composer install
-        run: composer install --no-interaction --prefer-dist
-
-      # Use the parallel runner (--processes=auto on an ubuntu-latest 2-core
-      # runner is 2, on a 4-core runner is 4). ~13x faster than serial on
-      # the spora-core suite (~290s -> ~25s).
-      - name: Run Pest (parallel)
-        run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50
-
-  static-analysis:
-    name: PHPStan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
-        with:
-          php-version: '8.4'
-          extensions: pdo_mysql, zip
-          coverage: none
-          tools: composer
-
-      - name: Composer install
-        run: composer install --no-interaction --prefer-dist
-
-      - name: Run PHPStan
-        run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=2G
-
-  coverage:
-    name: Test coverage
-    needs: [test, static-analysis]
+    # Single Pest invocation covers both the test gate and the coverage
+    # report. We dropped the previous PHP 8.4/8.5 matrix and the separate
+    # coverage job: that ran Pest three times (matrix x 2 + coverage x 1)
+    # and added ~2 minutes to every CI run. 8.4 is the production target;
+    # 8.5 is exercised locally + in nightly.
+    name: Pest (PHP 8.4)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -92,11 +49,10 @@ jobs:
       - name: Composer install
         run: composer install --no-interaction --prefer-dist
 
-      # Reuse the parallel runner in the coverage job too. The coverage
-      # driver (pcov) is what makes this expensive per-test; the parallel
-      # runner is what makes it fast per-worker. End-to-end this is ~5x
-      # faster than the previous xdebug + serial combination.
-      - name: Generate clover coverage report
+      # Single Pest invocation: parallel runner + pcov coverage + clover
+      # output. End-to-end: ~60s on ubuntu-latest 2-core, down from the
+      # previous ~600s (xdebug + serial + matrix + separate coverage).
+      - name: Run Pest (parallel, with coverage)
         run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --coverage-clover=coverage.xml
 
       - name: Upload coverage.xml
@@ -107,9 +63,29 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  static-analysis:
+    name: PHPStan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, zip
+          coverage: none
+          tools: composer
+
+      - name: Composer install
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run PHPStan
+        run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=2G
+
   sonar:
     name: SonarCloud scan
-    needs: coverage
+    needs: test
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
