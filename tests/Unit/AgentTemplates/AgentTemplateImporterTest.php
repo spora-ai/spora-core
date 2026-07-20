@@ -2,38 +2,9 @@
 
 declare(strict_types=1);
 
-use Spora\AgentTemplates\AgentTemplateImporter;
-use Spora\Core\Paths;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
-use Spora\Plugins\PluginLoader;
-use Spora\Services\ToolConfigService;
-
-function makeImporter(): AgentTemplateImporter
-{
-    $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-    $security = new Spora\Core\SecurityManager($key);
-    $logger   = new Monolog\Logger('test');
-    // Mirror the 'tool_classes' config from ContainerDefinitions so the
-    // importer's plugin-missing detection sees the core tools.
-    $toolClasses = [
-        Spora\Tools\CurrentTimeTool::class,
-        Spora\Tools\CalculatorTool::class,
-        Spora\Tools\AgentMemoryTool::class,
-        Spora\Tools\GlobalMemoryTool::class,
-        Spora\Tools\ReadUrlTool::class,
-        Spora\Tools\UserInfoTool::class,
-        Spora\Tools\HandoverTool::class,
-    ];
-    $toolConfig = new ToolConfigService($security, $logger, $toolClasses);
-    // PluginLoader without directories boots an empty loader; tests
-    // exercise the tool-class lookup path that doesn't depend on plugins.
-    $plugins = new PluginLoader([]);
-    $paths = new Paths(BASE_PATH);
-
-    return new AgentTemplateImporter($toolConfig, $plugins, $paths);
-}
 
 beforeEach(function (): void {
     $this->importer = makeImporter();

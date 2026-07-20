@@ -51,6 +51,8 @@ set_error_handler(static function (int $errno, string $_errstr, string $errfile)
 
 // Shared test helpers (available to all test files)
 
+require_once __DIR__ . '/Support/AgentTemplateTestSupport.php';
+
 /**
  * Boot a fresh in-memory SQLite database and return a ready-to-use AuthService.
  * Throttling is disabled so tests never hit rate limits.
