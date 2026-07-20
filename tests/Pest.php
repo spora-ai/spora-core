@@ -187,11 +187,6 @@ uses()
         $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
         $db->boot();
         Illuminate\Database\Capsule\Manager::connection()->beginTransaction();
-        // Reset BASE_PATH/config.php to a known state. InstallCommand's bootstrap
-        // writes storage/secret.key + sets key_path; tests that resolve the
-        // SecurityManager from the real config (e.g. CoreExceptionsTest) must
-        // see key_path = null to exercise the MissingSecretKeyException path.
-        resetSporaConfigKeyPath();
     })
     ->afterEach(function () {
         if (Illuminate\Database\Capsule\Manager::connection()->transactionLevel() > 0) {
