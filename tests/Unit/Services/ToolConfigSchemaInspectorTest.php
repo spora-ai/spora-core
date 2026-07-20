@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Services\ToolConfigSchemaInspector;
+use Tests\Fixtures\InheritedSettingChildTool;
 use Tests\Fixtures\TestTool;
 
 // Pure schema inspection: no DB, no security, no logger needed.
@@ -177,4 +178,108 @@ test('multi-select: getLlmToolSettings falls back to "#id" when agent cannot be 
     ]);
 
     expect($result['allowed_target_agents']['value'])->toBe(['#9999']);
+});
+
+test('inheritance: getPasswordKeys sees parent password settings', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $keys = $inspector->getPasswordKeys(InheritedSettingChildTool::class);
+
+    expect($keys)->toContain('parent_secret');
+});
+
+test('inheritance: getSchemaDefaults sees parent defaults', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $defaults = $inspector->getSchemaDefaults(InheritedSettingChildTool::class);
+
+    expect($defaults)->toHaveKey('parent_with_default')
+        ->and($defaults['parent_with_default'])->toBe('inherited')
+        ->and($defaults)->toHaveKey('parent_picks')
+        ->and($defaults['parent_picks'])->toBe([]);
+});
+
+test('inheritance: getMissingRequiredSettings flags empty parent required fields', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $missing = $inspector->getMissingRequiredSettings(InheritedSettingChildTool::class, [
+        'child_only' => 'value',
+    ]);
+
+    expect($missing)->toContain('parent_required');
+});
+
+test('inheritance: getMissingRequiredSettings passes when parent required field is set', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $missing = $inspector->getMissingRequiredSettings(InheritedSettingChildTool::class, [
+        'parent_required' => 'configured',
+    ]);
+
+    expect($missing)->not->toContain('parent_required');
+});
+
+test('inheritance: maskForApi masks parent password fields', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $masked = $inspector->maskForApi([
+        'parent_secret' => 'super-secret',
+        'child_only'    => 'value',
+    ], InheritedSettingChildTool::class);
+
+    expect($masked['parent_secret'])->toBe('***')
+        ->and($masked['child_only'])->toBe('value');
+});
+
+test('inheritance: getMultiSelectKeys sees parent multi-select settings', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $keys = $inspector->getMultiSelectKeys(InheritedSettingChildTool::class);
+
+    expect($keys)->toContain('parent_picks')
+        ->and($keys)->not->toContain('child_only');
+});
+
+test('inheritance: normalizeMultiSelectValues coerces parent multi-select JSON to int[]', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $normalized = $inspector->normalizeMultiSelectValues(
+        InheritedSettingChildTool::class,
+        ['parent_picks' => '[1,2,3]'],
+    );
+
+    expect($normalized['parent_picks'])->toBe([1, 2, 3]);
+});
+
+test('inheritance: getLlmToolSettings includes parent exposeToLlm settings', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $result = $inspector->getLlmToolSettings(InheritedSettingChildTool::class, [
+        'parent_visible' => 'yes',
+        'parent_picks'   => [],
+    ]);
+
+    expect($result)->toHaveKey('parent_visible')
+        ->and($result['parent_visible']['label'])->toBe('Parent Visible')
+        ->and($result['parent_visible']['value'])->toBe('yes')
+        ->and($result)->toHaveKey('parent_picks');
+});
+
+test('inheritance: subclass redeclaration of a parent key wins (no duplicates, child value)', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $defaults = $inspector->getSchemaDefaults(InheritedSettingChildTool::class);
+    expect($defaults)->toHaveKey('shared_key')
+        ->and($defaults['shared_key'])->toBe('child-default');
+
+    $missing = $inspector->getMissingRequiredSettings(InheritedSettingChildTool::class, []);
+    expect(array_count_values($missing)['shared_key'] ?? 0)->toBe(0);
+});
+
+test('inheritance: getSchemaDefaults uses child value when child redeclares a parent key', function (): void {
+    $inspector = new ToolConfigSchemaInspector();
+
+    $defaults = $inspector->getSchemaDefaults(InheritedSettingChildTool::class);
+
+    expect($defaults['shared_key'])->toBe('child-default');
 });
