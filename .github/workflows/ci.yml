@@ -22,12 +22,10 @@ concurrency:
 
 jobs:
   test:
-    # Single Pest invocation covers both the test gate and the coverage
-    # report. We dropped the previous PHP 8.4/8.5 matrix and the separate
-    # coverage job: that ran Pest three times (matrix x 2 + coverage x 1)
-    # and added ~2 minutes to every CI run. 8.4 is the production target;
-    # 8.5 is exercised locally + in nightly.
-    name: Pest (PHP 8.4)
+    # Primary test + coverage gate on PHP 8.4 (the production target).
+    # Single Pest invocation: parallel runner + pcov + clover output.
+    # SonarQube depends on this job for the coverage report.
+    name: Pest + coverage (PHP 8.4)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -49,9 +47,6 @@ jobs:
       - name: Composer install
         run: composer install --no-interaction --prefer-dist
 
-      # Single Pest invocation: parallel runner + pcov coverage + clover
-      # output. End-to-end: ~60s on ubuntu-latest 2-core, down from the
-      # previous ~600s (xdebug + serial + matrix + separate coverage).
       - name: Run Pest (parallel, with coverage)
         run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --coverage-clover=coverage.xml
 
@@ -62,6 +57,29 @@ jobs:
           path: coverage.xml
           if-no-files-found: error
           retention-days: 7
+
+  test-85:
+    # PHP 8.5 compatibility check: same suite, no coverage. Runs in
+    # parallel with the 8.4 test+coverage job. If the suite passes on
+    # 8.4 but fails on 8.5, the PR is blocked.
+    name: Pest (PHP 8.5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        with:
+          php-version: '8.5'
+          extensions: pdo_mysql, zip
+          coverage: none
+          tools: composer
+
+      - name: Composer install
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run Pest (parallel)
+        run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50
 
   static-analysis:
     name: PHPStan
