@@ -312,14 +312,15 @@ final class MessageHistoryBuilder
         $imageOnly = $blocks['text'] === [] && $blocks['image'] !== [];
         $textOnly = $blocks['image'] === [];
 
-        if ($textOnly && $prompt === '' && count($blocks['text']) === 1) {
-            return $blocks['text'];
-        }
         if ($textOnly) {
-            return array_merge(
-                [['type' => 'text', 'text' => $combined]],
-                array_slice($blocks['text'], 0),
-            );
+            // Single text attachment with no prompt → emit the block as-is.
+            if ($prompt === '' && count($blocks['text']) === 1) {
+                return $blocks['text'];
+            }
+            // Otherwise emit one combined text block: prompt + `---` + every
+            // attachment's extracted text. Never append the original blocks
+            // again — `combined` already contains their text.
+            return [['type' => 'text', 'text' => $combined]];
         }
         return $imageOnly
             ? $blocks['image']
