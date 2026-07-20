@@ -157,28 +157,29 @@ final class OpenApiGenerateCommand extends Command
      */
     public static function checkAgainstFile(string $referencePath): int
     {
+        $serialised = '';
+        $error      = null;
         try {
-            $json = (new RouteToOpenApi())->build();
-            $serialised = self::encode($json);
+            $serialised = self::encode((new RouteToOpenApi())->build());
         } catch (JsonException $e) {
-            fwrite(STDERR, sprintf("Failed to encode OpenAPI document as JSON: %s\n", $e->getMessage()));
-            return Command::FAILURE;
+            $error = sprintf("Failed to encode OpenAPI document as JSON: %s\n", $e->getMessage());
         }
 
-        if (!is_file($referencePath)) {
-            fwrite(STDERR, sprintf("No reference spec at %s to compare against.\n", $referencePath));
-            return Command::FAILURE;
-        }
-        $committed = file_get_contents($referencePath);
-        if ($committed === $serialised) {
-            return Command::SUCCESS;
+        $committed = is_file($referencePath) ? (string) file_get_contents($referencePath) : null;
+        if ($committed === null) {
+            $error = sprintf("No reference spec at %s to compare against.\n", $referencePath);
+        } elseif ($error === null && $committed !== $serialised) {
+            $error = sprintf(
+                "Spec at %s is stale. Regenerate with `composer openapi`.\n",
+                $referencePath,
+            );
         }
 
-        fwrite(STDERR, sprintf(
-            "Spec at %s is stale. Regenerate with `composer openapi`.\n",
-            $referencePath,
-        ));
-        return Command::FAILURE;
+        if ($error !== null) {
+            fwrite(STDERR, $error);
+            return Command::FAILURE;
+        }
+        return Command::SUCCESS;
     }
 
     private static function encode(OpenApi $openapi): string
