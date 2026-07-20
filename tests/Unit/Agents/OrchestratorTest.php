@@ -3133,9 +3133,6 @@ describe('Orchestrator::buildMessages — tool role', function (): void {
     })->afterEach(fn() => Spora\Core\Database::resetBootState());
 });
 
-// ---------------------------------------------------------------------------
-// Orchestrator::start — attachment serialization round-trip
-// ---------------------------------------------------------------------------
 //
 // Regression test for the writer-side bug where appendHistory() called
 // json_encode() on the attachment refs before assignment. The `attachments`
@@ -3179,20 +3176,17 @@ describe('Orchestrator::start — attachment serialization round-trip', function
         // is the exact code path that double-encoded the JSON before the fix.
         $task = $orch->start($agentId, 'Summarize the attached CV', maxSteps: 5, mediaIds: [$assetId]);
 
-        // 1) Storage shape: the attachments column must round-trip to a list,
-        //    not the broken double-encoded string. Refetching from a fresh
-        //    query (not the in-memory model) is important — it forces Eloquent
-        //    to apply the `array` cast on raw read.
+        // Refetching from a fresh query (not the in-memory model) is
+        // important — it forces Eloquent to apply the `array` cast on
+        // raw read.
         $attachmentRow = TaskHistory::where('task_id', $task->id)
             ->where('role', 'attachment')
             ->first();
 
         expect($attachmentRow)->not->toBeNull();
 
-        // The attachments column is cast to `array<string, mixed>`. The
-        // runtime value is always a list (the producer is
-        // appendHistory), but PHPStan can't prove that — so reindex
-        // before reading offset [0] to keep the static analyser quiet.
+        // PHPStan can't prove the cast value is a list — reindex so
+        // $refs[0] is statically typed.
         $refs = array_values((array) $attachmentRow->attachments);
         expect($refs)->toHaveCount(1)
             ->and($refs[0])->toMatchArray([
@@ -3200,9 +3194,7 @@ describe('Orchestrator::start — attachment serialization round-trip', function
                 'kind'     => 'text',
             ]);
 
-        // 2) End-to-end: MessageHistoryBuilder must emit the asset's markdown
-        //    content as part of the user message. Before the fix this came
-        //    back as the literal '[attachment]' fallback.
+        // Before the fix this came back as the literal '[attachment]' fallback.
         $messages = (new Spora\Agents\MessageHistoryBuilder())->build($task->id);
 
         $userMessage = null;
@@ -3220,16 +3212,4 @@ describe('Orchestrator::start — attachment serialization round-trip', function
         expect($joinedText)->toContain('CV body — keep me in the loop')
             ->and($joinedText)->not->toBe('[attachment]');
     })->afterEach(fn() => Spora\Core\Database::resetBootState());
-
-    it('regression: original double-encoded string shape would have failed the storage assertion above', function (): void {
-        // Documentation test, not a runtime test. Confirms what the broken
-        // shape looked like at the storage layer so a future reader can map
-        // a recurring failure to this exact bug. Exists alongside the
-        // round-trip test above; intentionally asserts the OPPOSITE shape so
-        // any change that re-introduces it will fail loudly.
-        $brokenShape = '"[{\"media_id\":\"x\",\"kind\":\"text\"}]"';
-        $decoded     = json_decode($brokenShape, true);
-
-        expect($decoded)->toBeString('a re-introduction of double encoding would silently leak into MessageHistoryBuilder again');
-    });
 });

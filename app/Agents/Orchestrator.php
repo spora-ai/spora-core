@@ -501,12 +501,10 @@ final class Orchestrator implements OrchestratorInterface
             $row['reasoning'] = $context->reasoning;
         }
 
-        // Hand the refs to Eloquent as-is — the `array` cast on
-        // TaskHistory::$casts handles the JSON encoding on save. Encoding
-        // here too produces a double-encoded string that the cast decodes
-        // back into a JSON string (not a list), leaving
-        // MessageHistoryBuilder::collectAttachmentBlocks unable to
-        // iterate and silently dropping the attachment content.
+        // TaskHistory::$casts['attachments'] => 'array' handles JSON
+        // encoding. Pre-encoding here would double-encode the value
+        // and leave MessageHistoryBuilder unable to iterate the
+        // resulting string — the LLM would see '[attachment]'.
         if ($context->attachments !== null) {
             $row['attachments'] = $context->attachments;
         }
