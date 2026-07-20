@@ -11,7 +11,8 @@ use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\MediaTool;
 
-use function Tests\Feature\MediaArchive\makeMediaArchiveService;
+// makeMediaArchiveService() is autoloaded globally via composer.json
+// (autoload-dev.files -> tests/Support/CrossFileTestHelpers.php).
 
 /**
  * Wire-schema coverage for {@see MediaTool}.
