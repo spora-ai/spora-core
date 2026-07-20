@@ -3,19 +3,10 @@
 declare(strict_types=1);
 
 /*
- * Shared helpers for AgentTemplateImporter / AgentTemplateExporter tests.
- *
- * Previously these functions lived as global functions at the top of the
- * individual test files, which forced AgentTemplateExporterTest.php to
- * `require_once` its sibling test files just to pick them up. That
- * side-effect re-registered every test in the imported files in the same
- * Pest execution context, polluting shared state (e.g. env mutations in
- * ContainerDefinitionsTest) and triggering Pest 4's risky-test detection
- * on unrelated tests in the suite.
- *
- * Centralising the helpers here lets each test file stay independent:
- * Pest.php requires this support file once, the helpers become available
- * globally, and no test file needs to require another test file.
+ * Lives in tests/Support (loaded once from tests/Pest.php) so individual
+ * test files don't have to require one another — that pattern re-registers
+ * the imported tests in the same Pest context and leaks shared state
+ * (env mutations, Monolog buffers) across the suite.
  */
 
 use Spora\AgentTemplates\AgentTemplateImporter;
@@ -24,8 +15,7 @@ use Spora\Plugins\PluginLoader;
 use Spora\Services\ToolConfigService;
 
 /**
- * Build a real PluginLoader that loads the tools-contributing fixture plugin.
- * The fixture's tools() returns [Tests\Fixtures\TestTool].
+ * Fixture plugin's tools() returns [Tests\Fixtures\TestTool].
  */
 function makeToolsPluginLoader(): PluginLoader
 {
@@ -35,17 +25,14 @@ function makeToolsPluginLoader(): PluginLoader
 }
 
 /**
- * Build an AgentTemplateImporter wired with the core tool classes (the same
- * set ContainerDefinitions registers) and an empty PluginLoader. Tests
- * exercise the tool-class lookup path that does not depend on plugins.
+ * Wires the importer with the same tool_classes set ContainerDefinitions
+ * registers so the importer's plugin-missing detection sees the core tools.
  */
 function makeImporter(): AgentTemplateImporter
 {
     $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new Spora\Core\SecurityManager($key);
     $logger   = new Monolog\Logger('test');
-    // Mirror the 'tool_classes' config from ContainerDefinitions so the
-    // importer's plugin-missing detection sees the core tools.
     $toolClasses = [
         Spora\Tools\CurrentTimeTool::class,
         Spora\Tools\CalculatorTool::class,
@@ -56,8 +43,6 @@ function makeImporter(): AgentTemplateImporter
         Spora\Tools\HandoverTool::class,
     ];
     $toolConfig = new ToolConfigService($security, $logger, $toolClasses);
-    // PluginLoader without directories boots an empty loader; tests
-    // exercise the tool-class lookup path that doesn't depend on plugins.
     $plugins = new PluginLoader([]);
     $paths = new Paths(BASE_PATH);
 
