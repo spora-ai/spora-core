@@ -19,8 +19,6 @@ use Spora\Services\ToolConfigService;
 use Spora\Tools\CalculatorTool;
 use Tests\Fixtures\TestTool;
 
-const FIXTURE_TOOLS_PLUGINS = BASE_PATH . '/tests/Fixtures/plugins_with_tools';
-
 /**
  * Invoke a private static method on ContainerDefinitions.
  */
@@ -70,17 +68,6 @@ function makeContainerWithPaths(string $baseDir): Psr\Container\ContainerInterfa
             return $id === Paths::class || $id === 'config';
         }
     };
-}
-
-/**
- * Build a real PluginLoader that loads the tools-contributing fixture plugin.
- * The fixture's tools() returns [Tests\Fixtures\TestTool].
- */
-function makeToolsPluginLoader(): PluginLoader
-{
-    $loader = new PluginLoader([FIXTURE_TOOLS_PLUGINS], null);
-    $loader->boot();
-    return $loader;
 }
 
 /**
@@ -171,51 +158,68 @@ it('configDefinition returns a closure that resolves the config array', function
 });
 
 it('configDefinition honours env var overrides for all keys', function (): void {
-    $_ENV['SPORA_DB_DRIVER'] = 'pgsql';
-    $_ENV['SPORA_DB_HOST'] = 'db.example.com';
-    $_ENV['SPORA_DB_PORT'] = '5432';
-    $_ENV['SPORA_DB_NAME'] = 'spora';
-    $_ENV['SPORA_DB_USER'] = 'spora_user';
-    $_ENV['SPORA_DB_PASSWORD'] = 'secret';
-    $_ENV['SPORA_SQLITE_BUSY_TIMEOUT'] = '5000';
-    $_ENV['SPORA_APP_ENV'] = 'staging';
-    $_ENV['SPORA_ALLOW_REGISTRATION'] = 'false';
-    $_ENV['SPORA_LOG_LEVEL'] = 'INFO';
-    $_ENV['SPORA_LOG_PATH'] = '/tmp/spora.log';
-    $_ENV['SPORA_SYNC_MODE'] = 'false';
-    $_ENV['SPORA_WORKER_STALE_MINUTES'] = '30';
-    $_ENV['SPORA_MAX_WORKERS'] = '4';
-    $_ENV['SPORA_LLM_TIMEOUT'] = '600';
-    $_ENV['SPORA_TOOL_HTTP_TIMEOUT'] = '60';
-    $_ENV['SPORA_MERCURE_URL'] = 'https://mercure.example.com';
-    $_ENV['SPORA_MERCURE_JWT_KEY'] = 'jwt-key';
-    $_ENV['SPORA_MERCURE_PUBLISH_URL'] = 'https://mercure.example.com/hub';
-    $_ENV['SPORA_APP_URL'] = 'https://spora.example.com';
-    $_ENV['SPORA_NOTIFICATIONS_EMAIL_ENABLED'] = 'true';
+    // Pest 4 flags tests that mutate $_ENV without restoring it as risky
+    // and bleeds the contamination into subsequent tests in the run. Scope
+    // every override in try/finally so a failing assertion still leaves
+    // a clean env for the next test.
+    $overrides = [
+        'SPORA_DB_DRIVER'                => 'pgsql',
+        'SPORA_DB_HOST'                  => 'db.example.com',
+        'SPORA_DB_PORT'                  => '5432',
+        'SPORA_DB_NAME'                  => 'spora',
+        'SPORA_DB_USER'                  => 'spora_user',
+        'SPORA_DB_PASSWORD'              => 'secret',
+        'SPORA_SQLITE_BUSY_TIMEOUT'      => '5000',
+        'SPORA_APP_ENV'                  => 'staging',
+        'SPORA_ALLOW_REGISTRATION'       => 'false',
+        'SPORA_LOG_LEVEL'                => 'INFO',
+        'SPORA_LOG_PATH'                 => '/tmp/spora.log',
+        'SPORA_SYNC_MODE'                => 'false',
+        'SPORA_WORKER_STALE_MINUTES'     => '30',
+        'SPORA_MAX_WORKERS'              => '4',
+        'SPORA_LLM_TIMEOUT'              => '600',
+        'SPORA_TOOL_HTTP_TIMEOUT'        => '60',
+        'SPORA_MERCURE_URL'              => 'https://mercure.example.com',
+        'SPORA_MERCURE_JWT_KEY'          => 'jwt-key',
+        'SPORA_MERCURE_PUBLISH_URL'      => 'https://mercure.example.com/hub',
+        'SPORA_APP_URL'                  => 'https://spora.example.com',
+        'SPORA_NOTIFICATIONS_EMAIL_ENABLED' => 'true',
+    ];
 
-    $config = callContainerMethod('configDefinition')['config'](makeFakeContainer());
+    try {
+        foreach ($overrides as $key => $value) {
+            $_ENV[$key] = $value;
+        }
 
-    expect($config['db_driver'])->toBe('pgsql')
-        ->and($config['db_host'])->toBe('db.example.com')
-        ->and($config['db_port'])->toBe(5432)
-        ->and($config['db_name'])->toBe('spora')
-        ->and($config['db_user'])->toBe('spora_user')
-        ->and($config['db_password'])->toBe('secret')
-        ->and($config['sqlite_busy_timeout'])->toBe(5000)
-        ->and($config['app_env'])->toBe('staging')
-        ->and($config['allow_registration'])->toBeFalse()
-        ->and($config['log_level'])->toBe('INFO')
-        ->and($config['log_path'])->toBe('/tmp/spora.log')
-        ->and($config['worker_mode'])->toBeFalse()
-        ->and($config['worker_stale_minutes'])->toBe(30)
-        ->and($config['max_workers'])->toBe(4)
-        ->and($config['llm_timeout'])->toBe(600)
-        ->and($config['tool_http_timeout'])->toBe(60)
-        ->and($config['mercure_url'])->toBe('https://mercure.example.com')
-        ->and($config['mercure_jwt_key'])->toBe('jwt-key')
-        ->and($config['mercure_publish_url'])->toBe('https://mercure.example.com/hub')
-        ->and($config['app_url'])->toBe('https://spora.example.com')
-        ->and($config['notifications']['email_enabled'])->toBeTrue();
+        $config = callContainerMethod('configDefinition')['config'](makeFakeContainer());
+
+        expect($config['db_driver'])->toBe('pgsql')
+            ->and($config['db_host'])->toBe('db.example.com')
+            ->and($config['db_port'])->toBe(5432)
+            ->and($config['db_name'])->toBe('spora')
+            ->and($config['db_user'])->toBe('spora_user')
+            ->and($config['db_password'])->toBe('secret')
+            ->and($config['sqlite_busy_timeout'])->toBe(5000)
+            ->and($config['app_env'])->toBe('staging')
+            ->and($config['allow_registration'])->toBeFalse()
+            ->and($config['log_level'])->toBe('INFO')
+            ->and($config['log_path'])->toBe('/tmp/spora.log')
+            ->and($config['worker_mode'])->toBeFalse()
+            ->and($config['worker_stale_minutes'])->toBe(30)
+            ->and($config['max_workers'])->toBe(4)
+            ->and($config['llm_timeout'])->toBe(600)
+            ->and($config['tool_http_timeout'])->toBe(60)
+            ->and($config['mercure_url'])->toBe('https://mercure.example.com')
+            ->and($config['mercure_jwt_key'])->toBe('jwt-key')
+            ->and($config['mercure_publish_url'])->toBe('https://mercure.example.com/hub')
+            ->and($config['app_url'])->toBe('https://spora.example.com')
+            ->and($config['notifications']['email_enabled'])->toBeTrue();
+    } finally {
+        foreach ($overrides as $key => $_value) {
+            unset($_ENV[$key]);
+            putenv($key);
+        }
+    }
 });
 
 it('coreServiceDefinitions resolves core services', function (): void {

@@ -9,9 +9,6 @@ use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
 use Tests\Fixtures\TestTool;
 
-require_once BASE_PATH . '/tests/Unit/Core/ContainerDefinitionsTest.php';
-require_once BASE_PATH . '/tests/Unit/AgentTemplates/AgentTemplateImporterTest.php';
-
 function makeExporter(?PluginLoader $pluginLoader = null): AgentTemplateExporter
 {
     return new AgentTemplateExporter($pluginLoader ?? new PluginLoader([]));
