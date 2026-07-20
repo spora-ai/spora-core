@@ -28,14 +28,35 @@ See the [Installation Guide](docs/13_installation.md) for full setup instruction
 ## Testing Your Changes
 
 ```bash
-# Backend
+# Backend (serial — slow but most thorough)
 composer analyse && composer test
+
+# Backend (parallel — ~6.7× faster, 27s vs 293s on the spora-core suite)
+composer analyse && composer test:parallel
 
 # Frontend
 cd frontend && npm run lint && npm test
 
 # Both together
-composer analyse && composer test && cd frontend && npm run lint && npm test
+composer analyse && composer test:parallel && cd frontend && npm run lint && npm test
+```
+
+### Running tests in parallel
+
+`composer test:parallel` runs Pest via `--parallel --processes=auto --max-batch-size=50`. Each worker is an isolated PHP process with its own in-memory SQLite, so cross-test state isolation is the same as serial mode.
+
+- **Override process count** for smaller CI runners:
+  ```bash
+  composer test:parallel -- --processes=4
+  ```
+- **`--max-batch-size=50`** recycles workers every 50 tests to reclaim memory. Tune down (`--max-batch-size=30`) on memory-constrained runners or up on fast ones.
+- The first parallel run may be slightly slower because workers spawn; subsequent tests reuse workers.
+- Memory limit per worker is set in `phpunit.xml` (`<ini name="memory_limit" value="1G"/>`). If you see "Premature end of PHP process" errors, lower the parallel `--processes` count or the per-worker memory limit.
+
+If you need to debug a single test file in parallel mode:
+
+```bash
+./vendor/bin/pest --parallel --processes=4 tests/Unit/Agents/OrchestratorTest.php
 ```
 
 ## Pull Request Guidelines
