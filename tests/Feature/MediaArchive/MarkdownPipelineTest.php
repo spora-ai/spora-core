@@ -166,7 +166,6 @@ test('attachment + prompt does not duplicate extracted text across blocks', func
         'content'      => '',
         'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
     ]);
-    // Following user row carries the prompt that lands in the leading block.
     TaskHistory::create([
         'task_id'  => $task->id,
         'sequence' => 1,
@@ -178,7 +177,6 @@ test('attachment + prompt does not duplicate extracted text across blocks', func
 
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
-    // Exactly one block: the combined text block. No trailing duplicate.
     expect($messages[0]['content'])->toHaveCount(1);
     expect($messages[0]['content'][0]['type'])->toBe('text');
     $text = $messages[0]['content'][0]['text'];
@@ -248,7 +246,6 @@ test('multiple text attachments + prompt produces a single combined block', func
     expect($text)->toContain('---');
     expect($text)->toContain('# alpha.txt (extracted text)');
     expect($text)->toContain('# beta.txt (extracted text)');
-    // Each filename header must appear exactly once.
     expect(substr_count($text, '# alpha.txt (extracted text)'))->toBe(1);
     expect(substr_count($text, '# beta.txt (extracted text)'))->toBe(1);
 });
@@ -349,8 +346,6 @@ function makePdfPipelineServiceWithParser(\Iamgerwin\PdfToMarkdownParser\PdfToMa
 }
 
 test('PDF upload: parser returns text → markdown_content populated → LLM gets the text', function (): void {
-    // The happy path. Proves end-to-end that a real PDF upload, after
-    // conversion, gives the LLM the extracted text.
     $service = makePdfPipelineServiceWithParser(mockPdfParserReturning("Chapter 1\n\nIt was the best of times."));
 
     $asset = $service->ingest(new MediaIngestRequest(
@@ -366,7 +361,6 @@ test('PDF upload: parser returns text → markdown_content populated → LLM get
     expect($asset->markdown_content)->toContain('Chapter 1');
     expect($asset->markdown_content)->toContain('best of times');
 
-    // Build the LLM prompt and assert the file content lands.
     $userId = bootAuthLayer()->register('pdf-pipeline@example.com', 'Password1!', 'P');
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
@@ -513,7 +507,6 @@ test('production row order: user row first, attachment row second → LLM still 
         'step_count' => 0, 'max_steps' => 10,
     ]);
 
-    // Production order — user row first, then attachment.
     TaskHistory::create([
         'task_id' => $task->id, 'sequence' => 0,
         'role' => 'user', 'content' => 'Summarize this paper',
@@ -543,5 +536,89 @@ test('production row order: user row first, attachment row second → LLM still 
     expect($combined)->toContain('Summarize this paper');
     expect($combined)->toContain('# paper.txt (extracted text)');
     expect($combined)->toContain('Lorem ipsum dolor sit amet');
+    expect($combined)->not->toContain('[no extractable text]');
+});
+
+test('multiple text attachments in production row order: dedup survives', function (): void {
+    // Regression sibling for the production row order (user-then-attachment).
+    // The single-attachment case above is not affected by the dedup bug
+    // because the trivial `prompt==='' && count===1` early return fires
+    // regardless of which row order produced the inputs. The bug DOES fire
+    // in production for multiple text attachments: the attachment row is
+    // written by appendAttachmentRow() with empty content, so buildAttachment-
+    // Content sees `prompt==='' && count>1`, which skips the trivial early
+    // return and used to fall into `array_merge($combined, $blocks['text'])`
+    // — emitting each filename header + extracted markdown twice. This test
+    // pins dedup on that production path.
+    $service = buildMarkdownPipelineService();
+    $assetA = $service->ingest(new MediaIngestRequest(
+        bytes: 'Alpha section content.',
+        mime: 'text/plain',
+        filename: 'alpha.txt',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+    $assetB = $service->ingest(new MediaIngestRequest(
+        bytes: 'Beta section content.',
+        mime: 'text/plain',
+        filename: 'beta.txt',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+
+    $userId = bootAuthLayer()->register('md-prod-multi@example.com', 'Password1!', 'M');
+    $agentId = buildMarkdownPipelineAgent($userId);
+    $task = \Spora\Models\Task::create([
+        'agent_id'    => $agentId,
+        'user_id'     => $userId,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'Compare these notes',
+        'max_steps'   => 10,
+    ]);
+
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 0,
+        'role'     => 'user',
+        'content'  => 'Compare these notes',
+    ]);
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 1,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [
+            ['media_id' => $assetA->id, 'kind' => 'text'],
+            ['media_id' => $assetB->id, 'kind' => 'text'],
+        ],
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+
+    // Aggregate every text payload so dedup is checked globally across the
+    // resulting message stream (the production path produces two messages:
+    // the typed prompt on its own, then the attachment as a separate user
+    // message — the dedup invariant lives across both).
+    $combined = '';
+    foreach ($messages as $msg) {
+        if (is_array($msg['content'])) {
+            foreach ($msg['content'] as $block) {
+                if (isset($block['text'])) {
+                    $combined .= $block['text'] . "\n\n";
+                }
+            }
+        } elseif (is_string($msg['content'])) {
+            $combined .= $msg['content'] . "\n\n";
+        }
+    }
+
+    // Before the fix, the trailing array_merge re-appended both blocks, so
+    // each marker appeared twice in $combined.
+    expect(substr_count($combined, '# alpha.txt (extracted text)'))->toBe(1);
+    expect(substr_count($combined, '# beta.txt (extracted text)'))->toBe(1);
+    // The LLM still receives the operator's prompt and the file bodies.
+    expect($combined)->toContain('Compare these notes');
+    expect($combined)->toContain('Alpha section content.');
+    expect($combined)->toContain('Beta section content.');
     expect($combined)->not->toContain('[no extractable text]');
 });
