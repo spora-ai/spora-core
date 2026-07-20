@@ -501,8 +501,14 @@ final class Orchestrator implements OrchestratorInterface
             $row['reasoning'] = $context->reasoning;
         }
 
+        // Hand the refs to Eloquent as-is — the `array` cast on
+        // TaskHistory::$casts handles the JSON encoding on save. Encoding
+        // here too produces a double-encoded string that the cast decodes
+        // back into a JSON string (not a list), leaving
+        // MessageHistoryBuilder::collectAttachmentBlocks unable to
+        // iterate and silently dropping the attachment content.
         if ($context->attachments !== null) {
-            $row['attachments'] = json_encode($context->attachments, JSON_THROW_ON_ERROR);
+            $row['attachments'] = $context->attachments;
         }
 
         Capsule::connection()->transaction(function () use ($taskId, $row) {
