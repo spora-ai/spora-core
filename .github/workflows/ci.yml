@@ -22,19 +22,55 @@ concurrency:
 
 jobs:
   test:
-    name: Pest (PHP ${{ matrix.php }})
+    # Primary test + coverage gate on PHP 8.4 (the production target).
+    # Single Pest invocation: parallel runner + pcov + clover output.
+    # SonarQube depends on this job for the coverage report.
+    name: Pest + coverage (PHP 8.4)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        php: ['8.4', '8.5']
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      # pcov is ~3-5x faster than xdebug for coverage. The trade-off is
+      # that branch/path coverage is not reported (statement + line only),
+      # which is fine for spora-core's quality gate (clover XML is consumed
+      # by SonarCloud which only needs line coverage).
+      - name: Setup PHP with pcov
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, zip
+          coverage: pcov
+          tools: composer
+
+      - name: Composer install
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run Pest (parallel, with coverage)
+        run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --coverage-clover=coverage.xml
+
+      - name: Upload coverage.xml
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-report
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  test-85:
+    # PHP 8.5 compatibility check: same suite, no coverage. Runs in
+    # parallel with the 8.4 test+coverage job. If the suite passes on
+    # 8.4 but fails on 8.5, the PR is blocked.
+    name: Pest (PHP 8.5)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
         with:
-          php-version: ${{ matrix.php }}
+          php-version: '8.5'
           extensions: pdo_mysql, zip
           coverage: none
           tools: composer
@@ -42,8 +78,8 @@ jobs:
       - name: Composer install
         run: composer install --no-interaction --prefer-dist
 
-      - name: Run Pest
-        run: ./vendor/bin/pest
+      - name: Run Pest (parallel)
+        run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50
 
   static-analysis:
     name: PHPStan
@@ -65,40 +101,9 @@ jobs:
       - name: Run PHPStan
         run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=2G
 
-  coverage:
-    name: Test coverage
-    needs: [test, static-analysis]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          fetch-depth: 0
-
-      - name: Setup PHP with Xdebug
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
-        with:
-          php-version: '8.4'
-          extensions: pdo_mysql, zip
-          coverage: xdebug
-          tools: composer
-
-      - name: Composer install
-        run: composer install --no-interaction --prefer-dist
-
-      - name: Generate clover coverage report
-        run: composer test:coverage:clover
-
-      - name: Upload coverage.xml
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: coverage-report
-          path: coverage.xml
-          if-no-files-found: error
-          retention-days: 7
-
   sonar:
     name: SonarCloud scan
-    needs: coverage
+    needs: test
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:

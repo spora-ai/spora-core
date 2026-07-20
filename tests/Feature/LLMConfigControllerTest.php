@@ -42,32 +42,9 @@ function makeLLMConfigController(): array
     return [$controller, $authService, $llmConfigService, $key, $authMiddleware, $csrfMiddleware];
 }
 
-function makeAdmin(Spora\Auth\AuthService $authService, int $userId): void
-{
-    $authService->grantRole($userId, Delight\Auth\Role::ADMIN);
-}
-
-function createTestConfig(string $name, string $driverClass, array $settings, bool $isDefault = false, ?int $userId = null, ?Spora\Services\LLMConfigService $llmConfigService = null): LLMDriverConfiguration
-{
-    if ($llmConfigService === null) {
-        $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-        $security = new Spora\Core\SecurityManager($key);
-        $llmConfigService = new Spora\Services\LLMConfigService($security, [
-            OpenAICompatibleDriver::class,
-            AnthropicCompatibleDriver::class,
-        ]);
-    }
-
-    $config = new LLMDriverConfiguration();
-    $config->user_id = $userId ?? ($_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID] ?? 1);
-    $config->name = $name;
-    $config->driver_class = $driverClass;
-    $config->settings = json_encode($llmConfigService->encodeSettings($driverClass, $settings));
-    $config->is_default = $isDefault;
-    $config->save();
-
-    return $config;
-}
+// makeAdmin() and createTestConfig() are loaded globally via composer.json
+// (autoload-dev.files -> tests/Support/CrossFileTestHelpers.php) so they are
+// visible to tests in other files under Pest's parallel runner.
 
 // Helpers
 

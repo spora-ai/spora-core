@@ -17,24 +17,8 @@ if (!defined('BASE_PATH')) {
     define('BASE_PATH', dirname(__DIR__));
 }
 
-// Fixture plugins are organised by test purpose (e.g. plugins_inventory/<Plugin>)
-// rather than by namespace, so Composer's `Tests\` → `tests/` mapping can't find
-// them. Register each fixture explicitly so `is_a(..., true)` in PluginLoader
-// can resolve the class.
-$classLoader = require BASE_PATH . '/vendor/autoload.php';
-$fixtures   = BASE_PATH . '/tests/Fixtures';
-foreach ([
-    'ManifestPlugin'    => 'plugins_with_manifest/ManifestPlugin',
-    'ToolsPlugin'       => 'plugins_with_tools/ToolsPlugin',
-    'MigratingPlugin'   => 'plugins_with_migrations/MigratingPlugin',
-    'InventoryPlugin'   => 'plugins_inventory/InventoryPlugin',
-    'DefaultIconPlugin' => 'plugins_inventory_brain/DefaultIconPlugin',
-    'BadPrefixPlugin'   => 'plugins_bad_migrations/BadPrefixPlugin',
-    'NamedPlugin'       => 'plugins_with_custom_file/NamedPlugin',
-    'NotAPlugin'        => 'plugins_invalid_manifest/NotAPlugin',
-] as $plugin => $relativePath) {
-    $classLoader->addPsr4('Tests\\Fixtures\\Plugins\\' . $plugin . '\\', $fixtures . '/' . $relativePath . '/');
-}
+// Fixture plugin PSR-4 prefixes are registered in composer.json (autoload-dev.psr-4).
+require_once BASE_PATH . '/vendor/autoload.php';
 
 // Suppress E_DEPRECATED originating from delight-im vendor packages.
 // delight-im/auth v9.0.0 uses implicit nullable types (e.g. `callable $x = null`)
@@ -187,11 +171,6 @@ uses()
         $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
         $db->boot();
         Illuminate\Database\Capsule\Manager::connection()->beginTransaction();
-        // Reset BASE_PATH/config.php to a known state. InstallCommand's bootstrap
-        // writes storage/secret.key + sets key_path; tests that resolve the
-        // SecurityManager from the real config (e.g. CoreExceptionsTest) must
-        // see key_path = null to exercise the MissingSecretKeyException path.
-        resetSporaConfigKeyPath();
     })
     ->afterEach(function () {
         if (Illuminate\Database\Capsule\Manager::connection()->transactionLevel() > 0) {

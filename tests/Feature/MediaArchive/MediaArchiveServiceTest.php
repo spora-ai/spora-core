@@ -83,49 +83,9 @@ function mediaArchiveTestSetup(): array
     ];
 }
 
-/**
- * Build a MediaArchiveService with optional injected dependencies.
- *
- * @param array<string, mixed> $overrides
- */
-function makeMediaArchiveService(array $overrides = []): array
-{
-    $ctx = mediaArchiveTestSetup();
-    $fetcher = $overrides['fetcher'] ?? new RemoteMediaFetcher(
-        new MockHttpClient([]),
-        $ctx['logger'],
-        30,
-        100 * 1024 * 1024,
-    );
-
-    $resolver = new MediaArchiveUrlResolver(
-        $fetcher,
-        $ctx['sniffer'],
-        $ctx['logger'],
-        (bool) ($overrides['promoteExternal'] ?? true),
-        (int) ($overrides['maxPromoteBytes'] ?? 100 * 1024 * 1024),
-    );
-
-    $service = new MediaArchiveService(
-        $ctx['assetStore'],
-        $resolver,
-        $ctx['sniffer'],
-        $ctx['metadata'],
-        \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
-        new MediaIngestDecoder(),
-    );
-
-    return [
-        'service'    => $service,
-        'assetStore' => $ctx['assetStore'],
-        'sniffer'    => $ctx['sniffer'],
-        'metadata'   => $ctx['metadata'],
-        'logger'     => $ctx['logger'],
-        'fetcher'    => $fetcher,
-        'tmp'        => $ctx['tmp'],
-        'restore'    => $ctx['restore'],
-    ];
-}
+// makeMediaArchiveService() is autoloaded globally via composer.json
+// (autoload-dev.files -> tests/Support/CrossFileTestHelpers.php). Calls
+// inside this file resolve via PHP's namespace fallback to the global one.
 
 // ----- Sniff -----------------------------------------------------------------
 

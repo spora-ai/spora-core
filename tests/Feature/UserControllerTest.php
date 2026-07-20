@@ -19,15 +19,8 @@ function makeUserController(): array
     return [$controller, $authService, $userService];
 }
 
-/**
- * Grant admin role to a user.
- */
-if (! function_exists('makeAdmin')) {
-    function makeAdmin(AuthService $authService, int $userId): void
-    {
-        $authService->grantRole($userId, Role::ADMIN);
-    }
-}
+// makeAdmin() is loaded globally via composer.json
+// (autoload-dev.files -> tests/Support/CrossFileTestHelpers.php).
 
 /**
  * Register a user with a display name. Returns the user ID.

@@ -101,7 +101,7 @@ function makeMediaToolWithRealArchive(?AuthService $auth = null, ?ToolConfigServ
 {
     // Reuse the same builder that MediaArchiveServiceTest uses so we get a
     // fully-wired service (asset store, resolver, converters, decoder).
-    $ctx = \Tests\Feature\MediaArchive\makeMediaArchiveService();
+    $ctx = makeMediaArchiveService();
     $tool = new MediaTool(
         $ctx['service'],
         $auth ?? makeMediaToolNonAdminAuth(),
