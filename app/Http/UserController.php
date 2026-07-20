@@ -42,12 +42,10 @@ final class UserController
         $perPage = min((int) ($request->query->get('per_page', 20)), 100);
         $page    = max((int) ($request->query->get('page', 1)), 1);
 
-        $result = $this->userService->getUsers($page, $perPage);
-
-        return new JsonResponse([
-            'data' => $result['data'],
-            'meta' => $result['meta'],
-        ], Response::HTTP_OK);
+        return new JsonResponse(
+            $this->userService->getUsers($page, $perPage),
+            Response::HTTP_OK,
+        );
     }
 
     public function show(int $id): JsonResponse

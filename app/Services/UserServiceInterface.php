@@ -12,7 +12,11 @@ interface UserServiceInterface
     /**
      * Get paginated users.
      *
-     * @return array{data: list<array>, meta: array}
+     * Flat envelope — matches the frontend `PaginatedUsers` type and avoids
+     * a `{data, meta}` wrapper that the shared API client would auto-unwrap
+     * and drop the meta block.
+     *
+     * @return array{users: list<array>, current_page: int, last_page: int, per_page: int, total: int}
      */
     public function getUsers(int $page, int $perPage): array;
 

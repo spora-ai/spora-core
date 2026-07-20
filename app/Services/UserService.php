@@ -23,6 +23,11 @@ final class UserService implements UserServiceInterface
         'MODERATOR'   => Role::MODERATOR,
     ];
 
+    /**
+     * Flat envelope (`users` + pagination keys at top level) — matches the
+     * frontend `PaginatedUsers` type and avoids a `{data, meta}` wrapper that
+     * the shared API client would auto-unwrap, dropping the meta block.
+     */
     public function getUsers(int $page, int $perPage): array
     {
         $paginator = User::orderBy('id', 'asc')
@@ -31,13 +36,11 @@ final class UserService implements UserServiceInterface
         $users = array_map(fn(User $u) => $this->serializeUser($u), $paginator->all());
 
         return [
-            'data' => $users,
-            'meta' => [
-                'current_page' => $paginator->currentPage(),
-                'last_page'    => $paginator->lastPage(),
-                'per_page'     => $paginator->perPage(),
-                'total'        => $paginator->total(),
-            ],
+            'users'        => $users,
+            'current_page' => $paginator->currentPage(),
+            'last_page'    => $paginator->lastPage(),
+            'per_page'     => $paginator->perPage(),
+            'total'        => $paginator->total(),
         ];
     }
 
