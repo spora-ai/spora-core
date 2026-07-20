@@ -10,7 +10,7 @@ use Spora\Auth\AuthService;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Tools\Attributes\Tool;
-use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\ToolSettingSchema;
 use Spora\Tools\Traits\HasOperations;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -170,16 +170,17 @@ final class ToolController
         $category = $toolAttr->category ?? 'general';
 
         $schema = [];
-        foreach ($reflection->getAttributes(ToolSetting::class) as $attribute) {
-            $setting  = $attribute->newInstance();
+        // Schema rows for the form; `expose_to_llm` is the only field
+        // the controller needs that the inspectors don't produce.
+        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
             $schema[] = [
-                'key'         => $setting->key,
-                'label'       => $setting->label,
-                'type'        => $setting->type,
-                'description' => $setting->description,
-                'default'     => $setting->default,
-                'required'    => $setting->required,
-                'options'     => $setting->options,
+                'key'           => $setting->key,
+                'label'         => $setting->label,
+                'type'          => $setting->type,
+                'description'   => $setting->description,
+                'default'       => $setting->default,
+                'required'      => $setting->required,
+                'options'       => $setting->options,
                 'expose_to_llm' => $setting->exposeToLlm,
             ];
         }

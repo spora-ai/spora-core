@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-use ReflectionClass;
 use Spora\Models\Agent;
-use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\ToolSettingSchema;
 
 /**
  * Reads the `#[ToolSetting]` attribute schema declared on tool classes.
@@ -37,18 +36,12 @@ final class ToolConfigSchemaInspector
      */
     public function getPasswordKeys(string $toolClass): array
     {
-        $reflection = new ReflectionClass($toolClass);
-        $keys       = [];
-
-        foreach ($reflection->getAttributes(ToolSetting::class) as $attribute) {
-            /** @var ToolSetting $instance */
-            $instance = $attribute->newInstance();
-
+        $keys = [];
+        foreach (ToolSettingSchema::collect($toolClass) as $instance) {
             if ($instance->type === 'password') {
                 $keys[] = $instance->key;
             }
         }
-
         return $keys;
     }
 
@@ -60,14 +53,8 @@ final class ToolConfigSchemaInspector
      */
     public function getSchemaDefaults(string $toolClass): array
     {
-        if (!class_exists($toolClass)) {
-            return [];
-        }
-
         $defaults = [];
-        foreach ((new ReflectionClass($toolClass))->getAttributes(ToolSetting::class) as $attr) {
-            /** @var ToolSetting $setting */
-            $setting = $attr->newInstance();
+        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
             if ($setting->type === 'multi-select') {
                 // Stored as int[] — empty array unless the schema overrides.
                 $defaults[$setting->key] = $setting->default ?? [];
@@ -77,7 +64,6 @@ final class ToolConfigSchemaInspector
                 $defaults[$setting->key] = $setting->default;
             }
         }
-
         return $defaults;
     }
 
@@ -89,14 +75,8 @@ final class ToolConfigSchemaInspector
      */
     public function getMissingRequiredSettings(string $toolClass, array $effectiveSettings): array
     {
-        if (!class_exists($toolClass)) {
-            return [];
-        }
-
         $missing = [];
-        foreach ((new ReflectionClass($toolClass))->getAttributes(ToolSetting::class) as $attr) {
-            /** @var ToolSetting $setting */
-            $setting = $attr->newInstance();
+        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
             if (!$setting->required) {
                 continue;
             }
@@ -112,7 +92,6 @@ final class ToolConfigSchemaInspector
                 $missing[] = $setting->key;
             }
         }
-
         return $missing;
     }
 
@@ -144,19 +123,12 @@ final class ToolConfigSchemaInspector
      */
     public function getMultiSelectKeys(string $toolClass): array
     {
-        if (!class_exists($toolClass)) {
-            return [];
-        }
-
         $keys = [];
-        foreach ((new ReflectionClass($toolClass))->getAttributes(ToolSetting::class) as $attr) {
-            /** @var ToolSetting $setting */
-            $setting = $attr->newInstance();
+        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
             if ($setting->type === 'multi-select') {
                 $keys[] = $setting->key;
             }
         }
-
         return $keys;
     }
 
@@ -309,19 +281,12 @@ final class ToolConfigSchemaInspector
      */
     private function getLlmSettingLabels(string $toolClass): array
     {
-        if (!class_exists($toolClass)) {
-            return [];
-        }
-
         $labels = [];
-        foreach ((new ReflectionClass($toolClass))->getAttributes(ToolSetting::class) as $attr) {
-            /** @var ToolSetting $setting */
-            $setting = $attr->newInstance();
+        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
             if ($setting->exposeToLlm) {
                 $labels[$setting->key] = $setting->label;
             }
         }
-
         return $labels;
     }
 }

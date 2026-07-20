@@ -77,3 +77,43 @@ test('getSchemaForDriver returns an empty list for an unknown driver class', fun
 
     expect($inspector->getSchemaForDriver('Spora\\Drivers\\DoesNotExist'))->toBe([]);
 });
+
+test('settings_schema inherits #[ToolSetting] attributes from an abstract base driver', function (): void {
+    // AbstractCompatibleDriver::supports_image_input is the original
+    // regression — it was declared on the base class but invisible
+    // from the concrete subclass.
+    $inspector = new LLMConfigSchemaInspector([OpenAICompatibleDriver::class]);
+
+    $keys = array_column(
+        $inspector->getSchemaForDriver(OpenAICompatibleDriver::class),
+        'key',
+    );
+
+    expect($keys)->toContain('supports_image_input');
+});
+
+test('AnthropicCompatibleDriver also inherits the image-input toggle from its base', function (): void {
+    $inspector = new LLMConfigSchemaInspector([AnthropicCompatibleDriver::class]);
+
+    $keys = array_column(
+        $inspector->getSchemaForDriver(AnthropicCompatibleDriver::class),
+        'key',
+    );
+
+    expect($keys)->toContain('supports_image_input');
+});
+
+test('inherited `supports_image_input` is exposed as a toggle field', function (): void {
+    $inspector = new LLMConfigSchemaInspector([OpenAICompatibleDriver::class]);
+
+    $schema = $inspector->getSchemaForDriver(OpenAICompatibleDriver::class);
+    $toggle = current(array_filter(
+        $schema,
+        static fn(array $row): bool => $row['key'] === 'supports_image_input',
+    ));
+
+    expect($toggle)->not->toBeFalse()
+        ->and($toggle['type'])->toBe('toggle')
+        ->and($toggle['label'])->toBe('Allow images')
+        ->and($toggle['default'])->toBeFalse();
+});

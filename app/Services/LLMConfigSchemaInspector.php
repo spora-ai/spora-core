@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-use ReflectionClass;
 use Spora\Drivers\LLMDriverConfigInterface;
-use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\ToolSettingSchema;
 
 /**
  * Driver discovery and settings schema introspection for LLM config.
@@ -55,15 +54,8 @@ final class LLMConfigSchemaInspector
      */
     public function buildSchemaFromClass(string $class): array
     {
-        if (! class_exists($class)) {
-            return [];
-        }
-
-        $ref = new ReflectionClass($class);
-
         $schema = [];
-        foreach ($ref->getAttributes(ToolSetting::class) as $attr) {
-            $setting = $attr->newInstance();
+        foreach (ToolSettingSchema::collect($class) as $setting) {
             $schema[] = [
                 'key' => $setting->key,
                 'label' => $setting->label,
@@ -107,21 +99,12 @@ final class LLMConfigSchemaInspector
      */
     private function getPasswordKeys(string $driverClass): array
     {
-        if (! class_exists($driverClass)) {
-            return [];
-        }
-
-        $reflection = new ReflectionClass($driverClass);
         $keys = [];
-
-        foreach ($reflection->getAttributes(ToolSetting::class) as $attribute) {
-            /** @var ToolSetting $instance */
-            $instance = $attribute->newInstance();
+        foreach (ToolSettingSchema::collect($driverClass) as $instance) {
             if ($instance->type === 'password') {
                 $keys[] = $instance->key;
             }
         }
-
         return $keys;
     }
 

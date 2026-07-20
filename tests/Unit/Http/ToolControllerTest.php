@@ -12,6 +12,7 @@ use Spora\Tools\CalculatorTool;
 use Spora\Tools\CurrentTimeTool;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Tests\Fixtures\InheritedSettingChildTool;
 
 function makeToolController(): array
 {
@@ -48,6 +49,56 @@ describe('ToolController::index', function (): void {
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
         expect($body['data']['tools'])->toBe([]);
+    });
+
+    test('settings_schema includes #[ToolSetting] attributes inherited from the parent class', function (): void {
+        // The child only declares child_only; the rest come from the base.
+        $authService = bootAuthLayer();
+        $security    = new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+        $toolConfig  = new ToolConfigService($security, new NullLogger(), [InheritedSettingChildTool::class]);
+        $controller  = new ToolController($authService, $toolConfig, [InheritedSettingChildTool::class]);
+
+        $response = $controller->index();
+        $body = json_decode($response->getContent(), true);
+        $tools = $body['data']['tools'];
+        $entry = current(array_filter(
+            $tools,
+            static fn(array $tool): bool => $tool['tool_class'] === InheritedSettingChildTool::class,
+        ));
+
+        expect($entry)->not->toBeFalse();
+        $keys = array_column($entry['settings_schema'], 'key');
+        expect($keys)->toContain('child_only')
+            ->and($keys)->toContain('parent_toggle')
+            ->and($keys)->toContain('parent_secret')
+            ->and($keys)->toContain('parent_required')
+            ->and($keys)->toContain('parent_picks')
+            ->and($keys)->toContain('parent_visible')
+            ->and($keys)->toContain('parent_with_default');
+    });
+
+    test('settings_schema deduplicates a key redeclared on the child', function (): void {
+        // shared_key lives on both InheritedSettingBaseTool and
+        // InheritedSettingChildTool. The schema must contain exactly
+        // one row, with the child's label and default.
+        $authService = bootAuthLayer();
+        $security    = new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+        $toolConfig  = new ToolConfigService($security, new NullLogger(), [InheritedSettingChildTool::class]);
+        $controller  = new ToolController($authService, $toolConfig, [InheritedSettingChildTool::class]);
+
+        $body = json_decode($controller->index()->getContent(), true);
+        $entry = current(array_filter(
+            $body['data']['tools'],
+            static fn(array $tool): bool => $tool['tool_class'] === InheritedSettingChildTool::class,
+        ));
+        $rows = array_values(array_filter(
+            $entry['settings_schema'],
+            static fn(array $row): bool => $row['key'] === 'shared_key',
+        ));
+
+        expect($rows)->toHaveCount(1)
+            ->and($rows[0]['label'])->toBe('Child Shared')
+            ->and($rows[0]['default'])->toBe('child-default');
     });
 });
 
