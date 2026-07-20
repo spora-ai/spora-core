@@ -303,6 +303,11 @@ final class MessageHistoryBuilder
      * filename header + extracted markdown. Image blocks (when present)
      * follow a single leading text block.
      *
+     * Trivial case — a single text attachment with no operator prompt —
+     * returns the original block unchanged: no combined-block rewrite, no
+     * `---` separator. (`{@see composeTextContent()}()` still runs first to
+     * compute `$combined`, which the early return then discards.)
+     *
      * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>} $blocks
      * @return list<array<string, mixed>>
      */
@@ -312,14 +317,13 @@ final class MessageHistoryBuilder
         $imageOnly = $blocks['text'] === [] && $blocks['image'] !== [];
         $textOnly = $blocks['image'] === [];
 
-        if ($textOnly && $prompt === '' && count($blocks['text']) === 1) {
-            return $blocks['text'];
-        }
         if ($textOnly) {
-            return array_merge(
-                [['type' => 'text', 'text' => $combined]],
-                array_slice($blocks['text'], 0),
-            );
+            if ($prompt === '' && count($blocks['text']) === 1) {
+                return $blocks['text'];
+            }
+            // Regression: never re-append $blocks['text'] — composeTextContent()
+            // already folded their text into $combined.
+            return [['type' => 'text', 'text' => $combined]];
         }
         return $imageOnly
             ? $blocks['image']
