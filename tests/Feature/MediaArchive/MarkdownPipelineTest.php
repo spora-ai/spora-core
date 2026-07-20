@@ -482,3 +482,66 @@ test('PDF upload: parser throws → conversion swallowed → LLM gets [no extrac
     expect($text)->toContain('[no extractable text]');
     expect($text)->not->toContain('corrupt garbage');
 });
+
+test('production row order: user row first, attachment row second → LLM still gets the file content', function (): void {
+    // Orchestrator::start writes the user row first (via appendHistory)
+    // and the attachment row second (via appendAttachmentRow). The
+    // existing pipeline test reverses that order, which lets
+    // consumeAttachmentPair() merge them into a single message —
+    // a code path that does NOT fire in production.
+    //
+    // The LLM still has to receive the file content, but with the
+    // production order the result is TWO user messages: the typed
+    // prompt on its own, then a separate user message whose content
+    // is the extracted markdown. The LLM should still see the file
+    // content. If it claims it doesn't, this test will pin down where
+    // the gap is.
+    $service = buildMarkdownPipelineService();
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: 'Lorem ipsum dolor sit amet',
+        mime: 'text/plain',
+        filename: 'paper.txt',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+
+    $userId = bootAuthLayer()->register('md-prod-order@example.com', 'Password1!', 'P');
+    $agentId = buildMarkdownPipelineAgent($userId);
+    $task = \Spora\Models\Task::create([
+        'agent_id' => $agentId, 'user_id' => $userId,
+        'status' => 'RUNNING', 'user_prompt' => 'Summarize this paper',
+        'step_count' => 0, 'max_steps' => 10,
+    ]);
+
+    // Production order — user row first, then attachment.
+    TaskHistory::create([
+        'task_id' => $task->id, 'sequence' => 0,
+        'role' => 'user', 'content' => 'Summarize this paper',
+    ]);
+    TaskHistory::create([
+        'task_id' => $task->id, 'sequence' => 1,
+        'role' => 'attachment', 'content' => '',
+        'attachments' => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+
+    // Whatever the merge behaviour, the LLM must receive the file content
+    // somewhere in the message stream.
+    $combined = '';
+    foreach ($messages as $msg) {
+        if (is_array($msg['content'])) {
+            foreach ($msg['content'] as $block) {
+                if (isset($block['text'])) {
+                    $combined .= $block['text'] . "\n\n";
+                }
+            }
+        } elseif (is_string($msg['content'])) {
+            $combined .= $msg['content'] . "\n\n";
+        }
+    }
+    expect($combined)->toContain('Summarize this paper');
+    expect($combined)->toContain('# paper.txt (extracted text)');
+    expect($combined)->toContain('Lorem ipsum dolor sit amet');
+    expect($combined)->not->toContain('[no extractable text]');
+});
