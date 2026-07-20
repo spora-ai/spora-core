@@ -25,6 +25,7 @@ use Spora\Console\Commands\PluginUninstallCommand;
 use Spora\Console\Commands\PluginUpdateCommand;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Console\Commands\ToolSettingsMigrationCommand;
+use Spora\Console\Commands\OpenApiGenerateCommand;
 use Spora\Console\Commands\WorkerRunCommand;
 
 // 1. Boot Kernel to get the DI container. Each command boots its own DB connection.
@@ -50,6 +51,14 @@ $application->addCommand($container->get(PluginUpdateCommand::class));
 $application->addCommand($container->get(TaskRunCommand::class));
 $application->addCommand($container->get(ToolSettingsMigrationCommand::class));
 $application->addCommand($container->get(WorkerRunCommand::class));
+
+// OpenAPI generator — direct construction (no DI) so this command doesn't pull the
+// orchestrator/DB/secret-key tree at boot. Only registered when swagger-php is present
+// (the package is a dev-only dep, so production deployments without `composer install`
+// won't have it).
+if (class_exists(OpenApiGenerateCommand::class)) {
+    $application->addCommand(new OpenApiGenerateCommand());
+}
 
 // Optional dev-time scaffolder (spora-ai/spora-maker). When installed as a
 // require-dev dep, every `make:*` subcommand is exposed under the `make`

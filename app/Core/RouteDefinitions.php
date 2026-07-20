@@ -35,6 +35,7 @@ use Spora\Http\ToolController;
 use Spora\Http\UserController;
 use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
+use Spora\OpenApi\RouteSpecCollector;
 
 final class RouteDefinitions
 {
@@ -52,7 +53,7 @@ final class RouteDefinitions
     public const ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID = '/api/v1/agents/{id}/templates/{templateId}';
     public const ROUTE_AGENTS_SCHEDULED_RUNS_RUN_ID = '/api/v1/agents/{id}/scheduled-runs/{runId}';
 
-    public static function register(MiddlewareRouteCollector $r): void
+    public static function register(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
         $r->addRoute('GET', '/api/health', [HealthController::class, 'check'], []);
         $r->addRoute('GET', '/api/v1/config', [ConfigController::class, 'index'], []);
@@ -76,15 +77,18 @@ final class RouteDefinitions
         $r->addRoute('PATCH', '/api/v1/plugins/{package}', [PluginsController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('POST', '/api/v1/auth/login', [AuthController::class, 'login'], []);
         $r->addRoute('POST', '/api/v1/auth/register', [AuthController::class, 'register'], []);
-        $r->addRoute('POST', '/api/v1/auth/logout', [AuthController::class, 'logout'], [CsrfMiddleware::class]);
-        $r->addRoute('GET', '/api/v1/auth/me', [AuthController::class, 'me'], [CsrfMiddleware::class]);
-        $r->addRoute('PATCH', '/api/v1/auth/password', [AuthController::class, 'password'], [CsrfMiddleware::class]);
-        $r->addRoute('PATCH', '/api/v1/auth/account', [AuthController::class, 'account'], [CsrfMiddleware::class]);
+        // Authenticated + CSRF: the controllers dereference the current user, so
+        // AuthMiddleware must run before CsrfMiddleware (CsrfMiddleware itself only
+        // validates the token header and assumes a session-bearing request).
+        $r->addRoute('POST', '/api/v1/auth/logout', [AuthController::class, 'logout'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/auth/me', [AuthController::class, 'me'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', '/api/v1/auth/password', [AuthController::class, 'password'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', '/api/v1/auth/account', [AuthController::class, 'account'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/auth/verify/{selector}', [AuthController::class, 'verify'], []);
         $r->addRoute('POST', '/api/v1/auth/verification/resend', [AuthController::class, 'resendVerification'], []);
         $r->addRoute('POST', '/api/v1/auth/forgot-password', [AuthController::class, 'forgotPassword'], []);
         $r->addRoute('POST', '/api/v1/auth/reset-password', [AuthController::class, 'resetPassword'], []);
-        $r->addRoute('POST', '/api/v1/auth/email/change-request', [AuthController::class, 'requestEmailChange'], [CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/auth/email/change-request', [AuthController::class, 'requestEmailChange'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/auth/email/confirm', [AuthController::class, 'confirmEmailChange'], []);
 
         $r->addRoute('GET', '/api/v1/agents', [AgentController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);

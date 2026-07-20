@@ -35,14 +35,30 @@
 - Don't add error handling, fallbacks, or abstractions beyond what the task requires
 - **Never commit or push directly to `main`.** Every change goes through a feature branch and a pull request — even single-commit fixes. Branch naming: `<scope>/<phase-or-feature>` (e.g. `coverage/phase-1.4-orchestrator-and-controllers`, `feat/tool-authooring-dx`, `fix/logout`). Local `main` may be fast-forwarded via `git pull --ff-only` but never receives a direct push. SonarQube's `new_coverage` metric is calculated per PR, so bypassing the PR flow breaks the quality-gate signal.
 
-### CLI Entry Point
-`bin/spora` is the single CLI entry point:
+### CLI Entry Points
+
+Spora has two CLI binaries, one for runtime/operations and one for build-time
+tools that must run in a clean checkout with only the source tree.
+
+**Runtime: `bin/spora`** — boots the Kernel, DI container, and `storage/secret.key`.
+This is the operator-facing CLI for installing, migrating, seeding, running workers.
 - `spora:install` — Initial setup (idempotent migrations)
 - `db:reset` — Wipe the database (SQLite file or MySQL DROP+CREATE) and clear the schema stamp
 - `db:seed` — Seed database with sample data
 - `worker:run` — Run async worker (queued mode)
 - `worker:run --scheduled` — Run scheduled tasks worker
+- `spora:openapi [--output=openapi.json] [--check]` — Generate / drift-check the OpenAPI spec
 - Full CLI reference: `bin/spora --help`
+
+**Build: `bin/spora-build`** — deliberately skips the Kernel / DI / secret-key boot
+because downstream tooling (CI, sibling-repo docs builds) checks out spora-core
+into a sibling directory and runs this binary without an installed app. Lives
+in `app/Build/`; gates on the `zircote/swagger-php` dev dependency. Today:
+- `openapi:generate [output]` — emit `openapi.json` to the given path (default
+  `openapi.json` resolved against `BASE_PATH` or the package root)
+- `openapi:check [reference]` — exit non-zero if the freshly regenerated spec
+  differs from `reference` (default `openapi.json`)
+- Composer alias: `composer openapi` (alias for `openapi:generate`)
 
 ### Storage
 `storage/` directory:

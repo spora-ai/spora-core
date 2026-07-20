@@ -1,0 +1,25 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../vendor/autoload.php';
+
+use Spora\Build\OpenApiCheckCommand;
+use Spora\Build\OpenApiGenerateCommand;
+use Spora\Core\Version;
+use Symfony\Component\Console\Application;
+
+/**
+ * Build-time companion to `bin/spora`. Same shape (Symfony Console entry,
+ * multiple subcommands), but deliberately skips the `Kernel` / DI /
+ * `storage/secret.key` boot — every command here must work in a clean
+ * checkout with only the source tree, because downstream tooling (CI, docs
+ * builds) checks out spora-core into a sibling directory and runs this
+ * binary without an installed app.
+ */
+
+$app = new Application('Spora Build', Version::current());
+$app->addCommand(new OpenApiGenerateCommand());
+$app->addCommand(new OpenApiCheckCommand());
+$app->run();

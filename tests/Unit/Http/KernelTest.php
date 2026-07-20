@@ -477,10 +477,14 @@ test('protected route with valid session and valid CSRF token succeeds', functio
     expect($body['data']['agents'])->toBeArray();
 });
 
-test('csrf-only route without CSRF token returns 403 CSRF_TOKEN_MISSING', function (): void {
-    // /api/v1/auth/logout has CsrfMiddleware only (no AuthMiddleware)
-    // The session does not need to be valid for CsrfMiddleware to run
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+test('csrf-only authenticated route without CSRF token returns 403 CSRF_TOKEN_MISSING', function (): void {
+    // /api/v1/auth/logout carries [AuthMiddleware, CsrfMiddleware]: the session
+    // must exist (the controller dereferences the current user) and the request
+    // must carry an X-CSRF-Token. AuthMiddleware passes because we're logged in;
+    // CsrfMiddleware then blocks because the header is missing.
+    $authService = bootAuthLayer();
+    $authService->register('mw_auth_nocsrf@example.com', KERNEL_TEST_PASSWORD, 'MW Auth No CSRF');
+    $authService->login('mw_auth_nocsrf@example.com', KERNEL_TEST_PASSWORD);
 
     $kernel = new Kernel();
     $request = Request::create('/api/v1/auth/logout', 'POST', [], [], [], [
@@ -496,7 +500,11 @@ test('csrf-only route without CSRF token returns 403 CSRF_TOKEN_MISSING', functi
     expect($body['error']['code'])->toBe('CSRF_TOKEN_MISSING');
 });
 
-test('csrf-only route with valid CSRF token passes through to controller', function (): void {
+test('csrf-only authenticated route with valid CSRF token passes through to controller', function (): void {
+    $authService = bootAuthLayer();
+    $authService->register('mw_auth_csrf@example.com', KERNEL_TEST_PASSWORD, 'MW Auth CSRF');
+    $authService->login('mw_auth_csrf@example.com', KERNEL_TEST_PASSWORD);
+
     $csrfToken = bin2hex(random_bytes(32));
     $_SESSION['csrf_token'] = $csrfToken;
 
@@ -508,9 +516,28 @@ test('csrf-only route with valid CSRF token passes through to controller', funct
     $response = $kernel->handle($request);
     $kernel->__destruct();
 
-    // CsrfMiddleware passes, controller is reached (returns its own response)
+    // Both middleware pass, controller is reached (returns its own response)
     expect($response->getStatusCode())->not()->toBe(403);
     expect($response->getStatusCode())->not()->toBe(401);
+});
+
+test('csrf-only route without session returns 401 UNAUTHENTICATED', function (): void {
+    // The session routes that previously carried only CsrfMiddleware now carry
+    // [AuthMiddleware, CsrfMiddleware]. Without a session, AuthMiddleware is the
+    // first to run and returns 401; CsrfMiddleware is never reached.
+    clearSession();
+    $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
+
+    $kernel = new Kernel();
+    $request = Request::create('/api/v1/auth/logout', 'POST', [], [], [], [
+        'CONTENT_TYPE' => KERNEL_MIME_JSON,
+    ]);
+    $response = $kernel->handle($request);
+    $kernel->__destruct();
+
+    expect($response->getStatusCode())->toBe(401);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('UNAUTHENTICATED');
 });
 
 test('protected route with wrong HTTP method returns 401 when not authenticated', function (): void {
