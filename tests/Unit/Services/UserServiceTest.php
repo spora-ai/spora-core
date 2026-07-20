@@ -29,10 +29,10 @@ describe('UserService::getUsers', function (): void {
 
         $result = $service->getUsers(1, 10);
 
-        expect($result['data'])->toBeArray();
-        expect($result['data'])->not->toBeEmpty();
-        expect($result['meta'])->toHaveKeys(['current_page', 'last_page', 'per_page', 'total']);
-        expect($result['meta']['per_page'])->toBe(10);
+        expect($result['users'])->toBeArray();
+        expect($result['users'])->not->toBeEmpty();
+        expect($result)->toHaveKeys(['current_page', 'last_page', 'per_page', 'total']);
+        expect($result['per_page'])->toBe(10);
     });
 });
 

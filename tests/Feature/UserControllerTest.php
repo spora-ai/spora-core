@@ -176,10 +176,10 @@ test('getUsers includes name and verified for each user', function (): void {
     expect($response->getStatusCode())->toBe(200);
 
     $body = json_decode($response->getContent(), true);
-    expect($body['data'])->toBeArray();
+    expect($body['users'])->toBeArray();
 
     // Find our users in the list
-    $usersById = array_column($body['data'], null, 'id');
+    $usersById = array_column($body['users'], null, 'id');
 
     expect($usersById[$userId1])->toHaveKey('name');
     expect($usersById[$userId1])->toHaveKey('verified');
@@ -219,8 +219,11 @@ test('index() returns paginated list of users', function (): void {
 
     expect($response->getStatusCode())->toBe(200);
     $body = json_decode($response->getContent(), true);
-    expect($body['data'])->toBeArray();
-    expect($body['meta'])->toHaveKey('total');
+    expect($body['users'])->toBeArray();
+    expect($body)->toHaveKey('total');
+    expect($body)->toHaveKey('current_page');
+    expect($body)->toHaveKey('last_page');
+    expect($body)->toHaveKey('per_page');
 });
 
 test('show() returns a user by id', function (): void {
