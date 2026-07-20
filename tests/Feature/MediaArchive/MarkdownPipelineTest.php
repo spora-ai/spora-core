@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\MediaArchive;
 
+use Mockery;
+use RuntimeException;
 use Spora\Agents\MessageHistoryBuilder;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
@@ -16,6 +18,7 @@ use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Tests\Support\MediaArchiveTestSupport;
+use Throwable;
 
 afterEach(function (): void {
     MediaConverterDiscovery::reset();
@@ -248,4 +251,234 @@ test('multiple text attachments + prompt produces a single combined block', func
     // Each filename header must appear exactly once.
     expect(substr_count($text, '# alpha.txt (extracted text)'))->toBe(1);
     expect(substr_count($text, '# beta.txt (extracted text)'))->toBe(1);
+});
+
+/**
+ * PDF fixture — `MimeSniffer` keys on the `%PDF-` magic bytes at offset 0
+ * (see MimeSniffer::MAGIC_SIGNATURES), so the body content is irrelevant
+ * to MIME detection. The PDF parser is replaced with a Mockery mock that
+ * returns whatever the test wants — the conversion pipeline then writes
+ * that into `markdown_content` and the message builder reads it back.
+ */
+const PDF_MAGIC = "%PDF-1.4\n";
+
+function mockPdfParserReturning(string $markdown): \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser
+{
+    $parser = Mockery::mock(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class);
+    $parser->shouldReceive('parseContent')
+        ->andReturn($markdown);
+    return $parser;
+}
+
+function mockPdfParserThrowing(Throwable $error): \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser
+{
+    $parser = Mockery::mock(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class);
+    $parser->shouldReceive('parseContent')
+        ->andThrow($error);
+    return $parser;
+}
+
+/**
+ * Build a {@see MediaArchiveService} whose {@see MediaConverterRegistry}
+ * resolves {@see PdfToMarkdownConverter} with the supplied parser mock.
+ *
+ * The default {@see MediaArchiveTestSupport::buildConverterRegistry()}
+ * builds converters through a PSR-11 stub that uses `Mockery::mock(...)`
+ * with no `shouldReceive` setup, which gives us an empty return — useless
+ * for asserting anything about the markdown pipeline. This helper wires
+ * the caller's mock parser into the converter's constructor instead.
+ */
+function makePdfPipelineServiceWithParser(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser $parser): \Spora\Services\MediaArchive\MediaArchiveService
+{
+    $tmp = sys_get_temp_dir() . '/spora-pdf-pipeline-' . bin2hex(random_bytes(4));
+    mkdir($tmp, 0755, recursive: true);
+    putenv("SPORA_STORAGE_DIR={$tmp}");
+    $_ENV['SPORA_STORAGE_DIR']    = $tmp;
+    $_SERVER['SPORA_STORAGE_DIR'] = $tmp;
+    $paths    = new Paths(BASE_PATH);
+    $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $database = new DatabaseAssetStore(50 * 1024 * 1024);
+    $local    = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
+
+    $container = new class ($parser) implements \Psr\Container\ContainerInterface {
+        public function __construct(private readonly \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser $parser) {}
+        public function get(string $id): mixed
+        {
+            return match ($id) {
+                \Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter::class
+                    => new \Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter($this->parser),
+                \Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter::class
+                    => new \Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter(),
+                default => throw new RuntimeException("Not registered: {$id}"),
+            };
+        }
+        public function has(string $id): bool
+        {
+            return in_array($id, [
+                \Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter::class,
+                \Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter::class,
+            ], true);
+        }
+    };
+
+    MediaConverterDiscovery::reset();
+    MediaConverterDiscovery::add(\Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter::class);
+    MediaConverterDiscovery::add(\Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter::class);
+    $registry = new \Spora\Services\MediaArchive\MediaConverterRegistry($container);
+
+    $logger   = new \Psr\Log\NullLogger();
+    $sniffer  = new \Spora\Services\MediaArchive\MimeSniffer();
+    $metadata = new \Spora\Services\MediaArchive\MetadataExtractor($logger, false);
+    $resolver = new \Spora\Services\MediaArchive\MediaArchiveUrlResolver(
+        new \Spora\Services\MediaArchive\RemoteMediaFetcher(new \Symfony\Component\HttpClient\MockHttpClient([]), $logger, 30, 100 * 1024 * 1024),
+        $sniffer,
+        $logger,
+        true,
+        100 * 1024 * 1024,
+    );
+
+    return new \Spora\Services\MediaArchive\MediaArchiveService(
+        new AutoAssetStore($database, $local, 1_048_576),
+        $resolver,
+        $sniffer,
+        $metadata,
+        $registry,
+        new \Spora\Services\MediaArchive\MediaIngestDecoder(),
+        $logger,
+    );
+}
+
+test('PDF upload: parser returns text → markdown_content populated → LLM gets the text', function (): void {
+    // The happy path. Proves end-to-end that a real PDF upload, after
+    // conversion, gives the LLM the extracted text.
+    $service = makePdfPipelineServiceWithParser(mockPdfParserReturning("Chapter 1\n\nIt was the best of times."));
+
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: PDF_MAGIC . '%PDF body content',
+        mime: 'application/pdf',
+        filename: 'novel.pdf',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+
+    expect($asset->mime_type)->toBe('application/pdf');
+    expect($asset->markdown_content)->not->toBeNull();
+    expect($asset->markdown_content)->toContain('Chapter 1');
+    expect($asset->markdown_content)->toContain('best of times');
+
+    // Build the LLM prompt and assert the file content lands.
+    $userId = bootAuthLayer()->register('pdf-pipeline@example.com', 'Password1!', 'P');
+    $agentId = buildMarkdownPipelineAgent($userId);
+    $task = \Spora\Models\Task::create([
+        'agent_id' => $agentId, 'user_id' => $userId,
+        'status' => 'RUNNING', 'user_prompt' => 'Summarize chapter 1',
+        'step_count' => 0, 'max_steps' => 10,
+    ]);
+    TaskHistory::create([
+        'task_id' => $task->id, 'sequence' => 0,
+        'role' => 'attachment', 'content' => '',
+        'attachments' => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+    TaskHistory::create([
+        'task_id' => $task->id, 'sequence' => 1,
+        'role' => 'user', 'content' => 'Summarize chapter 1',
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    expect($messages)->toHaveCount(1);
+    expect($messages[0]['role'])->toBe('user');
+    expect($messages[0]['content'])->toHaveCount(1);
+    $text = $messages[0]['content'][0]['text'];
+    expect($text)->toContain('Summarize chapter 1');
+    expect($text)->toContain('# novel.pdf (extracted text)');
+    expect($text)->toContain('Chapter 1');
+    expect($text)->toContain('best of times');
+});
+
+test('PDF upload: parser returns empty string → LLM gets [no extractable text] placeholder', function (): void {
+    // This is the "scanned PDF, no OCR layer" case: the parser succeeds,
+    // returns an empty string, and the converter trims it to "". The
+    // asset is saved with markdown_content = "" and the LLM sees the
+    // placeholder. This is the most likely reason a user observes "the
+    // LLM says it has no file content" — the upload succeeded but the
+    // PDF had no text layer.
+    $service = makePdfPipelineServiceWithParser(mockPdfParserReturning(''));
+
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: PDF_MAGIC . 'scanned pages with no OCR',
+        mime: 'application/pdf',
+        filename: 'scan.pdf',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+
+    // markdown_content is set to "" (empty string), not null.
+    expect($asset->markdown_content)->toBe('');
+
+    $userId = bootAuthLayer()->register('pdf-empty@example.com', 'Password1!', 'P');
+    $agentId = buildMarkdownPipelineAgent($userId);
+    $task = \Spora\Models\Task::create([
+        'agent_id' => $agentId, 'user_id' => $userId,
+        'status' => 'RUNNING', 'user_prompt' => 'What does this PDF say?',
+        'step_count' => 0, 'max_steps' => 10,
+    ]);
+    TaskHistory::create([
+        'task_id' => $task->id, 'sequence' => 0,
+        'role' => 'attachment', 'content' => '',
+        'attachments' => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+    TaskHistory::create([
+        'task_id' => $task->id, 'sequence' => 1,
+        'role' => 'user', 'content' => 'What does this PDF say?',
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    expect($messages)->toHaveCount(1);
+    // The placeholder is the ONLY thing the LLM has to work with — no real
+    // file content reaches the prompt.
+    $text = $messages[0]['content'][0]['text'];
+    expect($text)->toContain('[no extractable text]');
+    expect($text)->not->toContain('scanned pages with no OCR');
+});
+
+test('PDF upload: parser throws → conversion swallowed → LLM gets [no extractable text] placeholder', function (): void {
+    // The corruption case. The parser raises, the registry propagates,
+    // MediaArchiveService catches it, logs a warning, and continues.
+    // The asset is saved without markdown_content; the LLM sees the
+    // same placeholder as the empty-string case.
+    $service = makePdfPipelineServiceWithParser(mockPdfParserThrowing(new RuntimeException('corrupt pdf')));
+
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: PDF_MAGIC . 'corrupt garbage',
+        mime: 'application/pdf',
+        filename: 'corrupt.pdf',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+
+    // markdown_content stays null because the exception was caught.
+    expect($asset->markdown_content)->toBeNull();
+
+    $userId = bootAuthLayer()->register('pdf-corrupt@example.com', 'Password1!', 'P');
+    $agentId = buildMarkdownPipelineAgent($userId);
+    $task = \Spora\Models\Task::create([
+        'agent_id' => $agentId, 'user_id' => $userId,
+        'status' => 'RUNNING', 'user_prompt' => 'Read this PDF',
+        'step_count' => 0, 'max_steps' => 10,
+    ]);
+    TaskHistory::create([
+        'task_id' => $task->id, 'sequence' => 0,
+        'role' => 'attachment', 'content' => '',
+        'attachments' => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+    TaskHistory::create([
+        'task_id' => $task->id, 'sequence' => 1,
+        'role' => 'user', 'content' => 'Read this PDF',
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    expect($messages)->toHaveCount(1);
+    $text = $messages[0]['content'][0]['text'];
+    expect($text)->toContain('[no extractable text]');
+    expect($text)->not->toContain('corrupt garbage');
 });
