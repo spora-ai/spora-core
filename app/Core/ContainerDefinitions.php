@@ -525,7 +525,53 @@ final class ContainerDefinitions
             },
 
             ...self::assetStoreDefinitions(),
+            ...self::mediaArchiveServiceDefinitions(),
 
+            DriverFactory::class => static function (ContainerInterface $c): DriverFactory {
+                return new DriverFactory(
+                    $c->get(LoggerInterface::class),
+                    $c->get(LLMConfigServiceInterface::class),
+                    (int) ($c->get('config')['llm_timeout'] ?? 300),
+                );
+            },
+
+            ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
+                return new ToolConfigService(
+                    $c->get(SecurityManagerInterface::class),
+                    $c->get(LoggerInterface::class),
+                    array_values(array_unique(array_merge(
+                        $c->get('tool_classes'),
+                        $c->get(PluginLoader::class)->toolClasses(),
+                    ))),
+                );
+            },
+
+            ToolIconResolver::class => static function (ContainerInterface $c): ToolIconResolver {
+                return new ToolIconResolver(
+                    new ToolConfigNameResolver(
+                        $c->get(LoggerInterface::class),
+                        array_values(array_unique(array_merge(
+                            $c->get('tool_classes'),
+                            $c->get(PluginLoader::class)->toolClasses(),
+                        ))),
+                    ),
+                    $c->get(PluginLoader::class),
+                );
+            },
+        ];
+    }
+
+    /**
+     * Definitions for the MediaArchive service stack. Extracted from
+     * `coreServiceDefinitions()` so that function stays under the
+     * SonarQube S138 line cap. The bindings share config-driven setup
+     * (`media_archive.*`) so they live together.
+     *
+     * @return array<string, callable>
+     */
+    private static function mediaArchiveServiceDefinitions(): array
+    {
+        return [
             // MediaArchive service stack — see app/Services/MediaArchive.
             // Config block lives under the `media_archive` key above.
             MimeSniffer::class => static fn(): MimeSniffer => new MimeSniffer(),
@@ -597,38 +643,6 @@ final class ContainerDefinitions
                     $c->get(DriverFactory::class),
                     $c->get('config')['media_archive']['allowed_image_types'] ?? null,
                 ),
-
-            DriverFactory::class => static function (ContainerInterface $c): DriverFactory {
-                return new DriverFactory(
-                    $c->get(LoggerInterface::class),
-                    $c->get(LLMConfigServiceInterface::class),
-                    (int) ($c->get('config')['llm_timeout'] ?? 300),
-                );
-            },
-
-            ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
-                return new ToolConfigService(
-                    $c->get(SecurityManagerInterface::class),
-                    $c->get(LoggerInterface::class),
-                    array_values(array_unique(array_merge(
-                        $c->get('tool_classes'),
-                        $c->get(PluginLoader::class)->toolClasses(),
-                    ))),
-                );
-            },
-
-            ToolIconResolver::class => static function (ContainerInterface $c): ToolIconResolver {
-                return new ToolIconResolver(
-                    new ToolConfigNameResolver(
-                        $c->get(LoggerInterface::class),
-                        array_values(array_unique(array_merge(
-                            $c->get('tool_classes'),
-                            $c->get(PluginLoader::class)->toolClasses(),
-                        ))),
-                    ),
-                    $c->get(PluginLoader::class),
-                );
-            },
         ];
     }
 
