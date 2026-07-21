@@ -111,7 +111,7 @@ final class MediaArchiveController
     private function extractUpdatableFields(array $body): array
     {
         $dirty = [];
-        foreach (['filename', 'tags', 'metadata', 'prompt'] as $field) {
+        foreach (['filename', 'tags', 'metadata', 'prompt', 'markdown_content'] as $field) {
             if (array_key_exists($field, $body)) {
                 $dirty[$field] = $body[$field];
             }
@@ -155,6 +155,13 @@ final class MediaArchiveController
             && !is_string($body['prompt'])
         ) {
             $message = 'prompt must be a string.';
+        }
+        if ($message === null
+            && array_key_exists('markdown_content', $body)
+            && $body['markdown_content'] !== null
+            && !is_string($body['markdown_content'])
+        ) {
+            $message = 'markdown_content must be a string.';
         }
         if ($message === null
             && array_key_exists('public_access_enabled', $body)
