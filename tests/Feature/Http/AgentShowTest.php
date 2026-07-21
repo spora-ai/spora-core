@@ -77,6 +77,14 @@ function buildAgentController(): AgentController
         {
             return Agent::query()->find($agentId);
         }
+        public function updateAgentByAgentId(int $agentId, array $data): ?Agent
+        {
+            return Agent::query()->find($agentId);
+        }
+        public function getAgentByAgentId(int $agentId): ?Agent
+        {
+            return Agent::query()->find($agentId);
+        }
         public function deleteAgent(int $agentId, int $userId): bool
         {
             return true;

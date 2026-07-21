@@ -39,7 +39,7 @@ final class AgentTemplateValidator
     ];
 
     private const ALLOWED_AGENT_KEYS = [
-        'description', 'system_prompt', 'max_steps',
+        'description', 'system_prompt', 'notes', 'max_steps',
         'allow_continuation', 'retry_after_minutes', 'max_retries',
     ];
 

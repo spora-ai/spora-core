@@ -188,6 +188,18 @@ For plugin-based tools, place the class in your plugin directory and use the `Pl
 
 > **Full tool system docs:** Naming conventions, `#[Tool]` attribute, `#[ToolSetting]`, `#[ToolParameter]`, `InputToolInterface` vs `OutputToolInterface`, and the settings key convention are in [docs/06_tools.md](docs/06_tools.md).
 
+### Agent `notes` field vs `AgentTool`
+
+Operators store runbooks and behaviour hints on an agent through the `notes`
+markdown field (`PATCH /api/v1/agents/{id}` or the dashboard settings UI).
+The `AgentTool` (`app/Tools/AgentTool.php`) exposes `read_notes` /
+`write_notes` to the LLM so it can persist context between sessions; the
+notes field is **only** mutated via that tool, never via
+`write_agent_configuration` (which silently drops `notes` from its patch).
+`write_notes` defaults to `mode: append` to protect operator-curated notes
+from accidental LLM wipes; `mode: overwrite` is destructive and must be
+opted in.
+
 ---
 
 ## Feature Overview

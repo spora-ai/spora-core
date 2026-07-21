@@ -128,6 +128,7 @@ use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
 use Spora\Tools\AgentMemoryTool;
+use Spora\Tools\AgentTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\CurrentTimeTool;
 use Spora\Tools\GlobalMemoryTool;
@@ -710,6 +711,7 @@ final class ContainerDefinitions
                 ReadUrlTool::class,
                 UserInfoTool::class,
                 HandoverTool::class,
+                AgentTool::class,
             ],
 
             LLMConfigService::class => static function (ContainerInterface $c): LLMConfigService {
@@ -1042,6 +1044,19 @@ final class ContainerDefinitions
             CalculatorTool::class => static fn(): CalculatorTool => new CalculatorTool(),
             AgentMemoryTool::class => static fn(): AgentMemoryTool => new AgentMemoryTool(),
             GlobalMemoryTool::class => static fn(): GlobalMemoryTool => new GlobalMemoryTool(),
+
+            // AgentTool reuses AgentTemplateImporter for the create_agent
+            // operation so the LLM path shares validation + activation
+            // semantics with the operator upload endpoint. AgentService
+            // owns read_agent_configuration / write_*_notes through the
+            // shared EDITABLE_AGENT_FIELDS allowlist.
+            AgentTool::class => static function (ContainerInterface $c): AgentTool {
+                return new AgentTool(
+                    $c->get(AgentServiceInterface::class),
+                    $c->get(AgentTemplateImporter::class),
+                    $c->get(AgentTemplateValidator::class),
+                );
+            },
 
             ReadUrlTool::class => static function (ContainerInterface $c): ReadUrlTool {
                 return new ReadUrlTool(

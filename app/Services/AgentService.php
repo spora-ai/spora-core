@@ -27,6 +27,30 @@ final class AgentService implements AgentServiceInterface
 {
     private const DATETIME_FORMAT = 'Y-m-d H:i:s';
 
+    /**
+     * Editable agent columns the service will write through updateAgent()
+     * and updateAgentByAgentId(). Keep in sync with AgentController::$allowed
+     * (minus internal-only fields like user_id / llm_driver_config_id) so
+     * the operator-facing PATCH and the in-tool write_agent_configuration
+     * stay on the same allowlist.
+     *
+     * @var list<string>
+     */
+    private const EDITABLE_AGENT_FIELDS = [
+        'name',
+        'description',
+        'system_prompt',
+        'llm_driver_config_id',
+        'max_steps',
+        'allow_followup',
+        'retry_after_minutes',
+        'max_retries',
+        'is_pinned',
+        'is_archived',
+        'is_favorite',
+        'notes',
+    ];
+
     private readonly AgentToolInstanceResolver $instanceResolver;
     private readonly AgentToolOverrideResolver $overrideResolver;
     private readonly AgentToolOperationsResolver $operationsResolver;
@@ -84,8 +108,43 @@ final class AgentService implements AgentServiceInterface
             return null;
         }
 
-        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived', 'is_favorite'];
-        $filtered = array_intersect_key($data, array_flip($allowed));
+        return $this->applyAgentPatch($agentId, $agent, $data);
+    }
+
+    public function updateAgentByAgentId(int $agentId, array $data): ?Agent
+    {
+        $agent = Agent::find($agentId);
+        if ($agent === null) {
+            return null;
+        }
+
+        // No user-ownership check: the orchestrator has already pinned the
+        // agent id to the calling agent. The same EDITABLE_AGENT_FIELDS
+        // allowlist still applies, so the tool cannot escalate to internal
+        // columns (e.g. user_id, llm_driver_config_id) by omitting a
+        // userId here.
+        return $this->applyAgentPatch($agentId, $agent, $data);
+    }
+
+    public function getAgentByAgentId(int $agentId): ?Agent
+    {
+        // No user-ownership check — see updateAgentByAgentId() for the
+        // security rationale. Tests can rely on the in-memory Eloquent
+        // harness to find a seeded agent; production reads come from the
+        // orchestrator-pinned agent id.
+        return Agent::find($agentId);
+    }
+
+    /**
+     * Filter $data against the editable-field allowlist and write the
+     * surviving columns. Shared by the user-scoped and agent-scoped update
+     * paths so the column set stays in lockstep.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function applyAgentPatch(int $agentId, Agent $agent, array $data): Agent
+    {
+        $filtered = array_intersect_key($data, array_flip(self::EDITABLE_AGENT_FIELDS));
 
         if ($filtered !== []) {
             Capsule::table('agents')

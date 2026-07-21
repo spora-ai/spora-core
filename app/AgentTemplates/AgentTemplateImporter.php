@@ -378,6 +378,7 @@ final class AgentTemplateImporter
             'name'                => $this->resolveAgentName($template),
             'description'         => $this->nullIfEmpty($agent['description'] ?? null),
             'system_prompt'       => $this->nullIfEmpty($agent['system_prompt'] ?? null),
+            'notes'               => $this->nullIfEmpty($agent['notes'] ?? null),
             'max_steps'           => (int) ($agent['max_steps'] ?? 10),
             'allow_followup'      => $allowFollowup ? 1 : 0,
             'retry_after_minutes' => (int) ($agent['retry_after_minutes'] ?? 0),

@@ -82,6 +82,31 @@ class StubAgentService implements AgentServiceInterface
         return $agent;
     }
 
+    public function updateAgentByAgentId(int $agentId, array $data): ?Agent
+    {
+        // Mirror updateAgent() for the agent-scoped path the AgentTool uses.
+        $agent = new Agent();
+        $agent->id = $agentId;
+        $agent->user_id = 0;
+        $agent->name = 'Stub Agent';
+        $agent->description = null;
+        $agent->system_prompt = null;
+        $agent->llm_driver_config_id = null;
+        $agent->max_steps = 10;
+        $this->seedAgentDefaults($agent);
+
+        if (array_key_exists('notes', $data)) {
+            $agent->notes = (string) $data['notes'];
+        }
+
+        return $agent;
+    }
+
+    public function getAgentByAgentId(int $agentId): ?Agent
+    {
+        return $this->getAgent($agentId, 0);
+    }
+
     public function deleteAgent(int $agentId, int $userId): bool
     {
         return $agentId !== 999999;

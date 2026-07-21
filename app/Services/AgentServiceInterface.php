@@ -24,6 +24,26 @@ interface AgentServiceInterface
 
     public function updateAgent(int $agentId, int $userId, array $data): ?Agent;
 
+    /**
+     * Update an agent's editable fields without a user-ownership check.
+     *
+     * Intended for in-tool callers (AgentTool) where the orchestrator has
+     * already pinned the agent id to the calling agent. Callers outside
+     * that context must use {@see self::updateAgent()} instead so the
+     * standard user-ownership guard is applied.
+     */
+    public function updateAgentByAgentId(int $agentId, array $data): ?Agent;
+
+    /**
+     * Look up an agent by id without a user-ownership check.
+     *
+     * Same context as {@see self::updateAgentByAgentId()}: intended for
+     * in-tool callers where the orchestrator has already pinned the agent
+     * id. Operator-facing code must keep using {@see self::getAgent()}
+     * with a userId so the standard ownership guard applies.
+     */
+    public function getAgentByAgentId(int $agentId): ?Agent;
+
     public function deleteAgent(int $agentId, int $userId): bool;
 
     /**
