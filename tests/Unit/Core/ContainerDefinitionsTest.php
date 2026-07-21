@@ -7,6 +7,7 @@ use DI\ContainerBuilder;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Spora\Auth\AuthService;
+use Spora\Core\ConfigMerger;
 use Spora\Core\ContainerDefinitions;
 use Spora\Core\Kernel;
 use Spora\Core\Paths;
@@ -933,5 +934,194 @@ describe('resolvePluginInstallEnabled', function (): void {
             }
         };
         expect(callContainerMethod('resolvePluginInstallEnabled', [$c]))->toBeFalse();
+    });
+});
+
+describe('nested env override merging', function (): void {
+    it('writes dotted env keys into the nested array (regression for the dotted-key bug)', function (): void {
+        // Pre-fix, $overrides['media_archive.promote_external'] was set as
+        // a literal top-level key and the deep merge landed it next to
+        // siblings; consumers reading $config['media_archive']['promote_external']
+        // never saw the env value.
+        try {
+            $_ENV['SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL'] = 'false';
+            $_ENV['SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT']   = '45';
+
+            $overrides = callContainerMethod('collectEnvOverrides');
+
+            expect($overrides)->toHaveKey('media_archive');
+            expect($overrides['media_archive'])->toBeArray();
+            expect($overrides['media_archive']['promote_external'])->toBeFalse();
+            expect($overrides['media_archive']['fetch_timeout_seconds'])->toBe(45);
+            // The literal dotted key must NOT leak to top level. Pest's
+            // toHaveKey recurses into nested arrays, so assert against
+            // the raw array.
+            expect(array_key_exists('media_archive.promote_external', $overrides))->toBeFalse();
+            expect(array_key_exists('media_archive.fetch_timeout_seconds', $overrides))->toBeFalse();
+        } finally {
+            unset($_ENV['SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL']);
+            unset($_ENV['SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT']);
+            putenv('SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL');
+            putenv('SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT');
+        }
+    });
+
+    it('configDefinition exposes nested env values to consumers', function (): void {
+        try {
+            $_ENV['SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL'] = 'false';
+            $_ENV['SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT']   = '45';
+
+            $config = callContainerMethod('configDefinition')['config'](makeFakeContainer());
+
+            expect($config['media_archive']['promote_external'])->toBeFalse();
+            expect($config['media_archive']['fetch_timeout_seconds'])->toBe(45);
+        } finally {
+            unset($_ENV['SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL']);
+            unset($_ENV['SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT']);
+            putenv('SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL');
+            putenv('SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT');
+        }
+    });
+
+    it('deep-merges associative maps across default + file + env layers', function (): void {
+        // The first layer carries the full default. The second layer adds a
+        // sibling key — deep merge must keep both. The third layer replaces
+        // a leaf — the leaf update must win without clobbering the sibling.
+        $base   = ['media_archive' => ['a' => 1, 'b' => 2]];
+        $file   = ['media_archive' => ['b' => 20, 'c' => 30]];
+        $env    = ['media_archive' => ['c' => 300]];
+
+        $merged = ConfigMerger::merge($base, $file, $env);
+
+        expect($merged['media_archive']['a'])->toBe(1);
+        expect($merged['media_archive']['b'])->toBe(20);
+        expect($merged['media_archive']['c'])->toBe(300);
+    });
+
+    it('replaces list (numerically indexed) arrays atomically', function (): void {
+        // Overriding ['png','jpeg','webp'] with ['gif'] must yield ['gif'],
+        // not ['png','jpeg','webp','gif']. The merge recognises list-vs-map
+        // by checking `array_is_list()` on both sides.
+        $base = ['media_archive' => ['allowed_image_types' => ['png', 'jpeg', 'webp']]];
+        $env  = ['media_archive' => ['allowed_image_types' => ['gif']]];
+
+        $merged = ConfigMerger::merge($base, $env);
+
+        expect($merged['media_archive']['allowed_image_types'])->toBe(['gif']);
+    });
+
+    it('precedence: defaults < file config < env overrides', function (): void {
+        // Defaults set both keys; file config updates one; env updates the
+        // other. The end state must reflect both overrides, with env
+        // winning where it overlaps.
+        $defaults = ['k' => 'default-k', 'shared' => 'default-shared'];
+        $file     = ['shared' => 'file-shared', 'file_only' => 'file-only'];
+        $env      = ['shared' => 'env-shared', 'env_only' => 'env-only'];
+
+        $merged = ConfigMerger::merge($defaults, $file, $env);
+
+        expect($merged['k'])->toBe('default-k');
+        expect($merged['shared'])->toBe('env-shared');
+        expect($merged['file_only'])->toBe('file-only');
+        expect($merged['env_only'])->toBe('env-only');
+    });
+});
+
+describe('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES', function (): void {
+    it('omits the key when env is unset so the $defaults triple applies', function (): void {
+        unset($_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES']);
+        putenv('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
+
+        $overrides = callContainerMethod('collectEnvOverrides');
+
+        // `collectEnvOverrides()` is only the env layer. When the env
+        // var is unset, the key is absent here — the default flows
+        // through from `$defaults` in `configDefinition()` instead.
+        expect($overrides)->not->toHaveKey('media_archive');
+
+        // End-to-end check via configDefinition: the merged result must
+        // carry the default triple.
+        $config = callContainerMethod('configDefinition')['config'](makeFakeContainer());
+        expect($config['media_archive']['allowed_image_types'])
+            ->toBe(['png', 'jpeg', 'webp']);
+    });
+
+    it('parses a comma-separated list and normalizes', function (): void {
+        try {
+            $_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'] = ' png , JPG ,webp ';
+
+            $overrides = callContainerMethod('collectEnvOverrides');
+
+            expect($overrides['media_archive']['allowed_image_types'])
+                ->toBe(['png', 'jpeg', 'webp']);
+        } finally {
+            unset($_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES']);
+            putenv('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
+        }
+    });
+
+    it('rejects svg variants even when configured', function (): void {
+        try {
+            $_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'] = 'png,svg,svg+xml';
+
+            $overrides = callContainerMethod('collectEnvOverrides');
+
+            expect($overrides['media_archive']['allowed_image_types'])
+                ->toBe(['png']);
+        } finally {
+            unset($_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES']);
+            putenv('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
+        }
+    });
+
+    it('returns empty array when set to empty value (operator disabled images)', function (): void {
+        try {
+            $_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'] = '';
+
+            $overrides = callContainerMethod('collectEnvOverrides');
+
+            expect($overrides['media_archive']['allowed_image_types'])->toBe([]);
+        } finally {
+            unset($_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES']);
+            putenv('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
+        }
+    });
+
+    it('omits the key entirely when env is unset (defaults flow through)', function (): void {
+        unset($_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES']);
+        putenv('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
+
+        // Default `$overrides` (no env) should NOT contain the key —
+        // downstream consumers fall back to defaults in that case.
+        $overrides = callContainerMethod('collectEnvOverrides');
+
+        // collectEnvOverrides() only writes keys that came from the
+        // env layer. When the env var is unset the layer is empty at
+        // this dot-path.
+        expect(array_key_exists('media_archive', $overrides))->toBeFalse();
+    });
+});
+
+describe('parseImageTypesCsv', function (): void {
+    it('returns null when input is null', function (): void {
+        expect(ConfigMerger::parseImageTypesCsv(null))->toBeNull();
+    });
+
+    it('returns empty array for empty string (distinct from null)', function (): void {
+        expect(ConfigMerger::parseImageTypesCsv(''))->toBe([]);
+    });
+
+    it('collapses jpg → jpeg', function (): void {
+        expect(ConfigMerger::parseImageTypesCsv('jpg,jpeg'))->toBe(['jpeg']);
+    });
+
+    it('drops duplicates while preserving first occurrence', function (): void {
+        expect(ConfigMerger::parseImageTypesCsv('png,PNG,jpg'))
+            ->toBe(['png', 'jpeg']);
+    });
+
+    it('excludes svg regardless of casing or leading dot', function (): void {
+        expect(ConfigMerger::parseImageTypesCsv('.svg,SVG,svg+xml,png'))
+            ->toBe(['png']);
     });
 });

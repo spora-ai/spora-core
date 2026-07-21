@@ -32,8 +32,16 @@ final readonly class ListMediaQuery
         self::SORT_SIZE_DESC,
     ];
 
+    /**
+     * @param list<MediaType>|null $mediaTypes Multi-value media-type filter
+     *        (`?types=image,document`). Null means no filter. When set,
+     *        takes precedence over the singular `$mediaType` so the picker
+     *        can request `image,document` in one round-trip without audio
+     *        or unknown rows leaking in.
+     */
     public function __construct(
         public ?MediaType $mediaType = null,
+        public ?array $mediaTypes = null,
         public ?int $agentId = null,
         public ?int $userId = null,
         public ?string $pluginSlug = null,
@@ -66,6 +74,9 @@ final readonly class ListMediaQuery
     {
         return [
             'mediaType'  => $this->mediaType?->value,
+            'mediaTypes' => $this->mediaTypes !== null
+                ? array_map(static fn(MediaType $t): string => $t->value, $this->mediaTypes)
+                : null,
             'agentId'    => $this->agentId,
             'userId'     => $this->userId,
             'pluginSlug' => $this->pluginSlug,

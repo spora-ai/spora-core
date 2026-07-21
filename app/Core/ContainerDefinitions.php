@@ -250,6 +250,16 @@ final class ContainerDefinitions
                         'fetch_timeout_seconds' => 30,
                         'max_promote_bytes'     => 100 * 1024 * 1024,
                         'ffprobe_enabled'       => false,
+
+                        // Image MIME types the upload UI offers as image-only
+                        // attachments (PNG/JPEG/WebP). Operators can extend this
+                        // via config.php (`'media_archive' => ['allowed_image_types' => [...]]`)
+                        // or via `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES` env var
+                        // (comma-separated). An empty list explicitly disables
+                        // image uploads; missing key falls back to this default.
+                        // GIF is opt-in (GPT-4o accepts non-animated GIF); SVG is
+                        // excluded pending a sanitization pass.
+                        'allowed_image_types'   => ['png', 'jpeg', 'webp'],
                     ],
                 ];
 
@@ -257,7 +267,13 @@ final class ContainerDefinitions
                 $fileConfig = UserConfig::load($configPath);
 
                 $envOverrides = self::collectEnvOverrides();
-                return array_merge($defaults, $fileConfig, $envOverrides);
+                // Deep merge for associative maps so env-overridden nested keys
+                // (e.g. `media_archive.fetch_timeout_seconds`) reach consumers
+                // that read `$config['media_archive']['fetch_timeout_seconds']`.
+                // List arrays are replaced atomically — overriding
+                // `['png','jpeg','webp']` with `['gif']` yields `['gif']`, not
+                // a merged list.
+                return ConfigMerger::merge($defaults, $fileConfig, $envOverrides);
             },
         ];
     }
@@ -267,11 +283,29 @@ final class ContainerDefinitions
         $env = static fn(string $k): ?string => $_ENV[$k] ?? (getenv($k) ?: null);
 
         $overrides = [];
-        $apply = static function (string $envVar, string $key, callable $cast) use ($env, &$overrides): void {
-            $value = $env($envVar);
-            if ($value !== null) {
-                $overrides[$key] = $cast($value);
+        // `set` writes the value at the dot-path inside `$overrides`. A
+        // key like `media_archive.allowed_image_types` lands at
+        // `['media_archive' => ['allowed_image_types' => …]]` so the deep
+        // merge in `mergeConfig()` keeps it next to its siblings. Each
+        // call returns true if the value was actually set.
+        $set = static function (string $dotPath, mixed $value) use (&$overrides): bool {
+            if ($value === null) {
+                return false;
             }
+            $segments = explode('.', $dotPath);
+            $cursor = & $overrides;
+            foreach (array_slice($segments, 0, -1) as $segment) {
+                if (!isset($cursor[$segment]) || !is_array($cursor[$segment])) {
+                    $cursor[$segment] = [];
+                }
+                $cursor = & $cursor[$segment];
+            }
+            $cursor[end($segments)] = $value;
+            return true;
+        };
+        $apply = static function (string $envVar, string $key, callable $cast) use ($env, $set): void {
+            $value = $env($envVar);
+            $set($key, $value === null ? null : $cast($value));
         };
 
         $apply('SPORA_DB_DRIVER', 'db_driver', static fn($v) => $v);
@@ -305,10 +339,14 @@ final class ContainerDefinitions
         $apply('SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT', 'media_archive.fetch_timeout_seconds', static fn($v) => (int) $v);
         $apply('SPORA_MEDIA_ARCHIVE_MAX_PROMOTE_BYTES', 'media_archive.max_promote_bytes', static fn($v) => (int) $v);
         $apply('SPORA_MEDIA_ARCHIVE_FFPROBE_ENABLED', 'media_archive.ffprobe_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
+        $set(
+            'media_archive.allowed_image_types',
+            ConfigMerger::parseImageTypesCsv($env('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES')),
+        );
 
         $notifEmail = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED');
         if ($notifEmail !== null) {
-            $overrides['notifications'] = ['email_enabled' => filter_var($notifEmail, FILTER_VALIDATE_BOOLEAN)];
+            $set('notifications.email_enabled', filter_var($notifEmail, FILTER_VALIDATE_BOOLEAN));
         }
 
         return $overrides;
@@ -408,7 +446,53 @@ final class ContainerDefinitions
             },
 
             ...self::assetStoreDefinitions(),
+            ...self::mediaArchiveServiceDefinitions(),
 
+            DriverFactory::class => static function (ContainerInterface $c): DriverFactory {
+                return new DriverFactory(
+                    $c->get(LoggerInterface::class),
+                    $c->get(LLMConfigServiceInterface::class),
+                    (int) ($c->get('config')['llm_timeout'] ?? 300),
+                );
+            },
+
+            ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
+                return new ToolConfigService(
+                    $c->get(SecurityManagerInterface::class),
+                    $c->get(LoggerInterface::class),
+                    array_values(array_unique(array_merge(
+                        $c->get('tool_classes'),
+                        $c->get(PluginLoader::class)->toolClasses(),
+                    ))),
+                );
+            },
+
+            ToolIconResolver::class => static function (ContainerInterface $c): ToolIconResolver {
+                return new ToolIconResolver(
+                    new ToolConfigNameResolver(
+                        $c->get(LoggerInterface::class),
+                        array_values(array_unique(array_merge(
+                            $c->get('tool_classes'),
+                            $c->get(PluginLoader::class)->toolClasses(),
+                        ))),
+                    ),
+                    $c->get(PluginLoader::class),
+                );
+            },
+        ];
+    }
+
+    /**
+     * Definitions for the MediaArchive service stack. Extracted from
+     * `coreServiceDefinitions()` so that function stays under the
+     * SonarQube S138 line cap. The bindings share config-driven setup
+     * (`media_archive.*`) so they live together.
+     *
+     * @return array<string, callable>
+     */
+    private static function mediaArchiveServiceDefinitions(): array
+    {
+        return [
             // MediaArchive service stack — see app/Services/MediaArchive.
             // Config block lives under the `media_archive` key above.
             MimeSniffer::class => static fn(): MimeSniffer => new MimeSniffer(),
@@ -478,39 +562,8 @@ final class ContainerDefinitions
                 => new MediaAllowedTypesService(
                     $c->get(MediaConverterRegistry::class),
                     $c->get(DriverFactory::class),
+                    $c->get('config')['media_archive']['allowed_image_types'] ?? null,
                 ),
-
-            DriverFactory::class => static function (ContainerInterface $c): DriverFactory {
-                return new DriverFactory(
-                    $c->get(LoggerInterface::class),
-                    $c->get(LLMConfigServiceInterface::class),
-                    (int) ($c->get('config')['llm_timeout'] ?? 300),
-                );
-            },
-
-            ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
-                return new ToolConfigService(
-                    $c->get(SecurityManagerInterface::class),
-                    $c->get(LoggerInterface::class),
-                    array_values(array_unique(array_merge(
-                        $c->get('tool_classes'),
-                        $c->get(PluginLoader::class)->toolClasses(),
-                    ))),
-                );
-            },
-
-            ToolIconResolver::class => static function (ContainerInterface $c): ToolIconResolver {
-                return new ToolIconResolver(
-                    new ToolConfigNameResolver(
-                        $c->get(LoggerInterface::class),
-                        array_values(array_unique(array_merge(
-                            $c->get('tool_classes'),
-                            $c->get(PluginLoader::class)->toolClasses(),
-                        ))),
-                    ),
-                    $c->get(PluginLoader::class),
-                );
-            },
         ];
     }
 
