@@ -346,21 +346,23 @@ final class AgentTool extends AbstractTool
      */
     private function prepareCreateAgent(?int $userId, array $arguments): array|ToolResult
     {
-        if ($userId === null) {
-            return ToolResult::fail('create_agent requires an authenticated user.');
-        }
         $payload = (array) ($arguments['payload'] ?? []);
-        if ($payload === []) {
-            return ToolResult::fail('create_agent: payload object is required.');
-        }
-        // Same guard the operator upload endpoint uses — malformed LLM
-        // payloads fail before any DB write.
         $validation = $this->templateValidator->validate($payload);
-        if (!$validation->isValid()) {
-            return ToolResult::fail(
-                'create_agent: payload failed validation: '
-                . $this->summarizeValidationErrors($validation),
-            );
+        // Consolidate the three independent failure paths into a single
+        // return so the S1142 3-return ceiling stays satisfied. Each guard
+        // contributes one early return via the match below.
+        $error = match (true) {
+            $userId === null
+                => 'create_agent requires an authenticated user.',
+            $payload === []
+                => 'create_agent: payload object is required.',
+            !$validation->isValid()
+                => 'create_agent: payload failed validation: '
+                   . $this->summarizeValidationErrors($validation),
+            default => null,
+        };
+        if ($error !== null) {
+            return ToolResult::fail($error);
         }
         return ['userId' => $userId, 'payload' => $payload];
     }
