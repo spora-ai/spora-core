@@ -83,6 +83,7 @@ describe('ListMediaQuery::toArray()', function (): void {
 
         expect($query->toArray())->toBe([
             'mediaType'  => 'image',
+            'mediaTypes' => null,
             'agentId'    => 42,
             'userId'     => null,
             'pluginSlug' => 'foo',

@@ -74,6 +74,38 @@ final class MediaArchiveService
         return $map[strtolower($mime)] ?? null;
     }
 
+    /**
+     * Reverse of {@see extensionForMime()}: maps a file extension to its
+     * canonical MIME type. Returns null when the extension is not in the
+     * static map. Used by `MediaAllowedTypesService` to convert configured
+     * image extensions into the MIME list the frontend picker renders.
+     */
+    public static function mimeForExtension(?string $ext): ?string
+    {
+        if (!is_string($ext) || $ext === '') {
+            return null;
+        }
+        $reverse = [
+            'mp3' => 'audio/mpeg',
+            'wav' => 'audio/wav',
+            'ogg' => 'audio/ogg',
+            'm4a' => 'audio/mp4',
+            'flac' => 'audio/flac',
+            'mp4' => 'video/mp4',
+            'webm' => 'video/webm',
+            'mov' => 'video/quicktime',
+            'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'gif' => 'image/gif',
+            'webp' => 'image/webp',
+            'svg' => 'image/svg+xml',
+            'pdf' => 'application/pdf',
+            'txt' => 'text/plain',
+        ];
+        return $reverse[strtolower(ltrim($ext, '.'))] ?? null;
+    }
+
     public function __construct(
         private readonly AssetStore $assetStore,
         private readonly MediaArchiveUrlResolver $urlResolver,
@@ -108,7 +140,12 @@ final class MediaArchiveService
         /** @var Builder<MediaAsset> $builder */
         $builder = MediaAsset::query();
 
-        if ($query->mediaType !== null) {
+        if ($query->mediaTypes !== null && $query->mediaTypes !== []) {
+            $builder->whereIn(
+                'media_type',
+                array_map(static fn(MediaType $t): string => $t->value, $query->mediaTypes),
+            );
+        } elseif ($query->mediaType !== null) {
             $builder->where('media_type', $query->mediaType->value);
         }
         if ($query->agentId !== null) {
@@ -131,11 +168,21 @@ final class MediaArchiveService
         }
         if ($query->search !== null && trim($query->search) !== '') {
             $term = '%' . trim($query->search) . '%';
-            $builder->where(function (Builder $q) use ($term): void {
+            // Escape LIKE wildcards so user-typed terms do not act as SQL
+            // patterns; the substring match itself stays functional.
+            $escaped = addcslashes(trim($query->search), '%_\\');
+            $prefixed = '%' . $escaped . '%';
+            $builder->where(function (Builder $q) use ($term, $prefixed): void {
                 $q->where('prompt', 'like', $term)
                     ->orWhere('filename', 'like', $term)
                     ->orWhere('asset_url', 'like', $term)
-                    ->orWhere('source_url', 'like', $term);
+                    ->orWhere('source_url', 'like', $term)
+                    // Substring UUID match. `id` is a 36-char UUID column;
+                    // a full UUID gives an exact match, a prefix/suffix
+                    // gives a partial LIKE match. The leading-wildcard
+                    // query is fine for a 36-char keyspace and avoids
+                    // a separate exact-match fast path.
+                    ->orWhere('id', 'like', $prefixed);
             });
         }
 

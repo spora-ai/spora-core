@@ -80,7 +80,7 @@ test('isAllowed reports text MIME as allowed and binary executable as not', func
 /**
  * @return array{0: MediaAllowedTypesService, 1: MediaConverterRegistry}
  */
-function buildAllowedTypesService(): array
+function buildAllowedTypesService(?array $imageExtensions = null): array
 {
     $registry = MediaArchiveTestSupport::buildConverterRegistry();
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
@@ -89,7 +89,10 @@ function buildAllowedTypesService(): array
         AnthropicCompatibleDriver::class,
     ]);
     $factory = new DriverFactory(new NullLogger(), $llmService, 60);
-    return [new MediaAllowedTypesService($registry, $factory), $registry];
+    return [
+        new MediaAllowedTypesService($registry, $factory, $imageExtensions),
+        $registry,
+    ];
 }
 
 function seedLlmConfig(int $id, int $userId, string $driverClass, string $model): void
@@ -135,3 +138,101 @@ function seedAgent(int $id, int $userId): void
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
 }
+
+
+test('allowedMimeTypes defaults to png/jpeg/webp when no list is configured (vision agent)', function (): void {
+    $authService = bootAuthLayer();
+    $userId = bootAuth($authService);
+    seedLlmConfig(1, $userId, OpenAICompatibleDriver::class, 'gpt-4o');
+    seedAgent(42, $userId);
+    [$service] = buildAllowedTypesService();
+
+    $mimes = $service->allowedMimeTypes(42);
+
+    expect($mimes)->toContain('image/png');
+    expect($mimes)->toContain('image/jpeg');
+    expect($mimes)->toContain('image/webp');
+    // GIF and SVG are excluded from the default; vision models don't
+    // universally read them and SVG needs sanitization.
+    expect($mimes)->not->toContain('image/gif');
+    expect($mimes)->not->toContain('image/svg+xml');
+});
+
+test('allowedMimeTypes respects configured image extensions (gif opt-in)', function (): void {
+    $authService = bootAuthLayer();
+    $userId = bootAuth($authService);
+    seedLlmConfig(1, $userId, OpenAICompatibleDriver::class, 'gpt-4o');
+    seedAgent(42, $userId);
+    [$service] = buildAllowedTypesService(['gif']);
+
+    $mimes = $service->allowedMimeTypes(42);
+
+    expect($mimes)->toContain('image/gif');
+    // The default triple stays only if the operator explicitly opted in
+    // to those as well. The ctor list is authoritative.
+    expect($mimes)->not->toContain('image/png');
+    expect($mimes)->not->toContain('image/jpeg');
+    expect($mimes)->not->toContain('image/webp');
+});
+
+test('allowedMimeTypes excludes svg even when configured', function (): void {
+    $authService = bootAuthLayer();
+    $userId = bootAuth($authService);
+    seedLlmConfig(1, $userId, OpenAICompatibleDriver::class, 'gpt-4o');
+    seedAgent(42, $userId);
+    [$service] = buildAllowedTypesService(['png', 'svg']);
+
+    $mimes = $service->allowedMimeTypes(42);
+
+    expect($mimes)->toContain('image/png');
+    expect($mimes)->not->toContain('image/svg+xml');
+});
+
+test('allowedMimeTypes with empty configured list returns no images even for vision agents', function (): void {
+    $authService = bootAuthLayer();
+    $userId = bootAuth($authService);
+    seedLlmConfig(1, $userId, OpenAICompatibleDriver::class, 'gpt-4o');
+    seedAgent(42, $userId);
+    [$service] = buildAllowedTypesService([]);
+
+    $mimes = $service->allowedMimeTypes(42);
+
+    foreach ($mimes as $m) {
+        expect(str_starts_with($m, 'image/'))->toBeFalse();
+    }
+    expect($service->imageExtensions())->toBe([]);
+});
+
+test('allowedMimeTypes normalises jpg to jpeg', function (): void {
+    $authService = bootAuthLayer();
+    $userId = bootAuth($authService);
+    seedLlmConfig(1, $userId, OpenAICompatibleDriver::class, 'gpt-4o');
+    seedAgent(42, $userId);
+    [$service] = buildAllowedTypesService(['jpg', 'jpeg']);
+
+    $mimes = $service->allowedMimeTypes(42);
+
+    // jpg → jpeg normalisation collapses duplicates; only image/jpeg
+    // shows up.
+    $jpegCount = 0;
+    foreach ($mimes as $m) {
+        if ($m === 'image/jpeg') {
+            $jpegCount++;
+        }
+    }
+    expect($jpegCount)->toBe(1);
+});
+
+test('normalizeImageExtensions handles casing, dots, and duplicates', function (): void {
+    expect(MediaAllowedTypesService::normalizeImageExtensions(['PNG', '.jpg', 'WebP', 'PNG']))
+        ->toBe(['png', 'jpeg', 'webp']);
+});
+
+test('normalizeImageExtensions returns the built-in default when input is null', function (): void {
+    expect(MediaAllowedTypesService::normalizeImageExtensions(null))
+        ->toBe(['png', 'jpeg', 'webp']);
+});
+
+test('normalizeImageExtensions preserves an empty list', function (): void {
+    expect(MediaAllowedTypesService::normalizeImageExtensions([]))->toBe([]);
+});

@@ -250,6 +250,16 @@ final class ContainerDefinitions
                         'fetch_timeout_seconds' => 30,
                         'max_promote_bytes'     => 100 * 1024 * 1024,
                         'ffprobe_enabled'       => false,
+
+                        // Image MIME types the upload UI offers as image-only
+                        // attachments (PNG/JPEG/WebP). Operators can extend this
+                        // via config.php (`'media_archive' => ['allowed_image_types' => [...]]`)
+                        // or via `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES` env var
+                        // (comma-separated). An empty list explicitly disables
+                        // image uploads; missing key falls back to this default.
+                        // GIF is opt-in (GPT-4o accepts non-animated GIF); SVG is
+                        // excluded pending a sanitization pass.
+                        'allowed_image_types'   => ['png', 'jpeg', 'webp'],
                     ],
                 ];
 
@@ -257,7 +267,13 @@ final class ContainerDefinitions
                 $fileConfig = UserConfig::load($configPath);
 
                 $envOverrides = self::collectEnvOverrides();
-                return array_merge($defaults, $fileConfig, $envOverrides);
+                // Deep merge for associative maps so env-overridden nested keys
+                // (e.g. `media_archive.fetch_timeout_seconds`) reach consumers
+                // that read `$config['media_archive']['fetch_timeout_seconds']`.
+                // List arrays are replaced atomically — overriding
+                // `['png','jpeg','webp']` with `['gif']` yields `['gif']`, not
+                // a merged list.
+                return self::mergeConfig($defaults, $fileConfig, $envOverrides);
             },
         ];
     }
@@ -267,11 +283,29 @@ final class ContainerDefinitions
         $env = static fn(string $k): ?string => $_ENV[$k] ?? (getenv($k) ?: null);
 
         $overrides = [];
-        $apply = static function (string $envVar, string $key, callable $cast) use ($env, &$overrides): void {
-            $value = $env($envVar);
-            if ($value !== null) {
-                $overrides[$key] = $cast($value);
+        // `set` writes the value at the dot-path inside `$overrides`. A
+        // key like `media_archive.allowed_image_types` lands at
+        // `['media_archive' => ['allowed_image_types' => …]]` so the deep
+        // merge in `mergeConfig()` keeps it next to its siblings. Each
+        // call returns true if the value was actually set.
+        $set = static function (string $dotPath, mixed $value) use (&$overrides): bool {
+            if ($value === null) {
+                return false;
             }
+            $segments = explode('.', $dotPath);
+            $cursor = & $overrides;
+            foreach (array_slice($segments, 0, -1) as $segment) {
+                if (!isset($cursor[$segment]) || !is_array($cursor[$segment])) {
+                    $cursor[$segment] = [];
+                }
+                $cursor = & $cursor[$segment];
+            }
+            $cursor[end($segments)] = $value;
+            return true;
+        };
+        $apply = static function (string $envVar, string $key, callable $cast) use ($env, $set): void {
+            $value = $env($envVar);
+            $set($key, $value === null ? null : $cast($value));
         };
 
         $apply('SPORA_DB_DRIVER', 'db_driver', static fn($v) => $v);
@@ -305,13 +339,96 @@ final class ContainerDefinitions
         $apply('SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT', 'media_archive.fetch_timeout_seconds', static fn($v) => (int) $v);
         $apply('SPORA_MEDIA_ARCHIVE_MAX_PROMOTE_BYTES', 'media_archive.max_promote_bytes', static fn($v) => (int) $v);
         $apply('SPORA_MEDIA_ARCHIVE_FFPROBE_ENABLED', 'media_archive.ffprobe_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
+        $set(
+            'media_archive.allowed_image_types',
+            self::parseImageTypesCsv($env('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES')),
+        );
 
         $notifEmail = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED');
         if ($notifEmail !== null) {
-            $overrides['notifications'] = ['email_enabled' => filter_var($notifEmail, FILTER_VALIDATE_BOOLEAN)];
+            $set('notifications.email_enabled', filter_var($notifEmail, FILTER_VALIDATE_BOOLEAN));
         }
 
         return $overrides;
+    }
+
+    /**
+     * Parse the `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES` env value.
+     *
+     * Returns null when the env var is unset (caller falls back to defaults).
+     * Returns an empty array when the env var is set but empty — that means
+     * the operator explicitly disabled image uploads. Both states must be
+     * distinguishable from `['png','jpeg','webp']` (the built-in default).
+     *
+     * Whitespace is trimmed; tokens are lowercased; `jpg`/`jpeg` collapse to
+     * `jpeg`. SVG variants are rejected explicitly. Order and duplicates are
+     * collapsed to the first occurrence.
+     *
+     * @return list<string>|null
+     */
+    private static function parseImageTypesCsv(?string $raw): ?array
+    {
+        if ($raw === null) {
+            return null;
+        }
+        $tokens = preg_split('/[\s,]+/', trim($raw));
+        if ($tokens === false || implode('', $tokens) === '') {
+            return [];
+        }
+        $normalized = [];
+        $seen = [];
+        foreach ($tokens as $token) {
+            $t = strtolower(trim($token));
+            if ($t === '') {
+                continue;
+            }
+            $t = ltrim($t, '.');
+            // SVG is excluded pending a sanitization pass.
+            if ($t === 'svg' || $t === 'svg+xml') {
+                continue;
+            }
+            $alias = $t === 'jpg' ? 'jpeg' : $t;
+            if (!isset($seen[$alias])) {
+                $seen[$alias] = true;
+                $normalized[] = $alias;
+            }
+        }
+        return $normalized;
+    }
+
+    /**
+     * Deep-merge `$overrides` into `$base` for associative maps, but
+     * replace list (numerically-indexed) arrays atomically.
+     *
+     * Precedence (last write wins):
+     *   `$base` < `$fileConfig` < `$envOverrides`
+     *
+     * Without this helper, dotted env keys like
+     * `media_archive.fetch_timeout_seconds` were stored as a literal
+     * top-level key in the overrides array and never reached consumers
+     * reading `$config['media_archive']['fetch_timeout_seconds']`.
+     *
+     * @param array<string, mixed> $base
+     * @param array<string, mixed> $overrides
+     * @return array<string, mixed>
+     */
+    private static function mergeConfig(array $base, array ...$overrides): array
+    {
+        foreach ($overrides as $layer) {
+            foreach ($layer as $key => $value) {
+                if (
+                    isset($base[$key])
+                    && is_array($base[$key]) && is_array($value)
+                    && array_is_list($base[$key]) === array_is_list($value)
+                    && !array_is_list($value)
+                ) {
+                    $base[$key] = self::mergeConfig($base[$key], $value);
+                } else {
+                    $base[$key] = $value;
+                }
+            }
+        }
+        return $base;
     }
 
     /**
@@ -478,6 +595,7 @@ final class ContainerDefinitions
                 => new MediaAllowedTypesService(
                     $c->get(MediaConverterRegistry::class),
                     $c->get(DriverFactory::class),
+                    $c->get('config')['media_archive']['allowed_image_types'] ?? null,
                 ),
 
             DriverFactory::class => static function (ContainerInterface $c): DriverFactory {
