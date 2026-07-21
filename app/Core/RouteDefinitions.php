@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\Core;
 
 use Spora\Http\AgentController;
-use Spora\Http\AgentMemoryController;
 use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentTemplateController;
 use Spora\Http\AgentToolController;
@@ -20,7 +19,6 @@ use Spora\Http\MailTemplateController;
 use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
 use Spora\Http\MediaUploadController;
-use Spora\Http\MemoryController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
@@ -46,8 +44,6 @@ final class RouteDefinitions
     public const ROUTE_TOOLS_SETTINGS = '/api/v1/tools/{toolId}/settings';
     public const ROUTE_TOOLS_USER_SETTINGS = '/api/v1/tools/{toolId}/user-settings';
     public const ROUTE_LLM_CONFIGS_ID = '/api/v1/llm-configs/{id}';
-    public const ROUTE_MEMORIES_ID = '/api/v1/memories/{id}';
-    public const ROUTE_AGENTS_MEMORIES_MEMORY_ID = '/api/v1/agents/{agentId}/memories/{memoryId}';
     public const ROUTE_USERS_ID = '/api/v1/users/{id}';
     public const ROUTE_MAIL_TEMPLATES_ID = '/api/v1/mail-templates/{id}';
     public const ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID = '/api/v1/agents/{id}/templates/{templateId}';
@@ -166,21 +162,6 @@ final class RouteDefinitions
 
         $r->addRoute('GET', '/api/v1/user-preferences/llm', [UserPreferenceController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PUT', '/api/v1/user-preferences/llm', [UserPreferenceController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
-
-        $r->addRoute('GET', '/api/v1/memories', [MemoryController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('POST', '/api/v1/memories', [MemoryController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PATCH', '/api/v1/memories/reorder', [MemoryController::class, 'reorder'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', self::ROUTE_MEMORIES_ID, [MemoryController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PUT', self::ROUTE_MEMORIES_ID, [MemoryController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('DELETE', self::ROUTE_MEMORIES_ID, [MemoryController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
-
-        $r->addRoute('GET', '/api/v1/agents/{agentId}/memories', [AgentMemoryController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('POST', '/api/v1/agents/{agentId}/memories', [AgentMemoryController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PATCH', '/api/v1/agents/{agentId}/memories/reorder', [AgentMemoryController::class, 'reorder'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', self::ROUTE_AGENTS_MEMORIES_MEMORY_ID, [AgentMemoryController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PUT', self::ROUTE_AGENTS_MEMORIES_MEMORY_ID, [AgentMemoryController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('DELETE', self::ROUTE_AGENTS_MEMORIES_MEMORY_ID, [AgentMemoryController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
-
         $r->addRoute('GET', '/api/v1/notifications', [NotificationController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/notifications/{id}/read', [NotificationController::class, 'markRead'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/notifications/read-all', [NotificationController::class, 'markAllRead'], [AuthMiddleware::class, CsrfMiddleware::class]);

@@ -21,7 +21,6 @@ use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Apps\AppRegistry;
-use Spora\Apps\MemoriesApp;
 use Spora\Apps\PluginsApp;
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\AssetGcCommand;
@@ -44,7 +43,6 @@ use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Extensions\AppLoader;
 use Spora\Http\AgentController;
-use Spora\Http\AgentMemoryController;
 use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentTemplateController;
 use Spora\Http\AgentToolController;
@@ -58,7 +56,6 @@ use Spora\Http\MailTemplateController;
 use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
 use Spora\Http\MediaUploadController;
-use Spora\Http\MemoryController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
@@ -105,8 +102,6 @@ use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
-use Spora\Services\MemoryService;
-use Spora\Services\MemoryServiceInterface;
 use Spora\Services\MercurePublisher;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
@@ -127,10 +122,8 @@ use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
-use Spora\Tools\AgentMemoryTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\CurrentTimeTool;
-use Spora\Tools\GlobalMemoryTool;
 use Spora\Tools\HandoverTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\UserInfoTool;
@@ -684,7 +677,6 @@ final class ContainerDefinitions
             ))),
 
             'app_apps' => [
-                MemoriesApp::class,
                 PluginsApp::class,
             ],
 
@@ -705,8 +697,6 @@ final class ContainerDefinitions
             'tool_classes' => [
                 CurrentTimeTool::class,
                 CalculatorTool::class,
-                AgentMemoryTool::class,
-                GlobalMemoryTool::class,
                 ReadUrlTool::class,
                 UserInfoTool::class,
                 HandoverTool::class,
@@ -804,21 +794,6 @@ final class ContainerDefinitions
                     $c->get(PluginLoader::class),
                 );
             },
-
-            MemoryController::class => static function (ContainerInterface $c): MemoryController {
-                return new MemoryController(
-                    $c->get(AuthService::class),
-                    $c->get(MemoryServiceInterface::class),
-                );
-            },
-
-            AgentMemoryController::class => static function (ContainerInterface $c): AgentMemoryController {
-                return new AgentMemoryController(
-                    $c->get(AuthService::class),
-                    $c->get(MemoryServiceInterface::class),
-                );
-            },
-
             PluginMetadataExtractor::class => static fn(): PluginMetadataExtractor => new PluginMetadataExtractor(),
 
             PluginsService::class => static function (ContainerInterface $c): PluginsService {
@@ -1040,8 +1015,6 @@ final class ContainerDefinitions
 
             CurrentTimeTool::class => static fn(): CurrentTimeTool => new CurrentTimeTool(),
             CalculatorTool::class => static fn(): CalculatorTool => new CalculatorTool(),
-            AgentMemoryTool::class => static fn(): AgentMemoryTool => new AgentMemoryTool(),
-            GlobalMemoryTool::class => static fn(): GlobalMemoryTool => new GlobalMemoryTool(),
 
             ReadUrlTool::class => static function (ContainerInterface $c): ReadUrlTool {
                 return new ReadUrlTool(
@@ -1183,7 +1156,6 @@ final class ContainerDefinitions
                 $c->get(PluginLoader::class),
             ),
 
-            MemoryServiceInterface::class => static fn(): MemoryServiceInterface => new MemoryService(),
             MailTemplateServiceInterface::class => static fn(): MailTemplateServiceInterface => new MailTemplateService(),
             PromptTemplateServiceInterface::class => static fn(): PromptTemplateServiceInterface => new PromptTemplateService(),
             EmailTemplateLoader::class => static function (ContainerInterface $c): EmailTemplateLoader {

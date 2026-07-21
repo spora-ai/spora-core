@@ -30,8 +30,8 @@ function makeSetupTester(): CommandTester
     $toolConfig = new ToolConfigService($security, $logger, [
         Spora\Tools\CurrentTimeTool::class,
         Spora\Tools\CalculatorTool::class,
-        Spora\Tools\AgentMemoryTool::class,
-        Spora\Tools\GlobalMemoryTool::class,
+        Spora\Tools\CalculatorTool::class,
+        Spora\Tools\HandoverTool::class,
         Spora\Tools\ReadUrlTool::class,
         Spora\Tools\UserInfoTool::class,
         Spora\Tools\HandoverTool::class,

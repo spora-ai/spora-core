@@ -2,7 +2,7 @@
   "$schema": "https://spora.dev/agent-template.schema.json",
   "id": "core/core-assistant",
   "name": "Spora Core Agent",
-  "description": "Default Spora agent with time, math, and memory tools.",
+  "description": "Default Spora agent with time and math tools.",
   "version": "1.0.0",
   "agent": {
     "description": "Spora's general-purpose starter agent.",
@@ -25,26 +25,6 @@
       "enabled": true,
       "operations": [
         { "name": "calculate", "enabled": true, "auto_approve": true }
-      ]
-    },
-    {
-      "tool_class": "Spora\\Tools\\AgentMemoryTool",
-      "enabled": true,
-      "operations": [
-        { "name": "list", "enabled": true, "auto_approve": true },
-        { "name": "get", "enabled": true, "auto_approve": true },
-        { "name": "save", "enabled": true, "auto_approve": false },
-        { "name": "delete", "enabled": true, "auto_approve": false }
-      ]
-    },
-    {
-      "tool_class": "Spora\\Tools\\GlobalMemoryTool",
-      "enabled": true,
-      "operations": [
-        { "name": "list", "enabled": true, "auto_approve": true },
-        { "name": "get", "enabled": true, "auto_approve": true },
-        { "name": "save", "enabled": true, "auto_approve": false },
-        { "name": "delete", "enabled": true, "auto_approve": false }
       ]
     }
   ],

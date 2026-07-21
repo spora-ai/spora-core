@@ -10,7 +10,7 @@ namespace Spora\Apps;
  *
  * Plugins whose `AppInterface` does NOT implement {@see VueAppInterface}
  * continue to work — they're treated as "core-owned" apps and routed by
- * the SPA's hard-coded children (`memories`, `plugins`). Implementing
+ * the SPA's hard-coded children (`plugins`). Implementing
  * this interface opts the app into the generic `/apps/:appName` loader
  * in `spora-frontend`.
  *

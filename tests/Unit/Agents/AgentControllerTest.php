@@ -788,7 +788,7 @@ test('getToolsStatus is_enabled is keyed by tool_class, not tool_name — same t
     $agentId = createAgent($crud, AGENT_NAME_MY_AGENT, [$authMiddleware]);
 
     // Directly insert two agent_tool records with the SAME tool_name but DIFFERENT tool_class.
-    // This simulates the orphaned MemoryTool scenario where a stale tool_class remains in the DB.
+    // This simulates an orphaned tool scenario where a stale tool_class remains in the DB.
     // Both have tool_name = 'test_tool' (matching TestTool's registered name).
     Capsule::table('agent_tools')->insert([
         'agent_id'   => $agentId,

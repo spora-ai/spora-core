@@ -7,21 +7,14 @@ use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
 use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\Exceptions\EmailTemplateParseException;
-use Spora\Services\Exceptions\MemoryValidationException;
 use Spora\Services\Exceptions\PromptTemplateMissingException;
 use Spora\Services\Exceptions\ScheduledRunNotFoundException;
-use Spora\Services\MemoryService;
 use Spora\Services\PromptTemplateService;
 use Spora\Services\ScheduledRunService;
 
 /**
  * Shared helpers
  */
-
-function makeMemoryServiceForExceptions(): MemoryService
-{
-    return new MemoryService();
-}
 
 function makePromptTemplateServiceForExceptions(): PromptTemplateService
 {
@@ -107,36 +100,6 @@ describe('Service exceptions', function (): void {
         });
     });
 
-    describe('MemoryValidationException', function (): void {
-        it('extends RuntimeException', function (): void {
-            $e = new MemoryValidationException('name is required');
-            expect($e)->toBeInstanceOf(RuntimeException::class);
-        });
-
-        it('preserves the message verbatim', function (): void {
-            $e = new MemoryValidationException('name is required');
-            expect($e->getMessage())->toBe('name is required');
-        });
-    });
-});
-
-describe('MemoryService throws AgentNotFoundException', function (): void {
-
-    it('createAgentMemory throws when the agent does not exist', function (): void {
-        [$userId] = createServiceExceptionUserAgent('memory-create@example.com');
-        $service = makeMemoryServiceForExceptions();
-
-        expect(fn() => $service->createAgentMemory(9999, $userId, ['name' => 'test']))
-            ->toThrow(AgentNotFoundException::class, 'Agent not found');
-    });
-
-    it('reorderAgentMemories throws when the agent does not exist', function (): void {
-        [$userId] = createServiceExceptionUserAgent('memory-reorder@example.com');
-        $service = makeMemoryServiceForExceptions();
-
-        expect(fn() => $service->reorderAgentMemories(9999, $userId, []))
-            ->toThrow(AgentNotFoundException::class, 'Agent not found');
-    });
 });
 
 describe('PromptTemplateService throws AgentNotFoundException', function (): void {

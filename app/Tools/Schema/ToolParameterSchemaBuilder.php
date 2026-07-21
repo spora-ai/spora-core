@@ -71,8 +71,7 @@ final class ToolParameterSchemaBuilder
 
         // 2. Author-declared parameters — preserves attribute declaration order.
         //    Walks up the class hierarchy so an abstract base class can declare
-        //    shared parameters (e.g. AbstractMemoryTool's name/content/summary/order)
-        //    that concrete subclasses inherit.
+        //    shared parameters that concrete subclasses inherit.
         foreach (self::collectInheritedAttributes($ref, ToolParameter::class) as $attr) {
             /** @var ToolParameter $param */
             $param = $attr->newInstance();

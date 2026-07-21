@@ -8,7 +8,7 @@ use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
-use Tests\Fixtures\StubMemoriesApp;
+use Tests\Fixtures\StubSampleApp;
 use Tests\Fixtures\StubVueApp;
 use Tests\Fixtures\StubVueAppEmpty;
 
@@ -39,7 +39,7 @@ describe('AppsController', function (): void {
         simulateLoggedInSession($userId, 'apps@example.com');
 
         $registry = new AppRegistry();
-        $registry->register(StubMemoriesApp::class);
+        $registry->register(StubSampleApp::class);
 
         [$controller, $authMiddleware, $csrfMiddleware] = makeAppsController($registry);
 
@@ -51,10 +51,10 @@ describe('AppsController', function (): void {
         expect($body)->toHaveKey('data');
         expect($body['data']['apps'])->toHaveCount(1);
         expect($body['data']['apps'][0])->toMatchArray([
-            'name' => 'memories',
-            'displayName' => 'Memories',
-            'icon' => 'brain',
-            'route' => '/apps/memories',
+            'name' => 'sample',
+            'displayName' => 'Sample',
+            'icon' => 'puzzle',
+            'route' => '/apps/sample',
         ]);
     });
 
@@ -119,7 +119,7 @@ describe('AppsController', function (): void {
         simulateLoggedInSession($userId, 'noentry@example.com');
 
         $registry = new AppRegistry();
-        $registry->register(StubMemoriesApp::class);
+        $registry->register(StubSampleApp::class);
 
         // Explicitly pass null for the loader.
         [$controller, $authMiddleware, $csrfMiddleware] = makeAppsController($registry, null);
@@ -163,7 +163,7 @@ describe('AppsController', function (): void {
         simulateLoggedInSession($userId, 'noslug@example.com');
 
         $registry = new AppRegistry();
-        $registry->register(StubMemoriesApp::class);
+        $registry->register(StubSampleApp::class);
 
         $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_tools'], null);
         $loader->boot();

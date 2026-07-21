@@ -402,7 +402,6 @@ it('llmDefinitions includes all expected entries', function (): void {
     expect($def['llm_driver_classes'])->toContain(Spora\Drivers\AnthropicCompatibleDriver::class);
 
     expect($def)->toHaveKey('app_apps');
-    expect($def['app_apps'])->toContain(Spora\Apps\MemoriesApp::class);
 
     expect($def)->toHaveKey('tool_classes');
     expect($def['tool_classes'])->toContain(Spora\Tools\CurrentTimeTool::class);
@@ -433,8 +432,6 @@ it('apiResourceControllerDefinitions includes resource controllers', function ()
     $def = callContainerMethod('apiResourceControllerDefinitions');
 
     expect($def)->toHaveKey(Spora\Http\AppsController::class);
-    expect($def)->toHaveKey(Spora\Http\MemoryController::class);
-    expect($def)->toHaveKey(Spora\Http\AgentMemoryController::class);
     expect($def)->toHaveKey(Spora\Http\AgentController::class);
     expect($def)->toHaveKey(Spora\Http\AgentToolController::class);
     expect($def)->toHaveKey(Spora\Http\AgentOverrideController::class);
@@ -486,7 +483,6 @@ it('orchestratorDefinitions includes orchestrator, plugins, and facades', functi
     // factory (in this same method) consumes it via $c->get(PluginLoader::class).
     expect($def)->not->toHaveKey(PluginLoader::class);
     expect($def)->toHaveKey(Spora\AgentTemplates\AgentTemplateScanner::class);
-    expect($def)->toHaveKey(Spora\Services\MemoryServiceInterface::class);
     expect($def)->toHaveKey(Spora\Services\MailTemplateServiceInterface::class);
     expect($def)->toHaveKey(Spora\Services\PromptTemplateServiceInterface::class);
     expect($def)->toHaveKey(Spora\Services\EmailTemplateLoader::class);
@@ -518,7 +514,6 @@ it('RouteDefinitions::register is callable and adds routes', function (): void {
 it('RouteDefinitions has the documented route path constants', function (): void {
     expect(Spora\Core\RouteDefinitions::ROUTE_AGENTS_ID)->toBe('/api/v1/agents/{id}');
     expect(Spora\Core\RouteDefinitions::ROUTE_TOOLS_SETTINGS)->toBe('/api/v1/tools/{toolId}/settings');
-    expect(Spora\Core\RouteDefinitions::ROUTE_MEMORIES_ID)->toBe('/api/v1/memories/{id}');
     expect(Spora\Core\RouteDefinitions::ROUTE_USERS_ID)->toBe('/api/v1/users/{id}');
     expect(Spora\Core\RouteDefinitions::ROUTE_MAIL_TEMPLATES_ID)->toBe('/api/v1/mail-templates/{id}');
     expect(Spora\Core\RouteDefinitions::ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID)->toBe('/api/v1/agents/{id}/templates/{templateId}');

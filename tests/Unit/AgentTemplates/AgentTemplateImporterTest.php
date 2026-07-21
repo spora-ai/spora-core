@@ -21,29 +21,19 @@ test('applyTemplate("core/core-assistant") creates the Agent and 4 enabled tool 
     $tools = AgentTool::where('agent_id', $result->agent->id)->get()->pluck('tool_class')->all();
     expect($tools)->toContain('Spora\\Tools\\CurrentTimeTool');
     expect($tools)->toContain('Spora\\Tools\\CalculatorTool');
-    expect($tools)->toContain('Spora\\Tools\\AgentMemoryTool');
-    expect($tools)->toContain('Spora\\Tools\\GlobalMemoryTool');
-    expect(count($tools))->toBe(4);
+    expect(count($tools))->toBe(2);
 });
 
 test('applyTemplate("core/core-assistant") persists per-operation auto_approve overrides', function (): void {
     $result = $this->importer->applyTemplate($this->userId, 'core/core-assistant');
 
-    $saveOverride = AgentToolOperationOverride::where('agent_id', $result->agent->id)
-        ->where('tool_class', 'Spora\\Tools\\AgentMemoryTool')
-        ->where('operation', 'save')
+    $nowOverride = AgentToolOperationOverride::where('agent_id', $result->agent->id)
+        ->where('tool_class', 'Spora\\Tools\\CurrentTimeTool')
+        ->where('operation', 'now')
         ->first();
-    expect($saveOverride)->not->toBeNull();
-    // auto_approve=false in template → default_requires_approval=1 in DB
-    expect((int) $saveOverride->default_requires_approval)->toBe(1);
-
-    $listOverride = AgentToolOperationOverride::where('agent_id', $result->agent->id)
-        ->where('tool_class', 'Spora\\Tools\\AgentMemoryTool')
-        ->where('operation', 'list')
-        ->first();
-    expect($listOverride)->not->toBeNull();
+    expect($nowOverride)->not->toBeNull();
     // auto_approve=true in template → default_requires_approval=0 in DB
-    expect((int) $listOverride->default_requires_approval)->toBe(0);
+    expect((int) $nowOverride->default_requires_approval)->toBe(0);
 });
 
 test('applyTemplate maps allow_continuation to allow_followup on the Agent row', function (): void {
