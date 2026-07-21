@@ -124,53 +124,95 @@ final class MediaArchiveController
     }
 
     /**
+     * Run each per-field validator in order; the first one that produces
+     * an error message short-circuits the response. Per-field checks live
+     * in their own helpers so the orchestrator stays under SonarQube's
+     * 15 cognitive-complexity threshold — each helper is a free method
+     * call from this scope.
+     *
      * @param array<string, mixed> $body
      */
     private function validateUpdatableFields(array $body): ?JsonResponse
     {
-        $message = null;
-        if (array_key_exists('filename', $body)) {
-            $filename = $body['filename'];
-            if ($filename !== null && (!is_string($filename) || strlen($filename) > 255)) {
-                $message = 'filename must be a string up to 255 characters.';
+        $messages = [
+            $this->validateFilenameField($body),
+            $this->validateArrayField($body, 'tags', 'tags must be an array of strings.'),
+            $this->validateArrayField($body, 'metadata', 'metadata must be an object.'),
+            $this->validateStringField($body, 'prompt', 'prompt must be a string.'),
+            $this->validateStringField($body, 'markdown_content', 'markdown_content must be a string.'),
+            $this->validateBoolField($body, 'public_access_enabled', 'public_access_enabled must be a boolean.'),
+        ];
+        foreach ($messages as $message) {
+            if ($message !== null) {
+                return $this->badRequest($message);
             }
         }
-        if ($message === null
-            && array_key_exists('tags', $body)
-            && $body['tags'] !== null
-            && !is_array($body['tags'])
-        ) {
-            $message = 'tags must be an array of strings.';
-        }
-        if ($message === null
-            && array_key_exists('metadata', $body)
-            && $body['metadata'] !== null
-            && !is_array($body['metadata'])
-        ) {
-            $message = 'metadata must be an object.';
-        }
-        if ($message === null
-            && array_key_exists('prompt', $body)
-            && $body['prompt'] !== null
-            && !is_string($body['prompt'])
-        ) {
-            $message = 'prompt must be a string.';
-        }
-        if ($message === null
-            && array_key_exists('markdown_content', $body)
-            && $body['markdown_content'] !== null
-            && !is_string($body['markdown_content'])
-        ) {
-            $message = 'markdown_content must be a string.';
-        }
-        if ($message === null
-            && array_key_exists('public_access_enabled', $body)
-            && !is_bool($body['public_access_enabled'])
-        ) {
-            $message = 'public_access_enabled must be a boolean.';
-        }
+        return null;
+    }
 
-        return $message === null ? null : $this->badRequest($message);
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function validateFilenameField(array $body): ?string
+    {
+        if (!array_key_exists('filename', $body)) {
+            return null;
+        }
+        $filename = $body['filename'];
+        if ($filename !== null && (!is_string($filename) || strlen($filename) > 255)) {
+            return 'filename must be a string up to 255 characters.';
+        }
+        return null;
+    }
+
+    /**
+     * Shared validator for tags and metadata: both reject non-null
+     * non-array payloads.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function validateArrayField(array $body, string $field, string $errorMessage): ?string
+    {
+        if (!array_key_exists($field, $body)) {
+            return null;
+        }
+        $value = $body[$field];
+        if ($value !== null && !is_array($value)) {
+            return $errorMessage;
+        }
+        return null;
+    }
+
+    /**
+     * Shared validator for prompt and markdown_content: both reject
+     * non-null non-string payloads.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function validateStringField(array $body, string $field, string $errorMessage): ?string
+    {
+        if (!array_key_exists($field, $body)) {
+            return null;
+        }
+        $value = $body[$field];
+        if ($value !== null && !is_string($value)) {
+            return $errorMessage;
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function validateBoolField(array $body, string $field, string $errorMessage): ?string
+    {
+        if (!array_key_exists($field, $body)) {
+            return null;
+        }
+        if (!is_bool($body[$field])) {
+            return $errorMessage;
+        }
+        return null;
     }
 
     public function destroy(string $id): JsonResponse
