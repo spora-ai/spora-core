@@ -7,6 +7,7 @@ use DI\ContainerBuilder;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Spora\Auth\AuthService;
+use Spora\Core\ConfigMerger;
 use Spora\Core\ContainerDefinitions;
 use Spora\Core\Kernel;
 use Spora\Core\Paths;
@@ -990,7 +991,7 @@ describe('nested env override merging', function (): void {
         $file   = ['media_archive' => ['b' => 20, 'c' => 30]];
         $env    = ['media_archive' => ['c' => 300]];
 
-        $merged = callContainerMethod('mergeConfig', [$base, $file, $env]);
+        $merged = ConfigMerger::merge($base, $file, $env);
 
         expect($merged['media_archive']['a'])->toBe(1);
         expect($merged['media_archive']['b'])->toBe(20);
@@ -1004,7 +1005,7 @@ describe('nested env override merging', function (): void {
         $base = ['media_archive' => ['allowed_image_types' => ['png', 'jpeg', 'webp']]];
         $env  = ['media_archive' => ['allowed_image_types' => ['gif']]];
 
-        $merged = callContainerMethod('mergeConfig', [$base, $env]);
+        $merged = ConfigMerger::merge($base, $env);
 
         expect($merged['media_archive']['allowed_image_types'])->toBe(['gif']);
     });
@@ -1017,7 +1018,7 @@ describe('nested env override merging', function (): void {
         $file     = ['shared' => 'file-shared', 'file_only' => 'file-only'];
         $env      = ['shared' => 'env-shared', 'env_only' => 'env-only'];
 
-        $merged = callContainerMethod('mergeConfig', [$defaults, $file, $env]);
+        $merged = ConfigMerger::merge($defaults, $file, $env);
 
         expect($merged['k'])->toBe('default-k');
         expect($merged['shared'])->toBe('env-shared');
@@ -1103,24 +1104,24 @@ describe('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES', function (): void {
 
 describe('parseImageTypesCsv', function (): void {
     it('returns null when input is null', function (): void {
-        expect(callContainerMethod('parseImageTypesCsv', [null]))->toBeNull();
+        expect(ConfigMerger::parseImageTypesCsv(null))->toBeNull();
     });
 
     it('returns empty array for empty string (distinct from null)', function (): void {
-        expect(callContainerMethod('parseImageTypesCsv', ['']))->toBe([]);
+        expect(ConfigMerger::parseImageTypesCsv(''))->toBe([]);
     });
 
     it('collapses jpg → jpeg', function (): void {
-        expect(callContainerMethod('parseImageTypesCsv', ['jpg,jpeg']))->toBe(['jpeg']);
+        expect(ConfigMerger::parseImageTypesCsv('jpg,jpeg'))->toBe(['jpeg']);
     });
 
     it('drops duplicates while preserving first occurrence', function (): void {
-        expect(callContainerMethod('parseImageTypesCsv', ['png,PNG,jpg']))
+        expect(ConfigMerger::parseImageTypesCsv('png,PNG,jpg'))
             ->toBe(['png', 'jpeg']);
     });
 
     it('excludes svg regardless of casing or leading dot', function (): void {
-        expect(callContainerMethod('parseImageTypesCsv', ['.svg,SVG,svg+xml,png']))
+        expect(ConfigMerger::parseImageTypesCsv('.svg,SVG,svg+xml,png'))
             ->toBe(['png']);
     });
 });
