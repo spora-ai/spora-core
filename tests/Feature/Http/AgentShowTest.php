@@ -89,6 +89,10 @@ function buildAgentController(): AgentController
         {
             return Agent::query()->find($agentId) ?? throw new RuntimeException('agent not found');
         }
+        public function setFavorite(int $userId, int $agentId, bool $favorite): Agent
+        {
+            return Agent::query()->find($agentId) ?? throw new RuntimeException('agent not found');
+        }
         /** @phpstan-ignore return.unusedType */
         public function enableTool(int $agentId, int $userId, string $toolClass): array
         {

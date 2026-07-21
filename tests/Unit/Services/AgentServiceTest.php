@@ -712,15 +712,16 @@ describe('AgentService::maskLlmConfig via public API', function (): void {
     });
 });
 
-describe('AgentService::setPinned / setArchived', function (): void {
+describe('AgentService::setPinned / setArchived / setFavorite', function (): void {
 
-    it('newly created agents default to is_pinned=false and is_archived=false', function (): void {
+    it('newly created agents default to is_pinned=false, is_archived=false, and is_favorite=false', function (): void {
         [$service, $userId] = makeAgentServiceWithUser();
 
         $agent = $service->createAgent($userId, ['name' => 'Defaults']);
 
         expect($agent->is_pinned)->toBeFalse();
         expect($agent->is_archived)->toBeFalse();
+        expect($agent->is_favorite)->toBeFalse();
     });
 
     /**
@@ -731,6 +732,7 @@ describe('AgentService::setPinned / setArchived', function (): void {
     dataset('flagSetters', [
         'setPinned'   => ['setPinned',   'is_pinned',   'Pin me'],
         'setArchived' => ['setArchived', 'is_archived', 'Archive me'],
+        'setFavorite' => ['setFavorite', 'is_favorite', 'Favorite me'],
     ]);
 
     it('persists and returns the agent', function (string $method, string $field, string $name): void {
@@ -758,6 +760,16 @@ describe('AgentService::setPinned / setArchived', function (): void {
         expect($result->is_pinned)->toBeFalse();
     });
 
+    it('setFavorite can flip back to false', function (): void {
+        [$service, $userId] = makeAgentServiceWithUser();
+        $agent = $service->createAgent($userId, ['name' => 'Toggle favorite']);
+
+        $service->setFavorite($userId, (int) $agent->getKey(), true);
+        $result = $service->setFavorite($userId, (int) $agent->getKey(), false);
+
+        expect($result->is_favorite)->toBeFalse();
+    });
+
     /**
      * Parameterised ownership / not-found rejection: setPinned / setArchived
      * each throw AgentNotFoundException when the agent is missing or owned
@@ -766,6 +778,7 @@ describe('AgentService::setPinned / setArchived', function (): void {
     dataset('notFoundScenarios', [
         'setPinned:   foreign owner'   => ['setPinned',   'Not yours', 'agent-svc-pin-foreign@example.com'],
         'setArchived: missing agent'   => ['setArchived', null,        null],
+        'setFavorite: missing agent'   => ['setFavorite', null,        null],
     ]);
 
     it('throws AgentNotFoundException when the agent is inaccessible', function (string $method, ?string $agentName, ?string $foreignEmail): void {
