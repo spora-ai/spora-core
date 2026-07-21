@@ -133,6 +133,14 @@ final class AgentTool extends AbstractTool
 
     private const NOTES_SEPARATOR = "\n\n";
 
+    /**
+     * Shared failure message for every operation that scopes to a specific
+     * agent by id. Centralised so the wording stays consistent and the
+     * SonarCloud S1192 "duplicate literal" rule stays green as more
+     * operations are added.
+     */
+    private const AGENT_NOT_FOUND = 'Agent not found.';
+
     public function __construct(
         private readonly AgentServiceInterface $agentService,
         private readonly AgentTemplateImporter $templateImporter,
@@ -176,7 +184,7 @@ final class AgentTool extends AbstractTool
     {
         $agent = $this->agentService->getAgentByAgentId($agentId);
         if ($agent === null) {
-            return ToolResult::fail('Agent not found.');
+            return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
         $payload = AgentResource::toArray($agent);
@@ -213,7 +221,7 @@ final class AgentTool extends AbstractTool
 
         $agent = $this->agentService->updateAgentByAgentId($agentId, $patch);
         if ($agent === null) {
-            return ToolResult::fail('Agent not found.');
+            return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
         return ToolResult::ok(
@@ -226,7 +234,7 @@ final class AgentTool extends AbstractTool
     {
         $agent = $this->agentService->getAgentByAgentId($agentId);
         if ($agent === null) {
-            return ToolResult::fail('Agent not found.');
+            return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
         $notes = (string) ($agent->notes ?? '');
@@ -242,24 +250,39 @@ final class AgentTool extends AbstractTool
 
     /**
      * @param array<string, mixed> $arguments
+     * @return array{0: string, 1: string}|ToolResult
+     *   Returns [content, mode] on success; a ToolResult to surface
+     *   the failure to the caller on a missing/invalid argument.
      */
-    private function writeNotes(int $agentId, array $arguments): ToolResult
+    private function parseWriteNotesArgs(array $arguments): array|ToolResult
     {
         if (!array_key_exists('content', $arguments)) {
             return ToolResult::fail('write_notes: content is required.');
         }
         $content = (string) $arguments['content'];
-
-        $mode = (string) ($arguments['mode'] ?? 'append');
+        $mode    = (string) ($arguments['mode'] ?? 'append');
         if (!in_array($mode, self::NOTES_MODES, true)) {
             return ToolResult::fail(
                 "write_notes: invalid mode '{$mode}'. Allowed: " . implode(', ', self::NOTES_MODES) . '.',
             );
         }
+        return [$content, $mode];
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     */
+    private function writeNotes(int $agentId, array $arguments): ToolResult
+    {
+        $parsed = $this->parseWriteNotesArgs($arguments);
+        if ($parsed instanceof ToolResult) {
+            return $parsed;
+        }
+        [$content, $mode] = $parsed;
 
         $agent = $this->agentService->getAgentByAgentId($agentId);
         if ($agent === null) {
-            return ToolResult::fail('Agent not found.');
+            return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
         $existing = (string) ($agent->notes ?? '');
@@ -284,7 +307,7 @@ final class AgentTool extends AbstractTool
     {
         $agent = $this->agentService->getAgentByAgentId($agentId);
         if ($agent === null) {
-            return ToolResult::fail('Agent not found.');
+            return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
         $userId ??= $agent->user_id;
@@ -313,19 +336,23 @@ final class AgentTool extends AbstractTool
     }
 
     /**
+     * Run the shared pre-import guards (user, payload, validator) and
+     * return a `ToolResult` on the first failure, or the validated payload
+     * on success. Kept out of createAgent() to drop that method below the
+     * SonarCloud S1142 3-return ceiling.
+     *
      * @param array<string, mixed> $arguments
+     * @return array{userId: int, payload: array<string, mixed>}|ToolResult
      */
-    private function createAgent(?int $userId, array $arguments): ToolResult
+    private function prepareCreateAgent(?int $userId, array $arguments): array|ToolResult
     {
         if ($userId === null) {
             return ToolResult::fail('create_agent requires an authenticated user.');
         }
-
         $payload = (array) ($arguments['payload'] ?? []);
         if ($payload === []) {
             return ToolResult::fail('create_agent: payload object is required.');
         }
-
         // Same guard the operator upload endpoint uses — malformed LLM
         // payloads fail before any DB write.
         $validation = $this->templateValidator->validate($payload);
@@ -335,8 +362,20 @@ final class AgentTool extends AbstractTool
                 . $this->summarizeValidationErrors($validation),
             );
         }
+        return ['userId' => $userId, 'payload' => $payload];
+    }
 
-        $result = $this->templateImporter->importPayload($userId, $payload);
+    /**
+     * @param array<string, mixed> $arguments
+     */
+    private function createAgent(?int $userId, array $arguments): ToolResult
+    {
+        $prepared = $this->prepareCreateAgent($userId, $arguments);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
+        }
+
+        $result = $this->templateImporter->importPayload($prepared['userId'], $prepared['payload']);
 
         return ToolResult::ok(
             "Created agent #{$result->agent->id} ('{$result->agent->name}').",

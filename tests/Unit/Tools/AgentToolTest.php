@@ -150,6 +150,150 @@ describe('AgentTool::execute — write_notes', function (): void {
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('invalid mode');
     });
+
+    test('appends by default and persists via updateAgentByAgentId', function (): void {
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $agent           = new Agent();
+        $agent->id       = 7;
+        $agent->user_id  = 99;
+        $agent->name     = 'Alpha';
+        $agent->notes    = 'pre-existing';
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $service->shouldReceive('updateAgentByAgentId')
+            ->once()
+            ->with(7, ['notes' => "pre-existing\n\nnew content"])
+            ->andReturn($agent);
+
+        $result = $tool->execute(
+            ['action' => 'write_notes', 'content' => 'new content'],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeTrue();
+        /** @var array<string, mixed> $data */
+        $data = $result->data;
+        expect($data['mode'])->toBe('append')
+            ->and($data['notes'])->toBe("pre-existing\n\nnew content")
+            ->and($data['length'])->toBe(mb_strlen("pre-existing\n\nnew content"));
+    });
+
+    test('uses the literal mode when provided', function (): void {
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $agent           = new Agent();
+        $agent->id       = 7;
+        $agent->user_id  = 99;
+        $agent->name     = 'Alpha';
+        $agent->notes    = 'existing';
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $service->shouldReceive('updateAgentByAgentId')
+            ->once()
+            ->with(7, ['notes' => 'replacement'])
+            ->andReturn($agent);
+
+        $result = $tool->execute(
+            ['action' => 'write_notes', 'content' => 'replacement', 'mode' => 'overwrite'],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeTrue();
+        /** @var array<string, mixed> $data */
+        $data = $result->data;
+        expect($data['mode'])->toBe('overwrite');
+    });
+
+    test('returns failure when Agent::find returns null', function (): void {
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $service->allows('getAgentByAgentId')->andReturn(null);
+
+        $result = $tool->execute(
+            ['action' => 'write_notes', 'content' => 'x'],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('Agent not found.');
+    });
+});
+
+describe('AgentTool::execute — read_notes', function (): void {
+    test('returns notes and length when the agent exists', function (): void {
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $agent           = new Agent();
+        $agent->id       = 7;
+        $agent->user_id  = 99;
+        $agent->name     = 'Alpha';
+        $agent->notes    = '# runbook';
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+
+        $result = $tool->execute(['action' => 'read_notes'], 7, 99);
+
+        expect($result->success)->toBeTrue();
+        /** @var array<string, mixed> $data */
+        $data = $result->data;
+        expect($data['notes'])->toBe('# runbook')
+            ->and($data['length'])->toBe(9);
+    });
+
+    test('returns failure when Agent::find returns null', function (): void {
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $service->allows('getAgentByAgentId')->andReturn(null);
+
+        $result = $tool->execute(['action' => 'read_notes'], 7);
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('Agent not found.');
+    });
+});
+
+describe('AgentTool::execute — write_agent_configuration — happy path', function (): void {
+    test('forwards patch and returns the updated resource', function (): void {
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $agent           = new Agent();
+        $agent->id       = 7;
+        $agent->user_id  = 99;
+        $agent->name     = 'Alpha';
+        $agent->notes    = null;
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $service->shouldReceive('updateAgentByAgentId')
+            ->once()
+            ->andReturn(stubAgent(7, 'Renamed'));
+
+        $result = $tool->execute(
+            ['action' => 'write_agent_configuration', 'agent' => ['name' => 'Renamed']],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeTrue();
+        /** @var array<string, mixed> $data */
+        $data = $result->data;
+        expect($data['name'])->toBe('Renamed');
+    });
+
+    test('returns failure when the agent disappears mid-write', function (): void {
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        // updateAgentByAgentId returns null when the agent no longer exists,
+        // which the tool surfaces as the standard AGENT_NOT_FOUND failure.
+        $service->allows('updateAgentByAgentId')->andReturn(null);
+
+        $result = $tool->execute(
+            ['action' => 'write_agent_configuration', 'agent' => ['name' => 'x']],
+            7,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('Agent not found.');
+    });
 });
 
 describe('AgentTool::execute — get_available_tools', function (): void {
@@ -246,6 +390,38 @@ describe('AgentTool::execute — create_agent', function (): void {
 
         expect($out->success)->toBeFalse()
             ->and($out->content)->toContain('payload failed validation');
+    });
+
+    test('happy path: validates and imports a complete payload', function (): void {
+        // Booting auth so the importer can resolve the agent's user_id FK
+        // against the in-memory SQLite db seeded by Pest's beforeEach.
+        $auth   = bootAuthLayer();
+        $userId = bootAuth($auth, 'creator@example.com');
+        [$tool] = makeAgentTool();
+
+        $out = $tool->execute(
+            [
+                'action'  => 'create_agent',
+                'payload' => [
+                    'id'      => 'new-agent',
+                    'name'    => 'New Agent',
+                    'version' => '1.0.0',
+                    'agent'   => ['description' => 'created via AgentTool'],
+                    'tools'   => [],
+                ],
+            ],
+            7,
+            $userId,
+        );
+
+        expect($out->success)->toBeTrue();
+        /** @var array<string, mixed> $data */
+        $data = $out->data;
+        /** @var array<string, mixed> $agentRow */
+        $agentRow = $data['agent'];
+        expect($agentRow['name'])->toBe('New Agent')
+            ->and($agentRow['description'])->toBe('created via AgentTool')
+            ->and($data['tools_enabled'])->toBe([]);
     });
 });
 
