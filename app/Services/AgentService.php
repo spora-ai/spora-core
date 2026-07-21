@@ -84,7 +84,7 @@ final class AgentService implements AgentServiceInterface
             return null;
         }
 
-        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived'];
+        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived', 'is_favorite'];
         $filtered = array_intersect_key($data, array_flip($allowed));
 
         if ($filtered !== []) {

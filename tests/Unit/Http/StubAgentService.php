@@ -96,7 +96,6 @@ class StubAgentService implements AgentServiceInterface
     {
         return $this->setFlag($userId, $agentId, 'is_archived', $archived);
     }
-
     /**
      * Apply the static default scalars to a stubbed Agent. Mirrors the
      * migration defaults for the new flag columns plus the long-standing
