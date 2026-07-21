@@ -67,6 +67,41 @@ test('PATCH prompt is persisted', function (): void {
     expect($body['data']['prompt'])->toBe('updated');
 });
 
+test('PATCH markdown_content is persisted', function (): void {
+    [, $service, $controller] = buildUpdateController();
+    $asset = ingestSample($service, 1);
+    $req = Request::create("/api/v1/media/{$asset->id}", 'PATCH', content: json_encode(['markdown_content' => "# Hello\n\nWorld"]));
+    $req->headers->set('Content-Type', 'application/json');
+    $resp = $controller->update($asset->id, $req);
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['markdown_content'])->toBe("# Hello\n\nWorld");
+});
+
+test('PATCH markdown_content can be cleared by sending null', function (): void {
+    [, $service, $controller] = buildUpdateController();
+    $asset = ingestSample($service, 1);
+    $asset->markdown_content = 'pre-existing';
+    $asset->save();
+    $req = Request::create("/api/v1/media/{$asset->id}", 'PATCH', content: json_encode(['markdown_content' => null]));
+    $req->headers->set('Content-Type', 'application/json');
+    $resp = $controller->update($asset->id, $req);
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['markdown_content'])->toBeNull();
+});
+
+test('PATCH markdown_content rejects non-string non-null payloads with 400', function (): void {
+    [, $service, $controller] = buildUpdateController();
+    $asset = ingestSample($service, 1);
+    $req = Request::create("/api/v1/media/{$asset->id}", 'PATCH', content: json_encode(['markdown_content' => ['not', 'a', 'string']]));
+    $req->headers->set('Content-Type', 'application/json');
+    $resp = $controller->update($asset->id, $req);
+    expect($resp->getStatusCode())->toBe(400);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['error']['message'])->toBe('markdown_content must be a string.');
+});
+
 test('PATCH returns 403 when the asset is owned by a different non-admin user', function (): void {
     [, $service] = buildUpdateController();
     $asset = ingestSample($service, 99);

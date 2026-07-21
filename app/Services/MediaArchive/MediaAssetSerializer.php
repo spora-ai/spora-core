@@ -37,6 +37,7 @@ final class MediaAssetSerializer
             'duration_seconds'    => $asset->duration_seconds,
             'prompt'              => $asset->prompt,
             'filename'            => $asset->filename,
+            'markdown_content'    => $asset->markdown_content,
             'tags'                => $asset->tags,
             'metadata'            => $asset->metadata,
             'asset_url'           => $asset->publicUrl(),
