@@ -119,13 +119,8 @@ final class AgentService implements AgentServiceInterface
         return $this->setFlag($userId, $agentId, 'is_archived', $archived);
     }
 
-    public function setFavorite(int $userId, int $agentId, bool $favorite): Agent
-    {
-        return $this->setFlag($userId, $agentId, 'is_favorite', $favorite);
-    }
-
     /**
-     * Shared flip-a-boolean-column path for setPinned / setArchived / setFavorite.
+     * Shared flip-a-boolean-column path for setPinned / setArchived.
      * Centralises the user-scoped ownership check + updated_at stamp so
      * the public methods stay one-liners and the SQL shape stays in one place.
      */

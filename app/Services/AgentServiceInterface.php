@@ -48,18 +48,6 @@ interface AgentServiceInterface
      */
     public function setArchived(int $userId, int $agentId, bool $archived): Agent;
 
-    /**
-     * Favorite or unfavorite an agent for the given user.
-     *
-     * Parameter order is (int $userId, int $agentId, bool $value) — see
-     * setPinned() / setArchived() for the rationale on the deliberate
-     * flip away from the service-wide (int $agentId, int $userId, ...)
-     * convention.
-     *
-     * @throws Exceptions\AgentNotFoundException If the agent does not exist or is not owned by $userId
-     */
-    public function setFavorite(int $userId, int $agentId, bool $favorite): Agent;
-
     // ── Tool management ─────────────────────────────────────────────────────────
 
     /**
