@@ -11,6 +11,7 @@ use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\Agents\AgentToolInstanceResolver;
 use Spora\Services\Agents\AgentToolOverrideResolver;
 use Spora\Services\AgentService;
+use Spora\Services\AgentToolSettingsService;
 use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
@@ -20,7 +21,7 @@ use Spora\Tools\CalculatorTool;
 defined('AGENT_TEST_PASSWORD') || define('AGENT_TEST_PASSWORD', 'Password1!');
 
 /**
- * @return array{0: AgentService, 1: int}
+ * @return array{0: AgentService, 1: int, 2: ToolConfigService, 3: LLMConfigService}
  */
 function makeAgentServiceWithUser(): array
 {
@@ -34,7 +35,7 @@ function makeAgentServiceWithUser(): array
     $toolConfig = new ToolConfigService($security, $logger, [CalculatorTool::class]);
     $llmConfig  = new LLMConfigService($security, []);
 
-    $service = new AgentService($toolConfig, $llmConfig);
+    $service = new AgentService();
 
     $auth = bootAuthLayer();
     static $seq = 0;
@@ -42,7 +43,7 @@ function makeAgentServiceWithUser(): array
     $email = "agent-service-{$seq}@example.com";
     $userId = bootAuth($auth, $email, AGENT_TEST_PASSWORD);
 
-    return [$service, $userId];
+    return [$service, $userId, $toolConfig, $llmConfig];
 }
 
 /**
@@ -50,9 +51,9 @@ function makeAgentServiceWithUser(): array
  */
 function makeAgentServiceWithLlmDriver(): array
 {
-    // Same as makeAgentServiceWithUser() but with an LLMConfigService that
-    // knows about the OpenAI driver so getOverride('llm_configuration', …)
-    // can resolve a settings schema and apply password masking.
+    // Like makeAgentServiceWithUser() but the LLMConfigService knows about
+    // the OpenAI driver so getOverride('llm_configuration', ...) can resolve
+    // a settings schema and apply password masking.
     $key = str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new SecurityManager($key);
     $logger   = new NullLogger();
@@ -60,7 +61,7 @@ function makeAgentServiceWithLlmDriver(): array
     $toolConfig = new ToolConfigService($security, $logger, [CalculatorTool::class]);
     $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
-    $service = new AgentService($toolConfig, $llmConfig);
+    $service = new AgentService();
 
     $auth = bootAuthLayer();
     static $seq = 0;
@@ -115,13 +116,16 @@ describe('AgentService::getAgentsForUser', function (): void {
         $logger   = new NullLogger();
         $toolConfig = new ToolConfigService($security, $logger, [CalculatorTool::class]);
         $llmConfig  = new LLMConfigService($security, []);
-        $service = new AgentService($toolConfig, $llmConfig, $resolver);
+        $service = new AgentService($resolver);
 
         $auth = bootAuthLayer();
         $userId = bootAuth($auth, 'agent-svc-icons@example.com', AGENT_TEST_PASSWORD);
 
         $agent = $service->createAgent($userId, ['name' => 'Icon List Agent']);
-        $service->enableTool($agent->id, $userId, CalculatorTool::class);
+        // Tool enablement moved to AgentToolSettingsService when AgentService
+        // was split to satisfy SonarCloud S1448.
+        $toolSettings = new AgentToolSettingsService($toolConfig, $llmConfig);
+        $toolSettings->enableTool($agent->id, $userId, CalculatorTool::class);
 
         $result = $service->getAgentsForUser($userId);
 
@@ -134,10 +138,13 @@ describe('AgentService::getAgentsForUser', function (): void {
         // Mirrors AgentResourceTest's contract: when the service is constructed
         // without a resolver, each tools[i] entry has no `icon` key. The
         // frontend's <Icon> falls back to 'puzzle' on missing keys.
-        [$service, $userId] = makeAgentServiceWithUser();
+        [$service, $userId, $toolConfig, $llmConfig] = makeAgentServiceWithUser();
 
         $agent = $service->createAgent($userId, ['name' => 'Backcompat Agent']);
-        $service->enableTool($agent->id, $userId, CalculatorTool::class);
+        // Tool enablement moved to AgentToolSettingsService when AgentService
+        // was split to satisfy SonarCloud S1448.
+        $toolSettings = new AgentToolSettingsService($toolConfig, $llmConfig);
+        $toolSettings->enableTool($agent->id, $userId, CalculatorTool::class);
 
         $result = $service->getAgentsForUser($userId);
 
@@ -231,323 +238,13 @@ describe('AgentService::getAgent / updateAgent / deleteAgent', function (): void
     });
 });
 
-describe('AgentService::enableTool / disableTool', function (): void {
-
-    it('enables a tool on an agent', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'Tooled']);
-
-        $result = $service->enableTool($agent->id, $userId, CalculatorTool::class);
-        expect($result['tool']['tool_class'])->toBe(CalculatorTool::class);
-        expect($result['tool']['tool_name'])->toBe('calculator');
-        expect($result)->not->toHaveKey('is_idempotent');
-    });
-
-    it('is idempotent when called twice', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'Tooled']);
-
-        $first  = $service->enableTool($agent->id, $userId, CalculatorTool::class);
-        $second = $service->enableTool($agent->id, $userId, CalculatorTool::class);
-
-        expect($second)->toHaveKey('is_idempotent');
-        expect($second['is_idempotent'])->toBeTrue();
-        // Both calls reference the same tool
-        expect($first['tool']['tool_class'])->toBe($second['tool']['tool_class']);
-    });
-
-    it('returns error when agent does not exist', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $result = $service->enableTool(9999, $userId, CalculatorTool::class);
-        expect($result)->toBe(['error' => 'NOT_FOUND']);
-    });
-
-    it('disables a tool', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'Tooled']);
-        $service->enableTool($agent->id, $userId, CalculatorTool::class);
-
-        $service->disableTool($agent->id, $userId, CalculatorTool::class);
-
-        $status = $service->getToolStatus($agent->id, $userId, CalculatorTool::class);
-        expect($status['is_enabled'])->toBeFalse();
-    });
-});
-
-describe('AgentService::getToolStatus / getAllToolsStatus', function (): void {
-
-    it('returns null for a non-existent agent', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        expect($service->getToolStatus(9999, $userId, CalculatorTool::class))->toBeNull();
-        expect($service->getAllToolsStatus(9999, $userId))->toBeNull();
-    });
-
-    it('reports is_enabled=false for a tool that has not been enabled', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'NoTools']);
-
-        $status = $service->getToolStatus($agent->id, $userId, CalculatorTool::class);
-        expect($status['is_enabled'])->toBeFalse();
-        expect($status['tool_class'])->toBe(CalculatorTool::class);
-    });
-
-    it('lists all registered tools in getAllToolsStatus', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'HasTools']);
-
-        $all = $service->getAllToolsStatus($agent->id, $userId);
-        expect($all)->toBeArray();
-        expect($all)->toHaveCount(1);
-        expect($all[0]['tool_class'])->toBe(CalculatorTool::class);
-    });
-});
-
-describe('AgentService::getOverride', function (): void {
-
-    it('returns an empty array when the agent does not exist', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        expect($service->getOverride(9999, $userId, CalculatorTool::class))->toBe([]);
-    });
-
-    it('returns the raw agent override when rawOnly is true (no source annotation)', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'RawOverride']);
-        $service->putOverride($agent->id, $userId, CalculatorTool::class, [
-            'calculator.expression' => '2+2',
-        ]);
-
-        $raw = $service->getOverride($agent->id, $userId, CalculatorTool::class, rawOnly: true);
-        expect($raw)->toHaveKey('calculator.expression');
-        expect($raw['calculator.expression'])->toBe('2+2');
-        // rawOnly path does NOT wrap in {value, source}
-        expect($raw['calculator.expression'])->not->toHaveKey('value');
-    });
-
-    it('returns annotated {value, source} entries when rawOnly is false', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'Annotated']);
-        $service->putOverride($agent->id, $userId, CalculatorTool::class, [
-            'calculator.expression' => '3+4',
-        ]);
-
-        $annotated = $service->getOverride($agent->id, $userId, CalculatorTool::class);
-        expect($annotated)->toHaveKey('calculator.expression');
-        expect($annotated['calculator.expression'])->toHaveKeys(['value', 'source']);
-        expect($annotated['calculator.expression']['value'])->toBe('3+4');
-        // The agent override layer is the source for the put
-        expect($annotated['calculator.expression']['source'])->toBe('agent');
-    });
-
-    it('masks password settings to *** in the annotated path', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'PasswordAgent']);
-
-        // CalculatorTool has no password settings — values pass through unchanged.
-        $service->putOverride($agent->id, $userId, CalculatorTool::class, [
-            'calculator.expression' => '1+1',
-        ]);
-        $annotated = $service->getOverride($agent->id, $userId, CalculatorTool::class);
-        expect($annotated['calculator.expression']['value'])->toBe('1+1');
-    });
-
-    it('returns an empty array for llm_configuration when the agent has no config', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'NoLlmConfig']);
-
-        $result = $service->getOverride($agent->id, $userId, 'llm_configuration');
-        // No LLM driver config assigned → empty result
-        expect($result)->toBe([]);
-    });
-
-    it('returns a masked LLM configuration array when the agent has one assigned', function (): void {
-        // Uses the LLM-driver-enabled service so maskLlmConfig can resolve
-        // the settings schema (and therefore mask the api_key password field).
-        [$service, $userId] = makeAgentServiceWithLlmDriver();
-
-        $config = LLMDriverConfiguration::create([
-            'user_id'      => null,
-            'name'         => 'Global default',
-            'driver_class' => OpenAICompatibleDriver::class,
-            'settings'     => json_encode([
-                'api_key'  => 'plain-secret',
-                'model'    => 'gpt-4o',
-                'base_url' => 'https://api.openai.com/v1',
-            ]),
-            'is_global'  => true,
-            'is_default' => true,
-        ]);
-
-        $agent = $service->createAgent($userId, [
-            'name'                 => 'LlmAgent',
-            'llm_driver_config_id' => (int) $config->getKey(),
-        ]);
-
-        $result = $service->getOverride($agent->id, $userId, 'llm_configuration');
-
-        expect($result)->toBeArray();
-        // api_key is a password field → must be masked
-        expect($result)->toHaveKey('api_key');
-        expect($result['api_key'])->toBe('***');
-        // Non-password fields pass through unchanged
-        expect($result['model'])->toBe('gpt-4o');
-        expect($result['base_url'])->toBe('https://api.openai.com/v1');
-    });
-
-    it('returns the tool override (array) for an enabled tool with no row stored', function (): void {
-        // getOverride for a registered tool class (not 'llm_configuration')
-        // returns the agent override even when no row exists — it should be
-        // an array, possibly empty if there are no settings for that tool.
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'ToolNoOverride']);
-        $service->enableTool($agent->id, $userId, CalculatorTool::class);
-
-        $raw = $service->getOverride($agent->id, $userId, CalculatorTool::class, rawOnly: true);
-        expect($raw)->toBeArray();
-        // CalculatorTool has no schema-default settings; raw agent override is empty.
-        expect($raw)->not->toHaveKey('calculator.expression');
-    });
-});
-
-describe('AgentService::putOverride / deleteOverride', function (): void {
-
-    it('returns an empty array when putting on a non-existent agent', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        expect($service->putOverride(9999, $userId, CalculatorTool::class, ['x' => 1]))->toBe([]);
-    });
-
-    it('returns the effective settings after a put', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'PutOK']);
-
-        $masked = $service->putOverride($agent->id, $userId, CalculatorTool::class, [
-            'calculator.expression' => '5*5',
-        ]);
-        expect($masked)->toHaveKey('calculator.expression');
-        expect($masked['calculator.expression'])->toBe('5*5');
-    });
-
-    it('deleteOverride is a no-op when the agent does not exist', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        // Should not throw
-        $service->deleteOverride(9999, $userId, CalculatorTool::class);
-        expect(true)->toBeTrue();
-    });
-
-    it('deleteOverride removes the agent-level override', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'DeleteOK']);
-        $service->putOverride($agent->id, $userId, CalculatorTool::class, [
-            'calculator.expression' => '7+7',
-        ]);
-
-        $service->deleteOverride($agent->id, $userId, CalculatorTool::class);
-
-        $raw = $service->getOverride($agent->id, $userId, CalculatorTool::class, rawOnly: true);
-        // After delete, the agent-level override is gone — either empty or
-        // shows the global default (also empty for CalculatorTool).
-        expect($raw)->not->toHaveKey('calculator.expression');
-    });
-});
-
-describe('AgentService::getToolsOperations / getOperationOverride / patchOperationOverride', function (): void {
-
-    it('returns null for getToolsOperations when the agent does not exist', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        expect($service->getToolsOperations(9999, $userId))->toBeNull();
-    });
-
-    it('returns enabled operations for tools that use HasOperations', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'HasOps']);
-        $service->enableTool($agent->id, $userId, CalculatorTool::class);
-
-        $ops = $service->getToolsOperations($agent->id, $userId);
-        expect($ops)->not->toBeEmpty();
-        expect($ops[0])->toHaveKeys([
-            'tool_class', 'tool_name', 'operation',
-            'enabled', 'default_requires_approval',
-            'effective_enabled', 'effective_requires_approval',
-        ]);
-        expect($ops[0]['tool_class'])->toBe(CalculatorTool::class);
-    });
-
-    it('returns an empty array for getOperationOverride when the agent does not exist', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        expect($service->getOperationOverride(9999, $userId, CalculatorTool::class, 'eval'))
-            ->toBe([]);
-    });
-
-    it('returns an empty array for getOperationOverride for a missing override', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'OpOverride']);
-
-        $row = $service->getOperationOverride($agent->id, $userId, CalculatorTool::class, 'eval');
-        expect($row)->toBe([
-            'operation'                   => 'eval',
-            'tool_class'                  => CalculatorTool::class,
-            'enabled'                      => null,
-            'default_requires_approval'    => null,
-            'effective_enabled'            => true,
-            'effective_requires_approval'  => true,
-        ]);
-    });
-
-    it('patchOperationOverride creates a new override row', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'PatchNew']);
-
-        $result = $service->patchOperationOverride(
-            $agent->id,
-            $userId,
-            CalculatorTool::class,
-            'eval',
-            ['enabled' => false, 'default_requires_approval' => true],
-        );
-
-        expect($result['enabled'])->toBe(0);
-        expect($result['default_requires_approval'])->toBe(1);
-    });
-
-    it('patchOperationOverride updates an existing override row', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        $agent = $service->createAgent($userId, ['name' => 'PatchUpdate']);
-
-        $service->patchOperationOverride(
-            $agent->id,
-            $userId,
-            CalculatorTool::class,
-            'eval',
-            ['enabled' => true],
-        );
-
-        // Update only default_requires_approval — enabled must stay
-        $updated = $service->patchOperationOverride(
-            $agent->id,
-            $userId,
-            CalculatorTool::class,
-            'eval',
-            ['default_requires_approval' => false],
-        );
-
-        expect($updated['enabled'])->toBe(1);
-        expect($updated['default_requires_approval'])->toBe(0);
-    });
-
-    it('patchOperationOverride returns empty when the agent does not exist', function (): void {
-        [$service, $userId] = makeAgentServiceWithUser();
-        expect($service->patchOperationOverride(9999, $userId, CalculatorTool::class, 'eval', ['enabled' => true]))
-            ->toBe([]);
-    });
-});
 
 describe('AgentService private helpers (now on collaborators)', function (): void {
-    // After the AgentService split (refactor/split-agent-service), the helper
-    // methods moved to dedicated collaborators:
-    //   - AgentToolOverrideResolver::extractOverrideFlag, parseOverrideFlag, maskLlmConfig
-    //   - AgentToolInstanceResolver::resolveToolInstance
-    // The override-resolver methods are public on the new class, so they can
-    // be called directly. maskLlmConfig is still private, so reflection is
-    // needed (targeting the new class, not AgentService).
+    // After the AgentService split (S1448), the helpers moved to dedicated
+    // collaborators: extractOverrideFlag / parseOverrideFlag / maskLlmConfig
+    // on AgentToolOverrideResolver, resolveToolInstance on
+    // AgentToolInstanceResolver. maskLlmConfig is still private, so the
+    // last test below uses reflection against the new class.
 
     /**
      * Build an override resolver with the same key + drivers the rest of the
@@ -702,7 +399,13 @@ describe('AgentService::maskLlmConfig via public API', function (): void {
             'llm_driver_config_id' => (int) $config->getKey(),
         ]);
 
-        $result = $service->getOverride((int) $agent->getKey(), $userId, 'llm_configuration');
+        // getOverride() moved to AgentToolSettingsService when AgentService
+        // was split to satisfy SonarCloud S1448. The mask logic still
+        // runs through AgentToolOverrideResolver internally.
+        $llmConfig  = new LLMConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), [OpenAICompatibleDriver::class]);
+        $toolConfig = new ToolConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new NullLogger(), [CalculatorTool::class]);
+        $toolSettings = new AgentToolSettingsService($toolConfig, $llmConfig);
+        $result = $toolSettings->getOverride((int) $agent->getKey(), $userId, 'llm_configuration');
 
         expect($result)->toBeArray();
         // Password field is masked through the public surface

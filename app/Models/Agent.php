@@ -26,6 +26,8 @@ use Throwable;
  * @property int $max_retries
  * @property bool $is_pinned
  * @property bool $is_archived
+ * @property bool $is_favorite
+ * @property string|null $notes
  * @property DateTimeInterface|null $created_at
  * @property DateTimeInterface|null $updated_at
  */
@@ -46,6 +48,8 @@ final class Agent extends Model
         'max_retries',
         'is_pinned',
         'is_archived',
+        'is_favorite',
+        'notes',
     ];
 
     protected $casts = [
@@ -55,6 +59,7 @@ final class Agent extends Model
         'allow_followup' => 'boolean',
         'is_pinned' => 'boolean',
         'is_archived' => 'boolean',
+        'is_favorite' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

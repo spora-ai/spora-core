@@ -188,6 +188,21 @@ For plugin-based tools, place the class in your plugin directory and use the `Pl
 
 > **Full tool system docs:** Naming conventions, `#[Tool]` attribute, `#[ToolSetting]`, `#[ToolParameter]`, `InputToolInterface` vs `OutputToolInterface`, and the settings key convention are in [docs/06_tools.md](docs/06_tools.md).
 
+### Agent `notes` field vs `AgentTool`
+
+Operators store runbooks and behaviour hints on an agent through the `notes`
+markdown field, either via `PATCH /api/v1/agents/{id}` / the dashboard
+settings UI or by seeding the agent template. The `AgentTool`
+(`app/Tools/AgentTool.php`) exposes two `AgentTool` operations for the LLM:
+`read_notes` (returns current notes) and `write_notes` (defaults to
+`mode: append`, also accepts `prepend`). Inside `AgentTool` itself,
+`write_notes` is the only path that mutates `notes` from the LLM side;
+`write_agent_configuration` strips `notes` from its patch and refuses the
+call if nothing else remains, so an LLM cannot use config-write to smuggle
+a notes mutation. Wholesale replacement is a separate
+`write_notes_overwrite` operation, disabled by default and per-call
+operator-approved — the destructive path cannot ride on the safe default.
+
 ---
 
 ## Feature Overview

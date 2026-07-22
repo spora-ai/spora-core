@@ -23,6 +23,7 @@ it('maps every wire-format field for an agent', function (): void {
         'max_retries'          => 4,
         'is_pinned'            => true,
         'is_archived'          => false,
+        'is_favorite'          => true,
     ]);
 
     $array = AgentResource::toArray($agent);
@@ -33,7 +34,7 @@ it('maps every wire-format field for an agent', function (): void {
             'llm_driver_config_id', 'max_steps',
             'is_active', 'allow_followup',
             'retry_after_minutes', 'max_retries',
-            'is_pinned', 'is_archived',
+            'is_pinned', 'is_archived', 'is_favorite',
             'created_at', 'tools',
         ])
         ->and($array['id'])->toBe((int) $agent->id)
@@ -48,13 +49,14 @@ it('maps every wire-format field for an agent', function (): void {
         ->and($array['max_retries'])->toBe(4)
         ->and($array['is_pinned'])->toBeTrue()
         ->and($array['is_archived'])->toBeFalse()
+        ->and($array['is_favorite'])->toBeTrue()
         ->and($array['created_at'])->toBeString()
         ->and($array['tools'])->toBe([]);
 });
 
-it('defaults is_pinned and is_archived to false when the model columns are null', function (): void {
+it('defaults is_pinned, is_archived, and is_favorite to false when the model columns are null', function (): void {
     // New Agent() without save() leaves the boolean fields null. The mapper
-    // must coalesce both to false so clients never see null on a flag column.
+    // must coalesce each to false so clients never see null on a flag column.
     $agent = new Agent();
     $agent->name = 'Unset';
     $agent->max_steps = 10;
@@ -64,6 +66,7 @@ it('defaults is_pinned and is_archived to false when the model columns are null'
 
     expect($array['is_pinned'])->toBeFalse()
         ->and($array['is_archived'])->toBeFalse()
+        ->and($array['is_favorite'])->toBeFalse()
         ->and($array['created_at'])->toBeNull();
 });
 

@@ -5,13 +5,11 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use JsonException;
-use ReflectionClass;
 use Spora\Auth\AuthService;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
-use Spora\Tools\Attributes\Tool;
+use Spora\Tools\ToolSchemaPresenter;
 use Spora\Tools\ToolSettingSchema;
-use Spora\Tools\Traits\HasOperations;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -155,19 +153,14 @@ final class ToolController
 
     private function toolSchemaResource(string $toolClass): array
     {
-        if (!class_exists($toolClass)) {
-            // No class to resolve against — the resolver would have no tool.icon
-            // attribute to read, so null on the wire is correct here.
-            return ['tool_class' => $toolClass, 'tool_name' => basename(str_replace('\\', '/', $toolClass)), 'settings_schema' => [], 'operations' => [], 'icon' => null];
-        }
-
-        $reflection = new ReflectionClass($toolClass);
-
-        $toolAttrs = $reflection->getAttributes(Tool::class);
-        $toolAttr  = $toolAttrs !== [] ? $toolAttrs[0]->newInstance() : null;
-        $toolName  = $toolAttr->name ?? $reflection->getShortName();
-        $displayName = $toolAttr->displayName ?? $toolName;
-        $category = $toolAttr->category ?? 'general';
+        // Per-class metadata + per-operation declarations are extracted from
+        // #[Tool] / #[ToolOperation] by the shared presenter — keeps this
+        // controller focused on the form-side settings schema. AgentTool
+        // reuses the same presenter so the two callers stay in lockstep.
+        $summary = ToolSchemaPresenter::summarize(
+            $toolClass,
+            $this->toolIconResolver?->resolve($toolClass),
+        );
 
         $schema = [];
         // Schema rows for the form; `expose_to_llm` is the only field
@@ -185,36 +178,14 @@ final class ToolController
             ];
         }
 
-        $operations = [];
-        $usesOperations = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
-        if ($usesOperations) {
-            // Intentionally bypass the constructor to enumerate #[ToolOperation]
-            // declarations for the tool's settings schema. The instance is held
-            // only for attribute reflection via getOperations(), which is a pure
-            // metadata reader on the class — it never performs work and never
-            // requires injected dependencies. The orchestrator constructs real
-            // tool instances via the DI container at execution time. Safe by
-            // construction.
-            $instance = $reflection->newInstanceWithoutConstructor(); // NOSONAR php:S3011 — see comment above
-            foreach ($instance->getOperations() as $op) {
-                $operations[] = [
-                    'name'                          => $op->name,
-                    'description'                   => $op->description,
-                    'enabledByDefault'              => $op->enabledByDefault,
-                    'requiresApprovalByDefault'      => $op->requiresApprovalByDefault,
-                    'discriminatorKey'              => $op->discriminatorKey,
-                ];
-            }
-        }
-
         return [
-            'tool_class'      => $toolClass,
-            'tool_name'       => $toolName,
-            'display_name'    => $displayName,
-            'category'        => $category,
-            'icon'            => $this->toolIconResolver?->resolve($toolClass),
+            'tool_class'      => $summary['tool_class'],
+            'tool_name'       => $summary['tool_name'],
+            'display_name'    => $summary['display_name'],
+            'category'        => $summary['category'],
+            'icon'            => $summary['icon'],
             'settings_schema' => $schema,
-            'operations'      => $operations,
+            'operations'      => $summary['operations'],
         ];
     }
 

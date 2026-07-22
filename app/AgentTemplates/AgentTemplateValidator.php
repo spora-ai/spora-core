@@ -39,7 +39,7 @@ final class AgentTemplateValidator
     ];
 
     private const ALLOWED_AGENT_KEYS = [
-        'description', 'system_prompt', 'max_steps',
+        'description', 'system_prompt', 'notes', 'max_steps',
         'allow_continuation', 'retry_after_minutes', 'max_retries',
     ];
 
@@ -70,7 +70,6 @@ final class AgentTemplateValidator
         $this->validateStringField($raw, 'name', null, $result, true);
         $this->validateStringField($raw, 'version', self::VERSION_PATTERN, $result, true);
 
-        // `agent` is required.
         if (!array_key_exists('agent', $raw) || !is_array($raw['agent'])) {
             $result->addError([
                 'code'     => 'AGENT_REQUIRED',

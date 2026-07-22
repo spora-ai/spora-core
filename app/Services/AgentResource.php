@@ -48,6 +48,7 @@ final class AgentResource
             'name'                 => $agent->name,
             'description'          => $agent->description,
             'system_prompt'        => $agent->system_prompt,
+            'notes'                => $agent->notes,
             'llm_driver_config_id' => $agent->llm_driver_config_id,
             'max_steps'            => (int) $agent->max_steps,
             'is_active'            => (bool) $agent->is_active,
@@ -56,6 +57,7 @@ final class AgentResource
             'max_retries'          => (int) ($agent->max_retries ?? 0),
             'is_pinned'            => (bool) ($agent->is_pinned ?? false),
             'is_archived'          => (bool) ($agent->is_archived ?? false),
+            'is_favorite'          => (bool) ($agent->is_favorite ?? false),
             'created_at'           => $agent->created_at !== null
                 ? $agent->created_at->format(DateTimeInterface::ATOM)
                 : null,

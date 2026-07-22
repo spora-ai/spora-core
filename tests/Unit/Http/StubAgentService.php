@@ -82,6 +82,31 @@ class StubAgentService implements AgentServiceInterface
         return $agent;
     }
 
+    public function updateAgentByAgentId(int $agentId, array $data): ?Agent
+    {
+        // Mirror updateAgent() for the agent-scoped path the AgentTool uses.
+        $agent = new Agent();
+        $agent->id = $agentId;
+        $agent->user_id = 0;
+        $agent->name = 'Stub Agent';
+        $agent->description = null;
+        $agent->system_prompt = null;
+        $agent->llm_driver_config_id = null;
+        $agent->max_steps = 10;
+        $this->seedAgentDefaults($agent);
+
+        if (array_key_exists('notes', $data)) {
+            $agent->notes = (string) $data['notes'];
+        }
+
+        return $agent;
+    }
+
+    public function getAgentByAgentId(int $agentId): ?Agent
+    {
+        return $this->getAgent($agentId, 0);
+    }
+
     public function deleteAgent(int $agentId, int $userId): bool
     {
         return $agentId !== 999999;
@@ -96,7 +121,6 @@ class StubAgentService implements AgentServiceInterface
     {
         return $this->setFlag($userId, $agentId, 'is_archived', $archived);
     }
-
     /**
      * Apply the static default scalars to a stubbed Agent. Mirrors the
      * migration defaults for the new flag columns plus the long-standing
@@ -134,10 +158,7 @@ class StubAgentService implements AgentServiceInterface
         return ['tool' => ['tool_class' => $toolClass, 'is_enabled' => true]];
     }
 
-    public function disableTool(int $agentId, int $userId, string $toolClass): void
-    {
-        // no-op
-    }
+    public function disableTool(int $agentId, int $userId, string $toolClass): void {}
 
     public function getToolStatus(int $agentId, int $userId, string $toolClass): ?array
     {
@@ -168,10 +189,7 @@ class StubAgentService implements AgentServiceInterface
         return $settings;
     }
 
-    public function deleteOverride(int $agentId, int $userId, string $toolClass): void
-    {
-        // no-op
-    }
+    public function deleteOverride(int $agentId, int $userId, string $toolClass): void {}
 
     public function getToolsOperations(int $agentId, int $userId): ?array
     {

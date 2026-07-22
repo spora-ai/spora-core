@@ -101,6 +101,11 @@ final class AgentController
             'name'          => $name,
             'description'   => trim((string) ($body['description'] ?? '')) ?: null,
             'system_prompt' => trim((string) ($body['system_prompt'] ?? '')) ?: null,
+            // `notes` accepted on POST so an operator can seed runbook text
+            // on first-create, not just PATCH-edit. Mirrors the PATCH path.
+            'notes'         => isset($body['notes']) && is_string($body['notes']) && $body['notes'] !== ''
+                ? $body['notes']
+                : null,
             'llm_driver_config_id' => isset($body['llm_driver_config_id']) ? (int) $body['llm_driver_config_id'] : null,
             'max_steps'     => (int) ($body['max_steps'] ?? 10),
             'allow_followup' => array_key_exists('allow_followup', $body) ? (bool) $body['allow_followup'] : true,
@@ -145,13 +150,14 @@ final class AgentController
             return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
 
-        $allowed = ['name', 'description', 'system_prompt', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived'];
+        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived', 'is_favorite'];
         $data = array_intersect_key($body, array_flip($allowed));
 
         // Booleans arrive as either real bools or boolean-strings (the form
         // layer + curl both send 'true'/'false'). Coerce via FILTER_VALIDATE_BOOLEAN
         // so the service receives a real bool regardless of transport.
-        foreach (['is_pinned', 'is_archived'] as $boolKey) {
+        // notes stays a raw string (markdown) — never coerced.
+        foreach (['is_pinned', 'is_archived', 'is_favorite'] as $boolKey) {
             if (array_key_exists($boolKey, $data)) {
                 $data[$boolKey] = filter_var($data[$boolKey], FILTER_VALIDATE_BOOLEAN);
             }

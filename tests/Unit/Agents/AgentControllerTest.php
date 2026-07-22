@@ -17,6 +17,7 @@ use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\UserPreference;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentService;
+use Spora\Services\AgentToolSettingsService;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\HttpFoundation\Request;
@@ -30,10 +31,6 @@ const TOOL_PATH_SEGMENT = '/tools/';
 const TOOL_PATH_ENABLE = '/enable';
 const TOOL_PATH_OVERRIDE = '/override';
 const TOOL_PATH_STATUS = '/status';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Boot a fresh in-memory DB and return all three agent controllers + supporting services.
@@ -57,10 +54,13 @@ function makeAgentControllers(): array
     $logger     = new Monolog\Logger('test');
     $toolConfig = new ToolConfigService($security, $logger, [TestTool::class]);
     $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class]);
-    $agentService = new AgentService($toolConfig, $llmConfig);
+    $agentService = new AgentService();
+    // Tool enablement / overrides / operations moved to AgentToolSettingsService
+    // when AgentService was split to satisfy SonarCloud S1448.
+    $toolSettings = new AgentToolSettingsService($toolConfig, $llmConfig);
     $crudController      = new AgentController($authService, $agentService);
-    $toolController      = new AgentToolController($authService, $agentService, $toolConfig);
-    $overrideController  = new AgentOverrideController($authService, $agentService, $toolConfig);
+    $toolController      = new AgentToolController($authService, $toolSettings, $toolConfig);
+    $overrideController  = new AgentOverrideController($authService, $toolSettings, $toolConfig);
     $authMiddleware = new AuthMiddleware($authService);
     $csrfService = new CsrfTokenService();
     $csrfMiddleware = new CsrfMiddleware($csrfService);
@@ -128,9 +128,6 @@ function agentJsonRequest(string $method, string $path, array $body = [], int $a
     return $request;
 }
 
-// ---------------------------------------------------------------------------
-// Auth guard
-// ---------------------------------------------------------------------------
 
 test('unauthenticated request throws UnauthenticatedException', function (): void {
     clearSession();
@@ -140,9 +137,6 @@ test('unauthenticated request throws UnauthenticatedException', function (): voi
         ->toThrow(UnauthenticatedException::class);
 });
 
-// ---------------------------------------------------------------------------
-// index / store
-// ---------------------------------------------------------------------------
 
 test('index returns empty array when no agents exist', function (): void {
     clearSession();
@@ -242,9 +236,6 @@ test('store requires a name', function (): void {
     expect($response->getStatusCode())->toBe(422);
 });
 
-// ---------------------------------------------------------------------------
-// show / update / destroy
-// ---------------------------------------------------------------------------
 
 test('show returns the agent by id', function (): void {
     clearSession();
@@ -371,9 +362,6 @@ test('destroy removes the agent and returns 204', function (): void {
     expect(Capsule::table('agents')->count())->toBe(0);
 });
 
-// ---------------------------------------------------------------------------
-// enableTool / disableTool
-// ---------------------------------------------------------------------------
 
 test('enableTool inserts an AgentTool row and returns 201', function (): void {
     clearSession();
@@ -434,9 +422,6 @@ test('disableTool removes the AgentTool row and returns 204', function (): void 
     expect(Capsule::table('agent_tools')->count())->toBe(0);
 });
 
-// ---------------------------------------------------------------------------
-// getOverride / putOverride / deleteOverride
-// ---------------------------------------------------------------------------
 
 test('getOverride returns empty settings when no override set', function (): void {
     clearSession();
@@ -494,9 +479,6 @@ test('getOverride for llm_configuration falls back to the user default LLMDriver
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });
 
-// ---------------------------------------------------------------------------
-// Fix: getOverride llm_configuration gracefully handles corrupted settings
-// ---------------------------------------------------------------------------
 
 test('getOverride for llm_configuration returns empty settings when decryption fails', function (): void {
     clearSession();
@@ -670,9 +652,6 @@ test('deleteOverride succeeds even when tool is not enabled', function (): void 
     expect($body['data']['deleted'])->toBe(true);
 });
 
-// ---------------------------------------------------------------------------
-// getToolStatus
-// ---------------------------------------------------------------------------
 
 test('getToolStatus returns is_enabled false and missing_required when tool not enabled', function (): void {
     clearSession();
@@ -733,9 +712,6 @@ test('getToolStatus returns 404 for non-existent agent', function (): void {
     expect($response->getStatusCode())->toBe(404);
 });
 
-// ---------------------------------------------------------------------------
-// getToolsStatus (batch)
-// ---------------------------------------------------------------------------
 
 test('getToolsStatus returns all registered tools with correct is_enabled and missing_required', function (): void {
     clearSession();
@@ -813,9 +789,6 @@ test('getToolsStatus is_enabled is keyed by tool_class, not tool_name — same t
     expect($testToolStatus['is_enabled'])->toBe(false); // not explicitly enabled
 });
 
-// ---------------------------------------------------------------------------
-// enableTool enhanced response with missing_required
-// ---------------------------------------------------------------------------
 
 test('enableTool returns warning and missing_required when settings are incomplete', function (): void {
     clearSession();
@@ -856,9 +829,6 @@ test('enableTool is idempotent: no warning on already-enabled tool', function ()
     expect($body['data'])->not()->toHaveKey('warning');
 });
 
-// ---------------------------------------------------------------------------
-// getOverride with ?raw=true
-// ---------------------------------------------------------------------------
 
 test('getOverride with raw=true returns only stored agent override keys (passwords masked)', function (): void {
     clearSession();
