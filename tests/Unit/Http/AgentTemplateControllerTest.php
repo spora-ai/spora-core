@@ -24,8 +24,6 @@ function makeController(): AgentTemplateController
     $toolClasses = [
         Spora\Tools\CurrentTimeTool::class,
         Spora\Tools\CalculatorTool::class,
-        Spora\Tools\CalculatorTool::class,
-        Spora\Tools\HandoverTool::class,
         Spora\Tools\ReadUrlTool::class,
         Spora\Tools\UserInfoTool::class,
         Spora\Tools\HandoverTool::class,
