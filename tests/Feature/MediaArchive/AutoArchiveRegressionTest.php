@@ -23,6 +23,10 @@ use Spora\Services\MediaArchive\RemoteMediaFetcher;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
+beforeEach(function (): void {
+    MediaConverterDiscovery::reset();
+});
+
 afterEach(function (): void {
     MediaConverterDiscovery::reset();
 });
