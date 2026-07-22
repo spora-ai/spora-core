@@ -10,6 +10,8 @@ use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\CalculatorTool;
 
+defined('AGENT_TEST_PASSWORD') || define('AGENT_TEST_PASSWORD', 'Password1!');
+
 /**
  * Tests for AgentToolSettingsService — extracted from AgentService when
  * the latter was split to satisfy SonarCloud S1448. Mirrors the shape of
