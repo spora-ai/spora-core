@@ -44,14 +44,8 @@ final class AgentService implements AgentServiceInterface
     ];
 
     public function __construct(
-        LLMConfigService $llmConfig,
         private readonly ?ToolIconResolver $toolIconResolver = null,
-    ) {
-        // LLMConfigService is kept in the signature so existing container
-        // wiring continues to resolve; the resolvers that need it moved to
-        // AgentToolSettingsService when AgentService was split for S1448.
-        unset($llmConfig);
-    }
+    ) {}
 
 
     public function getAgentsForUser(int $userId): array
@@ -127,6 +121,9 @@ final class AgentService implements AgentServiceInterface
      * paths so the column set stays in lockstep.
      *
      * @param array<string, mixed> $data
+     * @return Agent The refreshed agent (refreshed from the DB so the
+     *              caller sees the post-update row, including the
+     *              auto-bumped `updated_at`).
      */
     private function applyAgentPatch(int $agentId, Agent $agent, array $data): Agent
     {

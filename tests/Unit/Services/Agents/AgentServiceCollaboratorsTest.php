@@ -36,7 +36,7 @@ function makeAgentServiceWithCollaborators(): array
 
     // ToolSettings service consumes the same three collaborators — kept on
     // AgentToolSettingsService when AgentService was split to satisfy S1448.
-    $service = new AgentService($llmConfig);
+    $service = new AgentService();
     $toolSettings = new AgentToolSettingsService($toolConfig, $llmConfig);
 
     $auth = bootAuthLayer();

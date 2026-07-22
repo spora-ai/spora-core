@@ -35,7 +35,7 @@ function makeAgentServiceWithUser(): array
     $toolConfig = new ToolConfigService($security, $logger, [CalculatorTool::class]);
     $llmConfig  = new LLMConfigService($security, []);
 
-    $service = new AgentService($llmConfig);
+    $service = new AgentService();
 
     $auth = bootAuthLayer();
     static $seq = 0;
@@ -61,7 +61,7 @@ function makeAgentServiceWithLlmDriver(): array
     $toolConfig = new ToolConfigService($security, $logger, [CalculatorTool::class]);
     $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
-    $service = new AgentService($llmConfig);
+    $service = new AgentService();
 
     $auth = bootAuthLayer();
     static $seq = 0;
@@ -116,7 +116,7 @@ describe('AgentService::getAgentsForUser', function (): void {
         $logger   = new NullLogger();
         $toolConfig = new ToolConfigService($security, $logger, [CalculatorTool::class]);
         $llmConfig  = new LLMConfigService($security, []);
-        $service = new AgentService($llmConfig, $resolver);
+        $service = new AgentService($resolver);
 
         $auth = bootAuthLayer();
         $userId = bootAuth($auth, 'agent-svc-icons@example.com', AGENT_TEST_PASSWORD);

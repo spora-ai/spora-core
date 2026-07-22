@@ -54,7 +54,7 @@ function makeAgentControllers(): array
     $logger     = new Monolog\Logger('test');
     $toolConfig = new ToolConfigService($security, $logger, [TestTool::class]);
     $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class]);
-    $agentService = new AgentService($llmConfig);
+    $agentService = new AgentService();
     // Tool enablement / overrides / operations moved to AgentToolSettingsService
     // when AgentService was split to satisfy SonarCloud S1448.
     $toolSettings = new AgentToolSettingsService($toolConfig, $llmConfig);

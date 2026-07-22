@@ -50,7 +50,7 @@ describe('AgentToolSettingsService::enableTool / disableTool', function (): void
             new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
             [],
         );
-        $agentService = new AgentService($llmConfig);
+        $agentService = new AgentService();
         $agent = $agentService->createAgent($userId, ['name' => 'Tooled']);
 
         $result = $toolSettings->enableTool($agent->id, $userId, CalculatorTool::class);
@@ -65,7 +65,7 @@ describe('AgentToolSettingsService::enableTool / disableTool', function (): void
             new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
             [],
         );
-        $agentService = new AgentService($llmConfig);
+        $agentService = new AgentService();
         $agent = $agentService->createAgent($userId, ['name' => 'Tooled']);
 
         $first  = $toolSettings->enableTool($agent->id, $userId, CalculatorTool::class);
@@ -88,7 +88,7 @@ describe('AgentToolSettingsService::enableTool / disableTool', function (): void
             new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
             [],
         );
-        $agentService = new AgentService($llmConfig);
+        $agentService = new AgentService();
         $agent = $agentService->createAgent($userId, ['name' => 'Tooled']);
         $toolSettings->enableTool($agent->id, $userId, CalculatorTool::class);
 
@@ -113,7 +113,7 @@ describe('AgentToolSettingsService::getToolStatus / getAllToolsStatus', function
             new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
             [],
         );
-        $agentService = new AgentService($llmConfig);
+        $agentService = new AgentService();
         $agent = $agentService->createAgent($userId, ['name' => 'NoTools']);
 
         $status = $toolSettings->getToolStatus($agent->id, $userId, CalculatorTool::class);
@@ -127,7 +127,7 @@ describe('AgentToolSettingsService::getToolStatus / getAllToolsStatus', function
             new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
             [],
         );
-        $agentService = new AgentService($llmConfig);
+        $agentService = new AgentService();
         $agent = $agentService->createAgent($userId, ['name' => 'HasTools']);
 
         $all = $toolSettings->getAllToolsStatus($agent->id, $userId);

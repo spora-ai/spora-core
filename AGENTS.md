@@ -191,14 +191,17 @@ For plugin-based tools, place the class in your plugin directory and use the `Pl
 ### Agent `notes` field vs `AgentTool`
 
 Operators store runbooks and behaviour hints on an agent through the `notes`
-markdown field (`PATCH /api/v1/agents/{id}` or the dashboard settings UI).
-The `AgentTool` (`app/Tools/AgentTool.php`) exposes `read_notes` /
-`write_notes` to the LLM so it can persist context between sessions; the
-notes field is **only** mutated via that tool, never via
-`write_agent_configuration` (which silently drops `notes` from its patch).
-`write_notes` defaults to `mode: append` to protect operator-curated notes
-from accidental LLM wipes; `mode: overwrite` is destructive and must be
-opted in.
+markdown field, either via `PATCH /api/v1/agents/{id}` / the dashboard
+settings UI or by seeding the agent template. The `AgentTool`
+(`app/Tools/AgentTool.php`) exposes two `AgentTool` operations for the LLM:
+`read_notes` (returns current notes) and `write_notes` (defaults to
+`mode: append`, also accepts `prepend`). Inside `AgentTool` itself,
+`write_notes` is the only path that mutates `notes` from the LLM side;
+`write_agent_configuration` strips `notes` from its patch and refuses the
+call if nothing else remains, so an LLM cannot use config-write to smuggle
+a notes mutation. Wholesale replacement is a separate
+`write_notes_overwrite` operation, disabled by default and per-call
+operator-approved — the destructive path cannot ride on the safe default.
 
 ---
 

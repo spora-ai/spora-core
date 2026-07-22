@@ -101,6 +101,11 @@ final class AgentController
             'name'          => $name,
             'description'   => trim((string) ($body['description'] ?? '')) ?: null,
             'system_prompt' => trim((string) ($body['system_prompt'] ?? '')) ?: null,
+            // `notes` accepted on POST so an operator can seed runbook text
+            // on first-create, not just PATCH-edit. Mirrors the PATCH path.
+            'notes'         => isset($body['notes']) && is_string($body['notes']) && $body['notes'] !== ''
+                ? $body['notes']
+                : null,
             'llm_driver_config_id' => isset($body['llm_driver_config_id']) ? (int) $body['llm_driver_config_id'] : null,
             'max_steps'     => (int) ($body['max_steps'] ?? 10),
             'allow_followup' => array_key_exists('allow_followup', $body) ? (bool) $body['allow_followup'] : true,

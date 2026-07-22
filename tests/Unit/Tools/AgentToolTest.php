@@ -110,8 +110,10 @@ describe('AgentTool::execute — write_agent_configuration', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
+        // `description` survives the strip so the service still gets called.
         $service->shouldReceive('updateAgentByAgentId')
             ->once()
+            ->with(7, ['description' => 'x'])
             ->andReturn(stubAgent(7));
 
         $result = $tool->execute(
@@ -123,6 +125,27 @@ describe('AgentTool::execute — write_agent_configuration', function (): void {
         );
 
         expect($result->success)->toBeTrue();
+    });
+
+    test('returns failure when the only field in the patch is notes', function (): void {
+        // If the LLM only sends notes, the strip leaves the patch empty
+        // and we surface a clear failure rather than silently reporting
+        // success with no DB write. Operators can use write_notes for that.
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $service->shouldNotReceive('updateAgentByAgentId');
+
+        $result = $tool->execute(
+            [
+                'action' => 'write_agent_configuration',
+                'agent'  => ['notes' => 'sneaky'],
+            ],
+            7,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('Use write_notes to mutate notes');
     });
 
     test('returns failure when the agent object is missing', function (): void {
@@ -137,6 +160,8 @@ describe('AgentTool::execute — write_agent_configuration', function (): void {
 
 describe('AgentTool::execute — write_notes', function (): void {
     test('rejects missing content', function (): void {
+        // Agent existence is checked first, so the LLM sees "Agent not
+        // found." rather than a content-shape complaint when both are wrong.
         [$tool, $service, $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
@@ -145,19 +170,71 @@ describe('AgentTool::execute — write_notes', function (): void {
         $result = $tool->execute(['action' => 'write_notes'], 7);
 
         expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('Agent not found.');
+    });
+
+    test('rejects missing content when the agent exists', function (): void {
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $agent = new Agent();
+        $agent->id = 7;
+        $agent->user_id = 99;
+        $agent->name = 'Alpha';
+        $agent->notes = null;
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+
+        $result = $tool->execute(['action' => 'write_notes'], 7, 99);
+
+        expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('content is required');
     });
 
     test('rejects invalid mode', function (): void {
-        [$tool] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $agent = new Agent();
+        $agent->id = 7;
+        $agent->user_id = 99;
+        $agent->name = 'Alpha';
+        $agent->notes = null;
+        $service->allows('getAgentByAgentId')->andReturn($agent);
 
         $result = $tool->execute(
             ['action' => 'write_notes', 'content' => 'x', 'mode' => 'nuke'],
             7,
+            99,
         );
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('invalid mode');
+    });
+
+    test('rejects empty content with no-op return', function (): void {
+        // Empty content on append/prepend must not pile up separator
+        // characters across repeated LLM calls.
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $agent           = new Agent();
+        $agent->id       = 7;
+        $agent->user_id  = 99;
+        $agent->name     = 'Alpha';
+        $agent->notes    = 'preserved';
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        // updateAgentByAgentId must NOT be called when content is empty.
+        $service->shouldNotReceive('updateAgentByAgentId');
+
+        $result = $tool->execute(
+            ['action' => 'write_notes', 'content' => '', 'mode' => 'append'],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['mode'])->toBe('append')
+            ->and($result->data['notes'])->toBe('preserved');
     });
 
     test('appends by default and persists via updateAgentByAgentId', function (): void {
@@ -189,7 +266,39 @@ describe('AgentTool::execute — write_notes', function (): void {
             ->and($data['length'])->toBe(mb_strlen("pre-existing\n\nnew content"));
     });
 
-    test('uses the literal mode when provided', function (): void {
+    test('prepends when mode=prepend is passed', function (): void {
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $agent           = new Agent();
+        $agent->id       = 7;
+        $agent->user_id  = 99;
+        $agent->name     = 'Alpha';
+        $agent->notes    = 'existing';
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $service->shouldReceive('updateAgentByAgentId')
+            ->once()
+            ->with(7, ['notes' => "new content\n\nexisting"])
+            ->andReturn($agent);
+
+        $result = $tool->execute(
+            ['action' => 'write_notes', 'content' => 'new content', 'mode' => 'prepend'],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeTrue();
+        /** @var array<string, mixed> $data */
+        $data = $result->data;
+        expect($data['mode'])->toBe('prepend')
+            ->and($data['notes'])->toBe("new content\n\nexisting");
+    });
+
+    test('write_notes_overwrite replaces wholesale and returns mode=overwrite', function (): void {
+        // The destructive overwrite path is a separate operation that
+        // requires operator approval when enabled. Verify the body of
+        // write_notes_overwrite: it discards the LLM's `mode` arg and
+        // overwrites the agent's notes wholesale.
         [$tool, $service, $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
@@ -205,7 +314,11 @@ describe('AgentTool::execute — write_notes', function (): void {
             ->andReturn($agent);
 
         $result = $tool->execute(
-            ['action' => 'write_notes', 'content' => 'replacement', 'mode' => 'overwrite'],
+            [
+                'action'  => 'write_notes_overwrite',
+                'content' => 'replacement',
+                'mode'    => 'append', // ignored — write_notes_overwrite forces overwrite
+            ],
             7,
             99,
         );
@@ -213,7 +326,8 @@ describe('AgentTool::execute — write_notes', function (): void {
         expect($result->success)->toBeTrue();
         /** @var array<string, mixed> $data */
         $data = $result->data;
-        expect($data['mode'])->toBe('overwrite');
+        expect($data['mode'])->toBe('overwrite')
+            ->and($data['notes'])->toBe('replacement');
     });
 
     test('returns failure when Agent::find returns null', function (): void {
@@ -424,7 +538,10 @@ describe('AgentTool::execute — create_agent', function (): void {
                     'id'      => 'new-agent',
                     'name'    => 'New Agent',
                     'version' => '1.0.0',
-                    'agent'   => ['description' => 'created via AgentTool'],
+                    'agent'   => [
+                        'description' => 'created via AgentTool',
+                        'notes'       => 'runbook step 1',
+                    ],
                     'tools'   => [],
                 ],
             ],
@@ -439,6 +556,7 @@ describe('AgentTool::execute — create_agent', function (): void {
         $agentRow = $data['agent'];
         expect($agentRow['name'])->toBe('New Agent')
             ->and($agentRow['description'])->toBe('created via AgentTool')
+            ->and($agentRow['notes'])->toBe('runbook step 1')
             ->and($data['tools_enabled'])->toBe([]);
     });
 });
@@ -461,7 +579,14 @@ describe('AgentTool::describeAction', function (): void {
         expect($tool->describeAction(['action' => 'write_notes']))
             ->toBe('Write notes on this agent (mode: append).');
 
-        expect($tool->describeAction(['action' => 'write_notes', 'mode' => 'overwrite']))
-            ->toBe('Write notes on this agent (mode: overwrite).');
+        expect($tool->describeAction(['action' => 'write_notes', 'mode' => 'prepend']))
+            ->toBe('Write notes on this agent (mode: prepend).');
+    });
+
+    test('renders the destructive path for write_notes_overwrite', function (): void {
+        [$tool] = makeAgentTool();
+
+        expect($tool->describeAction(['action' => 'write_notes_overwrite']))
+            ->toBe("Replace the agent's notes wholesale (destructive).");
     });
 });

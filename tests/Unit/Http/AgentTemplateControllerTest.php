@@ -11,7 +11,6 @@ use Spora\Http\AgentTemplateController;
 use Spora\Models\Agent;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentService;
-use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 
 function makeController(): AgentTemplateController
@@ -39,9 +38,7 @@ function makeController(): AgentTemplateController
     $validator = new AgentTemplateValidator();
     $importer = new AgentTemplateImporter($toolConfig, $plugins, $paths);
     $exporter = new AgentTemplateExporter($plugins);
-    $agentService = new AgentService(
-        new LLMConfigService($security, []),
-    );
+    $agentService = new AgentService();
 
     return new AgentTemplateController($auth, $scanner, $validator, $importer, $exporter, $agentService);
 }

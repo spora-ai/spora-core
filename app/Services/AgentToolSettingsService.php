@@ -5,14 +5,12 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use ReflectionClass;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOverride;
 use Spora\Services\Agents\AgentToolInstanceResolver;
 use Spora\Services\Agents\AgentToolOperationsResolver;
 use Spora\Services\Agents\AgentToolOverrideResolver;
-use Spora\Tools\Attributes\Tool;
 
 /**
  * Tool enablement, per-agent settings overrides, and per-operation overrides.
@@ -127,7 +125,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
 
         return [
             'tool_class'       => $toolClass,
-            'tool_name'        => $this->resolveToolName($toolClass),
+            'tool_name'        => $this->instanceResolver->resolveToolName($toolClass),
             'is_enabled'       => $isEnabled,
             'missing_required' => $missing,
             'can_enable'       => $missing === [],
@@ -155,7 +153,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
 
             $statuses[] = [
                 'tool_class'       => $toolClass,
-                'tool_name'        => $this->resolveToolName($toolClass),
+                'tool_name'        => $this->instanceResolver->resolveToolName($toolClass),
                 'is_enabled'       => $isEnabled,
                 'missing_required' => $missing,
                 'can_enable'       => $missing === [],
@@ -195,17 +193,4 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
         return $this->operationsResolver->patchOperationOverride($agentId, $userId, $toolClass, $operation, $data);
     }
 
-    private function resolveToolName(string $toolClass): string
-    {
-        if (!class_exists($toolClass)) {
-            $parts = explode('\\', $toolClass);
-            return end($parts) ?: $toolClass;
-        }
-        $reflection = new ReflectionClass($toolClass);
-        $toolAttrs = $reflection->getAttributes(Tool::class);
-        if ($toolAttrs === []) {
-            return $reflection->getShortName();
-        }
-        return $toolAttrs[0]->newInstance()->name;
-    }
 }

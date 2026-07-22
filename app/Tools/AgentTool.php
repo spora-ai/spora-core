@@ -32,7 +32,8 @@ use Spora\Tools\ValueObjects\ToolResult;
  *   - read_agent_configuration  (enabled, no approval)
  *   - write_agent_configuration (disabled, requires approval)
  *   - read_notes                (enabled, no approval)
- *   - write_notes               (enabled, no approval; default mode=append)
+ *   - write_notes               (enabled, no approval; append/prepend only)
+ *   - write_notes_overwrite     (disabled, requires approval — destructive)
  *   - get_available_tools       (disabled, no approval)
  *   - create_agent              (disabled, requires approval)
  */
@@ -70,11 +71,21 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'write_notes',
-    description: 'Write markdown notes on the calling agent. `mode` defaults to `append` '
-               . '(safe), with `prepend` and `overwrite` (destructive) as opt-ins. Segments '
-               . 'are joined with a blank line.',
+    description: 'Append (default) or prepend markdown notes on the calling agent. '
+               . 'Segments are joined with a blank line. The destructive `overwrite` '
+               . 'mode is a separate `write_notes_overwrite` operation that requires '
+               . 'operator approval.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'write_notes_overwrite',
+    description: 'Replace the agent\'s markdown notes wholesale. Destructive — wipes any '
+               . 'operator-curated notes. Disabled by default and requires explicit '
+               . 'operator approval per call so an LLM cannot wipe notes without '
+               . 'operator sign-off.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
 )]
 #[ToolOperation(
     name: 'get_available_tools',
@@ -114,10 +125,10 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'string',
     description: 'For write_notes: how to combine `content` with the existing notes. '
               . '`append` (default, safe) keeps existing notes and adds new content; '
-              . '`prepend` puts new content before; `overwrite` replaces everything '
-              . '(destructive — opt-in).',
+              . '`prepend` puts new content before. Wholesale replacement is a separate '
+              . '`write_notes_overwrite` operation (requires operator approval).',
     required: false,
-    enum: ['append', 'prepend', 'overwrite'],
+    enum: ['append', 'prepend'],
     default: 'append',
 )]
 #[ToolParameter(
@@ -130,7 +141,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 final class AgentTool extends AbstractTool
 {
-    private const NOTES_MODES = ['append', 'prepend', 'overwrite'];
+    private const APPEND_MODES = ['append', 'prepend'];
 
     private const NOTES_SEPARATOR = "\n\n";
 
@@ -157,7 +168,8 @@ final class AgentTool extends AbstractTool
             'read_agent_configuration'  => $this->readConfiguration($agentId),
             'write_agent_configuration' => $this->writeConfiguration($agentId, $arguments),
             'read_notes'                => $this->readNotes($agentId),
-            'write_notes'               => $this->writeNotes($agentId, $arguments),
+            'write_notes'               => $this->writeNotes($agentId, $arguments, 'append'),
+            'write_notes_overwrite'     => $this->writeNotes($agentId, $arguments, 'overwrite'),
             'get_available_tools'       => $this->getAvailableTools($agentId, $userId),
             'create_agent'              => $this->createAgent($userId, $arguments),
             default                     => ToolResult::fail("Invalid action '{$operation}'."),
@@ -176,6 +188,7 @@ final class AgentTool extends AbstractTool
                 'Write notes on this agent (mode: %s).',
                 (string) ($arguments['mode'] ?? 'append'),
             ),
+            'write_notes_overwrite'     => 'Replace the agent\'s notes wholesale (destructive).',
             'get_available_tools'       => 'List available tools with configuration status.',
             'create_agent'              => 'Create a new agent from the provided template payload.',
             default                     => "Agent tool: {$operation}",
@@ -218,8 +231,18 @@ final class AgentTool extends AbstractTool
         }
 
         // Strip `notes` defensively — write_agent_configuration must never
-        // mutate notes; that goes through write_notes only.
+        // mutate notes; that goes through write_notes / write_notes_overwrite.
         unset($patch['notes']);
+
+        // If the only field in the patch was `notes`, the call has no
+        // observable effect. Surface a clear failure rather than silently
+        // reporting success with no DB write.
+        if ($patch === []) {
+            return ToolResult::fail(
+                'write_agent_configuration: no editable fields after `notes` was stripped. '
+                . 'Use write_notes to mutate notes.',
+            );
+        }
 
         $agent = $this->agentService->updateAgentByAgentId($agentId, $patch);
         if ($agent === null) {
@@ -251,44 +274,46 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * @param array<string, mixed> $arguments
-     * @return array{0: string, 1: string}|ToolResult
-     *   Returns [content, mode] on success; a ToolResult to surface
-     *   the failure to the caller on a missing/invalid argument.
-     */
-    private function parseWriteNotesArgs(array $arguments): array|ToolResult
-    {
-        if (!array_key_exists('content', $arguments)) {
-            return ToolResult::fail('write_notes: content is required.');
-        }
-        $content = (string) $arguments['content'];
-        $mode    = (string) ($arguments['mode'] ?? 'append');
-        if (!in_array($mode, self::NOTES_MODES, true)) {
-            return ToolResult::fail(
-                "write_notes: invalid mode '{$mode}'. Allowed: " . implode(', ', self::NOTES_MODES) . '.',
-            );
-        }
-        return [$content, $mode];
-    }
-
-    /**
+     * Apply the calling agent's notes update. Two public operations route
+     * through this:
+     *   - write_notes           → $mode is 'append' (default) or 'prepend'
+     *   - write_notes_overwrite → $mode is 'overwrite' (requires approval)
+     *
+     * The agent existence check runs first so callers see the right failure
+     * even when their input is malformed. Empty content on append/prepend
+     * is a no-op so repeated LLM calls don't pile up separators.
+     *
      * @param array<string, mixed> $arguments
      */
-    private function writeNotes(int $agentId, array $arguments): ToolResult
+    private function writeNotes(int $agentId, array $arguments, string $mode): ToolResult
     {
-        $parsed = $this->parseWriteNotesArgs($arguments);
-        if ($parsed instanceof ToolResult) {
-            return $parsed;
-        }
-        [$content, $mode] = $parsed;
-
         $agent = $this->agentService->getAgentByAgentId($agentId);
         if ($agent === null) {
             return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
+        $parsed = $this->parseWriteNotesArgs($arguments, $mode);
+        if ($parsed instanceof ToolResult) {
+            return $parsed;
+        }
+        [$content, $mode] = $parsed;
+
         $existing = (string) ($agent->notes ?? '');
         $combined = $this->combineNotes($existing, $content, $mode);
+
+        // No-op: empty content on append/prepend collapses to the
+        // existing string in combineNotes(). Skip the DB write to keep
+        // updated_at from drifting on no-op calls.
+        if ($combined === $existing) {
+            return ToolResult::ok(
+                "Notes unchanged ({$this->humanBytes(mb_strlen($combined))}).",
+                [
+                    'notes'  => $combined,
+                    'length' => mb_strlen($combined),
+                    'mode'   => $mode,
+                ],
+            );
+        }
 
         // Route through the service so the same EDITABLE_AGENT_FIELDS
         // allowlist applies as everywhere else; no user-ownership check
@@ -303,6 +328,40 @@ final class AgentTool extends AbstractTool
                 'mode'   => $mode,
             ],
         );
+    }
+
+    /**
+     * Validate the `content` arg and resolve the effective `mode` for the
+     * calling operation. Returns [content, mode] on success; a ToolResult
+     * on failure. The resolved mode is what the caller should use, so
+     * `parseWriteNotesArgs` has to return it (PHP passes scalars by value).
+     *
+     * @param array<string, mixed> $arguments
+     * @return array{0: string, 1: string}|ToolResult
+     */
+    private function parseWriteNotesArgs(array $arguments, string $defaultMode): array|ToolResult
+    {
+        if (!array_key_exists('content', $arguments)) {
+            return ToolResult::fail('write_notes: content is required.');
+        }
+        $content = (string) $arguments['content'];
+        // write_notes accepts 'append' / 'prepend' (from the LLM's mode
+        // argument). write_notes_overwrite ignores the LLM's mode argument
+        // — the mode is fixed at the call site (overwrite) because the
+        // whole point of the operation is to wipe notes wholesale.
+        if ($defaultMode === 'append' || $defaultMode === 'prepend') {
+            $requested = (string) ($arguments['mode'] ?? $defaultMode);
+            if (!in_array($requested, self::APPEND_MODES, true)) {
+                return ToolResult::fail(
+                    "write_notes: invalid mode '{$requested}'. Allowed: " . implode(', ', self::APPEND_MODES) . '.',
+                );
+            }
+            $mode = $requested;
+        } else {
+            // write_notes_overwrite (or any future destructive variant).
+            $mode = $defaultMode;
+        }
+        return [$content, $mode];
     }
 
     private function getAvailableTools(int $agentId, ?int $userId): ToolResult
@@ -398,16 +457,22 @@ final class AgentTool extends AbstractTool
      */
     private function combineNotes(string $existing, string $content, string $mode): string
     {
-        if ($existing === '') {
+        // Empty content on append/prepend is a no-op so repeated LLM
+        // calls don't pile up separators.
+        if ($content === '') {
+            return $existing;
+        }
+        // Overwrite wipes existing wholesale — content stands alone
+        // regardless of what was there before. The 'existing === '' shortcut
+        // also collapses to plain content for both modes.
+        if ($existing === '' || $mode === 'overwrite') {
             return $content;
         }
-
-        return match ($mode) {
-            'append'    => $existing . self::NOTES_SEPARATOR . $content,
-            'prepend'   => $content . self::NOTES_SEPARATOR . $existing,
-            'overwrite' => $content,
-            default     => $content,
-        };
+        if ($mode === 'prepend') {
+            return $content . self::NOTES_SEPARATOR . $existing;
+        }
+        // append
+        return $existing . self::NOTES_SEPARATOR . $content;
     }
 
     private function humanBytes(int $length): string

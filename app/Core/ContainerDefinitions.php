@@ -728,10 +728,7 @@ final class ContainerDefinitions
             },
 
             AgentServiceInterface::class => static function (ContainerInterface $c): AgentServiceInterface {
-                return new AgentService(
-                    $c->get(LLMConfigService::class),
-                    $c->get(ToolIconResolver::class),
-                );
+                return new AgentService($c->get(ToolIconResolver::class));
             },
 
             // Tool enablement, settings overrides, and operation overrides
