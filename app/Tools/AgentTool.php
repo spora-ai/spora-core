@@ -226,21 +226,18 @@ final class AgentTool extends AbstractTool
     private function writeConfiguration(int $agentId, array $arguments): ToolResult
     {
         $patch = (array) ($arguments['agent'] ?? []);
-        if ($patch === []) {
-            return ToolResult::fail('write_agent_configuration: agent object is required.');
-        }
-
+        // Distinguish "no agent object at all" from "agent object only carried
+        // `notes`" before stripping — same failure path, different message.
+        $hadOnlyNotes = array_keys($patch) === ['notes'];
         // Strip `notes` defensively — write_agent_configuration must never
         // mutate notes; that goes through write_notes / write_notes_overwrite.
         unset($patch['notes']);
 
-        // If the only field in the patch was `notes`, the call has no
-        // observable effect. Surface a clear failure rather than silently
-        // reporting success with no DB write.
         if ($patch === []) {
             return ToolResult::fail(
-                'write_agent_configuration: no editable fields after `notes` was stripped. '
-                . 'Use write_notes to mutate notes.',
+                $hadOnlyNotes
+                    ? 'write_agent_configuration: no editable fields after `notes` was stripped. Use write_notes to mutate notes.'
+                    : 'write_agent_configuration: agent object is required.',
             );
         }
 
@@ -304,24 +301,21 @@ final class AgentTool extends AbstractTool
         // No-op: empty content on append/prepend collapses to the
         // existing string in combineNotes(). Skip the DB write to keep
         // updated_at from drifting on no-op calls.
-        if ($combined === $existing) {
-            return ToolResult::ok(
-                "Notes unchanged ({$this->humanBytes(mb_strlen($combined))}).",
-                [
-                    'notes'  => $combined,
-                    'length' => mb_strlen($combined),
-                    'mode'   => $mode,
-                ],
-            );
+        $isNoop = $combined === $existing;
+        if (!$isNoop) {
+            // Route through the service so the same EDITABLE_AGENT_FIELDS
+            // allowlist applies as everywhere else; no user-ownership check
+            // because the orchestrator has pinned the agent id.
+            $this->agentService->updateAgentByAgentId($agentId, ['notes' => $combined]);
         }
 
-        // Route through the service so the same EDITABLE_AGENT_FIELDS
-        // allowlist applies as everywhere else; no user-ownership check
-        // because the orchestrator has pinned the agent id.
-        $this->agentService->updateAgentByAgentId($agentId, ['notes' => $combined]);
+        $size = $this->humanBytes(mb_strlen($combined));
+        $message = $isNoop
+            ? "Notes unchanged ({$size})."
+            : "Notes updated via {$mode} ({$size}).";
 
         return ToolResult::ok(
-            "Notes updated via {$mode} ({$this->humanBytes(mb_strlen($combined))}).",
+            $message,
             [
                 'notes'  => $combined,
                 'length' => mb_strlen($combined),
@@ -457,22 +451,17 @@ final class AgentTool extends AbstractTool
      */
     private function combineNotes(string $existing, string $content, string $mode): string
     {
-        // Empty content on append/prepend is a no-op so repeated LLM
-        // calls don't pile up separators.
-        if ($content === '') {
-            return $existing;
-        }
-        // Overwrite wipes existing wholesale — content stands alone
-        // regardless of what was there before. The 'existing === '' shortcut
-        // also collapses to plain content for both modes.
-        if ($existing === '' || $mode === 'overwrite') {
-            return $content;
-        }
-        if ($mode === 'prepend') {
-            return $content . self::NOTES_SEPARATOR . $existing;
-        }
-        // append
-        return $existing . self::NOTES_SEPARATOR . $content;
+        // Empty content on append/prepend is a no-op so repeated LLM calls
+        // don't pile up separators. Overwrite wipes existing wholesale;
+        // empty-existing collapses to plain content for both modes. Match(true)
+        // keeps the function under SonarCloud S1142's 3-return ceiling.
+        $separator = self::NOTES_SEPARATOR;
+        return match (true) {
+            $content === ''                   => $existing,
+            $existing === '' || $mode === 'overwrite' => $content,
+            $mode === 'prepend'               => $content . $separator . $existing,
+            default                           => $existing . $separator . $content,
+        };
     }
 
     private function humanBytes(int $length): string
