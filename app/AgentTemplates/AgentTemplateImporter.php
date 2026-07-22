@@ -93,9 +93,9 @@ final class AgentTemplateImporter
 
         $this->collectPluginWarnings($template, $warnings);
 
-        // Transaction returns the tuple (agentId, toolsEnabled) so we
-        // avoid needing a by-ref parameter on applyTools. The outer
-        // unpack keeps the closure signature simple.
+        // The closure returns a tuple (agentId, toolsEnabled) so the
+        // outer scope can unpack both without a by-ref parameter on
+        // applyTools.
         [$agentId, $toolsEnabled] = Capsule::connection()->transaction(
             function () use ($userId, $template, $registeredTools, &$warnings): array {
                 $agentId = $this->createAgent($userId, $template);
@@ -378,6 +378,7 @@ final class AgentTemplateImporter
             'name'                => $this->resolveAgentName($template),
             'description'         => $this->nullIfEmpty($agent['description'] ?? null),
             'system_prompt'       => $this->nullIfEmpty($agent['system_prompt'] ?? null),
+            'notes'               => $this->nullIfEmpty($agent['notes'] ?? null),
             'max_steps'           => (int) ($agent['max_steps'] ?? 10),
             'allow_followup'      => $allowFollowup ? 1 : 0,
             'retry_after_minutes' => (int) ($agent['retry_after_minutes'] ?? 0),

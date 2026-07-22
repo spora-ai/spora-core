@@ -27,6 +27,7 @@ use Throwable;
  * @property bool $is_pinned
  * @property bool $is_archived
  * @property bool $is_favorite
+ * @property string|null $notes
  * @property DateTimeInterface|null $created_at
  * @property DateTimeInterface|null $updated_at
  */
@@ -48,6 +49,7 @@ final class Agent extends Model
         'is_pinned',
         'is_archived',
         'is_favorite',
+        'notes',
     ];
 
     protected $casts = [

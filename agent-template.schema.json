@@ -45,6 +45,11 @@
           "type": "string",
           "description": "System prompt. Recipients see a SYSTEM_PROMPT_MISSING warning if empty."
         },
+        "notes": {
+          "type": "string",
+          "maxLength": 200000,
+          "description": "Operator-facing markdown notes attached to the agent. Readable via the dashboard and via AgentTool.read_notes / write_notes."
+        },
         "max_steps": {
           "type": "integer",
           "minimum": 1,

@@ -7,12 +7,16 @@ namespace Spora\Services;
 use Spora\Models\Agent;
 
 /**
- * Service interface for agent lifecycle, tool management, and settings overrides.
+ * Service interface for agent lifecycle + flag management.
+ *
+ * Tool enablement, per-agent settings overrides, and per-operation overrides
+ * moved to {@see AgentToolSettingsServiceInterface} so this service stays
+ * under SonarCloud's 20-method-per-class ceiling (S1448). Consumers that
+ * only touch the lifecycle / flag surface (AgentController) keep depending
+ * on this interface; consumers that touch tools depend on the narrower one.
  */
 interface AgentServiceInterface
 {
-    // ── Agent lifecycle ─────────────────────────────────────────────────────────
-
     /**
      * @return list<array> Agent resource arrays for a user
      */
@@ -23,6 +27,26 @@ interface AgentServiceInterface
     public function getAgent(int $agentId, int $userId): ?Agent;
 
     public function updateAgent(int $agentId, int $userId, array $data): ?Agent;
+
+    /**
+     * Update an agent's editable fields without a user-ownership check.
+     *
+     * Intended for in-tool callers (AgentTool) where the orchestrator has
+     * already pinned the agent id to the calling agent. Callers outside
+     * that context must use {@see self::updateAgent()} instead so the
+     * standard user-ownership guard is applied.
+     */
+    public function updateAgentByAgentId(int $agentId, array $data): ?Agent;
+
+    /**
+     * Look up an agent by id without a user-ownership check.
+     *
+     * Same context as {@see self::updateAgentByAgentId()}: intended for
+     * in-tool callers where the orchestrator has already pinned the agent
+     * id. Operator-facing code must keep using {@see self::getAgent()}
+     * with a userId so the standard ownership guard applies.
+     */
+    public function getAgentByAgentId(int $agentId): ?Agent;
 
     public function deleteAgent(int $agentId, int $userId): bool;
 
@@ -47,52 +71,4 @@ interface AgentServiceInterface
      * @throws Exceptions\AgentNotFoundException If the agent does not exist or is not owned by $userId
      */
     public function setArchived(int $userId, int $agentId, bool $archived): Agent;
-
-    // ── Tool management ─────────────────────────────────────────────────────────
-
-    /**
-     * Enable a tool for an agent, seeding schema defaults if no config exists.
-     *
-     * @return array{tool: array, warning?: string, missing_required?: list<string>}|array{tool: array, warning?: string, missing_required?: list<string>, is_idempotent: true}|array{error: string}
-     */
-    public function enableTool(int $agentId, int $userId, string $toolClass): array;
-
-    public function disableTool(int $agentId, int $userId, string $toolClass): void;
-
-    // ── Tool status & settings ────────────────────────────────────────────────────
-
-    /**
-     * @return array{tool_class: string, is_enabled: bool, missing_required: list<string>, can_enable: bool}|null
-     */
-    public function getToolStatus(int $agentId, int $userId, string $toolClass): ?array;
-
-    /**
-     * @return list<array{tool_class: string, is_enabled: bool, missing_required: list<string>, can_enable: bool}>|null
-     */
-    public function getAllToolsStatus(int $agentId, int $userId): ?array;
-
-    // ── Settings overrides ────────────────────────────────────────────────────────
-
-    /**
-     * @return array<string, mixed>|array<string, array{value: mixed, source: string}>
-     */
-    public function getOverride(int $agentId, int $userId, string $toolClass, bool $rawOnly = false): array;
-
-    public function putOverride(int $agentId, int $userId, string $toolClass, array $settings): array;
-
-    public function deleteOverride(int $agentId, int $userId, string $toolClass): void;
-
-    // ── Operation overrides ───────────────────────────────────────────────────────
-
-    /**
-     * @return list<array{tool_class: string, operation: string, enabled: int|null, default_requires_approval: int|null, effective_enabled: bool, effective_requires_approval: bool}>|null
-     */
-    public function getToolsOperations(int $agentId, int $userId): ?array;
-
-    /**
-     * @return array{operation: string, tool_class: string, enabled: int|null, default_requires_approval: int|null, effective_enabled: bool, effective_requires_approval: bool}|array{}
-     */
-    public function getOperationOverride(int $agentId, int $userId, string $toolClass, string $operation): array;
-
-    public function patchOperationOverride(int $agentId, int $userId, string $toolClass, string $operation, array $data): array;
 }
