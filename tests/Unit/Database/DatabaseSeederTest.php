@@ -23,8 +23,6 @@ function makeSeeder(): DatabaseSeeder
     $toolConfig = new ToolConfigService($security, $logger, [
         Spora\Tools\CurrentTimeTool::class,
         Spora\Tools\CalculatorTool::class,
-        Spora\Tools\AgentMemoryTool::class,
-        Spora\Tools\GlobalMemoryTool::class,
         Spora\Tools\ReadUrlTool::class,
         Spora\Tools\UserInfoTool::class,
         Spora\Tools\HandoverTool::class,
@@ -51,7 +49,7 @@ it('seeds the admin user and agent successfully', function () {
 
     expect($output)->toContain('Created Admin User')
         ->toContain("Created Spora Core Agent from 'core/core-assistant' template")
-        ->toContain('4 tools');
+        ->toContain('2 tools');
 
     // Assert database state
     $user = User::where('email', 'admin@spora.local')->first();
@@ -62,7 +60,7 @@ it('seeds the admin user and agent successfully', function () {
         ->and($agent->name)->toBe('Spora Core Agent');
 
     $tools = AgentTool::where('agent_id', $agent->id)->get();
-    expect($tools)->toHaveCount(4);
+    expect($tools)->toHaveCount(2);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('does not duplicate records if seeder is run twice', function () {

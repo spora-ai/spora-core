@@ -6,25 +6,25 @@ namespace Tests\Fixtures;
 
 use Spora\Apps\AppInterface;
 
-final class StubMemoriesApp implements AppInterface
+final class StubSampleApp implements AppInterface
 {
     public function name(): string
     {
-        return 'memories';
+        return 'sample';
     }
 
     public function displayName(): string
     {
-        return 'Memories';
+        return 'Sample';
     }
 
     public function description(): string
     {
-        return 'Global and per-agent memory store';
+        return 'Sample app used for fixture-only registrations';
     }
 
     public function icon(): string
     {
-        return 'brain';
+        return 'puzzle';
     }
 }

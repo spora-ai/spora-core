@@ -62,16 +62,16 @@ test('export() round-trips an agent created from core-assistant', function (): v
     // must not claim that namespace.
     expect($payload['id'])->toBe('spora-core-agent');
     expect($payload['name'])->toBe('Spora Core Agent');
-    expect(count($payload['tools']))->toBe(4);
+    expect(count($payload['tools']))->toBe(2);
 
     // Operations should be present for the auto-approve overrides that
-    // the seeder ran. save/delete for memory tools → default_requires_approval=1.
-    $agentMemory = collect($payload['tools'])
-        ->firstWhere('tool_class', 'Spora\\Tools\\AgentMemoryTool');
-    expect($agentMemory)->not->toBeNull();
-    $saveOp = collect($agentMemory['operations'])->firstWhere('name', 'save');
-    expect($saveOp)->not->toBeNull();
-    expect($saveOp['auto_approve'])->toBeFalse();
+    // the seeder ran. current_time's `now` operation has auto_approve=true
+    // → default_requires_approval=0, so no per-op override row exists and
+    // operations[] is empty here. We just verify the core tool is in the
+    // exported payload.
+    $currentTime = collect($payload['tools'])
+        ->firstWhere('tool_class', 'Spora\\Tools\\CurrentTimeTool');
+    expect($currentTime)->not->toBeNull();
 });
 
 test('export() omits operations that have no explicit override', function (): void {

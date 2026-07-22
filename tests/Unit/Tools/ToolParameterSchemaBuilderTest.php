@@ -128,7 +128,7 @@ it('throws when ToolParameter is constructed with an unknown type', function ():
 });
 
 it('walks the inheritance chain to collect #[ToolParameter] from parent classes', function (): void {
-    // Mirrors the AbstractMemoryTool → AgentMemoryTool relationship: parameters
+    // Mirrors an abstract-base → concrete-subclass relationship: parameters
     // declared on the abstract base must show up in the concrete subclass's
     // schema. The builder walks `ReflectionClass::getParentClass()` until it
     // hits the root so shared parameter declarations work as inheritance.

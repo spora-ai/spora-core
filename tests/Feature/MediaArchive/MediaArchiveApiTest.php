@@ -21,10 +21,9 @@ use Spora\Services\MediaArchive\MediaIngestRequest;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
- * REST surface smoke test for {@see MediaArchiveController}. Mirrors the
- * `MemoryController` test layout — register a user, simulate the session,
- * drive the controller through the same middleware pipeline the router
- * uses in production.
+ * REST surface smoke test for {@see MediaArchiveController}. Registers a user,
+ * simulates the session, and drives the controller through the same middleware
+ * pipeline the router uses in production.
  */
 function mediaArchiveApiSetup(): array
 {

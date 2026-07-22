@@ -633,5 +633,5 @@ test('getSlugForApp() returns the slug of the plugin that owns the app class', f
 test('getSlugForApp() returns null for an app not claimed by any loaded plugin', function (): void {
     $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_app'], null);
     $loader->boot();
-    expect($loader->getSlugForApp(new Tests\Fixtures\StubMemoriesApp()))->toBeNull();
+    expect($loader->getSlugForApp(new Tests\Fixtures\StubSampleApp()))->toBeNull();
 });

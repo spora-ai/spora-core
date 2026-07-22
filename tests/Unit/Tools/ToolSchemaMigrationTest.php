@@ -9,12 +9,10 @@ use ReflectionClass;
 use Spora\Services\HandoverServiceInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\AbstractTool;
-use Spora\Tools\AgentMemoryTool;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\CurrentTimeTool;
-use Spora\Tools\GlobalMemoryTool;
 use Spora\Tools\HandoverTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\ToolInterface;
@@ -52,8 +50,6 @@ function instantiateAllTools(): array
         CurrentTimeTool::class      => new CurrentTimeTool(),
         ReadUrlTool::class          => new ReadUrlTool($httpClient, $configService),
         UserInfoTool::class         => new UserInfoTool(),
-        AgentMemoryTool::class      => new AgentMemoryTool(),
-        GlobalMemoryTool::class     => new GlobalMemoryTool(),
         HandoverTool::class         => new HandoverTool(
             Mockery::mock(HandoverServiceInterface::class),
             $configService,
