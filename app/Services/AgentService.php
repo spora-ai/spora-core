@@ -5,23 +5,15 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use ReflectionClass;
 use Spora\Models\Agent;
-use Spora\Models\AgentTool;
-use Spora\Models\AgentToolOverride;
-use Spora\Services\Agents\AgentToolInstanceResolver;
-use Spora\Services\Agents\AgentToolOperationsResolver;
-use Spora\Services\Agents\AgentToolOverrideResolver;
 use Spora\Services\Exceptions\AgentNotFoundException;
-use Spora\Tools\Attributes\Tool;
 
 /**
- * Service for agent lifecycle, tool management, and operation overrides.
- * All DB access for Agent domain goes through this service.
+ * Service for agent lifecycle + flag management.
  *
- * Thin facade: lifecycle CRUD + tool enable/disable + tool status live here;
- * settings overrides and per-operation resolution are delegated to collaborators
- * in {@see Spora\Services\Agents}.
+ * Tool enablement, per-agent settings overrides, and per-operation overrides
+ * moved to {@see AgentToolSettingsService} so this umbrella service stays
+ * under SonarCloud's 20-method-per-class ceiling (S1448).
  */
 final class AgentService implements AgentServiceInterface
 {
@@ -51,18 +43,17 @@ final class AgentService implements AgentServiceInterface
         'notes',
     ];
 
-    private readonly AgentToolInstanceResolver $instanceResolver;
-    private readonly AgentToolOverrideResolver $overrideResolver;
-    private readonly AgentToolOperationsResolver $operationsResolver;
-
     public function __construct(
-        private readonly ToolConfigService $toolConfig,
         LLMConfigService $llmConfig,
         private readonly ?ToolIconResolver $toolIconResolver = null,
     ) {
-        $this->instanceResolver    = new AgentToolInstanceResolver();
-        $this->overrideResolver    = new AgentToolOverrideResolver($toolConfig, $llmConfig, $this->instanceResolver);
-        $this->operationsResolver  = new AgentToolOperationsResolver($this->instanceResolver, $this->overrideResolver);
+        // LLMConfigService is part of the constructor for backwards
+        // compatibility with the previous single-service shape — the
+        // collaborator resolvers that need it have moved to
+        // AgentToolSettingsService. Kept in the signature so existing
+        // container wiring (which passes the LLMConfigService) continues
+        // to resolve without a second registration.
+        unset($llmConfig);
     }
 
 
@@ -200,178 +191,6 @@ final class AgentService implements AgentServiceInterface
         $agent->refresh();
 
         return $agent;
-    }
-
-
-    public function enableTool(int $agentId, int $userId, string $toolClass): array
-    {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return ['error' => 'NOT_FOUND'];
-        }
-
-        $existing = AgentTool::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->first();
-
-        $isIdempotent = $existing !== null;
-        if ($isIdempotent) {
-            return [
-                'tool' => [
-                    'tool_class' => $existing->tool_class,
-                    'tool_name'  => $existing->tool_name,
-                ],
-                'is_idempotent' => true,
-            ];
-        }
-
-        Capsule::table('agent_tools')->insert([
-            'agent_id'   => $agentId,
-            'tool_class' => $toolClass,
-            'tool_name'  => $this->instanceResolver->resolveToolName($toolClass),
-            'created_at' => date(self::DATETIME_FORMAT),
-            'updated_at' => date(self::DATETIME_FORMAT),
-        ]);
-
-        // Seed schema defaults if no global config AND no agent override exists
-        $globalSettings = $this->toolConfig->getGlobalSettings($toolClass);
-        $hasAgentOverride = AgentToolOverride::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->exists();
-
-        if ($globalSettings === [] && !$hasAgentOverride) {
-            $defaults = $this->toolConfig->getSchemaDefaults($toolClass);
-            if ($defaults !== []) {
-                $this->toolConfig->putAgentOverride($toolClass, $agentId, $defaults);
-            }
-        }
-
-        $tool = AgentTool::where('agent_id', $agentId)->where('tool_class', $toolClass)->first();
-
-        $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId);
-        $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
-
-        $result = [
-            'tool' => [
-                'tool_class' => $tool->tool_class,
-                'tool_name'  => $tool->tool_name,
-            ],
-        ];
-        if ($missing !== []) {
-            $result['warning'] = 'Required settings are missing. The tool may not work until credentials are configured.';
-            $result['missing_required'] = $missing;
-        }
-
-        return $result;
-    }
-
-    public function disableTool(int $agentId, int $userId, string $toolClass): void
-    {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return;
-        }
-
-        AgentTool::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->delete();
-    }
-
-
-    public function getToolStatus(int $agentId, int $userId, string $toolClass): ?array
-    {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return null;
-        }
-
-        $isEnabled = AgentTool::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->exists();
-
-        $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId, $userId);
-        $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
-
-        // Get tool_name from #[Tool] attribute or fall back to short class name
-        $reflection = new ReflectionClass($toolClass);
-        $toolAttrs = $reflection->getAttributes(Tool::class);
-        $toolName = $toolAttrs !== [] ? $toolAttrs[0]->newInstance()->name : $reflection->getShortName();
-
-        return [
-            'tool_class'       => $toolClass,
-            'tool_name'        => $toolName,
-            'is_enabled'      => $isEnabled,
-            'missing_required' => $missing,
-            'can_enable'      => $missing === [],
-        ];
-    }
-
-    public function getAllToolsStatus(int $agentId, int $userId): ?array
-    {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return null;
-        }
-
-        $toolClasses = $this->toolConfig->getRegisteredToolClasses();
-        $statuses = [];
-
-        $enabledTools = AgentTool::where('agent_id', $agentId)
-            ->pluck('tool_class')
-            ->flip()
-            ->toArray();
-
-        foreach ($toolClasses as $toolClass) {
-            $isEnabled = isset($enabledTools[$toolClass]);
-            $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId, $userId);
-            $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
-
-            // Get tool_name from #[Tool] attribute or fall back to short class name
-            $reflection = new ReflectionClass($toolClass);
-            $toolAttrs = $reflection->getAttributes(Tool::class);
-            $toolName = $toolAttrs !== [] ? $toolAttrs[0]->newInstance()->name : $reflection->getShortName();
-
-            $statuses[] = [
-                'tool_class'       => $toolClass,
-                'tool_name'        => $toolName,
-                'is_enabled'       => $isEnabled,
-                'missing_required' => $missing,
-                'can_enable'       => $missing === [],
-            ];
-        }
-
-        return $statuses;
-    }
-
-    public function getOverride(int $agentId, int $userId, string $toolClass, bool $rawOnly = false): array
-    {
-        return $this->overrideResolver->getOverride($agentId, $userId, $toolClass, $rawOnly);
-    }
-
-    public function putOverride(int $agentId, int $userId, string $toolClass, array $settings): array
-    {
-        return $this->overrideResolver->putOverride($agentId, $userId, $toolClass, $settings);
-    }
-
-    public function deleteOverride(int $agentId, int $userId, string $toolClass): void
-    {
-        $this->overrideResolver->deleteOverride($agentId, $userId, $toolClass);
-    }
-
-
-    public function getToolsOperations(int $agentId, int $userId): ?array
-    {
-        return $this->operationsResolver->getToolsOperations($agentId, $userId);
-    }
-
-    public function getOperationOverride(int $agentId, int $userId, string $toolClass, string $operation): array
-    {
-        return $this->operationsResolver->getOperationOverride($agentId, $userId, $toolClass, $operation);
-    }
-
-    public function patchOperationOverride(int $agentId, int $userId, string $toolClass, string $operation, array $data): array
-    {
-        return $this->operationsResolver->patchOperationOverride($agentId, $userId, $toolClass, $operation, $data);
     }
 
 

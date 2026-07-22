@@ -78,6 +78,8 @@ use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentService;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\AgentToolSettingsService;
+use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\AssetStore;
 use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
@@ -727,9 +729,18 @@ final class ContainerDefinitions
 
             AgentServiceInterface::class => static function (ContainerInterface $c): AgentServiceInterface {
                 return new AgentService(
-                    $c->get(ToolConfigService::class),
                     $c->get(LLMConfigService::class),
                     $c->get(ToolIconResolver::class),
+                );
+            },
+
+            // Tool enablement, settings overrides, and operation overrides
+            // moved here from AgentService so the umbrella stays under the
+            // SonarCloud S1448 20-method-per-class ceiling.
+            AgentToolSettingsServiceInterface::class => static function (ContainerInterface $c): AgentToolSettingsServiceInterface {
+                return new AgentToolSettingsService(
+                    $c->get(ToolConfigService::class),
+                    $c->get(LLMConfigService::class),
                 );
             },
 
@@ -863,7 +874,7 @@ final class ContainerDefinitions
             AgentToolController::class => static function (ContainerInterface $c): AgentToolController {
                 return new AgentToolController(
                     $c->get(AuthService::class),
-                    $c->get(AgentServiceInterface::class),
+                    $c->get(AgentToolSettingsServiceInterface::class),
                     $c->get(ToolConfigService::class),
                 );
             },
@@ -871,7 +882,7 @@ final class ContainerDefinitions
             AgentOverrideController::class => static function (ContainerInterface $c): AgentOverrideController {
                 return new AgentOverrideController(
                     $c->get(AuthService::class),
-                    $c->get(AgentServiceInterface::class),
+                    $c->get(AgentToolSettingsServiceInterface::class),
                     $c->get(ToolConfigService::class),
                 );
             },
@@ -1053,6 +1064,7 @@ final class ContainerDefinitions
             AgentTool::class => static function (ContainerInterface $c): AgentTool {
                 return new AgentTool(
                     $c->get(AgentServiceInterface::class),
+                    $c->get(AgentToolSettingsServiceInterface::class),
                     $c->get(AgentTemplateImporter::class),
                     $c->get(AgentTemplateValidator::class),
                 );

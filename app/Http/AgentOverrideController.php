@@ -6,7 +6,7 @@ namespace Spora\Http;
 
 use JsonException;
 use Spora\Auth\AuthService;
-use Spora\Services\AgentServiceInterface;
+use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -32,7 +32,7 @@ final class AgentOverrideController
 
     public function __construct(
         private readonly AuthService $authService,
-        private readonly AgentServiceInterface $agentService,
+        private readonly AgentToolSettingsServiceInterface $agentService,
         private readonly ToolConfigService $toolConfigService,
     ) {}
 

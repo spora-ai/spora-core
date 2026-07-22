@@ -15,19 +15,20 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * @return array{AgentController, AgentToolController, AgentOverrideController, \Spora\Auth\AuthService, StubAgentService, ToolConfigService}
+ * @return array{AgentController, AgentToolController, AgentOverrideController, \Spora\Auth\AuthService, StubAgentService, StubAgentToolSettingsService, ToolConfigService}
  */
 function makeAgentControllers(): array
 {
     $authService = bootAuthLayer();
-    $service = new StubAgentService();
-    $security = new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $toolConfig = new ToolConfigService($security, new NullLogger(), [CalculatorTool::class]);
+    $service        = new StubAgentService();
+    $toolSettings   = new StubAgentToolSettingsService();
+    $security       = new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $toolConfig     = new ToolConfigService($security, new NullLogger(), [CalculatorTool::class]);
     $crudController = new AgentController($authService, $service);
-    $toolController = new AgentToolController($authService, $service, $toolConfig);
-    $overrideController = new AgentOverrideController($authService, $service, $toolConfig);
+    $toolController = new AgentToolController($authService, $toolSettings, $toolConfig);
+    $overrideController = new AgentOverrideController($authService, $toolSettings, $toolConfig);
 
-    return [$crudController, $toolController, $overrideController, $authService, $service, $toolConfig];
+    return [$crudController, $toolController, $overrideController, $authService, $service, $toolSettings, $toolConfig];
 }
 
 describe('AgentController::index', function (): void {

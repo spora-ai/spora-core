@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use Spora\Auth\AuthService;
-use Spora\Services\AgentServiceInterface;
+use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -29,7 +29,7 @@ final class AgentToolController
 
     public function __construct(
         private readonly AuthService $authService,
-        private readonly AgentServiceInterface $agentService,
+        private readonly AgentToolSettingsServiceInterface $agentService,
         private readonly ToolConfigService $toolConfigService,
     ) {}
 

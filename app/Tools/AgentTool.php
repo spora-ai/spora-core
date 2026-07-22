@@ -10,6 +10,7 @@ use Spora\AgentTemplates\ValidationResult;
 use Spora\Models\Agent;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
@@ -143,6 +144,7 @@ final class AgentTool extends AbstractTool
 
     public function __construct(
         private readonly AgentServiceInterface $agentService,
+        private readonly AgentToolSettingsServiceInterface $toolSettings,
         private readonly AgentTemplateImporter $templateImporter,
         private readonly AgentTemplateValidator $templateValidator,
     ) {}
@@ -312,7 +314,7 @@ final class AgentTool extends AbstractTool
 
         $userId ??= $agent->user_id;
 
-        $rows = $this->agentService->getAllToolsStatus($agentId, $userId) ?? [];
+        $rows = $this->toolSettings->getAllToolsStatus($agentId, $userId) ?? [];
         $enriched = [];
         foreach ($rows as $row) {
             $toolClass = (string) $row['tool_class'];

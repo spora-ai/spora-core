@@ -12,6 +12,7 @@ use Spora\Services\Agents\AgentToolInstanceResolver;
 use Spora\Services\Agents\AgentToolOperationsResolver;
 use Spora\Services\Agents\AgentToolOverrideResolver;
 use Spora\Services\AgentService;
+use Spora\Services\AgentToolSettingsService;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\CalculatorTool;
@@ -19,7 +20,7 @@ use Spora\Tools\CalculatorTool;
 defined('AGENT_COLLABORATORS_TEST_PASSWORD') || define('AGENT_COLLABORATORS_TEST_PASSWORD', 'Password1!');
 
 /**
- * @return array{0: AgentService, 1: AgentToolInstanceResolver, 2: AgentToolOverrideResolver, 3: AgentToolOperationsResolver, 4: int}
+ * @return array{0: AgentService, 1: AgentToolInstanceResolver, 2: AgentToolOverrideResolver, 3: AgentToolOperationsResolver, 4: int, 5: AgentToolSettingsService}
  */
 function makeAgentServiceWithCollaborators(): array
 {
@@ -33,24 +34,29 @@ function makeAgentServiceWithCollaborators(): array
     $overrideResolver    = new AgentToolOverrideResolver($toolConfig, $llmConfig, $instanceResolver);
     $operationsResolver  = new AgentToolOperationsResolver($instanceResolver, $overrideResolver);
 
-    $service = new AgentService($toolConfig, $llmConfig);
+    // ToolSettings service consumes the same three collaborators — kept on
+    // AgentToolSettingsService when AgentService was split to satisfy S1448.
+    $service = new AgentService($llmConfig);
+    $toolSettings = new AgentToolSettingsService($toolConfig, $llmConfig);
 
     $auth = bootAuthLayer();
     static $seq = 0;
     $seq++;
     $userId = bootAuth($auth, "agent-collab-{$seq}@example.com", AGENT_COLLABORATORS_TEST_PASSWORD);
 
-    return [$service, $instanceResolver, $overrideResolver, $operationsResolver, $userId];
+    return [$service, $instanceResolver, $overrideResolver, $operationsResolver, $userId, $toolSettings];
 }
 
 describe('AgentService facade wires collaborators', function (): void {
 
     it('exposes a working facade that delegates to the underlying resolvers', function (): void {
-        [$service, , , , $userId] = makeAgentServiceWithCollaborators();
+        [$service, , , , $userId, $toolSettings] = makeAgentServiceWithCollaborators();
         $agent = $service->createAgent($userId, ['name' => 'Wired']);
 
-        // Facade still works end-to-end (delegate path proven)
-        $result = $service->getOperationOverride($agent->id, $userId, CalculatorTool::class, 'eval');
+        // Facade still works end-to-end (delegate path proven). getOperationOverride
+        // moved to AgentToolSettingsService when AgentService was split to
+        // satisfy SonarCloud S1448.
+        $result = $toolSettings->getOperationOverride($agent->id, $userId, CalculatorTool::class, 'eval');
         expect($result)->toBe([
             'operation'                   => 'eval',
             'tool_class'                  => CalculatorTool::class,

@@ -7,10 +7,11 @@ use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Models\Agent;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Tools\AgentTool;
 
 /**
- * @return array{0: AgentTool, 1: AgentServiceInterface}
+ * @return array{0: AgentTool, 1: AgentServiceInterface, 2: AgentToolSettingsServiceInterface}
  */
 function makeAgentTool(): array
 {
@@ -28,10 +29,13 @@ function makeAgentTool(): array
     $validator = new AgentTemplateValidator();
     /** @var AgentServiceInterface&MockInterface $agentService */
     $agentService = Mockery::mock(AgentServiceInterface::class);
+    /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+    $toolSettings = Mockery::mock(AgentToolSettingsServiceInterface::class);
 
     return [
-        new AgentTool($agentService, $importer, $validator),
+        new AgentTool($agentService, $toolSettings, $importer, $validator),
         $agentService,
+        $toolSettings,
     ];
 }
 
@@ -47,14 +51,15 @@ function stubAgent(int $id = 1, string $name = 'Test Agent', ?string $notes = nu
 
 describe('AgentTool::execute — read_agent_configuration', function (): void {
     test('returns the agent resource plus enabled_tools', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $agent        = new Agent();
         $agent->id    = 7;
         $agent->name  = 'Alpha';
         $agent->notes = null;
         $service->allows('getAgentByAgentId')->andReturn($agent);
-        $service->allows('getAllToolsStatus')->andReturn([
+        $toolSettings->allows("getAllToolsStatus")->andReturn([
             ['tool_class' => 'Foo', 'tool_name' => 'foo', 'is_enabled' => true, 'can_enable' => true, 'missing_required' => []],
         ]);
 
@@ -69,7 +74,8 @@ describe('AgentTool::execute — read_agent_configuration', function (): void {
     });
 
     test('returns failure when Agent::find returns null', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(null);
 
@@ -82,7 +88,8 @@ describe('AgentTool::execute — read_agent_configuration', function (): void {
 
 describe('AgentTool::execute — write_agent_configuration', function (): void {
     test('forwards patch through AgentServiceInterface::updateAgentByAgentId', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $service->shouldReceive('updateAgentByAgentId')
             ->once()
@@ -100,7 +107,8 @@ describe('AgentTool::execute — write_agent_configuration', function (): void {
     });
 
     test('silently drops `notes` from the patch (notes are write_notes-only)', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $service->shouldReceive('updateAgentByAgentId')
             ->once()
@@ -129,7 +137,8 @@ describe('AgentTool::execute — write_agent_configuration', function (): void {
 
 describe('AgentTool::execute — write_notes', function (): void {
     test('rejects missing content', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(null);
 
@@ -152,7 +161,8 @@ describe('AgentTool::execute — write_notes', function (): void {
     });
 
     test('appends by default and persists via updateAgentByAgentId', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
@@ -180,7 +190,8 @@ describe('AgentTool::execute — write_notes', function (): void {
     });
 
     test('uses the literal mode when provided', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
@@ -206,7 +217,8 @@ describe('AgentTool::execute — write_notes', function (): void {
     });
 
     test('returns failure when Agent::find returns null', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(null);
 
@@ -223,7 +235,8 @@ describe('AgentTool::execute — write_notes', function (): void {
 
 describe('AgentTool::execute — read_notes', function (): void {
     test('returns notes and length when the agent exists', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
@@ -242,7 +255,8 @@ describe('AgentTool::execute — read_notes', function (): void {
     });
 
     test('returns failure when Agent::find returns null', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(null);
 
@@ -255,7 +269,8 @@ describe('AgentTool::execute — read_notes', function (): void {
 
 describe('AgentTool::execute — write_agent_configuration — happy path', function (): void {
     test('forwards patch and returns the updated resource', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
@@ -280,7 +295,8 @@ describe('AgentTool::execute — write_agent_configuration — happy path', func
     });
 
     test('returns failure when the agent disappears mid-write', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         // updateAgentByAgentId returns null when the agent no longer exists,
         // which the tool surfaces as the standard AGENT_NOT_FOUND failure.
@@ -298,14 +314,15 @@ describe('AgentTool::execute — write_agent_configuration — happy path', func
 
 describe('AgentTool::execute — get_available_tools', function (): void {
     test('enriches per-agent status with presenter metadata', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
         $agent->name     = 'Alpha';
         $service->allows('getAgentByAgentId')->andReturn($agent);
-        $service->allows('getAllToolsStatus')->andReturn([
+        $toolSettings->allows("getAllToolsStatus")->andReturn([
             [
                 'tool_class'       => 'Spora\\Tools\\CalculatorTool',
                 'tool_name'        => 'calculator',
@@ -328,14 +345,15 @@ describe('AgentTool::execute — get_available_tools', function (): void {
     });
 
     test('flags needs_configuration when can_enable is false', function (): void {
-        [$tool, $service] = makeAgentTool();
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
         $agent->name     = 'Alpha';
         $service->allows('getAgentByAgentId')->andReturn($agent);
-        $service->allows('getAllToolsStatus')->andReturn([
+        $toolSettings->allows("getAllToolsStatus")->andReturn([
             [
                 'tool_class'       => 'Spora\\Tools\\ReadUrlTool',
                 'tool_name'        => 'read_url',

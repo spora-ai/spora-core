@@ -14,6 +14,7 @@ use Spora\Http\AgentController;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\LLMConfigService;
 use Symfony\Component\HttpFoundation\Request;
 
@@ -97,6 +98,10 @@ function buildAgentController(): AgentController
         {
             return Agent::query()->find($agentId) ?? throw new RuntimeException('agent not found');
         }
+    };
+    // Tool enablement / overrides / operations moved to a separate
+    // service when AgentService was split to satisfy SonarCloud S1448.
+    $toolSettings = new class implements AgentToolSettingsServiceInterface {
         /** @phpstan-ignore return.unusedType */
         public function enableTool(int $agentId, int $userId, string $toolClass): array
         {

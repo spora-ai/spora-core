@@ -17,6 +17,7 @@ use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\UserPreference;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentService;
+use Spora\Services\AgentToolSettingsService;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\HttpFoundation\Request;
@@ -57,10 +58,13 @@ function makeAgentControllers(): array
     $logger     = new Monolog\Logger('test');
     $toolConfig = new ToolConfigService($security, $logger, [TestTool::class]);
     $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class]);
-    $agentService = new AgentService($toolConfig, $llmConfig);
+    $agentService = new AgentService($llmConfig);
+    // Tool enablement / overrides / operations moved to AgentToolSettingsService
+    // when AgentService was split to satisfy SonarCloud S1448.
+    $toolSettings = new AgentToolSettingsService($toolConfig, $llmConfig);
     $crudController      = new AgentController($authService, $agentService);
-    $toolController      = new AgentToolController($authService, $agentService, $toolConfig);
-    $overrideController  = new AgentOverrideController($authService, $agentService, $toolConfig);
+    $toolController      = new AgentToolController($authService, $toolSettings, $toolConfig);
+    $overrideController  = new AgentOverrideController($authService, $toolSettings, $toolConfig);
     $authMiddleware = new AuthMiddleware($authService);
     $csrfService = new CsrfTokenService();
     $csrfMiddleware = new CsrfMiddleware($csrfService);
