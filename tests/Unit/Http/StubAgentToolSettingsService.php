@@ -22,9 +22,7 @@ class StubAgentToolSettingsService implements AgentToolSettingsServiceInterface
         return ['tool' => ['tool_class' => $toolClass, 'tool_name' => 'stub']];
     }
 
-    public function disableTool(int $agentId, int $userId, string $toolClass): void
-    {
-    }
+    public function disableTool(int $agentId, int $userId, string $toolClass): void {}
 
     public function getToolStatus(int $agentId, int $userId, string $toolClass): ?array
     {
@@ -53,9 +51,7 @@ class StubAgentToolSettingsService implements AgentToolSettingsServiceInterface
         return $settings;
     }
 
-    public function deleteOverride(int $agentId, int $userId, string $toolClass): void
-    {
-    }
+    public function deleteOverride(int $agentId, int $userId, string $toolClass): void {}
 
     public function getToolsOperations(int $agentId, int $userId): ?array
     {
