@@ -24,7 +24,6 @@ class StubAgentToolSettingsService implements AgentToolSettingsServiceInterface
 
     public function disableTool(int $agentId, int $userId, string $toolClass): void
     {
-        // no-op
     }
 
     public function getToolStatus(int $agentId, int $userId, string $toolClass): ?array
@@ -56,7 +55,6 @@ class StubAgentToolSettingsService implements AgentToolSettingsServiceInterface
 
     public function deleteOverride(int $agentId, int $userId, string $toolClass): void
     {
-        // no-op
     }
 
     public function getToolsOperations(int $agentId, int $userId): ?array

@@ -70,7 +70,6 @@ final class AgentTemplateValidator
         $this->validateStringField($raw, 'name', null, $result, true);
         $this->validateStringField($raw, 'version', self::VERSION_PATTERN, $result, true);
 
-        // `agent` is required.
         if (!array_key_exists('agent', $raw) || !is_array($raw['agent'])) {
             $result->addError([
                 'code'     => 'AGENT_REQUIRED',

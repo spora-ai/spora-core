@@ -51,9 +51,9 @@ function makeAgentServiceWithUser(): array
  */
 function makeAgentServiceWithLlmDriver(): array
 {
-    // Same as makeAgentServiceWithUser() but with an LLMConfigService that
-    // knows about the OpenAI driver so getOverride('llm_configuration', …)
-    // can resolve a settings schema and apply password masking.
+    // Like makeAgentServiceWithUser() but the LLMConfigService knows about
+    // the OpenAI driver so getOverride('llm_configuration', ...) can resolve
+    // a settings schema and apply password masking.
     $key = str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new SecurityManager($key);
     $logger   = new NullLogger();
@@ -240,13 +240,11 @@ describe('AgentService::getAgent / updateAgent / deleteAgent', function (): void
 
 
 describe('AgentService private helpers (now on collaborators)', function (): void {
-    // After the AgentService split (refactor/split-agent-service), the helper
-    // methods moved to dedicated collaborators:
-    //   - AgentToolOverrideResolver::extractOverrideFlag, parseOverrideFlag, maskLlmConfig
-    //   - AgentToolInstanceResolver::resolveToolInstance
-    // The override-resolver methods are public on the new class, so they can
-    // be called directly. maskLlmConfig is still private, so reflection is
-    // needed (targeting the new class, not AgentService).
+    // After the AgentService split (S1448), the helpers moved to dedicated
+    // collaborators: extractOverrideFlag / parseOverrideFlag / maskLlmConfig
+    // on AgentToolOverrideResolver, resolveToolInstance on
+    // AgentToolInstanceResolver. maskLlmConfig is still private, so the
+    // last test below uses reflection against the new class.
 
     /**
      * Build an override resolver with the same key + drivers the rest of the

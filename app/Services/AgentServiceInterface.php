@@ -17,8 +17,6 @@ use Spora\Models\Agent;
  */
 interface AgentServiceInterface
 {
-    // ── Agent lifecycle ─────────────────────────────────────────────────────────
-
     /**
      * @return list<array> Agent resource arrays for a user
      */
@@ -51,8 +49,6 @@ interface AgentServiceInterface
     public function getAgentByAgentId(int $agentId): ?Agent;
 
     public function deleteAgent(int $agentId, int $userId): bool;
-
-    // ── Flag setters ────────────────────────────────────────────────────────────
 
     /**
      * Pin or unpin an agent for the given user.

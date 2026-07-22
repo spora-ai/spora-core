@@ -47,12 +47,9 @@ final class AgentService implements AgentServiceInterface
         LLMConfigService $llmConfig,
         private readonly ?ToolIconResolver $toolIconResolver = null,
     ) {
-        // LLMConfigService is part of the constructor for backwards
-        // compatibility with the previous single-service shape — the
-        // collaborator resolvers that need it have moved to
-        // AgentToolSettingsService. Kept in the signature so existing
-        // container wiring (which passes the LLMConfigService) continues
-        // to resolve without a second registration.
+        // LLMConfigService is kept in the signature so existing container
+        // wiring continues to resolve; the resolvers that need it moved to
+        // AgentToolSettingsService when AgentService was split for S1448.
         unset($llmConfig);
     }
 
@@ -109,20 +106,18 @@ final class AgentService implements AgentServiceInterface
             return null;
         }
 
-        // No user-ownership check: the orchestrator has already pinned the
-        // agent id to the calling agent. The same EDITABLE_AGENT_FIELDS
-        // allowlist still applies, so the tool cannot escalate to internal
-        // columns (e.g. user_id, llm_driver_config_id) by omitting a
-        // userId here.
+        // No user-ownership check — the orchestrator has pinned the agent
+        // id. EDITABLE_AGENT_FIELDS still gates the columns, so the tool
+        // cannot escalate to user_id / llm_driver_config_id.
         return $this->applyAgentPatch($agentId, $agent, $data);
     }
 
     public function getAgentByAgentId(int $agentId): ?Agent
     {
         // No user-ownership check — see updateAgentByAgentId() for the
-        // security rationale. Tests can rely on the in-memory Eloquent
-        // harness to find a seeded agent; production reads come from the
-        // orchestrator-pinned agent id.
+        // security rationale. Production reads come from the
+        // orchestrator-pinned agent id; tests rely on the in-memory
+        // Eloquent harness to find a seeded agent.
         return Agent::find($agentId);
     }
 

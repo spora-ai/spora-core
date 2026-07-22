@@ -398,8 +398,8 @@ describe('AgentTool::execute — create_agent', function (): void {
     test('rejects invalid payload via validator', function (): void {
         [$tool] = makeAgentTool();
 
-        // Top-level payload is present (so we reach the validator), but the
-        // shape is missing required top-level keys (id, name, version).
+        // Shape is missing the required top-level keys (id, name, version)
+        // so the validator fails before any DB write.
         $out = $tool->execute(
             ['action' => 'create_agent', 'payload' => ['agent' => [], 'tools' => []]],
             7,

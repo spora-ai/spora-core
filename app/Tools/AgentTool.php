@@ -350,9 +350,8 @@ final class AgentTool extends AbstractTool
     {
         $payload = (array) ($arguments['payload'] ?? []);
         $validation = $this->templateValidator->validate($payload);
-        // Consolidate the three independent failure paths into a single
-        // return so the S1142 3-return ceiling stays satisfied. Each guard
-        // contributes one early return via the match below.
+        // Collapse the three independent failure paths into a single match
+        // arm so the method stays under the S1142 3-return ceiling.
         $error = match (true) {
             $userId === null
                 => 'create_agent requires an authenticated user.',
