@@ -120,24 +120,33 @@ final class MediaAssetSerializer
         if ($value === '' || mb_check_encoding($value, 'UTF-8')) {
             return $value;
         }
-        // 1. iconv `//IGNORE` strips invalid UTF-8 bytes but keeps every
-        //    valid multi-byte sequence intact — so `ça` survives even
-        //    when followed by a stray 0xE9 byte.
+        $repaired = self::repairGarbled($value);
+        if ($repaired !== null) {
+            return $repaired;
+        }
+        $salvaged = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
+        return $salvaged === false ? '' : $salvaged;
+    }
+
+    /**
+     * Two-step recovery for malformed UTF-8 input.
+     *
+     * @return string|null Returns a clean UTF-8 string, or null when
+     *                    neither strategy worked — caller falls back
+     *                    to dropping bytes via `iconv //IGNORE`.
+     */
+    private static function repairGarbled(string $value): ?string
+    {
         $repaired = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
         if (is_string($repaired) && $repaired !== '' && mb_check_encoding($repaired, 'UTF-8')) {
             return $repaired;
         }
-        // 2. If every byte was garbage, the input is almost certainly a
-        //    Windows-1252 / ISO-8859-1 web upload. Reinterpret under
-        //    the legacy encoding.
         foreach (['Windows-1252', 'ISO-8859-1'] as $encoding) {
             $candidate = @mb_convert_encoding($value, 'UTF-8', $encoding);
             if (mb_check_encoding($candidate, 'UTF-8')) {
                 return $candidate;
             }
         }
-        // 3. Last resort: whatever iconv salvaged (possibly empty).
-        //    Never throws.
-        return is_string($repaired) ? $repaired : '';
+        return null;
     }
 }
