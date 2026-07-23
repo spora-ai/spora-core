@@ -605,8 +605,7 @@ describe('MediaArchiveController', function (): void {
             $userA = $authService->register('media-owner-a@example.com', 'ValidPass1!', 'OwnerA');
             $userB = $authService->register('media-owner-b@example.com', 'ValidPass1!', 'OwnerB');
 
-            // Two agents, one per user. Tool rows attributed to each agent
-            // must surface only when the current user owns that agent.
+            // Two agents (one per user) so tool rows surface only when the current user owns that agent.
             $agentA = Agent::create([
                 'user_id'      => $userA,
                 'name'         => 'Agent A',
@@ -626,21 +625,18 @@ describe('MediaArchiveController', function (): void {
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             $service = $ctx['service'];
-            // A's upload (user_id=$userA, no agent).
             $service->ingest(new MediaIngestRequest(
                 bytes: $bytes,
                 mime: 'image/png',
                 userId: $userA,
                 uploadSource: 'upload',
             ));
-            // B's upload.
             $service->ingest(new MediaIngestRequest(
                 bytes: $bytes,
                 mime: 'image/png',
                 userId: $userB,
                 uploadSource: 'upload',
             ));
-            // A's tool row (agent_id=$agentA->id).
             $service->ingest(new MediaIngestRequest(
                 bytes: $bytes,
                 mime: 'image/png',
@@ -649,7 +645,6 @@ describe('MediaArchiveController', function (): void {
                 toolName: 'tavily',
                 uploadSource: 'tool',
             ));
-            // B's tool row.
             $service->ingest(new MediaIngestRequest(
                 bytes: $bytes,
                 mime: 'image/png',
@@ -666,9 +661,7 @@ describe('MediaArchiveController', function (): void {
             $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
             expect($response->getStatusCode())->toBe(200);
             $body = json_decode($response->getContent(), true);
-            // The union: A's upload + A's tool row = 2. B's rows (upload +
-            // tool) are owned by another user / agent, so they don't
-            // surface.
+            // Union: A's upload + A's tool = 2; B's rows are owned by another user/agent.
             expect($body['data']['total'])->toBe(2);
         } finally {
             $ctx['restore']();
@@ -721,8 +714,7 @@ describe('MediaArchiveController', function (): void {
             $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
             expect($response->getStatusCode())->toBe(200);
             $body = json_decode($response->getContent(), true);
-            // Union narrowed by upload_source='upload': only A's upload.
-            // B's upload and A's tool row are both excluded.
+            // Union narrowed to upload_source='upload' yields only A's upload.
             expect($body['data']['total'])->toBe(1);
             expect($body['data']['assets'][0]['upload_source'])->toBe('upload');
             expect($body['data']['assets'][0]['user_id'])->toBe($userA);
@@ -787,8 +779,7 @@ describe('MediaArchiveController', function (): void {
             $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
             expect($response->getStatusCode())->toBe(200);
             $body = json_decode($response->getContent(), true);
-            // Narrowed to tool rows of A's agent only. A's upload and B's
-            // tool row are both excluded.
+            // Narrowed to tool rows of A's agent only.
             expect($body['data']['total'])->toBe(1);
             expect($body['data']['assets'][0]['upload_source'])->toBe('tool');
             expect($body['data']['assets'][0]['agent_id'])->toBe($agentA->id);
