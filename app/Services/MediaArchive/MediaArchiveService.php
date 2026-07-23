@@ -10,6 +10,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
+use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
@@ -151,7 +152,19 @@ final class MediaArchiveService
         if ($query->agentId !== null) {
             $builder->where('agent_id', $query->agentId);
         }
-        if ($query->userId !== null) {
+        // Ownership union takes precedence over the legacy userId-only
+        // scope. When `?ownership=mine` is in play, the DTO has cleared
+        // `userId` and stashed the auth user id in `agentOwnerUserId`, so
+        // this branch is dormant for ownership callers and active for
+        // legacy `?scope=mine` callers.
+        if ($query->agentOwnerUserId !== null) {
+            $builder->where(function (Builder $q) use ($query): void {
+                $q->where('user_id', $query->agentOwnerUserId)
+                  ->orWhereIn('agent_id', Agent::query()
+                      ->select('id')
+                      ->where('user_id', $query->agentOwnerUserId));
+            });
+        } elseif ($query->userId !== null) {
             $builder->where('user_id', $query->userId);
         }
         if ($query->pluginSlug !== null) {

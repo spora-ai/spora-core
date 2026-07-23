@@ -97,15 +97,17 @@ describe('ListMediaQuery::toArray()', function (): void {
         );
 
         expect($query->toArray())->toBe([
-            'mediaType'    => 'image',
-            'mediaTypes'   => null,
-            'agentId'      => 42,
-            'userId'       => null,
-            'pluginSlug'   => 'foo',
-            'toolName'     => 'tavily',
-            'search'       => 'hello',
-            'sort'         => ListMediaQuery::SORT_CREATED_ASC,
-            'uploadSource' => null,
+            'mediaType'        => 'image',
+            'mediaTypes'       => null,
+            'agentId'          => 42,
+            'userId'           => null,
+            'pluginSlug'       => 'foo',
+            'toolName'         => 'tavily',
+            'search'           => 'hello',
+            'sort'             => ListMediaQuery::SORT_CREATED_ASC,
+            'uploadSource'     => null,
+            'ownership'        => null,
+            'agentOwnerUserId' => null,
         ]);
     });
 
