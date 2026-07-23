@@ -40,11 +40,8 @@ function makeMediaAsset(array $attrs = []): MediaAsset
 }
 
 /**
- * Build a MediaAsset whose `tags` / `metadata` casts are stripped so
- * raw PHP arrays (with arbitrary bytes) survive directly into the
- * serializer. PHP's json_encode() hard-fails on non-UTF-8 input, so
- * feeding real Latin-1 / Windows-1252 bytes through a JSON column
- * cast isn't possible in a test — we bypass the cast by reflection.
+ * Like makeMediaAsset(), but strips the JSON casts on tags/metadata
+ * so we can feed raw Latin-1 / Windows-1252 bytes through them.
  */
 function makeRawMediaAsset(array $attrs = []): MediaAsset
 {
@@ -91,10 +88,7 @@ test('serialize() preserves valid UTF-8 strings untouched', function (): void {
 });
 
 test('serialize() fully-garbage Latin-1 strings are reinterpreted under Windows-1252', function (): void {
-    // Three Latin-1-only bytes — the canonical "all bytes are
-    // garbage from a UTF-8 perspective" case. iconv `//IGNORE`
-    // drops everything (output is empty), so the Windows-1252
-    // fallback kicks in and recovers the three glyphs.
+    // Three Latin-1-only bytes — iconv //IGNORE drops them all, so the Windows-1252 fallback must kick in.
     $latin1Bytes = chr(0xE9) . chr(0xFC) . chr(0xDF); // é ü ß
     expect(mb_check_encoding($latin1Bytes, 'UTF-8'))->toBeFalse();
 
@@ -106,10 +100,7 @@ test('serialize() fully-garbage Latin-1 strings are reinterpreted under Windows-
 });
 
 test('serialize() never throws on completely unsalvageable bytes', function (): void {
-    // 0xC0 is a "non-shortest form" overlong-encoding marker; it is
-    // invalid even when treated as the start of a 2-byte UTF-8
-    // sequence. The fallback must drop it cleanly and keep the
-    // surrounding valid UTF-8 intact.
+    // 0xC0 is an overlong-encoding marker; iconv //IGNORE must drop it cleanly and stitch the rest back together.
     $garbled = "ok-" . chr(0xC0) . "-more";
     expect(mb_check_encoding($garbled, 'UTF-8'))->toBeFalse();
 
@@ -117,16 +108,12 @@ test('serialize() never throws on completely unsalvageable bytes', function (): 
     $payload    = $serializer->serialize(makeMediaAsset(['filename' => $garbled]));
 
     expect(mb_check_encoding($payload['filename'], 'UTF-8'))->toBeTrue();
-    // iconv `//IGNORE` drops the 0xC0 byte and stitches the two
-    // ASCII fragments back together.
     expect($payload['filename'])->toContain('ok-');
     expect($payload['filename'])->toContain('-more');
 });
 
 test('serialize() preserves valid UTF-8 around a single dropped byte', function (): void {
-    // `caf` + é(U+00E9) + `.txt` with the `é` represented as a raw
-    // 0xE9 byte. Mostly valid UTF-8 with one stray byte — iconv
-    // `//IGNORE` must drop the 0xE9 and keep the surrounding ASCII.
+    // Mostly valid UTF-8 with one stray 0xE9 byte — iconv //IGNORE must drop it and keep the surrounding ASCII.
     $partial = "caf" . chr(0xE9) . ".txt";
     expect(mb_check_encoding($partial, 'UTF-8'))->toBeFalse();
 
@@ -150,12 +137,6 @@ test('serialize() scrubs inside nested arrays (tags + metadata)', function (): v
         ],
     ]));
 
-    // iconv `//IGNORE` recovers single stray non-UTF-8 bytes into
-    // their Unicode codepoint (U+00E9 here, mapping 0xE9 → 'é'). When
-    // the input is wholly garbage the path falls back to
-    // Windows-1252 — three contiguous Latin-1 bytes (é ü ß) round-
-    // trip through that fallback. The realistic production mix is
-    // "one odd browser char" or "fully Latin-1", not partial.
     expect($payload['tags'])->toBe(['café', 'plain', 'éüß']);
     expect($payload['metadata']['author'])->toBe('François');
     expect($payload['metadata']['greeting'])->toBe('Salut, é');
@@ -183,9 +164,7 @@ test('serialize() preserves null values exactly', function (): void {
 });
 
 test('serialize() produces JSON that json_encode accepts for the whole payload', function (): void {
-    // End-to-end check: the actual call that fails when the bug is
-    // present is `new JsonResponse($payload)`. Reproduce it here
-    // without a JsonResponse so this stays a pure unit test.
+    // The real failure path is `new JsonResponse($payload)` — exercised here without the Symfony response.
     $serializer = new MediaAssetSerializer();
     $payload    = $serializer->serialize(makeMediaAsset([
         'filename' => "weird " . chr(0x80) . " name " . chr(0xC0) . ".txt",

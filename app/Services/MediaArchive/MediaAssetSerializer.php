@@ -21,11 +21,7 @@ final class MediaAssetSerializer
      */
     public function serialize(MediaAsset $asset, ?string $host = null): array
     {
-        // The recursive scrub below keeps the wire payload UTF-8-safe
-        // even when a stored string (typically `filename` from a
-        // pre-HTML5 web upload) contains Windows-1252 / ISO-8859-1
-        // bytes that would otherwise crash Symfony's JsonResponse
-        // encoder with `Malformed UTF-8 characters`.
+        // Scrub non-UTF-8 bytes (legacy Latin-1 filenames) so json_encode cannot choke.
         return self::scrubUtf8([
             'id'                  => $asset->id,
             'agent_id'            => $asset->agent_id,
@@ -73,9 +69,6 @@ final class MediaAssetSerializer
     }
 
     /**
-     * Recursively normalize every string in the array to valid UTF-8 so
-     * `json_encode` cannot throw "Malformed UTF-8 characters".
-     *
      * @param array<string, mixed> $value
      * @return array<string, mixed>
      */
@@ -88,10 +81,6 @@ final class MediaAssetSerializer
         return $result;
     }
 
-    /**
-     * @param mixed $value
-     * @return mixed
-     */
     private static function scrubValue(mixed $value): mixed
     {
         if (is_string($value)) {
@@ -105,15 +94,8 @@ final class MediaAssetSerializer
     }
 
     /**
-     * Best-effort repair of a single string.
-     *
-     * Valid UTF-8 passes through untouched so we keep filenames like
-     * "résumé.pdf" intact. When the input is malformed we try the two
-     * encodings that historically leak into web uploads
-     * (Windows-1252, ISO-8859-1) and fall back to dropping
-     * unconvertible bytes via `iconv //IGNORE`. The fallback path
-     * never throws — that's the whole point of having it: an
-     * unsalvageable string still gets the asset out the door.
+     * Pass valid UTF-8 through; otherwise try Windows-1252 / ISO-8859-1,
+     * then `iconv //IGNORE` to drop unsalvageable bytes.
      */
     private static function scrubString(string $value): string
     {
@@ -129,11 +111,7 @@ final class MediaAssetSerializer
     }
 
     /**
-     * Two-step recovery for malformed UTF-8 input.
-     *
-     * @return string|null Returns a clean UTF-8 string, or null when
-     *                    neither strategy worked — caller falls back
-     *                    to dropping bytes via `iconv //IGNORE`.
+     * @return string|null null when neither recovery produced valid UTF-8; caller falls back to `iconv //IGNORE`.
      */
     private static function repairGarbled(string $value): ?string
     {
