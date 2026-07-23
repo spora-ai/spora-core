@@ -94,8 +94,8 @@ final class MediaAssetSerializer
     }
 
     /**
-     * Pass valid UTF-8 through; otherwise try Windows-1252 / ISO-8859-1,
-     * then `iconv //IGNORE` to drop unsalvageable bytes.
+     * Pass valid UTF-8 through; otherwise delegate to repairGarbled,
+     * then `iconv //IGNORE` as last resort.
      */
     private static function scrubString(string $value): string
     {
