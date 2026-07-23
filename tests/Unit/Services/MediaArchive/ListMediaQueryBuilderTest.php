@@ -150,7 +150,7 @@ describe('ListMediaQueryBuilder ownership field', function (): void {
         expect($query->agentOwnerUserId)->toBe(7);
     });
 
-    it('ownership wins over scope when both are present', function (): void {
+    it('ignores the removed scope parameter and keeps the ownership union', function (): void {
         $request = Request::create('/?scope=mine&ownership=mine');
         $query = ListMediaQueryBuilder::fromRequest($request, 7);
         expect($query->ownership)->toBe('mine');
@@ -158,11 +158,9 @@ describe('ListMediaQueryBuilder ownership field', function (): void {
         expect($query->userId)->toBeNull();
     });
 
-    it('legacy scope=mine with explicit ownership=bogus still falls through to the union default', function (): void {
+    it('ignores scope when ownership is invalid', function (): void {
         $request = Request::create('/?scope=mine&ownership=bogus');
         $query = ListMediaQueryBuilder::fromRequest($request, 7);
-        // `bogus` is dropped and the parser falls back to the union
-        // default (mine) — legacy scope is dormant.
         expect($query->ownership)->toBe('mine');
         expect($query->agentOwnerUserId)->toBe(7);
         expect($query->userId)->toBeNull();

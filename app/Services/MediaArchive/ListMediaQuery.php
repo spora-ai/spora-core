@@ -55,18 +55,13 @@ final readonly class ListMediaQuery
     ];
 
     /**
-     * Ownership filter (`?ownership=mine`) — replaces the user-only
-     * `?scope=mine` semantic for callers that need tool-generated media
-     * for the current user's agents.
+     * Authenticated ownership filter for media listings.
      *
-     * `'mine'` expands to the union "uploads where user_id = me OR tool
-     * rows where agent_id IN (agents owned by me)". There is NO `'all'`
-     * value: an authenticated user must never be able to bypass the
-     * ownership filter via a query string and dump every media row in
-     * the system. The builder defaults `agentOwnerUserId` to the auth
-     * user when the param is missing so EVERY authenticated request is
-     * scoped to the caller. Admin tooling that needs every row uses a
-     * separate admin-only endpoint with a role check.
+     * `'mine'` expands to the union "uploads where user_id = me OR media
+     * associated with agents owned by me". There is no `'all'` value: an
+     * authenticated user must never bypass the ownership filter through a
+     * query string. Admin tooling that needs every row uses a separate
+     * role-protected endpoint.
      */
     public const OWNERSHIP_MINE = 'mine';
 
@@ -98,8 +93,9 @@ final readonly class ListMediaQuery
         // `?ownership=mine` semantic — union of uploads owned by the user
         // and tool-generated rows for agents owned by the user. The
         // builder sets `agentOwnerUserId` (the subquery target) and clears
-        // `userId` when ownership is in play; the legacy `userId` branch
-        // stays for callers that only need the upload-only scope.
+        // Authenticated listings use the ownership union via
+        // `agentOwnerUserId`; `userId` remains available for direct callers
+        // that explicitly need an upload-only filter.
         public ?string $ownership = null,
         public ?int $agentOwnerUserId = null,
         public int $page = 1,

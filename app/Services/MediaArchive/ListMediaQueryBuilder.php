@@ -23,19 +23,10 @@ final class ListMediaQueryBuilder
         $mediaTypes = self::parseMediaTypes($params->get('types'));
         $mediaType  = self::parseMediaType($params->get('type'));
 
-        // Ownership vs scope precedence:
-        // - `?ownership=mine` (or no param at all) wins — it expresses
-        //   the union and is the safe default. Missing/empty/unknown
-        //   param defaults to ownership=mine so an authenticated user
-        //   can NEVER get an unfiltered list via a missing or empty
-        //   ownership query string.
-        // - `?scope=mine` is the legacy upload-only path; preserved for
-        //   callers that don't need the union.
-        // - `parseOwnership()` returns null for any value other than
-        //   `mine`; we treat that as the same default.
+        // Authenticated listings always use the ownership union: the caller's
+        // uploads plus media associated with agents they own. Invalid or
+        // missing ownership values resolve to this safe default.
         $ownership = self::parseOwnership($params->get('ownership'));
-        $wantsUnion = $ownership === null || $ownership === ListMediaQuery::OWNERSHIP_MINE;
-        $usesLegacyScopeMine = !$wantsUnion && $params->get('scope') === 'mine';
 
         return new ListMediaQuery(
             // `types=` wins over `type=` when both are supplied — the picker
@@ -45,7 +36,7 @@ final class ListMediaQueryBuilder
             mediaType: $mediaTypes === null ? $mediaType : null,
             mediaTypes: $mediaTypes,
             agentId: self::parseAgentId($params->get('agent_id')),
-            userId: $usesLegacyScopeMine ? $userId : null,
+            userId: null,
             pluginSlug: self::parseString($params->get('plugin_slug')),
             toolName: self::parseString($params->get('tool_name')),
             from: self::parseDate($params->get('from')),
@@ -54,7 +45,7 @@ final class ListMediaQueryBuilder
             sort: self::parseSort($params->get('sort')),
             uploadSource: self::parseUploadSource($params->get('source')),
             ownership: $ownership ?? ListMediaQuery::OWNERSHIP_MINE,
-            agentOwnerUserId: $wantsUnion ? $userId : null,
+            agentOwnerUserId: $userId,
             page: self::parseInt($params->get('page'), 1),
             perPage: self::parseInt($params->get('per_page'), ListMediaQuery::PER_PAGE_DEFAULT),
         );
