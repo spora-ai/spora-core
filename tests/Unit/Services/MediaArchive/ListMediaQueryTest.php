@@ -27,8 +27,23 @@ describe('ListMediaQuery defaults', function (): void {
         expect($query->to)->toBeNull();
         expect($query->search)->toBeNull();
         expect($query->sort)->toBe(ListMediaQuery::SORT_CREATED_DESC);
+        expect($query->uploadSource)->toBeNull();
         expect($query->page)->toBe(1);
         expect($query->perPage)->toBe(ListMediaQuery::PER_PAGE_DEFAULT);
+    });
+
+    it('exposes the canonical upload-source filter constants', function (): void {
+        expect(ListMediaQuery::UPLOAD_SOURCE_UPLOAD)->toBe('upload');
+        expect(ListMediaQuery::UPLOAD_SOURCE_TOOL)->toBe('tool');
+        // `'all'` is the input-only sentinel for `?source=all`; the HTTP
+        // builder normalises it to null. The persisted-filter list
+        // excludes it so direct DTO construction can't leak a
+        // `WHERE upload_source = 'all'` clause into the service.
+        expect(ListMediaQuery::UPLOAD_SOURCE_ALL)->toBe('all');
+        expect(ListMediaQuery::ALLOWED_UPLOAD_SOURCES)->toBe([
+            ListMediaQuery::UPLOAD_SOURCE_UPLOAD,
+            ListMediaQuery::UPLOAD_SOURCE_TOOL,
+        ]);
     });
 
     it('exposes the canonical sort keys and their ALLOWED_SORTS list', function (): void {
@@ -82,14 +97,15 @@ describe('ListMediaQuery::toArray()', function (): void {
         );
 
         expect($query->toArray())->toBe([
-            'mediaType'  => 'image',
-            'mediaTypes' => null,
-            'agentId'    => 42,
-            'userId'     => null,
-            'pluginSlug' => 'foo',
-            'toolName'   => 'tavily',
-            'search'     => 'hello',
-            'sort'       => ListMediaQuery::SORT_CREATED_ASC,
+            'mediaType'    => 'image',
+            'mediaTypes'   => null,
+            'agentId'      => 42,
+            'userId'       => null,
+            'pluginSlug'   => 'foo',
+            'toolName'     => 'tavily',
+            'search'       => 'hello',
+            'sort'         => ListMediaQuery::SORT_CREATED_ASC,
+            'uploadSource' => null,
         ]);
     });
 
@@ -98,11 +114,18 @@ describe('ListMediaQuery::toArray()', function (): void {
         expect($arr)->toHaveKey('sort');
         expect($arr)->toHaveKey('mediaType');
         expect($arr)->toHaveKey('agentId');
+        expect($arr)->toHaveKey('uploadSource');
         // Values are null when the caller didn't supply them.
         expect($arr['mediaType'])->toBeNull();
         expect($arr['agentId'])->toBeNull();
         expect($arr['pluginSlug'])->toBeNull();
         expect($arr['search'])->toBeNull();
+        expect($arr['uploadSource'])->toBeNull();
+    });
+
+    it('projects the uploadSource filter through toArray() when set', function (): void {
+        $arr = (new ListMediaQuery(uploadSource: ListMediaQuery::UPLOAD_SOURCE_UPLOAD))->toArray();
+        expect($arr['uploadSource'])->toBe('upload');
     });
 });
 

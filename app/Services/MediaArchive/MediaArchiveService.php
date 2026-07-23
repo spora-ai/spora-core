@@ -160,6 +160,13 @@ final class MediaArchiveService
         if ($query->toolName !== null) {
             $builder->where('tool_name', $query->toolName);
         }
+        if ($query->uploadSource !== null) {
+            // Restricted to the upload-source column on the migration's
+            // `media_assets_upload_source_created_at_idx` index — see
+            // migration 0056. Filter is a single equality, so the planner
+            // uses the leading column of the index.
+            $builder->where('upload_source', $query->uploadSource);
+        }
         if ($query->from !== null) {
             $builder->where('created_at', '>=', Carbon::instance(DateTime::createFromInterface($query->from)));
         }

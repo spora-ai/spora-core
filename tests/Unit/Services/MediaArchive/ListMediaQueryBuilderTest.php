@@ -57,3 +57,40 @@ describe('ListMediaQueryBuilder search field', function (): void {
         expect($query->search)->toBe('alpine sunset');
     });
 });
+describe('ListMediaQueryBuilder upload_source field', function (): void {
+    it('returns null when source is missing or empty', function (): void {
+        $request = Request::create('/media');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->uploadSource)->toBeNull();
+    });
+
+    it("parses source=upload into the 'upload' constant", function (): void {
+        $request = Request::create('/?source=upload');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->uploadSource)->toBe('upload');
+    });
+
+    it("parses source=tool into the 'tool' constant", function (): void {
+        $request = Request::create('/?source=tool');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->uploadSource)->toBe('tool');
+    });
+
+    it("maps source=all to null (no filter applied)", function (): void {
+        $request = Request::create('/?source=all');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->uploadSource)->toBeNull();
+    });
+
+    it('silently drops unknown source values (typo tolerance)', function (): void {
+        $request = Request::create('/?source=bogus');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->uploadSource)->toBeNull();
+    });
+
+    it('lowercases the value before comparing', function (): void {
+        $request = Request::create('/?source=UPLOAD');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->uploadSource)->toBe('upload');
+    });
+});
