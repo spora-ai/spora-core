@@ -16,7 +16,6 @@ use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\Task;
-use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
@@ -174,19 +173,21 @@ final class TickPhaseRunner
             context: new HistoryMessageContext(
                 toolCallPayload: json_encode(
                     array_map(static fn(DriverToolCall $tc) => [
-                        'id'       => $tc->providerCallId,
-                        'type'     => 'function',
+                        'id' => $tc->providerCallId,
+                        'type' => 'function',
                         'function' => [
-                            'name'      => $tc->toolName,
+                            'name' => $tc->toolName,
                             // Normalize empty array [] to {} for strict providers
                             'arguments' => empty($tc->arguments) ? '{}' : json_encode($tc->arguments, JSON_THROW_ON_ERROR),
                         ],
                     ], $response->toolCalls),
                     JSON_THROW_ON_ERROR,
                 ),
-                inputTokens: $response->inputTokens,
-                outputTokens: $response->outputTokens,
-                reasoning: $response->reasoning,
+                inputTokens: $response->usage->inputTokens,
+                outputTokens: $response->usage->outputTokens,
+                contentBlocks: $response->contentBlocks,
+                usage: $response->usage,
+                displayReasoning: $response->displayReasoning,
             ),
         );
     }
@@ -198,9 +199,11 @@ final class TickPhaseRunner
             role: 'assistant',
             content: $response->content,
             context: new HistoryMessageContext(
-                inputTokens: $response->inputTokens,
-                outputTokens: $response->outputTokens,
-                reasoning: $response->reasoning,
+                inputTokens: $response->usage->inputTokens,
+                outputTokens: $response->usage->outputTokens,
+                contentBlocks: $response->contentBlocks,
+                usage: $response->usage,
+                displayReasoning: $response->displayReasoning,
             ),
         );
 
@@ -346,19 +349,17 @@ final class TickPhaseRunner
 
         $serializer = $this->toolCallSerializer ?? new ToolCallSerializer($this->toolInstances);
 
+        $historyRows = $task->taskHistory()->orderBy('sequence')->get();
+        $historyPayload = \Spora\Services\TaskService::buildHistoryPayload($historyRows);
+        $totals = \Spora\Services\TaskService::aggregateUsage($historyPayload['usages']);
+
         $taskData = [
-            'id'         => $task->id,
-            'status'     => $task->status,
+            'id' => $task->id,
+            'status' => $task->status,
             'step_count' => $task->step_count,
             'tool_calls' => $task->toolCalls->map(fn(ToolCallModel $tc) => $serializer->toArray($tc))->all(),
-            'history' => $task->taskHistory()->orderBy('sequence')->get()->map(fn(TaskHistory $h) => [
-                'sequence'     => $h->sequence,
-                'role'         => $h->role,
-                'content'      => $h->content,
-                'reasoning'    => $h->reasoning,
-                'tool_call_id' => $h->tool_call_id,
-                'tool_name'    => $h->tool_name,
-            ])->all(),
+            'history' => $historyPayload['history'],
+            'totals' => $totals,
         ];
 
         $this->mercure->publish($task->id, $task->user_id, $taskData);

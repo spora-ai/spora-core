@@ -11,8 +11,8 @@ test('parse returns reasoning=null and content when array is plain text block', 
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('Plain text response.')
-        ->and($response['reasoning'])->toBeNull();
+    expect($response['textContent'])->toBe('Plain text response.')
+        ->and($response['displayReasoning'])->toBeNull();
 });
 
 test('parse extracts thinking block as reasoning when content is an array of blocks', function (): void {
@@ -23,8 +23,8 @@ test('parse extracts thinking block as reasoning when content is an array of blo
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('Here is a vegan brownie recipe...')
-        ->and($response['reasoning'])->toBe('The user wants brownies. I should search for a recipe.');
+    expect($response['textContent'])->toBe('Here is a vegan brownie recipe...')
+        ->and($response['displayReasoning'])->toBe('The user wants brownies. I should search for a recipe.');
 });
 
 test('parse handles redacted_thinking from Anthropic', function (): void {
@@ -35,8 +35,8 @@ test('parse handles redacted_thinking from Anthropic', function (): void {
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('It works!')
-        ->and($response['reasoning'])->toBe('[Redacted Thinking]');
+    expect($response['textContent'])->toBe('It works!')
+        ->and($response['displayReasoning'])->toBe('[Redacted Thinking]');
 });
 
 test('parse returns reasoning=null when content is a flat string', function (): void {
@@ -44,22 +44,22 @@ test('parse returns reasoning=null when content is a flat string', function (): 
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('Plain text response.')
-        ->and($response['reasoning'])->toBeNull();
+    expect($response['textContent'])->toBe('Plain text response.')
+        ->and($response['displayReasoning'])->toBeNull();
 });
 
 test('parse handles content=null gracefully in legacy response', function (): void {
     $response = LLMContentParser::parse(null);
 
-    expect($response['content'])->toBe('')
-        ->and($response['reasoning'])->toBeNull();
+    expect($response['textContent'])->toBe('')
+        ->and($response['displayReasoning'])->toBeNull();
 });
 
 test('parse handles empty array gracefully', function (): void {
     $response = LLMContentParser::parse([]);
 
-    expect($response['content'])->toBe('')
-        ->and($response['reasoning'])->toBeNull();
+    expect($response['textContent'])->toBe('')
+        ->and($response['displayReasoning'])->toBeNull();
 });
 
 test('parse extracts XML <thinking> tags as reasoning from plain string content', function (): void {
@@ -67,8 +67,8 @@ test('parse extracts XML <thinking> tags as reasoning from plain string content'
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('You should tip $6.30.')
-        ->and($response['reasoning'])->toBe('I need to calculate 15% tip for $42. 15% of 42 is 6.3.');
+    expect($response['textContent'])->toBe('You should tip $6.30.')
+        ->and($response['displayReasoning'])->toBe('I need to calculate 15% tip for $42. 15% of 42 is 6.3.');
 });
 
 test('parse extracts multiple XML <thinking> blocks and concatenates them', function (): void {
@@ -76,8 +76,8 @@ test('parse extracts multiple XML <thinking> blocks and concatenates them', func
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('Result one. Result two.')
-        ->and($response['reasoning'])->toBe("First step...\nSecond step...");
+    expect($response['textContent'])->toBe('Result one. Result two.')
+        ->and($response['displayReasoning'])->toBe("First step...\nSecond step...");
 });
 
 test('parse extracts XML <thinking> nested inside a text block', function (): void {
@@ -90,8 +90,8 @@ test('parse extracts XML <thinking> nested inside a text block', function (): vo
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('Inner text.')
-        ->and($response['reasoning'])->toBe('Inner thinking within block');
+    expect($response['textContent'])->toBe('Inner text.')
+        ->and($response['displayReasoning'])->toBe('Inner thinking within block');
 });
 
 test('parse extracts <thought> tags as reasoning from plain string content', function (): void {
@@ -99,8 +99,8 @@ test('parse extracts <thought> tags as reasoning from plain string content', fun
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('The total is $42.')
-        ->and($response['reasoning'])->toBe('I should calculate the total first.');
+    expect($response['textContent'])->toBe('The total is $42.')
+        ->and($response['displayReasoning'])->toBe('I should calculate the total first.');
 });
 
 test('parse extracts Anthropic-style thinking tags and preserves newlines in content', function (): void {
@@ -108,9 +108,9 @@ test('parse extracts Anthropic-style thinking tags and preserves newlines in con
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['reasoning'])->toBe("Step one.\nStep two.");
+    expect($response['displayReasoning'])->toBe("Step one.\nStep two.");
     // Newlines should be preserved, not collapsed to spaces
-    expect($response['content'])->toBe("## Header\n\nList item 1\nList item 2");
+    expect($response['textContent'])->toBe("## Header\n\nList item 1\nList item 2");
 });
 
 test('parse preserves newlines in content when stripping thinking tags', function (): void {
@@ -119,8 +119,8 @@ test('parse preserves newlines in content when stripping thinking tags', functio
     $response = LLMContentParser::parse($raw);
 
     // Newlines should NOT be collapsed to spaces - only spaces/tabs collapsed
-    expect($response['content'])->toBe("## Header\n\nParagraph here");
-    expect($response['content'])->not()->toContain('  '); // no double spaces
+    expect($response['textContent'])->toBe("## Header\n\nParagraph here");
+    expect($response['textContent'])->not()->toContain('  '); // no double spaces
 });
 
 test('parse extracts Anthropic thinking from response02.txt and preserves markdown formatting', function (): void {
@@ -129,20 +129,20 @@ test('parse extracts Anthropic thinking from response02.txt and preserves markdo
     $response = LLMContentParser::parse($raw);
 
     // Thinking should be extracted into reasoning field
-    expect($response['reasoning'])->not()->toBeNull();
-    expect($response['reasoning'])->toContain('Wie wird das Wetter');
+    expect($response['displayReasoning'])->not()->toBeNull();
+    expect($response['displayReasoning'])->toContain('Wie wird das Wetter');
 
     // Content should NOT contain thinking tags
-    expect($response['content'])->not()->toContain('</think>');
-    expect($response['content'])->not()->toContain('<think>');
+    expect($response['textContent'])->not()->toContain('</think>');
+    expect($response['textContent'])->not()->toContain('<think>');
 
     // Content should start with markdown heading, not with thinking tag
-    expect(trim($response['content']))->toStartWith('## Wetter in Deutschland');
+    expect(trim($response['textContent']))->toStartWith('## Wetter in Deutschland');
 
     // Markdown formatting (tables) should be preserved with newlines
-    expect($response['content'])->toContain("| Stadt |");
-    expect($response['content'])->toContain("|-------|");
-    expect($response['content'])->toContain("| **Köln**");
+    expect($response['textContent'])->toContain("| Stadt |");
+    expect($response['textContent'])->toContain("|-------|");
+    expect($response['textContent'])->toContain("| **Köln**");
 });
 
 test('parse extracts Anthropic thinking from response01.txt and preserves content', function (): void {
@@ -151,15 +151,15 @@ test('parse extracts Anthropic thinking from response01.txt and preserves conten
     $response = LLMContentParser::parse($raw);
 
     // Thinking should be extracted
-    expect($response['reasoning'])->not()->toBeNull();
-    expect($response['reasoning'])->toContain('6x7');
+    expect($response['displayReasoning'])->not()->toBeNull();
+    expect($response['displayReasoning'])->toContain('6x7');
 
     // Content should NOT contain thinking tags
-    expect($response['content'])->not()->toContain('</think>');
-    expect($response['content'])->not()->toContain('<think>');
+    expect($response['textContent'])->not()->toContain('</think>');
+    expect($response['textContent'])->not()->toContain('<think>');
 
     // Content should be the simple answer
-    expect(trim($response['content']))->toBe("6 × 7 = **42**");
+    expect(trim($response['textContent']))->toBe("6 × 7 = **42**");
 });
 
 test('parse skips non-array blocks mixed into a block array', function (): void {
@@ -172,8 +172,8 @@ test('parse skips non-array blocks mixed into a block array', function (): void 
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('Hello. World.')
-        ->and($response['reasoning'])->toBeNull();
+    expect($response['textContent'])->toBe('Hello. World.')
+        ->and($response['displayReasoning'])->toBeNull();
 });
 
 test('parse falls back to empty text when a text block has no text key', function (): void {
@@ -184,8 +184,8 @@ test('parse falls back to empty text when a text block has no text key', functio
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('after')
-        ->and($response['reasoning'])->toBeNull();
+    expect($response['textContent'])->toBe('after')
+        ->and($response['displayReasoning'])->toBeNull();
 });
 
 test('parse falls back to empty string when a thinking block has no thinking key', function (): void {
@@ -196,6 +196,6 @@ test('parse falls back to empty string when a thinking block has no thinking key
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('answer')
-        ->and($response['reasoning'])->toBe('');
+    expect($response['textContent'])->toBe('answer')
+        ->and($response['displayReasoning'])->toBe('');
 });

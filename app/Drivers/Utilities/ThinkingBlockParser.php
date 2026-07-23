@@ -4,18 +4,24 @@ declare(strict_types=1);
 
 namespace Spora\Drivers\Utilities;
 
+use Spora\Drivers\ValueObjects\ContentBlock;
+
 /**
- * Parses a `thinking` content block: the block's `thinking` key is treated
- * as chain-of-thought reasoning. Empty/missing keys yield an empty string
- * to preserve concatenation semantics in the dispatcher.
+ * Preserves Anthropic's signed thinking block for byte-identical replay.
  */
 final class ThinkingBlockParser implements ContentBlockParser
 {
     public function parse(array $block): ParsedContentBlock
     {
+        $thinking = (string) ($block['thinking'] ?? '');
+
         return new ParsedContentBlock(
-            content: '',
-            reasoning: (string) ($block['thinking'] ?? ''),
+            displayReasoning: $thinking,
+            contentBlock: ContentBlock::thinking(
+                $thinking,
+                (string) ($block['signature'] ?? ''),
+                is_array($block['metadata'] ?? null) ? $block['metadata'] : null,
+            ),
         );
     }
 }

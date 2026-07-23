@@ -499,7 +499,13 @@ describe('TaskService — getTaskWithHistory', function (): void {
         expect($result['history'])->toBeArray();
         expect($result['history'])->toHaveCount(2);
         expect($result['history'][0]['sequence'])->toBe(1);
-        expect($result['history'][1]['reasoning'])->toBe('thinking');
+        // Post PR #1: legacy `reasoning` column dropped from the API surface entirely; content_blocks replaces it.
+        // usage is only populated when a `usage` row was persisted alongside the
+        // history row; this fixture pre-dates the new persistence path, so `usage`
+        // is omitted (legacy decoder returns an empty content_blocks array).
+        expect($result['history'][1])->not->toHaveKey('reasoning');
+        expect($result['history'][1])->toHaveKey('content_blocks');
+        expect($result['history'][1]['content_blocks'])->toBe([]);
     });
 
     it('filters history by sinceSequence when provided', function (): void {

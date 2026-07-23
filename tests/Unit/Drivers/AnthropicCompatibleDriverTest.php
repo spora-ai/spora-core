@@ -231,11 +231,19 @@ test('OpenAI-format tools are converted to Anthropic input_schema format', funct
 
     $driver->complete($request);
 
+    expect($capturedBody['system'])->toBeArray();
+    expect($capturedBody['system'][0])->toMatchArray([
+        'type' => 'text',
+        'text' => 'You are helpful.',
+    ]);
+    expect($capturedBody['system'][0]['cache_control'])->toBe(['type' => 'ephemeral']);
+
     expect($capturedBody['tools'])->toHaveCount(1);
-    expect($capturedBody['tools'][0])->toBe([
-        'name'         => 'my_tool',
-        'description'  => 'Does something',
+    expect($capturedBody['tools'][0])->toMatchArray([
+        'name' => 'my_tool',
+        'description' => 'Does something',
         'input_schema' => ['type' => 'object', 'properties' => ['x' => ['type' => 'string']]],
+        'cache_control' => ['type' => 'ephemeral'],
     ]);
 });
 
@@ -519,8 +527,14 @@ test('complete extracts reasoning from thinking content blocks', function (): vo
     $response = $driver->complete(makeAnthropicRequest());
 
     expect($response->content)->toBe('The answer is 42.')
-        ->and($response->reasoning)->toBe('I should consider X and Y.')
+        ->and($response->displayReasoning)->toBe('I should consider X and Y.')
         ->and($response->toolCalls)->toBeEmpty();
+    expect($response->contentBlocks)->toHaveCount(2);
+    expect($response->contentBlocks[0])->toBeInstanceOf(Spora\Drivers\ValueObjects\ContentBlock::class);
+    expect($response->contentBlocks[0]->type)->toBe(Spora\Drivers\ValueObjects\ContentBlock::TYPE_THINKING);
+    expect($response->contentBlocks[0]->text)->toBe('I should consider X and Y.');
+    expect($response->contentBlocks[1]->type)->toBe(Spora\Drivers\ValueObjects\ContentBlock::TYPE_TEXT);
+    expect($response->contentBlocks[1]->text)->toBe('The answer is 42.');
 });
 
 test('complete falls back to empty content for tool_use with no text', function (): void {

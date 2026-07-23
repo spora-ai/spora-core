@@ -9,9 +9,11 @@ use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\Utilities\LLMContentParser;
+use Spora\Drivers\ValueObjects\ContentBlock;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
+use Spora\Drivers\ValueObjects\Usage;
 use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -174,13 +176,17 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
             return $this->buildToolCallsResponse($data, $message, $parsedContent);
         }
 
+        $usage = $this->buildUsage(is_array($data['usage'] ?? null) ? $data['usage'] : null);
+
         return new LLMResponse(
-            content: $parsedContent['content'],
+            content: $parsedContent['textContent'],
             toolCalls: [],
-            inputTokens: (int) ($data['usage']['prompt_tokens'] ?? 0),
-            outputTokens: (int) ($data['usage']['completion_tokens'] ?? 0),
+            inputTokens: $usage->inputTokens,
+            outputTokens: $usage->outputTokens,
             completionId: (string) ($data['id'] ?? ''),
-            reasoning: $parsedContent['reasoning'],
+            contentBlocks: $parsedContent['contentBlocks'],
+            usage: $usage,
+            displayReasoning: $parsedContent['displayReasoning'],
         );
     }
 
@@ -192,22 +198,24 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     private function buildToolCallsResponse(array $data, array $message, array $parsedContent): LLMResponse
     {
         $toolCalls = [];
-        foreach (($message['tool_calls'] ?? []) as $tc) {
+        foreach (($message['tool_calls'] ?? []) as $toolCall) {
             $toolCalls[] = new ToolCall(
-                providerCallId: (string) ($tc['id'] ?? ''),
-                toolName: (string) ($tc['function']['name'] ?? ''),
-                arguments: $this->parseToolArguments($tc['function']['arguments'] ?? '{}'),
+                providerCallId: (string) ($toolCall['id'] ?? ''),
+                toolName: (string) ($toolCall['function']['name'] ?? ''),
+                arguments: $this->parseToolArguments($toolCall['function']['arguments'] ?? '{}'),
             );
         }
+        $usage = $this->buildUsage(is_array($data['usage'] ?? null) ? $data['usage'] : null);
+
         return new LLMResponse(
-            content: $parsedContent['content'] !== '' ? $parsedContent['content'] : null,
+            content: $parsedContent['textContent'] !== '' ? $parsedContent['textContent'] : null,
             toolCalls: $toolCalls,
-            inputTokens: (int) ($data['usage']['prompt_tokens'] ?? 0),
-            outputTokens: (int) ($data['usage']['completion_tokens'] ?? 0),
+            inputTokens: $usage->inputTokens,
+            outputTokens: $usage->outputTokens,
             completionId: (string) ($data['id'] ?? ''),
-            // Pass reasoning through so tool-call turns persist their pre-call chain-of-thought
-            // alongside the final-response branch; otherwise reasoning is silently dropped.
-            reasoning: $parsedContent['reasoning'],
+            contentBlocks: $parsedContent['contentBlocks'],
+            usage: $usage,
+            displayReasoning: $parsedContent['displayReasoning'],
         );
     }
 
@@ -220,6 +228,14 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
             return json_decode($rawArguments, true) ?? [];
         }
         return (array) $rawArguments;
+    }
+
+    /**
+     * @param array<string, mixed>|null $usage
+     */
+    private function buildUsage(?array $usage): Usage
+    {
+        return Usage::fromProviderUsage($usage, 'openai');
     }
 
     public static function getName(): string
@@ -266,14 +282,20 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     private static function contentBlockToPart(array $block): ?array
     {
         $type = $block['type'] ?? null;
-        $result = null;
-        if ($type === 'text') {
-            $result = ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
-        } elseif ($type === 'image') {
-            $result = self::imageBlockToPart($block);
+        if ($type === ContentBlock::TYPE_TEXT) {
+            return ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
+        }
+        if ($type === ContentBlock::TYPE_IMAGE) {
+            return self::imageBlockToPart($block);
+        }
+        if ($type === ContentBlock::TYPE_THINKING) {
+            return ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
+        }
+        if ($type === ContentBlock::TYPE_REDACTED_THINKING) {
+            return ['type' => 'text', 'text' => '[Redacted Thinking]'];
         }
 
-        return $result;
+        return null;
     }
 
     /**

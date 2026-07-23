@@ -4,16 +4,16 @@ declare(strict_types=1);
 
 namespace Spora\Drivers\Utilities;
 
+use Spora\Drivers\ValueObjects\ContentBlock;
+
 /**
- * Normalised contribution of a single LLM content block.
- *
- * `content` is appended to the response text; `reasoning` (when non-null) is
- * appended to the chain-of-thought stream. Either or both may be empty.
+ * Normalized contribution of one provider content block.
  */
-final class ParsedContentBlock
+final readonly class ParsedContentBlock
 {
     public function __construct(
-        public readonly string $content = '',
-        public readonly ?string $reasoning = null,
+        public string $textContent = '',
+        public ?string $displayReasoning = null,
+        public ?ContentBlock $contentBlock = null,
     ) {}
 }
