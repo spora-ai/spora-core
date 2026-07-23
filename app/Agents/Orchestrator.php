@@ -25,6 +25,7 @@ use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\ScrubDataUrls;
+use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
@@ -114,7 +115,7 @@ final class Orchestrator implements OrchestratorInterface
             'agent_id'      => $agentId,
             'user_id'       => $agent->user_id,
             'status'        => $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED',
-            'user_prompt'   => $userPrompt,
+            'user_prompt'   => Utf8Sanitizer::scrubString($userPrompt),
             'step_count'    => 0,
             'max_steps'     => $maxSteps,
             'parent_task_id' => $parentTaskId,
@@ -150,7 +151,7 @@ final class Orchestrator implements OrchestratorInterface
 
         $task->status = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
         $task->step_count = 0;
-        $task->user_prompt = $newPrompt;
+        $task->user_prompt = Utf8Sanitizer::scrubString($newPrompt);
 
         if ($additionalSteps !== null) {
             $task->max_steps = $additionalSteps;
@@ -278,8 +279,8 @@ final class Orchestrator implements OrchestratorInterface
             Task::where('id', $taskId)->update([
                 'status'         => 'FAILED',
                 'error_code'     => 'REJECT_FAILED',
-                'error_message'  => 'Task reject failed: ' . $e->getMessage(),
-                'failure_reason' => $e->getMessage(),
+                'error_message'  => Utf8Sanitizer::scrubString('Task reject failed: ' . $e->getMessage()),
+                'failure_reason' => Utf8Sanitizer::scrubString($e->getMessage()),
             ]);
             throw $e;
         }

@@ -16,6 +16,7 @@ use Spora\Models\Task;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\Text\Utf8Sanitizer;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -98,7 +99,7 @@ final class TaskRunCommand extends Command
             $task->refresh();
             if ($task->status !== 'FAILED') {
                 $task->status = 'FAILED';
-                $task->failure_reason = $e->getMessage();
+                $task->failure_reason = Utf8Sanitizer::scrubString($e->getMessage());
                 $task->save();
             }
             // Notification is sent by Orchestrator.tick() catch block — do not duplicate here.

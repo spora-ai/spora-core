@@ -11,6 +11,7 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\ScrubDataUrls;
+use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -165,7 +166,7 @@ final class ToolCallExecutor
         $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
 
         \Illuminate\Database\Capsule\Manager::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
-            $scrubbed = ScrubDataUrls::scrub($result->content);
+            $scrubbed = ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content));
             $toolCallRecord->update([
                 'status'         => 'APPROVED',
                 'result_content' => $scrubbed,
@@ -199,7 +200,7 @@ final class ToolCallExecutor
         );
 
         \Illuminate\Database\Capsule\Manager::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
-            $scrubbed = ScrubDataUrls::scrub($result->content);
+            $scrubbed = ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content));
             $toolCallRecord->update([
                 'status'         => 'APPROVED',
                 'result_content' => $scrubbed,

@@ -102,6 +102,7 @@ test('PATCH markdown_content rejects non-string non-null payloads with 400', fun
     expect($body['error']['message'])->toBe('markdown_content must be a string.');
 });
 
+
 test('PATCH returns 403 when the asset is owned by a different non-admin user', function (): void {
     [, $service] = buildUpdateController();
     $asset = ingestSample($service, 99);

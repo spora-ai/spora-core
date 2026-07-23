@@ -5,14 +5,14 @@ declare(strict_types=1);
 namespace Spora\Services\MediaArchive;
 
 use Spora\Models\MediaAsset;
+use Spora\Services\Text\Utf8Sanitizer;
 
 /**
- * Single source of truth for the wire shape of a {@see MediaAsset}.
+ * Single source of truth for the wire shape of a MediaAsset.
  *
- * Both {@see \Spora\Http\MediaArchiveController} and
- * {@see \Spora\Http\MediaUploadController} need to return the same
- * payload — extracting the serializer here removes a cross-controller
- * static call and makes it trivially testable.
+ * Both MediaArchiveController and MediaUploadController need to
+ * return the same payload - extracting the serializer here removes
+ * a cross-controller static call and makes it trivially testable.
  */
 final class MediaAssetSerializer
 {
@@ -22,7 +22,8 @@ final class MediaAssetSerializer
     public function serialize(MediaAsset $asset, ?string $host = null): array
     {
         // Scrub non-UTF-8 bytes (legacy Latin-1 filenames) so json_encode cannot choke.
-        return self::scrubUtf8([
+        // See Spora\Services\Text\Utf8Sanitizer for the recovery algorithm.
+        return Utf8Sanitizer::scrub([
             'id'                  => $asset->id,
             'agent_id'            => $asset->agent_id,
             'task_id'             => $asset->task_id,
@@ -55,6 +56,9 @@ final class MediaAssetSerializer
 
     private function buildPublicUrl(MediaAsset $asset, ?string $host): ?string
     {
+        // No token => no public URL. Without this guard the
+        // MediaArchiveSharingTest PATCH-disable case leaks a URL
+        // with a stray ?token= query string.
         if ($asset->public_access_token === null || $asset->public_access_token === '') {
             return null;
         }
@@ -66,65 +70,5 @@ final class MediaAssetSerializer
         }
         $scheme = !empty($_SERVER['HTTPS']) ? 'https' : 'http';
         return $scheme . '://' . $base . '/api/v1/public/media/' . $asset->id . '?token=' . $asset->public_access_token;
-    }
-
-    /**
-     * @param array<string, mixed> $value
-     * @return array<string, mixed>
-     */
-    private static function scrubUtf8(array $value): array
-    {
-        $result = [];
-        foreach ($value as $key => $item) {
-            $result[$key] = self::scrubValue($item);
-        }
-        return $result;
-    }
-
-    private static function scrubValue(mixed $value): mixed
-    {
-        if (is_string($value)) {
-            return self::scrubString($value);
-        }
-        if (is_array($value)) {
-            /** @var array<string, mixed> $value */
-            return self::scrubUtf8($value);
-        }
-        return $value;
-    }
-
-    /**
-     * Pass valid UTF-8 through; otherwise delegate to repairGarbled,
-     * then `iconv //IGNORE` as last resort.
-     */
-    private static function scrubString(string $value): string
-    {
-        if ($value === '' || mb_check_encoding($value, 'UTF-8')) {
-            return $value;
-        }
-        $repaired = self::repairGarbled($value);
-        if ($repaired !== null) {
-            return $repaired;
-        }
-        $salvaged = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
-        return $salvaged === false ? '' : $salvaged;
-    }
-
-    /**
-     * @return string|null null when neither recovery produced valid UTF-8; caller falls back to `iconv //IGNORE`.
-     */
-    private static function repairGarbled(string $value): ?string
-    {
-        $repaired = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
-        if (is_string($repaired) && $repaired !== '' && mb_check_encoding($repaired, 'UTF-8')) {
-            return $repaired;
-        }
-        foreach (['Windows-1252', 'ISO-8859-1'] as $encoding) {
-            $candidate = @mb_convert_encoding($value, 'UTF-8', $encoding);
-            if (mb_check_encoding($candidate, 'UTF-8')) {
-                return $candidate;
-            }
-        }
-        return null;
     }
 }
