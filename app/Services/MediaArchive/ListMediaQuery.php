@@ -34,12 +34,24 @@ final readonly class ListMediaQuery
 
     public const UPLOAD_SOURCE_UPLOAD = 'upload';
     public const UPLOAD_SOURCE_TOOL = 'tool';
+    /**
+     * Input-only sentinel for `?source=all` — the HTTP builder normalises
+     * this to null so the WHERE clause is skipped. NOT a valid value for
+     * direct DTO construction: `MediaArchiveService::list()` will execute
+     * `WHERE upload_source = 'all'` if anyone passes it through. Use null
+     * (or omit the arg) for the unfiltered case.
+     */
     public const UPLOAD_SOURCE_ALL = 'all';
 
+    /**
+     * Persisted filter values — the subset of {@see self::UPLOAD_SOURCE_*}
+     * that {@see MediaArchiveService::list()} is safe to apply as a WHERE
+     * clause. Excludes the `'all'` sentinel, which the builder converts
+     * to null upstream.
+     */
     public const ALLOWED_UPLOAD_SOURCES = [
         self::UPLOAD_SOURCE_UPLOAD,
         self::UPLOAD_SOURCE_TOOL,
-        self::UPLOAD_SOURCE_ALL,
     ];
 
     /**

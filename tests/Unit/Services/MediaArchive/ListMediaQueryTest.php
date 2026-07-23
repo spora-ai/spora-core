@@ -35,11 +35,14 @@ describe('ListMediaQuery defaults', function (): void {
     it('exposes the canonical upload-source filter constants', function (): void {
         expect(ListMediaQuery::UPLOAD_SOURCE_UPLOAD)->toBe('upload');
         expect(ListMediaQuery::UPLOAD_SOURCE_TOOL)->toBe('tool');
+        // `'all'` is the input-only sentinel for `?source=all`; the HTTP
+        // builder normalises it to null. The persisted-filter list
+        // excludes it so direct DTO construction can't leak a
+        // `WHERE upload_source = 'all'` clause into the service.
         expect(ListMediaQuery::UPLOAD_SOURCE_ALL)->toBe('all');
         expect(ListMediaQuery::ALLOWED_UPLOAD_SOURCES)->toBe([
             ListMediaQuery::UPLOAD_SOURCE_UPLOAD,
             ListMediaQuery::UPLOAD_SOURCE_TOOL,
-            ListMediaQuery::UPLOAD_SOURCE_ALL,
         ]);
     });
 
