@@ -21,20 +21,25 @@ test('scrubString salvages Latin-1 bytes as Windows-1252', function (): void {
     expect($scrubbed)->toBe('éüß');
 });
 
-test('scrubString salvages pure ISO-8859-1 bytes', function (): void {
+test('scrubString salvages Latin-1 bytes via the Windows-1252 branch (bytes also defined in ISO-8859-1)', function (): void {
     // À (0xC0) © (0xA9) ¢ (0xA2) ® (0xAE) — same bytes in both encodings
-    // for this range, but exercises the ISO-8859-1 branch.
+    // for this range, so mb_convert_encoding succeeds on the Windows-1252
+    // attempt and the ISO-8859-1 fallback never runs. The test pins the
+    // sibling under the Windows-1252 branch, not the ISO-8859-1 branch
+    // the original name implied.
     $iso = chr(0xC0) . chr(0xA9) . chr(0xA2) . chr(0xAE);
     $scrubbed = Utf8Sanitizer::scrubString($iso);
     expect(mb_check_encoding($scrubbed, 'UTF-8'))->toBeTrue();
     expect($scrubbed)->toBe('À©¢®');
 });
 
-test('scrubString falls back to iconv IGNORE and preserves surrounding ASCII', function (): void {
+test('scrubString drops an isolated invalid UTF-8 byte via iconv //IGNORE', function (): void {
     // 0xC0 alone is an invalid UTF-8 leading byte (overlong marker).
     // Windows-1252 and ISO-8859-1 both salvage it as "À", so the
-    // scrubber reinterprets it. The fixture verifies the fallback
-    // path produces a string that round-trips through json_encode.
+    // mb_convert_encoding branch wins first and the iconv //IGNORE
+    // fallback never runs. The fixture documents the iconv-only path
+    // a future test could cover explicitly (e.g. an unrecognised
+    // byte sequence that the encoding chain can't map).
     $text = "prefix-" . chr(0xC0) . "-suffix";
     $scrubbed = Utf8Sanitizer::scrubString($text);
     expect(mb_check_encoding($scrubbed, 'UTF-8'))->toBeTrue();

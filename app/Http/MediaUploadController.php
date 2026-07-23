@@ -62,11 +62,14 @@ final class MediaUploadController
             );
         }
 
+        $clientName = $file->getClientOriginalName();
         $prompt = $request->request->get('prompt');
         $asset = $this->mediaArchive->ingest(new MediaIngestRequest(
             bytes: $bytes,
             mime: $sniffedMime,
-            filename: Utf8Sanitizer::scrubString($file->getClientOriginalName() !== '' ? $file->getClientOriginalName() : null),
+            filename: $clientName !== ''
+                ? Utf8Sanitizer::scrubString($clientName)
+                : null,
             userId: $userId,
             prompt: is_string($prompt) ? Utf8Sanitizer::scrubString($prompt) : null,
             tags: Utf8Sanitizer::scrub($this->parseJsonArray($request->request->get('tags'))),

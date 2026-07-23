@@ -56,9 +56,14 @@ final class Utf8Sanitizer
     }
 
     /**
-     * Pass valid UTF-8 through; otherwise delegate to repairGarbled,
-     * then `iconv //IGNORE` as last resort. Always returns a string —
-     * falls back to `''` on total failure so callers never get `false`.
+     * Pass valid UTF-8 through unchanged. Otherwise delegate to repairGarbled
+     * which tries the two-byte encodings Windows-1252 / ISO-8859-1 (every
+     * byte is defined in at least one, so the salvage chain always succeeds
+     * for any PHP string input). A final `iconv //IGNORE` pass strips any
+     * bytes that survived both attempts — a defensive guard for the
+     * hypothetical case where the encoding chain can't recognise the input.
+     *
+     * Always returns a string — never `false`.
      */
     public static function scrubString(string $value): string
     {
@@ -79,10 +84,13 @@ final class Utf8Sanitizer
      */
     private static function repairGarbled(string $value): ?string
     {
-        // The iconv //IGNORE pass is the cheapest of the three: it just
-        // drops the bad bytes. Worth trying first because Windows-1252
-        // garbage that happens to be all-printable looks like a string,
-        // not a garbled blob, and iconv handles that case correctly.
+        // iconv //IGNORE is the cheapest of the three paths and the right
+        // tool when the input is mostly valid UTF-8 with a few stray invalid
+        // bytes — those get dropped and the surrounding text is preserved.
+        // Only fall through to mb_convert_encoding if iconv dropped everything
+        // (returns '') or produced an invalid result, because mb_convert_encoding
+        // reinterprets the entire byte sequence as the named encoding and is
+        // destructive for inputs that weren't actually in that encoding.
         $repaired = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
         if (is_string($repaired) && $repaired !== '' && mb_check_encoding($repaired, 'UTF-8')) {
             return $repaired;

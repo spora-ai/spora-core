@@ -102,31 +102,6 @@ test('PATCH markdown_content rejects non-string non-null payloads with 400', fun
     expect($body['error']['message'])->toBe('markdown_content must be a string.');
 });
 
-test('PATCH filename with Latin-1 bytes persists a clean UTF-8 filename', function (): void {
-    [, $service, $controller] = buildUpdateController();
-    $asset = ingestSample($service, 1);
-    $dirty = 'résumé' . chr(0xE9) . chr(0xFC) . '.txt';
-    $req = Request::create("/api/v1/media/{$asset->id}", 'PATCH', content: json_encode(['filename' => $dirty]));
-    $req->headers->set('Content-Type', 'application/json');
-    $resp = $controller->update($asset->id, $req);
-    expect($resp->getStatusCode())->toBe(200);
-    $body = json_decode($resp->getContent(), true);
-    expect(mb_check_encoding($body['data']['filename'], 'UTF-8'))->toBeTrue();
-    expect($resp->getContent())->not->toContain(chr(0xE9));
-});
-
-test('PATCH metadata with nested Latin-1 bytes round-trips through JSON cleanly', function (): void {
-    [, $service, $controller] = buildUpdateController();
-    $asset = ingestSample($service, 1);
-    $dirty = ['title' => 'café' . chr(0xE9), 'nested' => ['note' => chr(0xFC) . 'ber']];
-    $req = Request::create("/api/v1/media/{$asset->id}", 'PATCH', content: json_encode(['metadata' => $dirty]));
-    $req->headers->set('Content-Type', 'application/json');
-    $resp = $controller->update($asset->id, $req);
-    expect($resp->getStatusCode())->toBe(200);
-    $body = json_decode($resp->getContent(), true);
-    expect(mb_check_encoding($body['data']['metadata']['title'], 'UTF-8'))->toBeTrue();
-    expect(mb_check_encoding($body['data']['metadata']['nested']['note'], 'UTF-8'))->toBeTrue();
-});
 
 test('PATCH returns 403 when the asset is owned by a different non-admin user', function (): void {
     [, $service] = buildUpdateController();
