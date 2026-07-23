@@ -65,7 +65,12 @@ test('ListMediaQueryBuilder parses all query params', function (): void {
     $query = ListMediaQueryBuilder::fromRequest($req, userId: 7);
     expect($query->mediaType)->toBe(MediaType::Image);
     expect($query->agentId)->toBe(42);
-    expect($query->userId)->toBe(7);
+    // `?scope=mine` without an explicit `?ownership` param falls into
+    // the safe union default (ownership=mine, agentOwnerUserId=7); the
+    // legacy `userId` branch is dormant to avoid double-filtering.
+    expect($query->ownership)->toBe('mine');
+    expect($query->agentOwnerUserId)->toBe(7);
+    expect($query->userId)->toBeNull();
     expect($query->pluginSlug)->toBe('foo');
     expect($query->toolName)->toBe('bar');
     expect($query->search)->toBe('hello');

@@ -152,11 +152,9 @@ final class MediaArchiveService
         if ($query->agentId !== null) {
             $builder->where('agent_id', $query->agentId);
         }
-        // Ownership union takes precedence over the legacy userId-only
-        // scope. When `?ownership=mine` is in play, the DTO has cleared
-        // `userId` and stashed the auth user id in `agentOwnerUserId`, so
-        // this branch is dormant for ownership callers and active for
-        // legacy `?scope=mine` callers.
+        // Ownership union takes precedence over the direct userId filter.
+        // HTTP listings always use agentOwnerUserId; userId remains available
+        // for direct callers that explicitly request upload-only filtering.
         if ($query->agentOwnerUserId !== null) {
             $builder->where(function (Builder $q) use ($query): void {
                 $q->where('user_id', $query->agentOwnerUserId)

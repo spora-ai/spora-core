@@ -23,19 +23,10 @@ final class ListMediaQueryBuilder
         $mediaTypes = self::parseMediaTypes($params->get('types'));
         $mediaType  = self::parseMediaType($params->get('type'));
 
-        // Ownership vs scope precedence:
-        // - `?ownership=mine` wins — it expresses the union
-        //   (user uploads + tool rows for the user's agents). The builder
-        //   stashes the auth user id in `agentOwnerUserId` (the subquery
-        //   target) and clears `userId` so the legacy WHERE branch stays
-        //   dormant.
-        // - `?scope=mine` is the legacy upload-only path; preserved for
-        //   callers that don't need the union.
-        // - When neither is set, no ownership filter is applied (admin
-        //   views, plugin tooling).
+        // Authenticated listings always use the ownership union: the caller's
+        // uploads plus media associated with agents they own. Invalid or
+        // missing ownership values resolve to this safe default.
         $ownership = self::parseOwnership($params->get('ownership'));
-        $usesOwnershipMine = $ownership === ListMediaQuery::OWNERSHIP_MINE;
-        $usesLegacyScopeMine = !$usesOwnershipMine && $params->get('scope') === 'mine';
 
         return new ListMediaQuery(
             // `types=` wins over `type=` when both are supplied — the picker
@@ -45,7 +36,7 @@ final class ListMediaQueryBuilder
             mediaType: $mediaTypes === null ? $mediaType : null,
             mediaTypes: $mediaTypes,
             agentId: self::parseAgentId($params->get('agent_id')),
-            userId: $usesLegacyScopeMine ? $userId : null,
+            userId: null,
             pluginSlug: self::parseString($params->get('plugin_slug')),
             toolName: self::parseString($params->get('tool_name')),
             from: self::parseDate($params->get('from')),
@@ -53,8 +44,8 @@ final class ListMediaQueryBuilder
             search: self::parseString($params->get('q')),
             sort: self::parseSort($params->get('sort')),
             uploadSource: self::parseUploadSource($params->get('source')),
-            ownership: $ownership,
-            agentOwnerUserId: $usesOwnershipMine ? $userId : null,
+            ownership: $ownership ?? ListMediaQuery::OWNERSHIP_MINE,
+            agentOwnerUserId: $userId,
             page: self::parseInt($params->get('page'), 1),
             perPage: self::parseInt($params->get('per_page'), ListMediaQuery::PER_PAGE_DEFAULT),
         );
@@ -161,10 +152,14 @@ final class ListMediaQueryBuilder
     }
 
     /**
-     * Parse the `?ownership=mine|all` filter. Returns null for missing,
-     * empty, or unknown values — mirroring the typo tolerance of
-     * {@see self::parseUploadSource()} and {@see self::parseMediaTypes()}.
+     * Parse the `?ownership=` filter. Returns null for missing, empty,
+     * or any value other than `'mine'` — mirroring the typo tolerance
+     * of {@see self::parseUploadSource()} and {@see self::parseMediaTypes()}.
      * A typo from an older client must not crash the listing endpoint.
+     * Note: there is NO `'all'` value — see {@see ListMediaQuery::OWNERSHIP_MINE}
+     * for the security rationale (an authenticated user must never be
+     * able to dump the full table via a query string). The null return
+     * triggers the `mine` default in `fromRequest()`.
      */
     private static function parseOwnership(mixed $raw): ?string
     {
@@ -172,7 +167,7 @@ final class ListMediaQueryBuilder
             return null;
         }
         $value = strtolower(trim($raw));
-        return in_array($value, ListMediaQuery::ALLOWED_OWNERSHIP_VALUES, true) ? $value : null;
+        return $value === ListMediaQuery::OWNERSHIP_MINE ? $value : null;
     }
 
     private static function parseString(mixed $raw): ?string

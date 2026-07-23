@@ -55,26 +55,15 @@ final readonly class ListMediaQuery
     ];
 
     /**
-     * Ownership filter (`?ownership=mine`) — replaces the user-only
-     * `?scope=mine` semantic for callers that need tool-generated media
-     * for the current user's agents.
+     * Authenticated ownership filter for media listings.
      *
-     * `'mine'` expands to the union "uploads where user_id = me OR tool
-     * rows where agent_id IN (agents owned by me)". `'all'` is an explicit
-     * "no filter" sentinel; the builder normalises it to null upstream.
+     * `'mine'` expands to the union "uploads where user_id = me OR media
+     * associated with agents owned by me". There is no `'all'` value: an
+     * authenticated user must never bypass the ownership filter through a
+     * query string. Admin tooling that needs every row uses a separate
+     * role-protected endpoint.
      */
     public const OWNERSHIP_MINE = 'mine';
-    public const OWNERSHIP_ALL = 'all';
-
-    /**
-     * Persisted ownership values — anything outside this set (typos,
-     * older clients) is silently dropped by the builder so the listing
-     * endpoint never crashes on a bad query string.
-     */
-    public const ALLOWED_OWNERSHIP_VALUES = [
-        self::OWNERSHIP_MINE,
-        self::OWNERSHIP_ALL,
-    ];
 
     /**
      * @param list<MediaType>|null $mediaTypes Multi-value media-type filter
@@ -104,8 +93,9 @@ final readonly class ListMediaQuery
         // `?ownership=mine` semantic — union of uploads owned by the user
         // and tool-generated rows for agents owned by the user. The
         // builder sets `agentOwnerUserId` (the subquery target) and clears
-        // `userId` when ownership is in play; the legacy `userId` branch
-        // stays for callers that only need the upload-only scope.
+        // Authenticated listings use the ownership union via
+        // `agentOwnerUserId`; `userId` remains available for direct callers
+        // that explicitly need an upload-only filter.
         public ?string $ownership = null,
         public ?int $agentOwnerUserId = null,
         public int $page = 1,
