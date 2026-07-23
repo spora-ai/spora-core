@@ -82,3 +82,20 @@ test('null content on a tool_calls response is preserved', function (): void {
     expect($response->toolCalls)->toHaveCount(1);
     expect($response->toolCalls[0])->toBeInstanceOf(ToolCall::class);
 });
+
+test('reasoning is propagated on tool_calls responses (Thinking-Tag regression)', function (): void {
+    $driver = makeOpenAIRequestDriver('gpt-4o');
+    $ref = new ReflectionMethod($driver, 'buildToolCallsResponse');
+    $response = $ref->invoke($driver, [
+        'id' => 'chatcmpl-2',
+        'usage' => ['prompt_tokens' => 10, 'completion_tokens' => 5],
+    ], [
+        'content' => 'I should look this up.',
+        'tool_calls' => [
+            ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'lookup', 'arguments' => '{}']],
+        ],
+    ], ['content' => 'I should look this up.', 'reasoning' => 'Plan: query the knowledge base first.']);
+    expect($response->reasoning)->toBe('Plan: query the knowledge base first.');
+    expect($response->content)->toBe('I should look this up.');
+    expect($response->toolCalls)->toHaveCount(1);
+});
