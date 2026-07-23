@@ -136,10 +136,12 @@ interface TaskServiceInterface
      *         sequence: int,
      *         role: string,
      *         content: string|null,
-     *         reasoning: string|null,
+     *         content_blocks: list<array<string, mixed>>,
      *         tool_call_id: string|null,
-     *         tool_name: string|null
-     *     }>
+     *         tool_name: string|null,
+     *         usage?: array<string, mixed>|null
+     *     }>,
+     *     totals: array<string, int>|null
      * }|null
      */
     public function getTaskWithHistory(int $taskId, int $userId, ?int $sinceSequence = null): ?array;

@@ -9,9 +9,11 @@ use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\Utilities\LLMContentParser;
+use Spora\Drivers\ValueObjects\ContentBlock;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
+use Spora\Drivers\ValueObjects\Usage;
 use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
@@ -34,6 +36,8 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 
     private readonly ?int $thinkingBudget;
 
+    private readonly bool $enablePromptCaching;
+
     public function __construct(
         string              $apiKey,
         string              $model,
@@ -54,6 +58,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
         );
         $this->temperature    = $options?->temperature;
         $this->thinkingBudget = $options?->thinkingBudget;
+        $this->enablePromptCaching = $options->enablePromptCaching ?? true;
     }
 
     /**
@@ -100,14 +105,27 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
      */
     private function buildAnthropicRequestBody(LLMRequest $request, array $tools, array $messages): array
     {
+        $system = $request->systemPrompt;
+        if ($this->enablePromptCaching) {
+            $system = [[
+                'type' => 'text',
+                'text' => $request->systemPrompt,
+                'cache_control' => ['type' => 'ephemeral'],
+            ]];
+        }
+
         $body = [
-            'model'      => $this->model,
-            'system'     => $request->systemPrompt,
-            'messages'   => $messages,
+            'model' => $this->model,
+            'system' => $system,
+            'messages' => $messages,
             'max_tokens' => $request->maxTokens,
         ];
 
         if ($tools !== []) {
+            if ($this->enablePromptCaching) {
+                $lastTool = array_key_last($tools);
+                $tools[$lastTool]['cache_control'] = ['type' => 'ephemeral'];
+            }
             $body['tools'] = $tools;
         }
 
@@ -117,7 +135,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 
         if ($this->thinkingBudget !== null) {
             $body['thinking'] = [
-                'type'          => 'enabled',
+                'type' => 'enabled',
                 'budget_tokens' => $this->thinkingBudget,
             ];
         }
@@ -169,32 +187,34 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
         $data = $response->toArray();
         $this->logger?->debug('LLM Response (Anthropic)', ['status' => $statusCode, 'data' => $data]);
 
-        $completionId  = (string) ($data['id'] ?? '');
-        $inputTokens   = (int) ($data['usage']['input_tokens'] ?? 0);
-        $outputTokens  = (int) ($data['usage']['output_tokens'] ?? 0);
-        $stopReason    = (string) ($data['stop_reason'] ?? '');
-        $contentBlocks = (array) ($data['content'] ?? []);
-
-        $parsedContent = LLMContentParser::parse($contentBlocks);
+        $completionId = (string) ($data['id'] ?? '');
+        $stopReason = (string) ($data['stop_reason'] ?? '');
+        $rawBlocks = is_array($data['content'] ?? null) ? $data['content'] : [];
+        $parsedContent = LLMContentParser::parse($rawBlocks);
+        $usage = $this->buildUsage(is_array($data['usage'] ?? null) ? $data['usage'] : null);
 
         if ($stopReason !== 'tool_use') {
             return new LLMResponse(
-                content: $parsedContent['content'],
+                content: $parsedContent['textContent'],
                 toolCalls: [],
-                inputTokens: $inputTokens,
-                outputTokens: $outputTokens,
+                inputTokens: $usage->inputTokens,
+                outputTokens: $usage->outputTokens,
                 completionId: $completionId,
-                reasoning: $parsedContent['reasoning'],
+                contentBlocks: $parsedContent['contentBlocks'],
+                usage: $usage,
+                displayReasoning: $parsedContent['displayReasoning'],
             );
         }
 
         return new LLMResponse(
-            content: $parsedContent['content'] !== '' ? $parsedContent['content'] : null,
-            toolCalls: $this->extractToolCalls($contentBlocks),
-            inputTokens: $inputTokens,
-            outputTokens: $outputTokens,
+            content: $parsedContent['textContent'] !== '' ? $parsedContent['textContent'] : null,
+            toolCalls: $this->extractToolCalls($rawBlocks),
+            inputTokens: $usage->inputTokens,
+            outputTokens: $usage->outputTokens,
             completionId: $completionId,
-            reasoning: $parsedContent['reasoning'],
+            contentBlocks: $parsedContent['contentBlocks'],
+            usage: $usage,
+            displayReasoning: $parsedContent['displayReasoning'],
         );
     }
 
@@ -277,7 +297,10 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
             }
 
             if ($role === 'assistant' && isset($msg['tool_calls'])) {
-                $converted[] = $this->buildAssistantToolUseMessage($msg['tool_calls']);
+                $converted[] = $this->buildAssistantToolUseMessage(
+                    $msg['tool_calls'],
+                    $msg['content'] ?? null,
+                );
                 continue;
             }
 
@@ -334,14 +357,38 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
     private function contentBlockToAnthropic(array $block): ?array
     {
         $type = $block['type'] ?? null;
-        $result = null;
-        if ($type === 'text') {
-            $result = ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
-        } elseif ($type === 'image') {
-            $result = $this->imageBlockToAnthropic($block);
+        if ($type === ContentBlock::TYPE_TEXT) {
+            return ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
+        }
+        if ($type === ContentBlock::TYPE_IMAGE) {
+            return $this->imageBlockToAnthropic($block);
+        }
+        if ($type === ContentBlock::TYPE_THINKING) {
+            return [
+                'type' => 'thinking',
+                'thinking' => (string) ($block['text'] ?? ''),
+                'signature' => (string) ($block['signature'] ?? ''),
+            ];
+        }
+        if ($type === ContentBlock::TYPE_REDACTED_THINKING) {
+            return ['type' => 'redacted_thinking', 'data' => (string) ($block['data'] ?? '')];
+        }
+        if ($type === ContentBlock::TYPE_TOOL_USE) {
+            $input = $block['toolInput'] ?? $block['tool_input'] ?? [];
+            $input = is_array($input) ? $input : [];
+            if (array_is_list($input)) {
+                $input = (object) $input;
+            }
+
+            return [
+                'type' => 'tool_use',
+                'id' => (string) ($block['toolUseId'] ?? $block['tool_use_id'] ?? ''),
+                'name' => (string) ($block['toolName'] ?? $block['tool_name'] ?? ''),
+                'input' => $input,
+            ];
         }
 
-        return $result;
+        return null;
     }
 
     /**
@@ -393,15 +440,28 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
     }
 
     /**
-     * @param  list<array<string, mixed>>  $toolCalls
+     * @param list<array<string, mixed>> $toolCalls
      * @return array{role: string, content: list<array<string, mixed>>}
      */
-    private function buildAssistantToolUseMessage(array $toolCalls): array
+    private function buildAssistantToolUseMessage(array $toolCalls, mixed $content): array
     {
-        $contentBlocks = [];
+        $normalized = $this->normalizeMessageContent($content);
+        $contentBlocks = is_array($normalized)
+            ? $normalized
+            : ($normalized === '' ? [] : [['type' => 'text', 'text' => $normalized]]);
 
-        foreach ($toolCalls as $tc) {
-            $contentBlocks[] = $this->buildToolUseBlock($tc);
+        $existingIds = [];
+        foreach ($contentBlocks as $block) {
+            if (($block['type'] ?? null) === 'tool_use') {
+                $existingIds[] = (string) ($block['id'] ?? '');
+            }
+        }
+
+        foreach ($toolCalls as $toolCall) {
+            $id = (string) ($toolCall['id'] ?? '');
+            if (!in_array($id, $existingIds, true)) {
+                $contentBlocks[] = $this->buildToolUseBlock($toolCall);
+            }
         }
 
         return ['role' => 'assistant', 'content' => $contentBlocks];
@@ -431,6 +491,14 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
             'name'  => (string) ($tc['function']['name'] ?? ''),
             'input' => $input,
         ];
+    }
+
+    /**
+     * @param array<string, mixed>|null $usage
+     */
+    private function buildUsage(?array $usage): Usage
+    {
+        return Usage::fromProviderUsage($usage, 'anthropic');
     }
 
     public static function getName(): string

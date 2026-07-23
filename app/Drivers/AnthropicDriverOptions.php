@@ -5,11 +5,7 @@ declare(strict_types=1);
 namespace Spora\Drivers;
 
 /**
- * Anthropic-specific driver options: sampling temperature + thinking budget
- * + image-input capability override.
- *
- * Bundled into a single value object so the AnthropicCompatibleDriver
- * constructor stays under the SonarQube S107 7-parameter cap.
+ * Anthropic-specific request behavior kept out of the driver constructor.
  */
 final class AnthropicDriverOptions
 {
@@ -17,5 +13,10 @@ final class AnthropicDriverOptions
         public readonly ?float $temperature = null,
         public readonly ?int $thinkingBudget = null,
         public readonly ?bool $supportsImageInput = null,
+
+        /**
+         * Enables driver-wide cache breakpoints on stable system and tool prefixes.
+         */
+        public readonly bool $enablePromptCaching = true,
     ) {}
 }

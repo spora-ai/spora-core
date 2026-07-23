@@ -77,7 +77,7 @@ test('null content on a tool_calls response is preserved', function (): void {
         'tool_calls' => [
             ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'noop', 'arguments' => '{}']],
         ],
-    ], ['content' => null, 'reasoning' => null]);
+    ], ['contentBlocks' => [], 'displayReasoning' => null, 'textContent' => '']);
     expect($response->content)->toBeNull();
     expect($response->toolCalls)->toHaveCount(1);
     expect($response->toolCalls[0])->toBeInstanceOf(ToolCall::class);
@@ -94,8 +94,9 @@ test('reasoning is propagated on tool_calls responses (Thinking-Tag regression)'
         'tool_calls' => [
             ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'lookup', 'arguments' => '{}']],
         ],
-    ], ['content' => 'I should look this up.', 'reasoning' => 'Plan: query the knowledge base first.']);
-    expect($response->reasoning)->toBe('Plan: query the knowledge base first.');
+    ], ['contentBlocks' => [], 'displayReasoning' => 'Plan: query the knowledge base first.', 'textContent' => 'I should look this up.']);
+    expect($response->displayReasoning)->toBe('Plan: query the knowledge base first.');
     expect($response->content)->toBe('I should look this up.');
     expect($response->toolCalls)->toHaveCount(1);
+    expect($response->contentBlocks)->toBe([]);
 });

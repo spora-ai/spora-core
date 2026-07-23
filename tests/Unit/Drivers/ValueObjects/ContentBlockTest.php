@@ -6,6 +6,7 @@ namespace Tests\Unit\Drivers\ValueObjects;
 
 use Error;
 use InvalidArgumentException;
+use Spora\Drivers\Exceptions\UnknownContentBlockTypeException;
 use Spora\Drivers\ValueObjects\ContentBlock;
 
 /**
@@ -72,3 +73,59 @@ test('properties are readonly — they cannot be reassigned', function (): void 
         expect($e->getMessage())->toContain('readonly');
     }
 });
+
+test('thinking() builds a signed block with optional metadata', function (): void {
+    $block = ContentBlock::thinking('plan', 'sig-1', ['cache_ttl' => '5m']);
+
+    expect($block->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($block->text)->toBe('plan')
+        ->and($block->signature)->toBe('sig-1')
+        ->and($block->metadata)->toBe(['cache_ttl' => '5m']);
+});
+
+test('redactedThinking() carries the encrypted data payload', function (): void {
+    $block = ContentBlock::redactedThinking('encrypted-blob');
+
+    expect($block->type)->toBe(ContentBlock::TYPE_REDACTED_THINKING)
+        ->and($block->data)->toBe('encrypted-blob')
+        ->and($block->signature)->toBeNull();
+});
+
+test('toolUse() builds a tool_use block', function (): void {
+    $block = ContentBlock::toolUse('toolu_1', 'lookup', ['q' => 'paris']);
+
+    expect($block->type)->toBe(ContentBlock::TYPE_TOOL_USE)
+        ->and($block->toolUseId)->toBe('toolu_1')
+        ->and($block->toolName)->toBe('lookup')
+        ->and($block->toolInput)->toBe(['q' => 'paris']);
+});
+
+test('toArray round-trips through fromArray for every block type', function (): void {
+    $blocks = [
+        ContentBlock::text('hi'),
+        ContentBlock::thinking('plan', 'sig-1', ['cache_ttl' => '5m']),
+        ContentBlock::redactedThinking('encrypted-blob'),
+        ContentBlock::toolUse('toolu_1', 'lookup', ['q' => 'paris']),
+        ContentBlock::imageBase64('image/png', 'AAAA'),
+        ContentBlock::imageUrl('https://example.invalid/cat.png'),
+    ];
+
+    foreach ($blocks as $original) {
+        $round = ContentBlock::fromArray($original->toArray());
+        expect($round->type)->toBe($original->type);
+        expect($round->text)->toBe($original->text);
+        expect($round->signature)->toBe($original->signature);
+        expect($round->data)->toBe($original->data);
+        expect($round->mediaType)->toBe($original->mediaType);
+        expect($round->base64)->toBe($original->base64);
+        expect($round->url)->toBe($original->url);
+        expect($round->toolUseId)->toBe($original->toolUseId);
+        expect($round->toolName)->toBe($original->toolName);
+        expect($round->toolInput)->toBe($original->toolInput);
+        expect($round->metadata)->toBe($original->metadata);
+    }
+});
+
+test('fromArray throws UnknownContentBlockTypeException for unknown types', function (): void {
+    ContentBlock::fromArray(['type' => 'audio']);
+})->throws(UnknownContentBlockTypeException::class);

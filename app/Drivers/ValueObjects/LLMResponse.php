@@ -4,25 +4,33 @@ declare(strict_types=1);
 
 namespace Spora\Drivers\ValueObjects;
 
+/**
+ * Normalized result of one provider completion.
+ *
+ * Reasoning moved from a flat string to signed `contentBlocks`; filter by
+ * {@see ContentBlock::TYPE_THINKING} when Anthropic chain continuity matters.
+ */
 final readonly class LLMResponse
 {
+    public Usage $usage;
+
     /**
-     * @param  ?string       $content     Non-null when the LLM returns text (task complete or no tool needed).
-     * @param  list<ToolCall> $toolCalls  Non-empty when the LLM requests one or more tool invocations.
-     *                                   Modern LLMs fire parallel tool calls in a single response.
+     * @param ?string $content Non-null when the LLM returns display text.
+     * @param list<ToolCall> $toolCalls Parallel tool calls requested in this turn.
+     * @param list<ContentBlock> $contentBlocks Ordered provider content retained for replay.
      */
     public function __construct(
         public ?string $content,
-        public array   $toolCalls,
-        public int     $inputTokens,
-        public int     $outputTokens,
-
-        /** Provider-issued completion ID for logging/debugging. */
-        public string  $completionId,
-
-        /** Provider-side reasoning / chain-of-thought (e.g. Anthropic extended thinking). */
-        public ?string $reasoning = null,
-    ) {}
+        public array $toolCalls,
+        public int $inputTokens,
+        public int $outputTokens,
+        public string $completionId,
+        public array $contentBlocks = [],
+        ?Usage $usage = null,
+        public ?string $displayReasoning = null,
+    ) {
+        $this->usage = $usage ?? new Usage();
+    }
 
     public function hasToolCalls(): bool
     {

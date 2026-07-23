@@ -199,22 +199,27 @@ final class MessageHistoryBuilder
             return $this->attachmentMessage($row);
         }
 
+        $content = $row->content;
+        if ($row->role === 'assistant' && is_array($row->content_blocks) && $row->content_blocks !== []) {
+            $content = $row->content_blocks;
+        }
+
         $message = [
-            'role'    => $row->role,
-            'content' => $row->content,
+            'role' => $row->role,
+            'content' => $content,
         ];
 
         if ($row->role === 'tool') {
             $message = [
-                'role'         => 'tool',
+                'role' => 'tool',
                 'tool_call_id' => $row->tool_call_id,
-                'name'         => $row->tool_name,
-                'content'      => $row->content,
+                'name' => $row->tool_name,
+                'content' => $row->content,
             ];
         } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
             $message = [
-                'role'       => 'assistant',
-                'content'    => null,
+                'role' => 'assistant',
+                'content' => $content,
                 'tool_calls' => $this->decodeToolCallPayload($row->tool_call_payload),
             ];
         }

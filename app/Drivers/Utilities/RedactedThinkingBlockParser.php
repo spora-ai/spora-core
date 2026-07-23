@@ -4,19 +4,18 @@ declare(strict_types=1);
 
 namespace Spora\Drivers\Utilities;
 
+use Spora\Drivers\ValueObjects\ContentBlock;
+
 /**
- * Parses a `redacted_thinking` block. Anthropic emits this when signature
- * verification fails or the reasoning is otherwise blocked; we surface a
- * stable `[Redacted Thinking]` marker so downstream consumers know that
- * reasoning existed but was withheld.
+ * Preserves Anthropic's encrypted redacted-thinking payload for replay.
  */
 final class RedactedThinkingBlockParser implements ContentBlockParser
 {
     public function parse(array $block): ParsedContentBlock
     {
         return new ParsedContentBlock(
-            content: '',
-            reasoning: '[Redacted Thinking]',
+            displayReasoning: '[Redacted Thinking]',
+            contentBlock: ContentBlock::redactedThinking((string) ($block['data'] ?? '')),
         );
     }
 }

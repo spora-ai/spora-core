@@ -16,7 +16,7 @@ namespace Spora\Drivers\Utilities;
 final class ThinkingTagExtractor
 {
     /**
-     * @return array{content: string, reasoning: string|null}
+     * @return array{textContent: string, displayReasoning: string|null}
      */
     public static function extract(string $rawContent): array
     {
@@ -38,14 +38,14 @@ final class ThinkingTagExtractor
             $textContent = trim(preg_replace('/[ \t]+/', ' ', $textContent));
 
             return [
-                'content'   => $textContent,
-                'reasoning' => $trimmed !== '' ? $trimmed : null,
+                'textContent'      => $textContent,
+                'displayReasoning' => $trimmed !== '' ? $trimmed : null,
             ];
         }
 
         return [
-            'content'   => $textContent,
-            'reasoning' => null,
+            'textContent'      => $textContent,
+            'displayReasoning' => null,
         ];
     }
 
