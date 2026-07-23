@@ -489,4 +489,112 @@ describe('MediaArchiveController', function (): void {
         }
     });
 
+    it('filters by ?source=upload on the list endpoint', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-source-filter@example.com', 'ValidPass1!', 'MediaSourceFilter');
+            simulateLoggedInSession($userId, 'media-source-filter@example.com');
+
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
+            // One row from the upload pipeline (uploadSource='upload')
+            // and one row from a tool call (uploadSource='tool').
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $bytes,
+                mime: 'image/png',
+                userId: $userId,
+                uploadSource: 'upload',
+            ));
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $bytes,
+                mime: 'image/png',
+                userId: $userId,
+                uploadSource: 'tool',
+            ));
+
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+            $request = Request::create('/api/v1/media?source=upload', 'GET');
+
+            $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(200);
+            $body = json_decode($response->getContent(), true);
+            expect($body['data']['total'])->toBe(1);
+            expect($body['data']['assets'][0]['upload_source'])->toBe('upload');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('?source=tool returns only tool-generated rows', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-source-tool@example.com', 'ValidPass1!', 'MediaSourceTool');
+            simulateLoggedInSession($userId, 'media-source-tool@example.com');
+
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $bytes,
+                mime: 'image/png',
+                userId: $userId,
+                uploadSource: 'upload',
+            ));
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $bytes,
+                mime: 'image/png',
+                userId: $userId,
+                uploadSource: 'tool',
+            ));
+
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+            $request = Request::create('/api/v1/media?source=tool', 'GET');
+
+            $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
+            expect($response->getStatusCode())->toBe(200);
+            $body = json_decode($response->getContent(), true);
+            expect($body['data']['total'])->toBe(1);
+            expect($body['data']['assets'][0]['upload_source'])->toBe('tool');
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('?source=all and ?source=bogus both return the unfiltered list', function (): void {
+        $ctx = mediaArchiveApiSetup();
+        try {
+            $authService = bootAuthLayer();
+            $userId = $authService->register('media-source-all@example.com', 'ValidPass1!', 'MediaSourceAll');
+            simulateLoggedInSession($userId, 'media-source-all@example.com');
+
+            $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $bytes,
+                mime: 'image/png',
+                userId: $userId,
+                uploadSource: 'upload',
+            ));
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $bytes,
+                mime: 'image/png',
+                userId: $userId,
+                uploadSource: 'tool',
+            ));
+
+            $authMw = new AuthMiddleware($authService);
+            $csrfMw = new CsrfMiddleware(new CsrfTokenService());
+
+            foreach (['all', 'bogus', ''] as $value) {
+                $request = Request::create('/api/v1/media' . ($value === '' ? '' : '?source=' . $value), 'GET');
+                $response = callController($ctx['controller'], 'index', $request, [$authMw, $csrfMw]);
+                expect($response->getStatusCode())->toBe(200);
+                $body = json_decode($response->getContent(), true);
+                expect($body['data']['total'])->toBe(2);
+            }
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
 });

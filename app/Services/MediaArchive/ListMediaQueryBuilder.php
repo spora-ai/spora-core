@@ -38,6 +38,7 @@ final class ListMediaQueryBuilder
             to: self::parseDate($params->get('to')),
             search: self::parseString($params->get('q')),
             sort: self::parseSort($params->get('sort')),
+            uploadSource: self::parseUploadSource($params->get('source')),
             page: self::parseInt($params->get('page'), 1),
             perPage: self::parseInt($params->get('per_page'), ListMediaQuery::PER_PAGE_DEFAULT),
         );
@@ -101,6 +102,27 @@ final class ListMediaQueryBuilder
     private static function parseSort(mixed $raw): string
     {
         return is_string($raw) ? $raw : ListMediaQuery::SORT_CREATED_DESC;
+    }
+
+    /**
+     * Parse the `?source=upload|tool|all` filter. Returns null for missing,
+     * empty, `'all'` (no filter), or unknown values — mirroring the typo
+     * tolerance of {@see self::parseMediaTypes()}. A typo from an older
+     * client must not crash the listing endpoint.
+     */
+    private static function parseUploadSource(mixed $raw): ?string
+    {
+        if (!is_string($raw) || trim($raw) === '') {
+            return null;
+        }
+        $value = strtolower(trim($raw));
+        if ($value === ListMediaQuery::UPLOAD_SOURCE_ALL) {
+            return null;
+        }
+        if (!in_array($value, ListMediaQuery::ALLOWED_UPLOAD_SOURCES, true)) {
+            return null;
+        }
+        return $value;
     }
 
     private static function parseString(mixed $raw): ?string
