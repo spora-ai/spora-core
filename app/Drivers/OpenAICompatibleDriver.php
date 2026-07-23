@@ -205,6 +205,9 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
             inputTokens: (int) ($data['usage']['prompt_tokens'] ?? 0),
             outputTokens: (int) ($data['usage']['completion_tokens'] ?? 0),
             completionId: (string) ($data['id'] ?? ''),
+            // Pass reasoning through so tool-call turns persist their pre-call chain-of-thought
+            // alongside the final-response branch; otherwise reasoning is silently dropped.
+            reasoning: $parsedContent['reasoning'],
         );
     }
 
