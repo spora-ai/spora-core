@@ -10,6 +10,7 @@ use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\ListMediaQueryBuilder;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
+use Spora\Services\Text\Utf8Sanitizer;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -83,7 +84,7 @@ final class MediaArchiveController
 
         $dirty = $this->extractUpdatableFields($body);
         if ($dirty !== []) {
-            $editable->fill($dirty);
+            $editable->fill(Utf8Sanitizer::scrub($dirty));
             $editable->save();
         }
 

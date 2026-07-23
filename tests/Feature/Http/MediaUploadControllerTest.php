@@ -88,6 +88,29 @@ test('upload records user_id from auth and upload_source=upload', function (): v
     unlink($tmp);
 });
 
+test('upload with a Latin-1 filename persists a clean UTF-8 filename', function (): void {
+    [, $service, , , , $controller] = buildUploadControllerFixtures();
+    $tmp = tempnam(sys_get_temp_dir(), 'latin1');
+    file_put_contents($tmp, "hello");
+    // é (0xE9) ü (0xFC) — Windows-1252 bytes that the sanitize path must repair.
+    $latin1Name = 'résumé' . chr(0xE9) . chr(0xFC) . '.txt';
+    $req = Request::create('/api/v1/media', 'POST', files: [
+        'file' => new UploadedFile($tmp, $latin1Name, 'text/plain', null, true),
+    ]);
+    $resp = $controller->store($req);
+    expect($resp->getStatusCode())->toBe(Response::HTTP_CREATED);
+    $body = json_decode($resp->getContent(), true);
+    $asset = $service->find($body['data']['id']);
+    expect($asset)->not->toBeNull();
+    // Persisted filename must be valid UTF-8 (the wrap at the
+    // MediaIngestRequest construction site ensures this).
+    expect(mb_check_encoding($asset->filename, 'UTF-8'))->toBeTrue();
+    // And the JSON response must round-trip cleanly — that's the
+    // invariant this whole utility exists for.
+    expect(mb_check_encoding($body['data']['filename'], 'UTF-8'))->toBeTrue();
+    unlink($tmp);
+});
+
 test('upload returns 401 when not authenticated', function (): void {
     $tmp = tempnam(sys_get_temp_dir(), 'noauth');
     file_put_contents($tmp, "hello");

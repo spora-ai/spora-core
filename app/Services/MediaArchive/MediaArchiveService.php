@@ -15,6 +15,7 @@ use Spora\Models\MediaAsset;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
 use Spora\Services\AssetTooLargeException;
+use Spora\Services\Text\Utf8Sanitizer;
 use Throwable;
 
 /**
@@ -402,7 +403,9 @@ final class MediaArchiveService
             'duration_seconds' => $fields->durationSeconds,
             'storage_mode' => $fields->storageMode,
             'asset_token' => $fields->token ?? $existing->asset_token,
-            'filename' => $fields->filename ?? $existing->filename,
+            'filename' => $fields->filename !== null
+                ? Utf8Sanitizer::scrubString($fields->filename)
+                : $existing->filename,
             'user_id' => $fields->userId ?? $existing->user_id,
             'upload_source' => $fields->uploadSource ?: ($existing->upload_source ?? 'tool'),
         ]);
@@ -424,7 +427,7 @@ final class MediaArchiveService
         $asset->width = $fields->width;
         $asset->height = $fields->height;
         $asset->duration_seconds = $fields->durationSeconds;
-        $asset->prompt = $request->prompt;
+        $asset->prompt = $request->prompt !== null ? Utf8Sanitizer::scrubString($request->prompt) : null;
         $asset->source_url = $fields->sourceUrl;
         $asset->storage_mode = $fields->storageMode;
         // Always materialize the opaque form. The resolver's $fields->assetUrl
@@ -440,10 +443,10 @@ final class MediaArchiveService
         $schema = $asset->getConnection()->getSchemaBuilder();
         $optionalFields = [
             'user_id'            => fn() => $fields->userId ?? $request->userId,
-            'filename'           => fn() => $fields->filename,
+            'filename'           => fn() => $fields->filename !== null ? Utf8Sanitizer::scrubString($fields->filename) : null,
             'upload_source'      => fn() => $fields->uploadSource ?: 'tool',
-            'tags'               => fn() => $request->tags,
-            'metadata'           => fn() => $request->metadata,
+            'tags'               => fn() => Utf8Sanitizer::scrub($request->tags),
+            'metadata'           => fn() => Utf8Sanitizer::scrub($request->metadata),
             // local-mode reuses the resolver's token verbatim so
             // LocalAssetStore::readFromAsset() can find the on-disk file
             // from a UUID lookup; DB-mode mints a fresh token to keep the
@@ -486,7 +489,7 @@ final class MediaArchiveService
             return;
         }
         if ($markdown !== null) {
-            $asset->markdown_content = $markdown;
+            $asset->markdown_content = Utf8Sanitizer::scrubString($markdown);
             $asset->save();
         }
     }

@@ -11,6 +11,7 @@ use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MimeSniffer;
+use Spora\Services\Text\Utf8Sanitizer;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -65,11 +66,11 @@ final class MediaUploadController
         $asset = $this->mediaArchive->ingest(new MediaIngestRequest(
             bytes: $bytes,
             mime: $sniffedMime,
-            filename: $file->getClientOriginalName() !== '' ? $file->getClientOriginalName() : null,
+            filename: Utf8Sanitizer::scrubString($file->getClientOriginalName() !== '' ? $file->getClientOriginalName() : null),
             userId: $userId,
-            prompt: is_string($prompt) ? $prompt : null,
-            tags: $this->parseJsonArray($request->request->get('tags')),
-            metadata: $this->parseJsonObject($request->request->get('metadata')),
+            prompt: is_string($prompt) ? Utf8Sanitizer::scrubString($prompt) : null,
+            tags: Utf8Sanitizer::scrub($this->parseJsonArray($request->request->get('tags'))),
+            metadata: Utf8Sanitizer::scrub($this->parseJsonObject($request->request->get('metadata'))),
             uploadSource: 'upload',
         ));
 

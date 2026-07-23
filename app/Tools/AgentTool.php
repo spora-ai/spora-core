@@ -11,6 +11,7 @@ use Spora\Models\Agent;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
+use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
@@ -306,7 +307,7 @@ final class AgentTool extends AbstractTool
             // Route through the service so the same EDITABLE_AGENT_FIELDS
             // allowlist applies as everywhere else; no user-ownership check
             // because the orchestrator has pinned the agent id.
-            $this->agentService->updateAgentByAgentId($agentId, ['notes' => $combined]);
+            $this->agentService->updateAgentByAgentId($agentId, ['notes' => Utf8Sanitizer::scrubString($combined)]);
         }
 
         $size = $this->humanBytes(mb_strlen($combined));

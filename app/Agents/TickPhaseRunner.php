@@ -20,6 +20,7 @@ use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
 use Throwable;
 
@@ -81,7 +82,7 @@ final class TickPhaseRunner
 
             if ($task->step_count >= $task->max_steps) {
                 $task->status         = 'FAILED';
-                $task->failure_reason = 'Max steps reached.';
+                $task->failure_reason = Utf8Sanitizer::scrubString('Max steps reached.');
                 $task->save();
                 return;
             }
@@ -204,7 +205,7 @@ final class TickPhaseRunner
         );
 
         $task->status         = 'COMPLETED';
-        $task->final_response = $response->content;
+        $task->final_response = Utf8Sanitizer::scrubString($response->content);
         $task->save();
 
         if (!isset($task->data['run_id'])) {
@@ -239,9 +240,9 @@ final class TickPhaseRunner
                 ->where('status', 'RUNNING')
                 ->update([
                     'status'         => 'FAILED',
-                    'failure_reason' => $e->getMessage(),
+                    'failure_reason' => Utf8Sanitizer::scrubString($e->getMessage()),
                     'error_code'     => $errorCode,
-                    'error_message'  => $friendlyMsg,
+                    'error_message'  => Utf8Sanitizer::scrubString($friendlyMsg),
                 ]);
 
             if ($updated > 0) {

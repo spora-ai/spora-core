@@ -12,6 +12,7 @@ use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Services\NotificationService;
 use Spora\Services\ScrubDataUrls;
+use Spora\Services\Text\Utf8Sanitizer;
 use Throwable;
 
 /**
@@ -152,7 +153,7 @@ final class ContextWindowRecovery
                 'task_id' => $taskId,
                 'sequence' => $firstSeq,
                 'role' => 'summary',
-                'content' => $summaryText,
+                'content' => Utf8Sanitizer::scrubString($summaryText),
                 'summarized_sequence_range' => "{$firstSeq}-{$lastSeq}",
             ]);
 
