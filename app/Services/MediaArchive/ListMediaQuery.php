@@ -55,6 +55,28 @@ final readonly class ListMediaQuery
     ];
 
     /**
+     * Ownership filter (`?ownership=mine`) — replaces the user-only
+     * `?scope=mine` semantic for callers that need tool-generated media
+     * for the current user's agents.
+     *
+     * `'mine'` expands to the union "uploads where user_id = me OR tool
+     * rows where agent_id IN (agents owned by me)". `'all'` is an explicit
+     * "no filter" sentinel; the builder normalises it to null upstream.
+     */
+    public const OWNERSHIP_MINE = 'mine';
+    public const OWNERSHIP_ALL = 'all';
+
+    /**
+     * Persisted ownership values — anything outside this set (typos,
+     * older clients) is silently dropped by the builder so the listing
+     * endpoint never crashes on a bad query string.
+     */
+    public const ALLOWED_OWNERSHIP_VALUES = [
+        self::OWNERSHIP_MINE,
+        self::OWNERSHIP_ALL,
+    ];
+
+    /**
      * @param list<MediaType>|null $mediaTypes Multi-value media-type filter
      *        (`?types=image,document`). Null means no filter. When set,
      *        takes precedence over the singular `$mediaType` so the picker
@@ -79,6 +101,13 @@ final readonly class ListMediaQuery
         public ?string $search = null,
         public string $sort = self::SORT_CREATED_DESC,
         public ?string $uploadSource = null,
+        // `?ownership=mine` semantic — union of uploads owned by the user
+        // and tool-generated rows for agents owned by the user. The
+        // builder sets `agentOwnerUserId` (the subquery target) and clears
+        // `userId` when ownership is in play; the legacy `userId` branch
+        // stays for callers that only need the upload-only scope.
+        public ?string $ownership = null,
+        public ?int $agentOwnerUserId = null,
         public int $page = 1,
         public int $perPage = self::PER_PAGE_DEFAULT,
     ) {}
@@ -113,6 +142,8 @@ final readonly class ListMediaQuery
             'search'     => $this->search,
             'sort'         => $this->sort,
             'uploadSource' => $this->uploadSource,
+            'ownership'    => $this->ownership,
+            'agentOwnerUserId' => $this->agentOwnerUserId,
         ];
     }
 
