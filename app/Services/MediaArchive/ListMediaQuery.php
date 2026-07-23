@@ -60,21 +60,15 @@ final readonly class ListMediaQuery
      * for the current user's agents.
      *
      * `'mine'` expands to the union "uploads where user_id = me OR tool
-     * rows where agent_id IN (agents owned by me)". `'all'` is an explicit
-     * "no filter" sentinel; the builder normalises it to null upstream.
+     * rows where agent_id IN (agents owned by me)". There is NO `'all'`
+     * value: an authenticated user must never be able to bypass the
+     * ownership filter via a query string and dump every media row in
+     * the system. The builder defaults `agentOwnerUserId` to the auth
+     * user when the param is missing so EVERY authenticated request is
+     * scoped to the caller. Admin tooling that needs every row uses a
+     * separate admin-only endpoint with a role check.
      */
     public const OWNERSHIP_MINE = 'mine';
-    public const OWNERSHIP_ALL = 'all';
-
-    /**
-     * Persisted ownership values — anything outside this set (typos,
-     * older clients) is silently dropped by the builder so the listing
-     * endpoint never crashes on a bad query string.
-     */
-    public const ALLOWED_OWNERSHIP_VALUES = [
-        self::OWNERSHIP_MINE,
-        self::OWNERSHIP_ALL,
-    ];
 
     /**
      * @param list<MediaType>|null $mediaTypes Multi-value media-type filter

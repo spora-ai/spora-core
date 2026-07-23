@@ -158,6 +158,14 @@ test('media archive: full pipeline from URL ingest → REST → CLI orphan sweep
 
         $controller = new MediaArchiveController($service, \Tests\Support\MediaArchiveTestSupport::buildAuth());
 
+        // Register the integration user BEFORE the first ingest so the
+        // row carries a real user_id. The default-min ownership filter
+        // on the list endpoint scopes to the caller, so test rows
+        // without user_id would be invisible.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('integration@example.com', 'ValidPass1!', 'Integration');
+        simulateLoggedInSession($userId, 'integration@example.com');
+
         // ----- 2. Ingest via URL → local promotion --------------------------
         // No tool_call_id here — that FK chains through agents → tasks
         // and would require booting a fixture agent. The idempotency
@@ -166,6 +174,7 @@ test('media archive: full pipeline from URL ingest → REST → CLI orphan sweep
         // → REST → CLI), not every business rule.
         $first = $service->ingest(new MediaIngestRequest(
             url: 'https://cdn.example/pixel.png',
+            userId: $userId,
             pluginSlug: 'demo',
             toolName: 'render',
             prompt: 'a pixel',
@@ -191,10 +200,6 @@ test('media archive: full pipeline from URL ingest → REST → CLI orphan sweep
         expect($list->getCollection()->first()->id)->toBe($first->id);
 
         // ----- 4. List via REST controller (auth + CSRF middleware) -------
-        $authService = bootAuthLayer();
-        $userId = $authService->register('integration@example.com', 'ValidPass1!', 'Integration');
-        simulateLoggedInSession($userId, 'integration@example.com');
-
         $authMw = new AuthMiddleware($authService);
         $csrfMw = new CsrfMiddleware(new CsrfTokenService());
         $request = Request::create('/api/v1/media?plugin=demo', 'GET');
@@ -231,6 +236,7 @@ test('media archive: full pipeline from URL ingest → REST → CLI orphan sweep
         // ----- 7. Ingest a second URL → fresh row -------------------------
         $second = $service->ingest(new MediaIngestRequest(
             url: 'https://cdn.example/photo.jpg',
+            userId: $userId,
             pluginSlug: 'demo',
             toolName: 'render',
         ));

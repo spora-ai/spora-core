@@ -93,8 +93,8 @@ describe('MediaArchiveController', function (): void {
             simulateLoggedInSession($userId, 'media@example.com');
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
-            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', filename: 'pixel.png'));
-            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', filename: 'pixel2.png'));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', filename: 'pixel.png', userId: $userId));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', filename: 'pixel2.png', userId: $userId));
 
             $authMw = new AuthMiddleware($authService);
             $csrfMw = new CsrfMiddleware(new CsrfTokenService());
@@ -118,7 +118,7 @@ describe('MediaArchiveController', function (): void {
             simulateLoggedInSession($userId, 'media2@example.com');
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
-            $asset = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', userId: $userId));
 
             $authMw = new AuthMiddleware($authService);
             $csrfMw = new CsrfMiddleware(new CsrfTokenService());
@@ -142,7 +142,7 @@ describe('MediaArchiveController', function (): void {
             simulateLoggedInSession($userId, 'media3@example.com');
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
-            $asset = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', userId: $userId));
 
             $csrfService = new CsrfTokenService();
             $token = $csrfService->generate();
@@ -211,7 +211,7 @@ describe('MediaArchiveController', function (): void {
             simulateLoggedInSession($userId, 'media-type@example.com');
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
-            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', userId: $userId));
 
             $authMw = new AuthMiddleware($authService);
             $csrfMw = new CsrfMiddleware(new CsrfTokenService());
@@ -234,7 +234,7 @@ describe('MediaArchiveController', function (): void {
             simulateLoggedInSession($userId, 'media-bogus-type@example.com');
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
-            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', userId: $userId));
 
             $authMw = new AuthMiddleware($authService);
             $csrfMw = new CsrfMiddleware(new CsrfTokenService());
@@ -259,8 +259,8 @@ describe('MediaArchiveController', function (): void {
             simulateLoggedInSession($userId, 'media-filter@example.com');
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
-            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', pluginSlug: 'foo', toolName: 'tavily'));
-            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', pluginSlug: 'bar', toolName: 'serper'));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', pluginSlug: 'foo', toolName: 'tavily', userId: $userId));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', pluginSlug: 'bar', toolName: 'serper', userId: $userId));
 
             $authMw = new AuthMiddleware($authService);
             $csrfMw = new CsrfMiddleware(new CsrfTokenService());
@@ -284,7 +284,7 @@ describe('MediaArchiveController', function (): void {
             simulateLoggedInSession($userId, 'media-agent@example.com');
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
-            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', userId: $userId));
 
             $authMw = new AuthMiddleware($authService);
             $csrfMw = new CsrfMiddleware(new CsrfTokenService());
@@ -309,8 +309,8 @@ describe('MediaArchiveController', function (): void {
             simulateLoggedInSession($userId, 'media-q@example.com');
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
-            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', prompt: 'a fluffy cat'));
-            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', prompt: 'a sleepy dog'));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', prompt: 'a fluffy cat', userId: $userId));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', prompt: 'a sleepy dog', userId: $userId));
 
             $authMw = new AuthMiddleware($authService);
             $csrfMw = new CsrfMiddleware(new CsrfTokenService());
@@ -332,8 +332,8 @@ describe('MediaArchiveController', function (): void {
             simulateLoggedInSession($userId, 'media-sort@example.com');
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
-            $first  = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
-            $second = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            $first  = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', userId: $userId));
+            $second = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', userId: $userId));
 
             $authMw = new AuthMiddleware($authService);
             $csrfMw = new CsrfMiddleware(new CsrfTokenService());
@@ -357,12 +357,12 @@ describe('MediaArchiveController', function (): void {
             simulateLoggedInSession($userId, 'media-bogus-sort@example.com');
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
-            $first  = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            $first  = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', userId: $userId));
             // Force the older row's created_at back in time so the desc sort is
             // deterministic regardless of SQLite's timestamp precision.
             $first->created_at = \Illuminate\Support\Carbon::now()->subMinutes(5);
             $first->save();
-            $second = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            $second = $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', userId: $userId));
 
             $authMw = new AuthMiddleware($authService);
             $csrfMw = new CsrfMiddleware(new CsrfTokenService());
@@ -388,7 +388,7 @@ describe('MediaArchiveController', function (): void {
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
             for ($i = 0; $i < 5; $i++) {
-                $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+                $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', userId: $userId));
             }
 
             $authMw = new AuthMiddleware($authService);
@@ -415,7 +415,7 @@ describe('MediaArchiveController', function (): void {
             simulateLoggedInSession($userId, 'media-baddate@example.com');
 
             $bytes = base64_decode(MEDIA_PNG_BYTES, strict: true);
-            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png'));
+            $ctx['service']->ingest(new MediaIngestRequest(bytes: $bytes, mime: 'image/png', userId: $userId));
 
             $authMw = new AuthMiddleware($authService);
             $csrfMw = new CsrfMiddleware(new CsrfTokenService());

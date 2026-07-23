@@ -102,16 +102,30 @@ describe('ListMediaQueryBuilder ownership field', function (): void {
         $query = ListMediaQueryBuilder::fromRequest($request, 7);
         expect($query->ownership)->toBe('mine');
         expect($query->agentOwnerUserId)->toBe(7);
-        // Ownership supersedes the legacy `userId` branch — the service
-        // applies the union and skips the upload-only WHERE.
         expect($query->userId)->toBeNull();
     });
 
-    it('ownership=all maps to no filter (mirrors ?source=all sentinel)', function (): void {
+    it('default with no ownership param scopes to the caller (security: must not leak full table)', function (): void {
+        // The default is ownership=mine so an authenticated user can
+        // never get an unfiltered list via a missing or empty ownership
+        // query string.
+        $request = Request::create('/');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->ownership)->toBe('mine');
+        expect($query->agentOwnerUserId)->toBe(7);
+        expect($query->userId)->toBeNull();
+    });
+
+    it('ownership=all is rejected to mine (no way for an authed user to dump every row)', function (): void {
+        // The historical `?ownership=all` was a no-op sentinel, which
+        // would have let any authenticated user dump every media row
+        // in the system. It is no longer a valid value: the builder
+        // normalises it to `mine` so the caller still gets a scoped
+        // response.
         $request = Request::create('/?ownership=all');
         $query = ListMediaQueryBuilder::fromRequest($request, 7);
-        expect($query->ownership)->toBe('all');
-        expect($query->agentOwnerUserId)->toBeNull();
+        expect($query->ownership)->toBe('mine');
+        expect($query->agentOwnerUserId)->toBe(7);
         expect($query->userId)->toBeNull();
     });
 
@@ -119,42 +133,38 @@ describe('ListMediaQueryBuilder ownership field', function (): void {
         $request = Request::create('/?ownership=mine');
         $query = ListMediaQueryBuilder::fromRequest($request, null);
         expect($query->ownership)->toBe('mine');
-        // No authenticated user → no ownership filter is applied; the
-        // service would refuse the request via AuthMiddleware anyway.
         expect($query->agentOwnerUserId)->toBeNull();
     });
 
-    it('silently drops unknown ownership values (typo tolerance)', function (): void {
+    it('silently drops unknown ownership values to the mine default (typo tolerance)', function (): void {
         $request = Request::create('/?ownership=bogus');
         $query = ListMediaQueryBuilder::fromRequest($request, 7);
-        expect($query->ownership)->toBeNull();
-        expect($query->agentOwnerUserId)->toBeNull();
+        expect($query->ownership)->toBe('mine');
+        expect($query->agentOwnerUserId)->toBe(7);
     });
 
-    it('treats empty ownership as missing', function (): void {
+    it('treats empty ownership as missing (defaults to mine)', function (): void {
         $request = Request::create('/?ownership=');
         $query = ListMediaQueryBuilder::fromRequest($request, 7);
-        expect($query->ownership)->toBeNull();
-        expect($query->agentOwnerUserId)->toBeNull();
+        expect($query->ownership)->toBe('mine');
+        expect($query->agentOwnerUserId)->toBe(7);
     });
 
     it('ownership wins over scope when both are present', function (): void {
         $request = Request::create('/?scope=mine&ownership=mine');
         $query = ListMediaQueryBuilder::fromRequest($request, 7);
-        // Ownership union takes precedence; legacy userId branch is
-        // dormant so the WHERE doesn't double-apply.
         expect($query->ownership)->toBe('mine');
         expect($query->agentOwnerUserId)->toBe(7);
         expect($query->userId)->toBeNull();
     });
 
-    it('legacy scope=mine with no ownership keeps the upload-only path', function (): void {
-        $request = Request::create('/?scope=mine');
+    it('legacy scope=mine with explicit ownership=bogus still falls through to the union default', function (): void {
+        $request = Request::create('/?scope=mine&ownership=bogus');
         $query = ListMediaQueryBuilder::fromRequest($request, 7);
-        expect($query->ownership)->toBeNull();
-        expect($query->agentOwnerUserId)->toBeNull();
-        // Pre-existing behaviour preserved for callers that haven't
-        // migrated to the union.
-        expect($query->userId)->toBe(7);
+        // `bogus` is dropped and the parser falls back to the union
+        // default (mine) — legacy scope is dormant.
+        expect($query->ownership)->toBe('mine');
+        expect($query->agentOwnerUserId)->toBe(7);
+        expect($query->userId)->toBeNull();
     });
 });
