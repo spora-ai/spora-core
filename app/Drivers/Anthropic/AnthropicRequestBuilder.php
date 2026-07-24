@@ -231,7 +231,7 @@ final class AnthropicRequestBuilder
     private function contentBlockToAnthropic(array $block): ?array
     {
         $type = $block['type'] ?? null;
-        $result = match ($type) {
+        return match ($type) {
             ContentBlock::TYPE_TEXT => ['type' => 'text', 'text' => (string) ($block['text'] ?? '')],
             ContentBlock::TYPE_IMAGE => $this->imageBlockToAnthropic($block),
             ContentBlock::TYPE_THINKING => [
@@ -246,7 +246,6 @@ final class AnthropicRequestBuilder
             ContentBlock::TYPE_TOOL_USE => $this->toolUseBlockToAnthropic($block),
             default => null,
         };
-        return $result;
     }
 
     /**
