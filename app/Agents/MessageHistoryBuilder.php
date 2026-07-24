@@ -445,16 +445,17 @@ final class AttachmentRowRenderer
      */
     private function buildAttachmentContent(array $blocks, string $prompt): array
     {
-        if ($blocks['image'] === []) {
-            if ($prompt === '' && count($blocks['text']) === 1) {
-                return $blocks['text'];
-            }
-            return [['type' => 'text', 'text' => $this->composeTextContent($prompt, $blocks['text'])]];
+        // Trivial: single text attachment with no prompt — return the original block.
+        if ($blocks['image'] === [] && $prompt === '' && count($blocks['text']) === 1) {
+            return $blocks['text'];
         }
 
-        if ($prompt === '') {
+        // Image-only with no prompt — return the image blocks as-is.
+        if ($blocks['image'] !== [] && $prompt === '') {
             return $blocks['image'];
         }
+
+        // Otherwise: a leading text block (composed) followed by any image blocks.
         return array_merge(
             [['type' => 'text', 'text' => $this->composeTextContent($prompt, $blocks['text'])]],
             $blocks['image'],
