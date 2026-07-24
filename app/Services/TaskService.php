@@ -278,7 +278,9 @@ final class TaskService implements TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string
+     *     retry_after?: string,
+     *     tool_calls: list<array<string, mixed>>,
+     *     history: list<array<string, mixed>>
      * }
      */
     private function taskResource(Task $task): array
@@ -288,14 +290,9 @@ final class TaskService implements TaskServiceInterface
         $serializer = $this->toolCallSerializer ?? new ToolCallSerializer();
         $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => $serializer->toArray($tc))->all();
 
-        $resource['history'] = $task->taskHistory()->orderBy('sequence')->get()->map(fn(TaskHistory $h) => [
-            'sequence'     => $h->sequence,
-            'role'         => $h->role,
-            'content'      => $h->content,
-            'reasoning'    => $h->reasoning,
-            'tool_call_id' => $h->tool_call_id,
-            'tool_name'    => $h->tool_name,
-        ])->all();
+        $historyPayload = TaskHistorySerializer::buildHistoryPayload($task->taskHistory()->orderBy('sequence')->get());
+        $resource['history'] = $historyPayload['history'];
+        $resource['totals'] = TaskHistorySerializer::aggregateUsage($historyPayload['usages']);
 
         return $resource;
     }
@@ -393,6 +390,7 @@ final class TaskService implements TaskServiceInterface
      *     retry_after?: string,
      *     tool_calls: list<array{
      *         id: int,
+     *         provider_call_id: string|null,
      *         tool_name: string,
      *         tool_type: string,
      *         status: string,
@@ -403,14 +401,8 @@ final class TaskService implements TaskServiceInterface
      *         result_data: array<string,mixed>|null,
      *         executed_at: string|null
      *     }>,
-     *     history: list<array{
-     *         sequence: int,
-     *         role: string,
-     *         content: string|null,
-     *         reasoning: string|null,
-     *         tool_call_id: string|null,
-     *         tool_name: string|null
-     *     }>
+     *     history: list<array<string, mixed>>,
+     *     totals: array<string, int>
      * }
      */
     private function taskDetailResource(Task $task, ?int $sinceSequence = null): array
@@ -436,15 +428,11 @@ final class TaskService implements TaskServiceInterface
             $historyQuery->where('sequence', '>', $sinceSequence);
         }
 
-        $resource['history'] = $historyQuery->get()->map(fn(TaskHistory $h) => [
-            'sequence'     => $h->sequence,
-            'role'         => $h->role,
-            'content'      => $h->content,
-            'reasoning'    => $h->reasoning,
-            'tool_call_id' => $h->tool_call_id,
-            'tool_name'    => $h->tool_name,
-        ])->all();
+        $historyPayload = TaskHistorySerializer::buildHistoryPayload($historyQuery->get());
+        $resource['history'] = $historyPayload['history'];
+        $resource['totals'] = TaskHistorySerializer::aggregateUsage($historyPayload['usages']);
 
         return $resource;
     }
+
 }

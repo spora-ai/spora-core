@@ -19,6 +19,10 @@ use Spora\Models\TaskHistory;
  * case, both producing a synthetic row whose `sequence` is the later of the
  * pair so summary-compaction `_seq` filtering still drops the right range.
  *
+ * Assistant rows with stored `content_blocks` (Anthropic thinking, redacted
+ * thinking, images) are rendered through the block list so the provider
+ * sees the original signed payload on the next outbound turn.
+ *
  * The internal `content` shape is `['type'=>'text'|'image', 'text'|'mediaType'|'base64', …]`;
  * the per-provider wire shape is built by the matching `LLMDriverInterface`
  * implementation (OpenAI, Anthropic, …).
@@ -242,22 +246,27 @@ final class MessageHistoryBuilder
             return $this->attachmentMessage($row);
         }
 
+        $content = $row->content;
+        if ($row->role === 'assistant' && is_array($row->content_blocks) && $row->content_blocks !== []) {
+            $content = $row->content_blocks;
+        }
+
         $message = [
-            'role'    => $row->role,
-            'content' => $row->content,
+            'role' => $row->role,
+            'content' => $content,
         ];
 
         if ($row->role === 'tool') {
             $message = [
-                'role'         => 'tool',
+                'role' => 'tool',
                 'tool_call_id' => $row->tool_call_id,
-                'name'         => $row->tool_name,
-                'content'      => $row->content,
+                'name' => $row->tool_name,
+                'content' => $row->content,
             ];
         } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
             $message = [
-                'role'       => 'assistant',
-                'content'    => null,
+                'role' => 'assistant',
+                'content' => $content,
                 'tool_calls' => $this->decodeToolCallPayload($row->tool_call_payload),
             ];
         }

@@ -8,6 +8,7 @@ use Spora\Drivers\Utilities\RedactedThinkingBlockParser;
 use Spora\Drivers\Utilities\TextBlockParser;
 use Spora\Drivers\Utilities\ThinkingBlockParser;
 use Spora\Drivers\Utilities\ThinkingTagExtractor;
+use Spora\Drivers\ValueObjects\ContentBlock;
 
 /*
 |--------------------------------------------------------------------------
@@ -30,23 +31,24 @@ use Spora\Drivers\Utilities\ThinkingTagExtractor;
 // Top-level dispatcher (LLMContentParser::parse)
 // ---------------------------------------------------------------------------
 
-test('parse returns empty content and null reasoning for null input', function (): void {
+test('parse returns the empty shape for null input', function (): void {
     $result = LLMContentParser::parse(null);
 
-    expect($result)->toBe(['content' => '', 'reasoning' => null]);
+    expect($result)->toBe(['contentBlocks' => [], 'textContent' => '']);
 });
 
-test('parse returns empty content and null reasoning for an empty block array', function (): void {
+test('parse returns the empty shape for an empty block array', function (): void {
     $result = LLMContentParser::parse([]);
 
-    expect($result)->toBe(['content' => '', 'reasoning' => null]);
+    expect($result)->toBe(['contentBlocks' => [], 'textContent' => '']);
 });
 
-test('parse returns empty content and null reasoning for a plain string with no thinking tags', function (): void {
+test('parse returns the input string as textContent for a plain string with no thinking tags', function (): void {
     $result = LLMContentParser::parse('Just a normal answer.');
 
-    expect($result['content'])->toBe('Just a normal answer.')
-        ->and($result['reasoning'])->toBeNull();
+    expect($result['textContent'])->toBe('Just a normal answer.')
+        ->and($result['contentBlocks'])->toHaveCount(1)
+        ->and($result['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_TEXT);
 });
 
 test('parse dispatches text blocks through TextBlockParser', function (): void {
@@ -54,29 +56,36 @@ test('parse dispatches text blocks through TextBlockParser', function (): void {
         ['type' => 'text', 'text' => 'Hello.'],
     ]);
 
-    expect($result['content'])->toBe('Hello.')
-        ->and($result['reasoning'])->toBeNull();
+    expect($result['textContent'])->toBe('Hello.')
+        ->and($result['contentBlocks'])->toHaveCount(1)
+        ->and($result['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_TEXT);
 });
 
-test('parse concatenates content and reasoning across multiple text blocks', function (): void {
+test('parse concatenates textContent across multiple text blocks', function (): void {
     $result = LLMContentParser::parse([
         ['type' => 'text', 'text' => 'First.'],
-        ['type' => 'text', 'text' => ' Second.'],
+        ['type' => 'text', 'text' => 'Second.'],
     ]);
 
-    expect($result['content'])->toBe('First. Second.')
-        ->and($result['reasoning'])->toBeNull();
+    expect($result['textContent'])->toBe('First.Second.')
+        ->and($result['contentBlocks'])->toHaveCount(2);
 });
 
-test('parse dispatches thinking blocks through ThinkingBlockParser and joins with newline', function (): void {
+test('parse preserves thinking blocks in contentBlocks while only emitting text blocks into textContent', function (): void {
     $result = LLMContentParser::parse([
         ['type' => 'thinking', 'thinking' => 'Plan A.'],
         ['type' => 'thinking', 'thinking' => 'Plan B.'],
         ['type' => 'text', 'text' => 'Done.'],
     ]);
 
-    expect($result['content'])->toBe('Done.')
-        ->and($result['reasoning'])->toBe("Plan A.\nPlan B.");
+    expect($result['textContent'])->toBe('Done.')
+        ->and($result['contentBlocks'])->toHaveCount(3)
+        ->and($result['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($result['contentBlocks'][0]->text)->toBe('Plan A.')
+        ->and($result['contentBlocks'][1]->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($result['contentBlocks'][1]->text)->toBe('Plan B.')
+        ->and($result['contentBlocks'][2]->type)->toBe(ContentBlock::TYPE_TEXT)
+        ->and($result['contentBlocks'][2]->text)->toBe('Done.');
 });
 
 test('parse dispatches redacted_thinking blocks through RedactedThinkingBlockParser', function (): void {
@@ -85,8 +94,10 @@ test('parse dispatches redacted_thinking blocks through RedactedThinkingBlockPar
         ['type' => 'text', 'text' => 'Visible.'],
     ]);
 
-    expect($result['content'])->toBe('Visible.')
-        ->and($result['reasoning'])->toBe('[Redacted Thinking]');
+    expect($result['textContent'])->toBe('Visible.')
+        ->and($result['contentBlocks'])->toHaveCount(2)
+        ->and($result['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_REDACTED_THINKING)
+        ->and($result['contentBlocks'][1]->type)->toBe(ContentBlock::TYPE_TEXT);
 });
 
 test('parse combines thinking, redacted_thinking, and text blocks in any order', function (): void {
@@ -96,11 +107,14 @@ test('parse combines thinking, redacted_thinking, and text blocks in any order',
         ['type' => 'text',              'text'     => 'final answer'],
     ]);
 
-    expect($result['content'])->toBe('final answer')
-        ->and($result['reasoning'])->toBe("reasoned thought\n[Redacted Thinking]");
+    expect($result['textContent'])->toBe('final answer')
+        ->and($result['contentBlocks'])->toHaveCount(3)
+        ->and($result['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($result['contentBlocks'][1]->type)->toBe(ContentBlock::TYPE_REDACTED_THINKING)
+        ->and($result['contentBlocks'][2]->type)->toBe(ContentBlock::TYPE_TEXT);
 });
 
-test('parse silently skips unknown block types', function (): void {
+test('parse silently skips unknown block types while preserving tool_use blocks', function (): void {
     $result = LLMContentParser::parse([
         ['type' => 'image',      'source' => ['type' => 'base64', 'data' => '...']],
         ['type' => 'tool_use',   'id'     => 'abc', 'name' => 'search', 'input' => []],
@@ -108,8 +122,10 @@ test('parse silently skips unknown block types', function (): void {
         ['type' => 'unsupported','x'      => 1],
     ]);
 
-    expect($result['content'])->toBe('only-text')
-        ->and($result['reasoning'])->toBeNull();
+    expect($result['textContent'])->toBe('only-text')
+        ->and($result['contentBlocks'])->toHaveCount(2)
+        ->and($result['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_TOOL_USE)
+        ->and($result['contentBlocks'][1]->type)->toBe(ContentBlock::TYPE_TEXT);
 });
 
 test('parse silently skips non-array entries inside a block array', function (): void {
@@ -120,46 +136,53 @@ test('parse silently skips non-array entries inside a block array', function ():
         ['type' => 'text', 'text' => 'survived.'],
     ]);
 
-    expect($result['content'])->toBe('survived.')
-        ->and($result['reasoning'])->toBeNull();
+    expect($result['textContent'])->toBe('survived.')
+        ->and($result['contentBlocks'])->toHaveCount(1);
 });
 
-test('parse keeps an empty-string reasoning when a thinking block has no thinking key and nothing else supplies reasoning', function (): void {
+test('parse handles a thinking block with no thinking key without crashing', function (): void {
     $result = LLMContentParser::parse([
         ['type' => 'thinking'], // missing 'thinking' key
         ['type' => 'text', 'text' => 'answer'],
     ]);
 
-    expect($result['content'])->toBe('answer')
-        ->and($result['reasoning'])->toBe('');
+    expect($result['textContent'])->toBe('answer')
+        ->and($result['contentBlocks'])->toHaveCount(2)
+        ->and($result['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($result['contentBlocks'][0]->text)->toBe('');
 });
 
-test('parse returns null reasoning for a text block with no embedded thinking tags', function (): void {
+test('parse passes a plain text block through with no tag extraction', function (): void {
     $result = LLMContentParser::parse([
         ['type' => 'text', 'text' => 'no tags here'],
     ]);
 
-    expect($result['reasoning'])->toBeNull();
+    expect($result['textContent'])->toBe('no tags here')
+        ->and($result['contentBlocks'])->toHaveCount(1)
+        ->and($result['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_TEXT);
 });
 
-test('parse extracts inline <think> tags from a plain-string input', function (): void {
+test('parse strips inline <think> tags from a plain-string input and exposes only the cleaned text', function (): void {
     $result = LLMContentParser::parse('<think>plan</think>The answer is 42.');
 
-    expect($result['content'])->toBe('The answer is 42.')
-        ->and($result['reasoning'])->toBe('plan');
+    expect($result['textContent'])->toBe('The answer is 42.')
+        ->and($result['contentBlocks'])->toHaveCount(1)
+        ->and($result['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_TEXT);
 });
 
 // ---------------------------------------------------------------------------
 // TextBlockParser
 // ---------------------------------------------------------------------------
 
-test('TextBlockParser returns the block text as content with no reasoning', function (): void {
+test('TextBlockParser returns the block text as content with no displayReasoning', function (): void {
     $parser = new TextBlockParser();
 
     $parsed = $parser->parse(['type' => 'text', 'text' => 'hello world']);
 
-    expect($parsed->content)->toBe('hello world')
-        ->and($parsed->reasoning)->toBeNull();
+    expect($parsed->textContent)->toBe('hello world')
+        ->and($parsed->contentBlock)->toBeInstanceOf(ContentBlock::class)
+        ->and($parsed->contentBlock->type)->toBe(ContentBlock::TYPE_TEXT)
+        ->and($parsed->contentBlock->text)->toBe('hello world');
 });
 
 test('TextBlockParser falls back to empty content when the text key is missing', function (): void {
@@ -167,57 +190,65 @@ test('TextBlockParser falls back to empty content when the text key is missing',
 
     $parsed = $parser->parse(['type' => 'text']);
 
-    expect($parsed->content)->toBe('')
-        ->and($parsed->reasoning)->toBeNull();
+    expect($parsed->textContent)->toBe('')
+        ->and($parsed->contentBlock)->toBeNull();
 });
 
-test('TextBlockParser extracts embedded thinking tags from its text payload', function (): void {
+test('TextBlockParser strips embedded thinking tags from its text payload', function (): void {
     $parser = new TextBlockParser();
 
     $parsed = $parser->parse([
         'type' => 'text',
-        'text' => '<thinking>inner reasoning</thinking>visible answer',
+        'text' => 'visible answer <thinking>inner reasoning</thinking>',
     ]);
 
-    expect($parsed->content)->toBe('visible answer')
-        ->and($parsed->reasoning)->toBe('inner reasoning');
+    expect($parsed->textContent)->toBe('visible answer')
+        ->and($parsed->contentBlock)->not->toBeNull()
+        ->and($parsed->contentBlock->type)->toBe(ContentBlock::TYPE_TEXT)
+        ->and($parsed->contentBlock->text)->toBe('visible answer');
 });
 
-test('TextBlockParser returns null reasoning when the embedded thinking block is empty', function (): void {
+test('TextBlockParser returns the cleaned text when the embedded thinking block is empty', function (): void {
     $parser = new TextBlockParser();
 
     $parsed = $parser->parse([
         'type' => 'text',
-        'text' => '<thinking>   </thinking>answer',
+        'text' => 'answer <thinking>   </thinking>',
     ]);
 
-    expect($parsed->content)->toBe('answer')
-        ->and($parsed->reasoning)->toBeNull();
+    expect($parsed->textContent)->toBe('answer')
+        ->and($parsed->contentBlock->text)->toBe('answer');
 });
 
 // ---------------------------------------------------------------------------
 // ThinkingBlockParser
 // ---------------------------------------------------------------------------
 
-test('ThinkingBlockParser returns the thinking string as reasoning with empty content', function (): void {
+test('ThinkingBlockParser preserves the thinking string as a signed content block', function (): void {
     $parser = new ThinkingBlockParser();
 
     $parsed = $parser->parse([
-        'type'     => 'thinking',
-        'thinking' => 'chain of thought',
+        'type'      => 'thinking',
+        'thinking'  => 'chain of thought',
+        'signature' => 'sig-1',
     ]);
 
-    expect($parsed->content)->toBe('')
-        ->and($parsed->reasoning)->toBe('chain of thought');
+    expect($parsed->textContent)->toBe('')
+        ->and($parsed->contentBlock)->toBeInstanceOf(ContentBlock::class)
+        ->and($parsed->contentBlock->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($parsed->contentBlock->text)->toBe('chain of thought')
+        ->and($parsed->contentBlock->signature)->toBe('sig-1');
 });
 
-test('ThinkingBlockParser returns an empty-string reasoning when the thinking key is missing', function (): void {
+test('ThinkingBlockParser returns a thinking content block with empty text when the thinking key is missing', function (): void {
     $parser = new ThinkingBlockParser();
 
     $parsed = $parser->parse(['type' => 'thinking']);
 
-    expect($parsed->content)->toBe('')
-        ->and($parsed->reasoning)->toBe('');
+    expect($parsed->textContent)->toBe('')
+        ->and($parsed->contentBlock)->toBeInstanceOf(ContentBlock::class)
+        ->and($parsed->contentBlock->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($parsed->contentBlock->text)->toBe('');
 });
 
 test('ThinkingBlockParser coerces a non-string thinking value to string', function (): void {
@@ -225,23 +256,25 @@ test('ThinkingBlockParser coerces a non-string thinking value to string', functi
 
     $parsed = $parser->parse(['type' => 'thinking', 'thinking' => 42]);
 
-    expect($parsed->reasoning)->toBe('42');
+    expect($parsed->contentBlock->text)->toBe('42');
 });
 
 // ---------------------------------------------------------------------------
 // RedactedThinkingBlockParser
 // ---------------------------------------------------------------------------
 
-test('RedactedThinkingBlockParser always returns the [Redacted Thinking] marker', function (): void {
+test('RedactedThinkingBlockParser returns a redacted_thinking content block with the opaque data payload', function (): void {
     $parser = new RedactedThinkingBlockParser();
 
     $parsed = $parser->parse(['type' => 'redacted_thinking', 'data' => 'opaque-blob']);
 
-    expect($parsed->content)->toBe('')
-        ->and($parsed->reasoning)->toBe('[Redacted Thinking]');
+    expect($parsed->textContent)->toBe('')
+        ->and($parsed->contentBlock)->toBeInstanceOf(ContentBlock::class)
+        ->and($parsed->contentBlock->type)->toBe(ContentBlock::TYPE_REDACTED_THINKING)
+        ->and($parsed->contentBlock->data)->toBe('opaque-blob');
 });
 
-test('RedactedThinkingBlockParser ignores extra keys and still returns the marker', function (): void {
+test('RedactedThinkingBlockParser ignores extra keys and still returns the redacted block', function (): void {
     $parser = new RedactedThinkingBlockParser();
 
     $parsed = $parser->parse([
@@ -250,7 +283,8 @@ test('RedactedThinkingBlockParser ignores extra keys and still returns the marke
         'unexpected_field' => ['nested' => true],
     ]);
 
-    expect($parsed->reasoning)->toBe('[Redacted Thinking]');
+    expect($parsed->contentBlock->type)->toBe(ContentBlock::TYPE_REDACTED_THINKING)
+        ->and($parsed->contentBlock->data)->toBe('whatever');
 });
 
 // ---------------------------------------------------------------------------
@@ -279,49 +313,39 @@ test('ContentBlockParserRegistry returns null for unknown block types', function
 // ---------------------------------------------------------------------------
 
 test('ThinkingTagExtractor returns the input unchanged when no thinking tags are present', function (): void {
-    $result = ThinkingTagExtractor::extract('Just plain text.');
+    $result = ThinkingTagExtractor::strip('Just plain text.');
 
-    expect($result['content'])->toBe('Just plain text.')
-        ->and($result['reasoning'])->toBeNull();
+    expect($result)->toBe('Just plain text.');
 });
 
-test('ThinkingTagExtractor strips <think>...</think> tags and captures the body as reasoning', function (): void {
-    $result = ThinkingTagExtractor::extract('<think>plan</think>The answer is 42.');
+test('ThinkingTagExtractor strips <think>...</think> tags and drops the body', function (): void {
+    $result = ThinkingTagExtractor::strip('<think>plan</think>The answer is 42.');
 
-    expect($result['content'])->toBe('The answer is 42.')
-        ->and($result['reasoning'])->toBe('plan');
+    expect($result)->toBe('The answer is 42.');
 });
 
-test('ThinkingTagExtractor strips <thinking>...</thinking> tags and captures the body as reasoning', function (): void {
-    $result = ThinkingTagExtractor::extract('<thinking>thought</thinking>answer');
+test('ThinkingTagExtractor strips <thinking>...</thinking> tags and drops the body', function (): void {
+    $result = ThinkingTagExtractor::strip('<thinking>thought</thinking>answer');
 
-    expect($result['content'])->toBe('answer')
-        ->and($result['reasoning'])->toBe('thought');
+    expect($result)->toBe('answer');
 });
 
-test('ThinkingTagExtractor strips <thought>...</thought> tags and captures the body as reasoning', function (): void {
-    $result = ThinkingTagExtractor::extract('<thought>idea</thought>answer');
+test('ThinkingTagExtractor strips <thought>...</thought> tags and drops the body', function (): void {
+    $result = ThinkingTagExtractor::strip('<thought>idea</thought>answer');
 
-    expect($result['content'])->toBe('answer')
-        ->and($result['reasoning'])->toBe('idea');
+    expect($result)->toBe('answer');
 });
 
-test('ThinkingTagExtractor joins multiple reasoning captures with newlines', function (): void {
-    $result = ThinkingTagExtractor::extract('<thinking>step 1</thinking><text>one.</text><thinking>step 2</thinking><text>two.</text>');
+test('ThinkingTagExtractor strips multiple tags in sequence and collapses adjacent whitespace', function (): void {
+    // Two adjacent tags produce a double space which the strip helper
+    // collapses to a single space (horizontal whitespace only).
+    $result = ThinkingTagExtractor::strip('one. <thinking>step 1</thinking>  two. <thinking>step 2</thinking>');
 
-    expect($result['content'])->toBe('one. two.')
-        ->and($result['reasoning'])->toBe("step 1\nstep 2");
-});
-
-test('ThinkingTagExtractor returns null reasoning when the captured thinking body is empty/whitespace', function (): void {
-    $result = ThinkingTagExtractor::extract('<thinking>   </thinking>visible.');
-
-    expect($result['content'])->toBe('visible.')
-        ->and($result['reasoning'])->toBeNull();
+    expect($result)->toBe('one. two.');
 });
 
 test('ThinkingTagExtractor preserves newlines in content while collapsing horizontal whitespace', function (): void {
-    $result = ThinkingTagExtractor::extract("<thinking>plan</thinking>\n\n## Header\n\nParagraph");
+    $result = ThinkingTagExtractor::strip("<thinking>plan</thinking>\n\n## Header\n\nParagraph");
 
-    expect($result['content'])->toBe("## Header\n\nParagraph");
+    expect($result)->toBe("## Header\n\nParagraph");
 });
