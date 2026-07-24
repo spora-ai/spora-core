@@ -5,15 +5,13 @@ declare(strict_types=1);
 namespace Spora\Drivers;
 
 use Psr\Log\LoggerInterface;
+use Spora\Drivers\Anthropic\AnthropicRequestBuilder;
+use Spora\Drivers\Anthropic\AnthropicResponseParser;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
-use Spora\Drivers\Utilities\LLMContentParser;
-use Spora\Drivers\ValueObjects\ContentBlock;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
-use Spora\Drivers\ValueObjects\ToolCall;
-use Spora\Drivers\ValueObjects\Usage;
 use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
@@ -28,15 +26,11 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
 final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 {
-    private const API_VERSION = '2023-06-01';
-
     private const PROVIDER_KEY = 'anthropic_compatible';
 
-    private readonly ?float $temperature;
+    private readonly AnthropicRequestBuilder $requestBuilder;
 
-    private readonly ?int $thinkingBudget;
-
-    private readonly bool $enablePromptCaching;
+    private readonly AnthropicResponseParser $responseParser;
 
     public function __construct(
         string              $apiKey,
@@ -56,9 +50,14 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
             $timeout,
             $options?->supportsImageInput,
         );
-        $this->temperature    = $options?->temperature;
-        $this->thinkingBudget = $options?->thinkingBudget;
-        $this->enablePromptCaching = $options->enablePromptCaching ?? true;
+        $this->requestBuilder = new AnthropicRequestBuilder(
+            apiKey: $apiKey,
+            model: $model,
+            enablePromptCaching: $options->enablePromptCaching ?? true,
+            temperature: $options?->temperature,
+            thinkingBudget: $options?->thinkingBudget,
+        );
+        $this->responseParser = new AnthropicResponseParser($logger);
     }
 
     /**
@@ -74,17 +73,17 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 
     public function getProviderName(): string
     {
-        return static::getName();
+        return 'anthropic_compatible';
     }
 
     public function complete(LLMRequest $request): LLMResponse
     {
-        $tools    = $this->convertTools($request->tools);
-        $messages = $this->convertMessages($request->messages);
-        $body     = $this->buildAnthropicRequestBody($request, $tools, $messages);
+        $tools    = $this->requestBuilder->convertTools($request->tools);
+        $messages = $this->requestBuilder->convertMessages($request->messages);
+        $body     = $this->requestBuilder->buildBody($request, $tools, $messages);
 
         $url     = rtrim($this->baseUrl, '/') . '/v1/messages';
-        $headers = $this->buildAnthropicHeaders();
+        $headers = $this->requestBuilder->buildHeaders();
         $this->logger?->debug('LLM Request (Anthropic)', ['url' => $url, 'payload' => $body]);
 
         $response = $this->httpClient->request('POST', $url, [
@@ -95,72 +94,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 
         $this->throwIfErrorResponse($response);
 
-        return $this->parseAnthropicResponse($response);
-    }
-
-    /**
-     * @param  list<array{name: string, description: string, input_schema: array}>  $tools
-     * @param  list<array{role: string, content: string|array}>  $messages
-     * @return array<string, mixed>
-     */
-    private function buildAnthropicRequestBody(LLMRequest $request, array $tools, array $messages): array
-    {
-        // Skip the cache breakpoint on an empty system prompt — the
-        // breakpoint would be wasted on a one-byte auto-wrap and the
-        // operator has nothing to cache.
-        $system = $request->systemPrompt;
-        if ($this->enablePromptCaching && $request->systemPrompt !== '') {
-            $system = [[
-                'type' => 'text',
-                'text' => $request->systemPrompt,
-                'cache_control' => ['type' => 'ephemeral'],
-            ]];
-        }
-
-        $body = [
-            'model' => $this->model,
-            'system' => $system,
-            'messages' => $messages,
-            'max_tokens' => $request->maxTokens,
-        ];
-
-        if ($tools !== []) {
-            if ($this->enablePromptCaching) {
-                $lastTool = array_key_last($tools);
-                $tools[$lastTool]['cache_control'] = ['type' => 'ephemeral'];
-            }
-            $body['tools'] = $tools;
-        }
-
-        if ($this->temperature !== null) {
-            $body['temperature'] = $this->temperature;
-        }
-
-        if ($this->thinkingBudget !== null) {
-            $body['thinking'] = [
-                'type' => 'enabled',
-                'budget_tokens' => $this->thinkingBudget,
-            ];
-        }
-
-        return $body;
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function buildAnthropicHeaders(): array
-    {
-        $headers = [
-            'anthropic-version' => self::API_VERSION,
-            'Content-Type'      => 'application/json',
-        ];
-
-        if ($this->apiKey !== '') {
-            $headers['x-api-key'] = $this->apiKey;
-        }
-
-        return $headers;
+        return $this->responseParser->parse($response);
     }
 
     private function throwIfErrorResponse(ResponseInterface $response): void
@@ -180,359 +114,6 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
             $rawBody = $response->getContent(throw: false);
             throw new LLMProviderException("Anthropic API error {$statusCode}: {$rawBody}");
         }
-    }
-
-    private function parseAnthropicResponse(ResponseInterface $response): LLMResponse
-    {
-        $statusCode = $response->getStatusCode();
-
-        /** @var array<string, mixed> $data */
-        $data = $response->toArray();
-        $this->logger?->debug('LLM Response (Anthropic)', ['status' => $statusCode, 'data' => $data]);
-
-        $parsedContent = LLMContentParser::parse(is_array($data['content'] ?? null) ? $data['content'] : []);
-        $usage = $this->buildUsage(is_array($data['usage'] ?? null) ? $data['usage'] : null);
-
-        return $this->buildResponseFromParsed(
-            parsed: $parsedContent,
-            usage: $usage,
-            completionId: (string) ($data['id'] ?? ''),
-            stopReason: (string) ($data['stop_reason'] ?? ''),
-            rawBlocks: is_array($data['content'] ?? null) ? $data['content'] : [],
-        );
-    }
-
-    /**
-     * @param array{contentBlocks: list<ContentBlock>, textContent: string} $parsed
-     * @param list<array<string, mixed>> $rawBlocks
-     */
-    private function buildResponseFromParsed(array $parsed, Usage $usage, string $completionId, string $stopReason, array $rawBlocks): LLMResponse
-    {
-        $isToolUse = $stopReason === 'tool_use';
-        $textContent = $isToolUse ? self::nullableText($parsed['textContent']) : $parsed['textContent'];
-        $toolCalls = $isToolUse ? $this->extractToolCalls($rawBlocks) : [];
-
-        return new LLMResponse(
-            content: $textContent,
-            toolCalls: $toolCalls,
-            inputTokens: $usage->inputTokens,
-            outputTokens: $usage->outputTokens,
-            completionId: $completionId,
-            contentBlocks: $parsed['contentBlocks'],
-            usage: $usage,
-        );
-    }
-
-    private static function nullableText(string $text): ?string
-    {
-        return $text !== '' ? $text : null;
-    }
-
-    /**
-     * @param  list<array<string, mixed>>  $contentBlocks
-     * @return list<ToolCall>
-     */
-    private function extractToolCalls(array $contentBlocks): array
-    {
-        $toolCalls = [];
-
-        foreach ($contentBlocks as $block) {
-            if (($block['type'] ?? '') !== 'tool_use') {
-                continue;
-            }
-
-            $toolCalls[] = new ToolCall(
-                providerCallId: (string) ($block['id'] ?? ''),
-                toolName: (string) ($block['name'] ?? ''),
-                arguments: (array) ($block['input'] ?? []),
-            );
-        }
-
-        return $toolCalls;
-    }
-
-    /**
-     * Convert OpenAI function-calling tool definitions to Anthropic format.
-     *
-     * OpenAI: [{type: "function", function: {name, description, parameters: {...}}}]
-     * Anthropic: [{name, description, input_schema: {...}}]
-     *
-     * @param  list<array{type: string, function: array{name: string, description: string, parameters: array}}>  $tools
-     * @return list<array{name: string, description: string, input_schema: array}>
-     */
-    private function convertTools(array $tools): array
-    {
-        $converted = [];
-
-        foreach ($tools as $tool) {
-            if ($tool['type'] !== 'function') {
-                continue;
-            }
-
-            $fn = $tool['function'];
-
-            $converted[] = [
-                'name'         => $fn['name'],
-                'description'  => $fn['description'],
-                'input_schema' => $fn['parameters'],
-            ];
-        }
-
-        return $converted;
-    }
-
-    /**
-     * Convert OpenAI-format messages to Anthropic format.
-     *
-     * Key conversions:
-     * - Assistant messages with tool_calls → Anthropic content blocks [{type:"tool_use",...}]
-     * - Tool result messages (role:"tool") → Batched into user messages with [{type:"tool_result",...}]
-     *   (Multiple consecutive tool results collapse into one user turn.)
-     *
-     * @param  list<array{role: string, content: string|null, tool_calls?: array, tool_call_id?: string, name?: string}>  $messages
-     * @return list<array{role: string, content: string|array}>
-     */
-    private function convertMessages(array $messages): array
-    {
-        $converted   = [];
-        $toolResults = [];
-
-        foreach ($messages as $msg) {
-            $role = $msg['role'];
-
-            if ($role === 'tool') {
-                // Accumulate; will be flushed as a single user turn
-                $toolResults[] = $this->buildToolResultBlock($msg);
-                continue;
-            }
-
-            if ($role === 'assistant' && isset($msg['tool_calls'])) {
-                $converted[] = $this->buildAssistantToolUseMessage(
-                    $msg['tool_calls'],
-                    $msg['content'] ?? null,
-                );
-                continue;
-            }
-
-            if ($toolResults !== []) {
-                $converted[] = $this->flushToolResults($toolResults);
-                $toolResults = [];
-            }
-
-            $converted[] = ['role' => $role, 'content' => $this->normalizeMessageContent($msg['content'] ?? null)];
-        }
-
-        // Flush any trailing tool results
-        if ($toolResults !== []) {
-            $converted[] = $this->flushToolResults($toolResults);
-        }
-
-        return $converted;
-    }
-
-    /**
-     * Translate a message's `content` field into Anthropic's wire shape.
-     * Three input forms:
-     *   - null / string     → return as-is (text).
-     *   - list<ContentBlock> (the new multi-modal shape) → translate to
-     *     Anthropic blocks: `{type:"text", text}` for text and
-     *     `{type:"image", source:{type, media_type, data|url}}` for
-     *     image blocks.
-     */
-    private function normalizeMessageContent(mixed $content): string|array
-    {
-        if ($content === null || is_string($content)) {
-            return $content ?? '';
-        }
-        if (!is_array($content)) {
-            return (string) $content;
-        }
-        $blocks = [];
-        foreach ($content as $b) {
-            if (!is_array($b)) {
-                continue;
-            }
-            $block = $this->contentBlockToAnthropic($b);
-            if ($block !== null) {
-                $blocks[] = $block;
-            }
-        }
-        return $blocks === [] ? '' : $blocks;
-    }
-
-    /**
-     * @param array<string, mixed> $block
-     * @return array<string, mixed>|null
-     */
-    private function contentBlockToAnthropic(array $block): ?array
-    {
-        $type = $block['type'] ?? null;
-        $result = match ($type) {
-            ContentBlock::TYPE_TEXT => ['type' => 'text', 'text' => (string) ($block['text'] ?? '')],
-            ContentBlock::TYPE_IMAGE => $this->imageBlockToAnthropic($block),
-            ContentBlock::TYPE_THINKING => [
-                'type' => 'thinking',
-                'thinking' => (string) ($block['text'] ?? ''),
-                'signature' => (string) ($block['signature'] ?? ''),
-            ],
-            ContentBlock::TYPE_REDACTED_THINKING => [
-                'type' => 'redacted_thinking',
-                'data' => (string) ($block['data'] ?? ''),
-            ],
-            ContentBlock::TYPE_TOOL_USE => $this->toolUseBlockToAnthropic($block),
-            default => null,
-        };
-        return $result;
-    }
-
-    /**
-     * @param array<string, mixed> $block
-     * @return array<string, mixed>
-     */
-    private function toolUseBlockToAnthropic(array $block): array
-    {
-        $input = $block['toolInput'] ?? $block['tool_input'] ?? [];
-        $input = is_array($input) ? $input : [];
-        if (array_is_list($input)) {
-            $input = (object) $input;
-        }
-
-        return [
-            'type' => 'tool_use',
-            'id' => (string) ($block['toolUseId'] ?? $block['tool_use_id'] ?? ''),
-            'name' => (string) ($block['toolName'] ?? $block['tool_name'] ?? ''),
-            'input' => $input,
-        ];
-    }
-
-    /**
-     * @param array<string, mixed> $block
-     * @return array<string, mixed>|null
-     */
-    private function imageBlockToAnthropic(array $block): ?array
-    {
-        if (isset($block['base64']) && is_string($block['base64']) && $block['base64'] !== '' && isset($block['mediaType'])) {
-            return [
-                'type'   => 'image',
-                'source' => [
-                    'type'       => 'base64',
-                    'media_type' => (string) $block['mediaType'],
-                    'data'       => $block['base64'],
-                ],
-            ];
-        }
-        if (isset($block['url']) && is_string($block['url']) && $block['url'] !== '') {
-            return [
-                'type'   => 'image',
-                'source' => ['type' => 'url', 'url' => $block['url']],
-            ];
-        }
-
-        return null;
-    }
-
-    /**
-     * @param  array{role: string, content: string|null, tool_call_id?: string, name?: string}  $msg
-     * @return array{type: string, tool_use_id: string, content: string}
-     */
-    private function buildToolResultBlock(array $msg): array
-    {
-        return [
-            'type'        => 'tool_result',
-            'tool_use_id' => (string) ($msg['tool_call_id'] ?? ''),
-            'content'     => (string) ($msg['content'] ?? ''),
-        ];
-    }
-
-    /**
-     * @param  list<array<string, mixed>>  $toolResults
-     * @return array{role: string, content: list<array<string, mixed>>}
-     */
-    private function flushToolResults(array $toolResults): array
-    {
-        return ['role' => 'user', 'content' => $toolResults];
-    }
-
-    /**
-     * Join an assistant message's `tool_calls` with any existing tool_use
-     * blocks already in its `content_blocks` array. The dedup-by-`tool_use.id`
-     * contract matters because the same tool call can appear in both fields
-     * after a history round-trip; emitting it twice would 400 the provider.
-     *
-     * @param list<array<string, mixed>> $toolCalls
-     * @return array{role: string, content: list<array<string, mixed>>}
-     */
-    private function buildAssistantToolUseMessage(array $toolCalls, mixed $content): array
-    {
-        $normalized = $this->normalizeMessageContent($content);
-        $contentBlocks = [];
-
-        if (is_array($normalized)) {
-            $contentBlocks = $normalized;
-        } elseif ($normalized !== '') {
-            $contentBlocks = [['type' => 'text', 'text' => $normalized]];
-        }
-
-        $existingIds = $this->collectExistingToolUseIds($contentBlocks);
-
-        foreach ($toolCalls as $toolCall) {
-            $id = (string) ($toolCall['id'] ?? '');
-            if (!in_array($id, $existingIds, true)) {
-                $contentBlocks[] = $this->buildToolUseBlock($toolCall);
-            }
-        }
-
-        return ['role' => 'assistant', 'content' => $contentBlocks];
-    }
-
-    /**
-     * @param list<array<string, mixed>> $contentBlocks
-     * @return list<string>
-     */
-    private function collectExistingToolUseIds(array $contentBlocks): array
-    {
-        $existingIds = [];
-        foreach ($contentBlocks as $block) {
-            if (($block['type'] ?? null) === 'tool_use') {
-                $existingIds[] = (string) ($block['id'] ?? '');
-            }
-        }
-
-        return $existingIds;
-    }
-
-    /**
-     * @param  array<string, mixed>  $tc
-     * @return array{type: string, id: string, name: string, input: mixed}
-     */
-    private function buildToolUseBlock(array $tc): array
-    {
-        $rawArguments = $tc['function']['arguments'] ?? '{}';
-        $input        = is_string($rawArguments)
-            ? (json_decode($rawArguments, true) ?? [])
-            : (array) $rawArguments;
-
-        // Anthropic requires input to be a dict, not a bare list/array.
-        // (object)[] becomes {} in JSON; array_is_list check handles
-        // non-empty lists which also must not be sent as bare arrays.
-        if (!is_array($input) || array_is_list($input)) {
-            $input = (object) $input;
-        }
-
-        return [
-            'type'  => 'tool_use',
-            'id'    => (string) ($tc['id'] ?? ''),
-            'name'  => (string) ($tc['function']['name'] ?? ''),
-            'input' => $input,
-        ];
-    }
-
-    /**
-     * @param array<string, mixed>|null $usage
-     */
-    private function buildUsage(?array $usage): Usage
-    {
-        return Usage::fromProviderUsage($usage, 'anthropic');
     }
 
     public static function getName(): string

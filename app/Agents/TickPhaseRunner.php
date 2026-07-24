@@ -348,8 +348,8 @@ final class TickPhaseRunner
         $serializer = $this->toolCallSerializer ?? new ToolCallSerializer($this->toolInstances);
 
         $historyRows = $task->taskHistory()->orderBy('sequence')->get();
-        $historyPayload = \Spora\Services\TaskService::buildHistoryPayload($historyRows);
-        $totals = \Spora\Services\TaskService::aggregateUsage($historyPayload['usages']);
+        $historyPayload = \Spora\Services\TaskHistorySerializer::buildHistoryPayload($historyRows);
+        $totals = \Spora\Services\TaskHistorySerializer::aggregateUsage($historyPayload['usages']);
 
         $taskData = [
             'id' => $task->id,

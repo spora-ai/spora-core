@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Drivers;
 
-use ReflectionMethod;
+use Spora\Drivers\Anthropic\AnthropicRequestBuilder;
 use Spora\Drivers\AnthropicCompatibleDriver;
-use Spora\Drivers\ValueObjects\LLMRequest;
 use Symfony\Component\HttpClient\MockHttpClient;
 
 /**
@@ -24,29 +23,28 @@ function makeAnthropicRequestDriver(string $model): AnthropicCompatibleDriver
     );
 }
 
-test('text block renders with type:text', function (): void {
-    $driver = makeAnthropicRequestDriver('claude-3-5-sonnet-20241022');
-    $request = new LLMRequest(
-        systemPrompt: 'You are helpful.',
-        messages: [
-            ['role' => 'user', 'content' => 'describe'],
-        ],
-        tools: [],
-        maxTokens: 1024,
+function makeAnthropicRequestBuilder(string $model): AnthropicRequestBuilder
+{
+    return new AnthropicRequestBuilder(
+        apiKey: 'test',
+        model: $model,
+        enablePromptCaching: false,
         temperature: 0.7,
+        thinkingBudget: null,
     );
-    $ref = new ReflectionMethod($driver, 'convertMessages');
-    $messages = $ref->invoke($driver, $request->messages);
+}
+
+test('text block renders with type:text', function (): void {
+    $builder = makeAnthropicRequestBuilder('claude-3-5-sonnet-20241022');
+    $messages = $builder->convertMessages([
+        ['role' => 'user', 'content' => 'describe'],
+    ]);
     expect($messages[0]['content'])->toBe('describe');
 });
 
 test('image block renders with type:image and source:{type:base64,...}', function (): void {
-    $driver = makeAnthropicRequestDriver('claude-3-5-sonnet-20241022');
-    // The convertMessages() path expects ContentBlock value-objects
-    // (since the LLMRequest typing has tightened) — build the message
-    // as a plain array via reflection to exercise the renderer directly.
-    $ref = new ReflectionMethod($driver, 'convertMessages');
-    $messages = $ref->invoke($driver, [[
+    $builder = makeAnthropicRequestBuilder('claude-3-5-sonnet-20241022');
+    $messages = $builder->convertMessages([[
         'role' => 'user',
         'content' => [
             ['type' => 'text', 'text' => 'describe'],
@@ -61,9 +59,8 @@ test('image block renders with type:image and source:{type:base64,...}', functio
 });
 
 test('null content is converted to empty string for Anthropic', function (): void {
-    $driver = makeAnthropicRequestDriver('claude-3-5-sonnet-20241022');
-    $ref = new ReflectionMethod($driver, 'convertMessages');
-    $messages = $ref->invoke($driver, [
+    $builder = makeAnthropicRequestBuilder('claude-3-5-sonnet-20241022');
+    $messages = $builder->convertMessages([
         ['role' => 'assistant', 'content' => null],
     ]);
     expect($messages[0]['content'])->toBe('');
