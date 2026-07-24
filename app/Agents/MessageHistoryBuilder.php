@@ -10,33 +10,18 @@ use Spora\Models\TaskHistory;
 
 /**
  * Replays {@see TaskHistory} rows into the OpenAI-compatible message list sent
- * to the LLM each tick. Three responsibilities:
- *   1. {@see applySummaryCompaction()} — drops rows whose `sequence` falls
- *      inside a `summary` row's `summarized_sequence_range`, keeping the
- *      summary row itself.
- *   2. {@see messageFromHistoryRow()} — maps a single row into the LLM wire
- *      shape (`tool`, `assistant+tool_calls`, plain role+content, and
- *      `attachment` rows that are folded into the adjacent `user` row).
- *      Rows with `role=attachment` are NEVER sent to the provider as such:
- *      OpenAI/Anthropic both reject the role, so the builder routes every
- *      attachment row through {@see attachmentMessage()} which produces a
- *      valid `user` message with text + image content blocks (filtered by
- *      the driver's image-input capability).
- *   3. {@see stripScaffoldingKeys()} — removes the internal `_seq` bookkeeping
- *      key so the scaffolding never leaks to the provider.
+ * to the LLM each tick. Rows with `role=attachment` are never sent as such
+ * (providers reject the role) — they fold into the adjacent `user` row,
+ * with the operator's typed prompt preserved as a leading text block.
  *
- * Attachment pairing is order-symmetric: the builder merges an attachment row
- * with its adjacent user row in either order, so production (`user` first,
- * then `attachment`) and the reverse ordering used by some fixtures both
- * collapse to a single `user` message. The merge helpers are
- * {@see consumeAttachmentPair()} (reverse-order) and
- * {@see consumeUserAttachmentPair()} (production order). Both produce a
- * synthetic row whose `sequence` is the later of the pair so summary
- * compaction semantics are preserved.
+ * Pairing is order-symmetric: {@see consumeAttachmentPair()} handles the
+ * reverse-order case and {@see consumeUserAttachmentPair()} the production
+ * case, both producing a synthetic row whose `sequence` is the later of the
+ * pair so summary-compaction `_seq` filtering still drops the right range.
  *
- * Attachment-row rendering (text + image content blocks, fallback
- * string, asset byte loading) lives in {@see AttachmentRowRenderer},
- * which {@see attachmentMessage()} delegates to.
+ * The internal `content` shape is `['type'=>'text'|'image', 'text'|'mediaType'|'base64', …]`;
+ * the per-provider wire shape is built by the matching `LLMDriverInterface`
+ * implementation (OpenAI, Anthropic, …).
  */
 final class MessageHistoryBuilder
 {
@@ -62,11 +47,9 @@ final class MessageHistoryBuilder
     /**
      * Walks the rows in `sequence` order, applying summary compaction and
      * converting each surviving row into an LLM-shaped message. Attachment
-     * rows are folded into the adjacent `user` row in either order — the
-     * production path writes `user` first then `attachment` while some
-     * fixtures use the reverse — so the wire payload never carries the
-     * unsupported `attachment` role and the operator's typed prompt always
-     * travels together with the attachment context.
+     * rows fold into the adjacent `user` row in either order; the merged
+     * row's `sequence` is the later of the pair so `_seq`-based eviction
+     * (see {@see evictCompactedRows()}) still drops the right range.
      *
      * `_seq` is set on every emitted message so {@see stripScaffoldingKeys()}
      * can target the key without altering the user-visible structure.
@@ -102,9 +85,6 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Apply a `summary` row: evict any prior messages inside its range,
-     * append the summary itself, return the new high-water mark.
-     *
      * @param list<array<string, mixed>> $messages
      */
     private function applySummaryRow(
@@ -119,9 +99,6 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Dispatch a single surviving row to its wire shape, attempting
-     * user/attachment pair consumption in either order first.
-     *
      * @param list<TaskHistory>          $rowsArray
      * @param list<array<string, mixed>> $messages
      * @return int  The new index to resume iteration at.
@@ -150,10 +127,6 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Try the appropriate pair-consumption helper for `$row`'s role.
-     * Returns the synthetic-row payload or null when the adjacent row
-     * does not pair (in which case the caller emits `$row` standalone).
-     *
      * @param list<TaskHistory> $rowsArray
      * @return array{row: TaskHistory, nextIndex: int}|null
      */
@@ -169,13 +142,8 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * If the row at `$i` is an `attachment` and the next row is a `user`,
-     * return a synthetic row whose `content` carries the user's prompt
-     * (so {@see attachmentMessage()} merges them) and the index to
-     * resume iteration at. Returns null when the adjacent row is not a
-     * `user` (or is absent), letting the caller fall through to the
-     * standalone attachment path. The companion production-order helper
-     * is {@see consumeUserAttachmentPair()}.
+     * Reverse-order merge: row at `$i` is `attachment`, next is `user`.
+     * The companion production-order helper is {@see consumeUserAttachmentPair()}.
      *
      * @param list<TaskHistory> $rowsArray
      * @return array{row: TaskHistory, nextIndex: int}|null
@@ -193,17 +161,10 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Production-order merge: if the row at `$i` is a `user` and the next
-     * row is an `attachment`, return a synthetic row whose `role` is
-     * `attachment` so the existing {@see attachmentMessage()} expansion
-     * path is reused. The synthetic row carries the user prompt in
-     * `content` and the attachment refs in `attachments`; its `sequence`
-     * is the later of the pair so summary-compaction `_seq` filtering
-     * still drops the right range. The companion reverse-order helper is
-     * {@see consumeAttachmentPair()}. Both are needed because
-     * {@see \Spora\Agents\Orchestrator::start/continue} persist the
-     * production order, while existing fixtures and some tests use the
-     * reverse.
+     * Production-order merge: row at `$i` is `user`, next is `attachment`.
+     * The synthetic row reuses {@see attachmentMessage()} expansion; its
+     * `sequence` is the later of the pair so `_seq`-filter eviction
+     * still drops the right range. Companion: {@see consumeAttachmentPair()}.
      *
      * @param list<TaskHistory> $rowsArray
      * @return array{row: TaskHistory, nextIndex: int}|null
@@ -234,8 +195,8 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Removes non-summary messages whose `_seq` is inside the summarised range,
-     * keeping every summary row untouched (each has its own `_seq`).
+     * Removes non-summary messages whose `_seq` is inside the summarised range.
+     * Summary rows keep their own `_seq` and are always preserved.
      *
      * @param  list<array<string, mixed>>  $messages
      * @return int  The new $lastSummarySeqEnd value (the largest range end seen).
@@ -267,8 +228,6 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Maps a non-summary row to its LLM wire shape.
-     *
      * The `attachment` branch is the load-bearing guard: regardless of
      * whether `$row->attachments` is non-empty, we always route through
      * {@see attachmentMessage()} which returns a `user` message. The
@@ -308,20 +267,11 @@ final class MessageHistoryBuilder
 
     /**
      * Expand an `attachment` row into a `user` message whose `content` is
-     * either:
-     *   - a list of ContentBlock dicts (text + image blocks), or
-     *   - a plain string when no blocks can be produced (e.g. all refs
-     *     reference missing assets, or the row is a legacy `attachment`
-     *     row with null/empty `attachments` JSON).
-     *
-     * The merged row that {@see consumeAttachmentPair()} produces carries
-     * the operator's typed prompt on `$row->content`. When text-kind
-     * attachments are present, we fold the prompt above the filename
-     * header and extracted markdown so the LLM sees the request as a
-     * single `user` turn rather than two. Image-kind attachments become
-     * base64 image blocks (only when `supportsImageInput()` is true; the
-     * controller should have already rejected the request with
-     * `400 MEDIA_CAPABILITY_MISMATCH`).
+     * either a list of ContentBlock dicts (text + image blocks) or a plain
+     * string when no blocks can be produced. Image blocks require the
+     * driver to support image input; the controller is expected to have
+     * rejected vision-incompatible requests with `400 MEDIA_CAPABILITY_MISMATCH`
+     * before we get here.
      */
     private function attachmentMessage(TaskHistory $row): array
     {
@@ -345,9 +295,9 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Decodes a stored `tool_call_payload` JSON string and rewrites any
-     * empty `arguments` array to the literal `'{}'` string that strict
-     * providers (OpenAI, MiniMax, LM Studio) require.
+     * Rewrites empty `arguments` arrays to the literal `'{}'` string —
+     * strict providers (OpenAI, MiniMax, LM Studio) reject `[]` for the
+     * tool-call `arguments` field.
      *
      * @return list<array<string, mixed>>
      */
@@ -374,8 +324,7 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Removes the internal `_seq` key from every emitted message. Mutates
-     * in place and returns nothing — the key is pure scaffolding.
+     * Scaffolding key — stripped before the wire payload is built.
      *
      * @param  list<array<string, mixed>>  $messages
      */
@@ -389,11 +338,9 @@ final class MessageHistoryBuilder
 }
 
 /**
- * Renders a {@see TaskHistory} `attachment` row into the OpenAI-compatible
- * `content` array for the merged `user` message. Lives outside
- * {@see MessageHistoryBuilder} so the public builder stays under the
- * SonarQube class-method cap while keeping the attachment rendering
- * pipeline as a private implementation detail of {@see attachmentMessage()}.
+ * Renders a {@see TaskHistory} `attachment` row into the internal
+ * `content` array for the merged `user` message. Internal to
+ * {@see MessageHistoryBuilder} — instantiated by {@see MessageHistoryBuilder::attachmentMessage()}.
  */
 final class AttachmentRowRenderer
 {
@@ -410,10 +357,11 @@ final class AttachmentRowRenderer
     ) {}
 
     /**
-     * @return list<array<string, mixed>>|null  Null when no resolvable
-     *         blocks exist (legacy rows, all-refs-missing, or image-only
-     *         attachments on a non-vision driver). Callers should fall
-     *         back to {@see fallbackText()} in that case.
+     * Null when no resolvable blocks exist (legacy rows, all-refs-missing,
+     * or image-only attachments on a non-vision driver). Callers fall
+     * back to {@see fallbackText()} in that case.
+     *
+     * @return list<array<string, mixed>>|null
      */
     public function render(TaskHistory $row): ?array
     {
@@ -428,10 +376,10 @@ final class AttachmentRowRenderer
     }
 
     /**
-     * Build the fallback string used when an attachment row has no
-     * resolvable blocks (legacy rows, all-refs-missing, or image-only
-     * attachments on a non-vision driver). The text content itself is
-     * preserved so the operator's typed prompt still reaches the LLM.
+     * Preserves the operator's typed prompt when no resolvable blocks
+     * exist (legacy rows, all-refs-missing, or image-only attachments
+     * on a non-vision driver). Returns `'[attachment]'` when `$rowContent`
+     * is empty.
      */
     public function fallbackText(?string $rowContent): string
     {
@@ -440,10 +388,9 @@ final class AttachmentRowRenderer
     }
 
     /**
-     * Walk `$row->attachments` and split refs into text blocks and image
-     * blocks. Image blocks are null when the LLM does not support image
-     * input; those refs are dropped here (defense in depth alongside the
-     * controller's `MEDIA_CAPABILITY_MISMATCH` pre-flight).
+     * Image blocks for non-vision drivers are dropped here — defense in
+     * depth alongside the controller's `MEDIA_CAPABILITY_MISMATCH`
+     * pre-flight.
      *
      * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>}
      */
@@ -478,61 +425,34 @@ final class AttachmentRowRenderer
     }
 
     /**
-     * Assemble the wire `content` for a user message that has at least one
-     * resolvable attachment. The prompt leads, followed by `---` and the
-     * filename header + extracted markdown. Image blocks (when present)
-     * follow a single leading text block.
-     *
-     * Trivial case — a single text attachment with no operator prompt —
-     * returns the original block unchanged: no combined-block rewrite, no
-     * `---` separator. (`{@see composeTextContent()}()` still runs first to
-     * compute `$combined`, which the early return then discards.)
+     * Assembles the `content` array. The operator prompt leads, followed
+     * by `---` and the filename header + extracted markdown. Image blocks
+     * (when present) follow the leading text block. Trivial case — a
+     * single text attachment with no prompt — passes the original block
+     * through unchanged (no `---` rewrite).
      *
      * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>} $blocks
      * @return list<array<string, mixed>>
      */
     private function buildAttachmentContent(array $blocks, string $prompt): array
     {
-        $combined = $this->composeTextContent($prompt, $blocks['text']);
-        $textOnly = $blocks['image'] === [];
-
-        if ($textOnly) {
-            return $this->buildTextOnlyContent($blocks, $prompt, $combined);
+        if ($blocks['image'] === []) {
+            if ($prompt === '' && count($blocks['text']) === 1) {
+                return $blocks['text'];
+            }
+            return [['type' => 'text', 'text' => $this->composeTextContent($prompt, $blocks['text'])]];
         }
-        return $this->buildImageContent($blocks, $prompt, $combined);
-    }
 
-    /**
-     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>} $blocks
-     */
-    private function buildTextOnlyContent(array $blocks, string $prompt, string $combined): array
-    {
-        if ($prompt === '' && count($blocks['text']) === 1) {
-            return $blocks['text'];
-        }
-        return [['type' => 'text', 'text' => $combined]];
-    }
-
-    /**
-     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>} $blocks
-     */
-    private function buildImageContent(array $blocks, string $prompt, string $combined): array
-    {
         if ($prompt === '') {
             return $blocks['image'];
         }
         return array_merge(
-            [['type' => 'text', 'text' => $combined]],
+            [['type' => 'text', 'text' => $this->composeTextContent($prompt, $blocks['text'])]],
             $blocks['image'],
         );
     }
 
     /**
-     * Compose the text-block body for an attachment row: operator prompt
-     * (when present), followed by `---` separator, then a `# filename
-     * (extracted text)` header and the extracted markdown for each text
-     * attachment, in order.
-     *
      * @param list<array<string, mixed>> $textBlocks
      */
     private function composeTextContent(string $prompt, array $textBlocks): string
