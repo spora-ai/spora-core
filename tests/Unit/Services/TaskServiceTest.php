@@ -499,11 +499,15 @@ describe('TaskService — getTaskWithHistory', function (): void {
         expect($result['history'])->toBeArray();
         expect($result['history'])->toHaveCount(2);
         expect($result['history'][0]['sequence'])->toBe(1);
-        // Post PR #1: legacy `reasoning` column dropped from the API surface entirely; content_blocks replaces it.
-        // usage is only populated when a `usage` row was persisted alongside the
-        // history row; this fixture pre-dates the new persistence path, so `usage`
-        // is omitted (legacy decoder returns an empty content_blocks array).
-        expect($result['history'][1])->not->toHaveKey('reasoning');
+        // The `reasoning` column is the display-only mirror for OpenAI-style
+        // tag-extracted reasoning (`<think>…</think>` from the MiniMax-M3
+        // model). It survives in the wire payload alongside `content_blocks`
+        // so the admin UI can render the per-message Reasoning foldout.
+        // `content_blocks` is empty here because the fixture pre-dates the
+        // structured-block persistence path; `usage` is omitted because no
+        // usage row was persisted alongside this history row.
+        expect($result['history'][1])->toHaveKey('reasoning');
+        expect($result['history'][1]['reasoning'])->toBe('thinking');
         expect($result['history'][1])->toHaveKey('content_blocks');
         expect($result['history'][1]['content_blocks'])->toBe([]);
     });

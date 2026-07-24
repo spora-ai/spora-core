@@ -478,6 +478,28 @@ final class Orchestrator implements OrchestratorInterface
         throw new ToolNotRegisteredException("No tool registered with name '{$toolName}'.");
     }
 
+    /**
+     * True when the supplied content blocks contain a `thinking` block with
+     * a non-empty signature. A signed thinking block carries the reasoning
+     * the provider returned with replay guarantees; duplicating that text
+     * into the legacy `reasoning` column would be redundant and risks drift.
+     *
+     * @param list<\Spora\Drivers\ValueObjects\ContentBlock> $blocks
+     */
+    private static function hasSignedThinkingBlock(array $blocks): bool
+    {
+        foreach ($blocks as $block) {
+            if ($block->type === \Spora\Drivers\ValueObjects\ContentBlock::TYPE_THINKING
+                && $block->signature !== null
+                && $block->signature !== ''
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function appendHistory(
         int                       $taskId,
         string                    $role,
@@ -502,6 +524,16 @@ final class Orchestrator implements OrchestratorInterface
                 static fn(\Spora\Drivers\ValueObjects\ContentBlock $block): array => $block->toArray(),
                 $context->contentBlocks,
             );
+        }
+
+        // Persist display-only reasoning (e.g. `<think>…</think>` tags
+        // extracted by ThinkingTagExtractor for models that do not emit
+        // signed thinking blocks). Skip the write when a signed `thinking`
+        // content block is present, since the structured block is the
+        // source of truth and we don't want to duplicate the same string
+        // across the column and the JSON.
+        if ($context->displayReasoning !== null && !self::hasSignedThinkingBlock($context->contentBlocks)) {
+            $row['reasoning'] = $context->displayReasoning;
         }
 
         if ($context->attachments !== null) {

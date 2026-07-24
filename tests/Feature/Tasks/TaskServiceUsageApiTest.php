@@ -163,3 +163,56 @@ test('task detail resource strips redacted_thinking data payload', function (): 
     expect($result['history'][0]['content_blocks'][0])->not->toHaveKey('data');
     expect($result['history'][0]['content_blocks'][1]['text'])->toBe('reply');
 });
+
+test('buildHistoryMessage exposes the reasoning column for OpenAI-style tag-extracted reasoning', function (): void {
+    $auth = bootAuthLayer();
+    $userId = $auth->register('wire@example.com', 'Password1!', 'WireUser');
+    simulateLoggedInSession($userId, 'wire@example.com');
+
+    $agent = Agent::create([
+        'user_id' => $userId,
+        'name' => 'WireAgent',
+        'max_steps' => 5,
+        'is_active' => true,
+    ]);
+    $task = Task::create([
+        'user_id' => $userId,
+        'agent_id' => $agent->id,
+        'status' => 'COMPLETED',
+        'user_prompt' => 'hi',
+        'max_steps' => 5,
+    ]);
+
+    // The MiniMax-M3 model emits `<think>…</think>` tags inside its text.
+    // ThinkingTagExtractor surfaces those as LLMResponse::displayReasoning,
+    // and Orchestrator::appendHistory persists them into the `reasoning`
+    // column when no signed thinking block is present. The wire payload
+    // must expose that string so the frontend can render the per-message
+    // Reasoning foldout.
+    $row = TaskHistory::create([
+        'task_id' => $task->id,
+        'sequence' => 1,
+        'role' => 'assistant',
+        'content' => 'Hi! How can I help?',
+        'reasoning' => 'The user is just saying hello.',
+    ]);
+
+    $message = TaskService::buildHistoryMessage($row);
+
+    expect($message['reasoning'])->toBe('The user is just saying hello.');
+    expect($message['content'])->toBe('Hi! How can I help?');
+
+    // A row with no reasoning must still expose a `reasoning` key
+    // (typed as null) so the frontend's reasoningForEntry can fall
+    // through to content_blocks without an undefined-property crash.
+    $rowNoReasoning = TaskHistory::create([
+        'task_id' => $task->id,
+        'sequence' => 2,
+        'role' => 'assistant',
+        'content' => 'plain answer',
+    ]);
+    $messagePlain = TaskService::buildHistoryMessage($rowNoReasoning);
+
+    expect($messagePlain)->toHaveKey('reasoning');
+    expect($messagePlain['reasoning'])->toBeNull();
+});
