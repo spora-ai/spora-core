@@ -7,19 +7,20 @@ namespace Spora\Drivers\Utilities;
 use Spora\Drivers\ValueObjects\ContentBlock;
 
 /**
- * Extracts unsigned inline reasoning for display without making it replayable.
+ * Strips embedded `<think>…</think>` reasoning tags from the text before
+ * surfacing it as a `text` content block. The extracted reasoning itself is
+ * intentionally not surfaced — operators get reasoning only from providers
+ * that return signed `thinking` content blocks (Anthropic extended
+ * thinking). Unsigned inline reasoning is silently dropped on the floor.
  */
 final class TextBlockParser implements ContentBlockParser
 {
     public function parse(array $block): ParsedContentBlock
     {
-        $cleaned = ThinkingTagExtractor::extract((string) ($block['text'] ?? ''));
-
-        $text = $cleaned['textContent'];
+        $text = ThinkingTagExtractor::strip((string) ($block['text'] ?? ''));
 
         return new ParsedContentBlock(
             textContent: $text,
-            displayReasoning: $cleaned['displayReasoning'],
             contentBlock: $text !== '' ? ContentBlock::text($text) : null,
         );
     }

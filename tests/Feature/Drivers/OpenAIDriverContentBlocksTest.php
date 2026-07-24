@@ -77,13 +77,19 @@ test('null content on a tool_calls response is preserved', function (): void {
         'tool_calls' => [
             ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'noop', 'arguments' => '{}']],
         ],
-    ], ['contentBlocks' => [], 'displayReasoning' => null, 'textContent' => '']);
+    ], ['contentBlocks' => [], 'textContent' => '']);
     expect($response->content)->toBeNull();
     expect($response->toolCalls)->toHaveCount(1);
     expect($response->toolCalls[0])->toBeInstanceOf(ToolCall::class);
 });
 
-test('reasoning is propagated on tool_calls responses (Thinking-Tag regression)', function (): void {
+test('parsed contentBlocks and textContent flow through buildToolCallsResponse', function (): void {
+    // Regression for the previous "Thinking-Tag" path: the driver used to
+    // surface a `displayReasoning` string that callers carried alongside
+    // contentBlocks. The displayReasoning round-trip was removed; this
+    // test now asserts that the parsed `contentBlocks` and `textContent`
+    // (the only shapes buildToolCallsResponse reads) flow into the
+    // resulting LLMResponse unchanged.
     $driver = makeOpenAIRequestDriver('gpt-4o');
     $ref = new ReflectionMethod($driver, 'buildToolCallsResponse');
     $response = $ref->invoke($driver, [
@@ -94,8 +100,7 @@ test('reasoning is propagated on tool_calls responses (Thinking-Tag regression)'
         'tool_calls' => [
             ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'lookup', 'arguments' => '{}']],
         ],
-    ], ['contentBlocks' => [], 'displayReasoning' => 'Plan: query the knowledge base first.', 'textContent' => 'I should look this up.']);
-    expect($response->displayReasoning)->toBe('Plan: query the knowledge base first.');
+    ], ['contentBlocks' => [], 'textContent' => 'I should look this up.']);
     expect($response->content)->toBe('I should look this up.');
     expect($response->toolCalls)->toHaveCount(1);
     expect($response->contentBlocks)->toBe([]);

@@ -5,47 +5,33 @@ declare(strict_types=1);
 namespace Spora\Drivers\Utilities;
 
 /**
- * Extracts embedded `<think>…</think>` / `<thinking>…</thinking>` /
- * `<thought>…</thought>` reasoning tags from a free-form text string and
- * returns the cleaned text plus the collected reasoning.
+ * Strips embedded `<think>…</think>` / `<thinking>…</thinking>` /
+ * `<thought>…</thought>` reasoning tags from a free-form text string.
  *
- * Extracted into its own class so both the top-level string parser and
- * `TextBlockParser` can share the same regex-driven logic without
- * duplicating it.
+ * The extracted reasoning itself is no longer surfaced — operators get
+ * reasoning only from providers that return signed `thinking` content
+ * blocks (Anthropic extended thinking). Unsigned inline reasoning is
+ * silently dropped on the floor. See the
+ * `llm-cache-and-reasoning-roundtrip` plan for the full rationale.
  */
 final class ThinkingTagExtractor
 {
-    /**
-     * @return array{textContent: string, displayReasoning: string|null}
-     */
-    public static function extract(string $rawContent): array
+    public static function strip(string $rawContent): string
     {
-        $textContent = $rawContent;
+        $cleaned = $rawContent;
 
         foreach (self::patterns() as $pattern) {
-            if (!preg_match_all($pattern, $rawContent, $matches)) {
+            if (preg_match_all($pattern, $rawContent, $matches) === false) {
                 continue;
             }
-
-            $reasoning = implode("\n", array_map('trim', $matches[1]));
-            $trimmed   = trim($reasoning);
-
-            // Strip <text>...</text> wrappers and replace with space
-            $textContent = preg_replace_callback('/<\/?text[^>]*>/is', static fn(): string => ' ', $textContent);
-            $textContent = preg_replace($pattern, '', $textContent);
-            // Collapse horizontal whitespace only (preserve newlines)
-            $textContent = trim(preg_replace('/[ \t]+/', ' ', $textContent));
-
-            return [
-                'textContent'      => $textContent,
-                'displayReasoning' => $trimmed !== '' ? $trimmed : null,
-            ];
+            $cleaned = preg_replace($pattern, '', $cleaned) ?? $cleaned;
         }
 
-        return [
-            'textContent'      => $textContent,
-            'displayReasoning' => null,
-        ];
+        // Collapse horizontal whitespace only (preserve newlines) so the
+        // cleaned text is readable when the tags wrap multi-line blocks.
+        $cleaned = preg_replace('/[ \t]+/', ' ', $cleaned) ?? $cleaned;
+
+        return trim($cleaned);
     }
 
     /**

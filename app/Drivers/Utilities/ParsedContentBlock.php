@@ -13,7 +13,6 @@ final readonly class ParsedContentBlock
 {
     public function __construct(
         public string $textContent = '',
-        public ?string $displayReasoning = null,
         public ?ContentBlock $contentBlock = null,
     ) {}
 }

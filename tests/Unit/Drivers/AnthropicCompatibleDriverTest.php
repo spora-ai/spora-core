@@ -527,7 +527,6 @@ test('complete extracts reasoning from thinking content blocks', function (): vo
     $response = $driver->complete(makeAnthropicRequest());
 
     expect($response->content)->toBe('The answer is 42.')
-        ->and($response->displayReasoning)->toBe('I should consider X and Y.')
         ->and($response->toolCalls)->toBeEmpty();
     expect($response->contentBlocks)->toHaveCount(2);
     expect($response->contentBlocks[0])->toBeInstanceOf(Spora\Drivers\ValueObjects\ContentBlock::class);

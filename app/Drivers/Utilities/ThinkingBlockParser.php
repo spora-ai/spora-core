@@ -16,7 +16,6 @@ final class ThinkingBlockParser implements ContentBlockParser
         $thinking = (string) ($block['thinking'] ?? '');
 
         return new ParsedContentBlock(
-            displayReasoning: $thinking,
             contentBlock: ContentBlock::thinking(
                 $thinking,
                 (string) ($block['signature'] ?? ''),

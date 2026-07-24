@@ -181,7 +181,7 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 
     /**
      * @param array<string, mixed> $data
-     * @param array{contentBlocks: list<ContentBlock>, displayReasoning: string|null, textContent: string} $parsedContent
+     * @param array{contentBlocks: list<ContentBlock>, textContent: string} $parsedContent
      */
     private function buildTextResponse(array $data, array $parsedContent, Usage $usage): LLMResponse
     {
@@ -193,14 +193,13 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
             completionId: (string) ($data['id'] ?? ''),
             contentBlocks: $parsedContent['contentBlocks'],
             usage: $usage,
-            displayReasoning: $parsedContent['displayReasoning'],
         );
     }
 
     /**
      * @param array<string, mixed> $data
      * @param array<string, mixed> $message
-     * @param array{contentBlocks: list<ContentBlock>, displayReasoning: string|null, textContent: string} $parsedContent
+     * @param array{contentBlocks: list<ContentBlock>, textContent: string} $parsedContent
      */
     private function buildToolCallsResponse(array $data, array $message, array $parsedContent): LLMResponse
     {
@@ -222,7 +221,6 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
             completionId: (string) ($data['id'] ?? ''),
             contentBlocks: $parsedContent['contentBlocks'],
             usage: $usage,
-            displayReasoning: $parsedContent['displayReasoning'],
         );
     }
 

@@ -503,11 +503,15 @@ final class TaskService implements TaskServiceInterface
      * Build the wire payload for a single history row, including the
      * sanitised content blocks and (when present) a sanitised usage subobject.
      *
+     * Reasoning is reachable only via `content_blocks[].type === "thinking"`.
+     * The legacy flat `reasoning` column was dropped from `task_history` in
+     * favour of structured content blocks; clients that need reasoning must
+     * filter the blocks list.
+     *
      * @return array{
      *     sequence: int,
      *     role: string,
      *     content: string|null,
-     *     reasoning: string|null,
      *     content_blocks: list<array<string, mixed>>,
      *     tool_call_id: string|null,
      *     tool_name: string|null,
@@ -521,12 +525,6 @@ final class TaskService implements TaskServiceInterface
             'sequence' => $history->sequence,
             'role' => $history->role,
             'content' => $history->content,
-            // Display-only reasoning for legacy rows. The structured source
-            // of truth is `content_blocks[].thinking.text`; this column is
-            // a flat mirror of displayReasoning that survives even when
-            // the model emits unsigned `<think>…</think>` tags rather than
-            // a signed thinking block (OpenAI-compatible drivers, etc.).
-            'reasoning' => $history->reasoning,
             'content_blocks' => self::sanitizeContentBlocksForApi($blocks),
             'tool_call_id' => $history->tool_call_id,
             'tool_name' => $history->tool_name,

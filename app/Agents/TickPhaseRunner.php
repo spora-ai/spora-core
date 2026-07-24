@@ -187,7 +187,6 @@ final class TickPhaseRunner
                 outputTokens: $response->usage->outputTokens,
                 contentBlocks: $response->contentBlocks,
                 usage: $response->usage,
-                displayReasoning: $response->displayReasoning,
             ),
         );
     }
@@ -203,7 +202,6 @@ final class TickPhaseRunner
                 outputTokens: $response->usage->outputTokens,
                 contentBlocks: $response->contentBlocks,
                 usage: $response->usage,
-                displayReasoning: $response->displayReasoning,
             ),
         );
 

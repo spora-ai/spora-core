@@ -11,7 +11,6 @@ use ReflectionMethod;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\TickPhaseRunner;
-use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\ValueObjects\ContentBlock;
@@ -26,6 +25,10 @@ use Symfony\Component\HttpClient\MockHttpClient;
  * Verifies that the LLM response (contentBlocks + Usage) flows from the
  * driver through TickPhaseRunner into the task_history.content_blocks
  * column and the usage table via the real Orchestrator transaction.
+ *
+ * Reasoning lives only inside the structured `content_blocks[]` of
+ * `type === "thinking"` — the legacy `displayReasoning`/`reasoning`
+ * round-trip was removed when the tag-extractor path was dropped.
  */
 test('TickPhaseRunner persists contentBlocks and Usage into the DB', function (): void {
     $auth = bootAuthLayer();
@@ -64,7 +67,6 @@ test('TickPhaseRunner persists contentBlocks and Usage into the DB', function ()
         completionId: 'cmp_1',
         contentBlocks: $blocks,
         usage: $usage,
-        displayReasoning: 'plan',
     );
 
     $driver = new AnthropicCompatibleDriver(
@@ -108,102 +110,7 @@ test('TickPhaseRunner persists contentBlocks and Usage into the DB', function ()
     expect($persistedUsage->provider)->toBe('openai');
 });
 
-
-test('Orchestrator::appendHistory persists displayReasoning into the reasoning column', function (): void {
-    $auth = bootAuthLayer();
-    $userId = $auth->register('reasoning@example.com', 'Password1!', 'ReasoningUser');
-    simulateLoggedInSession($userId, 'reasoning@example.com');
-
-    $agent = Agent::create([
-        'user_id' => $userId,
-        'name' => 'ReasoningAgent',
-        'max_steps' => 5,
-        'is_active' => true,
-    ]);
-    $task = Task::create([
-        'user_id' => $userId,
-        'agent_id' => $agent->id,
-        'status' => 'RUNNING',
-        'user_prompt' => 'hi',
-        'max_steps' => 5,
-    ]);
-
-    $driverFactory = Mockery::mock(DriverFactory::class);
-    $orchestrator = new Orchestrator(
-        $driverFactory,
-        new OrchestratorConfig(logger: new NullLogger()),
-    );
-
-    // The MiniMax-M3 model wraps reasoning in `<think>…</think>` tags
-    // inside the assistant text. ThinkingTagExtractor surfaces that as
-    // LLMResponse::displayReasoning, which the orchestrator must persist
-    // so the admin UI can render the per-message Reasoning foldout.
-    $orchestrator->appendHistory(
-        taskId: $task->id,
-        role: 'assistant',
-        content: 'Hi! How can I help?',
-        context: new HistoryMessageContext(
-            displayReasoning: 'The user is just saying hello.',
-        ),
-    );
-
-    $row = TaskHistory::where('task_id', $task->id)->orderByDesc('sequence')->first();
-    expect($row)->not->toBeNull();
-    expect($row->reasoning)->toBe('The user is just saying hello.');
-    expect($row->content)->toBe('Hi! How can I help?');
-    expect($row->content_blocks)->toBeNull();
-});
-
-test('Orchestrator::appendHistory does NOT duplicate displayReasoning when a signed thinking block is present', function (): void {
-    $auth = bootAuthLayer();
-    $userId = $auth->register('signed@example.com', 'Password1!', 'SignedUser');
-    simulateLoggedInSession($userId, 'signed@example.com');
-
-    $agent = Agent::create([
-        'user_id' => $userId,
-        'name' => 'SignedAgent',
-        'max_steps' => 5,
-        'is_active' => true,
-    ]);
-    $task = Task::create([
-        'user_id' => $userId,
-        'agent_id' => $agent->id,
-        'status' => 'RUNNING',
-        'user_prompt' => 'hi',
-        'max_steps' => 5,
-    ]);
-
-    $driverFactory = Mockery::mock(DriverFactory::class);
-    $orchestrator = new Orchestrator(
-        $driverFactory,
-        new OrchestratorConfig(logger: new NullLogger()),
-    );
-
-    // Anthropic extended thinking provides a signed `thinking` content
-    // block. The structured block is the source of truth — duplicating the
-    // text into the legacy `reasoning` column would risk drift and bloat
-    // the row.
-    $orchestrator->appendHistory(
-        taskId: $task->id,
-        role: 'assistant',
-        content: 'The answer is 42.',
-        context: new HistoryMessageContext(
-            contentBlocks: [
-                ContentBlock::thinking('plan', 'sig-xyz'),
-                ContentBlock::text('The answer is 42.'),
-            ],
-            displayReasoning: 'plan',
-        ),
-    );
-
-    $row = TaskHistory::where('task_id', $task->id)->orderByDesc('sequence')->first();
-    expect($row)->not->toBeNull();
-    expect($row->reasoning)->toBeNull();
-    expect($row->content_blocks)->toHaveCount(2);
-    expect($row->content_blocks[0])->toMatchArray(['type' => 'thinking', 'text' => 'plan', 'signature' => 'sig-xyz']);
-});
-
-test('Orchestrator::appendHistory skips the reasoning write when displayReasoning is null', function (): void {
+test('Orchestrator::appendHistory persists a plain assistant message without a reasoning column', function (): void {
     $auth = bootAuthLayer();
     $userId = $auth->register('nores@example.com', 'Password1!', 'NoResUser');
     simulateLoggedInSession($userId, 'nores@example.com');
@@ -228,6 +135,10 @@ test('Orchestrator::appendHistory skips the reasoning write when displayReasonin
         new OrchestratorConfig(logger: new NullLogger()),
     );
 
+    // The legacy `reasoning` column was dropped from `task_history` —
+    // appendHistory persists only `content` and any structured
+    // `content_blocks[]` provided by the caller. No `reasoning` key
+    // exists on either the model or the wire payload.
     $orchestrator->appendHistory(
         taskId: $task->id,
         role: 'assistant',
@@ -236,6 +147,6 @@ test('Orchestrator::appendHistory skips the reasoning write when displayReasonin
 
     $row = TaskHistory::where('task_id', $task->id)->orderByDesc('sequence')->first();
     expect($row)->not->toBeNull();
-    expect($row->reasoning)->toBeNull();
     expect($row->content)->toBe('Just a plain answer.');
+    expect($row->content_blocks)->toBeNull();
 });

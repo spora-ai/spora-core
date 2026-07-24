@@ -14,7 +14,6 @@ use Illuminate\Support\Carbon;
  * @property int         $sequence
  * @property string      $role
  * @property string|null $content
- * @property string|null $reasoning
  * @property string|null $tool_call_id
  * @property string|null $tool_name
  * @property string|null $tool_call_payload
@@ -39,7 +38,6 @@ final class TaskHistory extends Model
         'sequence',
         'role',
         'content',
-        'reasoning',
         'tool_call_id',
         'tool_name',
         'tool_call_payload',

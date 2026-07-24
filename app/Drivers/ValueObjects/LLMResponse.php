@@ -7,26 +7,27 @@ namespace Spora\Drivers\ValueObjects;
 /**
  * Normalized result of one provider completion.
  *
- * Reasoning moved from a flat string to signed `contentBlocks`; filter by
- * {@see ContentBlock::TYPE_THINKING} when Anthropic chain continuity matters.
+ * Reasoning is reachable only via signed `contentBlocks[]` of
+ * `type === ContentBlock::TYPE_THINKING` — those carry the provider's
+ * `signature` byte-identical and are replayed on the next turn. Unsigned
+ * inline `<think>…</think>` tags from the model's text are stripped by
+ * {@see \Spora\Drivers\Utilities\TextBlockParser} and intentionally
+ * not surfaced.
  */
 final readonly class LLMResponse
 {
     public Usage $usage;
 
     /**
-     * @param ?string                  $content           Non-null display text (assistant's plain message).
-     * @param list<ToolCall>           $toolCalls         Parallel tool calls requested in this turn.
-     * @param int                      $inputTokens       Legacy counter; prefer `$usage->inputTokens`.
-     * @param int                      $outputTokens      Legacy counter; prefer `$usage->outputTokens`.
-     * @param string                   $completionId      Provider-side completion identifier.
-     * @param list<ContentBlock>       $contentBlocks     Ordered provider content retained for replay.
-     * @param Usage|null               $usage             Authoritative per-message usage. When supplied,
-     *                                                  its counters supersede the legacy `$inputTokens` /
-     *                                                  `$outputTokens` fields.
-     * @param string|null              $displayReasoning  Human-readable reasoning text. Display-only —
-     *                                                  not signed by the provider and never replayed
-     *                                                  into a `thinking` block on the next turn.
+     * @param ?string             $content        Non-null display text (assistant's plain message).
+     * @param list<ToolCall>      $toolCalls      Parallel tool calls requested in this turn.
+     * @param int                 $inputTokens    Legacy counter; prefer `$usage->inputTokens`.
+     * @param int                 $outputTokens   Legacy counter; prefer `$usage->outputTokens`.
+     * @param string              $completionId   Provider-side completion identifier.
+     * @param list<ContentBlock>  $contentBlocks  Ordered provider content retained for replay.
+     * @param Usage|null          $usage          Authoritative per-message usage. When supplied,
+     *                                           its counters supersede the legacy `$inputTokens` /
+     *                                           `$outputTokens` fields.
      */
     public function __construct(
         public ?string $content,
@@ -36,7 +37,6 @@ final readonly class LLMResponse
         public string $completionId,
         public array $contentBlocks = [],
         ?Usage $usage = null,
-        public ?string $displayReasoning = null,
     ) {
         $this->usage = $usage ?? new Usage();
     }

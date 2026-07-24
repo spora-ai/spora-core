@@ -14,7 +14,6 @@ final class RedactedThinkingBlockParser implements ContentBlockParser
     public function parse(array $block): ParsedContentBlock
     {
         return new ParsedContentBlock(
-            displayReasoning: '[Redacted Thinking]',
             contentBlock: ContentBlock::redactedThinking((string) ($block['data'] ?? '')),
         );
     }

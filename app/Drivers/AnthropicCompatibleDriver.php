@@ -203,7 +203,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
     }
 
     /**
-     * @param array{contentBlocks: list<ContentBlock>, displayReasoning: string|null, textContent: string} $parsed
+     * @param array{contentBlocks: list<ContentBlock>, textContent: string} $parsed
      * @param list<array<string, mixed>> $rawBlocks
      */
     private function buildResponseFromParsed(array $parsed, Usage $usage, string $completionId, string $stopReason, array $rawBlocks): LLMResponse
@@ -220,7 +220,6 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
             completionId: $completionId,
             contentBlocks: $parsed['contentBlocks'],
             usage: $usage,
-            displayReasoning: $parsed['displayReasoning'],
         );
     }
 

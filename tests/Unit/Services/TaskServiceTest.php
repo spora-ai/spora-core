@@ -489,7 +489,6 @@ describe('TaskService — getTaskWithHistory', function (): void {
             'sequence'   => 2,
             'role'       => 'assistant',
             'content'    => 'response',
-            'reasoning'  => 'thinking',
         ]);
 
         $service = makeTaskService();
@@ -499,15 +498,15 @@ describe('TaskService — getTaskWithHistory', function (): void {
         expect($result['history'])->toBeArray();
         expect($result['history'])->toHaveCount(2);
         expect($result['history'][0]['sequence'])->toBe(1);
-        // The `reasoning` column is the display-only mirror for OpenAI-style
-        // tag-extracted reasoning (`<think>…</think>` from the MiniMax-M3
-        // model). It survives in the wire payload alongside `content_blocks`
-        // so the admin UI can render the per-message Reasoning foldout.
-        // `content_blocks` is empty here because the fixture pre-dates the
-        // structured-block persistence path; `usage` is omitted because no
-        // usage row was persisted alongside this history row.
-        expect($result['history'][1])->toHaveKey('reasoning');
-        expect($result['history'][1]['reasoning'])->toBe('thinking');
+        // The legacy `reasoning` column was dropped from `task_history` when
+        // the `displayReasoning` round-trip was removed — reasoning is now
+        // reachable only through the structured `content_blocks[]` of
+        // `type === "thinking"`. The wire payload must therefore expose no
+        // `reasoning` key at all. `content_blocks` is empty here because
+        // this fixture pre-dates the structured-block persistence path;
+        // `usage` is omitted because no usage row was persisted alongside
+        // this history row.
+        expect($result['history'][1])->not->toHaveKey('reasoning');
         expect($result['history'][1])->toHaveKey('content_blocks');
         expect($result['history'][1]['content_blocks'])->toBe([]);
     });
