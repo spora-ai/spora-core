@@ -367,38 +367,42 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
     private function contentBlockToAnthropic(array $block): ?array
     {
         $type = $block['type'] ?? null;
-        if ($type === ContentBlock::TYPE_TEXT) {
-            return ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
-        }
-        if ($type === ContentBlock::TYPE_IMAGE) {
-            return $this->imageBlockToAnthropic($block);
-        }
-        if ($type === ContentBlock::TYPE_THINKING) {
-            return [
+        $result = match ($type) {
+            ContentBlock::TYPE_TEXT => ['type' => 'text', 'text' => (string) ($block['text'] ?? '')],
+            ContentBlock::TYPE_IMAGE => $this->imageBlockToAnthropic($block),
+            ContentBlock::TYPE_THINKING => [
                 'type' => 'thinking',
                 'thinking' => (string) ($block['text'] ?? ''),
                 'signature' => (string) ($block['signature'] ?? ''),
-            ];
-        }
-        if ($type === ContentBlock::TYPE_REDACTED_THINKING) {
-            return ['type' => 'redacted_thinking', 'data' => (string) ($block['data'] ?? '')];
-        }
-        if ($type === ContentBlock::TYPE_TOOL_USE) {
-            $input = $block['toolInput'] ?? $block['tool_input'] ?? [];
-            $input = is_array($input) ? $input : [];
-            if (array_is_list($input)) {
-                $input = (object) $input;
-            }
+            ],
+            ContentBlock::TYPE_REDACTED_THINKING => [
+                'type' => 'redacted_thinking',
+                'data' => (string) ($block['data'] ?? ''),
+            ],
+            ContentBlock::TYPE_TOOL_USE => $this->toolUseBlockToAnthropic($block),
+            default => null,
+        };
+        return $result;
+    }
 
-            return [
-                'type' => 'tool_use',
-                'id' => (string) ($block['toolUseId'] ?? $block['tool_use_id'] ?? ''),
-                'name' => (string) ($block['toolName'] ?? $block['tool_name'] ?? ''),
-                'input' => $input,
-            ];
+    /**
+     * @param array<string, mixed> $block
+     * @return array<string, mixed>
+     */
+    private function toolUseBlockToAnthropic(array $block): array
+    {
+        $input = $block['toolInput'] ?? $block['tool_input'] ?? [];
+        $input = is_array($input) ? $input : [];
+        if (array_is_list($input)) {
+            $input = (object) $input;
         }
 
-        return null;
+        return [
+            'type' => 'tool_use',
+            'id' => (string) ($block['toolUseId'] ?? $block['tool_use_id'] ?? ''),
+            'name' => (string) ($block['toolName'] ?? $block['tool_name'] ?? ''),
+            'input' => $input,
+        ];
     }
 
     /**

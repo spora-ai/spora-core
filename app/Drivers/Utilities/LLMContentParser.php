@@ -67,33 +67,50 @@ final class LLMContentParser
             if (!is_array($block)) {
                 continue;
             }
-
-            $type = (string) ($block['type'] ?? '');
-            if ($type === ContentBlock::TYPE_TOOL_USE) {
-                $contentBlocks[] = ContentBlock::toolUse(
-                    (string) ($block['id'] ?? ''),
-                    (string) ($block['name'] ?? ''),
-                    is_array($block['input'] ?? null) ? $block['input'] : [],
-                );
-                continue;
-            }
-
-            $parser = $registry->for($type);
-            if ($parser === null) {
-                continue;
-            }
-
-            $parsed = $parser->parse($block);
-            $textContent .= $parsed->textContent;
-            if ($parsed->contentBlock !== null) {
-                $contentBlocks[] = $parsed->contentBlock;
-            }
+            self::appendStructuredBlock($block, $registry, $contentBlocks, $textContent);
         }
 
         return [
             'contentBlocks' => $contentBlocks,
             'textContent' => $textContent,
         ];
+    }
+
+    /**
+     * Append a single provider block to the accumulator. `tool_use` blocks
+     * are reconstructed from the raw array directly; every other type is
+     * routed through the {@see ContentBlockParserRegistry}.
+     *
+     * @param array<string, mixed> $block
+     * @param list<ContentBlock> $contentBlocks
+     */
+    private static function appendStructuredBlock(
+        array $block,
+        ContentBlockParserRegistry $registry,
+        array &$contentBlocks,
+        string &$textContent,
+    ): void {
+        $type = (string) ($block['type'] ?? '');
+        if ($type === ContentBlock::TYPE_TOOL_USE) {
+            $input = is_array($block['input'] ?? null) ? $block['input'] : [];
+            $contentBlocks[] = ContentBlock::toolUse(
+                (string) ($block['id'] ?? ''),
+                (string) ($block['name'] ?? ''),
+                $input,
+            );
+            return;
+        }
+
+        $parser = $registry->for($type);
+        if ($parser === null) {
+            return;
+        }
+
+        $parsed = $parser->parse($block);
+        $textContent .= $parsed->textContent;
+        if ($parsed->contentBlock !== null) {
+            $contentBlocks[] = $parsed->contentBlock;
+        }
     }
 
     /**

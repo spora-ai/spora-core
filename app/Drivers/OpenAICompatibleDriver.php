@@ -287,20 +287,13 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     private static function contentBlockToPart(array $block): ?array
     {
         $type = $block['type'] ?? null;
-        if ($type === ContentBlock::TYPE_TEXT) {
-            return ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
-        }
-        if ($type === ContentBlock::TYPE_IMAGE) {
-            return self::imageBlockToPart($block);
-        }
-        if ($type === ContentBlock::TYPE_THINKING) {
-            return ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
-        }
-        if ($type === ContentBlock::TYPE_REDACTED_THINKING) {
-            return ['type' => 'text', 'text' => '[Redacted Thinking]'];
-        }
-
-        return null;
+        return match ($type) {
+            ContentBlock::TYPE_TEXT,
+            ContentBlock::TYPE_THINKING => ['type' => 'text', 'text' => (string) ($block['text'] ?? '')],
+            ContentBlock::TYPE_REDACTED_THINKING => ['type' => 'text', 'text' => '[Redacted Thinking]'],
+            ContentBlock::TYPE_IMAGE => self::imageBlockToPart($block),
+            default => null,
+        };
     }
 
     /**
