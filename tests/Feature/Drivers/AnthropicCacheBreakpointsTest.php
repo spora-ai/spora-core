@@ -99,3 +99,35 @@ test('Anthropic driver omits cache_control when enablePromptCaching is false', f
     expect($captured['system'])->toBe('You are helpful.');
     expect($captured['tools'][0])->not->toHaveKey('cache_control');
 });
+
+test('Anthropic driver skips the system cache_control breakpoint when the system prompt is empty', function (): void {
+    $captured = null;
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$captured): MockResponse {
+        $captured = json_decode($options['body'], true);
+
+        return new MockResponse(json_encode([
+            'id' => 'msg_empty_system',
+            'stop_reason' => 'end_turn',
+            'content' => [['type' => 'text', 'text' => 'ok']],
+            'usage' => ['input_tokens' => 1, 'output_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: $client,
+    );
+
+    $driver->complete(new \Spora\Drivers\ValueObjects\LLMRequest(
+        systemPrompt: '',
+        messages: [['role' => 'user', 'content' => 'hello']],
+        tools: [],
+    ));
+
+    // Empty system prompt must stay a plain string and never carry cache_control:
+    // a breakpoint on an empty block wastes Anthropic's cache capacity.
+    expect($captured['system'])->toBe('');
+    expect($captured['system'])->not->toHaveKey('cache_control');
+});

@@ -105,8 +105,11 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
      */
     private function buildAnthropicRequestBody(LLMRequest $request, array $tools, array $messages): array
     {
+        // Skip the cache breakpoint on an empty system prompt — the
+        // breakpoint would be wasted on a one-byte auto-wrap and the
+        // operator has nothing to cache.
         $system = $request->systemPrompt;
-        if ($this->enablePromptCaching) {
+        if ($this->enablePromptCaching && $request->systemPrompt !== '') {
             $system = [[
                 'type' => 'text',
                 'text' => $request->systemPrompt,
@@ -187,35 +190,43 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
         $data = $response->toArray();
         $this->logger?->debug('LLM Response (Anthropic)', ['status' => $statusCode, 'data' => $data]);
 
-        $completionId = (string) ($data['id'] ?? '');
-        $stopReason = (string) ($data['stop_reason'] ?? '');
-        $rawBlocks = is_array($data['content'] ?? null) ? $data['content'] : [];
-        $parsedContent = LLMContentParser::parse($rawBlocks);
+        $parsedContent = LLMContentParser::parse(is_array($data['content'] ?? null) ? $data['content'] : []);
         $usage = $this->buildUsage(is_array($data['usage'] ?? null) ? $data['usage'] : null);
 
-        if ($stopReason !== 'tool_use') {
-            return new LLMResponse(
-                content: $parsedContent['textContent'],
-                toolCalls: [],
-                inputTokens: $usage->inputTokens,
-                outputTokens: $usage->outputTokens,
-                completionId: $completionId,
-                contentBlocks: $parsedContent['contentBlocks'],
-                usage: $usage,
-                displayReasoning: $parsedContent['displayReasoning'],
-            );
-        }
+        return $this->buildResponseFromParsed(
+            parsed: $parsedContent,
+            usage: $usage,
+            completionId: (string) ($data['id'] ?? ''),
+            stopReason: (string) ($data['stop_reason'] ?? ''),
+            rawBlocks: is_array($data['content'] ?? null) ? $data['content'] : [],
+        );
+    }
+
+    /**
+     * @param array{contentBlocks: list<ContentBlock>, displayReasoning: string|null, textContent: string} $parsed
+     * @param list<array<string, mixed>> $rawBlocks
+     */
+    private function buildResponseFromParsed(array $parsed, Usage $usage, string $completionId, string $stopReason, array $rawBlocks): LLMResponse
+    {
+        $isToolUse = $stopReason === 'tool_use';
+        $textContent = $isToolUse ? self::nullableText($parsed['textContent']) : $parsed['textContent'];
+        $toolCalls = $isToolUse ? $this->extractToolCalls($rawBlocks) : [];
 
         return new LLMResponse(
-            content: $parsedContent['textContent'] !== '' ? $parsedContent['textContent'] : null,
-            toolCalls: $this->extractToolCalls($rawBlocks),
+            content: $textContent,
+            toolCalls: $toolCalls,
             inputTokens: $usage->inputTokens,
             outputTokens: $usage->outputTokens,
             completionId: $completionId,
-            contentBlocks: $parsedContent['contentBlocks'],
+            contentBlocks: $parsed['contentBlocks'],
             usage: $usage,
-            displayReasoning: $parsedContent['displayReasoning'],
+            displayReasoning: $parsed['displayReasoning'],
         );
+    }
+
+    private static function nullableText(string $text): ?string
+    {
+        return $text !== '' ? $text : null;
     }
 
     /**
@@ -440,22 +451,26 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
     }
 
     /**
+     * Join an assistant message's `tool_calls` with any existing tool_use
+     * blocks already in its `content_blocks` array. The dedup-by-`tool_use.id`
+     * contract matters because the same tool call can appear in both fields
+     * after a history round-trip; emitting it twice would 400 the provider.
+     *
      * @param list<array<string, mixed>> $toolCalls
      * @return array{role: string, content: list<array<string, mixed>>}
      */
     private function buildAssistantToolUseMessage(array $toolCalls, mixed $content): array
     {
         $normalized = $this->normalizeMessageContent($content);
-        $contentBlocks = is_array($normalized)
-            ? $normalized
-            : ($normalized === '' ? [] : [['type' => 'text', 'text' => $normalized]]);
+        $contentBlocks = [];
 
-        $existingIds = [];
-        foreach ($contentBlocks as $block) {
-            if (($block['type'] ?? null) === 'tool_use') {
-                $existingIds[] = (string) ($block['id'] ?? '');
-            }
+        if (is_array($normalized)) {
+            $contentBlocks = $normalized;
+        } elseif ($normalized !== '') {
+            $contentBlocks = [['type' => 'text', 'text' => $normalized]];
         }
+
+        $existingIds = $this->collectExistingToolUseIds($contentBlocks);
 
         foreach ($toolCalls as $toolCall) {
             $id = (string) ($toolCall['id'] ?? '');
@@ -465,6 +480,22 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
         }
 
         return ['role' => 'assistant', 'content' => $contentBlocks];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $contentBlocks
+     * @return list<string>
+     */
+    private function collectExistingToolUseIds(array $contentBlocks): array
+    {
+        $existingIds = [];
+        foreach ($contentBlocks as $block) {
+            if (($block['type'] ?? null) === 'tool_use') {
+                $existingIds[] = (string) ($block['id'] ?? '');
+            }
+        }
+
+        return $existingIds;
     }
 
     /**

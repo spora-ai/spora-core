@@ -56,24 +56,15 @@ final readonly class HistoryMessageContext
      * and therefore cannot be replayed as an Anthropic thinking block.
      *
      * @param array<string, mixed> $data
+     * @param LoggerInterface|null $logger Optional logger for warnings emitted when a
+     *                                     stored row references an unknown `content_blocks.type`;
+     *                                     falls back to `error_log()` when null.
      */
     public static function fromArray(array $data, ?LoggerInterface $logger = null): self
     {
         $contentBlocks = self::decodeContentBlocks($data['content_blocks'] ?? [], $logger);
-        $legacyReasoning = self::nullableString($data['reasoning'] ?? null);
-        $displayReasoning = self::nullableString($data['display_reasoning'] ?? null);
-
-        if ($contentBlocks !== [] && $legacyReasoning !== null) {
-            self::warn($logger, 'Legacy reasoning ignored because structured content blocks are present.');
-            $displayReasoning = null;
-        } elseif ($contentBlocks === [] && $displayReasoning === null) {
-            $displayReasoning = $legacyReasoning;
-        }
-
-        $usageData = $data['usage'] ?? null;
-        $usage = $usageData instanceof Usage
-            ? $usageData
-            : (is_array($usageData) ? Usage::fromArray($usageData) : new Usage());
+        $displayReasoning = self::resolveDisplayReasoning($data, $contentBlocks, $logger);
+        $usage = self::resolveUsage($data['usage'] ?? null);
 
         return new self(
             toolCallId: self::nullableString($data['tool_call_id'] ?? $data['toolCallId'] ?? null),
@@ -86,6 +77,48 @@ final readonly class HistoryMessageContext
             displayReasoning: $displayReasoning,
             attachments: is_array($data['attachments'] ?? null) ? $data['attachments'] : null,
         );
+    }
+
+    /**
+     * Decide the display-only reasoning text. Structured `content_blocks`
+     * always win over the legacy flat `reasoning` column because the
+     * structured path is the only source that can be replayed as a signed
+     * `thinking` block on the next outbound turn.
+     *
+     * @param array<string, mixed> $data
+     * @param list<ContentBlock> $contentBlocks
+     */
+    private static function resolveDisplayReasoning(array $data, array $contentBlocks, ?LoggerInterface $logger): ?string
+    {
+        $legacyReasoning = self::nullableString($data['reasoning'] ?? null);
+        $displayReasoning = self::nullableString($data['display_reasoning'] ?? null);
+
+        if ($contentBlocks !== [] && $legacyReasoning !== null) {
+            self::warn($logger, 'Legacy reasoning ignored because structured content blocks are present.');
+            return null;
+        }
+
+        if ($contentBlocks === [] && $displayReasoning === null) {
+            return $legacyReasoning;
+        }
+
+        return $displayReasoning;
+    }
+
+    /**
+     * @param mixed $usageData
+     */
+    private static function resolveUsage(mixed $usageData): Usage
+    {
+        if ($usageData instanceof Usage) {
+            return $usageData;
+        }
+
+        if (is_array($usageData)) {
+            return Usage::fromArray($usageData);
+        }
+
+        return new Usage();
     }
 
     /**

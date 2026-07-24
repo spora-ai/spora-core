@@ -391,6 +391,7 @@ final class TaskService implements TaskServiceInterface
      *     retry_after?: string,
      *     tool_calls: list<array{
      *         id: int,
+     *         provider_call_id: string|null,
      *         tool_name: string,
      *         tool_type: string,
      *         status: string,
@@ -434,7 +435,13 @@ final class TaskService implements TaskServiceInterface
 
         return $resource;
     }
+
     /**
+     * Build the per-row history payload and the parallel `usages` array that
+     * drives {@see self::aggregateUsage()}. Performs a single
+     * `WHERE task_history_id IN (…)` query rather than N+1 lookups.
+     *
+     * @param iterable<TaskHistory> $historyRows
      * @return array{history: list<array<string, mixed>>, usages: list<array<string, mixed>>}
      */
     public static function buildHistoryPayload(iterable $historyRows): array
@@ -493,6 +500,9 @@ final class TaskService implements TaskServiceInterface
     }
 
     /**
+     * Build the wire payload for a single history row, including the
+     * sanitised content blocks and (when present) a sanitised usage subobject.
+     *
      * @return array<string, mixed>
      */
     public static function buildHistoryMessage(TaskHistory $history, ?Usage $usage = null): array
@@ -535,6 +545,15 @@ final class TaskService implements TaskServiceInterface
         return $sanitized;
     }
 
+    /**
+     * Security boundary for the per-message usage payload sent to the admin
+     * UI. Strips `raw_usage` (the verbatim provider subobject, kept only
+     * for on-disk forensics) and `driver_meta_info` (catch-all bag that may
+     * carry provider-defined fields the operator has no business seeing).
+     *
+     * The remaining fields are the six typed counters plus the `provider`
+     * tag.
+     */
     public static function sanitizeUsageForApi(Usage $usage): array
     {
         $raw = $usage->toArray();

@@ -80,7 +80,7 @@ class StubTaskService implements TaskServiceInterface
             'updated_at' => null,
             'tool_calls' => [],
             'history' => [],
-            'totals' => null,
+            'totals' => [],
         ];
     }
 

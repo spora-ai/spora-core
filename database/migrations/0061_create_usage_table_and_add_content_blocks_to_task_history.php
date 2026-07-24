@@ -12,7 +12,7 @@ use Illuminate\Database\Schema\Blueprint;
  * Two pieces:
  *
  *  - New `usage` table — one row per assistant turn, foreign-keyed to
- *    `task_history.id`. Carries the seven typed token counters plus
+ *    `task_history.id`. Carries the six typed token counters plus
  *    `provider`, `raw_usage` (the verbatim provider usage subobject), and
  *    `driver_meta_info` (forward-compat bag for non-normalized fields).
  *    Created as a separate table (not a column on `task_history`) so the

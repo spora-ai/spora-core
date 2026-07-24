@@ -16,7 +16,10 @@ use Spora\Models\TaskHistory;
  *      summary row itself.
  *   2. {@see messageFromHistoryRow()} — maps a single row into the LLM wire
  *      shape (`tool`, `assistant+tool_calls`, plain role+content, and
- *      `attachment` rows that are folded into the next `user` row).
+ *      `attachment` rows that are folded into the next `user` row). Assistant
+ *      rows with stored `content_blocks` (Anthropic thinking, redacted
+ *      thinking, images) are rendered through the block list so the provider
+ *      sees the original signed payload on the next outbound turn.
  *      Rows with `role=attachment` are NEVER sent to the provider as such:
  *      OpenAI/Anthropic both reject the role, so the builder routes every
  *      attachment row through {@see attachmentMessage()} which produces a

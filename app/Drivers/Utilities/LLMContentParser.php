@@ -27,7 +27,14 @@ final class LLMContentParser
             return self::emptyResult();
         }
 
-        return self::parseBlocks($rawContent);
+        $structured = self::parseStructuredBlocks($rawContent);
+        $displayReasoning = self::pickDisplayReasoning($structured);
+
+        return [
+            'contentBlocks' => $structured['contentBlocks'],
+            'displayReasoning' => $displayReasoning,
+            'textContent' => $structured['textContent'],
+        ];
     }
 
     /**
@@ -47,10 +54,16 @@ final class LLMContentParser
     }
 
     /**
+     * Walk the provider's structured content blocks and extract the three
+     * payload axes: ordered {@see ContentBlock} list (for replay), the
+     * concatenated text content (for the legacy `content` field), and the
+     * per-block parsing carry state used by
+     * {@see self::pickDisplayReasoning()}.
+     *
      * @param array<int, mixed> $rawContent
-     * @return array{contentBlocks: list<ContentBlock>, displayReasoning: string|null, textContent: string}
+     * @return array{contentBlocks: list<ContentBlock>, textContent: string, structuredReasoning: string|null, tagReasoning: string|null, hasStructuredReasoning: bool}
      */
-    private static function parseBlocks(array $rawContent): array
+    private static function parseStructuredBlocks(array $rawContent): array
     {
         $contentBlocks = [];
         $textContent = '';
@@ -100,9 +113,27 @@ final class LLMContentParser
 
         return [
             'contentBlocks' => $contentBlocks,
-            'displayReasoning' => $hasStructuredReasoning ? $structuredReasoning : $tagReasoning,
             'textContent' => $textContent,
+            'structuredReasoning' => $structuredReasoning,
+            'tagReasoning' => $tagReasoning,
+            'hasStructuredReasoning' => $hasStructuredReasoning,
         ];
+    }
+
+    /**
+     * Prefer structured reasoning (signed `thinking`/`redacted_thinking` blocks)
+     * over inline tag extraction; the tag would be unsigned and replaying it
+     * is unsafe.
+     *
+     * @param array{structuredReasoning: string|null, tagReasoning: string|null, hasStructuredReasoning: bool} $structured
+     */
+    private static function pickDisplayReasoning(array $structured): ?string
+    {
+        if ($structured['hasStructuredReasoning']) {
+            return $structured['structuredReasoning'];
+        }
+
+        return $structured['tagReasoning'];
     }
 
     private static function appendReasoning(?string $current, string $next): string

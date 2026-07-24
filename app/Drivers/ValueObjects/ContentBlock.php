@@ -32,8 +32,21 @@ final readonly class ContentBlock
     ];
 
     /**
-     * @param array<string, mixed>|null $toolInput
-     * @param array<string, mixed>|null $metadata
+     * @param string              $type        One of the `TYPE_*` constants.
+     * @param string|null         $text        Text body for text/thinking blocks; null for other kinds.
+     * @param string|null         $signature   Opaque Anthropic signature for `thinking` blocks — must be
+     *                                        replayed byte-identical on the next outbound turn. NIST
+     *                                        server-side state; never mutate.
+     * @param string|null         $data        Opaque encrypted payload for `redacted_thinking` blocks.
+     *                                        Distinct from `$signature`; clients cannot decrypt it.
+     * @param string|null         $mediaType   MIME type for `image` blocks (base64 transport).
+     * @param string|null         $base64      Base64-encoded image bytes for `image` blocks.
+     * @param string|null         $url         Remote URL for `image` blocks (alternative to base64).
+     * @param string|null         $toolUseId   Provider-issued call identifier for `tool_use` blocks.
+     * @param string|null         $toolName    Tool name for `tool_use` blocks.
+     * @param array<string, mixed>|null $toolInput  Tool input arguments for `tool_use` blocks.
+     * @param array<string, mixed>|null $metadata   Forward-compat bag for provider sub-fields that
+     *                                              don't yet warrant a typed property.
      */
     public function __construct(
         public string $type,

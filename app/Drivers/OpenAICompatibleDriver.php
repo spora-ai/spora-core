@@ -168,16 +168,23 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     private function parseResponse(array $data): LLMResponse
     {
         $choice = $data['choices'][0] ?? [];
-        $finishReason = (string) ($choice['finish_reason'] ?? '');
         $message = $choice['message'] ?? [];
         $parsedContent = LLMContentParser::parse($message['content'] ?? null);
 
-        if ($finishReason === 'tool_calls') {
+        if (($choice['finish_reason'] ?? '') === 'tool_calls') {
             return $this->buildToolCallsResponse($data, $message, $parsedContent);
         }
 
         $usage = $this->buildUsage(is_array($data['usage'] ?? null) ? $data['usage'] : null);
+        return $this->buildTextResponse($data, $parsedContent, $usage);
+    }
 
+    /**
+     * @param array<string, mixed> $data
+     * @param array{contentBlocks: list<ContentBlock>, displayReasoning: string|null, textContent: string} $parsedContent
+     */
+    private function buildTextResponse(array $data, array $parsedContent, Usage $usage): LLMResponse
+    {
         return new LLMResponse(
             content: $parsedContent['textContent'],
             toolCalls: [],
@@ -193,7 +200,7 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     /**
      * @param array<string, mixed> $data
      * @param array<string, mixed> $message
-     * @param array<string, mixed> $parsedContent
+     * @param array{contentBlocks: list<ContentBlock>, displayReasoning: string|null, textContent: string} $parsedContent
      */
     private function buildToolCallsResponse(array $data, array $message, array $parsedContent): LLMResponse
     {

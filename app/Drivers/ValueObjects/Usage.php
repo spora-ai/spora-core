@@ -38,6 +38,13 @@ final readonly class Usage
         public ?array $driverMetaInfo = null,
     ) {}
 
+    /**
+     * Return a new Usage with all six typed counters summed. The `provider`
+     * field is merged with a concrete-provider-wins rule: `$this->provider`
+     * keeps its tag unless it is the `unknown` sentinel, in which case the
+     * caller's tag is adopted. This guarantees that a merged Usage never
+     * claims a concrete provider it didn't actually see.
+     */
     public function add(self $other): self
     {
         return new self(
@@ -90,12 +97,18 @@ final readonly class Usage
     /**
      * Build a Usage from a provider `usage` subobject tagged with its provider.
      *
+     * When `$usage` is null or empty the returned Usage carries the
+     * `unknown` provider sentinel so it can still be merged via
+     * {@see self::add()} without polluting the caller's provider tag.
+     * Concrete providers see their counters populated; the tag is what
+     * claims provenance.
+     *
      * @param array<string, mixed>|null $usage
      */
     public static function fromProviderUsage(?array $usage, string $provider): self
     {
         if ($usage === null || $usage === []) {
-            return new self(provider: $provider);
+            return new self(provider: 'unknown');
         }
 
         if ($provider === 'anthropic') {

@@ -15,9 +15,18 @@ final readonly class LLMResponse
     public Usage $usage;
 
     /**
-     * @param ?string $content Non-null when the LLM returns display text.
-     * @param list<ToolCall> $toolCalls Parallel tool calls requested in this turn.
-     * @param list<ContentBlock> $contentBlocks Ordered provider content retained for replay.
+     * @param ?string                  $content           Non-null display text (assistant's plain message).
+     * @param list<ToolCall>           $toolCalls         Parallel tool calls requested in this turn.
+     * @param int                      $inputTokens       Legacy counter; prefer `$usage->inputTokens`.
+     * @param int                      $outputTokens      Legacy counter; prefer `$usage->outputTokens`.
+     * @param string                   $completionId      Provider-side completion identifier.
+     * @param list<ContentBlock>       $contentBlocks     Ordered provider content retained for replay.
+     * @param Usage|null               $usage             Authoritative per-message usage. When supplied,
+     *                                                  its counters supersede the legacy `$inputTokens` /
+     *                                                  `$outputTokens` fields.
+     * @param string|null              $displayReasoning  Human-readable reasoning text. Display-only —
+     *                                                  not signed by the provider and never replayed
+     *                                                  into a `thinking` block on the next turn.
      */
     public function __construct(
         public ?string $content,

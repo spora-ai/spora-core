@@ -114,3 +114,52 @@ test('task detail resource exposes content_blocks, sanitized usage, and aggregat
     expect($result['totals'])->not->toHaveKey('provider');
     expect($result['totals'])->not->toHaveKey('raw_usage');
 });
+
+/**
+ * Sanitisation must drop the encrypted `redacted_thinking.data` payload
+ * before the blocks reach the admin UI — clients cannot decrypt it and
+ * shipping it through Mercure would be a pointless leak.
+ */
+test('task detail resource strips redacted_thinking data payload', function (): void {
+    $auth = bootAuthLayer();
+    $userId = $auth->register('redacted@example.com', 'Password1!', 'Redacted');
+    simulateLoggedInSession($userId, 'redacted@example.com');
+
+    $agent = Agent::create([
+        'user_id' => $userId,
+        'name' => 'RedactedAgent',
+        'max_steps' => 5,
+        'is_active' => true,
+    ]);
+    $task = Task::create([
+        'user_id' => $userId,
+        'agent_id' => $agent->id,
+        'status' => 'COMPLETED',
+        'user_prompt' => 'hi',
+        'max_steps' => 5,
+    ]);
+    $row = TaskHistory::create([
+        'task_id' => $task->id,
+        'sequence' => 1,
+        'role' => 'assistant',
+        'content' => 'reply',
+        'content_blocks' => [
+            ['type' => 'redacted_thinking', 'data' => 'encrypted-payload'],
+            ['type' => 'text', 'text' => 'reply'],
+        ],
+    ]);
+
+    $service = new TaskService(
+        Mockery::mock(OrchestratorInterface::class),
+        Mockery::mock(MercurePublisherInterface::class),
+    );
+
+    /** @var array<string, mixed> $result */
+    $result = $service->getTaskWithHistory($task->id, $userId);
+
+    expect($result)->not->toBeNull();
+    expect($result['history'][0]['content_blocks'])->toHaveCount(2);
+    expect($result['history'][0]['content_blocks'][0])->toMatchArray(['type' => 'redacted_thinking']);
+    expect($result['history'][0]['content_blocks'][0])->not->toHaveKey('data');
+    expect($result['history'][0]['content_blocks'][1]['text'])->toBe('reply');
+});
