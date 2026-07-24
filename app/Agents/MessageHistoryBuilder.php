@@ -65,9 +65,11 @@ final class MessageHistoryBuilder
     /**
      * Walks the rows in `sequence` order, applying summary compaction and
      * converting each surviving row into an LLM-shaped message. Attachment
-     * rows are folded into the next `user` row so the wire payload never
-     * carries the unsupported `attachment` role and the operator's typed
-     * prompt travels together with the attachment context.
+     * rows are folded into the adjacent `user` row in either order — the
+     * production path writes `user` first then `attachment` while some
+     * fixtures use the reverse — so the wire payload never carries the
+     * unsupported `attachment` role and the operator's typed prompt always
+     * travels together with the attachment context.
      *
      * `_seq` is set on every emitted message so {@see stripScaffoldingKeys()}
      * can target the key without altering the user-visible structure.
@@ -79,59 +81,91 @@ final class MessageHistoryBuilder
     {
         $messages          = [];
         $lastSummarySeqEnd = -1;
+        $rowsArray         = $rows->values()->all();
 
-        $rowsArray = $rows->values()->all();
-        $i = 0;
-        while ($i < count($rowsArray)) {
-            /** @var TaskHistory $row */
+        for ($i = 0; $i < count($rowsArray); $i++) {
             $row = $rowsArray[$i];
 
             if ($this->isSummaryRow($row)) {
-                $rangeEnd          = $this->parseSummaryRange($row->summarized_sequence_range);
-                $lastSummarySeqEnd = $this->evictCompactedRows($messages, $rangeEnd, $lastSummarySeqEnd);
-                $messages[]        = $this->summaryMessage($row);
-                $i++;
+                $lastSummarySeqEnd = $this->applySummaryRow($row, $messages, $lastSummarySeqEnd);
                 continue;
             }
 
             if ($row->sequence <= $lastSummarySeqEnd) {
-                $i++;
                 continue;
             }
 
-            if ($row->role === 'attachment') {
-                $pair = $this->consumeAttachmentPair($rowsArray, $i);
-                if ($pair !== null) {
-                    $i = $pair['nextIndex'];
-                    if ($pair['row']->sequence > $lastSummarySeqEnd) {
-                        $message           = $this->messageFromHistoryRow($pair['row']);
-                        $message['_seq']   = $pair['row']->sequence;
-                        $messages[]        = $message;
-                    }
-                    continue;
-                }
-            }
-
-            if ($row->role === 'user') {
-                $pair = $this->consumeUserAttachmentPair($rowsArray, $i);
-                if ($pair !== null) {
-                    $i = $pair['nextIndex'];
-                    if ($pair['row']->sequence > $lastSummarySeqEnd) {
-                        $message           = $this->messageFromHistoryRow($pair['row']);
-                        $message['_seq']   = $pair['row']->sequence;
-                        $messages[]        = $message;
-                    }
-                    continue;
-                }
-            }
-
-            $message         = $this->messageFromHistoryRow($row);
-            $message['_seq'] = $row->sequence;
-            $messages[]      = $message;
-            $i++;
+            $i = $this->dispatchRow($row, $rowsArray, $i, $messages, $lastSummarySeqEnd);
         }
 
         return $messages;
+    }
+
+    /**
+     * Apply a `summary` row: evict any prior messages inside its range,
+     * append the summary itself, return the new high-water mark.
+     *
+     * @param list<array<string, mixed>> $messages
+     */
+    private function applySummaryRow(
+        TaskHistory $row,
+        array &$messages,
+        int $lastSummarySeqEnd,
+    ): int {
+        $rangeEnd          = $this->parseSummaryRange($row->summarized_sequence_range);
+        $lastSummarySeqEnd = $this->evictCompactedRows($messages, $rangeEnd, $lastSummarySeqEnd);
+        $messages[]        = $this->summaryMessage($row);
+        return $lastSummarySeqEnd;
+    }
+
+    /**
+     * Dispatch a single surviving row to its wire shape, attempting
+     * user/attachment pair consumption in either order first.
+     *
+     * @param list<TaskHistory>          $rowsArray
+     * @param list<array<string, mixed>> $messages
+     * @return int  The new index to resume iteration at.
+     */
+    private function dispatchRow(
+        TaskHistory $row,
+        array $rowsArray,
+        int $i,
+        array &$messages,
+        int $lastSummarySeqEnd,
+    ): int {
+        $pair = $this->consumeAdjacentPair($row, $rowsArray, $i);
+        if ($pair !== null) {
+            if ($pair['row']->sequence > $lastSummarySeqEnd) {
+                $message         = $this->messageFromHistoryRow($pair['row']);
+                $message['_seq'] = $pair['row']->sequence;
+                $messages[]      = $message;
+            }
+            return $pair['nextIndex'];
+        }
+
+        $message         = $this->messageFromHistoryRow($row);
+        $message['_seq'] = $row->sequence;
+        $messages[]      = $message;
+        return $i + 1;
+    }
+
+    /**
+     * Try the appropriate pair-consumption helper for `$row`'s role.
+     * Returns the synthetic-row payload or null when the adjacent row
+     * does not pair (in which case the caller emits `$row` standalone).
+     *
+     * @param list<TaskHistory> $rowsArray
+     * @return array{row: TaskHistory, nextIndex: int}|null
+     */
+    private function consumeAdjacentPair(TaskHistory $row, array $rowsArray, int $i): ?array
+    {
+        if ($row->role === 'attachment') {
+            return $this->consumeAttachmentPair($rowsArray, $i);
+        }
+        if ($row->role === 'user') {
+            return $this->consumeUserAttachmentPair($rowsArray, $i);
+        }
+        return null;
     }
 
     /**
