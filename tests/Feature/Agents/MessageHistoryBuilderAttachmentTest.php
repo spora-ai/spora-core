@@ -376,3 +376,146 @@ test('attachment with image is dropped when driver image capability is forced of
         expect($content)->toContain('Describe this');
     }
 });
+test('user row first, attachment row second (production order) merges into one user message', function (): void {
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: 'paper body',
+        mime: 'text/plain',
+        filename: 'paper.txt',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+    // Production order: user prompt first, attachment row second.
+    // Orchestrator::start/continue persist in this order, which used
+    // to bypass consumeAttachmentPair() and emit two user messages.
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 0,
+        'role'     => 'user',
+        'content'  => 'Summarize this paper',
+    ]);
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 1,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+
+    expect($messages)->toHaveCount(1);
+    expect($messages[0]['role'])->toBe('user');
+    expect($messages[0]['content'])->toBeArray();
+    $text = $messages[0]['content'][0]['text'];
+    expect($text)->toContain('Summarize this paper');
+    expect($text)->toContain('---');
+    expect($text)->toContain('# paper.txt (extracted text)');
+    expect($text)->toContain('paper body');
+    // Dedup invariant: each filename header appears exactly once.
+    expect(substr_count($text, '# paper.txt (extracted text)'))->toBe(1);
+});
+
+test('user row first, image attachment second (production order) merges prompt with image block on vision driver', function (): void {
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $png = base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+        strict: true,
+    );
+    $imageAsset = $service->ingest(new MediaIngestRequest(
+        bytes: $png,
+        mime: 'image/png',
+        filename: 'pixel.png',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 0,
+        'role'     => 'user',
+        'content'  => 'Describe this',
+    ]);
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 1,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $imageAsset->id, 'kind' => 'image']],
+    ]);
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: new MockHttpClient(),
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+        options: new \Spora\Drivers\AnthropicDriverOptions(supportsImageInput: true),
+    );
+
+    $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+    expect($messages)->toHaveCount(1);
+    expect($messages[0]['role'])->toBe('user');
+    expect($messages[0]['content'])->toBeArray();
+    // First block must be the prompt text, image block(s) follow.
+    expect($messages[0]['content'][0]['type'])->toBe('text');
+    expect($messages[0]['content'][0]['text'])->toContain('Describe this');
+    $image = collect($messages[0]['content'])->firstWhere('type', 'image');
+    expect($image)->not->toBeNull();
+    expect($image['mediaType'])->toBe('image/png');
+});
+
+test('user row first, image attachment second (production order) drops the image when vision forced off', function (): void {
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $png = base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+        strict: true,
+    );
+    $imageAsset = $service->ingest(new MediaIngestRequest(
+        bytes: $png,
+        mime: 'image/png',
+        filename: 'pixel.png',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 0,
+        'role'     => 'user',
+        'content'  => 'Describe this',
+    ]);
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 1,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $imageAsset->id, 'kind' => 'image']],
+    ]);
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: new MockHttpClient(),
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+        options: new \Spora\Drivers\AnthropicDriverOptions(supportsImageInput: false),
+    );
+
+    $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+    expect($messages)->toHaveCount(1);
+    expect($messages[0]['role'])->toBe('user');
+    $content = $messages[0]['content'];
+    if (is_array($content)) {
+        $types = array_map(static fn(array $b): string => (string) ($b['type'] ?? ''), $content);
+        expect($types)->not->toContain('image');
+    } else {
+        expect($content)->toContain('Describe this');
+    }
+});

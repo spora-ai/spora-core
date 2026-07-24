@@ -477,19 +477,12 @@ test('PDF upload: parser throws → conversion swallowed → LLM gets [no extrac
     expect($text)->not->toContain('corrupt garbage');
 });
 
-test('production row order: user row first, attachment row second → LLM still gets the file content', function (): void {
+test('production row order: user row first, attachment row second collapses to one user message', function (): void {
     // Orchestrator::start writes the user row first (via appendHistory)
-    // and the attachment row second (via appendAttachmentRow). The
-    // existing pipeline test reverses that order, which lets
-    // consumeAttachmentPair() merge them into a single message —
-    // a code path that does NOT fire in production.
-    //
-    // The LLM still has to receive the file content, but with the
-    // production order the result is TWO user messages: the typed
-    // prompt on its own, then a separate user message whose content
-    // is the extracted markdown. The LLM should still see the file
-    // content. If it claims it doesn't, this test will pin down where
-    // the gap is.
+    // and the attachment row second (via appendAttachmentRow). MessageHistoryBuilder
+    // merges the adjacent pair in either order, so this production path
+    // collapses to a single `user` message just like the reverse-order
+    // pipeline test.
     $service = buildMarkdownPipelineService();
     $asset = $service->ingest(new MediaIngestRequest(
         bytes: 'Lorem ipsum dolor sit amet',
@@ -519,37 +512,23 @@ test('production row order: user row first, attachment row second → LLM still 
 
     $messages = (new MessageHistoryBuilder())->build($task->id);
 
-    // Whatever the merge behaviour, the LLM must receive the file content
-    // somewhere in the message stream.
-    $combined = '';
-    foreach ($messages as $msg) {
-        if (is_array($msg['content'])) {
-            foreach ($msg['content'] as $block) {
-                if (isset($block['text'])) {
-                    $combined .= $block['text'] . "\n\n";
-                }
-            }
-        } elseif (is_string($msg['content'])) {
-            $combined .= $msg['content'] . "\n\n";
-        }
-    }
-    expect($combined)->toContain('Summarize this paper');
-    expect($combined)->toContain('# paper.txt (extracted text)');
-    expect($combined)->toContain('Lorem ipsum dolor sit amet');
-    expect($combined)->not->toContain('[no extractable text]');
+    expect($messages)->toHaveCount(1);
+    expect($messages[0]['role'])->toBe('user');
+    expect($messages[0]['content'])->toBeArray();
+    $text = $messages[0]['content'][0]['text'];
+    expect($text)->toContain('Summarize this paper');
+    expect($text)->toContain('---');
+    expect($text)->toContain('# paper.txt (extracted text)');
+    expect($text)->toContain('Lorem ipsum dolor sit amet');
+    expect($text)->not->toContain('[no extractable text]');
+    expect(substr_count($text, '# paper.txt (extracted text)'))->toBe(1);
 });
 
-test('multiple text attachments in production row order: dedup survives', function (): void {
-    // Regression sibling for the production row order (user-then-attachment).
-    // The single-attachment case above is not affected by the dedup bug
-    // because the trivial `prompt==='' && count===1` early return fires
-    // regardless of which row order produced the inputs. The bug DOES fire
-    // in production for multiple text attachments: the attachment row is
-    // written by appendAttachmentRow() with empty content, so buildAttachment-
-    // Content sees `prompt==='' && count>1`, which skips the trivial early
-    // return and used to fall into `array_merge($combined, $blocks['text'])`
-    // — emitting each filename header + extracted markdown twice. This test
-    // pins dedup on that production path.
+test('multiple text attachments in production row order: one user message with dedup survives', function (): void {
+    // Production-order regression for the multi-attachment case: the
+    // builder must collapse user prompt + a single attachment row
+    // carrying multiple text refs into one `user` message, with each
+    // filename header + extracted body emitted exactly once.
     $service = buildMarkdownPipelineService();
     $assetA = $service->ingest(new MediaIngestRequest(
         bytes: 'Alpha section content.',
@@ -595,30 +574,15 @@ test('multiple text attachments in production row order: dedup survives', functi
 
     $messages = (new MessageHistoryBuilder())->build($task->id);
 
-    // Aggregate every text payload so dedup is checked globally across the
-    // resulting message stream (the production path produces two messages:
-    // the typed prompt on its own, then the attachment as a separate user
-    // message — the dedup invariant lives across both).
-    $combined = '';
-    foreach ($messages as $msg) {
-        if (is_array($msg['content'])) {
-            foreach ($msg['content'] as $block) {
-                if (isset($block['text'])) {
-                    $combined .= $block['text'] . "\n\n";
-                }
-            }
-        } elseif (is_string($msg['content'])) {
-            $combined .= $msg['content'] . "\n\n";
-        }
-    }
-
-    // Before the fix, the trailing array_merge re-appended both blocks, so
-    // each marker appeared twice in $combined.
-    expect(substr_count($combined, '# alpha.txt (extracted text)'))->toBe(1);
-    expect(substr_count($combined, '# beta.txt (extracted text)'))->toBe(1);
-    // The LLM still receives the operator's prompt and the file bodies.
-    expect($combined)->toContain('Compare these notes');
-    expect($combined)->toContain('Alpha section content.');
-    expect($combined)->toContain('Beta section content.');
-    expect($combined)->not->toContain('[no extractable text]');
+    expect($messages)->toHaveCount(1);
+    expect($messages[0]['role'])->toBe('user');
+    expect($messages[0]['content'])->toBeArray();
+    $text = $messages[0]['content'][0]['text'];
+    expect($text)->toContain('Compare these notes');
+    expect($text)->toContain('---');
+    expect(substr_count($text, '# alpha.txt (extracted text)'))->toBe(1);
+    expect(substr_count($text, '# beta.txt (extracted text)'))->toBe(1);
+    expect($text)->toContain('Alpha section content.');
+    expect($text)->toContain('Beta section content.');
+    expect($text)->not->toContain('[no extractable text]');
 });
