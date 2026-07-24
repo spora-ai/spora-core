@@ -80,15 +80,18 @@ final class MessageHistoryBuilder
         $lastSummarySeqEnd = -1;
         $rowsArray         = $rows->values()->all();
 
-        for ($i = 0; $i < count($rowsArray); $i++) {
+        $i = 0;
+        while ($i < count($rowsArray)) {
             $row = $rowsArray[$i];
 
             if ($this->isSummaryRow($row)) {
                 $lastSummarySeqEnd = $this->applySummaryRow($row, $messages, $lastSummarySeqEnd);
+                $i++;
                 continue;
             }
 
             if ($row->sequence <= $lastSummarySeqEnd) {
+                $i++;
                 continue;
             }
 
