@@ -16,7 +16,7 @@ use Spora\Models\TaskHistory;
  *      summary row itself.
  *   2. {@see messageFromHistoryRow()} — maps a single row into the LLM wire
  *      shape (`tool`, `assistant+tool_calls`, plain role+content, and
- *      `attachment` rows that are folded into the next `user` row).
+ *      `attachment` rows that are folded into the adjacent `user` row).
  *      Rows with `role=attachment` are NEVER sent to the provider as such:
  *      OpenAI/Anthropic both reject the role, so the builder routes every
  *      attachment row through {@see attachmentMessage()} which produces a
@@ -24,6 +24,15 @@ use Spora\Models\TaskHistory;
  *      the driver's image-input capability).
  *   3. {@see stripScaffoldingKeys()} — removes the internal `_seq` bookkeeping
  *      key so the scaffolding never leaks to the provider.
+ *
+ * Attachment pairing is order-symmetric: the builder merges an attachment row
+ * with its adjacent user row in either order, so production (`user` first,
+ * then `attachment`) and the reverse ordering used by some fixtures both
+ * collapse to a single `user` message. The merge helpers are
+ * {@see consumeAttachmentPair()} (reverse-order) and
+ * {@see consumeUserAttachmentPair()} (production order). Both produce a
+ * synthetic row whose `sequence` is the later of the pair so summary
+ * compaction semantics are preserved.
  */
 final class MessageHistoryBuilder
 {
@@ -103,6 +112,19 @@ final class MessageHistoryBuilder
                 }
             }
 
+            if ($row->role === 'user') {
+                $pair = $this->consumeUserAttachmentPair($rowsArray, $i);
+                if ($pair !== null) {
+                    $i = $pair['nextIndex'];
+                    if ($pair['row']->sequence > $lastSummarySeqEnd) {
+                        $message           = $this->messageFromHistoryRow($pair['row']);
+                        $message['_seq']   = $pair['row']->sequence;
+                        $messages[]        = $message;
+                    }
+                    continue;
+                }
+            }
+
             $message         = $this->messageFromHistoryRow($row);
             $message['_seq'] = $row->sequence;
             $messages[]      = $message;
@@ -113,12 +135,13 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * If the row at `$i` is an attachment and is immediately followed by a
-     * `user` row, return a synthetic row that carries the user's typed
-     * prompt on the attachment row's data (so {@see attachmentMessage()}
-     * can merge them) and the index to resume iteration at. Returns null
-     * when no merge should happen — either because the next row is not a
-     * `user` row, or because there is no next row.
+     * If the row at `$i` is an `attachment` and the next row is a `user`,
+     * return a synthetic row whose `content` carries the user's prompt
+     * (so {@see attachmentMessage()} merges them) and the index to
+     * resume iteration at. Returns null when the adjacent row is not a
+     * `user` (or is absent), letting the caller fall through to the
+     * standalone attachment path. The companion production-order helper
+     * is {@see consumeUserAttachmentPair()}.
      *
      * @param list<TaskHistory> $rowsArray
      * @return array{row: TaskHistory, nextIndex: int}|null
@@ -135,6 +158,33 @@ final class MessageHistoryBuilder
         return ['row' => $merged, 'nextIndex' => $i + 2];
     }
 
+    /**
+     * Production-order merge: if the row at `$i` is a `user` and the next
+     * row is an `attachment`, return a synthetic row whose `role` is
+     * `attachment` so the existing {@see attachmentMessage()} expansion
+     * path is reused. The synthetic row carries the user prompt in
+     * `content` and the attachment refs in `attachments`; its `sequence`
+     * is the later of the pair so summary-compaction `_seq` filtering
+     * still drops the right range. The companion reverse-order helper is
+     * {@see consumeAttachmentPair()}. Both are needed because
+     * {@see \Spora\Agents\Orchestrator::start/continue} persist the
+     * production order, while existing fixtures and some tests use the
+     * reverse.
+     *
+     * @param list<TaskHistory> $rowsArray
+     * @return array{row: TaskHistory, nextIndex: int}|null
+     */
+    private function consumeUserAttachmentPair(array $rowsArray, int $i): ?array
+    {
+        $next = $rowsArray[$i + 1] ?? null;
+        if ($next === null || $next->role !== 'attachment') {
+            return null;
+        }
+        $merged = clone $next;
+        $merged->content  = $rowsArray[$i]->content;
+        $merged->sequence = $next->sequence;
+        return ['row' => $merged, 'nextIndex' => $i + 2];
+    }
     private function isSummaryRow(TaskHistory $row): bool
     {
         return $row->role === 'summary' && $row->summarized_sequence_range !== null;
@@ -325,14 +375,14 @@ final class MessageHistoryBuilder
             // already folded their text into $combined.
             return [['type' => 'text', 'text' => $combined]];
         }
-        return $imageOnly
-            ? $blocks['image']
-            : array_merge(
+        if ($prompt !== '') {
+            return array_merge(
                 [['type' => 'text', 'text' => $combined]],
                 $blocks['image'],
             );
+        }
+        return $blocks['image'];
     }
-
     /**
      * Compose the text-block body for an attachment row: operator prompt
      * (when present), followed by `---` separator, then a `# filename
