@@ -33,16 +33,13 @@ use Spora\Models\TaskHistory;
  * {@see consumeUserAttachmentPair()} (production order). Both produce a
  * synthetic row whose `sequence` is the later of the pair so summary
  * compaction semantics are preserved.
+ *
+ * Attachment-row rendering (text + image content blocks, fallback
+ * string, asset byte loading) lives in {@see AttachmentRowRenderer},
+ * which {@see attachmentMessage()} delegates to.
  */
 final class MessageHistoryBuilder
 {
-    /**
-     * Hard cap on inline image bytes. A 4K photo can exceed 20 MiB
-     * after MIME decode; without a cap, a single oversized attachment
-     * blows up the LLM context window and the request payload.
-     */
-    private const MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024;
-
     public function __construct(
         private readonly ?LLMDriverInterface $driver = null,
     ) {}
@@ -325,22 +322,118 @@ final class MessageHistoryBuilder
      */
     private function attachmentMessage(TaskHistory $row): array
     {
-        $blocks = $this->collectAttachmentBlocks($row);
-        $prompt = is_string($row->content) ? trim($row->content) : '';
+        $renderer = new AttachmentRowRenderer(
+            $this->driver,
+            defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3),
+        );
 
-        if ($blocks['text'] === [] && $blocks['image'] === []) {
-            // Defensive: legacy or malformed rows that have no resolvable
-            // attachment still become a `user` message — never `attachment`.
+        $rendered = $renderer->render($row);
+        if ($rendered !== null) {
             return [
                 'role'    => 'user',
-                'content' => $this->attachmentFallbackText($prompt),
+                'content' => $rendered,
             ];
         }
 
         return [
             'role'    => 'user',
-            'content' => $this->buildAttachmentContent($blocks, $prompt),
+            'content' => $renderer->fallbackText($row->content),
         ];
+    }
+
+    /**
+     * Decodes a stored `tool_call_payload` JSON string and rewrites any
+     * empty `arguments` array to the literal `'{}'` string that strict
+     * providers (OpenAI, MiniMax, LM Studio) require.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function decodeToolCallPayload(string $payload): array
+    {
+        $decoded = json_decode($payload, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        foreach ($decoded as $i => $tc) {
+            if (!isset($tc['function']['arguments'])) {
+                continue;
+            }
+
+            $args         = $tc['function']['arguments'];
+            $decodedArgs  = is_string($args) ? (json_decode($args, true) ?? []) : (array) $args;
+            if ($decodedArgs === []) {
+                $decoded[$i]['function']['arguments'] = '{}';
+            }
+        }
+
+        return array_values($decoded);
+    }
+
+    /**
+     * Removes the internal `_seq` key from every emitted message. Mutates
+     * in place and returns nothing — the key is pure scaffolding.
+     *
+     * @param  list<array<string, mixed>>  $messages
+     */
+    private function stripScaffoldingKeys(array &$messages): void
+    {
+        foreach ($messages as &$msg) {
+            unset($msg['_seq']);
+        }
+        unset($msg);
+    }
+}
+
+/**
+ * Renders a {@see TaskHistory} `attachment` row into the OpenAI-compatible
+ * `content` array for the merged `user` message. Lives outside
+ * {@see MessageHistoryBuilder} so the public builder stays under the
+ * SonarQube class-method cap while keeping the attachment rendering
+ * pipeline as a private implementation detail of {@see attachmentMessage()}.
+ */
+final class AttachmentRowRenderer
+{
+    /**
+     * Hard cap on inline image bytes. A 4K photo can exceed 20 MiB
+     * after MIME decode; without a cap, a single oversized attachment
+     * blows up the LLM context window and the request payload.
+     */
+    private const MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024;
+
+    public function __construct(
+        private readonly ?LLMDriverInterface $driver,
+        private readonly string $basePath,
+    ) {}
+
+    /**
+     * @return list<array<string, mixed>>|null  Null when no resolvable
+     *         blocks exist (legacy rows, all-refs-missing, or image-only
+     *         attachments on a non-vision driver). Callers should fall
+     *         back to {@see fallbackText()} in that case.
+     */
+    public function render(TaskHistory $row): ?array
+    {
+        $blocks = $this->collectAttachmentBlocks($row);
+        $prompt = is_string($row->content) ? trim($row->content) : '';
+
+        if ($blocks['text'] === [] && $blocks['image'] === []) {
+            return null;
+        }
+
+        return $this->buildAttachmentContent($blocks, $prompt);
+    }
+
+    /**
+     * Build the fallback string used when an attachment row has no
+     * resolvable blocks (legacy rows, all-refs-missing, or image-only
+     * attachments on a non-vision driver). The text content itself is
+     * preserved so the operator's typed prompt still reaches the LLM.
+     */
+    public function fallbackText(?string $rowContent): string
+    {
+        $content = is_string($rowContent) ? trim($rowContent) : '';
+        return $content === '' ? '[attachment]' : $content;
     }
 
     /**
@@ -430,6 +523,7 @@ final class MessageHistoryBuilder
             $blocks['image'],
         );
     }
+
     /**
      * Compose the text-block body for an attachment row: operator prompt
      * (when present), followed by `---` separator, then a `# filename
@@ -506,26 +600,13 @@ final class MessageHistoryBuilder
         ];
     }
 
-    /**
-     * Build the fallback string used when an attachment row has no
-     * resolvable blocks (legacy rows, all-refs-missing, or image-only
-     * attachments on a non-vision driver). The text content itself is
-     * preserved so the operator's typed prompt still reaches the LLM.
-     */
-    private function attachmentFallbackText(?string $rowContent): string
-    {
-        $content = is_string($rowContent) ? trim($rowContent) : '';
-        return $content === '' ? '[attachment]' : $content;
-    }
-
     private function loadAssetBytes(MediaAsset $asset): ?string
     {
         if ($asset->storage_mode === 'data_url') {
             return is_string($asset->payload) ? $asset->payload : null;
         }
         if ($asset->storage_mode === 'local' && $asset->asset_token !== null && $asset->asset_token !== '') {
-            $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);
-            $paths = new \Spora\Core\Paths($basePath);
+            $paths = new \Spora\Core\Paths($this->basePath);
             $path = $paths->storage('assets') . '/' . $asset->asset_token;
             $ext  = \Spora\Services\MediaArchive\MediaArchiveService::extensionForMime($asset->mime_type);
             if ($ext !== null) {
@@ -534,48 +615,5 @@ final class MessageHistoryBuilder
             return is_file($path) ? (string) file_get_contents($path) : null;
         }
         return null;
-    }
-
-    /**
-     * Decodes a stored `tool_call_payload` JSON string and rewrites any
-     * empty `arguments` array to the literal `'{}'` string that strict
-     * providers (OpenAI, MiniMax, LM Studio) require.
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function decodeToolCallPayload(string $payload): array
-    {
-        $decoded = json_decode($payload, true);
-        if (!is_array($decoded)) {
-            return [];
-        }
-
-        foreach ($decoded as $i => $tc) {
-            if (!isset($tc['function']['arguments'])) {
-                continue;
-            }
-
-            $args         = $tc['function']['arguments'];
-            $decodedArgs  = is_string($args) ? (json_decode($args, true) ?? []) : (array) $args;
-            if ($decodedArgs === []) {
-                $decoded[$i]['function']['arguments'] = '{}';
-            }
-        }
-
-        return array_values($decoded);
-    }
-
-    /**
-     * Removes the internal `_seq` key from every emitted message. Mutates
-     * in place and returns nothing — the key is pure scaffolding.
-     *
-     * @param  list<array<string, mixed>>  $messages
-     */
-    private function stripScaffoldingKeys(array &$messages): void
-    {
-        foreach ($messages as &$msg) {
-            unset($msg['_seq']);
-        }
-        unset($msg);
     }
 }
