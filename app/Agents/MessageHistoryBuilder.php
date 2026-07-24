@@ -16,7 +16,10 @@ use Spora\Models\TaskHistory;
  *      summary row itself.
  *   2. {@see messageFromHistoryRow()} — maps a single row into the LLM wire
  *      shape (`tool`, `assistant+tool_calls`, plain role+content, and
- *      `attachment` rows that are folded into the next `user` row).
+ *      `attachment` rows that are folded into the next `user` row). Assistant
+ *      rows with stored `content_blocks` (Anthropic thinking, redacted
+ *      thinking, images) are rendered through the block list so the provider
+ *      sees the original signed payload on the next outbound turn.
  *      Rows with `role=attachment` are NEVER sent to the provider as such:
  *      OpenAI/Anthropic both reject the role, so the builder routes every
  *      attachment row through {@see attachmentMessage()} which produces a
@@ -199,22 +202,27 @@ final class MessageHistoryBuilder
             return $this->attachmentMessage($row);
         }
 
+        $content = $row->content;
+        if ($row->role === 'assistant' && is_array($row->content_blocks) && $row->content_blocks !== []) {
+            $content = $row->content_blocks;
+        }
+
         $message = [
-            'role'    => $row->role,
-            'content' => $row->content,
+            'role' => $row->role,
+            'content' => $content,
         ];
 
         if ($row->role === 'tool') {
             $message = [
-                'role'         => 'tool',
+                'role' => 'tool',
                 'tool_call_id' => $row->tool_call_id,
-                'name'         => $row->tool_name,
-                'content'      => $row->content,
+                'name' => $row->tool_name,
+                'content' => $row->content,
             ];
         } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
             $message = [
-                'role'       => 'assistant',
-                'content'    => null,
+                'role' => 'assistant',
+                'content' => $content,
                 'tool_calls' => $this->decodeToolCallPayload($row->tool_call_payload),
             ];
         }

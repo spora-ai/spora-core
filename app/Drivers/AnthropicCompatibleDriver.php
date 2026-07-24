@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace Spora\Drivers;
 
 use Psr\Log\LoggerInterface;
+use Spora\Drivers\Anthropic\AnthropicRequestBuilder;
+use Spora\Drivers\Anthropic\AnthropicResponseParser;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
-use Spora\Drivers\Utilities\LLMContentParser;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
-use Spora\Drivers\ValueObjects\ToolCall;
 use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
@@ -26,13 +26,11 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
 final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 {
-    private const API_VERSION = '2023-06-01';
-
     private const PROVIDER_KEY = 'anthropic_compatible';
 
-    private readonly ?float $temperature;
+    private readonly AnthropicRequestBuilder $requestBuilder;
 
-    private readonly ?int $thinkingBudget;
+    private readonly AnthropicResponseParser $responseParser;
 
     public function __construct(
         string              $apiKey,
@@ -52,8 +50,14 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
             $timeout,
             $options?->supportsImageInput,
         );
-        $this->temperature    = $options?->temperature;
-        $this->thinkingBudget = $options?->thinkingBudget;
+        $this->requestBuilder = new AnthropicRequestBuilder(
+            apiKey: $apiKey,
+            model: $model,
+            enablePromptCaching: $options->enablePromptCaching ?? true,
+            temperature: $options?->temperature,
+            thinkingBudget: $options?->thinkingBudget,
+        );
+        $this->responseParser = new AnthropicResponseParser($logger);
     }
 
     /**
@@ -69,17 +73,17 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 
     public function getProviderName(): string
     {
-        return static::getName();
+        return 'anthropic_compatible';
     }
 
     public function complete(LLMRequest $request): LLMResponse
     {
-        $tools    = $this->convertTools($request->tools);
-        $messages = $this->convertMessages($request->messages);
-        $body     = $this->buildAnthropicRequestBody($request, $tools, $messages);
+        $tools    = $this->requestBuilder->convertTools($request->tools);
+        $messages = $this->requestBuilder->convertMessages($request->messages);
+        $body     = $this->requestBuilder->buildBody($request, $tools, $messages);
 
         $url     = rtrim($this->baseUrl, '/') . '/v1/messages';
-        $headers = $this->buildAnthropicHeaders();
+        $headers = $this->requestBuilder->buildHeaders();
         $this->logger?->debug('LLM Request (Anthropic)', ['url' => $url, 'payload' => $body]);
 
         $response = $this->httpClient->request('POST', $url, [
@@ -90,56 +94,7 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
 
         $this->throwIfErrorResponse($response);
 
-        return $this->parseAnthropicResponse($response);
-    }
-
-    /**
-     * @param  list<array{name: string, description: string, input_schema: array}>  $tools
-     * @param  list<array{role: string, content: string|array}>  $messages
-     * @return array<string, mixed>
-     */
-    private function buildAnthropicRequestBody(LLMRequest $request, array $tools, array $messages): array
-    {
-        $body = [
-            'model'      => $this->model,
-            'system'     => $request->systemPrompt,
-            'messages'   => $messages,
-            'max_tokens' => $request->maxTokens,
-        ];
-
-        if ($tools !== []) {
-            $body['tools'] = $tools;
-        }
-
-        if ($this->temperature !== null) {
-            $body['temperature'] = $this->temperature;
-        }
-
-        if ($this->thinkingBudget !== null) {
-            $body['thinking'] = [
-                'type'          => 'enabled',
-                'budget_tokens' => $this->thinkingBudget,
-            ];
-        }
-
-        return $body;
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function buildAnthropicHeaders(): array
-    {
-        $headers = [
-            'anthropic-version' => self::API_VERSION,
-            'Content-Type'      => 'application/json',
-        ];
-
-        if ($this->apiKey !== '') {
-            $headers['x-api-key'] = $this->apiKey;
-        }
-
-        return $headers;
+        return $this->responseParser->parse($response);
     }
 
     private function throwIfErrorResponse(ResponseInterface $response): void
@@ -159,278 +114,6 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver
             $rawBody = $response->getContent(throw: false);
             throw new LLMProviderException("Anthropic API error {$statusCode}: {$rawBody}");
         }
-    }
-
-    private function parseAnthropicResponse(ResponseInterface $response): LLMResponse
-    {
-        $statusCode = $response->getStatusCode();
-
-        /** @var array<string, mixed> $data */
-        $data = $response->toArray();
-        $this->logger?->debug('LLM Response (Anthropic)', ['status' => $statusCode, 'data' => $data]);
-
-        $completionId  = (string) ($data['id'] ?? '');
-        $inputTokens   = (int) ($data['usage']['input_tokens'] ?? 0);
-        $outputTokens  = (int) ($data['usage']['output_tokens'] ?? 0);
-        $stopReason    = (string) ($data['stop_reason'] ?? '');
-        $contentBlocks = (array) ($data['content'] ?? []);
-
-        $parsedContent = LLMContentParser::parse($contentBlocks);
-
-        if ($stopReason !== 'tool_use') {
-            return new LLMResponse(
-                content: $parsedContent['content'],
-                toolCalls: [],
-                inputTokens: $inputTokens,
-                outputTokens: $outputTokens,
-                completionId: $completionId,
-                reasoning: $parsedContent['reasoning'],
-            );
-        }
-
-        return new LLMResponse(
-            content: $parsedContent['content'] !== '' ? $parsedContent['content'] : null,
-            toolCalls: $this->extractToolCalls($contentBlocks),
-            inputTokens: $inputTokens,
-            outputTokens: $outputTokens,
-            completionId: $completionId,
-            reasoning: $parsedContent['reasoning'],
-        );
-    }
-
-    /**
-     * @param  list<array<string, mixed>>  $contentBlocks
-     * @return list<ToolCall>
-     */
-    private function extractToolCalls(array $contentBlocks): array
-    {
-        $toolCalls = [];
-
-        foreach ($contentBlocks as $block) {
-            if (($block['type'] ?? '') !== 'tool_use') {
-                continue;
-            }
-
-            $toolCalls[] = new ToolCall(
-                providerCallId: (string) ($block['id'] ?? ''),
-                toolName: (string) ($block['name'] ?? ''),
-                arguments: (array) ($block['input'] ?? []),
-            );
-        }
-
-        return $toolCalls;
-    }
-
-    /**
-     * Convert OpenAI function-calling tool definitions to Anthropic format.
-     *
-     * OpenAI: [{type: "function", function: {name, description, parameters: {...}}}]
-     * Anthropic: [{name, description, input_schema: {...}}]
-     *
-     * @param  list<array{type: string, function: array{name: string, description: string, parameters: array}}>  $tools
-     * @return list<array{name: string, description: string, input_schema: array}>
-     */
-    private function convertTools(array $tools): array
-    {
-        $converted = [];
-
-        foreach ($tools as $tool) {
-            if ($tool['type'] !== 'function') {
-                continue;
-            }
-
-            $fn = $tool['function'];
-
-            $converted[] = [
-                'name'         => $fn['name'],
-                'description'  => $fn['description'],
-                'input_schema' => $fn['parameters'],
-            ];
-        }
-
-        return $converted;
-    }
-
-    /**
-     * Convert OpenAI-format messages to Anthropic format.
-     *
-     * Key conversions:
-     * - Assistant messages with tool_calls → Anthropic content blocks [{type:"tool_use",...}]
-     * - Tool result messages (role:"tool") → Batched into user messages with [{type:"tool_result",...}]
-     *   (Multiple consecutive tool results collapse into one user turn.)
-     *
-     * @param  list<array{role: string, content: string|null, tool_calls?: array, tool_call_id?: string, name?: string}>  $messages
-     * @return list<array{role: string, content: string|array}>
-     */
-    private function convertMessages(array $messages): array
-    {
-        $converted   = [];
-        $toolResults = [];
-
-        foreach ($messages as $msg) {
-            $role = $msg['role'];
-
-            if ($role === 'tool') {
-                // Accumulate; will be flushed as a single user turn
-                $toolResults[] = $this->buildToolResultBlock($msg);
-                continue;
-            }
-
-            if ($role === 'assistant' && isset($msg['tool_calls'])) {
-                $converted[] = $this->buildAssistantToolUseMessage($msg['tool_calls']);
-                continue;
-            }
-
-            if ($toolResults !== []) {
-                $converted[] = $this->flushToolResults($toolResults);
-                $toolResults = [];
-            }
-
-            $converted[] = ['role' => $role, 'content' => $this->normalizeMessageContent($msg['content'] ?? null)];
-        }
-
-        // Flush any trailing tool results
-        if ($toolResults !== []) {
-            $converted[] = $this->flushToolResults($toolResults);
-        }
-
-        return $converted;
-    }
-
-    /**
-     * Translate a message's `content` field into Anthropic's wire shape.
-     * Three input forms:
-     *   - null / string     → return as-is (text).
-     *   - list<ContentBlock> (the new multi-modal shape) → translate to
-     *     Anthropic blocks: `{type:"text", text}` for text and
-     *     `{type:"image", source:{type, media_type, data|url}}` for
-     *     image blocks.
-     */
-    private function normalizeMessageContent(mixed $content): string|array
-    {
-        if ($content === null || is_string($content)) {
-            return $content ?? '';
-        }
-        if (!is_array($content)) {
-            return (string) $content;
-        }
-        $blocks = [];
-        foreach ($content as $b) {
-            if (!is_array($b)) {
-                continue;
-            }
-            $block = $this->contentBlockToAnthropic($b);
-            if ($block !== null) {
-                $blocks[] = $block;
-            }
-        }
-        return $blocks === [] ? '' : $blocks;
-    }
-
-    /**
-     * @param array<string, mixed> $block
-     * @return array<string, mixed>|null
-     */
-    private function contentBlockToAnthropic(array $block): ?array
-    {
-        $type = $block['type'] ?? null;
-        $result = null;
-        if ($type === 'text') {
-            $result = ['type' => 'text', 'text' => (string) ($block['text'] ?? '')];
-        } elseif ($type === 'image') {
-            $result = $this->imageBlockToAnthropic($block);
-        }
-
-        return $result;
-    }
-
-    /**
-     * @param array<string, mixed> $block
-     * @return array<string, mixed>|null
-     */
-    private function imageBlockToAnthropic(array $block): ?array
-    {
-        if (isset($block['base64']) && is_string($block['base64']) && $block['base64'] !== '' && isset($block['mediaType'])) {
-            return [
-                'type'   => 'image',
-                'source' => [
-                    'type'       => 'base64',
-                    'media_type' => (string) $block['mediaType'],
-                    'data'       => $block['base64'],
-                ],
-            ];
-        }
-        if (isset($block['url']) && is_string($block['url']) && $block['url'] !== '') {
-            return [
-                'type'   => 'image',
-                'source' => ['type' => 'url', 'url' => $block['url']],
-            ];
-        }
-
-        return null;
-    }
-
-    /**
-     * @param  array{role: string, content: string|null, tool_call_id?: string, name?: string}  $msg
-     * @return array{type: string, tool_use_id: string, content: string}
-     */
-    private function buildToolResultBlock(array $msg): array
-    {
-        return [
-            'type'        => 'tool_result',
-            'tool_use_id' => (string) ($msg['tool_call_id'] ?? ''),
-            'content'     => (string) ($msg['content'] ?? ''),
-        ];
-    }
-
-    /**
-     * @param  list<array<string, mixed>>  $toolResults
-     * @return array{role: string, content: list<array<string, mixed>>}
-     */
-    private function flushToolResults(array $toolResults): array
-    {
-        return ['role' => 'user', 'content' => $toolResults];
-    }
-
-    /**
-     * @param  list<array<string, mixed>>  $toolCalls
-     * @return array{role: string, content: list<array<string, mixed>>}
-     */
-    private function buildAssistantToolUseMessage(array $toolCalls): array
-    {
-        $contentBlocks = [];
-
-        foreach ($toolCalls as $tc) {
-            $contentBlocks[] = $this->buildToolUseBlock($tc);
-        }
-
-        return ['role' => 'assistant', 'content' => $contentBlocks];
-    }
-
-    /**
-     * @param  array<string, mixed>  $tc
-     * @return array{type: string, id: string, name: string, input: mixed}
-     */
-    private function buildToolUseBlock(array $tc): array
-    {
-        $rawArguments = $tc['function']['arguments'] ?? '{}';
-        $input        = is_string($rawArguments)
-            ? (json_decode($rawArguments, true) ?? [])
-            : (array) $rawArguments;
-
-        // Anthropic requires input to be a dict, not a bare list/array.
-        // (object)[] becomes {} in JSON; array_is_list check handles
-        // non-empty lists which also must not be sent as bare arrays.
-        if (!is_array($input) || array_is_list($input)) {
-            $input = (object) $input;
-        }
-
-        return [
-            'type'  => 'tool_use',
-            'id'    => (string) ($tc['id'] ?? ''),
-            'name'  => (string) ($tc['function']['name'] ?? ''),
-            'input' => $input,
-        ];
     }
 
     public static function getName(): string

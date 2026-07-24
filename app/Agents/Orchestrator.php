@@ -487,33 +487,51 @@ final class Orchestrator implements OrchestratorInterface
         $context ??= new HistoryMessageContext();
 
         $row = [
-            'task_id'           => $taskId,
-            'role'              => $role,
-            'content'           => $content,
-            'tool_call_id'      => $context->toolCallId,
-            'tool_name'         => $context->toolName,
+            'task_id' => $taskId,
+            'role' => $role,
+            'content' => $content,
+            'tool_call_id' => $context->toolCallId,
+            'tool_name' => $context->toolName,
             'tool_call_payload' => $context->toolCallPayload,
-            'input_tokens'      => $context->inputTokens,
-            'output_tokens'     => $context->outputTokens,
+            'input_tokens' => $context->inputTokens,
+            'output_tokens' => $context->outputTokens,
         ];
 
-        // Write reasoning unconditionally as the column is now part of the base schema
-        if ($context->reasoning !== null) {
-            $row['reasoning'] = $context->reasoning;
+        if ($context->contentBlocks !== []) {
+            $row['content_blocks'] = array_map(
+                static fn(\Spora\Drivers\ValueObjects\ContentBlock $block): array => $block->toArray(),
+                $context->contentBlocks,
+            );
         }
 
-        // TaskHistory::$casts['attachments'] => 'array' handles JSON
-        // encoding. Pre-encoding here would double-encode the value
-        // and leave MessageHistoryBuilder unable to iterate the
-        // resulting string — the LLM would see '[attachment]'.
         if ($context->attachments !== null) {
             $row['attachments'] = $context->attachments;
         }
 
-        Capsule::connection()->transaction(function () use ($taskId, $row) {
+        Capsule::connection()->transaction(function () use ($taskId, $row, $context): void {
             $nextSeq = TaskHistory::where('task_id', $taskId)->lockForUpdate()->max('sequence') ?? -1;
             $row['sequence'] = $nextSeq + 1;
-            TaskHistory::create($row);
+            $history = TaskHistory::create($row);
+
+            if ($context->usage !== null) {
+                Capsule::table('usage')->insert([
+                    'task_history_id' => $history->id,
+                    'input_tokens' => $context->usage->inputTokens,
+                    'output_tokens' => $context->usage->outputTokens,
+                    'reasoning_tokens' => $context->usage->reasoningTokens,
+                    'cached_tokens' => $context->usage->cachedTokens,
+                    'cache_creation_tokens' => $context->usage->cacheCreationTokens,
+                    'cache_read_tokens' => $context->usage->cacheReadTokens,
+                    'provider' => $context->usage->provider,
+                    'raw_usage' => $context->usage->rawUsage === null
+                        ? null
+                        : json_encode($context->usage->rawUsage, JSON_THROW_ON_ERROR),
+                    'driver_meta_info' => $context->usage->driverMetaInfo === null
+                        ? null
+                        : json_encode($context->usage->driverMetaInfo, JSON_THROW_ON_ERROR),
+                    'created_at' => date(self::DB_TIMESTAMP_FORMAT),
+                ]);
+            }
         });
     }
 }

@@ -3,19 +3,23 @@
 declare(strict_types=1);
 
 use Spora\Drivers\Utilities\LLMContentParser;
+use Spora\Drivers\ValueObjects\ContentBlock;
 
-test('parse returns reasoning=null and content when array is plain text block', function (): void {
+test('parse returns contentBlocks with a text block and matching textContent when input is a plain text block', function (): void {
     $raw = [
         ['type' => 'text', 'text' => 'Plain text response.'],
     ];
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('Plain text response.')
-        ->and($response['reasoning'])->toBeNull();
+    expect($response['textContent'])->toBe('Plain text response.')
+        ->and($response['contentBlocks'])->toHaveCount(1)
+        ->and($response['contentBlocks'][0])->toBeInstanceOf(ContentBlock::class)
+        ->and($response['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_TEXT)
+        ->and($response['contentBlocks'][0]->text)->toBe('Plain text response.');
 });
 
-test('parse extracts thinking block as reasoning when content is an array of blocks', function (): void {
+test('parse preserves signed thinking blocks in contentBlocks when content is an array of blocks', function (): void {
     $raw = [
         ['type' => 'thinking', 'thinking' => 'The user wants brownies. I should search for a recipe.'],
         ['type' => 'text', 'text' => 'Here is a vegan brownie recipe...'],
@@ -23,11 +27,15 @@ test('parse extracts thinking block as reasoning when content is an array of blo
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('Here is a vegan brownie recipe...')
-        ->and($response['reasoning'])->toBe('The user wants brownies. I should search for a recipe.');
+    expect($response['textContent'])->toBe('Here is a vegan brownie recipe...')
+        ->and($response['contentBlocks'])->toHaveCount(2)
+        ->and($response['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($response['contentBlocks'][0]->text)->toBe('The user wants brownies. I should search for a recipe.')
+        ->and($response['contentBlocks'][1]->type)->toBe(ContentBlock::TYPE_TEXT)
+        ->and($response['contentBlocks'][1]->text)->toBe('Here is a vegan brownie recipe...');
 });
 
-test('parse handles redacted_thinking from Anthropic', function (): void {
+test('parse preserves redacted_thinking blocks in contentBlocks without surfacing the opaque payload', function (): void {
     $raw = [
         ['type' => 'redacted_thinking', 'data' => '...'],
         ['type' => 'text', 'text' => 'It works!'],
@@ -35,131 +43,122 @@ test('parse handles redacted_thinking from Anthropic', function (): void {
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('It works!')
-        ->and($response['reasoning'])->toBe('[Redacted Thinking]');
+    expect($response['textContent'])->toBe('It works!')
+        ->and($response['contentBlocks'])->toHaveCount(2)
+        ->and($response['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_REDACTED_THINKING)
+        ->and($response['contentBlocks'][1]->type)->toBe(ContentBlock::TYPE_TEXT)
+        ->and($response['contentBlocks'][1]->text)->toBe('It works!');
 });
 
-test('parse returns reasoning=null when content is a flat string', function (): void {
+test('parse returns the input string as textContent when content is a flat string', function (): void {
     $raw = 'Plain text response.';
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('Plain text response.')
-        ->and($response['reasoning'])->toBeNull();
+    expect($response['textContent'])->toBe('Plain text response.')
+        ->and($response['contentBlocks'])->toHaveCount(1)
+        ->and($response['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_TEXT);
 });
 
 test('parse handles content=null gracefully in legacy response', function (): void {
     $response = LLMContentParser::parse(null);
 
-    expect($response['content'])->toBe('')
-        ->and($response['reasoning'])->toBeNull();
+    expect($response)->toBe(['contentBlocks' => [], 'textContent' => '']);
 });
 
 test('parse handles empty array gracefully', function (): void {
     $response = LLMContentParser::parse([]);
 
-    expect($response['content'])->toBe('')
-        ->and($response['reasoning'])->toBeNull();
+    expect($response)->toBe(['contentBlocks' => [], 'textContent' => '']);
 });
 
-test('parse extracts XML <thinking> tags as reasoning from plain string content', function (): void {
-    $raw = '<thinking>I need to calculate 15% tip for $42. 15% of 42 is 6.3.</thinking><text>You should tip $6.30.</text>';
+test('parse strips XML <thinking> tags from plain string content', function (): void {
+    $raw = 'You should tip $6.30. <thinking>I need to calculate 15% tip for $42. 15% of 42 is 6.3.</thinking>';
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('You should tip $6.30.')
-        ->and($response['reasoning'])->toBe('I need to calculate 15% tip for $42. 15% of 42 is 6.3.');
+    expect($response['textContent'])->toBe('You should tip $6.30.');
 });
 
-test('parse extracts multiple XML <thinking> blocks and concatenates them', function (): void {
-    $raw = '<thinking>First step...</thinking><text>Result one.</text><thinking>Second step...</thinking><text>Result two.</text>';
+test('parse strips multiple XML <thinking> blocks and collapses horizontal whitespace between them', function (): void {
+    $raw = 'Result one. <thinking>First step...</thinking>  Result two. <thinking>Second step...</thinking>';
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('Result one. Result two.')
-        ->and($response['reasoning'])->toBe("First step...\nSecond step...");
+    // The two adjacent spaces around the first tag collapse to a single
+    // space because ThinkingTagExtractor::strip() collapses [ \t]+.
+    expect($response['textContent'])->toBe('Result one. Result two.');
 });
 
-test('parse extracts XML <thinking> nested inside a text block', function (): void {
+test('parse strips XML <thinking> nested inside a text block', function (): void {
     $raw = [
         [
             'type' => 'text',
-            'text' => '<thinking>Inner thinking within block</thinking>Inner text.',
+            'text' => 'Inner text. <thinking>Inner thinking within block</thinking>',
         ],
     ];
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('Inner text.')
-        ->and($response['reasoning'])->toBe('Inner thinking within block');
+    expect($response['textContent'])->toBe('Inner text.');
 });
 
-test('parse extracts <thought> tags as reasoning from plain string content', function (): void {
-    $raw = '<thought>I should calculate the total first.</thought><text>The total is $42.</text>';
+test('parse strips <thought> tags from plain string content', function (): void {
+    $raw = 'The total is $42. <thought>I should calculate the total first.</thought>';
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('The total is $42.')
-        ->and($response['reasoning'])->toBe('I should calculate the total first.');
+    expect($response['textContent'])->toBe('The total is $42.');
 });
 
-test('parse extracts Anthropic-style thinking tags and preserves newlines in content', function (): void {
+test('parse strips Anthropic-style thinking tags and preserves newlines in textContent', function (): void {
     $raw = "<think>Step one.\nStep two.\n</think>\n\n## Header\n\nList item 1\nList item 2";
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['reasoning'])->toBe("Step one.\nStep two.");
     // Newlines should be preserved, not collapsed to spaces
-    expect($response['content'])->toBe("## Header\n\nList item 1\nList item 2");
+    expect($response['textContent'])->toBe("## Header\n\nList item 1\nList item 2");
 });
 
-test('parse preserves newlines in content when stripping thinking tags', function (): void {
+test('parse preserves newlines in textContent when stripping thinking tags', function (): void {
     $raw = "<thinking>First thought</thinking>\n\n## Header\n\nParagraph here";
 
     $response = LLMContentParser::parse($raw);
 
     // Newlines should NOT be collapsed to spaces - only spaces/tabs collapsed
-    expect($response['content'])->toBe("## Header\n\nParagraph here");
-    expect($response['content'])->not()->toContain('  '); // no double spaces
+    expect($response['textContent'])->toBe("## Header\n\nParagraph here");
+    expect($response['textContent'])->not->toContain('  '); // no double spaces
 });
 
-test('parse extracts Anthropic thinking from response02.txt and preserves markdown formatting', function (): void {
+test('parse strips Anthropic thinking from response02.txt and preserves markdown formatting', function (): void {
     $raw = file_get_contents(__DIR__ . '/response02.txt');
 
     $response = LLMContentParser::parse($raw);
 
-    // Thinking should be extracted into reasoning field
-    expect($response['reasoning'])->not()->toBeNull();
-    expect($response['reasoning'])->toContain('Wie wird das Wetter');
-
     // Content should NOT contain thinking tags
-    expect($response['content'])->not()->toContain('</think>');
-    expect($response['content'])->not()->toContain('<think>');
+    expect($response['textContent'])->not->toContain('</think>');
+    expect($response['textContent'])->not->toContain('<think>');
 
     // Content should start with markdown heading, not with thinking tag
-    expect(trim($response['content']))->toStartWith('## Wetter in Deutschland');
+    expect(trim($response['textContent']))->toStartWith('## Wetter in Deutschland');
 
     // Markdown formatting (tables) should be preserved with newlines
-    expect($response['content'])->toContain("| Stadt |");
-    expect($response['content'])->toContain("|-------|");
-    expect($response['content'])->toContain("| **Köln**");
+    expect($response['textContent'])->toContain('| Stadt |');
+    expect($response['textContent'])->toContain('|-------|');
+    expect($response['textContent'])->toContain('| **Köln**');
 });
 
-test('parse extracts Anthropic thinking from response01.txt and preserves content', function (): void {
+test('parse strips Anthropic thinking from response01.txt and preserves the answer', function (): void {
     $raw = file_get_contents(__DIR__ . '/response01.txt');
 
     $response = LLMContentParser::parse($raw);
 
-    // Thinking should be extracted
-    expect($response['reasoning'])->not()->toBeNull();
-    expect($response['reasoning'])->toContain('6x7');
-
     // Content should NOT contain thinking tags
-    expect($response['content'])->not()->toContain('</think>');
-    expect($response['content'])->not()->toContain('<think>');
+    expect($response['textContent'])->not->toContain('</think>');
+    expect($response['textContent'])->not->toContain('<think>');
 
     // Content should be the simple answer
-    expect(trim($response['content']))->toBe("6 × 7 = **42**");
+    expect(trim($response['textContent']))->toBe('6 × 7 = **42**');
 });
 
 test('parse skips non-array blocks mixed into a block array', function (): void {
@@ -172,8 +171,11 @@ test('parse skips non-array blocks mixed into a block array', function (): void 
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('Hello. World.')
-        ->and($response['reasoning'])->toBeNull();
+    // Each text block is trimmed individually; the leading space on
+    // " World." is dropped, so the two blocks concatenate to
+    // "Hello.World." (no space).
+    expect($response['textContent'])->toBe('Hello.World.')
+        ->and($response['contentBlocks'])->toHaveCount(2);
 });
 
 test('parse falls back to empty text when a text block has no text key', function (): void {
@@ -184,11 +186,10 @@ test('parse falls back to empty text when a text block has no text key', functio
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('after')
-        ->and($response['reasoning'])->toBeNull();
+    expect($response['textContent'])->toBe('after');
 });
 
-test('parse falls back to empty string when a thinking block has no thinking key', function (): void {
+test('parse handles thinking blocks with no thinking key without crashing', function (): void {
     $raw = [
         ['type' => 'thinking'], // missing 'thinking' key
         ['type' => 'text', 'text' => 'answer'],
@@ -196,6 +197,8 @@ test('parse falls back to empty string when a thinking block has no thinking key
 
     $response = LLMContentParser::parse($raw);
 
-    expect($response['content'])->toBe('answer')
-        ->and($response['reasoning'])->toBe('');
+    expect($response['textContent'])->toBe('answer')
+        ->and($response['contentBlocks'])->toHaveCount(2)
+        ->and($response['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($response['contentBlocks'][0]->text)->toBe('');
 });
