@@ -398,24 +398,37 @@ final class MessageHistoryBuilder
     private function buildAttachmentContent(array $blocks, string $prompt): array
     {
         $combined = $this->composeTextContent($prompt, $blocks['text']);
-        $imageOnly = $blocks['text'] === [] && $blocks['image'] !== [];
         $textOnly = $blocks['image'] === [];
 
         if ($textOnly) {
-            if ($prompt === '' && count($blocks['text']) === 1) {
-                return $blocks['text'];
-            }
-            // Regression: never re-append $blocks['text'] — composeTextContent()
-            // already folded their text into $combined.
-            return [['type' => 'text', 'text' => $combined]];
+            return $this->buildTextOnlyContent($blocks, $prompt, $combined);
         }
-        if ($prompt !== '') {
-            return array_merge(
-                [['type' => 'text', 'text' => $combined]],
-                $blocks['image'],
-            );
+        return $this->buildImageContent($blocks, $prompt, $combined);
+    }
+
+    /**
+     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>} $blocks
+     */
+    private function buildTextOnlyContent(array $blocks, string $prompt, string $combined): array
+    {
+        if ($prompt === '' && count($blocks['text']) === 1) {
+            return $blocks['text'];
         }
-        return $blocks['image'];
+        return [['type' => 'text', 'text' => $combined]];
+    }
+
+    /**
+     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>} $blocks
+     */
+    private function buildImageContent(array $blocks, string $prompt, string $combined): array
+    {
+        if ($prompt === '') {
+            return $blocks['image'];
+        }
+        return array_merge(
+            [['type' => 'text', 'text' => $combined]],
+            $blocks['image'],
+        );
     }
     /**
      * Compose the text-block body for an attachment row: operator prompt
