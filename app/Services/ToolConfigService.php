@@ -11,7 +11,6 @@ use Spora\Models\Agent;
 use Spora\Models\AgentToolOverride;
 use Spora\Models\ToolConfiguration;
 use Spora\Models\ToolUserSetting;
-use Spora\Skills\Skill;
 use Spora\Skills\SkillScanner;
 
 /**
@@ -51,23 +50,19 @@ class ToolConfigService implements ToolConfigServiceInterface
         array $toolClasses = [],
         ?SkillScanner $skillScanner = null,
     ) {
-        $skillsByName = $skillScanner !== null ? $this->indexSkillsByName($skillScanner->scan()) : [];
+        $skillsByName = [];
+        if ($skillScanner !== null) {
+            // Index the scanner's result by skill name so the inspector can
+            // resolve multi-select `allowed_skills` slugs to {name, description}
+            // pairs without re-scanning. The inline map keeps the public method
+            // count at the S1448 ceiling (20).
+            foreach ($skillScanner->scan() as $skill) {
+                $skillsByName[$skill->name()] = $skill;
+            }
+        }
         $this->schema = new ToolConfigSchemaInspector($skillsByName);
         $this->crypto = new ToolConfigCryptographer($security, $this->schema->getPasswordKeys(...));
         $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses);
-    }
-
-    /**
-     * @param  list<Skill> $skills
-     * @return array<string, Skill>
-     */
-    private function indexSkillsByName(array $skills): array
-    {
-        $out = [];
-        foreach ($skills as $skill) {
-            $out[$skill->name()] = $skill;
-        }
-        return $out;
     }
 
     /**

@@ -1185,7 +1185,6 @@ final class ContainerDefinitions
             // the resulting Skill objects.
             SkillScanner::class => static function (ContainerInterface $c): SkillScanner {
                 $paths = $c->get(Paths::class);
-                $pluginLoader = $c->get(PluginLoader::class);
 
                 $roots = [];
 

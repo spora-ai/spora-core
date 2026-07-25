@@ -94,6 +94,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 final class SkillTool extends AbstractTool
 {
     private const FILE_SIZE_HARD_LIMIT = 50_000;
+    private const SKILL_ENTRY_FILE = 'SKILL.md';
 
     public function __construct(
         private readonly SkillScanner $scanner,
@@ -102,25 +103,16 @@ final class SkillTool extends AbstractTool
 
     public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
-        $name = strtolower(trim((string) ($arguments['name'] ?? '')));
-        if ($name === '') {
-            return new ToolResult(false, 'name is required.');
+        $auth = $this->resolveAndAuthorize($arguments, $agentId, $userId);
+        if ($auth instanceof ToolResult) {
+            return $auth;
         }
-        if (!$this->isSkillAllowed($name, $agentId, $userId)) {
-            return new ToolResult(false, "Skill '{$name}' is not in the allowed_skills list for this agent.");
-        }
+        $skill = $auth;
 
-        $skill = $this->findSkill($name);
-        if ($skill === null) {
-            return new ToolResult(false, "Skill '{$name}' is not currently available on disk.");
-        }
-
-        $operation = $this->getOperationName($arguments);
-
-        return match ($operation) {
+        return match ($this->getOperationName($arguments)) {
             'read'  => $this->doRead($skill, $arguments),
             'files' => $this->doFiles($skill),
-            default => new ToolResult(false, "Unknown operation '{$operation}'."),
+            default => new ToolResult(false, "Unknown operation '{$this->getOperationName($arguments)}'."),
         };
     }
 
@@ -134,6 +126,29 @@ final class SkillTool extends AbstractTool
             'files' => "List the files in skill '{$name}'.",
             default => "Use the skill tool on '{$name}'.",
         };
+    }
+
+    /**
+     * Validate `name` (non-empty, in allowed_skills, on disk) and return
+     * the resolved Skill, or a failure ToolResult. Extracted from
+     * {@see execute()} so the dispatch method stays at 3 returns.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    private function resolveAndAuthorize(array $arguments, int $agentId, ?int $userId): Skill|ToolResult
+    {
+        $name = strtolower(trim((string) ($arguments['name'] ?? '')));
+        if ($name === '') {
+            return new ToolResult(false, 'name is required.');
+        }
+        if (!$this->isSkillAllowed($name, $agentId, $userId)) {
+            return new ToolResult(false, "Skill '{$name}' is not in the allowed_skills list for this agent.");
+        }
+        $skill = $this->findSkill($name);
+        if ($skill === null) {
+            return new ToolResult(false, "Skill '{$name}' is not currently available on disk.");
+        }
+        return $skill;
     }
 
     private function isSkillAllowed(string $name, int $agentId, ?int $userId): bool
@@ -164,11 +179,41 @@ final class SkillTool extends AbstractTool
 
     private function doRead(Skill $skill, array $arguments): ToolResult
     {
-        $filename = (string) ($arguments['filename'] ?? 'SKILL.md');
-        if ($filename === '') {
-            $filename = 'SKILL.md';
+        $resolved = $this->resolveReadableFile($skill, (string) ($arguments['filename'] ?? self::SKILL_ENTRY_FILE));
+        if ($resolved instanceof ToolResult) {
+            return $resolved;
         }
+        [$absolute, $sanitized, $contents] = $resolved;
 
+        // SKILL.md gets its frontmatter stripped: the LLM has already
+        // seen `name` + `description` in the tool definition (Stage 1
+        // of progressive disclosure) and the body is the only part it
+        // has not read yet. Other files are returned verbatim.
+        $body = $sanitized === self::SKILL_ENTRY_FILE
+            ? $this->stripFrontmatter($contents)
+            : $contents;
+
+        return new ToolResult(
+            true,
+            $body,
+            [
+                'name'     => $skill->name(),
+                'filename' => $sanitized,
+                'bytes'    => strlen($contents),
+            ],
+        );
+    }
+
+    /**
+     * Locate, sanitise, contain, stat-size-cap, and read the requested
+     * file. Returns a [absolute, sanitised, contents] tuple on success
+     * or a failure ToolResult. Extracted from {@see doRead()} so that
+     * method stays at the 3-return ceiling.
+     *
+     * @return array{0: string, 1: string, 2: string}|ToolResult
+     */
+    private function resolveReadableFile(Skill $skill, string $filename): array|ToolResult
+    {
         $sanitized = $this->sanitizeRelativePath($filename);
         if ($sanitized === null) {
             return new ToolResult(
@@ -207,24 +252,7 @@ final class SkillTool extends AbstractTool
         if ($contents === false) {
             return new ToolResult(false, "Could not read '{$sanitized}'.");
         }
-
-        // SKILL.md gets its frontmatter stripped: the LLM has already
-        // seen `name` + `description` in the tool definition (Stage 1
-        // of progressive disclosure) and the body is the only part it
-        // has not read yet. Other files are returned verbatim.
-        $body = $sanitized === 'SKILL.md'
-            ? $this->stripFrontmatter($contents)
-            : $contents;
-
-        return new ToolResult(
-            true,
-            $body,
-            [
-                'name'     => $skill->name(),
-                'filename' => $sanitized,
-                'bytes'    => strlen($contents),
-            ],
-        );
+        return [$absolute, $sanitized, $contents];
     }
 
     private function doFiles(Skill $skill): ToolResult
@@ -264,10 +292,7 @@ final class SkillTool extends AbstractTool
      */
     private function sanitizeRelativePath(string $path): ?string
     {
-        if ($path === '' || str_contains($path, "\0")) {
-            return null;
-        }
-        if (str_starts_with($path, '/')) {
+        if ($this->isUnsafeRelativePath($path)) {
             return null;
         }
         $segments = preg_split('#[/\\\\]+#', $path) ?: [];
@@ -280,24 +305,47 @@ final class SkillTool extends AbstractTool
     }
 
     /**
+     * Cheap pre-filter for {@see sanitizeRelativePath()}: empty input,
+     * embedded null bytes, and leading slashes are the most common
+     * attacks; checking them up-front lets the segment-walk below stay
+     * focused on traversal.
+     */
+    private function isUnsafeRelativePath(string $path): bool
+    {
+        return $path === '' || str_contains($path, "\0") || str_starts_with($path, '/');
+    }
+
+    /**
      * Strip the YAML frontmatter from a SKILL.md body, returning just
      * the Markdown content the LLM should consume.
      */
     private function stripFrontmatter(string $contents): string
     {
+        $body = $this->findFrontmatterBody($contents);
+        return $body ?? $contents;
+    }
+
+    /**
+     * Locate the body text after the closing frontmatter `---` line.
+     * Returns null when the file is missing one or both delimiters, in
+     * which case {@see stripFrontmatter()} falls back to the original
+     * contents verbatim. Extracted so the stripper stays at 3 returns.
+     */
+    private function findFrontmatterBody(string $contents): ?string
+    {
         $contents = ltrim($contents, "\xEF\xBB\xBF");
         if (!str_starts_with($contents, '---')) {
-            return $contents;
+            return null;
         }
         $rest = substr($contents, 3);
         $newlinePos = strpos($rest, "\n");
         if ($newlinePos === false) {
-            return $contents;
+            return null;
         }
         $afterFirst = substr($rest, $newlinePos + 1);
         $closePos = strpos($afterFirst, "\n---");
         if ($closePos === false) {
-            return $contents;
+            return null;
         }
         $afterClose = substr($afterFirst, $closePos + 4);
         return ltrim($afterClose, "\n\r");

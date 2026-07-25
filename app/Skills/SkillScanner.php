@@ -35,6 +35,13 @@ use Throwable;
 final class SkillScanner
 {
     /**
+     * Canonical entry file inside a skill directory. Kept as a constant
+     * so the scanner, the Skill tool, and any future consumers agree on
+     * the filename (SonarCloud php:S1192 — duplicated literal).
+     */
+    public const SKILL_FILE = 'SKILL.md';
+
+    /**
      * @param list<array{path: string, source: string}> $roots
      *        Scan roots, each carrying a `source` label used to bucket
      *        same-named skills and to populate `Skill::source()`.
@@ -91,7 +98,7 @@ final class SkillScanner
     /**
      * List skill directories inside a scan root. Depth 1 — only immediate
      * subdirectories are considered; a subdirectory only counts when it
-     * contains a SKILL.md file.
+     * contains the SKILL.md entry file.
      *
      * @return list<string>
      */
@@ -103,10 +110,11 @@ final class SkillScanner
             ->depth(0)
             ->sortByName();
 
+        $entryFile = self::SKILL_FILE;
         $out = [];
         foreach ($finder as $dir) {
             $real = $dir->getRealPath();
-            if (is_string($real) && is_file($real . '/SKILL.md')) {
+            if (is_string($real) && is_file($real . '/' . $entryFile)) {
                 $out[] = $real;
             }
         }
@@ -115,42 +123,89 @@ final class SkillScanner
 
     private function loadSkill(string $skillDir, string $source, SkillValidator $validator): Skill
     {
-        $slug = basename($skillDir);
-        $skillMd = $skillDir . '/SKILL.md';
+        $parsed = $this->parseSkillFile($skillDir, $source, $validator);
+        if ($parsed['error'] !== null) {
+            return $parsed['error'];
+        }
 
+        return new Skill(
+            frontmatter: $parsed['frontmatter'],
+            body: $parsed['body'],
+            dir: $skillDir,
+            filename: self::SKILL_FILE,
+            files: $this->collectFiles($skillDir),
+            initialWarnings: $parsed['warnings'],
+            source: $source,
+        );
+    }
+
+    /**
+     * Parse + validate one skill directory's SKILL.md, returning a single
+     * result structure: either a populated Skill (via the inner `error`
+     * key being null) or a Skill error placeholder. Extracted from
+     * {@see loadSkill()} so the dispatch stays below the S1142 3-return
+     * ceiling; this method is the only place that knows the specific
+     * parse / validate / warn ordering.
+     *
+     * @return array{
+     *   error: ?Skill,
+     *   frontmatter: array<string, mixed>,
+     *   body: string,
+     *   warnings: list<array{code: string, severity: string, message: string, path?: string}>
+     * }
+     */
+    private function parseSkillFile(string $skillDir, string $source, SkillValidator $validator): array
+    {
+        $skillMd = $skillDir . '/' . self::SKILL_FILE;
         $contents = @file_get_contents($skillMd);
         if ($contents === false) {
-            return $this->errorSkill(
-                $skillDir,
-                $source,
-                'SKILL_MD_UNREADABLE',
-                "Could not read '{$skillMd}'.",
+            return $this->errorParseResult(
+                $this->errorSkill($skillDir, $source, 'SKILL_MD_UNREADABLE', "Could not read '{$skillMd}'."),
             );
         }
 
         [$frontmatter, $body] = $this->parseFrontmatter($contents);
         if ($frontmatter === null) {
-            return $this->errorSkill(
-                $skillDir,
-                $source,
-                'SKILL_FRONTMATTER_MISSING',
-                "SKILL.md in '{$slug}' must start with a YAML frontmatter block delimited by '---'.",
+            $slug = basename($skillDir);
+            return $this->errorParseResult(
+                $this->errorSkill(
+                    $skillDir,
+                    $source,
+                    'SKILL_FRONTMATTER_MISSING',
+                    self::SKILL_FILE . " in '{$slug}' must start with a YAML frontmatter block delimited by '---'.",
+                ),
             );
         }
 
-        $result = $validator->validate($frontmatter, $body, $slug);
+        $result = $validator->validate($frontmatter, $body, basename($skillDir));
+        $warnings = $result->isValid()
+            ? $result->warnings()
+            : array_merge($result->errors(), $result->warnings());
 
-        $files = $this->collectFiles($skillDir);
+        return [
+            'error'        => null,
+            'frontmatter'  => $frontmatter,
+            'body'         => $body,
+            'warnings'     => $warnings,
+        ];
+    }
 
-        return new Skill(
-            frontmatter: $frontmatter,
-            body: $body,
-            dir: $skillDir,
-            filename: 'SKILL.md',
-            files: $files,
-            initialWarnings: $result->isValid() ? $result->warnings() : array_merge($result->errors(), $result->warnings()),
-            source: $source,
-        );
+    /**
+     * @return array{
+     *   error: Skill,
+     *   frontmatter: array<string, mixed>,
+     *   body: string,
+     *   warnings: list<array{code: string, severity: string, message: string, path?: string}>
+     * }
+     */
+    private function errorParseResult(Skill $error): array
+    {
+        return [
+            'error'       => $error,
+            'frontmatter' => [],
+            'body'        => '',
+            'warnings'    => [],
+        ];
     }
 
     /**
@@ -163,36 +218,66 @@ final class SkillScanner
      */
     private function parseFrontmatter(string $contents): array
     {
-        $contents = ltrim($contents, "\xEF\xBB\xBF");
-        if (!str_starts_with($contents, '---')) {
+        $bounds = $this->locateFrontmatterBounds($contents);
+        if ($bounds === null) {
             return [null, ''];
         }
 
-        $rest = substr($contents, 3);
-        $newlinePos = strpos($rest, "\n");
-        if ($newlinePos === false) {
-            return [null, ''];
-        }
-        $afterFirst = substr($rest, $newlinePos + 1);
-        $closePos = strpos($afterFirst, "\n---");
-        if ($closePos === false) {
-            return [null, ''];
-        }
-
-        $yamlBlock = substr($afterFirst, 0, $closePos);
-        $afterClose = substr($afterFirst, $closePos + 4);
-        $body = ltrim($afterClose, "\n\r");
-
-        try {
-            $parsed = Yaml::parse($yamlBlock);
-        } catch (Throwable) {
-            return [null, $body];
-        }
-        if (!is_array($parsed)) {
+        [$yamlBlock, $body] = $bounds;
+        $parsed = $this->parseYamlBlock($yamlBlock);
+        if ($parsed === null) {
             return [null, $body];
         }
         /** @var array<string, mixed> $parsed */
         return [$parsed, $body];
+    }
+
+    /**
+     * Find the [start, end) byte offsets of the YAML block delimited by
+     * `---` on its own line at the top of the file and a closing `---`
+     * line. Returns [yamlBlock, trimmedBody] on success, or null when
+     * the file is missing one or both delimiters.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    private function locateFrontmatterBounds(string $contents): ?array
+    {
+        $contents = ltrim($contents, "\xEF\xBB\xBF");
+        if (!str_starts_with($contents, '---')) {
+            return null;
+        }
+
+        $afterOpen = substr($contents, 3);
+        $newlinePos = strpos($afterOpen, "\n");
+        if ($newlinePos === false) {
+            return null;
+        }
+        $afterFirstNewline = substr($afterOpen, $newlinePos + 1);
+        $closePos = strpos($afterFirstNewline, "\n---");
+        if ($closePos === false) {
+            return null;
+        }
+
+        $yamlBlock = substr($afterFirstNewline, 0, $closePos);
+        $afterClose = substr($afterFirstNewline, $closePos + 4);
+
+        return [$yamlBlock, ltrim($afterClose, "\n\r")];
+    }
+
+    /**
+     * Parse the inner YAML block. Returns the assoc array on success,
+     * or null on parse error / non-array result.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function parseYamlBlock(string $yamlBlock): ?array
+    {
+        try {
+            $parsed = Yaml::parse($yamlBlock);
+        } catch (Throwable) {
+            return null;
+        }
+        return is_array($parsed) ? $parsed : null;
     }
 
     /**
@@ -228,13 +313,13 @@ final class SkillScanner
             frontmatter: [],
             body: '',
             dir: $skillDir,
-            filename: 'SKILL.md',
+            filename: self::SKILL_FILE,
             files: [],
             initialWarnings: [[
                 'code'     => $code,
                 'severity' => 'error',
                 'message'  => $message,
-                'path'     => basename($skillDir) . '/SKILL.md',
+                'path'     => basename($skillDir) . '/' . self::SKILL_FILE,
             ]],
             source: $source,
         );
