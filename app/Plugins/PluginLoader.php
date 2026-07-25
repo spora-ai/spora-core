@@ -175,6 +175,27 @@ final class PluginLoader
     }
 
     /**
+     * All skill directory paths contributed by loaded plugins. Mirrors
+     * {@see agentTemplatePaths()}; the scanner aggregates these alongside
+     * the project-level and framework-bundled skill roots from
+     * {@see \Spora\Core\Paths::skillsPaths()}.
+     *
+     * @return string[]
+     */
+    public function skillPaths(): array
+    {
+        $paths = [];
+
+        foreach ($this->plugins as $plugin) {
+            foreach ($plugin->skillPaths() as $path) {
+                $paths[] = $path;
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
      * All admin-panel App class FQCNs contributed by loaded plugins.
      * Merged into the host AppRegistry at container build time.
      *

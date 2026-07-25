@@ -107,6 +107,18 @@ abstract class AbstractPlugin implements PluginInterface
     }
 
     /**
+     * Absolute paths to skill directories this plugin ships. The
+     * scanner walks each directory depth-1 and treats immediate
+     * children as skill roots (each must contain a SKILL.md).
+     *
+     * @return string[]
+     */
+    public function skillPaths(): array
+    {
+        return [];
+    }
+
+    /**
      * Bump whenever new migration files are added under {@see migrationsPath()}.
      * Return 0 (the default) if the plugin has no database schema.
      */

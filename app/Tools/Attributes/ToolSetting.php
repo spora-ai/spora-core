@@ -7,18 +7,37 @@ namespace Spora\Tools\Attributes;
 use Attribute;
 
 /**
- * Declares a UI-configurable setting for a tool.
+ * Declares a single configurable setting on a Tool class.
  *
- * The `key` is the bare field name (e.g. `api_key`, `http_timeout`) — it is
- * scoped to the declaring tool class and resolved per-tool by
- * `ToolConfigService::getEffectiveSettings(toolClass, ...)`. Two tools may
- * declare a setting with the same key name without colliding.
+ * Used by:
+ * - the operator-facing settings form (label, type, default, validation, required)
+ * - the agent-level settings cascade (ToolConfigService reads / writes these)
+ * - the LLM tool-definition payload (when `exposeToLlm` is true; see
+ *   {@see \Spora\Services\ToolConfigSchemaInspector::getLlmToolSettings()})
  *
- * Usage:
- *   #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', required: true)]
- *   #[ToolSetting(key: 'max_results', label: 'Max Results', type: 'text', default: '10')]
- *   #[ToolSetting(key: 'allowed_agents', label: 'Allowed Agents', type: 'multi-select',
- *                 required: true, exposeToLlm: true)]
+ * Examples
+ * --------
+ *
+ * API key (operator-only, never sent to the LLM):
+ *
+ *   #[ToolSetting(
+ *       key: 'api_key',
+ *       label: 'API key',
+ *       type: 'password',
+ *       required: true,
+ *   )]
+ *
+ * Allowlist the LLM is the consumer of (mirrors HandoverTool's
+ * `allowed_target_agents`):
+ *
+ *   #[ToolSetting(
+ *       key: 'allowed_skills',
+ *       label: 'Allowed skills',
+ *       type: 'multi-select',
+ *       required: true,
+ *       exposeToLlm: true,
+ *       resolveAs: 'skill',  // see `resolveAs` below
+ *   )]
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class ToolSetting
@@ -41,5 +60,31 @@ final class ToolSetting
          * Mark true for settings that directly affect what the LLM can do (e.g. allowed_recipients).
          */
         public readonly bool $exposeToLlm = false,
+        /**
+         * Optional URL the frontend multi-select renderer should fetch its
+         * options from. Only consulted when `type === 'multi-select'`;
+         * ignored otherwise. The fetched payload shape is
+         * `[{value, label, ...}]` (caller-defined).
+         *
+         * Concrete example: the Skill tool's `allowed_skills` setting
+         * declares `dataSource: '/api/v1/skills?select=name,description'`
+         * so the admin UI dropdown lists every available skill with its
+         * short description as the option label.
+         */
+        public readonly ?string $dataSource = null,
+        /**
+         * How the multi-select value is stored and resolved for LLM exposure.
+         * Only meaningful when `type === 'multi-select'`. Defaults to
+         * `'agent'` for backwards compatibility with HandoverTool.
+         *
+         * - 'agent' — stored as `int[]`; LLM-facing values are resolved
+         *   against the `Agent` Eloquent model to `"Name (#id)"` strings.
+         * - 'skill' — stored as `string[]` of slugs; LLM-facing values
+         *   are resolved against the `SkillScanner` to `"name: short
+         *   description"` strings (description truncated to ~80 chars).
+         * - 'raw'   — stored and surfaced as-is. Use when neither agent
+         *   nor skill resolution fits the field's semantics.
+         */
+        public readonly string $resolveAs = 'agent',
     ) {}
 }

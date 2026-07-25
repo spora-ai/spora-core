@@ -1,0 +1,305 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Spora\Tools;
+
+use Spora\Services\ToolConfigServiceInterface;
+use Spora\Skills\Skill;
+use Spora\Skills\SkillScanner;
+use Spora\Tools\Attributes\Tool;
+use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\Attributes\ToolParameter;
+use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\ValueObjects\ToolResult;
+
+/**
+ * Lets the LLM list the files in a skill, or read one of its files.
+ *
+ * Activated per Agent via the same `Tool` / `ToolSetting` machinery as
+ * every other tool; the `allowed_skills` multi-select (exposed to the
+ * LLM via `exposeToLlm: true`, resolved via the new `resolveAs: 'skill'`
+ * branch in {@see \Spora\Services\ToolConfigSchemaInspector}) is the
+ * per-agent allowlist.
+ *
+ * Operations (selected via the `action` discriminator):
+ *   - 'read'  — return the body of one file (default `SKILL.md`); for
+ *               `SKILL.md` the frontmatter is stripped (the LLM has
+ *               already seen the name + description at tool-definition
+ *               time via the agent's `allowed_skills` summary).
+ *   - 'files' — return the recursive file listing as
+ *               `[{path, bytes}]`.
+ *
+ * Security: the LLM's choice of `name` and `filename` is re-validated
+ * server-side — `name` must be in the agent's `allowed_skills`; the
+ * `filename` is path-traversal-hardened before any FS read.
+ */
+#[Tool(
+    name: 'skill',
+    displayName: 'Skill',
+    category: 'agent',
+    icon: 'puzzle',
+    description: 'List the files in a skill, or read one of its files (default SKILL.md). '
+               . 'Use when a task matches one of the allowed skills listed in the effective configuration.',
+)]
+#[ToolSetting(
+    key: 'allowed_skills',
+    label: 'Allowed skills',
+    type: 'multi-select',
+    description: 'Skills the agent may load. The LLM sees the name and short description of each in the tool definition.',
+    required: true,
+    // 'skill' is a new branch on the multi-select resolver. The current
+    // ToolConfigSchemaInspector hardcodes multi-select values to int[] and
+    // resolves them against the Agent model — that path would silently mangle
+    // skill slugs to "#0". 'agent' is the default; declaring 'skill' here
+    // tells the inspector to store string[] slugs and resolve them against
+    // the SkillScanner to "name: short description" strings for LLM output.
+    resolveAs: 'skill',
+    // Frontend multi-select data source — the admin UI fetches the
+    // available skills from this endpoint and renders them as options.
+    dataSource: '/api/v1/skills?select=name,description',
+    exposeToLlm: true,
+)]
+#[ToolOperation(
+    name: 'read',
+    description: 'Read a single file from a skill (default SKILL.md).',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolParameter(
+    name: 'name',
+    type: 'string',
+    description: 'Skill slug. Must be in the configured allowed_skills list.',
+    required: true,
+)]
+#[ToolParameter(
+    name: 'filename',
+    type: 'string',
+    description: 'Relative path inside the skill. Defaults to SKILL.md.',
+    required: false,
+    default: 'SKILL.md',
+)]
+#[ToolOperation(
+    name: 'files',
+    description: 'List the files available inside a skill.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolParameter(
+    name: 'name',
+    type: 'string',
+    description: 'Skill slug. Must be in the configured allowed_skills list.',
+    required: true,
+)]
+final class SkillTool extends AbstractTool
+{
+    private const FILE_SIZE_HARD_LIMIT = 50_000;
+
+    public function __construct(
+        private readonly SkillScanner $scanner,
+        private readonly ToolConfigServiceInterface $config,
+    ) {}
+
+    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
+    {
+        $name = strtolower(trim((string) ($arguments['name'] ?? '')));
+        if ($name === '') {
+            return new ToolResult(false, 'name is required.');
+        }
+        if (!$this->isSkillAllowed($name, $agentId, $userId)) {
+            return new ToolResult(false, "Skill '{$name}' is not in the allowed_skills list for this agent.");
+        }
+
+        $skill = $this->findSkill($name);
+        if ($skill === null) {
+            return new ToolResult(false, "Skill '{$name}' is not currently available on disk.");
+        }
+
+        $operation = $this->getOperationName($arguments);
+
+        return match ($operation) {
+            'read'  => $this->doRead($skill, $arguments),
+            'files' => $this->doFiles($skill),
+            default => new ToolResult(false, "Unknown operation '{$operation}'."),
+        };
+    }
+
+    public function describeAction(array $arguments): string
+    {
+        $name = (string) ($arguments['name'] ?? '?');
+        $operation = $this->getOperationName($arguments);
+
+        return match ($operation) {
+            'read'  => "Read a file from skill '{$name}'.",
+            'files' => "List the files in skill '{$name}'.",
+            default => "Use the skill tool on '{$name}'.",
+        };
+    }
+
+    private function isSkillAllowed(string $name, int $agentId, ?int $userId): bool
+    {
+        $settings = $this->config->getEffectiveSettings(self::class, $agentId, $userId);
+        $allowed  = $settings['allowed_skills'] ?? [];
+
+        if (!is_array($allowed)) {
+            return false;
+        }
+        foreach ($allowed as $candidate) {
+            if (is_string($candidate) && strtolower(trim($candidate)) === $name) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function findSkill(string $name): ?Skill
+    {
+        foreach ($this->scanner->scan() as $skill) {
+            if ($skill->name() === $name) {
+                return $skill;
+            }
+        }
+        return null;
+    }
+
+    private function doRead(Skill $skill, array $arguments): ToolResult
+    {
+        $filename = (string) ($arguments['filename'] ?? 'SKILL.md');
+        if ($filename === '') {
+            $filename = 'SKILL.md';
+        }
+
+        $sanitized = $this->sanitizeRelativePath($filename);
+        if ($sanitized === null) {
+            return new ToolResult(
+                false,
+                "Invalid filename '{$filename}'. Paths must be relative, must not contain '..' or null bytes, and must be present in the skill's file listing.",
+            );
+        }
+
+        try {
+            $absolute = $skill->resolveFilePath($sanitized);
+        } catch (\Spora\Skills\Exceptions\SkillNotFoundException) {
+            return new ToolResult(false, "File '{$sanitized}' is not part of skill '{$skill->name()}'.");
+        }
+
+        // Defense in depth: re-check realpath containment after the
+        // listing check, in case the on-disk layout changes between
+        // scan() and read().
+        $real = realpath($absolute);
+        $rootReal = realpath($skill->dir());
+        if ($real === false || $rootReal === false || !str_starts_with($real, $rootReal . DIRECTORY_SEPARATOR)) {
+            return new ToolResult(false, "File '{$sanitized}' is not part of skill '{$skill->name()}'.");
+        }
+
+        $size = @filesize($real);
+        if ($size === false) {
+            return new ToolResult(false, "Could not stat '{$sanitized}'.");
+        }
+        if ($size > self::FILE_SIZE_HARD_LIMIT) {
+            return new ToolResult(
+                false,
+                "File '{$sanitized}' is {$size} bytes; skill_read is capped at " . self::FILE_SIZE_HARD_LIMIT . ' bytes.',
+            );
+        }
+
+        $contents = @file_get_contents($real);
+        if ($contents === false) {
+            return new ToolResult(false, "Could not read '{$sanitized}'.");
+        }
+
+        // SKILL.md gets its frontmatter stripped: the LLM has already
+        // seen `name` + `description` in the tool definition (Stage 1
+        // of progressive disclosure) and the body is the only part it
+        // has not read yet. Other files are returned verbatim.
+        $body = $sanitized === 'SKILL.md'
+            ? $this->stripFrontmatter($contents)
+            : $contents;
+
+        return new ToolResult(
+            true,
+            $body,
+            [
+                'name'     => $skill->name(),
+                'filename' => $sanitized,
+                'bytes'    => strlen($contents),
+            ],
+        );
+    }
+
+    private function doFiles(Skill $skill): ToolResult
+    {
+        $files = $skill->files();
+        if ($files === []) {
+            return new ToolResult(
+                true,
+                "Skill '{$skill->name()}' has no files listed.",
+                ['name' => $skill->name(), 'files' => []],
+            );
+        }
+
+        $lines = ["Files in skill '{$skill->name()}':"];
+        foreach ($files as $entry) {
+            $lines[] = sprintf('  - %s (%d bytes)', $entry['path'], $entry['bytes']);
+        }
+
+        return new ToolResult(
+            true,
+            implode("\n", $lines),
+            [
+                'name'  => $skill->name(),
+                'files' => $files,
+            ],
+        );
+    }
+
+    /**
+     * Reject path-traversal attempts and other unsafe inputs. Returns
+     * the sanitised path on success or null on rejection.
+     *
+     * - No leading slash (must be relative to the skill root).
+     * - No null bytes.
+     * - No `..` segments (the resolved realpath check is the final
+     *   defence, but we filter obvious attempts here too).
+     */
+    private function sanitizeRelativePath(string $path): ?string
+    {
+        if ($path === '' || str_contains($path, "\0")) {
+            return null;
+        }
+        if (str_starts_with($path, '/')) {
+            return null;
+        }
+        $segments = preg_split('#[/\\\\]+#', $path) ?: [];
+        foreach ($segments as $seg) {
+            if ($seg === '..' || $seg === '.') {
+                return null;
+            }
+        }
+        return implode('/', $segments);
+    }
+
+    /**
+     * Strip the YAML frontmatter from a SKILL.md body, returning just
+     * the Markdown content the LLM should consume.
+     */
+    private function stripFrontmatter(string $contents): string
+    {
+        $contents = ltrim($contents, "\xEF\xBB\xBF");
+        if (!str_starts_with($contents, '---')) {
+            return $contents;
+        }
+        $rest = substr($contents, 3);
+        $newlinePos = strpos($rest, "\n");
+        if ($newlinePos === false) {
+            return $contents;
+        }
+        $afterFirst = substr($rest, $newlinePos + 1);
+        $closePos = strpos($afterFirst, "\n---");
+        if ($closePos === false) {
+            return $contents;
+        }
+        $afterClose = substr($afterFirst, $closePos + 4);
+        return ltrim($afterClose, "\n\r");
+    }
+}

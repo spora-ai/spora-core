@@ -124,11 +124,13 @@ use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
+use Spora\Skills\SkillScanner;
 use Spora\Tools\AgentTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\CurrentTimeTool;
 use Spora\Tools\HandoverTool;
 use Spora\Tools\ReadUrlTool;
+use Spora\Tools\SkillTool;
 use Spora\Tools\UserInfoTool;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\Process\Process;
@@ -460,6 +462,7 @@ final class ContainerDefinitions
                         $c->get('tool_classes'),
                         $c->get(PluginLoader::class)->toolClasses(),
                     ))),
+                    $c->has(SkillScanner::class) ? $c->get(SkillScanner::class) : null,
                 );
             },
 
@@ -704,6 +707,7 @@ final class ContainerDefinitions
                 UserInfoTool::class,
                 HandoverTool::class,
                 AgentTool::class,
+                SkillTool::class,
             ],
 
             LLMConfigService::class => static function (ContainerInterface $c): LLMConfigService {
@@ -1058,6 +1062,13 @@ final class ContainerDefinitions
                 );
             },
 
+            SkillTool::class => static function (ContainerInterface $c): SkillTool {
+                return new SkillTool(
+                    $c->get(SkillScanner::class),
+                    $c->get(ToolConfigService::class),
+                );
+            },
+
             HandoverServiceInterface::class => static function (ContainerInterface $c): HandoverServiceInterface {
                 // Closure defers OrchestratorInterface resolution until HandoverService::handover()
                 // is called. Direct injection would create a cycle: Orchestrator → tool_instances
@@ -1167,6 +1178,39 @@ final class ContainerDefinitions
             },
 
             AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
+
+            // Skills are scanned in priority order: project, then framework,
+            // then each plugin. The `source` label attached to each root is
+            // what SkillScanner uses to bucket same-named skills and to tag
+            // the resulting Skill objects.
+            SkillScanner::class => static function (ContainerInterface $c): SkillScanner {
+                $paths = $c->get(Paths::class);
+                $pluginLoader = $c->get(PluginLoader::class);
+
+                $roots = [];
+
+                $project = $paths->base('skills');
+                if (is_dir($project)) {
+                    $roots[] = ['path' => $project, 'source' => 'project'];
+                }
+
+                $framework = $paths->framework('skills');
+                if (is_dir($framework)) {
+                    $roots[] = ['path' => $framework, 'source' => 'core'];
+                }
+
+                // PluginLoader::skillPaths() returns paths in slug-iteration
+                // order. We don't have direct slug->path mapping; rebuild
+                // it from the loader's plugin directory map.
+                foreach ($c->get(PluginLoader::class)->getPluginDirectories() as $slug => $pluginDir) {
+                    $skillsRoot = $pluginDir . '/skills';
+                    if (is_dir($skillsRoot)) {
+                        $roots[] = ['path' => $skillsRoot, 'source' => $slug];
+                    }
+                }
+
+                return new SkillScanner($roots);
+            },
 
             AgentTemplateImporter::class => static function (ContainerInterface $c): AgentTemplateImporter {
                 return new AgentTemplateImporter(
