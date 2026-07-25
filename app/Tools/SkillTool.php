@@ -48,12 +48,14 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'multi-select',
     description: 'Skills the agent may load. The LLM sees the name and short description of each in the tool definition.',
     required: true,
-    // 'skill' is a new branch on the multi-select resolver. The current
-    // ToolConfigSchemaInspector hardcodes multi-select values to int[] and
-    // resolves them against the Agent model — that path would silently mangle
-    // skill slugs to "#0". 'agent' is the default; declaring 'skill' here
-    // tells the inspector to store string[] slugs and resolve them against
-    // the SkillScanner to "name: short description" strings for LLM output.
+    // resolveAs selects how the inspector resolves the selected slugs:
+    //   'agent' (default) — Agent ids; the inspector coerces each value to int
+    //     and looks up the matching Agent for the LLM-facing projection.
+    //   'skill'           — Skill names; the inspector resolves each string
+    //     against the SkillScanner snapshot to "name: short description".
+    //   'raw'             — passthrough; the value is emitted verbatim.
+    // 'skill' here stores string[] slugs (not int[]) and feeds them to the
+    // SkillScanner so the LLM sees "name: short description" pairs.
     resolveAs: 'skill',
     // Frontend multi-select data source — the admin UI fetches the
     // available skills from this endpoint and renders them as options.

@@ -175,20 +175,24 @@ final class PluginLoader
     }
 
     /**
-     * All skill directory paths contributed by loaded plugins. Mirrors
-     * {@see agentTemplatePaths()}; the scanner aggregates these alongside
-     * the project-level and framework-bundled skill roots from
-     * {@see \Spora\Core\Paths::skillsPaths()}.
+     * All skill directory roots contributed by loaded plugins, paired with
+     * the contributing plugin's slug. Mirrors {@see agentTemplatePaths()};
+     * the scanner aggregates these alongside the project-level and
+     * framework-bundled skill roots from {@see \Spora\Core\Paths::skillsPaths()}.
      *
-     * @return string[]
+     * The `source` label is what {@see \Spora\Core\Skills\SkillScanner} uses
+     * to bucket same-named skills (project wins over framework wins over
+     * plugin) and to tag the resulting {@see \Spora\Core\Skills\Skill} objects.
+     *
+     * @return list<array{path: string, source: string}>
      */
     public function skillPaths(): array
     {
         $paths = [];
 
-        foreach ($this->plugins as $plugin) {
+        foreach ($this->plugins as $slug => $plugin) {
             foreach ($plugin->skillPaths() as $path) {
-                $paths[] = $path;
+                $paths[] = ['path' => $path, 'source' => $slug];
             }
         }
 

@@ -55,18 +55,18 @@ test('normalizeMultiSelectValues with resolveAs=skill coerces to string[] of val
     expect($normalized['allowed_skills'])->toBe(['git', '42', 'weather']);
 });
 
-test('normalizeMultiSelectValues with resolveAs=raw passes through', function (): void {
+test('normalizeMultiSelectValues with resolveAs=agent (HandoverTool default) coerces to int[]', function (): void {
     $inspector = new ToolConfigSchemaInspector();
 
-    // No current Tool has resolveAs='raw' — the SkillScanner is the only
-    // multi-select user; we synthesise a fictional tool class by directly
-    // testing the normalizeRawList path via the JSON-encoded input.
+    // resolveAs defaults to 'agent' on HandoverTool; strings round-trip through
+    // int casting. The `raw` branch is reserved for tools that explicitly
+    // declare resolveAs='raw' — none currently do, so it is covered separately
+    // by the SkillTool inspector tests below.
     $normalized = $inspector->normalizeMultiSelectValues(
         Spora\Tools\HandoverTool::class,
         ['allowed_target_agents' => ['5', '1']],
     );
 
-    // resolveAs defaults to 'agent', so this still coerces to int[].
     expect($normalized['allowed_target_agents'])->toBe([5, 1]);
 });
 

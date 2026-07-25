@@ -39,7 +39,18 @@ final class ToolConfigSchemaInspector
     private readonly array $skillsByName;
 
     /**
-     * @param array<string, Skill> $skillsByName
+     * @param array<string, Skill> $skillsByName Skill name → Skill map used to
+     *                                             resolve `resolveAs: 'skill'`
+     *                                             multi-select settings. The
+     *                                             inspector is constructed
+     *                                             once per request lifetime
+     *                                             with a snapshot of available
+     *                                             skills; long-running workers
+     *                                             (SSE / queue listeners) must
+     *                                             rebuild via
+     *                                             {@see ToolConfigService::reload()}
+     *                                             or accept the snapshot's
+     *                                             staleness window.
      */
     public function __construct(array $skillsByName = [])
     {

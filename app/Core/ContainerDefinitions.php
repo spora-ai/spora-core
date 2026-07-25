@@ -1198,13 +1198,12 @@ final class ContainerDefinitions
                     $roots[] = ['path' => $framework, 'source' => 'core'];
                 }
 
-                // PluginLoader::skillPaths() returns paths in slug-iteration
-                // order. We don't have direct slug->path mapping; rebuild
-                // it from the loader's plugin directory map.
-                foreach ($c->get(PluginLoader::class)->getPluginDirectories() as $slug => $pluginDir) {
-                    $skillsRoot = $pluginDir . '/skills';
-                    if (is_dir($skillsRoot)) {
-                        $roots[] = ['path' => $skillsRoot, 'source' => $slug];
+                // PluginLoader::skillPaths() already returns each plugin's
+                // skills root paired with the contributing slug, so the
+                // scanner can bucket same-named skills by source label.
+                foreach ($c->get(PluginLoader::class)->skillPaths() as $root) {
+                    if (is_dir($root['path'])) {
+                        $roots[] = $root;
                     }
                 }
 
