@@ -132,17 +132,24 @@ final class SkillTool extends AbstractTool
     private function resolveAndAuthorize(array $arguments, int $agentId, ?int $userId): Skill|ToolResult
     {
         $name = strtolower(trim((string) ($arguments['name'] ?? '')));
+        $authError = $this->authorizationErrorFor($name, $agentId, $userId);
+        if ($authError !== null) {
+            return $authError;
+        }
+
+        $skill = $this->findSkill($name);
+        return $skill ?? new ToolResult(false, "Skill '{$name}' is not currently available on disk.");
+    }
+
+    private function authorizationErrorFor(string $name, int $agentId, ?int $userId): ?ToolResult
+    {
         if ($name === '') {
             return new ToolResult(false, 'name is required.');
         }
         if (!$this->isSkillAllowed($name, $agentId, $userId)) {
             return new ToolResult(false, "Skill '{$name}' is not in the allowed_skills list for this agent.");
         }
-        $skill = $this->findSkill($name);
-        if ($skill === null) {
-            return new ToolResult(false, "Skill '{$name}' is not currently available on disk.");
-        }
-        return $skill;
+        return null;
     }
 
     private function isSkillAllowed(string $name, int $agentId, ?int $userId): bool
@@ -177,7 +184,7 @@ final class SkillTool extends AbstractTool
         if ($resolved instanceof ToolResult) {
             return $resolved;
         }
-        [$absolute, $sanitized, $contents] = $resolved;
+        [, $sanitized, $contents] = $resolved;
 
         // SKILL.md frontmatter is stripped — the LLM already saw
         // name+description in the tool definition (Stage 1).
@@ -214,20 +221,50 @@ final class SkillTool extends AbstractTool
             );
         }
 
+        $pathResult = $this->resolveAndValidatePath($skill, $sanitized);
+        if ($pathResult instanceof ToolResult) {
+            return $pathResult;
+        }
+        [$absolute, $real] = $pathResult;
+
+        $contents = $this->readContentsAt($real, $sanitized, $skill->name());
+        if ($contents instanceof ToolResult) {
+            return $contents;
+        }
+
+        return [$absolute, $sanitized, $contents];
+    }
+
+    /**
+     * Resolve the skill-relative path to an absolute + realpath pair, or
+     * return a failure ToolResult. Defense-in-depth containment check
+     * (realpath inside the skill dir) lives here.
+     *
+     * @return array{0: string, 1: string}|ToolResult  [absolute, realpath]
+     */
+    private function resolveAndValidatePath(Skill $skill, string $sanitized): array|ToolResult
+    {
         try {
             $absolute = $skill->resolveFilePath($sanitized);
         } catch (\Spora\Skills\Exceptions\SkillNotFoundException) {
             return new ToolResult(false, "File '{$sanitized}' is not part of skill '{$skill->name()}'.");
         }
 
-        // Defense in depth: re-check realpath containment in case the
-        // on-disk layout changed between scan() and read().
         $real = realpath($absolute);
         $rootReal = realpath($skill->dir());
         if ($real === false || $rootReal === false || !str_starts_with($real, $rootReal . DIRECTORY_SEPARATOR)) {
             return new ToolResult(false, "File '{$sanitized}' is not part of skill '{$skill->name()}'.");
         }
 
+        return [$absolute, $real];
+    }
+
+    /**
+     * stat-size-cap and read the contents at $real; returns the contents
+     * string on success or a failure ToolResult.
+     */
+    private function readContentsAt(string $real, string $sanitized, string $skillName): string|ToolResult
+    {
         $size = @filesize($real);
         if ($size === false) {
             return new ToolResult(false, "Could not stat '{$sanitized}'.");
@@ -243,7 +280,8 @@ final class SkillTool extends AbstractTool
         if ($contents === false) {
             return new ToolResult(false, "Could not read '{$sanitized}'.");
         }
-        return [$absolute, $sanitized, $contents];
+
+        return $contents;
     }
 
     private function doFiles(Skill $skill): ToolResult
@@ -328,6 +366,18 @@ final class SkillTool extends AbstractTool
         if (!str_starts_with($contents, '---')) {
             return null;
         }
+
+        $body = $this->bodyAfterClosingDelimiter($contents);
+        return $body === null ? null : ltrim($body, "\n\r");
+    }
+
+    /**
+     * Everything after the closing `---` line, or null when the closing
+     * delimiter is missing. Used by {@see findFrontmatterBody()}; split
+     * out so that method stays at the S1142 3-return ceiling.
+     */
+    private function bodyAfterClosingDelimiter(string $contents): ?string
+    {
         $rest = substr($contents, 3);
         $newlinePos = strpos($rest, "\n");
         if ($newlinePos === false) {
@@ -338,7 +388,7 @@ final class SkillTool extends AbstractTool
         if ($closePos === false) {
             return null;
         }
-        $afterClose = substr($afterFirst, $closePos + 4);
-        return ltrim($afterClose, "\n\r");
+
+        return substr($afterFirst, $closePos + 4);
     }
 }

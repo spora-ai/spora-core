@@ -247,21 +247,36 @@ final class SkillScanner
             return null;
         }
 
-        $afterOpen = substr($contents, 3);
-        $newlinePos = strpos($afterOpen, "\n");
+        $body = $this->bodyAfterClosingDelimiter($contents);
+        if ($body === null) {
+            return null;
+        }
+
+        $bodyStart = strpos($contents, "\n---");
+        $yamlBlock = substr($contents, 3, $bodyStart - 3);
+        return [$yamlBlock, ltrim($body, "\n\r")];
+    }
+
+    /**
+     * Extract everything after the closing `---` frontmatter line, or null
+     * when the closing delimiter is missing. Used by
+     * {@see locateFrontmatterBounds()}; split out so that method stays
+     * at the S1142 3-return ceiling.
+     */
+    private function bodyAfterClosingDelimiter(string $contents): ?string
+    {
+        $rest = substr($contents, 3);
+        $newlinePos = strpos($rest, "\n");
         if ($newlinePos === false) {
             return null;
         }
-        $afterFirstNewline = substr($afterOpen, $newlinePos + 1);
+        $afterFirstNewline = substr($rest, $newlinePos + 1);
         $closePos = strpos($afterFirstNewline, "\n---");
         if ($closePos === false) {
             return null;
         }
 
-        $yamlBlock = substr($afterFirstNewline, 0, $closePos);
-        $afterClose = substr($afterFirstNewline, $closePos + 4);
-
-        return [$yamlBlock, ltrim($afterClose, "\n\r")];
+        return substr($afterFirstNewline, $closePos + 4);
     }
 
     /**
