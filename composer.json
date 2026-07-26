@@ -32,7 +32,6 @@
         "php-di/php-di": "^7.1",
         "psr/log": "^3.0",
         "spora-ai/installer": "^1.1",
-        "spora-ai/spora-plugin-tavily": "^0.3.2",
         "symfony/console": "^8.0",
         "symfony/http-client": "^8.0",
         "symfony/http-foundation": "^8.0",
