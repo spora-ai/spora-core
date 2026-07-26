@@ -181,7 +181,7 @@ final class SkillTool extends AbstractTool
         if ($resolved instanceof ToolResult) {
             return $resolved;
         }
-        [, $sanitized, $contents] = $resolved;
+        [$sanitized, $contents] = $resolved;
 
         // SKILL.md frontmatter is stripped — the LLM already saw
         // name+description in the tool definition (Stage 1).
@@ -202,10 +202,10 @@ final class SkillTool extends AbstractTool
 
     /**
      * Locate, sanitise, contain, stat-size-cap, and read the requested
-     * file. Returns a [absolute, sanitised, contents] tuple on success
-     * or a failure ToolResult.
+     * file. Returns a [sanitised, contents] tuple on success or a
+     * failure ToolResult.
      *
-     * @return array{0: string, 1: string, 2: string}|ToolResult
+     * @return array{0: string, 1: string}|ToolResult
      */
     private function resolveReadableFile(Skill $skill, string $filename): array|ToolResult
     {
@@ -217,22 +217,21 @@ final class SkillTool extends AbstractTool
             );
         }
 
-        $pathResult = $this->resolveAndValidatePath($skill, $sanitized);
-        if ($pathResult instanceof ToolResult) {
-            return $pathResult;
+        $real = $this->resolveAndValidatePath($skill, $sanitized);
+        if ($real instanceof ToolResult) {
+            return $real;
         }
 
-        return $this->readAndAssemble($pathResult, $sanitized);
+        $contents = $this->readContentsAt($real, $sanitized);
+        return $contents instanceof ToolResult ? $contents : [$sanitized, $contents];
     }
 
     /**
-     * Resolve the skill-relative path to an absolute + realpath pair, or
-     * return a failure ToolResult. Defense-in-depth containment check
-     * (realpath inside the skill dir) lives here.
-     *
-     * @return array{0: string, 1: string}|ToolResult  [absolute, realpath]
+     * Resolve the skill-relative path to its realpath on disk, or return
+     * a failure ToolResult. Defense-in-depth containment check (realpath
+     * inside the skill dir) lives here.
      */
-    private function resolveAndValidatePath(Skill $skill, string $sanitized): array|ToolResult
+    private function resolveAndValidatePath(Skill $skill, string $sanitized): string|ToolResult
     {
         try {
             $absolute = $skill->resolveFilePath($sanitized);
@@ -246,17 +245,7 @@ final class SkillTool extends AbstractTool
             return new ToolResult(false, "File '{$sanitized}' is not part of skill '{$skill->name()}'.");
         }
 
-        return [$absolute, $real];
-    }
-
-    /**
-     * @param array{0: string, 1: string} $pathResult  [absolute, realpath]
-     */
-    private function readAndAssemble(array $pathResult, string $sanitized): array|ToolResult
-    {
-        [$absolute, $real] = $pathResult;
-        $contents = $this->readContentsAt($real, $sanitized);
-        return $contents instanceof ToolResult ? $contents : [$absolute, $sanitized, $contents];
+        return $real;
     }
 
     private function readContentsAt(string $real, string $sanitized): string|ToolResult

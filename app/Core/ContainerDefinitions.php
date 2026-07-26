@@ -1188,6 +1188,10 @@ final class ContainerDefinitions
 
                 $roots = [];
 
+                // First two roots (project + framework) come from the centralised
+                // Paths helper — the same one AgentTemplateScanner uses for its
+                // priority order. Plugin roots are appended below; their
+                // `source` label is the contributing plugin's slug.
                 $project = $paths->base('skills');
                 if (is_dir($project)) {
                     $roots[] = ['path' => $project, 'source' => 'project'];

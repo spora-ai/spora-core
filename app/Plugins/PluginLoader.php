@@ -180,9 +180,9 @@ final class PluginLoader
      * the scanner aggregates these alongside the project-level and
      * framework-bundled skill roots from {@see \Spora\Core\Paths::skillsPaths()}.
      *
-     * The `source` label is what {@see \Spora\Core\Skills\SkillScanner} uses
+     * The `source` label is what {@see \Spora\Skills\SkillScanner} uses
      * to bucket same-named skills (project wins over framework wins over
-     * plugin) and to tag the resulting {@see \Spora\Core\Skills\Skill} objects.
+     * plugin) and to tag the resulting {@see \Spora\Skills\Skill} objects.
      *
      * @return list<array{path: string, source: string}>
      */

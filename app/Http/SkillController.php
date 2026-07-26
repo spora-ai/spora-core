@@ -47,7 +47,10 @@ final class SkillController
             return $this->unauthenticated();
         }
 
-        $slug = (string) $request->attributes->get('slug', '');
+        // Skill names are case-insensitive (SkillTool::resolveAndAuthorize
+        // lowercases+trims the LLM's choice); mirror the same normalisation
+        // here so /api/v1/skills/Git and /api/v1/skills/git are equivalent.
+        $slug = strtolower(trim((string) $request->attributes->get('slug', '')));
 
         foreach ($this->scanner->scan() as $skill) {
             if ($skill->name() === $slug) {
