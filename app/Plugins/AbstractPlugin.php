@@ -6,6 +6,7 @@ namespace Spora\Plugins;
 
 use DI\ContainerBuilder;
 use ReflectionClass;
+use RuntimeException;
 use Spora\Core\MiddlewareRouteCollector;
 
 /**
@@ -37,6 +38,44 @@ use Spora\Core\MiddlewareRouteCollector;
  */
 abstract class AbstractPlugin implements PluginInterface
 {
+    /**
+     * Absolute path of the directory containing this plugin's `plugin.json`
+     * manifest. {@see PluginLoader::instantiatePlugin()} populates it on
+     * boot; tests / direct instantiation may pass `null`, in which case
+     * {@see pluginDir()} falls back to the parent of the entry-point file.
+     */
+    private readonly ?string $pluginDirPath;
+
+    public function __construct(?string $pluginDir = null)
+    {
+        $this->pluginDirPath = $pluginDir;
+    }
+
+    /**
+     * Absolute path to this plugin's root directory (the directory holding
+     * `plugin.json`). Use this to build paths under the plugin without
+     * reaching for `ReflectionClass` — e.g. `$this->pluginDir() . '/skills'`.
+     */
+    protected function pluginDir(): string
+    {
+        if ($this->pluginDirPath !== null) {
+            return $this->pluginDirPath;
+        }
+
+        // Fallback for direct instantiation (tests, fixtures): derive from
+        // the entry-point file location. Plugin.php lives at <root>/src/Plugin.php
+        // per the installer's PSR-4 convention, so go up one level.
+        $file = (new ReflectionClass($this))->getFileName();
+        if ($file === false) {
+            throw new RuntimeException(sprintf(
+                'Cannot resolve plugin directory for %s: not instantiated by PluginLoader and the entry-point file is unknown.',
+                static::class,
+            ));
+        }
+
+        return \dirname($file) . '/..';
+    }
+
     /**
      * Default name: the unqualified class name with a trailing "Plugin" suffix
      * stripped (e.g. SkeletonPlugin → "Skeleton"). Subclasses should override

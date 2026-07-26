@@ -111,3 +111,39 @@ test('routes() is a no-op (accepts a route collector, does not throw)', function
 test('boot() is a no-op', function (): void {
     expect(fn() => (new DemoPlugin())->boot())->not->toThrow(Throwable::class);
 });
+
+test('pluginDir() returns the path passed to the constructor (PluginLoader case)', function (): void {
+    $exposed = new class ('/var/www/plugins/demo') extends AbstractPlugin {
+        public function __construct(private readonly string $testDir)
+        {
+            parent::__construct($testDir);
+        }
+
+        public function exposePluginDir(): string
+        {
+            return $this->pluginDir();
+        }
+    };
+
+    expect($exposed->exposePluginDir())->toBe('/var/www/plugins/demo');
+});
+
+test('pluginDir() falls back to the parent of the entry-point file when no constructor arg is supplied', function (): void {
+    // Create a real subclass that lives in this test file. Its
+    // ReflectionClass::getFileName() will point here, so the fallback
+    // path resolves to the parent dir of tests/Unit/Plugins/AbstractPluginTest.php.
+    $exposed = new class extends AbstractPlugin {
+        public function exposePluginDir(): string
+        {
+            return $this->pluginDir();
+        }
+    };
+
+    // The literal fallback is `<test_dir>/..` — assert it's a non-empty
+    // string and that realpath() collapses it to a directory under
+    // tests/Unit/Plugins. We don't pin to an exact suffix so the test
+    // stays portable across CI machines.
+    $resolved = realpath($exposed->exposePluginDir());
+    expect($resolved)->not->toBeFalse();
+    expect($resolved)->toEndWith('tests' . DIRECTORY_SEPARATOR . 'Unit');
+});
