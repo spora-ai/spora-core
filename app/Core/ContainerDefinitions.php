@@ -1180,9 +1180,9 @@ final class ContainerDefinitions
             AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
 
             // Skills are scanned in priority order: project, then framework,
-            // then each plugin. The `source` label attached to each root is
-            // what SkillScanner uses to bucket same-named skills and to tag
-            // the resulting Skill objects.
+            // then each plugin. The `source` label on each root is what
+            // SkillScanner uses to bucket same-named skills (see
+            // {@see SkillScanner::scan()}) and to tag the resulting Skill objects.
             SkillScanner::class => static function (ContainerInterface $c): SkillScanner {
                 $paths = $c->get(Paths::class);
 
@@ -1198,9 +1198,6 @@ final class ContainerDefinitions
                     $roots[] = ['path' => $framework, 'source' => 'core'];
                 }
 
-                // PluginLoader::skillPaths() already returns each plugin's
-                // skills root paired with the contributing slug, so the
-                // scanner can bucket same-named skills by source label.
                 foreach ($c->get(PluginLoader::class)->skillPaths() as $root) {
                     if (is_dir($root['path'])) {
                         $roots[] = $root;

@@ -16,11 +16,9 @@ use Spora\Tools\ValueObjects\ToolResult;
 /**
  * Lets the LLM list the files in a skill, or read one of its files.
  *
- * Activated per Agent via the same `Tool` / `ToolSetting` machinery as
- * every other tool; the `allowed_skills` multi-select (exposed to the
- * LLM via `exposeToLlm: true`, resolved via the new `resolveAs: 'skill'`
- * branch in {@see \Spora\Services\ToolConfigSchemaInspector}) is the
- * per-agent allowlist.
+ * Per-agent allowlist is the `allowed_skills` multi-select
+ * (`exposeToLlm: true`, `resolveAs: 'skill'` — resolved to
+ * "name: short description" pairs via {@see \Spora\Services\ToolConfigSchemaInspector}).
  *
  * Operations (selected via the `action` discriminator):
  *   - 'read'  — return the body of one file (default `SKILL.md`); for
@@ -124,8 +122,7 @@ final class SkillTool extends AbstractTool
 
     /**
      * Validate `name` (non-empty, in allowed_skills, on disk) and return
-     * the resolved Skill, or a failure ToolResult. Extracted from
-     * {@see execute()} so the dispatch method stays at 3 returns.
+     * the resolved Skill, or a failure ToolResult.
      *
      * @param array<string, mixed> $arguments
      */
@@ -206,8 +203,7 @@ final class SkillTool extends AbstractTool
     /**
      * Locate, sanitise, contain, stat-size-cap, and read the requested
      * file. Returns a [absolute, sanitised, contents] tuple on success
-     * or a failure ToolResult. Extracted from {@see doRead()} so that
-     * method stays at the 3-return ceiling.
+     * or a failure ToolResult.
      *
      * @return array{0: string, 1: string, 2: string}|ToolResult
      */
@@ -263,10 +259,6 @@ final class SkillTool extends AbstractTool
         return $contents instanceof ToolResult ? $contents : [$absolute, $sanitized, $contents];
     }
 
-    /**
-     * stat-size-cap and read the contents at $real; returns the contents
-     * string on success or a failure ToolResult.
-     */
     private function readContentsAt(string $real, string $sanitized): string|ToolResult
     {
         $sizeError = $this->sizeCapErrorFor($real, $sanitized);
@@ -369,7 +361,7 @@ final class SkillTool extends AbstractTool
      * Locate the body text after the closing frontmatter `---` line.
      * Returns null when the file is missing one or both delimiters, in
      * which case {@see stripFrontmatter()} falls back to the original
-     * contents verbatim. Extracted so the stripper stays at 3 returns.
+     * contents verbatim.
      */
     private function findFrontmatterBody(string $contents): ?string
     {
@@ -384,8 +376,7 @@ final class SkillTool extends AbstractTool
 
     /**
      * Everything after the closing `---` line, or null when the closing
-     * delimiter is missing. Used by {@see findFrontmatterBody()}; split
-     * out so that method stays at the S1142 3-return ceiling.
+     * delimiter is missing.
      */
     private function bodyAfterClosingDelimiter(string $contents): ?string
     {

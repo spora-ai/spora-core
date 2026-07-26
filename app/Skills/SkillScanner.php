@@ -37,7 +37,7 @@ final class SkillScanner
     /**
      * Canonical entry file inside a skill directory. Kept as a constant
      * so the scanner, the Skill tool, and any future consumers agree on
-     * the filename (SonarCloud php:S1192 — duplicated literal).
+     * the filename.
      */
     public const SKILL_FILE = 'SKILL.md';
 
@@ -142,10 +142,8 @@ final class SkillScanner
     /**
      * Parse + validate one skill directory's SKILL.md, returning a single
      * result structure: either a populated Skill (via the inner `error`
-     * key being null) or a Skill error placeholder. Extracted from
-     * {@see loadSkill()} so the dispatch stays below the S1142 3-return
-     * ceiling; this method is the only place that knows the specific
-     * parse / validate / warn ordering.
+     * key being null) or a Skill error placeholder. Owns the
+     * parse → validate → warn ordering.
      *
      * @return array{
      *   error: ?Skill,
@@ -259,9 +257,7 @@ final class SkillScanner
 
     /**
      * Extract everything after the closing `---` frontmatter line, or null
-     * when the closing delimiter is missing. Used by
-     * {@see locateFrontmatterBounds()}; split out so that method stays
-     * at the S1142 3-return ceiling.
+     * when the closing delimiter is missing.
      */
     private function bodyAfterClosingDelimiter(string $contents): ?string
     {

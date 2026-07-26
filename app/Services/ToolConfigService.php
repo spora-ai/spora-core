@@ -54,8 +54,7 @@ class ToolConfigService implements ToolConfigServiceInterface
         if ($skillScanner !== null) {
             // Index the scanner's result by skill name so the inspector can
             // resolve multi-select `allowed_skills` slugs to {name, description}
-            // pairs without re-scanning. The inline map keeps the public method
-            // count at the S1448 ceiling (20).
+            // pairs without re-scanning.
             foreach ($skillScanner->scan() as $skill) {
                 $skillsByName[$skill->name()] = $skill;
             }

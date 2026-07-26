@@ -11,17 +11,9 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
- * Skill endpoints:
- *
- * - GET   /api/v1/skills             list discovered skills (powers the
- *                                    Skill tool's `allowed_skills` multi-
- *                                    select `dataSource`).
- * - GET   /api/v1/skills/{slug}      one skill, full `files` listing +
- *                                    raw SKILL.md body for the admin
- *                                    UI's skill-detail view.
- *
- * Both behind AuthMiddleware + CsrfMiddleware (same as the other
- * read-only browsing endpoints).
+ * Skill browsing endpoints powering the Skill tool's `allowed_skills`
+ * multi-select (via GET /api/v1/skills → data_source) and the admin
+ * UI's skill-detail view (via GET /api/v1/skills/{slug}).
  */
 final class SkillController
 {
@@ -33,9 +25,6 @@ final class SkillController
         private readonly SkillScanner $scanner,
     ) {}
 
-    /**
-     * GET /api/v1/skills
-     */
     public function index(): JsonResponse
     {
         $userId = $this->auth->currentUserId();
@@ -51,9 +40,6 @@ final class SkillController
         return new JsonResponse(['data' => ['skills' => $summaries]]);
     }
 
-    /**
-     * GET /api/v1/skills/{slug}
-     */
     public function show(Request $request): JsonResponse
     {
         $userId = $this->auth->currentUserId();

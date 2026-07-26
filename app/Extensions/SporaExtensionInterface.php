@@ -69,8 +69,7 @@ interface SporaExtensionInterface
      * Absolute paths to directories containing skills this extension ships.
      * Each directory's immediate subdirectories are skill roots — they
      * must contain a SKILL.md file with YAML frontmatter. See
-     * {@see \Spora\Skills\SkillScanner} for the on-disk contract and
-     * spora-workspace/plans/skills.md for the design.
+     * {@see \Spora\Skills\SkillScanner} for the on-disk contract.
      *
      * @return string[]
      */
