@@ -48,17 +48,9 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'multi-select',
     description: 'Skills the agent may load. The LLM sees the name and short description of each in the tool definition.',
     required: true,
-    // resolveAs selects how the inspector resolves the selected slugs:
-    //   'agent' (default) — Agent ids; the inspector coerces each value to int
-    //     and looks up the matching Agent for the LLM-facing projection.
-    //   'skill'           — Skill names; the inspector resolves each string
-    //     against the SkillScanner snapshot to "name: short description".
-    //   'raw'             — passthrough; the value is emitted verbatim.
-    // 'skill' here stores string[] slugs (not int[]) and feeds them to the
-    // SkillScanner so the LLM sees "name: short description" pairs.
+    // 'skill' stores string[] slugs and resolves them via the SkillScanner
+    // to "name: short description" pairs for the LLM-facing projection.
     resolveAs: 'skill',
-    // Frontend multi-select data source — the admin UI fetches the
-    // available skills from this endpoint and renders them as options.
     dataSource: '/api/v1/skills?select=name,description',
     exposeToLlm: true,
 )]
@@ -187,10 +179,8 @@ final class SkillTool extends AbstractTool
         }
         [$absolute, $sanitized, $contents] = $resolved;
 
-        // SKILL.md gets its frontmatter stripped: the LLM has already
-        // seen `name` + `description` in the tool definition (Stage 1
-        // of progressive disclosure) and the body is the only part it
-        // has not read yet. Other files are returned verbatim.
+        // SKILL.md frontmatter is stripped — the LLM already saw
+        // name+description in the tool definition (Stage 1).
         $body = $sanitized === self::SKILL_ENTRY_FILE
             ? $this->stripFrontmatter($contents)
             : $contents;
@@ -230,9 +220,8 @@ final class SkillTool extends AbstractTool
             return new ToolResult(false, "File '{$sanitized}' is not part of skill '{$skill->name()}'.");
         }
 
-        // Defense in depth: re-check realpath containment after the
-        // listing check, in case the on-disk layout changes between
-        // scan() and read().
+        // Defense in depth: re-check realpath containment in case the
+        // on-disk layout changed between scan() and read().
         $real = realpath($absolute);
         $rootReal = realpath($skill->dir());
         if ($real === false || $rootReal === false || !str_starts_with($real, $rootReal . DIRECTORY_SEPARATOR)) {

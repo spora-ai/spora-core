@@ -38,12 +38,6 @@ use Spora\Core\MiddlewareRouteCollector;
  */
 abstract class AbstractPlugin implements PluginInterface
 {
-    /**
-     * Absolute path of the directory containing this plugin's `plugin.json`
-     * manifest. {@see PluginLoader::instantiatePlugin()} populates it on
-     * boot; tests / direct instantiation may pass `null`, in which case
-     * {@see pluginDir()} falls back to the parent of the entry-point file.
-     */
     private readonly ?string $pluginDirPath;
 
     public function __construct(?string $pluginDir = null)
@@ -52,9 +46,9 @@ abstract class AbstractPlugin implements PluginInterface
     }
 
     /**
-     * Absolute path to this plugin's root directory (the directory holding
-     * `plugin.json`). Use this to build paths under the plugin without
-     * reaching for `ReflectionClass` — e.g. `$this->pluginDir() . '/skills'`.
+     * Absolute path to this plugin's root (the directory holding `plugin.json`).
+     * Falls back to `<entry-point dir>/..` for direct instantiation outside
+     * {@see PluginLoader}.
      */
     protected function pluginDir(): string
     {
@@ -62,9 +56,6 @@ abstract class AbstractPlugin implements PluginInterface
             return $this->pluginDirPath;
         }
 
-        // Fallback for direct instantiation (tests, fixtures): derive from
-        // the entry-point file location. Plugin.php lives at <root>/src/Plugin.php
-        // per the installer's PSR-4 convention, so go up one level.
         $file = (new ReflectionClass($this))->getFileName();
         if ($file === false) {
             throw new RuntimeException(sprintf(
