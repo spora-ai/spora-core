@@ -225,14 +225,8 @@ final class SkillTool extends AbstractTool
         if ($pathResult instanceof ToolResult) {
             return $pathResult;
         }
-        [$absolute, $real] = $pathResult;
 
-        $contents = $this->readContentsAt($real, $sanitized, $skill->name());
-        if ($contents instanceof ToolResult) {
-            return $contents;
-        }
-
-        return [$absolute, $sanitized, $contents];
+        return $this->readAndAssemble($pathResult, $sanitized);
     }
 
     /**
@@ -260,10 +254,33 @@ final class SkillTool extends AbstractTool
     }
 
     /**
+     * @param array{0: string, 1: string} $pathResult  [absolute, realpath]
+     */
+    private function readAndAssemble(array $pathResult, string $sanitized): array|ToolResult
+    {
+        [$absolute, $real] = $pathResult;
+        $contents = $this->readContentsAt($real, $sanitized);
+        return $contents instanceof ToolResult ? $contents : [$absolute, $sanitized, $contents];
+    }
+
+    /**
      * stat-size-cap and read the contents at $real; returns the contents
      * string on success or a failure ToolResult.
      */
-    private function readContentsAt(string $real, string $sanitized, string $skillName): string|ToolResult
+    private function readContentsAt(string $real, string $sanitized): string|ToolResult
+    {
+        $sizeError = $this->sizeCapErrorFor($real, $sanitized);
+        if ($sizeError !== null) {
+            return $sizeError;
+        }
+
+        $contents = @file_get_contents($real);
+        return $contents === false
+            ? new ToolResult(false, "Could not read '{$sanitized}'.")
+            : $contents;
+    }
+
+    private function sizeCapErrorFor(string $real, string $sanitized): ?ToolResult
     {
         $size = @filesize($real);
         if ($size === false) {
@@ -275,13 +292,7 @@ final class SkillTool extends AbstractTool
                 "File '{$sanitized}' is {$size} bytes; skill_read is capped at " . self::FILE_SIZE_HARD_LIMIT . ' bytes.',
             );
         }
-
-        $contents = @file_get_contents($real);
-        if ($contents === false) {
-            return new ToolResult(false, "Could not read '{$sanitized}'.");
-        }
-
-        return $contents;
+        return null;
     }
 
     private function doFiles(Skill $skill): ToolResult
