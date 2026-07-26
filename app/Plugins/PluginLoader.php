@@ -702,7 +702,7 @@ final class PluginLoader
         }
 
         /** @var PluginInterface $plugin */
-        $plugin = new $fqcn($pluginDir);
+        $plugin = new $fqcn();
 
         if ($classLoader !== null) {
             foreach ($plugin->autoload() as $namespace => $path) {

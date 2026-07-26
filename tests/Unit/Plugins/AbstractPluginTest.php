@@ -111,32 +111,3 @@ test('routes() is a no-op (accepts a route collector, does not throw)', function
 test('boot() is a no-op', function (): void {
     expect(fn() => (new DemoPlugin())->boot())->not->toThrow(Throwable::class);
 });
-
-test('pluginDir() returns the constructor arg (PluginLoader case)', function (): void {
-    $exposed = new class ('/var/www/plugins/demo') extends AbstractPlugin {
-        public function __construct(private readonly string $testDir)
-        {
-            parent::__construct($testDir);
-        }
-
-        public function exposePluginDir(): string
-        {
-            return $this->pluginDir();
-        }
-    };
-
-    expect($exposed->exposePluginDir())->toBe('/var/www/plugins/demo');
-});
-
-test('pluginDir() falls back to <entry-point>/.. when no constructor arg is supplied', function (): void {
-    $exposed = new class extends AbstractPlugin {
-        public function exposePluginDir(): string
-        {
-            return $this->pluginDir();
-        }
-    };
-
-    $resolved = realpath($exposed->exposePluginDir());
-    expect($resolved)->not->toBeFalse()
-        ->and($resolved)->toEndWith('tests' . DIRECTORY_SEPARATOR . 'Unit');
-});

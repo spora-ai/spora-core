@@ -6,7 +6,6 @@ namespace Spora\Plugins;
 
 use DI\ContainerBuilder;
 use ReflectionClass;
-use RuntimeException;
 use Spora\Core\MiddlewareRouteCollector;
 
 /**
@@ -38,35 +37,6 @@ use Spora\Core\MiddlewareRouteCollector;
  */
 abstract class AbstractPlugin implements PluginInterface
 {
-    private readonly ?string $pluginDirPath;
-
-    public function __construct(?string $pluginDir = null)
-    {
-        $this->pluginDirPath = $pluginDir;
-    }
-
-    /**
-     * Absolute path to this plugin's root (the directory holding `plugin.json`).
-     * Falls back to `<entry-point dir>/..` for direct instantiation outside
-     * {@see PluginLoader}.
-     */
-    protected function pluginDir(): string
-    {
-        if ($this->pluginDirPath !== null) {
-            return $this->pluginDirPath;
-        }
-
-        $file = (new ReflectionClass($this))->getFileName();
-        if ($file === false) {
-            throw new RuntimeException(sprintf(
-                'Cannot resolve plugin directory for %s: not instantiated by PluginLoader and the entry-point file is unknown.',
-                static::class,
-            ));
-        }
-
-        return \dirname($file) . '/..';
-    }
-
     /**
      * Default name: the unqualified class name with a trailing "Plugin" suffix
      * stripped (e.g. SkeletonPlugin → "Skeleton"). Subclasses should override
