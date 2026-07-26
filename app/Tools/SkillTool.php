@@ -48,8 +48,10 @@ use Spora\Tools\ValueObjects\ToolResult;
     required: true,
     // 'skill' stores string[] slugs and resolves them via the SkillScanner
     // to "name: short description" pairs for the LLM-facing projection.
+    // Path is relative to /api/v1 (the api client prepends it); an absolute
+    // path here would double up to `/api/v1/api/v1/skills` and 404.
     resolveAs: 'skill',
-    dataSource: '/api/v1/skills?select=name,description',
+    dataSource: '/skills?select=name,description',
     exposeToLlm: true,
 )]
 #[ToolOperation(
