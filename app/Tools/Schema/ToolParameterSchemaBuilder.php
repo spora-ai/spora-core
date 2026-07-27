@@ -12,21 +12,29 @@ use Spora\Tools\Exceptions\ToolParameterSchemaException;
 use stdClass;
 
 /**
- * Builds a JSON Schema `parameters` object for a tool from its #[ToolParameter]
- * and #[ToolOperation] attributes via reflection.
+ * Builds the JSON Schema "parameters" object from a tool's `#[ToolParameter]`
+ * and `#[ToolOperation]` attributes via reflection.
  *
  * Used by HasParameterSchema (and AbstractTool, which composes the trait) to
  * satisfy ToolInterface::getParametersSchema() without each tool hand-rolling
  * the schema literal.
  *
- * The synthesized property — generated when the tool has #[ToolOperation]
+ * The synthesized property — generated when the tool has `#[ToolOperation]`
  * declarations — uses the first operation's `discriminatorKey` as the property
- * name (default 'action') and lists every declared operation in the `enum`.
- * Tool authors must not also declare a #[ToolParameter] for the discriminator;
- * the builder owns that property.
+ * name (default `action`) and lists every declared operation in the `enum`.
+ * Tool authors must not also declare a `#[ToolParameter]` for the
+ * discriminator; the builder owns that property.
+ *
+ * The returned schema carries one internal key, `__required_when` (a map from
+ * property name to a list of op names), used by OperationSchemaFilter to
+ * narrow `required[]` per agent. The filter strips the key before the schema
+ * reaches the LLM — providers never see it.
  */
 final class ToolParameterSchemaBuilder
 {
+    /** @internal Filter-only side channel; see OperationSchemaFilter. */
+    public const REQUIRED_WHEN_KEY = '__required_when';
+
     /**
      * Build the JSON Schema "parameters" object from a tool's attributes.
      *
@@ -34,25 +42,18 @@ final class ToolParameterSchemaBuilder
      * @return array{
      *   type: "object",
      *   properties: array<string, array<string, mixed>>|stdClass,
-     *   required: list<string>
+     *   required: list<string>,
+     *   __required_when: array<string, list<string>>,
      * }
      */
     public static function build(object|string $target): array
     {
-        $ref = new ReflectionClass($target);
+        $ref              = new ReflectionClass($target);
+        $properties       = [];
+        $required         = [];
+        $requiredWhen     = [];
+        $discriminatorKey = null;
 
-        $properties        = [];
-        $required          = [];
-        $discriminatorKey  = null;
-
-        // 1. Discriminator synthesis — runs first so the dispatch field is
-        //    always the first property in the resulting schema, matching the
-        //    convention every existing multi-op tool followed by hand.
-        //
-        //    Skipped for single-op tools: the LLM has no choice to make, and
-        //    HasOperations::getOperationName() already falls back to the one
-        //    declared op when the argument is absent. Matches the hand-rolled
-        //    convention used by CalculatorTool, ReadUrlTool, etc.
         $operationAttrs = self::collectInheritedAttributes($ref, ToolOperation::class);
         if (count($operationAttrs) >= 2) {
             /** @var list<ToolOperation> $operations */
@@ -69,17 +70,10 @@ final class ToolParameterSchemaBuilder
             $required[] = $discriminatorKey;
         }
 
-        // 2. Author-declared parameters — preserves attribute declaration order.
-        //    Walks up the class hierarchy so an abstract base class can declare
-        //    shared parameters that concrete subclasses inherit.
         foreach (self::collectInheritedAttributes($ref, ToolParameter::class) as $attr) {
             /** @var ToolParameter $param */
             $param = $attr->newInstance();
 
-            // Fail fast on collision: silently overwriting the synthesized
-            // discriminator would let the LLM submit values outside the
-            // operation enum and surface as a baffling "Unknown operation"
-            // at dispatch time. Force the author to rename one.
             if ($discriminatorKey !== null && $param->name === $discriminatorKey) {
                 throw new ToolParameterSchemaException(sprintf(
                     'Tool %s declares #[ToolParameter(name: %s)] which collides with the synthesized '
@@ -92,36 +86,31 @@ final class ToolParameterSchemaBuilder
 
             $properties[$param->name] = self::propertyJson($param);
 
-            // `required: true` + a non-null `default` is contradictory in JSON
-            // Schema terms — drop the required marker so the LLM can omit the
-            // parameter and the default applies. The `default` key still surfaces
-            // in the property JSON for the LLM's reference.
-            if ($param->required && $param->default === null) {
+            if (is_array($param->required)) {
+                $requiredWhen[$param->name] = $param->required;
+                $required[]                  = $param->name;
+            } elseif ($param->required && $param->default === null) {
                 $required[] = $param->name;
             }
         }
 
         return [
-            'type'       => 'object',
-            'properties' => $properties === [] ? new stdClass() : $properties,
-            'required'   => $required,
+            'type'             => 'object',
+            'properties'       => $properties === [] ? new stdClass() : $properties,
+            'required'         => array_values(array_unique($required)),
+            self::REQUIRED_WHEN_KEY => $requiredWhen,
         ];
     }
 
     /**
-     * Walk the class hierarchy (concrete → root parent) and return all attribute
-     * instances of the given type. Parent declarations come AFTER child ones,
-     * mirroring how a hand-rolled subclass would extend its base — child overrides
-     * are visible first; inherited defaults follow.
-     *
      * @template T of object
      * @param  class-string<T>      $attributeClass
      * @return list<ReflectionAttribute<T>>
      */
     private static function collectInheritedAttributes(ReflectionClass $ref, string $attributeClass): array
     {
-        $attrs = [];
-        $current = $ref;
+        $attrs    = [];
+        $current  = $ref;
         while ($current !== false) {
             foreach ($current->getAttributes($attributeClass) as $attr) {
                 $attrs[] = $attr;
@@ -144,23 +133,18 @@ final class ToolParameterSchemaBuilder
         if ($param->enum !== []) {
             $json['enum'] = $param->enum;
         }
-
         if ($param->minimum !== null) {
             $json['minimum'] = $param->minimum;
         }
-
         if ($param->maximum !== null) {
             $json['maximum'] = $param->maximum;
         }
-
         if ($param->format !== null) {
             $json['format'] = $param->format;
         }
-
         if ($param->items !== null) {
             $json['items'] = $param->items;
         }
-
         if ($param->default !== null) {
             $json['default'] = $param->default;
         }

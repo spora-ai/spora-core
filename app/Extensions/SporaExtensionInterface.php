@@ -66,6 +66,16 @@ interface SporaExtensionInterface
     public function agentTemplatePaths(): array;
 
     /**
+     * Absolute paths to directories containing skills this extension ships.
+     * Each directory's immediate subdirectories are skill roots — they
+     * must contain a SKILL.md file with YAML frontmatter. See
+     * {@see \Spora\Skills\SkillScanner} for the on-disk contract.
+     *
+     * @return string[]
+     */
+    public function skillPaths(): array;
+
+    /**
      * Schema version for this extension's database migrations.
      * Return 0 (default) if the extension has no database schema.
      * Increment whenever new migration files are added.

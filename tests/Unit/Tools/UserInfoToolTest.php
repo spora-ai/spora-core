@@ -151,7 +151,7 @@ describe('UserInfoTool', function (): void {
 function makeUserInfoToolConfigService(): ToolConfigService
 {
     $toolClasses = [
-        Spora\Tools\CurrentTimeTool::class,
+        Spora\Tools\TimeTool::class,
         Spora\Tools\CalculatorTool::class,
         UserInfoTool::class,
     ];

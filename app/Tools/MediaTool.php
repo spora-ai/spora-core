@@ -92,7 +92,7 @@ use Symfony\Component\HttpFoundation\Request;
 #[ToolParameter(name: 'task_id', type: 'integer', description: 'Filter by media_assets.task_id.', required: false)]
 #[ToolParameter(name: 'limit', type: 'integer', description: 'Maximum items to return (default 24, capped at 100).', required: false, default: 24)]
 #[ToolParameter(name: 'offset', type: 'integer', description: 'Items to skip (default 0).', required: false, default: 0)]
-#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset (required for get_media, get_public_url, and get_embed_code).', required: false)]
+#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset. Required for get_media, get_public_url, and get_embed_code (search ignores it).', required: ['get_media', 'get_public_url', 'get_embed_code'])]
 final class MediaTool extends AbstractTool
 {
     /** @var string  Single error string used for asset-not-found / not-in-scope responses. */

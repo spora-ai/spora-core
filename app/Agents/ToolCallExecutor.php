@@ -60,12 +60,27 @@ final class ToolCallExecutor
         $requiresApproval = $this->orchestrator->resolveRequiresApproval($toolInstance, $toolClass, $agent->id, $toolCall->arguments);
         $toolCallRecord   = $this->createPendingRecord($task, $agent, $toolCall, $operationName, $operationDescription, $requiresApproval, $toolInstance);
 
-        return $this->validateAndExecute($task, $toolCall, $toolInstance, $agent, $toolCallRecord, $requiresApproval);
+        $hasOperations = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
+        return $this->validateAndExecute(
+            $task,
+            $toolCall,
+            $toolInstance,
+            $agent,
+            $toolCallRecord,
+            $requiresApproval,
+            $hasOperations ? $operationName : null,
+        );
     }
 
     /**
      * Validate the proposed arguments, then either execute immediately or
      * leave the record PENDING_APPROVAL for the resume() flow to pick up.
+     *
+     * `$operationName` is forwarded to {@see SchemaValidator::validate()} so
+     * per-op `required[]` bindings declared via `#[ToolParameter]` are narrowed
+     * against the actual op being dispatched. Pass `null` for tools without
+     * operations (no narrowing is needed and the validator falls back to its
+     * pre-narrowing behaviour).
      */
     private function validateAndExecute(
         Task           $task,
@@ -74,9 +89,14 @@ final class ToolCallExecutor
         Agent          $agent,
         ToolCallModel  $toolCallRecord,
         bool           $requiresApproval,
+        ?string        $operationName = null,
     ): ToolCallDisposition {
         try {
-            SchemaValidator::validate($toolCall->arguments, $toolInstance->getParametersSchema());
+            SchemaValidator::validate(
+                $toolCall->arguments,
+                $toolInstance->getParametersSchema(),
+                $operationName,
+            );
         } catch (Throwable $e) {
             $this->recordValidationFailure($task, $toolCallRecord, $e, $toolCall);
             return ToolCallDisposition::ValidationFailed;

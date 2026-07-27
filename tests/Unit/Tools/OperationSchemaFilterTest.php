@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Tools\Schema\OperationSchemaFilter;
+use Spora\Tools\Schema\ToolParameterSchemaBuilder;
 
 it('filters the action enum to allowed operations', function (): void {
     $schema = [
@@ -85,4 +86,46 @@ it('coerces stdClass properties to a typed array for filtering and back to stdCl
     $filtered = OperationSchemaFilter::filter($schema, ['x'], 'action');
 
     expect($filtered['properties'])->toBeInstanceOf(stdClass::class);
+});
+
+it('narrows required[] to properties whose per-op binding intersects the allowed set', function (): void {
+    // Schema built by the builder carries __required_when as a top-level
+    // side channel; the filter reads it, narrows required[], and strips it.
+    $schema = [
+        'type'             => 'object',
+        'properties'       => [
+            'action'   => ['type' => 'string',  'enum' => ['now', 'format']],
+            'epoch'    => ['type' => 'integer'],
+            'timezone' => ['type' => 'string'],
+            'name'     => ['type' => 'string'],
+        ],
+        'required'         => ['action', 'epoch', 'timezone', 'name'],
+        ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY => [
+            'epoch'    => ['format'],
+            'timezone' => ['format'],
+        ],
+    ];
+
+    expect(OperationSchemaFilter::filter($schema, ['now'], 'action')['required'])
+        ->toBe(['action', 'name']);
+    expect(OperationSchemaFilter::filter($schema, ['format'], 'action')['required'])
+        ->toBe(['action', 'epoch', 'timezone', 'name']);
+    expect(OperationSchemaFilter::filter($schema, ['now', 'format'], 'action')['required'])
+        ->toBe(['action', 'epoch', 'timezone', 'name']);
+});
+
+it('strips the __required_when side channel before the schema reaches the LLM', function (): void {
+    $schema = [
+        'type'             => 'object',
+        'properties'       => [
+            'action' => ['type' => 'string', 'enum' => ['now']],
+            'epoch'  => ['type' => 'integer'],
+        ],
+        'required'         => ['action'],
+        ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY => ['epoch' => ['format']],
+    ];
+
+    $filtered = OperationSchemaFilter::filter($schema, ['now'], 'action');
+
+    expect($filtered)->not->toHaveKey(ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY);
 });

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Http\TaskController;
 use Spora\Models\Agent;
@@ -24,7 +25,8 @@ function makeTaskController(?TaskServiceInterface $taskService = null): array
 {
     $authService = bootAuthLayer();
     $taskService ??= Mockery::mock(TaskServiceInterface::class);
-    $controller  = new TaskController($authService, $taskService, new TaskMediaCapabilityService());
+    $mediaCapability = new TaskMediaCapabilityService();
+    $controller  = new TaskController($authService, $taskService, $mediaCapability, new ContinueTaskDispatcher($taskService, $mediaCapability));
     $authMiddleware = new Spora\Http\Middleware\AuthMiddleware($authService);
     $csrfService = new Spora\Security\CsrfTokenService();
     $csrfMiddleware = new Spora\Http\Middleware\CsrfMiddleware($csrfService);

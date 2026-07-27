@@ -19,7 +19,7 @@ test('applyTemplate("core/core-assistant") creates the Agent and 4 enabled tool 
     expect($result->agent->name)->toBe('Spora Core Agent');
 
     $tools = AgentTool::where('agent_id', $result->agent->id)->get()->pluck('tool_class')->all();
-    expect($tools)->toContain('Spora\\Tools\\CurrentTimeTool');
+    expect($tools)->toContain('Spora\\Tools\\TimeTool');
     expect($tools)->toContain('Spora\\Tools\\CalculatorTool');
     expect(count($tools))->toBe(2);
 });
@@ -28,7 +28,7 @@ test('applyTemplate("core/core-assistant") persists per-operation auto_approve o
     $result = $this->importer->applyTemplate($this->userId, 'core/core-assistant');
 
     $nowOverride = AgentToolOperationOverride::where('agent_id', $result->agent->id)
-        ->where('tool_class', 'Spora\\Tools\\CurrentTimeTool')
+        ->where('tool_class', 'Spora\\Tools\\TimeTool')
         ->where('operation', 'now')
         ->first();
     expect($nowOverride)->not->toBeNull();
@@ -46,7 +46,7 @@ test('importPayload skips tools whose tool_class is not registered (TOOL_PLUGIN_
         'id' => 'mixed', 'name' => 'Mixed', 'version' => '1.0.0',
         'agent' => ['max_steps' => 5, 'system_prompt' => 'x'],
         'tools' => [
-            ['tool_class' => 'Spora\\Tools\\CurrentTimeTool', 'enabled' => true, 'operations' => []],
+            ['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true, 'operations' => []],
             ['tool_class' => 'Spora\\Tools\\NoSuchTool\\Anywhere', 'enabled' => true, 'operations' => []],
         ],
         'required_plugins' => [],
@@ -55,7 +55,7 @@ test('importPayload skips tools whose tool_class is not registered (TOOL_PLUGIN_
     $result = $this->importer->importPayload($this->userId, $raw);
 
     $tools = AgentTool::where('agent_id', $result->agent->id)->get()->pluck('tool_class')->all();
-    expect($tools)->toContain('Spora\\Tools\\CurrentTimeTool');
+    expect($tools)->toContain('Spora\\Tools\\TimeTool');
     expect($tools)->not->toContain('Spora\\Tools\\NoSuchTool\\Anywhere');
 
     $codes = array_column($result->warnings, 'code');
@@ -80,7 +80,7 @@ test('importPayload refuses disabled tools (no row inserted)', function (): void
         'id' => 'no-row', 'name' => 'No Row', 'version' => '1.0.0',
         'agent' => ['max_steps' => 5, 'system_prompt' => 'x'],
         'tools' => [[
-            'tool_class' => 'Spora\\Tools\\CurrentTimeTool',
+            'tool_class' => 'Spora\\Tools\\TimeTool',
             'enabled' => false,
             'operations' => [],
         ]],

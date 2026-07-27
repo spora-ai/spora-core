@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Spora\Models\Agent;
+use Spora\Skills\Skill;
 use Spora\Tools\ToolSettingSchema;
 
 /**
@@ -14,19 +15,46 @@ use Spora\Tools\ToolSettingSchema;
  * defaults, required-key reports, password masking for the API, and the
  * subset of settings exposed to the LLM. All methods are reflection
  * driven and read-only.
+ *
+ * The `multi-select` resolver branches on the setting's `resolveAs`
+ * attribute:
+ * - 'agent' (default) — stored as `int[]`; LLM-facing values are
+ *   resolved against the Agent model to "Name (#id)" strings.
+ * - 'skill'           — stored as `string[]` of slugs; LLM-facing
+ *   values are resolved against the bundled `$skillsByName` map to
+ *   "name: short description" strings (description truncated to ~80
+ *   chars).
+ * - 'raw'             — stored and surfaced as-is. Use when neither
+ *   agent nor skill resolution fits the field's semantics.
  */
 final class ToolConfigSchemaInspector
 {
-    public function __construct()
+    /**
+     * Skill name → Skill map, populated by the container from the
+     * SkillScanner. Used to resolve `resolveAs: 'skill'` multi-select
+     * settings at LLM-exposure time.
+     *
+     * @var array<string, Skill>
+     */
+    private readonly array $skillsByName;
+
+    /**
+     * @param array<string, Skill> $skillsByName Skill name → Skill map used to
+     *                                             resolve `resolveAs: 'skill'`
+     *                                             multi-select settings. The
+     *                                             inspector is constructed
+     *                                             once per request lifetime
+     *                                             with a snapshot of available
+     *                                             skills; long-running workers
+     *                                             (SSE / queue listeners) must
+     *                                             rebuild via
+     *                                             {@see ToolConfigService::reload()}
+     *                                             or accept the snapshot's
+     *                                             staleness window.
+     */
+    public function __construct(array $skillsByName = [])
     {
-        // Intentionally empty: this collaborator is reflection-driven and
-        // stateless. The original ToolConfigService took the tool_classes
-        // array and SecurityManager as constructor args so it could build
-        // the inspector + the cryptography + the name resolver on demand.
-        // After the split, the inspector no longer needs the password-key
-        // resolver or the schema — those live on ToolConfigCryptographer
-        // (for encryption) and the per-call schema queries (in this class).
-        // Each public method resolves the schema it needs via ReflectionClass.
+        $this->skillsByName = $skillsByName;
     }
 
     /**
@@ -133,45 +161,37 @@ final class ToolConfigSchemaInspector
     }
 
     /**
-     * Coerce stored multi-select values to `int[]`.
+     * Coerce stored multi-select values to the array type declared by the
+     * setting's `resolveAs` field. Three branches:
+     *
+     * - 'agent' (default) — decode JSON to `int[]` (Agent id list).
+     * - 'skill'           — decode JSON to `string[]` of validated skill
+     *                       slugs (`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`).
+     * - 'raw'             — decode JSON to `array` of mixed values, no
+     *                       element-wise coercion.
      *
      * Multi-select settings travel through the form layer as JSON-encoded
      * strings (the form is `Record<string, string>`), so the cryptographer
-     * round-trips them as literal strings. To keep downstream consumers
-     * (`Tool::execute()` and the LLM-facing projection) array-typed, decode
-     * any string value at a known multi-select key back to `int[]`. Leaves
-     * non-multi-select keys, null, and already-array values untouched.
+     * round-trips them as literal strings. This method decodes them back
+     * to their array-typed form. Non-multi-select keys are left untouched.
      *
      * @param  array<string, mixed> $settings
      * @return array<string, mixed>
      */
     public function normalizeMultiSelectValues(string $toolClass, array $settings): array
     {
-        $multiKeys = $this->getMultiSelectKeys($toolClass);
-        if ($multiKeys === []) {
-            return $settings;
-        }
+        $resolveAsByKey = $this->getResolveAsByKey($toolClass);
 
-        foreach ($multiKeys as $key) {
+        foreach ($resolveAsByKey as $key => $resolveAs) {
             if (!array_key_exists($key, $settings)) {
                 continue;
             }
             $value = $settings[$key];
-            if (is_array($value)) {
-                $settings[$key] = array_values(array_map('intval', $value));
-                continue;
-            }
-            // Anything not already an int[] must be coerced — a leftover JSON
-            // string would break the "multi-select is int[]" invariant that
-            // downstream consumers (Tool::execute(), the LLM projection) rely on.
-            if (is_string($value) && $value !== '') {
-                $decoded = json_decode($value, true);
-                $settings[$key] = is_array($decoded)
-                    ? array_values(array_map('intval', $decoded))
-                    : [];
-                continue;
-            }
-            $settings[$key] = [];
+            $settings[$key] = match ($resolveAs) {
+                'skill' => $this->normalizeSkillList($value),
+                'raw'   => $this->normalizeRawList($value),
+                default => $this->normalizeAgentIdList($value),
+            };
         }
 
         return $settings;
@@ -183,9 +203,10 @@ final class ToolConfigSchemaInspector
      * settings (computed from the cascade); this method only filters
      * down to the LLM-visible subset and attaches the label.
      *
-     * `multi-select` fields stored as `int[]` are resolved to `list<string>` of
-     * the form `["Name (#id)"]` so the LLM can see the human-readable agent
-     * names alongside the IDs it must reference.
+     * `multi-select` values are resolved per the setting's `resolveAs`:
+     * - 'agent' → `list<string>` of `"Name (#id)"` (existing behaviour).
+     * - 'skill' → `list<string>` of `"name: short description"` (truncated).
+     * - 'raw'   → value is surfaced unchanged.
      *
      * @param  array<string, mixed> $effectiveSettings
      * @return array<string, array{label: string, value: mixed}>
@@ -194,13 +215,19 @@ final class ToolConfigSchemaInspector
     {
         $labels        = $this->getLlmSettingLabels($toolClass);
         $multiKeys     = array_flip($this->getMultiSelectKeys($toolClass));
-        $resolvedNames = $this->resolveAgentNames($effectiveSettings, $multiKeys, $userId);
+        $resolveAsByKey = $this->getResolveAsByKey($toolClass);
+        $resolvedAgentNames = $this->resolveAgentNames($effectiveSettings, $multiKeys, $resolveAsByKey, $userId);
 
         $result = [];
         foreach ($labels as $key => $label) {
             $value = $effectiveSettings[$key] ?? null;
             if (isset($multiKeys[$key])) {
-                $value = $this->formatAgentIdList($value, $resolvedNames);
+                $resolveAs = $resolveAsByKey[$key] ?? 'agent';
+                $value = match ($resolveAs) {
+                    'skill' => $this->formatSkillList($value),
+                    'raw'   => is_array($value) ? array_values($value) : [],
+                    default => $this->formatAgentIdList($value, $resolvedAgentNames),
+                };
             }
             $result[$key] = [
                 'label' => $label,
@@ -214,10 +241,11 @@ final class ToolConfigSchemaInspector
     /**
      * @param  array<string, mixed> $effectiveSettings
      * @param  array<string, int>   $multiKeys        keys of multi-select settings (flipped for isset())
+     * @param  array<string, string> $resolveAsByKey  key => resolveAs ('agent' | 'skill' | 'raw')
      * @param  int|null             $userId           scope of the lookup; null returns no names
      * @return array<int, string>                     id => "Name"
      */
-    private function resolveAgentNames(array $effectiveSettings, array $multiKeys, ?int $userId): array
+    private function resolveAgentNames(array $effectiveSettings, array $multiKeys, array $resolveAsByKey, ?int $userId): array
     {
         // Multi-select values are user-controlled, so an unscoped lookup would
         // happily resolve another tenant's agent name and leak it to the LLM
@@ -229,6 +257,11 @@ final class ToolConfigSchemaInspector
 
         $ids = [];
         foreach ($multiKeys as $key => $_) {
+            // Only resolve agent-typed multi-selects; other resolveAs branches
+            // (skill, raw) don't have integer IDs.
+            if (($resolveAsByKey[$key] ?? 'agent') !== 'agent') {
+                continue;
+            }
             $value = $effectiveSettings[$key] ?? null;
             if (is_array($value)) {
                 foreach ($value as $id) {
@@ -272,6 +305,130 @@ final class ToolConfigSchemaInspector
                 : "#{$intId}";
         }
         return $out;
+    }
+
+    /**
+     * Resolve a list of skill slugs to a list of "name: short description"
+     * strings for LLM exposure. Description is truncated to ~80 chars
+     * with an ellipsis; the full body is available on demand via
+     * `skill_read`. Slugs that no longer exist on disk (renamed or
+     * removed after selection) are silently skipped.
+     *
+     * @param  mixed $value
+     * @return list<string>
+     */
+    private function formatSkillList(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+        $out = [];
+        foreach ($value as $slug) {
+            $slug = (string) $slug;
+            if ($slug === '' || !isset($this->skillsByName[$slug])) {
+                continue;
+            }
+            $skill = $this->skillsByName[$slug];
+            $description = $skill->description();
+            $truncated = mb_strlen($description) > 80
+                ? mb_substr($description, 0, 77) . '...'
+                : $description;
+            $out[] = $truncated === ''
+                ? $skill->name()
+                : "{$skill->name()}: {$truncated}";
+        }
+        return $out;
+    }
+
+    /**
+     * Coerce a value to `string[]` of validated skill slugs.
+     * Accepts arrays directly or JSON-encoded strings; rejects entries
+     * that don't match the skill name pattern.
+     *
+     * @param  mixed $value
+     * @return list<string>
+     */
+    private function normalizeSkillList(mixed $value): array
+    {
+        if (is_string($value) && $value !== '') {
+            $decoded = json_decode($value, true);
+            $value = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($value)) {
+            return [];
+        }
+        $out = [];
+        $seen = [];
+        foreach ($value as $entry) {
+            $slug = strtolower(trim((string) $entry));
+            // Negative lookahead rejects consecutive hyphens per the
+            // agentskills.io name pattern; mirrors {@see SkillValidator}.
+            if ($slug === '' || !preg_match('/^(?![a-z0-9-]*--)[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/', $slug)) {
+                continue;
+            }
+            if (isset($seen[$slug])) {
+                continue;
+            }
+            $seen[$slug] = true;
+            $out[] = $slug;
+        }
+        return $out;
+    }
+
+    /**
+     * Coerce a value to a raw `array` — JSON-decoded if string, passed
+     * through if already array, `[]` otherwise. Element-wise type is
+     * preserved (caller's responsibility).
+     *
+     * @param  mixed $value
+     * @return list<mixed>
+     */
+    private function normalizeRawList(mixed $value): array
+    {
+        if (is_string($value) && $value !== '') {
+            $decoded = json_decode($value, true);
+            $value = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($value)) {
+            return [];
+        }
+        return array_values($value);
+    }
+
+    /**
+     * Coerce a value to `int[]` — the historical multi-select format
+     * used by HandoverTool's `allowed_target_agents`.
+     *
+     * @param  mixed $value
+     * @return list<int>
+     */
+    private function normalizeAgentIdList(mixed $value): array
+    {
+        if (is_array($value)) {
+            return array_values(array_map('intval', $value));
+        }
+        if (is_string($value) && $value !== '') {
+            $decoded = json_decode($value, true);
+            return is_array($decoded)
+                ? array_values(array_map('intval', $decoded))
+                : [];
+        }
+        return [];
+    }
+
+    /**
+     * @return array<string, string>  key => resolveAs
+     */
+    private function getResolveAsByKey(string $toolClass): array
+    {
+        $map = [];
+        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
+            if ($setting->type !== 'multi-select') {
+                continue;
+            }
+            $map[$setting->key] = $setting->resolveAs;
+        }
+        return $map;
     }
 
     /**

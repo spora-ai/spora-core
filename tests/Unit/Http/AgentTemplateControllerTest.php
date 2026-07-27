@@ -21,7 +21,7 @@ function makeController(): AgentTemplateController
     $security = new Spora\Core\SecurityManager($key);
     $logger   = new Monolog\Logger('test');
     $toolClasses = [
-        Spora\Tools\CurrentTimeTool::class,
+        Spora\Tools\TimeTool::class,
         Spora\Tools\CalculatorTool::class,
         Spora\Tools\ReadUrlTool::class,
         Spora\Tools\UserInfoTool::class,
@@ -91,7 +91,7 @@ test('import returns 201 with an Agent payload + warnings on success', function 
         'id' => 'simple', 'name' => 'Simple', 'version' => '1.0.0',
         'agent' => ['max_steps' => 5, 'system_prompt' => 'x'],
         'tools' => [[
-            'tool_class' => 'Spora\\Tools\\CurrentTimeTool',
+            'tool_class' => 'Spora\\Tools\\TimeTool',
             'enabled' => true,
             'operations' => [['name' => 'now', 'auto_approve' => true]],
         ]],

@@ -9,7 +9,7 @@ use Spora\Core\SecurityManager;
 use Spora\Http\ToolController;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\CalculatorTool;
-use Spora\Tools\CurrentTimeTool;
+use Spora\Tools\TimeTool;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Tests\Fixtures\InheritedSettingChildTool;
@@ -18,8 +18,8 @@ function makeToolController(): array
 {
     $authService = bootAuthLayer();
     $security    = new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $toolConfig  = new ToolConfigService($security, new NullLogger(), [CalculatorTool::class, CurrentTimeTool::class]);
-    $controller  = new ToolController($authService, $toolConfig, [CalculatorTool::class, CurrentTimeTool::class]);
+    $toolConfig  = new ToolConfigService($security, new NullLogger(), [CalculatorTool::class, TimeTool::class]);
+    $controller  = new ToolController($authService, $toolConfig, [CalculatorTool::class, TimeTool::class]);
 
     return [$controller, $authService, $toolConfig];
 }
@@ -35,7 +35,7 @@ describe('ToolController::index', function (): void {
         expect($body['data']['tools'])->toBeArray();
         $names = array_column($body['data']['tools'], 'tool_class');
         expect($names)->toContain(CalculatorTool::class);
-        expect($names)->toContain(CurrentTimeTool::class);
+        expect($names)->toContain(TimeTool::class);
     });
 
     test('returns empty tools list when no tool classes are registered', function (): void {

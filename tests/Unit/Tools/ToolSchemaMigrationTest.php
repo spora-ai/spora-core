@@ -12,9 +12,9 @@ use Spora\Tools\AbstractTool;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\CalculatorTool;
-use Spora\Tools\CurrentTimeTool;
 use Spora\Tools\HandoverTool;
 use Spora\Tools\ReadUrlTool;
+use Spora\Tools\TimeTool;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\UserInfoTool;
 use stdClass;
@@ -47,7 +47,7 @@ function instantiateAllTools(): array
 
     return [
         CalculatorTool::class       => new CalculatorTool(),
-        CurrentTimeTool::class      => new CurrentTimeTool(),
+        TimeTool::class      => new TimeTool(),
         ReadUrlTool::class          => new ReadUrlTool($httpClient, $configService),
         UserInfoTool::class         => new UserInfoTool(),
         HandoverTool::class         => new HandoverTool(
@@ -148,9 +148,10 @@ it('single-op tools do NOT synthesize a discriminator', function (): void {
             expect($properties[$discriminatorKey]['enum'])->not->toBe($synthesized);
         }
     }
-    // Spora has 4 single-op tools at the time of writing (Calculator, CurrentTime,
-    // ReadUrl, Tavily). If this drops to 0 the invariant becomes meaningless and
-    // the assertion below catches it.
+    // Spora has 3 single-op tools at the time of writing (Calculator, ReadUrl,
+    // Tavily). TimeTool became multi-op after the format operation landed.
+    // If this drops to 0 the invariant becomes meaningless and the assertion
+    // below catches it.
     expect($checked)->toBeGreaterThan(0);
 });
 

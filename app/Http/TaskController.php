@@ -28,6 +28,7 @@ final class TaskController
         private readonly AuthService $authService,
         private readonly TaskServiceInterface $taskService,
         private readonly TaskMediaCapabilityService $mediaCapability,
+        private readonly ContinueTaskDispatcher $continuationDispatcher,
     ) {}
 
     /**
@@ -344,91 +345,7 @@ final class TaskController
 
         $body = json_decode($request->getContent(), true) ?? [];
 
-        $validation = $this->validateContinueBody($body);
-        if ($validation['result'] !== null) {
-            return $validation['result'];
-        }
-
-        return $this->dispatchContinue(
-            $taskId,
-            $userId,
-            $validation['prompt'],
-            $validation['additionalSteps'],
-            $validation['mediaIds'],
-        );
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     * @return array{result: ?JsonResponse, prompt: ?string, additionalSteps: ?int, mediaIds: list<string>}
-     */
-    private function validateContinueBody(array $body): array
-    {
-        $prompt = $body['prompt'] ?? null;
-        if (!is_string($prompt) || trim($prompt) === '') {
-            return [
-                'result' => new JsonResponse(
-                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'prompt is required and must be a non-empty string.']],
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                ),
-                'prompt' => null,
-                'additionalSteps' => null,
-                'mediaIds' => [],
-            ];
-        }
-
-        if (isset($body['additional_steps'])
-            && (!is_int($body['additional_steps']) || $body['additional_steps'] < 1 || $body['additional_steps'] > 100)
-        ) {
-            return [
-                'result' => new JsonResponse(
-                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'additional_steps must be an integer between 1 and 100.']],
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                ),
-                'prompt' => null,
-                'additionalSteps' => null,
-                'mediaIds' => [],
-            ];
-        }
-
-        return [
-            'result' => null,
-            'prompt' => $prompt,
-            'additionalSteps' => isset($body['additional_steps']) ? $body['additional_steps'] : null,
-            'mediaIds' => $this->mediaCapability->parseMediaIds($body['media_ids'] ?? null),
-        ];
-    }
-
-    /**
-     * @param list<string> $mediaIds
-     */
-    private function dispatchContinue(
-        int $taskId,
-        int $userId,
-        string $prompt,
-        ?int $additionalSteps,
-        array $mediaIds,
-    ): JsonResponse {
-        $existing = $this->taskService->getTask($taskId, $userId);
-        if ($existing === null) {
-            return $this->notFoundResponse();
-        }
-
-        try {
-            $this->mediaCapability->ensureMediaCapabilityCompatible($existing['agent_id'], $mediaIds);
-        } catch (MediaCapabilityMismatchException $e) {
-            return new JsonResponse(
-                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
-                Response::HTTP_BAD_REQUEST,
-            );
-        }
-
-        try {
-            $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
-            return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_OK);
-        } catch (InvalidArgumentException $e) {
-            return $this->errorForException($e);
-        }
+        return $this->continuationDispatcher->handleContinue($taskId, $userId, $body);
     }
 
     /**

@@ -16,6 +16,7 @@ use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Tools\Attributes\Tool;
+use Spora\Tools\TimeTool;
 use Spora\Tools\Traits\HasOperations;
 use Tests\Fixtures\StubInputTool;
 use Tests\Fixtures\StubOutputTool;
@@ -255,4 +256,71 @@ it('executor throws when the LLM invokes a tool that is not enabled for the agen
 
     expect(fn() => $executor->executeOrQueue($toolCall, $agent, $task, []))
         ->toThrow(RuntimeException::class, 'not enabled');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// Per-op `required[]` narrowing at the runtime validator
+// ---------------------------------------------------------------------------
+//
+// Regression: a `time(action: "now")` call used to fail with
+// "Validation Error: Required argument 'epoch' is missing" because
+// SchemaValidator was reading the unfiltered schema. The fix narrows
+// `required[]` against the operation the LLM actually dispatched so
+// `epoch` — bound only to `format` — is no longer required for `now`.
+
+it('time(action: "now") without epoch executes without validation failure', function (): void {
+    [$agentId, $task] = seedAgentAndTask([new TimeTool()]);
+    $agent = Agent::find($agentId);
+
+    $orch = makeExecutorHost([new TimeTool()]);
+    $executor = new ToolCallExecutor($orch);
+
+    // No 'epoch' supplied — would fail under the old unfiltered validator.
+    $toolCall = new DriverToolCall('call_time_now', 'time', ['action' => 'now']);
+
+    $disposition = $executor->executeOrQueue(
+        $toolCall,
+        $agent,
+        $task,
+        [TimeTool::class],
+    );
+
+    expect($disposition)->toBe(ToolCallDisposition::Executed);
+
+    $record = ToolCallModel::where('task_id', $task->id)->first();
+    expect($record)->not->toBeNull()
+        ->and($record->status)->toBe('APPROVED')
+        ->and($record->operation)->toBe('now')
+        // Result must be the tool's success content — `doNow()` returns
+        // a JSON string with `datetime`, `timezone`, `epoch`. We don't
+        // pin the exact timestamp, only that the executor reached the
+        // tool (i.e. validation did not block it).
+        ->and($record->result_content)->not->toContain('Validation Error');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('time(action: "format") without epoch still fails validation (epoch is required for format)', function (): void {
+    [$agentId, $task] = seedAgentAndTask([new TimeTool()]);
+    $agent = Agent::find($agentId);
+
+    $orch = makeExecutorHost([new TimeTool()]);
+    $executor = new ToolCallExecutor($orch);
+
+    // Missing `epoch` for the `format` op is a genuine validation error —
+    // the narrowing must NOT drop required params that ARE bound to the
+    // dispatched op.
+    $toolCall = new DriverToolCall('call_time_format', 'time', ['action' => 'format']);
+
+    $disposition = $executor->executeOrQueue(
+        $toolCall,
+        $agent,
+        $task,
+        [TimeTool::class],
+    );
+
+    expect($disposition)->toBe(ToolCallDisposition::ValidationFailed);
+
+    $record = ToolCallModel::where('task_id', $task->id)->first();
+    expect($record)->not->toBeNull()
+        ->and($record->operation)->toBe('format')
+        ->and($record->result_content)->toContain("Required argument 'epoch' is missing");
 })->afterEach(fn() => Spora\Core\Database::resetBootState());

@@ -27,6 +27,7 @@ use Spora\Http\PluginsController;
 use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
 use Spora\Http\ScheduledRunController;
+use Spora\Http\SkillController;
 use Spora\Http\SseController;
 use Spora\Http\TaskController;
 use Spora\Http\ToolController;
@@ -48,6 +49,7 @@ final class RouteDefinitions
     public const ROUTE_MAIL_TEMPLATES_ID = '/api/v1/mail-templates/{id}';
     public const ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID = '/api/v1/agents/{id}/templates/{templateId}';
     public const ROUTE_AGENTS_SCHEDULED_RUNS_RUN_ID = '/api/v1/agents/{id}/scheduled-runs/{runId}';
+    public const ROUTE_SKILLS_SLUG = '/api/v1/skills/{slug}';
 
     public static function register(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
@@ -150,6 +152,13 @@ final class RouteDefinitions
         $r->addRoute('POST', '/api/v1/agent-templates/validate', [AgentTemplateController::class, 'validatePayload'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/agent-templates/import', [AgentTemplateController::class, 'import'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/agents/{id}/export', [AgentTemplateController::class, 'exportAgent'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // Skills — list + detail. The list powers the Skill tool's
+        // `allowed_skills` multi-select `dataSource`; the detail
+        // endpoint surfaces the full SKILL.md body and sidecar listing
+        // for the admin UI's skill-detail view.
+        $r->addRoute('GET', '/api/v1/skills', [SkillController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', self::ROUTE_SKILLS_SLUG, [SkillController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', '/api/v1/llm-drivers', [LLMConfigController::class, 'drivers'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/llm-configs', [LLMConfigController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);

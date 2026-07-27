@@ -65,12 +65,12 @@ test('export() round-trips an agent created from core-assistant', function (): v
     expect(count($payload['tools']))->toBe(2);
 
     // Operations should be present for the auto-approve overrides that
-    // the seeder ran. current_time's `now` operation has auto_approve=true
+    // the seeder ran. time's `now` operation has auto_approve=true
     // → default_requires_approval=0, so no per-op override row exists and
     // operations[] is empty here. We just verify the core tool is in the
     // exported payload.
     $currentTime = collect($payload['tools'])
-        ->firstWhere('tool_class', 'Spora\\Tools\\CurrentTimeTool');
+        ->firstWhere('tool_class', 'Spora\\Tools\\TimeTool');
     expect($currentTime)->not->toBeNull();
 });
 
@@ -86,12 +86,12 @@ test('export() omits operations that have no explicit override', function (): vo
     // (the "inherit defaults" state).
     Spora\Models\AgentTool::create([
         'agent_id'   => $agent->id,
-        'tool_class' => 'Spora\\Tools\\CurrentTimeTool',
-        'tool_name'  => 'current_time',
+        'tool_class' => 'Spora\\Tools\\TimeTool',
+        'tool_name'  => 'time',
     ]);
     AgentToolOperationOverride::create([
         'agent_id'                  => $agent->id,
-        'tool_class'                => 'Spora\\Tools\\CurrentTimeTool',
+        'tool_class'                => 'Spora\\Tools\\TimeTool',
         'operation'                 => 'now',
         'enabled'                   => null,
         'default_requires_approval' => null,
@@ -99,7 +99,7 @@ test('export() omits operations that have no explicit override', function (): vo
 
     $exported = makeExporter()->export($agent);
     $payload = $exported['template']->raw();
-    $tool = collect($payload['tools'])->firstWhere('tool_class', 'Spora\\Tools\\CurrentTimeTool');
+    $tool = collect($payload['tools'])->firstWhere('tool_class', 'Spora\\Tools\\TimeTool');
     expect($tool)->not->toBeNull();
     expect($tool['operations'])->toBe([]);
 });
@@ -172,8 +172,8 @@ test('export() emits required_plugins: [] when the agent uses only core tools', 
     ]);
     Spora\Models\AgentTool::create([
         'agent_id'   => $agent->id,
-        'tool_class' => 'Spora\\Tools\\CurrentTimeTool',
-        'tool_name'  => 'current_time',
+        'tool_class' => 'Spora\\Tools\\TimeTool',
+        'tool_name'  => 'time',
     ]);
 
     $exported = makeExporter()->export($agent);
@@ -206,8 +206,8 @@ test('export() lists every owning plugin\'s Composer package name in required_pl
     ]);
     Spora\Models\AgentTool::create([
         'agent_id'   => $agent->id,
-        'tool_class' => 'Spora\\Tools\\CurrentTimeTool', // not in any plugin fixture
-        'tool_name'  => 'current_time',
+        'tool_class' => 'Spora\\Tools\\TimeTool', // not in any plugin fixture
+        'tool_name'  => 'time',
     ]);
 
     $exported = makeExporter($loader)->export($agent);
@@ -236,8 +236,8 @@ test('export() deduplicates required_plugins when two agent_tools share a plugin
     ]);
     Spora\Models\AgentTool::create([
         'agent_id'   => $agent->id,
-        'tool_class' => 'Spora\\Tools\\CurrentTimeTool',
-        'tool_name'  => 'current_time',
+        'tool_class' => 'Spora\\Tools\\TimeTool',
+        'tool_name'  => 'time',
     ]);
 
     $exported = makeExporter($loader)->export($agent);

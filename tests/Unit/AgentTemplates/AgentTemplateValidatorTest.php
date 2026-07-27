@@ -49,8 +49,8 @@ test('duplicate tool_class is rejected', function (): void {
         'id' => 'dup', 'name' => 'Dup', 'version' => '1.0.0',
         'agent' => ['max_steps' => 5],
         'tools' => [
-            ['tool_class' => 'Spora\\Tools\\CurrentTimeTool', 'enabled' => true, 'operations' => [['name' => 'now']]],
-            ['tool_class' => 'Spora\\Tools\\CurrentTimeTool', 'enabled' => true, 'operations' => [['name' => 'now']]],
+            ['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true, 'operations' => [['name' => 'now']]],
+            ['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true, 'operations' => [['name' => 'now']]],
         ],
         'required_plugins' => [],
     ];
@@ -85,7 +85,7 @@ test('unknown operation name on a known tool produces a warning', function (): v
         'id' => 'x', 'name' => 'X', 'version' => '1.0.0',
         'agent' => ['max_steps' => 5],
         'tools' => [[
-            'tool_class' => 'Spora\\Tools\\CurrentTimeTool',
+            'tool_class' => 'Spora\\Tools\\TimeTool',
             'enabled' => true,
             'operations' => [['name' => 'bogus', 'enabled' => true, 'auto_approve' => true]],
         ]],

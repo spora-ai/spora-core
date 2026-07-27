@@ -14,10 +14,11 @@
   },
   "tools": [
     {
-      "tool_class": "Spora\\Tools\\CurrentTimeTool",
+      "tool_class": "Spora\\Tools\\TimeTool",
       "enabled": true,
       "operations": [
-        { "name": "now", "enabled": true, "auto_approve": true }
+        { "name": "now", "enabled": true, "auto_approve": true },
+        { "name": "format", "enabled": true, "auto_approve": true }
       ]
     },
     {

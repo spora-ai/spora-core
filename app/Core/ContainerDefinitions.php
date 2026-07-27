@@ -49,6 +49,7 @@ use Spora\Http\AgentToolController;
 use Spora\Http\AppsController;
 use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
+use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -124,11 +125,13 @@ use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
+use Spora\Skills\SkillScanner;
 use Spora\Tools\AgentTool;
 use Spora\Tools\CalculatorTool;
-use Spora\Tools\CurrentTimeTool;
 use Spora\Tools\HandoverTool;
 use Spora\Tools\ReadUrlTool;
+use Spora\Tools\SkillTool;
+use Spora\Tools\TimeTool;
 use Spora\Tools\UserInfoTool;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\Process\Process;
@@ -460,6 +463,7 @@ final class ContainerDefinitions
                         $c->get('tool_classes'),
                         $c->get(PluginLoader::class)->toolClasses(),
                     ))),
+                    $c->has(SkillScanner::class) ? $c->get(SkillScanner::class) : null,
                 );
             },
 
@@ -698,12 +702,13 @@ final class ContainerDefinitions
             },
 
             'tool_classes' => [
-                CurrentTimeTool::class,
+                TimeTool::class,
                 CalculatorTool::class,
                 ReadUrlTool::class,
                 UserInfoTool::class,
                 HandoverTool::class,
                 AgentTool::class,
+                SkillTool::class,
             ],
 
             LLMConfigService::class => static function (ContainerInterface $c): LLMConfigService {
@@ -912,6 +917,14 @@ final class ContainerDefinitions
                     $c->get(AuthService::class),
                     $c->get(TaskServiceInterface::class),
                     $c->get(TaskMediaCapabilityService::class),
+                    $c->get(ContinueTaskDispatcher::class),
+                );
+            },
+
+            ContinueTaskDispatcher::class => static function (ContainerInterface $c): ContinueTaskDispatcher {
+                return new ContinueTaskDispatcher(
+                    $c->get(TaskServiceInterface::class),
+                    $c->get(TaskMediaCapabilityService::class),
                 );
             },
 
@@ -1023,7 +1036,7 @@ final class ContainerDefinitions
                 );
             },
 
-            CurrentTimeTool::class => static fn(): CurrentTimeTool => new CurrentTimeTool(),
+            TimeTool::class => static fn(): TimeTool => new TimeTool(),
             CalculatorTool::class => static fn(): CalculatorTool => new CalculatorTool(),
 
             // AgentTool reuses AgentTemplateImporter for the create_agent
@@ -1054,6 +1067,13 @@ final class ContainerDefinitions
             HandoverTool::class => static function (ContainerInterface $c): HandoverTool {
                 return new HandoverTool(
                     $c->get(HandoverServiceInterface::class),
+                    $c->get(ToolConfigService::class),
+                );
+            },
+
+            SkillTool::class => static function (ContainerInterface $c): SkillTool {
+                return new SkillTool(
+                    $c->get(SkillScanner::class),
                     $c->get(ToolConfigService::class),
                 );
             },
@@ -1167,6 +1187,38 @@ final class ContainerDefinitions
             },
 
             AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
+
+            // Skills are scanned in priority order: project, then framework,
+            // then each plugin. The `source` label on each root is what
+            // SkillScanner uses to bucket same-named skills (see
+            // {@see SkillScanner::scan()}) and to tag the resulting Skill objects.
+            SkillScanner::class => static function (ContainerInterface $c): SkillScanner {
+                $paths = $c->get(Paths::class);
+
+                $roots = [];
+
+                // First two roots (project + framework) come from the centralised
+                // Paths helper — the same one AgentTemplateScanner uses for its
+                // priority order. Plugin roots are appended below; their
+                // `source` label is the contributing plugin's slug.
+                $project = $paths->base('skills');
+                if (is_dir($project)) {
+                    $roots[] = ['path' => $project, 'source' => 'project'];
+                }
+
+                $framework = $paths->framework('skills');
+                if (is_dir($framework)) {
+                    $roots[] = ['path' => $framework, 'source' => 'core'];
+                }
+
+                foreach ($c->get(PluginLoader::class)->skillPaths() as $root) {
+                    if (is_dir($root['path'])) {
+                        $roots[] = $root;
+                    }
+                }
+
+                return new SkillScanner($roots);
+            },
 
             AgentTemplateImporter::class => static function (ContainerInterface $c): AgentTemplateImporter {
                 return new AgentTemplateImporter(

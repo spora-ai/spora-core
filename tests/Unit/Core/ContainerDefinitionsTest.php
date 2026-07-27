@@ -404,7 +404,7 @@ it('llmDefinitions includes all expected entries', function (): void {
     expect($def)->toHaveKey('app_apps');
 
     expect($def)->toHaveKey('tool_classes');
-    expect($def['tool_classes'])->toContain(Spora\Tools\CurrentTimeTool::class);
+    expect($def['tool_classes'])->toContain(Spora\Tools\TimeTool::class);
     expect($def['tool_classes'])->toContain(CalculatorTool::class);
     expect($def['tool_classes'])->toContain(Spora\Tools\UserInfoTool::class);
 
@@ -465,7 +465,7 @@ it('toolDefinitions includes all tools and tool_instances', function (): void {
 
     expect($def)->toHaveKey('tool_instances');
     expect($def)->toHaveKey(Spora\Services\ToolCallSerializer::class);
-    expect($def)->toHaveKey(Spora\Tools\CurrentTimeTool::class);
+    expect($def)->toHaveKey(Spora\Tools\TimeTool::class);
     expect($def)->toHaveKey(CalculatorTool::class);
     expect($def)->toHaveKey(Spora\Tools\UserInfoTool::class);
 });

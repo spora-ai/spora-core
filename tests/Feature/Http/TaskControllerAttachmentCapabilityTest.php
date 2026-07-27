@@ -10,6 +10,7 @@ use Spora\Core\SecurityManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\TaskController;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
@@ -167,7 +168,8 @@ function buildCapabilityController(string $model, string $driverClass): array
     }
 
     $stub = new StubTaskService();
-    return [new TaskController($authService, $stub, new TaskMediaCapabilityService($factory)), $stub];
+    $mediaCapability = new TaskMediaCapabilityService($factory);
+    return [new TaskController($authService, $stub, $mediaCapability, new ContinueTaskDispatcher($stub, $mediaCapability)), $stub];
 }
 
 /**

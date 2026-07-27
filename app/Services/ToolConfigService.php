@@ -11,6 +11,7 @@ use Spora\Models\Agent;
 use Spora\Models\AgentToolOverride;
 use Spora\Models\ToolConfiguration;
 use Spora\Models\ToolUserSetting;
+use Spora\Skills\SkillScanner;
 
 /**
  * The ONLY class permitted to read or write tool_configurations.settings
@@ -47,8 +48,18 @@ class ToolConfigService implements ToolConfigServiceInterface
         SecurityManagerInterface $security,
         LoggerInterface $logger,
         array $toolClasses = [],
+        ?SkillScanner $skillScanner = null,
     ) {
-        $this->schema = new ToolConfigSchemaInspector();
+        $skillsByName = [];
+        if ($skillScanner !== null) {
+            // Index the scanner's result by skill name so the inspector can
+            // resolve multi-select `allowed_skills` slugs to {name, description}
+            // pairs without re-scanning.
+            foreach ($skillScanner->scan() as $skill) {
+                $skillsByName[$skill->name()] = $skill;
+            }
+        }
+        $this->schema = new ToolConfigSchemaInspector($skillsByName);
         $this->crypto = new ToolConfigCryptographer($security, $this->schema->getPasswordKeys(...));
         $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses);
     }

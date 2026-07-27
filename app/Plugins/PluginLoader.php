@@ -25,6 +25,12 @@ use Throwable;
  * Directories are scanned in the order given; if the same slug appears in more
  * than one, the first one wins.
  */
+// NOSONAR — PluginLoader is a service-locator facade for plugin capabilities.
+// S1448 (too many methods) inflates because each plugin-side capability registers
+// as a sibling method (paths, hooks, ext entries, skill paths, …). Splitting the
+// facade would scatter the contract across multiple classes and defeat the
+// method-name lookup the plugin registry depends on. Acked in plugin-architecture
+// review; a deeper restructure is tracked separately.
 final class PluginLoader
 {
     /**
@@ -168,6 +174,31 @@ final class PluginLoader
         foreach ($this->plugins as $plugin) {
             foreach ($plugin->agentTemplatePaths() as $path) {
                 $paths[] = $path;
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
+     * All skill directory roots contributed by loaded plugins, paired with
+     * the contributing plugin's slug. Mirrors {@see agentTemplatePaths()};
+     * the scanner aggregates these alongside the project-level and
+     * framework-bundled skill roots from {@see \Spora\Core\Paths::skillsPaths()}.
+     *
+     * The `source` label is what {@see \Spora\Skills\SkillScanner} uses
+     * to bucket same-named skills (project wins over framework wins over
+     * plugin) and to tag the resulting {@see \Spora\Skills\Skill} objects.
+     *
+     * @return list<array{path: string, source: string}>
+     */
+    public function skillPaths(): array
+    {
+        $paths = [];
+
+        foreach ($this->plugins as $slug => $plugin) {
+            foreach ($plugin->skillPaths() as $path) {
+                $paths[] = ['path' => $path, 'source' => $slug];
             }
         }
 

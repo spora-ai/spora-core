@@ -116,6 +116,25 @@ final class Paths
         return $paths;
     }
 
+    /**
+     * Skills: project overrides win over framework defaults.
+     * Returns the list of skill root directories to scan, in priority
+     * order (highest first). Plugin-contributed paths are returned by
+     * {@see \Spora\Plugins\PluginLoader::skillPaths()} and appended
+     * downstream by the scanner — this method only knows about the
+     * project and framework roots.
+     *
+     * @return list<string>
+     */
+    public function skillsPaths(): array
+    {
+        $project = $this->base('skills');
+        $framework = $this->framework('skills');
+        $paths = is_dir($project) ? [$project] : [];
+        $paths[] = $framework;
+        return $paths;
+    }
+
     private function overrideOrDefault(string $envName, string $defaultSub): string
     {
         // Check $_SERVER/$_ENV first (already populated by phpdotenv/symfony Dotenv),

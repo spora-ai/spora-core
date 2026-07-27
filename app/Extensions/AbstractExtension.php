@@ -77,6 +77,17 @@ abstract class AbstractExtension implements SporaExtensionInterface
         return [];
     }
 
+    /**
+     * See {@see SporaExtensionInterface::skillPaths()}. Default to no
+     * skills shipped; subclasses override to contribute their own.
+     *
+     * @return string[]
+     */
+    public function skillPaths(): array
+    {
+        return [];
+    }
+
     public function schemaVersion(): int
     {
         return 0;

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Spora\Tools\CurrentTimeTool;
+use Spora\Tools\TimeTool;
 use Spora\Tools\ToolSchemaPresenter;
 
 /**
@@ -14,11 +14,11 @@ use Spora\Tools\ToolSchemaPresenter;
  */
 describe('ToolSchemaPresenter', function (): void {
     test('summarizes a tool that has #[Tool] and #[ToolOperation]', function (): void {
-        $summary = ToolSchemaPresenter::summarize(CurrentTimeTool::class);
+        $summary = ToolSchemaPresenter::summarize(TimeTool::class);
 
-        expect($summary['tool_class'])->toBe(CurrentTimeTool::class)
-            ->and($summary['tool_name'])->toBe('current_time')
-            ->and($summary['display_name'])->toBe('Current Time')
+        expect($summary['tool_class'])->toBe(TimeTool::class)
+            ->and($summary['tool_name'])->toBe('time')
+            ->and($summary['display_name'])->toBe('Time')
             ->and($summary['category'])->toBe('productivity')
             ->and($summary['icon'])->toBeNull() // No resolver passed.
             ->and($summary['operations'])->toBeArray();
@@ -36,7 +36,7 @@ describe('ToolSchemaPresenter', function (): void {
     });
 
     test('honours an explicit icon override passed in by the caller', function (): void {
-        $summary = ToolSchemaPresenter::summarize(CurrentTimeTool::class, 'clock');
+        $summary = ToolSchemaPresenter::summarize(TimeTool::class, 'clock');
 
         expect($summary['icon'])->toBe('clock');
     });
