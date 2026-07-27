@@ -16,7 +16,7 @@ use Spora\Tools\Traits\HasParameterSchema;
  *                            (and synthesized `action` enum from #[ToolOperation])
  *
  * No constructor is declared so subclasses keep full control of their DI
- * signatures (no-arg tools like CurrentTimeTool, multi-dep tools like EmailTool).
+ * signatures (no-arg tools like TimeTool, multi-dep tools like EmailTool).
  *
  * Tools must still implement execute() and describeAction() themselves.
  *

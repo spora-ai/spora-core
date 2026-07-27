@@ -28,7 +28,7 @@ function makeSetupTester(): CommandTester
     $security = new Spora\Core\SecurityManager($key);
     $logger   = new Monolog\Logger('test');
     $toolConfig = new ToolConfigService($security, $logger, [
-        Spora\Tools\CurrentTimeTool::class,
+        Spora\Tools\TimeTool::class,
         Spora\Tools\CalculatorTool::class,
         Spora\Tools\ReadUrlTool::class,
         Spora\Tools\UserInfoTool::class,

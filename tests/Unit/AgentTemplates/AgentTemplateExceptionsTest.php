@@ -22,7 +22,7 @@ test('AgentTemplateImporter throws AgentTemplateNotFoundException on unknown tem
     $security = new Spora\Core\SecurityManager($key);
     $logger   = new Monolog\Logger('test');
     $toolConfig = new Spora\Services\ToolConfigService($security, $logger, [
-        Spora\Tools\CurrentTimeTool::class,
+        Spora\Tools\TimeTool::class,
         Spora\Tools\CalculatorTool::class,
     ]);
     $importer = new Spora\AgentTemplates\AgentTemplateImporter(

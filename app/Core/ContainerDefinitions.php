@@ -127,10 +127,10 @@ use Spora\Services\UserServiceInterface;
 use Spora\Skills\SkillScanner;
 use Spora\Tools\AgentTool;
 use Spora\Tools\CalculatorTool;
-use Spora\Tools\CurrentTimeTool;
 use Spora\Tools\HandoverTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\SkillTool;
+use Spora\Tools\TimeTool;
 use Spora\Tools\UserInfoTool;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\Process\Process;
@@ -701,7 +701,7 @@ final class ContainerDefinitions
             },
 
             'tool_classes' => [
-                CurrentTimeTool::class,
+                TimeTool::class,
                 CalculatorTool::class,
                 ReadUrlTool::class,
                 UserInfoTool::class,
@@ -1027,7 +1027,7 @@ final class ContainerDefinitions
                 );
             },
 
-            CurrentTimeTool::class => static fn(): CurrentTimeTool => new CurrentTimeTool(),
+            TimeTool::class => static fn(): TimeTool => new TimeTool(),
             CalculatorTool::class => static fn(): CalculatorTool => new CalculatorTool(),
 
             // AgentTool reuses AgentTemplateImporter for the create_agent
