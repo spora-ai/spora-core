@@ -67,9 +67,14 @@ final class ToolSetting
          * `[{value, label, ...}]` (caller-defined).
          *
          * Concrete example: the Skill tool's `allowed_skills` setting
-         * declares `dataSource: '/api/v1/skills?select=name,description'`
-         * so the admin UI dropdown lists every available skill with its
-         * short description as the option label.
+         * declares `dataSource: '/skills?select=name,description'` so the
+         * admin UI dropdown lists every available skill with its short
+         * description as the option label. The path is intentionally
+         * relative — the API client prepends `/api/v1`, so an absolute
+         * `/api/v1/...` here would double up to `/api/v1/api/v1/skills`
+         * and 404. See {@see \Spora\Tools\SkillTool::class} (around the
+         * `allowed_skills` `#[ToolSetting]`) for the in-attribute comment
+         * that records this trap.
          */
         public readonly ?string $dataSource = null,
         /**

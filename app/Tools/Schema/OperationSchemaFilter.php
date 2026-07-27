@@ -102,10 +102,24 @@ final class OperationSchemaFilter
      * op only, not `now`.
      *
      * Unlike `filter()`, this narrows `required[]` but leaves
-     * `properties[discriminatorKey].enum` and `__required_when` untouched —
-     * the runtime only cares about the op being executed, not what other
-     * ops exist. `__required_when` is still unset on the returned schema
-     * because once narrowing has happened the side-channel has done its job.
+     * `properties[discriminatorKey].enum` untouched — the runtime only cares
+     * about the op being executed, not what other ops exist.
+     *
+     * `__required_when` handling depends on which path is taken:
+     *  - First early-return (no per-op bindings): the schema is returned
+     *    unchanged. The side-channel was not present to begin with, so the
+     *    returned schema carries no `__required_when` key.
+     *  - Second early-return (bindings present but `required` already empty):
+     *    the side-channel is explicitly written back onto the schema. The
+     *    `__required_when` key IS present on the returned schema in this case.
+     *  - Main path (bindings present and `required` non-empty): `required[]`
+     *    is narrowed and `__required_when` is then unset.
+     *
+     * The middle path therefore leaves the side-channel in place. This is
+     * benign — `SchemaValidator` only walks `required` and `properties`, so
+     * the orphan key has no functional effect — but it is the one path that
+     * does not strip the key. The docblock records this explicitly so the
+     * invariant is visible to readers (and to the test suite).
      *
      * @param  array{
      *   type?: string,
