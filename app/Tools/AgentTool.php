@@ -112,14 +112,14 @@ use Spora\Tools\ValueObjects\ToolResult;
               . 'Allowed keys: name, description, system_prompt, max_steps, allow_followup, '
               . 'retry_after_minutes, max_retries, is_pinned, is_archived, is_favorite. '
               . '`notes` is intentionally not accepted here — use write_notes.',
-    required: false,
+    required: ['write_agent_configuration'],
 )]
 #[ToolParameter(
     name: 'content',
     type: 'string',
-    description: 'For write_notes: the markdown segment to write. Combined with `mode` '
-              . 'against the current notes.',
-    required: false,
+    description: 'For write_notes and write_notes_overwrite: the markdown segment to write. '
+              . 'Combined with `mode` against the current notes (ignored by every other op).',
+    required: ['write_notes', 'write_notes_overwrite'],
 )]
 #[ToolParameter(
     name: 'mode',
@@ -138,7 +138,7 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'For create_agent: an Agent Template payload — same shape as the operator '
               . 'upload endpoint. Required plugins are NOT auto-installed; missing plugins '
               . 'produce warnings rather than aborting the import.',
-    required: false,
+    required: ['create_agent'],
 )]
 final class AgentTool extends AbstractTool
 {
