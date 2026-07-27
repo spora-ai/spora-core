@@ -36,7 +36,8 @@ use Spora\Tools\ValueObjects\ToolResult;
  * either (a) spawn a sub-agent with a chosen toolset via `create_agent`,
  * or (b) realise activation is operator-only. Direct activation of a tool
  * on the calling agent happens through the operator-facing API
- * (`POST /api/v1/agents/{id}/tools/{toolName}/enable`).
+ * (`POST /api/v1/agents/{id}/tools/{toolId}/enable`, where `{toolId}` is
+ * the tool's `#[Tool(name:)]` value).
  *
  * Operations:
  *   - read_agent_configuration  (enabled, no approval)
