@@ -39,9 +39,9 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(name: 'now', description: 'Get the current date and time in the server\'s default timezone.', enabledByDefault: true, requiresApprovalByDefault: false)]
 #[ToolOperation(name: 'format', description: 'Format a Unix epoch as a human-readable datetime in a given IANA timezone.', enabledByDefault: true, requiresApprovalByDefault: false)]
-#[ToolParameter(name: 'epoch', type: 'integer', description: 'Unix timestamp in seconds.', required: true, minimum: 0)]
-#[ToolParameter(name: 'timezone', type: 'string', description: 'IANA timezone name (e.g. "UTC", "America/New_York", "Asia/Tokyo"). Defaults to "UTC".', required: false, default: 'UTC')]
-#[ToolParameter(name: 'format', type: 'string', description: 'Output format: "iso8601" (default), "rfc2822", or "human" ("2026-07-26 14:32:00 UTC").', required: false, default: 'iso8601', enum: ['iso8601', 'rfc2822', 'human'])]
+#[ToolParameter(name: 'epoch', type: 'integer', description: 'Unix timestamp in seconds. Required only when action is "format"; ignored when action is "now".', required: ['format'], minimum: 0)]
+#[ToolParameter(name: 'timezone', type: 'string', description: 'IANA timezone name (e.g. "UTC", "America/New_York", "Asia/Tokyo"). Only used when action is "format". Defaults to "UTC".', required: false, default: 'UTC')]
+#[ToolParameter(name: 'format', type: 'string', description: 'Output format: "iso8601" (default), "rfc2822", or "human" ("2026-07-26 14:32:00 UTC"). Only used when action is "format".', required: false, default: 'iso8601', enum: ['iso8601', 'rfc2822', 'human'])]
 final class TimeTool extends AbstractTool
 {
     public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult

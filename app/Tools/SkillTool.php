@@ -69,7 +69,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'filename',
     type: 'string',
-    description: 'Relative path inside the skill. Defaults to SKILL.md.',
+    description: 'Relative path inside the skill. Defaults to SKILL.md. Only used when action is "read".',
     required: false,
     default: 'SKILL.md',
 )]

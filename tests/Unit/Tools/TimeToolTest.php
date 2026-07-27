@@ -29,16 +29,10 @@ it('exposes a format operation with epoch, timezone, and format parameters', fun
 
     expect($schema['properties'])->toHaveKey('action')
         ->and($schema['properties']['action']['enum'])->toBe(['now', 'format'])
-        ->and($schema['properties']['epoch'])->toBe([
-            'type'        => 'integer',
-            'description' => 'Unix timestamp in seconds.',
-            'minimum'     => 0,
-        ])
-        ->and($schema['properties']['timezone'])->toBe([
-            'type'        => 'string',
-            'description' => 'IANA timezone name (e.g. "UTC", "America/New_York", "Asia/Tokyo"). Defaults to "UTC".',
-            'default'     => 'UTC',
-        ])
+        ->and($schema['properties']['epoch']['type'])->toBe('integer')
+        ->and($schema['properties']['epoch']['minimum'])->toBe(0)
+        ->and($schema['properties']['timezone']['type'])->toBe('string')
+        ->and($schema['properties']['timezone']['default'])->toBe('UTC')
         ->and($schema['properties']['format']['enum'])->toBe(['iso8601', 'rfc2822', 'human']);
 });
 
@@ -143,4 +137,22 @@ it('describes the now and format actions', function () {
     expect($tool->describeAction(['action' => 'now']))->toBe('Get current date and time')
         ->and($tool->describeAction(['action' => 'format', 'epoch' => 1753464720]))
         ->toBe('Format epoch 1753464720 as datetime');
+});
+
+it('does not require epoch when only the now operation is enabled', function () {
+    // Per-op required[] narrowing: a strict LLM provider validates the
+    // request against the schema's required[] before dispatch. Without
+    // this narrowing, the LLM is forced to send dummy `epoch: 0` values
+    // to call `now`, which only confuses it (and the audit caught the
+    // agent doing exactly that).
+    $tool   = new TimeTool();
+    $schema = $tool->getParametersSchema();
+    $filtered = Spora\Tools\Schema\OperationSchemaFilter::filter($schema, ['now'], 'action');
+
+    expect($filtered['required'])->toBe(['action'])
+        ->and($filtered['properties']['action']['enum'])->toBe(['now']);
+
+    // And the reverse: with `format` only, epoch is required.
+    $filteredFormat = Spora\Tools\Schema\OperationSchemaFilter::filter($schema, ['format'], 'action');
+    expect($filteredFormat['required'])->toContain('action', 'epoch');
 });
