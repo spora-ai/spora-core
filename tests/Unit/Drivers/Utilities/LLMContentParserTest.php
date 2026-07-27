@@ -170,6 +170,25 @@ test('parse strips inline <think> tags from a plain-string input and exposes onl
         ->and($result['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_TEXT);
 });
 
+// Pins the structured shape the OpenAI compatible driver now produces
+// from `resolveMessageBlocks()`: a leading unsigned `thinking` block
+// followed by a `text` block, in that order, with the cleaned text
+// (no inline tags) flowing into textContent.
+test('parse preserves the leading thinking + text ordering the OpenAI driver emits', function (): void {
+    $result = LLMContentParser::parse([
+        ['type' => 'thinking', 'thinking' => 'plan a, then b', 'signature' => ''],
+        ['type' => 'text',     'text'     => 'final answer'],
+    ]);
+
+    expect($result['textContent'])->toBe('final answer')
+        ->and($result['contentBlocks'])->toHaveCount(2)
+        ->and($result['contentBlocks'][0]->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($result['contentBlocks'][0]->text)->toBe('plan a, then b')
+        ->and($result['contentBlocks'][0]->signature)->toBe('')
+        ->and($result['contentBlocks'][1]->type)->toBe(ContentBlock::TYPE_TEXT)
+        ->and($result['contentBlocks'][1]->text)->toBe('final answer');
+});
+
 // ---------------------------------------------------------------------------
 // TextBlockParser
 // ---------------------------------------------------------------------------

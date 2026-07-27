@@ -7,11 +7,14 @@ namespace Spora\Drivers\Utilities;
 use Spora\Drivers\ValueObjects\ContentBlock;
 
 /**
- * Strips embedded `<think>…</think>` reasoning tags from the text before
- * surfacing it as a `text` content block. The extracted reasoning itself is
- * intentionally not surfaced — operators get reasoning only from providers
- * that return signed `thinking` content blocks (Anthropic extended
- * thinking). Unsigned inline reasoning is silently dropped on the floor.
+ * Strips embedded reasoning tags from the text before surfacing it as a
+ * `text` content block. The extracted reasoning itself is **not** emitted
+ * here — the OpenAI compatible driver reads the original content string
+ * via {@see ThinkingTagExtractor::split()} and emits any inline reasoning
+ * as a separate `thinking` block; for Anthropic, provider-signed
+ * `thinking` blocks are the canonical source. Tags that survive into
+ * here (e.g. when the OpenAI driver passes an already-split payload) are
+ * silently dropped on the Anthropic surface.
  */
 final class TextBlockParser implements ContentBlockParser
 {

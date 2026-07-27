@@ -5,33 +5,66 @@ declare(strict_types=1);
 namespace Spora\Drivers\Utilities;
 
 /**
- * Strips embedded `<think>…</think>` / `<thinking>…</thinking>` /
- * `<thought>…</thought>` reasoning tags from a free-form text string.
+ * Splits embedded inline reasoning tags out of a free-form text string.
  *
- * The extracted reasoning itself is no longer surfaced — operators get
- * reasoning only from providers that return signed `thinking` content
- * blocks (Anthropic extended thinking). Unsigned inline reasoning is
- * silently dropped on the floor. See the
- * `llm-cache-and-reasoning-roundtrip` plan for the full rationale.
+ * Matches `<think>...</think>`, `<thinking>...</thinking>` and
+ * `<thought>...</thought>` blocks, with optional whitespace inside the
+ * tag names.
+ *
+ * {@see self::strip()} keeps the historical "text only" behaviour for
+ * callers that don't care about the extracted reasoning (the Anthropic
+ * driver relies on provider-signed `thinking` blocks instead). The
+ * Anthropic path intentionally drops inline-tag reasoning on the floor;
+ * the OpenAI compatible driver uses {@see self::split()} so unsigned
+ * reasoning reaches the UI.
  */
 final class ThinkingTagExtractor
 {
+    /**
+     * Strip embedded reasoning tags and return the leftover text only.
+     */
     public static function strip(string $rawContent): string
     {
+        return self::split($rawContent)['text'];
+    }
+
+    /**
+     * Split a raw text payload into its displayable text and any inline
+     * reasoning extracted from the tags. Multiple matches are
+     * concatenated with a blank line; whitespace inside and around the
+     * extracted blocks is collapsed.
+     *
+     * @return array{text: string, reasoning: string}
+     */
+    public static function split(string $rawContent): array
+    {
+        $reasoningParts = [];
         $cleaned = $rawContent;
 
         foreach (self::patterns() as $pattern) {
             if (preg_match_all($pattern, $rawContent, $matches) === false) {
                 continue;
             }
+            foreach ($matches[1] as $body) {
+                $reasoningParts[] = self::collapseWhitespace(trim((string) $body));
+            }
             $cleaned = preg_replace($pattern, '', $cleaned) ?? $cleaned;
         }
 
-        // Collapse horizontal whitespace only (preserve newlines) so the
-        // cleaned text is readable when the tags wrap multi-line blocks.
-        $cleaned = preg_replace('/[ \t]+/', ' ', $cleaned) ?? $cleaned;
+        return [
+            'text' => self::collapseWhitespace(trim($cleaned)),
+            'reasoning' => implode("\n\n", array_values(array_filter(
+                $reasoningParts,
+                static fn(string $part): bool => $part !== '',
+            ))),
+        ];
+    }
 
-        return trim($cleaned);
+    private static function collapseWhitespace(string $value): string
+    {
+        $collapsed = preg_replace('/[ \t]+/', ' ', $value) ?? $value;
+        $collapsed = preg_replace('/\n{3,}/', "\n\n", $collapsed) ?? $collapsed;
+        return trim($collapsed);
     }
 
     /**
@@ -40,9 +73,9 @@ final class ThinkingTagExtractor
     private static function patterns(): array
     {
         return [
-            '#<think>(.*?)</think>#is',
-            '/<thinking\b[^>]*>(.*?)<\/thinking>/is',
-            '/<thought\b[^>]*>(.*?)<\/thought>/is',
+            '/<\s*think\b[^>]*>(.*?)<\/\s*think\s*>/is',
+            '/<\s*thinking\b[^>]*>(.*?)<\/\s*thinking\s*>/is',
+            '/<\s*thought\b[^>]*>(.*?)<\/\s*thought\s*>/is',
         ];
     }
 }

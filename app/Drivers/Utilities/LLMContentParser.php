@@ -13,12 +13,25 @@ final class LLMContentParser
     /**
      * Normalise a provider completion payload into the canonical
      * `{contentBlocks, textContent}` shape the driver returns in
-     * {@see \Spora\Drivers\ValueObjects\LLMResponse}. Reasoning is
-     * surfaced only via the structured `content_blocks[]` of
-     * `type === "thinking"` (provider-signed, replayable). Unsigned inline
-     * `<think>…</think>` tags in the model text are stripped from the
-     * surfaced `textContent` but their content is not surfaced — see
-     * {@see ThinkingTagExtractor::strip()} for the rationale.
+     * {@see \Spora\Drivers\ValueObjects\LLMResponse}.
+     *
+     * Reasoning reaches the consumer as a `ContentBlock::TYPE_THINKING`
+     * entry in `contentBlocks[]`:
+     *
+     *   - Anthropic extended thinking carries the provider-signed
+     *     `signature` byte-identical for chain-continuity replay.
+     *   - The OpenAI compatible driver emits unsigned `thinking` blocks
+     *     sourced from `message.reasoning_content` (o-series, DeepSeek,
+     *     MiniMax-M3), `message.reasoning`, or inline reasoning tags
+     *     extracted from `message.content` via
+     *     {@see ThinkingTagExtractor::split()}.
+     *
+     * Unsigned inline reasoning is preserved on the OpenAI path. The
+     * Anthropic outbound path
+     * ({@see \Spora\Drivers\Anthropic\AnthropicRequestBuilder::contentBlockToAnthropic()})
+     * drops unsigned thinking blocks instead of forwarding them, so a
+     * mid-task driver switch to Anthropic cannot break the Anthropic
+     * chain-continuity contract.
      *
      * @param string|array<int, mixed>|null $rawContent
      * @return array{contentBlocks: list<ContentBlock>, textContent: string}
