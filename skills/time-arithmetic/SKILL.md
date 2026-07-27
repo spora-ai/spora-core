@@ -30,6 +30,8 @@ Trigger on any of:
 
 If either is not enabled, the protocol degrades. Without `time(action: "format", ...)`, step 4 becomes mental string formatting of the pre-computed epoch (allowed, but the timezone label MUST still be explicit). Without `calculator(action: "calculate", ...)`, the protocol collapses entirely — report the missing tool to the operator rather than doing mental arithmetic on durations.
 
+> **Tool name and parameter shapes.** Call the `time` tool as `time(action: "now")` / `time(action: "format", ...)` — there is no separate `current_time` tool, and `skill_read` is also not a tool; the canonical read shape is `skill(action: "read", name: "<slug>", filename: "<file>")`. See the `skill` tool reference for the full operation list.
+
 ## Constants
 
 | Unit         | Seconds |
@@ -43,10 +45,10 @@ The skill's steps always reduce the duration to seconds before applying it to th
 
 ## Steps
 
-1. **Get the current time** with `time(action: "now")`. Capture both the formatted string and the Unix epoch from the result.
+1. **Get the current time** with `time(action: "now")`. Capture both the formatted string and the Unix epoch from the result. Pass only `action: "now"` — the `time` tool's `epoch`/`timezone`/`format` parameters are bound to the `format` operation and would be rejected if supplied to `now`; if you ever need them back, the `format` op below already encodes them.
 2. **Normalise the duration** to a single unit (seconds is recommended) using `calculator(action: "calculate", expression: <expr>)`. Use a single expression that combines all units, e.g. `2 * 604800 + 3 * 86400 + 5 * 3600 + 15 * 60`.
 3. **Apply** the seconds to the epoch with `calculator(action: "calculate", expression: "<epoch> + <seconds>")` (future) or `calculator(action: "calculate", expression: "<epoch> - <seconds>")` (past). Never do this in your head.
-4. **Format** the result back to a human-readable time with `time(action: "format", epoch: <result_epoch>, timezone: "<user's zone or UTC>", format: "human")`. The `human` format returns `"YYYY-MM-DD HH:MM:SS <zone>"` which is easy to read aloud. Use `format: "iso8601"` when the user wants machine-readable output.
+4. **Format** the result back to a human-readable time with `time(action: "format", epoch: <result_epoch>, timezone: "<user's zone or UTC>", format: "human")`. The `epoch`, `timezone`, and `format` arguments are required by *this* operation — the `time` tool's `format` op rejects calls missing `epoch`. The `human` format returns `"YYYY-MM-DD HH:MM:SS <zone>"` which is easy to read aloud. Use `format: "iso8601"` when the user wants machine-readable output.
 5. **Report** in the user's original unit. If they asked in hours, reply in hours; if in a different timezone, name the timezone explicitly.
 
 ## Edge cases

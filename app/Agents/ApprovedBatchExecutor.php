@@ -43,9 +43,18 @@ final class ApprovedBatchExecutor
             ]);
 
             $approvedMap = $this->indexApprovedBatch($approvedBatch);
+            // The operation each pending tool call was dispatched against is
+            // persisted on ToolCallModel.operation when the orchestrator first
+            // queued it (see ToolCallExecutor::createPendingRecord). Resume
+            // needs it so SchemaValidator can narrow per-op `required[]`
+            // bindings — without the op, validator would re-fail with
+            // "Required argument 'epoch' is missing" for, e.g., a `format`
+            // op whose `epoch` is bound only to the `format` op.
+            $operationMap = $this->indexPersistedOperations($taskId);
 
             foreach ($state->pendingToolCalls as $pendingToolCall) {
-                $this->executeApprovedToolCall($pendingToolCall, $approvedMap, $task, $state, $taskId);
+                $operationName = $operationMap[$pendingToolCall->providerCallId] ?? null;
+                $this->executeApprovedToolCall($pendingToolCall, $approvedMap, $task, $state, $taskId, $operationName);
             }
 
             $this->cleanupStrandedApprovals($task, $taskId);
@@ -112,18 +121,43 @@ final class ApprovedBatchExecutor
         return $approvedMap;
     }
 
+    /**
+     * Bulk-loads the `operation` each PENDING_APPROVAL tool_call was queued
+     * for. Returned as `provider_call_id → operation`. Rows from before the
+     * `operation` column existed (or older rows that pre-date the Skills
+     * work) are skipped — validators fall back to no narrowing for those.
+     *
+     * @return array<string, string>
+     */
+    private function indexPersistedOperations(int $taskId): array
+    {
+        $rows = ToolCallModel::where('task_id', $taskId)
+            ->whereIn('status', ['PENDING_APPROVAL', 'AWAITING_FINAL_APPROVAL'])
+            ->get(['provider_call_id', 'operation']);
+
+        $map = [];
+        foreach ($rows as $row) {
+            $op = $row->getAttribute('operation');
+            if (is_string($op) && $op !== '') {
+                $map[$row->getAttribute('provider_call_id')] = $op;
+            }
+        }
+        return $map;
+    }
+
     private function executeApprovedToolCall(
         DriverToolCall $pendingToolCall,
         array $approvedMap,
         Task $task,
         AgentState $state,
         int $taskId,
+        ?string $operationName = null,
     ): void {
         $approvedArgs = $approvedMap[$pendingToolCall->providerCallId] ?? $pendingToolCall->arguments;
         $toolInstance = $this->orchestrator->resolveToolByName($pendingToolCall->toolName);
 
         try {
-            SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema());
+            SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema(), $operationName);
         } catch (Throwable $e) {
             $this->recordResumeValidationFailure($task, $taskId, $pendingToolCall, $e);
             return;

@@ -57,7 +57,7 @@ final class TimeTool extends AbstractTool
     {
         return match ($this->getOperationName($arguments)) {
             'now'    => 'Get current date and time',
-            'format' => "Format epoch {$arguments['epoch']} as datetime",
+            'format' => 'Format epoch ' . ($arguments['epoch'] ?? '?') . ' as datetime',
             default  => 'Use the time tool',
         };
     }

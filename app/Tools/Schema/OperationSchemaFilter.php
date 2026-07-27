@@ -30,6 +30,10 @@ use stdClass;
  * — read from the tool's `#[ToolOperation]` declarations — so tools that use
  * a non-default key (e.g. WorldNewsApiTool uses 'operation') are filtered
  * correctly.
+ *
+ * `filterForOperation()` is the runtime counterpart used by `SchemaValidator`
+ * to apply the same per-op narrowing against the single op currently being
+ * executed. Both entry points read the same `__required_when` side channel.
  */
 final class OperationSchemaFilter
 {
@@ -83,6 +87,64 @@ final class OperationSchemaFilter
         $schema['type']             = $schema['type'] ?? 'object';
         $schema['properties']       = $properties === [] ? new stdClass() : $properties;
         $schema['required']         = $required;
+        unset($schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY]);
+
+        return $schema;
+    }
+
+    /**
+     * Narrows `required[]` for a single operation the runtime is about to execute.
+     *
+     * The LLM-facing schema (built via `filter()`) advertises the action's
+     * required params to the model. The runtime `SchemaValidator` needs the
+     * same per-op narrowing so a `time(action: "now")` call doesn't fail with
+     * "Required argument 'epoch' is missing" — `epoch` is bound to the `format`
+     * op only, not `now`.
+     *
+     * Unlike `filter()`, this narrows `required[]` but leaves
+     * `properties[discriminatorKey].enum` and `__required_when` untouched —
+     * the runtime only cares about the op being executed, not what other
+     * ops exist. `__required_when` is still unset on the returned schema
+     * because once narrowing has happened the side-channel has done its job.
+     *
+     * @param  array{
+     *   type?: string,
+     *   properties?: array<string, mixed>|stdClass,
+     *   required?: list<string>,
+     *   __required_when?: array<string, list<string>>,
+     * } $schema
+     * @return array{type: string, properties?: array<string, mixed>|stdClass, required: list<string>}
+     */
+    public static function filterForOperation(array $schema, string $operationName): array
+    {
+        $requiredWhen = $schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY] ?? [];
+        if ($requiredWhen === []) {
+            return $schema;
+        }
+
+        $required = $schema['required'] ?? [];
+        if ($required === []) {
+            $schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY] = $requiredWhen;
+            return $schema;
+        }
+
+        $narrowed = array_values(array_filter(
+            $required,
+            static function (string $name) use ($requiredWhen, $operationName): bool {
+                $binding = $requiredWhen[$name] ?? null;
+                if ($binding === null) {
+                    return true;
+                }
+                foreach ($binding as $op) {
+                    if ($op === $operationName) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+        ));
+
+        $schema['required'] = $narrowed;
         unset($schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY]);
 
         return $schema;
