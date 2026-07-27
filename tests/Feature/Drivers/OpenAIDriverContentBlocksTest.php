@@ -108,15 +108,9 @@ test('parsed contentBlocks and textContent flow through buildToolCallsResponse',
     expect($response->contentBlocks)->toBe([]);
 });
 
-/**
- * OpenAI compatible driver — reasoning surfacing.
- *
- * The driver emits reasoning sourced from `message.reasoning_content`
- * (o1/DeepSeek/MiniMax-M3), `message.reasoning`, and inline reasoning
- * tags inside `message.content`, preserving the order of the inline
- * content parts. Reasoning lands in `contentBlocks[]` as a
- * `ContentBlock::TYPE_THINKING` entry with an empty signature.
- */
+// OpenAI compatible driver — reasoning surfacing.
+// Reasoning lands in `contentBlocks[]` as a `ContentBlock::TYPE_THINKING`
+// entry with an empty signature (OpenAI hosts don't sign chain-of-thought).
 test('parseResponse surfaces reasoning_content as an unsigned thinking block', function (): void {
     $payload = json_encode([
         'id' => 'chatcmpl-o1',
@@ -244,11 +238,9 @@ test('parseResponse extracts inline reasoning tags from message.content when no 
 });
 
 test('parseResponse propagates reasoning_content on tool_calls responses', function (): void {
-    // Regression guard for the PR #161 scenario: o-series models emit
-    // `reasoning_content` on the same turn that asks for a tool call.
-    // The driver must persist that chain-of-thought alongside the
-    // tool-call request, otherwise reasoning is silently dropped the
-    // moment a step ends with a tool call.
+    // PR #161 scenario: o-series emit `reasoning_content` on the same
+    // turn they ask for a tool call; the chain-of-thought must persist
+    // alongside the tool-call request.
     $payload = json_encode([
         'id' => 'chatcmpl-o1-tool',
         'choices' => [
@@ -298,11 +290,10 @@ test('parseResponse propagates reasoning_content on tool_calls responses', funct
 });
 
 test('parseResponse emits no thinking block when no reasoning field and no inline tags are present', function (): void {
-    // Regression guard for the no-reasoning path: the LLMContentParser text
-    // block still lands in contentBlocks so $response->content round-trips,
-    // but there must be no `type === thinking` entry. Otherwise the
-    // frontend's `reasoningForEntry` would render a foldout for a plain
-    // response.
+    // A plain response must not produce a `type === thinking` entry,
+    // otherwise the frontend's `reasoningForEntry` would render an
+    // empty foldout. The `text` block survives into contentBlocks so
+    // $response->content round-trips.
     $payload = json_encode([
         'id' => 'chatcmpl-plain',
         'choices' => [

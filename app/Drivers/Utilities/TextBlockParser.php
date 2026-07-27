@@ -8,13 +8,10 @@ use Spora\Drivers\ValueObjects\ContentBlock;
 
 /**
  * Strips embedded reasoning tags from the text before surfacing it as a
- * `text` content block. The extracted reasoning itself is **not** emitted
- * here — the OpenAI compatible driver reads the original content string
- * via {@see ThinkingTagExtractor::split()} and emits any inline reasoning
- * as a separate `thinking` block; for Anthropic, provider-signed
- * `thinking` blocks are the canonical source. Tags that survive into
- * here (e.g. when the OpenAI driver passes an already-split payload) are
- * silently dropped on the Anthropic surface.
+ * `text` content block. Inline reasoning is not emitted here — the
+ * OpenAI driver reads the raw content via {@see ThinkingTagExtractor::split()}
+ * and surfaces the reasoning as a separate `thinking` block; Anthropic
+ * uses provider-signed `thinking` blocks instead.
  */
 final class TextBlockParser implements ContentBlockParser
 {

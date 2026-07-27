@@ -7,16 +7,13 @@ namespace Spora\Drivers\Utilities;
 /**
  * Splits embedded inline reasoning tags out of a free-form text string.
  *
- * Matches `<think>...</think>`, `<thinking>...</thinking>` and
- * `<thought>...</thought>` blocks, with optional whitespace inside the
- * tag names.
+ * Matches the three tag forms the field uses (and their `<thinking>` /
+ * `<thought>` siblings), with optional whitespace inside the tag names.
  *
- * {@see self::strip()} keeps the historical "text only" behaviour for
- * callers that don't care about the extracted reasoning (the Anthropic
- * driver relies on provider-signed `thinking` blocks instead). The
- * Anthropic path intentionally drops inline-tag reasoning on the floor;
- * the OpenAI compatible driver uses {@see self::split()} so unsigned
- * reasoning reaches the UI.
+ * The historical {@see self::strip()} returns text only — useful for
+ * the Anthropic path that sources reasoning from provider-signed
+ * `thinking` blocks. The OpenAI compatible driver uses
+ * {@see self::split()} so unsigned inline reasoning can reach the UI.
  */
 final class ThinkingTagExtractor
 {

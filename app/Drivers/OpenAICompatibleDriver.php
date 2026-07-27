@@ -182,25 +182,18 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     }
 
     /**
-     * Convert an OpenAI-style assistant message into the ordered list of
-     * provider blocks the {@see LLMContentParser} dispatcher can normalise.
+     * Convert an OpenAI assistant message into the ordered list of
+     * provider blocks the {@see LLMContentParser} dispatcher can
+     * normalise. Reasoning is sourced from `message.reasoning_content`
+     * (OpenAI o-series, DeepSeek, MiniMax-M3) → `message.reasoning` →
+     * inline reasoning tags inside `message.content`; both can be
+     * present and are concatenated with a blank line.
      *
-     * Reasoning sources, in precedence order:
-     *
-     *   1. `message.reasoning_content` — OpenAI o-series, DeepSeek, MiniMax-M3.
-     *   2. `message.reasoning`          — some MiniMax-compatible endpoints.
-     *   3. inline reasoning tags        — distilled local models that emit
-     *      reasoning wrapped in `think` (or `thinking` / `thought`) tag
-     *      pairs inside the `message.content` string.
-     *
-     * The structured `reasoning_content` / `reasoning` field wins when set;
-     * any inline-tag reasoning discovered inside `message.content` is
-     * appended (with a blank-line separator) so both sources survive when
-     * a provider emits them together. The resulting `ContentBlock::thinking`
-     * carries an empty `signature` — OpenAI-compatible hosts don't sign
-     * their chain-of-thought, and the Anthropic outbound path
-     * ({@see Anthropic\AnthropicRequestBuilder::contentBlockToAnthropic})
-     * drops unsigned thinking blocks instead of forwarding them.
+     * The emitted `ContentBlock::thinking` carries an empty `signature`
+     * — OpenAI-compatible hosts don't sign chain-of-thought. The
+     * Anthropic outbound path drops unsigned thinking blocks instead
+     * of forwarding them, so a mid-task driver switch cannot break
+     * Anthropic chain continuity.
      *
      * @param  array<string, mixed> $message
      * @return list<array<string, mixed>>
@@ -244,10 +237,10 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     }
 
     /**
-     * Pick the first non-empty `reasoning_content` / `reasoning` string from
-     * an assistant message. The structured field wins over the alias; an
-     * empty string is treated as "absent" to avoid an empty reasoning block
-     * when a provider sends `reasoning_content: ""`.
+     * First non-empty `reasoning_content` / `reasoning` value on the
+     * message (structured field wins). Empty string is treated as
+     * "absent" so a `reasoning_content: ""` payload doesn't surface
+     * an empty reasoning block.
      *
      * @param  array<string, mixed> $message
      */

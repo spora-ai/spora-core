@@ -4,15 +4,8 @@ declare(strict_types=1);
 
 use Spora\Drivers\Utilities\ThinkingTagExtractor;
 
-/*
-|--------------------------------------------------------------------------
-| ThinkingTagExtractor::split()
-|--------------------------------------------------------------------------
-|
-| Unit coverage for the parallel text / reasoning split helper. The
-| earlier strip() API is preserved and covered indirectly through the
-| higher-level parser tests in this directory.
-*/
+/* Unit coverage for ThinkingTagExtractor::split(). The earlier strip()
+   API is preserved and exercised indirectly through the parser tests. */
 
 function tte_tag_open(): string
 {

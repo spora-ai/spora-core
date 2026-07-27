@@ -67,12 +67,10 @@ test('null content is converted to empty string for Anthropic', function (): voi
 });
 
 test('unsigned thinking blocks are dropped from the Anthropic outbound assistant message', function (): void {
-    // Cross-driver provenance guard: when an agent that started on the
-    // OpenAI compatible driver (which writes unsigned thinking blocks
-    // from `reasoning_content`) is reconfigured to use the Anthropic
-    // driver, the unsigned block must be dropped instead of forwarded as
-    // `{type: thinking, signature: ""}`. Anthropic's extended thinking
-    // rejects empty signatures and would 400 the request.
+    // Cross-driver guard: agents that started on the OpenAI driver
+    // store unsigned thinking blocks from `reasoning_content`; the
+    // Anthropic path must drop them instead of forwarding
+    // `{signature: ''}` (Anthropic 400s that).
     $builder = makeAnthropicRequestBuilder('claude-3-5-sonnet-20241022');
     $messages = $builder->convertMessages([
         [
@@ -101,10 +99,8 @@ test('unsigned thinking blocks are dropped from the Anthropic outbound assistant
 });
 
 test('signed thinking blocks from a previous Anthropic turn still replay byte-identical', function (): void {
-    // Companion to the unsigned-skip test above: signed blocks from an
-    // earlier Anthropic response must continue to round-trip with the
-    // original signature byte-identical, otherwise the chain-continuity
-    // fix from PR #163 regresses.
+    // Companion to the unsigned-skip test above; pins the PR #163
+    // chain-continuity contract on the Anthropic outbound path.
     $builder = makeAnthropicRequestBuilder('claude-3-5-sonnet-20241022');
     $messages = $builder->convertMessages([
         [

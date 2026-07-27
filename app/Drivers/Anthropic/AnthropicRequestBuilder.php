@@ -234,12 +234,11 @@ final class AnthropicRequestBuilder
         return match ($type) {
             ContentBlock::TYPE_TEXT => ['type' => 'text', 'text' => (string) ($block['text'] ?? '')],
             ContentBlock::TYPE_IMAGE => $this->imageBlockToAnthropic($block),
-            // Anthropic's extended-thinking chain breaks when a `signature`
-            // is missing or empty, so unsigned thinking blocks (the ones the
-            // OpenAI compatible driver populates from `reasoning_content` /
-            // inline reasoning tags) are dropped here instead of forwarded.
-            // The OpenAI outbound path collapses any `thinking` block to a
-            // text part, so cross-driver replay is lossless the other way.
+            // Anthropic's extended-thinking chain breaks with an empty
+            // signature; unsigned thinking blocks (sourced from the OpenAI
+            // driver's `reasoning_content` / inline tags) are dropped here
+            // instead of forwarded. The OpenAI outbound path flattens
+            // thinking→text, so cross-driver replay is lossless the other way.
             ContentBlock::TYPE_THINKING => (string) ($block['signature'] ?? '') === '' ? null : [
                 'type' => 'thinking',
                 'thinking' => (string) ($block['text'] ?? ''),
