@@ -21,6 +21,8 @@ describe('ToolSchemaPresenter', function (): void {
             ->and($summary['display_name'])->toBe('Time')
             ->and($summary['category'])->toBe('productivity')
             ->and($summary['icon'])->toBeNull() // No resolver passed.
+            ->and($summary['description'])->toBeString()
+            ->and($summary['description'])->not->toBe('')
             ->and($summary['operations'])->toBeArray();
     });
 
@@ -30,6 +32,7 @@ describe('ToolSchemaPresenter', function (): void {
         expect($summary['tool_class'])->toBe('Spora\\Tools\\DoesNotExistTool')
             ->and($summary['tool_name'])->toBe('DoesNotExistTool')
             ->and($summary['display_name'])->toBe('DoesNotExistTool')
+            ->and($summary['description'])->toBe('')
             ->and($summary['category'])->toBe('general')
             ->and($summary['icon'])->toBeNull()
             ->and($summary['operations'])->toBe([]);
