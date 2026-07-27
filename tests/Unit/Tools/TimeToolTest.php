@@ -43,10 +43,13 @@ it('formats an epoch as iso8601 by default in UTC', function () {
         'epoch'  => 1753464720, // 2025-07-25T17:32:00Z
     ], 1);
 
+    $payload = json_decode((string) $result->content, true, flags: JSON_THROW_ON_ERROR);
+
     expect($result->success)->toBeTrue()
-        ->and($result->content)->toBe('2025-07-25T17:32:00+00:00')
-        ->and($result->data['timezone'])->toBe('UTC')
-        ->and($result->data['format'])->toBe('iso8601');
+        ->and($payload['formatted'])->toBe('2025-07-25T17:32:00+00:00')
+        ->and($payload['weekday'])->toBe('Friday')
+        ->and($result->data['formatted'])->toBe('2025-07-25T17:32:00+00:00')
+        ->and($result->data['weekday'])->toBe('Friday');
 });
 
 it('formats an epoch in a chosen IANA timezone', function () {
@@ -58,9 +61,13 @@ it('formats an epoch in a chosen IANA timezone', function () {
     ], 1);
 
     // 17:32 UTC → 02:32 the next day in Tokyo (UTC+9).
+    $payload = json_decode((string) $result->content, true, flags: JSON_THROW_ON_ERROR);
+
     expect($result->success)->toBeTrue()
-        ->and($result->content)->toBe('2025-07-26T02:32:00+09:00')
-        ->and($result->data['timezone'])->toBe('Asia/Tokyo');
+        ->and($payload['formatted'])->toBe('2025-07-26T02:32:00+09:00')
+        ->and($payload['weekday'])->toBe('Saturday')
+        ->and($result->data['formatted'])->toBe('2025-07-26T02:32:00+09:00')
+        ->and($result->data['weekday'])->toBe('Saturday');
 });
 
 it('formats an epoch in the human format', function () {
@@ -72,8 +79,13 @@ it('formats an epoch in the human format', function () {
         'format'   => 'human',
     ], 1);
 
+    $payload = json_decode((string) $result->content, true, flags: JSON_THROW_ON_ERROR);
+
     expect($result->success)->toBeTrue()
-        ->and($result->content)->toBe('2025-07-25 17:32:00 UTC');
+        ->and($payload['formatted'])->toBe('2025-07-25 17:32:00 UTC')
+        ->and($payload['weekday'])->toBe('Friday')
+        ->and($result->data['formatted'])->toBe('2025-07-25 17:32:00 UTC')
+        ->and($result->data['weekday'])->toBe('Friday');
 });
 
 it('formats an epoch in rfc2822', function () {
@@ -85,8 +97,11 @@ it('formats an epoch in rfc2822', function () {
         'format'   => 'rfc2822',
     ], 1);
 
+    $payload = json_decode((string) $result->content, true, flags: JSON_THROW_ON_ERROR);
+
     expect($result->success)->toBeTrue()
-        ->and($result->content)->toContain('Fri, 25 Jul 2025');
+        ->and($payload['formatted'])->toContain('Fri, 25 Jul 2025')
+        ->and($payload['weekday'])->toBe('Friday');
 });
 
 it('rejects a negative epoch', function () {
@@ -137,6 +152,29 @@ it('describes the now and format actions', function () {
     expect($tool->describeAction(['action' => 'now']))->toBe('Get current date and time')
         ->and($tool->describeAction(['action' => 'format', 'epoch' => 1753464720]))
         ->toBe('Format epoch 1753464720 as datetime');
+});
+
+it('returns the weekday on now', function () {
+    $tool = new TimeTool();
+    $result = $tool->execute([], 1);
+
+    expect($result->success)->toBeTrue()
+        ->and($result->data['weekday'])->toBeIn(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
+});
+
+it('returns the weekday on format', function () {
+    $tool = new TimeTool();
+    $result = $tool->execute([
+        'action'   => 'format',
+        'epoch'    => 1753464720,
+        'timezone' => 'UTC',
+    ], 1);
+
+    $payload = json_decode((string) $result->content, true, flags: JSON_THROW_ON_ERROR);
+
+    expect($result->success)->toBeTrue()
+        ->and($payload['weekday'])->toBe('Friday')
+        ->and($result->data['weekday'])->toBe('Friday');
 });
 
 it('does not require epoch when only the now operation is enabled', function () {

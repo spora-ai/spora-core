@@ -18,15 +18,25 @@ use Spora\Tools\ValueObjects\ToolResult;
  *
  * Operations:
  *   - 'now'    — current instant in the server's default timezone
- *                (no parameters; returns {datetime, timezone, epoch}).
+ *                (no parameters; returns {datetime, timezone, epoch, weekday}).
  *   - 'format' — render an epoch as a human-readable datetime in a named
  *                IANA timezone. Used by the time-arithmetic skill to
  *                convert a previously-computed epoch back to a string the
- *                agent can speak.
+ *                agent can speak. Returns {formatted, weekday}.
+ *
+ * Both ops include `weekday` (long English name, ISO 8601 Monday-based —
+ * `Monday`..`Sunday`). The skill teaches the agent to derive the short
+ * three-letter form (`Mon`..`Sun`) and numeric day-of-week (`1`..`7`) from
+ * this string.
  *
  * The `format` op accepts a user-supplied `timezone` (IANA name) so the agent
  * can answer "what time is it in Tokyo right now" without doing mental
  * arithmetic on offsets. DST is handled by DateTimeZone.
+ *
+ * BC note: as of v2.1 the `format` op's `$content` is the JSON-encoded
+ * payload `{formatted, weekday}` instead of a bare rendered string. Callers
+ * that read `$content` directly must decode it. `$data` is also reshaped
+ * (no more `datetime`/`format` keys; `formatted` replaces both).
  */
 #[Tool(
     name: 'time',
@@ -82,7 +92,7 @@ final class TimeTool extends AbstractTool
         return new ToolResult(
             true,
             "Current Date & Time: {$iso8601}\nTimezone: {$timezone}\nUnix Timestamp: {$unix}",
-            ['datetime' => $iso8601, 'timezone' => $timezone, 'epoch' => $unix],
+            ['datetime' => $iso8601, 'timezone' => $timezone, 'epoch' => $unix, 'weekday' => $now->format('l')],
         );
     }
 
@@ -115,10 +125,12 @@ final class TimeTool extends AbstractTool
             default   => $dt->format(DateTimeInterface::ATOM),
         };
 
+        $weekday = $dt->format('l');
+
         return new ToolResult(
             true,
-            $rendered,
-            ['datetime' => $rendered, 'epoch' => $epoch, 'timezone' => $timezone, 'format' => $format],
+            json_encode(['formatted' => $rendered, 'weekday' => $weekday], JSON_THROW_ON_ERROR),
+            ['formatted' => $rendered, 'weekday' => $weekday],
         );
     }
 }

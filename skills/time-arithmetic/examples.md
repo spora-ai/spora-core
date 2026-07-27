@@ -6,16 +6,16 @@ Each example shows the exact tool calls and the intermediate results. The agent 
 
 ```
 time(action: "now")
-→ { datetime: "2025-07-25T14:32:00+00:00", timezone: "UTC", epoch: 1753453920 }
+→ { datetime: "2025-07-25T14:32:00+00:00", timezone: "UTC", epoch: 1753453920, weekday: "Friday" }
 
-calculator(action: "calculate", expression: "3 * 3600")
+calculator(expression: "3 * 3600")
 → 10800
 
-calculator(action: "calculate", expression: "1753453920 + 10800")
+calculator(expression: "1753453920 + 10800")
 → 1753464720
 
 time(action: "format", epoch: 1753464720, timezone: "UTC", format: "human")
-→ "2025-07-25 17:32:00 UTC"
+→ { formatted: "2025-07-25 17:32:00 UTC", weekday: "Friday" }
 ```
 
 Reply: *"In 3 hours it will be 17:32 UTC."*
@@ -25,14 +25,14 @@ Reply: *"In 3 hours it will be 17:32 UTC."*
 Reduce the duration to seconds in a single expression so the agent does not chain operations:
 
 ```
-calculator(action: "calculate", expression: "2 * 86400 + 3 * 3600 + 15 * 60")
+calculator(expression: "2 * 86400 + 3 * 3600 + 15 * 60")
 → 183300
 
-calculator(action: "calculate", expression: "1753453920 - 183300")
+calculator(expression: "1753453920 - 183300")
 → 1753270620
 
 time(action: "format", epoch: 1753270620, timezone: "UTC", format: "human")
-→ "2025-07-23 11:17:00 UTC"
+→ { formatted: "2025-07-23 11:17:00 UTC", weekday: "Wednesday" }
 ```
 
 Reply: *"2 days, 3 hours, and 15 minutes ago it was 2025-07-23 11:17 UTC."*
@@ -43,12 +43,12 @@ The agent computes seconds-until-next-midnight from the current epoch, then conv
 
 ```
 time(action: "now")
-→ { datetime: "2025-07-25T14:32:00+00:00", timezone: "UTC", epoch: 1753453920 }
+→ { datetime: "2025-07-25T14:32:00+00:00", timezone: "UTC", epoch: 1753453920, weekday: "Friday" }
 
-calculator(action: "calculate", expression: "86400 - (1753453920 % 86400)")
+calculator(expression: "86400 - (1753453920 % 86400)")
 → 28800
 
-calculator(action: "calculate", expression: "28800 / 60")
+calculator(expression: "28800 / 60")
 → 480
 ```
 
@@ -59,7 +59,7 @@ Reply: *"There are 480 minutes (8 hours) until midnight UTC."*
 This is a unit-conversion request, not a time-arithmetic one — but the same protocol applies.
 
 ```
-calculator(action: "calculate", expression: "30 * 60")
+calculator(expression: "30 * 60")
 → 1800
 ```
 
@@ -71,10 +71,10 @@ This is a timezone-display question, not a duration one. The arithmetic skill is
 
 ```
 time(action: "now")
-→ { datetime: "2025-07-25T14:32:00+00:00", timezone: "UTC", epoch: 1753453920 }
+→ { datetime: "2025-07-25T14:32:00+00:00", timezone: "UTC", epoch: 1753453920, weekday: "Friday" }
 
 time(action: "format", epoch: 1753453920, timezone: "Asia/Tokyo", format: "human")
-→ "2025-07-25 23:32:00 Asia/Tokyo"
+→ { formatted: "2025-07-25 23:32:00 Asia/Tokyo", weekday: "Friday" }
 ```
 
 Note: UTC+9 makes "now" in Tokyo 23:32 same-day in summer (Tokyo does not observe DST), so the result lands later the same day rather than early the next day.
@@ -87,16 +87,25 @@ Demonstrates the weeks constant (604800):
 
 ```
 time(action: "now")
-→ { datetime: "2025-07-25T14:32:00+00:00", timezone: "UTC", epoch: 1753453920 }
+→ { datetime: "2025-07-25T14:32:00+00:00", timezone: "UTC", epoch: 1753453920, weekday: "Friday" }
 
-calculator(action: "calculate", expression: "1 * 604800 + 2 * 86400")
+calculator(expression: "1 * 604800 + 2 * 86400")
 → 777600
 
-calculator(action: "calculate", expression: "1753453920 + 777600")
+calculator(expression: "1753453920 + 777600")
 → 1754231520
 
 time(action: "format", epoch: 1754231520, timezone: "UTC", format: "human")
-→ "2025-08-03 14:32:00 UTC"
+→ { formatted: "2025-08-03 14:32:00 UTC", weekday: "Sunday" }
 ```
 
 Reply: *"1 week and 2 days from now it will be 2025-08-03 14:32 UTC."*
+
+## Example 7 — "What day of the week was this epoch?"
+
+```
+time(action: "format", epoch: 1, timezone: "UTC", format: "human")
+→ { formatted: "1970-01-01 00:00:00 UTC", weekday: "Thursday" }
+```
+
+Reply: *"Epoch 1 (the first second past the Unix epoch) was a Thursday."*
