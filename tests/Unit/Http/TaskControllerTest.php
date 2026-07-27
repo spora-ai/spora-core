@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Http;
 
+use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\TaskController;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Symfony\Component\HttpFoundation\Request;
@@ -13,7 +14,7 @@ function makeTaskController(): array
 {
     $authService = bootAuthLayer();
     $service = new StubTaskService();
-    $controller = new TaskController($authService, $service, new TaskMediaCapabilityService());
+    $controller = new TaskController($authService, $service, new TaskMediaCapabilityService(), new ContinueTaskDispatcher($service, new TaskMediaCapabilityService()));
 
     return [$controller, $authService, $service];
 }

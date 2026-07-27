@@ -20,7 +20,7 @@ use Throwable;
  * consume image blocks, returning a clear HTTP 400 at the request boundary
  * rather than a silent image-strip during the first tick.
  */
-final class TaskMediaCapabilityService
+final class TaskMediaCapabilityService implements TaskMediaCapabilityInterface
 {
     public function __construct(
         private readonly ?DriverFactory $driverFactory = null,

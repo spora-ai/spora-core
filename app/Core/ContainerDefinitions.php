@@ -49,6 +49,7 @@ use Spora\Http\AgentToolController;
 use Spora\Http\AppsController;
 use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
+use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -914,6 +915,14 @@ final class ContainerDefinitions
             TaskController::class => static function (ContainerInterface $c): TaskController {
                 return new TaskController(
                     $c->get(AuthService::class),
+                    $c->get(TaskServiceInterface::class),
+                    $c->get(TaskMediaCapabilityService::class),
+                    $c->get(ContinueTaskDispatcher::class),
+                );
+            },
+
+            ContinueTaskDispatcher::class => static function (ContainerInterface $c): ContinueTaskDispatcher {
+                return new ContinueTaskDispatcher(
                     $c->get(TaskServiceInterface::class),
                     $c->get(TaskMediaCapabilityService::class),
                 );
