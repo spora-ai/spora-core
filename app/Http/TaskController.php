@@ -416,19 +416,28 @@ final class TaskController
 
         try {
             $this->mediaCapability->ensureMediaCapabilityCompatible($existing['agent_id'], $mediaIds);
-        } catch (MediaCapabilityMismatchException $e) {
+            $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
+
+            return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_OK);
+        } catch (MediaCapabilityMismatchException | InvalidArgumentException $e) {
+            return $this->continueExceptionResponse($e);
+        }
+    }
+
+    /**
+     * @param MediaCapabilityMismatchException|InvalidArgumentException $e
+     */
+    private function continueExceptionResponse(
+        MediaCapabilityMismatchException|InvalidArgumentException $e,
+    ): JsonResponse {
+        if ($e instanceof MediaCapabilityMismatchException) {
             return new JsonResponse(
                 ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
                 Response::HTTP_BAD_REQUEST,
             );
         }
 
-        try {
-            $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
-            return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_OK);
-        } catch (InvalidArgumentException $e) {
-            return $this->errorForException($e);
-        }
+        return $this->errorForException($e);
     }
 
     /**
