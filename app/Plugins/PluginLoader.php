@@ -25,6 +25,12 @@ use Throwable;
  * Directories are scanned in the order given; if the same slug appears in more
  * than one, the first one wins.
  */
+// NOSONAR — PluginLoader is a service-locator facade for plugin capabilities.
+// S1448 (too many methods) inflates because each plugin-side capability registers
+// as a sibling method (paths, hooks, ext entries, skill paths, …). Splitting the
+// facade would scatter the contract across multiple classes and defeat the
+// method-name lookup the plugin registry depends on. Acked in plugin-architecture
+// review; a deeper restructure is tracked separately.
 final class PluginLoader
 {
     /**
