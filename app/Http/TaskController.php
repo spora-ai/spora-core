@@ -399,50 +399,6 @@ final class TaskController
         ];
     }
 
-    /** @param list<string> $mediaIds */
-    private function continueDispatch(
-        int $taskId,
-        int $userId,
-        string $prompt,
-        ?int $additionalSteps,
-        array $mediaIds,
-    ): JsonResponse {
-        $existing = $this->taskService->getTask($taskId, $userId);
-        if ($existing === null) {
-            return $this->notFoundResponse();
-        }
-
-        return $this->continueDispatchRun(
-            $existing['agent_id'],
-            $taskId,
-            $userId,
-            $prompt,
-            $additionalSteps,
-            $mediaIds,
-        );
-    }
-
-    /**
-     * @param list<string> $mediaIds
-     */
-    private function continueDispatchRun(
-        int $agentId,
-        int $taskId,
-        int $userId,
-        string $prompt,
-        ?int $additionalSteps,
-        array $mediaIds,
-    ): JsonResponse {
-        try {
-            $this->mediaCapability->ensureMediaCapabilityCompatible($agentId, $mediaIds);
-            $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
-
-            return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_OK);
-        } catch (MediaCapabilityMismatchException | InvalidArgumentException $e) {
-            return $this->continueExceptionResponse($e);
-        }
-    }
-
     /**
      * @param MediaCapabilityMismatchException|InvalidArgumentException $e
      */
@@ -516,5 +472,49 @@ final class TaskController
         }
 
         return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    /** @param list<string> $mediaIds */
+    private function continueDispatch(
+        int $taskId,
+        int $userId,
+        string $prompt,
+        ?int $additionalSteps,
+        array $mediaIds,
+    ): JsonResponse {
+        $existing = $this->taskService->getTask($taskId, $userId);
+        if ($existing === null) {
+            return $this->notFoundResponse();
+        }
+
+        return $this->continueDispatchRun(
+            $existing['agent_id'],
+            $taskId,
+            $userId,
+            $prompt,
+            $additionalSteps,
+            $mediaIds,
+        );
+    }
+
+    /**
+     * @param list<string> $mediaIds
+     */
+    private function continueDispatchRun(
+        int $agentId,
+        int $taskId,
+        int $userId,
+        string $prompt,
+        ?int $additionalSteps,
+        array $mediaIds,
+    ): JsonResponse {
+        try {
+            $this->mediaCapability->ensureMediaCapabilityCompatible($agentId, $mediaIds);
+            $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
+
+            return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_OK);
+        } catch (MediaCapabilityMismatchException | InvalidArgumentException $e) {
+            return $this->continueExceptionResponse($e);
+        }
     }
 }
