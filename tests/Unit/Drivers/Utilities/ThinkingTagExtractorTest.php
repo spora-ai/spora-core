@@ -92,6 +92,33 @@ test('split returns reasoning === "" when only whitespace lives inside the tags'
         ->and($result['reasoning'])->toBe('');
 });
 
+test('split preserves the source order of mixed reasoning tag types', function (): void {
+    // Regression: a single-pass alternation regex walks the string in
+    // source order, so `<thought>A</thought>` followed by `thinkB/think`
+    // yields A then B, not B then A. Old per-pattern iteration collected
+    // every `think` before any `thought`, inverting the order.
+    $result = ThinkingTagExtractor::split(
+        'visible ' . tte_thought_open() . 'A.' . tte_thought_close()
+        . ' sep ' . tte_tag_open() . 'B.' . tte_tag_close() . ' end',
+    );
+
+    expect($result['text'])->toBe('visible sep end')
+        ->and($result['reasoning'])->toBe("A.\n\nB.");
+});
+
+test('split leaves mismatched or unclosed reasoning tags as visible text', function (): void {
+    // The backref (\1) enforces matching open/close tags; an unclosed
+    // opening tag leaves the raw text untouched, and a mismatched pair
+    // (`think.../thought`) does not match either branch.
+    $mismatched = ThinkingTagExtractor::split('mismatched ' . tte_tag_open() . 'x' . tte_thought_close() . ' end');
+    expect($mismatched['text'])->toBe('mismatched ' . tte_tag_open() . 'x' . tte_thought_close() . ' end')
+        ->and($mismatched['reasoning'])->toBe('');
+
+    $unclosed = ThinkingTagExtractor::split('leftover ' . tte_tag_open() . 'never closes');
+    expect($unclosed['text'])->toBe('leftover ' . tte_tag_open() . 'never closes')
+        ->and($unclosed['reasoning'])->toBe('');
+});
+
 test('strip is a thin wrapper that returns just the text side of split()', function (): void {
     expect(ThinkingTagExtractor::strip('visible ' . tte_tag_open() . 'hidden' . tte_tag_close() . ' end'))
         ->toBe('visible end')

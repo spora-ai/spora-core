@@ -28,25 +28,22 @@ final class ThinkingTagExtractor
     /**
      * Split a raw text payload into its displayable text and any inline
      * reasoning extracted from the tags. Multiple matches are
-     * concatenated with a blank line; whitespace inside and around the
-     * extracted blocks is collapsed.
+     * concatenated with a blank line in source order; whitespace inside
+     * and around the extracted blocks is collapsed.
      *
      * @return array{text: string, reasoning: string}
      */
     public static function split(string $rawContent): array
     {
         $reasoningParts = [];
-        $cleaned = $rawContent;
 
-        foreach (self::patterns() as $pattern) {
-            if (preg_match_all($pattern, $rawContent, $matches) === false) {
-                continue;
+        if (preg_match_all(self::pattern(), $rawContent, $matches, PREG_SET_ORDER) !== false) {
+            foreach ($matches as $match) {
+                $reasoningParts[] = self::collapseWhitespace(trim((string) $match[2]));
             }
-            foreach ($matches[1] as $body) {
-                $reasoningParts[] = self::collapseWhitespace(trim((string) $body));
-            }
-            $cleaned = preg_replace($pattern, '', $cleaned) ?? $cleaned;
         }
+
+        $cleaned = preg_replace(self::pattern(), '', $rawContent) ?? $rawContent;
 
         return [
             'text' => self::collapseWhitespace(trim($cleaned)),
@@ -65,14 +62,13 @@ final class ThinkingTagExtractor
     }
 
     /**
-     * @return list<string>
+     * Single alternation regex walks the string in source order so mixed
+     * tag types (e.g. `<thought>` then `<\u200Bthink>`) preserve their
+     * original sequencing. `\1` backref enforces matching open/close
+     * tags so `<\u200Bthink>A</thought>` cannot match.
      */
-    private static function patterns(): array
+    private static function pattern(): string
     {
-        return [
-            '/<\s*think\b[^>]*>(.*?)<\/\s*think\s*>/is',
-            '/<\s*thinking\b[^>]*>(.*?)<\/\s*thinking\s*>/is',
-            '/<\s*thought\b[^>]*>(.*?)<\/\s*thought\s*>/is',
-        ];
+        return '/<\s*(think|thinking|thought)\b[^>]*>(.*?)<\/\s*\1\s*>/is';
     }
 }
