@@ -88,11 +88,12 @@ final class TimeTool extends AbstractTool
         $iso8601  = $now->format(DateTimeInterface::ATOM);
         $timezone = $now->getTimezone()->getName();
         $unix     = $now->getTimestamp();
+        $weekday  = $now->format('l');
 
         return new ToolResult(
             true,
-            "Current Date & Time: {$iso8601}\nTimezone: {$timezone}\nUnix Timestamp: {$unix}",
-            ['datetime' => $iso8601, 'timezone' => $timezone, 'epoch' => $unix, 'weekday' => $now->format('l')],
+            "Current Date & Time: {$iso8601}\nWeekday: {$weekday}\nTimezone: {$timezone}\nUnix Timestamp: {$unix}",
+            ['datetime' => $iso8601, 'timezone' => $timezone, 'epoch' => $unix, 'weekday' => $weekday],
         );
     }
 

@@ -10,6 +10,7 @@ it('returns the current time formatted', function () {
 
     expect($result->success)->toBeTrue()
         ->and($result->content)->toContain('Current Date & Time:')
+        ->and($result->content)->toContain('Weekday:')
         ->and($result->content)->toContain('Timezone:')
         ->and($result->content)->toContain('Unix Timestamp:');
 });
