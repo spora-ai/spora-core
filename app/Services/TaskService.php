@@ -280,17 +280,23 @@ final class TaskService implements TaskServiceInterface
      *     retry_after_minutes?: int,
      *     retry_after?: string,
      *     tool_calls: list<array<string, mixed>>,
-     *     history: list<array<string, mixed>>
+     *     history: list<array<string, mixed>>,
+     *     totals: array<string, int>
      * }
      */
-    private function taskResource(Task $task): array
+    private function taskResource(Task $task, ?int $sinceSequence = null): array
     {
         $resource = $this->buildBaseTaskResource($task);
 
         $serializer = $this->toolCallSerializer ?? new ToolCallSerializer();
         $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => $serializer->toArray($tc))->all();
 
-        $historyPayload = TaskHistorySerializer::buildHistoryPayload($task->taskHistory()->orderBy('sequence')->get());
+        $historyQuery = $task->taskHistory()->orderBy('sequence');
+        if ($sinceSequence !== null) {
+            $historyQuery->where('sequence', '>', $sinceSequence);
+        }
+
+        $historyPayload = TaskHistorySerializer::buildHistoryPayload($historyQuery->get());
         $resource['history'] = $historyPayload['history'];
         $resource['totals'] = TaskHistorySerializer::aggregateUsage($historyPayload['usages']);
 
@@ -388,51 +394,19 @@ final class TaskService implements TaskServiceInterface
      *     max_retries?: int,
      *     retry_after_minutes?: int,
      *     retry_after?: string,
-     *     tool_calls: list<array{
-     *         id: int,
-     *         provider_call_id: string|null,
-     *         tool_name: string,
-     *         tool_type: string,
-     *         status: string,
-     *         proposed_arguments: array|null,
-     *         approved_arguments: array|null,
-     *         human_description: string|null,
-     *         result_content: string|null,
-     *         result_data: array<string,mixed>|null,
-     *         executed_at: string|null
-     *     }>,
+     *     tool_calls: list<array<string, mixed>>,
      *     history: list<array<string, mixed>>,
      *     totals: array<string, int>
      * }
      */
     private function taskDetailResource(Task $task, ?int $sinceSequence = null): array
     {
-        $resource = $this->taskResource($task);
-
-        $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => [
-            'id'                 => $tc->id,
-            'provider_call_id'   => $tc->provider_call_id,
-            'tool_name'          => $tc->tool_name,
-            'tool_type'          => $tc->tool_type,
-            'status'             => $tc->status,
-            'proposed_arguments' => $tc->proposed_arguments,
-            'approved_arguments' => $tc->approved_arguments,
-            'human_description'  => $tc->human_description,
-            'result_content'     => $tc->result_content,
-            'result_data'        => $tc->result_data,
-            'executed_at'        => $tc->executed_at?->toIso8601String(),
-        ])->all();
-
-        $historyQuery = $task->taskHistory()->orderBy('sequence');
-        if ($sinceSequence !== null) {
-            $historyQuery->where('sequence', '>', $sinceSequence);
-        }
-
-        $historyPayload = TaskHistorySerializer::buildHistoryPayload($historyQuery->get());
-        $resource['history'] = $historyPayload['history'];
-        $resource['totals'] = TaskHistorySerializer::aggregateUsage($historyPayload['usages']);
-
-        return $resource;
+        // Single source of truth: taskResource now honours sinceSequence and
+        // serialises tool_calls via ToolCallSerializer (Shape A parity with
+        // the Mercure live stream — operation, operation_description, and
+        // parameter_schema all flow through). Re-running the queries here
+        // would duplicate work and re-introduce the Shape A/B divergence.
+        return $this->taskResource($task, $sinceSequence);
     }
 
 }

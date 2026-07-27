@@ -8,10 +8,12 @@ use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\AgentTemplates\ValidationResult;
 use Spora\Models\Agent;
+use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
+use Spora\Services\ToolIconResolver;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
@@ -29,6 +31,13 @@ use Spora\Tools\ValueObjects\ToolResult;
  * operator upload endpoint share validation, warnings, and tool-activation
  * semantics.
  *
+ * Tool activation is intentionally NOT exposed as an agent operation.
+ * `get_available_tools` returns rich per-tool metadata so the agent can
+ * either (a) spawn a sub-agent with a chosen toolset via `create_agent`,
+ * or (b) realise activation is operator-only. Direct activation of a tool
+ * on the calling agent happens through the operator-facing API
+ * (`POST /api/v1/agents/{id}/tools/{toolName}/enable`).
+ *
  * Operations:
  *   - read_agent_configuration  (enabled, no approval)
  *   - write_agent_configuration (disabled, requires approval)
@@ -41,9 +50,11 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[Tool(
     name: 'agent',
     description: 'Inspect or modify this agent: read/write its configuration, manage its '
-               . 'operator-facing notes, list available tools (with notes about which need '
-               . 'configuration), and create new agents. All operations scope to the calling '
-               . 'agent — the tool never accepts an agent_id argument.',
+               . 'operator-facing notes, list available tools (with details such as '
+               . 'description, source plugin, per-operation enablement and approval state, '
+               . 'and any missing required configuration), and create new agents. '
+               . 'All operations scope to the calling agent — the tool never accepts an '
+               . 'agent_id argument.',
     displayName: 'Agent',
     category: 'agent',
     icon: 'bot',
@@ -90,9 +101,13 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'get_available_tools',
-    description: 'List every registered tool with whether it can be enabled right now '
-               . '(tools needing configuration that has not been set up are flagged). Use '
-               . 'to plan tool activation or to build a sub-agent.',
+    description: 'List every registered tool with a compact, versioned JSON payload '
+               . '(version 1) covering tool_name, call_name, description, source, '
+               . 'current enablement, missing required configuration, and per-operation '
+               . 'enabled/requires_approval state. Tools that need configuration to '
+               . 'become activatable are flagged via `ready_to_enable: false`. '
+               . 'Use this to plan a sub-agent via `create_agent`; tool activation on '
+               . 'the calling agent itself is operator-only and not exposed here.',
     enabledByDefault: false,
     requiresApprovalByDefault: false,
 )]
@@ -159,6 +174,8 @@ final class AgentTool extends AbstractTool
         private readonly AgentToolSettingsServiceInterface $toolSettings,
         private readonly AgentTemplateImporter $templateImporter,
         private readonly AgentTemplateValidator $templateValidator,
+        private readonly ?PluginLoader $pluginLoader = null,
+        private readonly ?ToolIconResolver $iconResolver = null,
     ) {}
 
     public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
@@ -369,26 +386,209 @@ final class AgentTool extends AbstractTool
         $userId ??= $agent->user_id;
 
         $rows = $this->toolSettings->getAllToolsStatus($agentId, $userId) ?? [];
+        $operationsByClass = $this->indexOperationsByToolClass(
+            $this->toolSettings->getToolsOperations($agentId, $userId) ?? [],
+        );
         $enriched = [];
         foreach ($rows as $row) {
             $toolClass = (string) $row['tool_class'];
-            $summary   = ToolSchemaPresenter::summarize($toolClass);
+            $summary   = ToolSchemaPresenter::summarize(
+                $toolClass,
+                $this->iconResolver?->resolve($toolClass),
+            );
             $enriched[] = [
                 'tool_class'         => $toolClass,
                 'tool_name'          => $summary['tool_name'],
                 'display_name'       => $summary['display_name'],
+                'description'        => $summary['description'],
                 'category'           => $summary['category'],
                 'icon'               => $summary['icon'],
                 'is_enabled'         => (bool) $row['is_enabled'],
                 'needs_configuration' => $row['can_enable'] === false,
                 'missing_required'   => $row['missing_required'],
+                'operations'         => $summary['operations'],
             ];
         }
 
-        return ToolResult::ok(
-            sprintf('Found %d registered tool(s).', count($enriched)),
-            $enriched,
+        $agentFacing = $this->buildAgentFacingToolRows($enriched, $operationsByClass);
+        // `$data` keeps the legacy shape for the operator-facing UI / audit
+        // log (`result_data` on the persisted tool_calls row). The LLM only
+        // sees the JSON in `$content`.
+        $content = json_encode(
+            $agentFacing,
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
         );
+
+        return ToolResult::ok($content, $enriched);
+    }
+
+    /**
+     * Build the LLM-facing payload for `get_available_tools`.
+     *
+     * Shape (version 1):
+     * ```
+     * {
+     *   "version": 1,
+     *   "count": <int>,
+     *   "tools": [
+     *     {
+     *       "tool_class": "Spora\\Tools\\...",
+     *       "tool_name": "calculator",
+     *       "call_name": "calculator"  |  "tavily:tavily_search"  (plugin-qualified),
+     *       "display_name": "Calculator",
+     *       "description": "...",
+     *       "category": "productivity",
+     *       "source": {"kind": "core|plugin|app", "slug": "tavily"|null, "name": "Tavily"|null},
+     *       "enabled": <bool>,
+     *       "ready_to_enable": <bool>,
+     *       "missing_required": ["api_key", ...],
+     *       "operations": [{"name": "calculate", "description": "...", "enabled": <bool>, "requires_approval": <bool>}, ...]
+     *     }
+     *   ]
+     * }
+     * ```
+     *
+     * The default response deliberately OMITS full parameter schemas — the
+     * LLM can call `create_agent` with `tools[]` entries by `tool_name`
+     * without needing the schema. A future `get_tool_details` operation
+     * can add schema drill-down.
+     *
+     * Precedence rules:
+     *   - `call_name` is the exact LLM-facing identifier. Plain for core
+     *     tools, `<pluginSlug>:<toolName>` for plugin tools (so the LLM
+     *     never confuses two plugins that happen to share a plain name).
+     *   - `enabled` reflects current `agent_tools` row presence.
+     *   - `ready_to_enable` mirrors the operator API's `can_enable`
+     *     semantic (no missing required settings). A tool may be enabled
+     *     even with missing required settings — the server inserts the
+     *     `agent_tools` row and returns a warning, but it is NOT
+     *     activatable as `enabled` on the LLM's side without config.
+     *   - `missing_required` lists only the required setting keys; no
+     *     effective values are exposed to avoid leaking credentials.
+     *
+     * @param list<array<string, mixed>> $rows Legacy per-agent status rows
+     *        (already enriched with display_name, category, icon by the caller).
+     * @param array<string, list<array{operation: string, effective_enabled: bool, effective_requires_approval: bool}>> $operationsByClass
+     *        Effective per-operation enablement/approval state, keyed by tool_class.
+     * @return array<string, mixed>
+     */
+    private function buildAgentFacingToolRows(
+        array $rows,
+        array $operationsByClass,
+    ): array {
+        $tools = [];
+        foreach ($rows as $row) {
+            $toolClass = (string) $row['tool_class'];
+            $toolName  = (string) $row['tool_name'];
+            $slug      = $this->pluginLoader?->getSlugForToolClass($toolClass);
+            $source    = $this->buildToolSource($toolClass, $slug);
+            $toolOperations = $this->buildAgentFacingOperations(
+                $toolClass,
+                (array) ($row['operations'] ?? []),
+                $operationsByClass[$toolClass] ?? [],
+            );
+            $tools[] = [
+                'tool_class'       => $toolClass,
+                'tool_name'        => $toolName,
+                'call_name'        => $slug !== null ? "{$slug}:{$toolName}" : $toolName,
+                'display_name'     => (string) $row['display_name'],
+                'description'      => (string) ($row['description'] ?? ''),
+                'category'         => (string) $row['category'],
+                'source'           => $source,
+                'enabled'          => (bool) $row['is_enabled'],
+                'ready_to_enable'  => $row['needs_configuration'] === false,
+                'missing_required' => (array) $row['missing_required'],
+                'operations'       => $toolOperations,
+            ];
+        }
+
+        return [
+            'version' => 1,
+            'count'   => count($tools),
+            'tools'   => $tools,
+        ];
+    }
+
+    /**
+     * @param list<array{name: string, description: string, enabledByDefault: bool, requiresApprovalByDefault: bool, discriminatorKey: string}> $declaredOperations
+     * @param list<array{operation: string, effective_enabled: bool, effective_requires_approval: bool}> $effectiveOperations
+     * @return list<array{name: string, description: string, enabled: bool, requires_approval: bool}>
+     */
+    private function buildAgentFacingOperations(
+        string $toolClass,
+        array $declaredOperations,
+        array $effectiveOperations,
+    ): array {
+        if ($declaredOperations === []) {
+            return [];
+        }
+        $effectiveByName = [];
+        foreach ($effectiveOperations as $op) {
+            $effectiveByName[(string) $op['operation']] = $op;
+        }
+        $out = [];
+        foreach ($declaredOperations as $op) {
+            $name = (string) $op['name'];
+            $effective = $effectiveByName[$name] ?? null;
+            $out[] = [
+                'name'              => $name,
+                'description'       => (string) $op['description'],
+                'enabled'           => $effective === null
+                    ? (bool) $op['enabledByDefault']
+                    : (bool) $effective['effective_enabled'],
+                'requires_approval' => $effective === null
+                    ? (bool) $op['requiresApprovalByDefault']
+                    : (bool) $effective['effective_requires_approval'],
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * @return array{kind: string, slug: string|null, name: string|null}
+     */
+    private function buildToolSource(string $toolClass, ?string $pluginSlug): array
+    {
+        if ($pluginSlug !== null) {
+            $manifest = $this->pluginLoader?->getPluginManifest($pluginSlug);
+            $name = is_array($manifest) ? ($manifest['name'] ?? null) : null;
+            return [
+                'kind' => 'plugin',
+                'slug' => $pluginSlug,
+                'name' => is_string($name) && $name !== '' ? $name : null,
+            ];
+        }
+        // No plugin owns the class. Distinguish "core" (ships with spora-core)
+        // from "app" (registered by the operator's app/App.php) by checking
+        // whether the class is in the core tool_classes list — that's the
+        // closest signal we have without an explicit App-vs-core flag.
+        $coreClasses = [
+            'Spora\\Tools\\TimeTool',
+            'Spora\\Tools\\CalculatorTool',
+            'Spora\\Tools\\ReadUrlTool',
+            'Spora\\Tools\\UserInfoTool',
+            'Spora\\Tools\\HandoverTool',
+            'Spora\\Tools\\AgentTool',
+            'Spora\\Tools\\SkillTool',
+        ];
+        return [
+            'kind' => in_array($toolClass, $coreClasses, true) ? 'core' : 'app',
+            'slug' => null,
+            'name' => null,
+        ];
+    }
+
+    /**
+     * @param list<array{tool_class: string, operation: string, effective_enabled: bool, effective_requires_approval: bool}> $operations
+     * @return array<string, list<array{operation: string, effective_enabled: bool, effective_requires_approval: bool}>>
+     */
+    private function indexOperationsByToolClass(array $operations): array
+    {
+        $indexed = [];
+        foreach ($operations as $op) {
+            $indexed[(string) $op['tool_class']][] = $op;
+        }
+        return $indexed;
     }
 
     /**

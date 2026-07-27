@@ -120,19 +120,7 @@ interface TaskServiceInterface
      *     max_retries?: int,
      *     retry_after_minutes?: int,
      *     retry_after?: string,
-     *     tool_calls: list<array{
-     *         id: int,
-     *         provider_call_id: string|null,
-     *         tool_name: string,
-     *         tool_type: string,
-     *         status: string,
-     *         proposed_arguments: array|null,
-     *         approved_arguments: array|null,
-     *         human_description: string|null,
-     *         result_content: string|null,
-     *         result_data: array<string,mixed>|null,
-     *         executed_at: string|null
-     *     }>,
+     *     tool_calls: list<array<string, mixed>>,
      *     history: list<array{
      *         sequence: int,
      *         role: string,

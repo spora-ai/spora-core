@@ -26,6 +26,7 @@ final class ToolSchemaPresenter
      *   tool_class: string,
      *   tool_name: string,
      *   display_name: string,
+     *   description: string,
      *   category: string,
      *   icon: string|null,
      *   operations: list<array{name: string, description: string, enabledByDefault: bool, requiresApprovalByDefault: bool, discriminatorKey: string}>
@@ -40,6 +41,7 @@ final class ToolSchemaPresenter
                 'tool_class'   => $toolClass,
                 'tool_name'    => basename(str_replace('\\', '/', $toolClass)),
                 'display_name' => basename(str_replace('\\', '/', $toolClass)),
+                'description'  => '',
                 'category'     => 'general',
                 'icon'         => $icon,
                 'operations'   => [],
@@ -53,6 +55,7 @@ final class ToolSchemaPresenter
         $toolAttr   = $toolAttrs !== [] ? $toolAttrs[0]->newInstance() : null;
         $toolName   = $toolAttr->name ?? $reflection->getShortName();
         $displayName = $toolAttr->displayName ?? $toolName;
+        $description = $toolAttr->description ?? '';
         $category   = $toolAttr->category ?? 'general';
 
         $operations = [];
@@ -81,6 +84,7 @@ final class ToolSchemaPresenter
             'tool_class'   => $toolClass,
             'tool_name'    => $toolName,
             'display_name' => $displayName,
+            'description'  => $description,
             'category'     => $category,
             'icon'         => $icon,
             'operations'   => $operations,

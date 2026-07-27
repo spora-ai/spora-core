@@ -586,6 +586,54 @@ describe('TaskService — getTaskWithHistory', function (): void {
             'target_agent_id' => 1,
         ]);
     });
+
+    it('emits Shape A fields (operation, operation_description, parameter_schema) on getTaskWithHistory', function (): void {
+        // getTaskWithHistory used to skip the ToolCallSerializer path and
+        // emit a slimmer shape (no operation, operation_description, or
+        // parameter_schema). The chat UI now renders tool input panels, so
+        // those fields have to be on this endpoint too. This test pins
+        // parity with the Mercure live stream and the approve/reject/retry
+        // resource shapes.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('shapeparity@example.com', 'Password1!', 'ShapeParity');
+        simulateLoggedInSession($userId, 'shapeparity@example.com');
+
+        $agent = Agent::create([
+            'user_id' => $userId, 'name' => 'ShapeParityAgent', 'max_steps' => 5, 'is_active' => true,
+        ]);
+        $task = Task::create([
+            'user_id'     => $userId,
+            'agent_id'    => $agent->id,
+            'status'      => 'COMPLETED',
+            'user_prompt' => 'shape parity',
+            'max_steps'   => 5,
+        ]);
+        Spora\Models\ToolCall::create([
+            'task_id'               => $task->id,
+            'agent_id'              => $agent->id,
+            'provider_call_id'      => 'shape-1',
+            'tool_name'             => 'serializer_fixture',
+            'tool_class'            => Tests\Unit\Services\ToolCallSerializerFixtureTool::class,
+            'tool_type'             => 'output',
+            'operation'             => 'run',
+            'operation_description' => 'Run',
+            'status'                => 'EXECUTED',
+            'proposed_arguments'    => ['q' => 'hello'],
+            'approved_arguments'    => ['q' => 'hello'],
+            'result_content'        => 'ok',
+        ]);
+
+        $service = makeTaskService();
+        $result  = $service->getTaskWithHistory($task->id, $userId);
+
+        expect($result)->not->toBeNull();
+        $tc = $result['tool_calls'][0];
+        expect($tc)->toHaveKeys(['operation', 'operation_description', 'parameter_schema']);
+        expect($tc['operation'])->toBe('run');
+        expect($tc['operation_description'])->toBe('Run');
+        expect($tc['parameter_schema'])->not->toBeNull();
+        expect(array_keys($tc['parameter_schema']['properties']))->toBe(['action', 'q']);
+    });
 });
 
 describe('TaskService — approveTask', function (): void {

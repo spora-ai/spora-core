@@ -39,6 +39,47 @@ function makeAgentTool(): array
     ];
 }
 
+/**
+ * Variant of makeAgentTool() that also stubs the optional PluginLoader and
+ * ToolIconResolver collaborators. Used by get_available_tools tests that
+ * exercise the plugin-qualified call_name and icon paths.
+ *
+ * PluginLoader is `final` and therefore cannot be mocked with Mockery, so
+ * we hand back a real loader with a stub plugin injected via reflection —
+ * the same pattern used by PluginLoaderTest (see
+ * tests/Unit/Plugins/PluginLoaderTest.php:395-400).
+ *
+ * @return array{0: AgentTool, 1: AgentServiceInterface, 2: AgentToolSettingsServiceInterface, 3: Spora\Plugins\PluginLoader, 4: Spora\Services\ToolIconResolver}
+ */
+function makeAgentToolWithPlugins(): array
+{
+    $importer = new AgentTemplateImporter(
+        new Spora\Services\ToolConfigService(
+            new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+            new Psr\Log\NullLogger(),
+        ),
+        new Spora\Plugins\PluginLoader([], null),
+        new Spora\Core\Paths(BASE_PATH),
+    );
+    $validator = new AgentTemplateValidator();
+    /** @var AgentServiceInterface&MockInterface $service */
+    $service = Mockery::mock(AgentServiceInterface::class);
+    /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+    $toolSettings = Mockery::mock(AgentToolSettingsServiceInterface::class);
+    // Real PluginLoader; tests inject stubs via reflection.
+    $pluginLoader = new Spora\Plugins\PluginLoader([], null);
+    /** @var Spora\Services\ToolIconResolver&MockInterface $iconResolver */
+    $iconResolver = Mockery::mock(Spora\Services\ToolIconResolver::class);
+
+    return [
+        new AgentTool($service, $toolSettings, $importer, $validator, $pluginLoader, $iconResolver),
+        $service,
+        $toolSettings,
+        $pluginLoader,
+        $iconResolver,
+    ];
+}
+
 function stubAgent(int $id = 1, string $name = 'Test Agent', ?string $notes = null): Agent
 {
     $agent          = new Agent();
@@ -427,7 +468,7 @@ describe('AgentTool::execute — write_agent_configuration — happy path', func
 });
 
 describe('AgentTool::execute — get_available_tools', function (): void {
-    test('enriches per-agent status with presenter metadata', function (): void {
+    test('enriches per-agent status with presenter metadata and returns a versioned JSON payload as content', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
@@ -445,10 +486,12 @@ describe('AgentTool::execute — get_available_tools', function (): void {
                 'missing_required' => [],
             ],
         ]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
 
         $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
 
         expect($result->success)->toBeTrue();
+        // `$data` keeps the legacy shape for the operator UI / audit log.
         /** @var list<array<string, mixed>> $rows */
         $rows = $result->data;
         $first = $rows[0];
@@ -456,6 +499,22 @@ describe('AgentTool::execute — get_available_tools', function (): void {
             ->and($first['tool_name'])->toBe('calculator')
             ->and($first['is_enabled'])->toBeFalse()
             ->and($first['needs_configuration'])->toBeFalse();
+
+        // `$content` is the new LLM-facing contract — a compact versioned
+        // JSON payload, not a one-liner summary.
+        $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
+        expect($payload['version'])->toBe(1)
+            ->and($payload['count'])->toBe(1);
+        $tool = $payload['tools'][0];
+        expect($tool['tool_class'])->toBe('Spora\\Tools\\CalculatorTool')
+            ->and($tool['tool_name'])->toBe('calculator')
+            ->and($tool['call_name'])->toBe('calculator')
+            ->and($tool['description'])->toBeString()
+            ->and($tool['enabled'])->toBeFalse()
+            ->and($tool['ready_to_enable'])->toBeTrue()
+            ->and($tool['missing_required'])->toBe([])
+            ->and($tool['source']['kind'])->toBe('core')
+            ->and($tool['source']['slug'])->toBeNull();
     });
 
     test('flags needs_configuration when can_enable is false', function (): void {
@@ -476,6 +535,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
                 'missing_required' => ['allowed_hosts'],
             ],
         ]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
 
         $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
 
@@ -483,6 +543,170 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         $rows = $result->data;
         expect($rows[0]['needs_configuration'])->toBeTrue()
             ->and($rows[0]['missing_required'])->toBe(['allowed_hosts']);
+
+        $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
+        expect($payload['tools'][0]['ready_to_enable'])->toBeFalse()
+            ->and($payload['tools'][0]['missing_required'])->toBe(['allowed_hosts']);
+    });
+
+    test('qualifies call_name with the plugin slug for plugin-owned tools', function (): void {
+        [$tool, $service, $toolSettings, $pluginLoader, $iconResolver] = makeAgentToolWithPlugins();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        /** @var MockInterface $iconResolver */
+        $agent           = new Agent();
+        $agent->id       = 7;
+        $agent->user_id  = 99;
+        $agent->name     = 'Alpha';
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        // We use a real Spora core class as the target so the
+        // `class-string<ToolInterface>` return type is satisfied, and the
+        // plugin mapping is supplied by a stub plugin injected via
+        // reflection (PluginLoader is final and cannot be mocked).
+        $toolSettings->allows('getAllToolsStatus')->andReturn([
+            [
+                'tool_class'       => Spora\Tools\TimeTool::class,
+                'tool_name'        => 'time',
+                'is_enabled'       => false,
+                'can_enable'       => true,
+                'missing_required' => [],
+            ],
+        ]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $tavilyPlugin = new class extends Spora\Plugins\AbstractPlugin {
+            public function getName(): string
+            {
+                return 'Tavily';
+            }
+            /**
+             * @return list<class-string<Spora\Tools\ToolInterface>>
+             */
+            public function tools(): array
+            {
+                return [Spora\Tools\TimeTool::class];
+            }
+        };
+        $ref = new ReflectionClass($pluginLoader);
+        $pluginsProp = $ref->getProperty('plugins');
+        $pluginsProp->setValue($pluginLoader, ['tavily' => $tavilyPlugin]);
+        $manifestsProp = $ref->getProperty('pluginManifests');
+        $manifestsProp->setValue($pluginLoader, ['tavily' => ['name' => 'Tavily', 'icon' => 'search']]);
+
+        $iconResolver->allows('resolve')->andReturn('search');
+
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+
+        $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
+        $row = $payload['tools'][0];
+        expect($row['call_name'])->toBe('tavily:time')
+            ->and($row['source']['kind'])->toBe('plugin')
+            ->and($row['source']['slug'])->toBe('tavily')
+            ->and($row['source']['name'])->toBe('Tavily');
+    });
+
+    test('renders per-operation enabled + requires_approval from effective state', function (): void {
+        // Use AgentTool as the target: it ships 7 #[ToolOperation] entries
+        // with a mix of enabledByDefault / requiresApprovalByDefault flags,
+        // and `getToolsOperations` is easy to drive from a mock. The
+        // presenter enumerates operations in declaration order, so we
+        // expect `read_agent_configuration` first and `write_agent_configuration`
+        // second in the response.
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $agent           = new Agent();
+        $agent->id       = 7;
+        $agent->user_id  = 99;
+        $agent->name     = 'Alpha';
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([
+            [
+                'tool_class'       => AgentTool::class,
+                'tool_name'        => 'agent',
+                'is_enabled'       => true,
+                'can_enable'       => true,
+                'missing_required' => [],
+            ],
+        ]);
+        $toolSettings->allows('getToolsOperations')->andReturn([
+            [
+                'tool_class'                  => AgentTool::class,
+                'operation'                   => 'read_agent_configuration',
+                'effective_enabled'           => true,
+                'effective_requires_approval' => false,
+            ],
+            [
+                'tool_class'                  => AgentTool::class,
+                'operation'                   => 'write_agent_configuration',
+                'effective_enabled'           => false,
+                'effective_requires_approval' => true,
+            ],
+        ]);
+
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+
+        $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
+        $opsByName = [];
+        foreach ($payload['tools'][0]['operations'] as $op) {
+            if (in_array($op['name'], ['read_agent_configuration', 'write_agent_configuration'], true)) {
+                $opsByName[$op['name']] = $op;
+            }
+        }
+        expect($opsByName['read_agent_configuration']['enabled'])->toBeTrue()
+            ->and($opsByName['read_agent_configuration']['requires_approval'])->toBeFalse();
+        expect($opsByName['write_agent_configuration']['enabled'])->toBeFalse()
+            ->and($opsByName['write_agent_configuration']['requires_approval'])->toBeTrue();
+    });
+
+    test('falls back to operation defaults when no per-agent override exists', function (): void {
+        // `getToolsOperations` returns rows only for *enabled* tools, so a
+        // not-yet-enabled tool will not appear in the effective map at all.
+        // The presenter should fall back to the operation's
+        // enabledByDefault / requiresApprovalByDefault from #[ToolOperation].
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $agent           = new Agent();
+        $agent->id       = 7;
+        $agent->user_id  = 99;
+        $agent->name     = 'Alpha';
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([
+            [
+                'tool_class'       => AgentTool::class,
+                'tool_name'        => 'agent',
+                'is_enabled'       => false,
+                'can_enable'       => true,
+                'missing_required' => [],
+            ],
+        ]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+
+        $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
+        $opsByName = [];
+        foreach ($payload['tools'][0]['operations'] as $op) {
+            $opsByName[$op['name']] = $op;
+        }
+        // read_agent_configuration: enabledByDefault=true, requiresApprovalByDefault=false
+        expect($opsByName['read_agent_configuration']['enabled'])->toBeTrue()
+            ->and($opsByName['read_agent_configuration']['requires_approval'])->toBeFalse();
+        // write_agent_configuration: enabledByDefault=false, requiresApprovalByDefault=true
+        expect($opsByName['write_agent_configuration']['enabled'])->toBeFalse()
+            ->and($opsByName['write_agent_configuration']['requires_approval'])->toBeTrue();
+    });
+
+    test('returns failure when the agent does not exist', function (): void {
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $service->allows('getAgentByAgentId')->andReturn(null);
+
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('not found');
     });
 });
 
