@@ -400,22 +400,6 @@ final class TaskController
     }
 
     /**
-     * @param MediaCapabilityMismatchException|InvalidArgumentException $e
-     */
-    private function continueExceptionResponse(
-        MediaCapabilityMismatchException|InvalidArgumentException $e,
-    ): JsonResponse {
-        if ($e instanceof MediaCapabilityMismatchException) {
-            return new JsonResponse(
-                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
-                Response::HTTP_BAD_REQUEST,
-            );
-        }
-
-        return $this->errorForException($e);
-    }
-
-    /**
      * Map a service-layer {@see InvalidArgumentException} to the JSON
      * error response the API contract uses for "task not found" and
      * "invalid state" failures.
@@ -516,5 +500,21 @@ final class TaskController
         } catch (MediaCapabilityMismatchException | InvalidArgumentException $e) {
             return $this->continueExceptionResponse($e);
         }
+    }
+
+    /**
+     * @param MediaCapabilityMismatchException|InvalidArgumentException $e
+     */
+    private function continueExceptionResponse(
+        MediaCapabilityMismatchException|InvalidArgumentException $e,
+    ): JsonResponse {
+        if ($e instanceof MediaCapabilityMismatchException) {
+            return new JsonResponse(
+                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
+                Response::HTTP_BAD_REQUEST,
+            );
+        }
+
+        return $this->errorForException($e);
     }
 }
