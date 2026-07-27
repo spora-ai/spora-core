@@ -484,7 +484,6 @@ final class AgentTool extends AbstractTool
             $slug      = $this->pluginLoader?->getSlugForToolClass($toolClass);
             $source    = $this->buildToolSource($toolClass, $slug);
             $toolOperations = $this->buildAgentFacingOperations(
-                $toolClass,
                 (array) ($row['operations'] ?? []),
                 $operationsByClass[$toolClass] ?? [],
             );
@@ -516,7 +515,6 @@ final class AgentTool extends AbstractTool
      * @return list<array{name: string, description: string, enabled: bool, requires_approval: bool}>
      */
     private function buildAgentFacingOperations(
-        string $toolClass,
         array $declaredOperations,
         array $effectiveOperations,
     ): array {
