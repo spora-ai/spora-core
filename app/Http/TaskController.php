@@ -349,7 +349,7 @@ final class TaskController
             return $validation['result'];
         }
 
-        return $this->dispatchContinue(
+        return $this->continueDispatch(
             $taskId,
             $userId,
             $validation['prompt'],
@@ -399,10 +399,8 @@ final class TaskController
         ];
     }
 
-    /**
-     * @param list<string> $mediaIds
-     */
-    private function dispatchContinue(
+    /** @param list<string> $mediaIds */
+    private function continueDispatch(
         int $taskId,
         int $userId,
         string $prompt,
@@ -414,8 +412,29 @@ final class TaskController
             return $this->notFoundResponse();
         }
 
+        return $this->continueDispatchRun(
+            $existing['agent_id'],
+            $taskId,
+            $userId,
+            $prompt,
+            $additionalSteps,
+            $mediaIds,
+        );
+    }
+
+    /**
+     * @param list<string> $mediaIds
+     */
+    private function continueDispatchRun(
+        int $agentId,
+        int $taskId,
+        int $userId,
+        string $prompt,
+        ?int $additionalSteps,
+        array $mediaIds,
+    ): JsonResponse {
         try {
-            $this->mediaCapability->ensureMediaCapabilityCompatible($existing['agent_id'], $mediaIds);
+            $this->mediaCapability->ensureMediaCapabilityCompatible($agentId, $mediaIds);
             $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
 
             return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_OK);
