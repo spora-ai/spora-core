@@ -160,9 +160,9 @@ use Spora\Tools\ValueObjects\ToolResult;
                . '`system_prompt`, enabled tools, and per-operation `enabled` / `requires_approval` state. '
                . 'Use this to verify what was actually committed by `create_agent` and `configure_tools` — '
                . 'silent drops do occur, so the read-back is the source of truth. '
-               . 'Identify the target by `template_id` (the same string used in `create_agent`\'s `id`) '
-               . 'or by `agent_id` (the numeric primary key returned by `create_agent`). '
-               . 'This is the only AgentTool operation that takes an agent identifier.',
+               . 'Identify the target by `agent_id` (the numeric primary key returned by `create_agent`). '
+               . 'Omit `agent_id` to read the calling agent (same as the deprecated '
+               . '`read_agent_configuration` operation).',
     enabledByDefault: false,
     requiresApprovalByDefault: false,
 )]
@@ -174,8 +174,8 @@ use Spora\Tools\ValueObjects\ToolResult;
               . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived, '
               . 'is_favorite. `notes` is intentionally not accepted here — use write_notes. '
               . 'Ignored by every other operation; omit this key entirely when calling '
-              . 'read_agent_configuration, read_notes, write_notes, write_notes_overwrite, '
-              . 'get_available_tools, or create_agent.',
+              . 'read_notes, write_notes, write_notes_overwrite, get_available_tools, '
+              . 'configure_tools, read_agent, or create_agent.',
     required: ['write_agent_configuration'],
 )]
 #[ToolParameter(
@@ -183,8 +183,8 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'string',
     description: 'ONLY for write_notes and write_notes_overwrite: the markdown segment to '
               . 'write. Combined with `mode` against the current notes. Ignored by every '
-              . 'other operation; omit this key entirely when calling read_agent_configuration, '
-              . 'read_notes, write_agent_configuration, get_available_tools, or create_agent.',
+              . 'other operation; omit this key entirely when calling read_notes, '
+              . 'write_agent_configuration, get_available_tools, or create_agent.',
     required: ['write_notes', 'write_notes_overwrite'],
 )]
 #[ToolParameter(
@@ -207,9 +207,9 @@ use Spora\Tools\ValueObjects\ToolResult;
               . 'on failure are unforgiving — see the agent-creation skill '
               . '(skill action: read, name: agent-creation, filename: SKILL.md) for the '
               . 'exact shape. Required plugins are NOT auto-installed; missing plugins '
-              . 'produce warnings rather than aborting the import. Ignored by every other '
-              . 'operation; omit this key entirely when calling read_agent_configuration, '
-              . 'read_notes, write_notes, write_notes_overwrite, write_agent_configuration, '
+              . 'produce warnings rather than aborting the import. Ignored by every '
+              . 'other operation; omit this key entirely when calling read_notes, '
+              . 'write_notes, write_notes_overwrite, write_agent_configuration, '
               . 'configure_tools, read_agent, or get_available_tools.',
     required: ['create_agent'],
 )]
@@ -220,24 +220,18 @@ use Spora\Tools\ValueObjects\ToolResult;
               . 'Each operation entry may set `enabled` (default true) and `auto_approve` (default false). '
               . 'A tool with `enabled: false` removes it from the agent. '
               . 'Ignored by every other operation; omit this key entirely when calling '
-              . 'read_agent_configuration, read_notes, write_notes, write_notes_overwrite, '
-              . 'write_agent_configuration, get_available_tools, create_agent, or read_agent.',
+              . 'read_notes, write_notes, write_notes_overwrite, write_agent_configuration, '
+              . 'get_available_tools, create_agent, or read_agent.',
     required: ['configure_tools'],
-)]
-#[ToolParameter(
-    name: 'template_id',
-    type: 'string',
-    description: 'ONLY for read_agent: the `id` string from the Agent Template format '
-              . '(e.g. "weather-agent", or "core/core-assistant"). Mutually exclusive with '
-              . '`agent_id`; prefer whichever is more convenient. Ignored by every other '
-              . 'operation.',
-    required: false,
 )]
 #[ToolParameter(
     name: 'agent_id',
     type: 'integer',
-    description: 'ONLY for read_agent: the numeric primary key returned by `create_agent`. '
-              . 'Mutually exclusive with `template_id`. Ignored by every other operation.',
+    description: 'ONLY for read_agent and configure_tools. '
+              . 'For read_agent: numeric primary key returned by `create_agent`. Omit to read the calling agent. '
+              . 'For configure_tools: numeric primary key of the agent to configure (default: the calling agent). '
+              . 'Pass the value from `create_agent` to target a freshly-created agent. '
+              . 'Ignored by every other operation.',
     required: false,
 )]
 final class AgentTool extends AbstractTool
@@ -290,7 +284,7 @@ final class AgentTool extends AbstractTool
             'get_available_tools'       => $this->getAvailableTools($agentId, $userId),
             'create_agent'              => $this->createAgent($userId, $arguments),
             'configure_tools'           => $this->configureTools($agentId, $userId, $arguments),
-            'read_agent'                => $this->readAgent($userId, $arguments),
+            'read_agent'                => $this->readAgent($agentId, $userId, $arguments),
             default                     => ToolResult::fail("Invalid action '{$operation}'."),
         };
     }
@@ -316,7 +310,9 @@ final class AgentTool extends AbstractTool
             ),
             'read_agent'                => sprintf(
                 'Read agent state (%s).',
-                $this->describeReadAgentTarget($arguments),
+                isset($arguments['agent_id']) && is_scalar($arguments['agent_id']) && (int) $arguments['agent_id'] > 0
+                    ? 'agent_id: ' . (int) $arguments['agent_id']
+                    : 'calling agent',
             ),
             default                     => "Agent tool: {$operation}",
         };
@@ -725,7 +721,7 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * Apply a toolset + per-operation overrides to the calling agent.
+     * Apply a toolset + per-operation overrides.
      *
      * Two-phase agent creation pairs this with `create_agent`: the LLM
      * creates the skeletal agent first, then calls `configure_tools` to
@@ -737,17 +733,23 @@ final class AgentTool extends AbstractTool
      * — the existing operator-side surface — so the LLM-facing path and
      * the operator-facing API share the same enable / override semantics.
      *
+     * Target resolution: when `agent_id` is supplied in `$arguments`,
+     * operate on that agent (cross-user reads return not-found). When
+     * omitted, operate on the calling agent — the original in-place
+     * semantics preserved for back-compat.
+     *
+     * The result is the canonical agent manifest (Markdown +
+     * result_data) — the LLM can verify what `configure_tools` actually
+     * committed without a follow-up `read_agent` call.
+     *
      * @param array<string, mixed> $arguments
      */
     private function configureTools(int $agentId, ?int $userId, array $arguments): ToolResult
     {
+        // Validate user + payload shape BEFORE the target resolver so
+        // malformed inputs surface the schema validation error without
+        // a wasted DB lookup. Order mirrors {@see createAgent()}.
         $entries = $arguments['tools'] ?? [];
-        // Validate every entry up-front via {@see self::buildConfigureToolsPlan()}
-        // so a half-applied toolset never lands in the database. The plan
-        // builder returns either a typed array (apply it) or a fail
-        // ToolResult (return as-is). Match collapses the three independent
-        // failure paths into one branch so this method stays under the
-        // SonarCloud S1142 3-return ceiling.
         $planOrFail = match (true) {
             $userId === null
                 => ToolResult::fail('configure_tools requires an authenticated user.'),
@@ -758,11 +760,19 @@ final class AgentTool extends AbstractTool
         if ($planOrFail instanceof ToolResult) {
             return $planOrFail;
         }
-        $this->applyConfigureToolsPlan($agentId, $userId, $planOrFail);
-        // Return the post-change effective state via getAvailableTools so
-        // the LLM sees the same wire shape it would have seen from a
-        // follow-up get_available_tools call.
-        return $this->getAvailableTools($agentId, $userId);
+
+        $target = $this->resolveAgentToolTarget($userId, $agentId, $arguments);
+        if ($target instanceof ToolResult) {
+            return $target;
+        }
+        $this->applyConfigureToolsPlan($target->id, $userId, $planOrFail);
+        // Re-read after the apply so `renderManifestResult` sees the
+        // post-change rows + override state.
+        $fresh = Agent::find($target->id);
+        if ($fresh === null) {
+            return ToolResult::fail(self::AGENT_NOT_FOUND);
+        }
+        return $this->renderManifestResult($fresh);
     }
 
     /**
@@ -889,17 +899,22 @@ final class AgentTool extends AbstractTool
     /**
      * Read a specific agent's full state by `agent_id`.
      *
-     * This is the only AgentTool operation that accepts an agent
-     * identifier — it exists so the LLM can verify what `create_agent`
-     * and `configure_tools` actually committed. Input is scoped to the
-     * authenticated user: cross-user reads are refused, never
-     * transparently returned as "not found" only when the agent exists.
+     * `agent_id` is optional — omit to read the calling agent (same
+     * semantics the deprecated `read_agent_configuration` operation
+     * had). This is the only AgentTool operation that accepts an agent
+     * identifier beyond the calling agent — it exists so the LLM can
+     * verify what `create_agent` and `configure_tools` actually
+     * committed. Input is scoped to the authenticated user: cross-user
+     * reads are refused, never silently substituted.
      *
      * @param array<string, mixed> $arguments
      */
-    private function readAgent(?int $userId, array $arguments): ToolResult
+    private function readAgent(int $callingAgentId, ?int $userId, array $arguments): ToolResult
     {
-        $target = $this->resolveReadAgentTarget($userId, $arguments);
+        if ($userId === null) {
+            return ToolResult::fail('read_agent requires an authenticated user.');
+        }
+        $target = $this->resolveAgentToolTarget($userId, $callingAgentId, $arguments);
         if ($target instanceof ToolResult) {
             return $target;
         }
@@ -907,89 +922,59 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * Validate and resolve the read_agent target. Returns the Agent row
-     * on success, or a failure ToolResult. Split out from
-     * {@see self::readAgent()} so that method stays under SonarCloud's
-     * S1142 3-return ceiling.
+     * Validate and resolve the target agent for `configure_tools` and
+     * `read_agent`. Three input modes drive the behavior:
      *
-     * `template_id` takes precedence over `agent_id`. If the agents table
-     * does not yet expose a `template_id` column, the LLM is expected to
-     * supply `agent_id` (the primary key returned by `create_agent`).
+     *   1. `agent_id` supplied and positive → look up that agent, scoped
+     *      to the authenticated user. Cross-user reads return "not
+     *      found" without ever exposing the agent's payload.
+     *   2. `agent_id` omitted → fall back to the calling agent
+     *      ($callingAgentId), scoped to the authenticated user. This is
+     *      the in-place edit semantics both operations used to have
+     *      before `agent_id` was added.
+     *   3. `agent_id` malformed (zero / non-numeric) → fail with a
+     *      clear validation message so the LLM knows what to retry.
      *
      * @param  array<string, mixed> $arguments
      * @return Agent|ToolResult
      */
-    private function resolveReadAgentTarget(?int $userId, array $arguments): Agent|ToolResult
+    private function resolveAgentToolTarget(int $userId, int $callingAgentId, array $arguments): Agent|ToolResult
     {
-        $templateId = is_string($arguments['template_id'] ?? null) ? trim((string) $arguments['template_id']) : '';
-        $agentId    = $this->parseReadAgentId($arguments['agent_id'] ?? null);
+        // `template_id` was the legacy read_agent identifier before
+        // agent_id took over (PR #170). Today multiple agents can share
+        // a template label, so it can never resolve to a single row.
+        // Refusing it explicitly is cheaper than silently misrouting.
+        if (array_key_exists('template_id', $arguments)) {
+            return ToolResult::fail(
+                self::READ_AGENT_ERR_PREFIX
+                . '`template_id` is no longer an identifier — use the numeric `agent_id` returned by `create_agent`.',
+            );
+        }
 
-        if ($userId === null) {
-            return ToolResult::fail('read_agent requires an authenticated user.');
+        $raw = $arguments['agent_id'] ?? null;
+        if ($raw === null) {
+            $resolvedId = $callingAgentId;
+        } elseif (is_int($raw) && $raw > 0) {
+            $resolvedId = $raw;
+        } elseif (is_numeric($raw)) {
+            $n = (int) $raw;
+            if ($n <= 0) {
+                return ToolResult::fail(
+                    self::READ_AGENT_ERR_PREFIX . '`agent_id` must be a positive integer.',
+                );
+            }
+            $resolvedId = $n;
+        } else {
+            return ToolResult::fail(
+                self::READ_AGENT_ERR_PREFIX . '`agent_id` must be a positive integer.',
+            );
         }
-        if ($templateId === '' && $agentId === 0) {
-            return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . 'either `template_id` or `agent_id` is required.');
-        }
-        // The not-found case returns a fail directly via the null-coalesce
-        // so this method stays at three explicit returns total.
-        return $this->fetchAgentForRead($userId, $templateId, $agentId)
-            ?? ToolResult::fail(self::READ_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
-    }
-
-    /**
-     * Parse `$arguments['agent_id']` into a strict non-negative int. LLM
-     * tooling can deliver the int as a JSON number or a numeric string;
-     * anything else is treated as "not supplied".
-     */
-    private function parseReadAgentId(mixed $raw): int
-    {
-        if (is_int($raw)) {
-            return $raw;
-        }
-        return is_numeric($raw) ? (int) $raw : 0;
-    }
-
-    /**
-     * Render the read_agent target identifier for `describeAction()`.
-     * Pulled out so the dispatch match stays free of nested ternaries.
-     *
-     * @param  array<string, mixed> $arguments
-     */
-    private function describeReadAgentTarget(array $arguments): string
-    {
-        if (isset($arguments['template_id']) && is_string($arguments['template_id']) && $arguments['template_id'] !== '') {
-            return 'template_id: ' . $arguments['template_id'];
-        }
-        if (isset($arguments['agent_id']) && $arguments['agent_id'] !== '') {
-            return 'agent_id: ' . $arguments['agent_id'];
-        }
-        return 'no identifier';
-    }
-
-    /**
-     * Run the right Agent query for the supplied identifier pair.
-     * Returns null on miss. Early-return for `template_id` (the dominant
-     * lookup) keeps this method under the SonarCloud S1142 3-return
-     * ceiling — the second branch handles the two remaining cases.
-     */
-    private function fetchAgentForRead(int $userId, string $templateId, int $agentId): ?Agent
-    {
-        if ($templateId !== ''
-            && (new Agent())->getConnection()->getSchemaBuilder()->hasColumn('agents', 'template_id')
-        ) {
-            return Agent::query()
-                ->where('user_id', $userId)
-                ->where('template_id', $templateId)
-                ->first();
-        }
-        // Match collapses the no-template_id-column and no-identifier-supplied
-        // cases so the function's three returns map cleanly to the three
-        // outcomes: hit, miss-on-template_id, miss-on-agent_id.
-        $id = $templateId !== '' && is_numeric($templateId) ? (int) $templateId : $agentId;
-        return Agent::query()
+        $agent = Agent::query()
             ->where('user_id', $userId)
-            ->where('id', $id)
+            ->where('id', $resolvedId)
             ->first();
+        return $agent
+            ?? ToolResult::fail(self::READ_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
     }
 
     /**

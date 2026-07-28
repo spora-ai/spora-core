@@ -895,10 +895,10 @@ describe('AgentTool::describeAction', function (): void {
     test('renders the identifier for read_agent', function (): void {
         [$tool] = makeAgentTool();
 
+        // No agent_id: falls through to the calling agent.
         expect($tool->describeAction(['action' => 'read_agent']))
-            ->toBe('Read agent state (no identifier).');
-        expect($tool->describeAction(['action' => 'read_agent', 'template_id' => 'core/x']))
-            ->toBe('Read agent state (template_id: core/x).');
+            ->toBe('Read agent state (calling agent).');
+        // Targeted agent by numeric id.
         expect($tool->describeAction(['action' => 'read_agent', 'agent_id' => 42]))
             ->toBe('Read agent state (agent_id: 42).');
     });
@@ -964,21 +964,36 @@ describe('AgentTool::execute — configure_tools', function (): void {
             ->and($result->content)->toContain('operations[0][0]');
     });
 
-    test('enables a tool on the calling agent and returns the readback', function (): void {
-        [$tool, $service, $toolSettings] = makeAgentTool();
+    test('enables a tool on the calling agent and returns the manifest readback', function (): void {
+        // configure_tools without agent_id operates on the calling agent
+        // — the resolver hits the live agents table, so the row has to
+        // exist for the test to drive a successful apply.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-self@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
-        $agent        = new Agent();
-        $agent->id    = 7;
-        $agent->name  = 'Alpha';
-        $agent->user_id = 99;
-        $service->allows('getAgentByAgentId')->andReturn($agent);
+
+        $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id'              => $ownerId,
+            'name'                 => 'Calling',
+            'description'          => null,
+            'system_prompt'        => null,
+            'notes'                => null,
+            'max_steps'            => 10,
+            'allow_followup'       => 1,
+            'retry_after_minutes'  => 0,
+            'max_retries'          => 0,
+            'is_active'            => 1,
+            'created_at'           => date('Y-m-d H:i:s'),
+            'updated_at'           => date('Y-m-d H:i:s'),
+        ]);
+
         $toolSettings->shouldReceive('enableTool')
             ->once()
-            ->with(7, 99, 'Spora\\Tools\\TimeTool')
+            ->with($callingId, $ownerId, 'Spora\\Tools\\TimeTool')
             ->andReturn(['tool' => ['tool_class' => 'Spora\\Tools\\TimeTool', 'tool_name' => 'time']]);
         $toolSettings->shouldNotReceive('disableTool');
-        // getAvailableTools readback:
         $toolSettings->allows('getAllToolsStatus')->andReturn([
             [
                 'tool_class'       => 'Spora\\Tools\\TimeTool',
@@ -995,25 +1010,46 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 'action' => 'configure_tools',
                 'tools'  => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true, 'operations' => []]],
             ],
-            7,
-            99,
+            $callingId,
+            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
+        /** @var array<string, mixed> $data */
+        $data = $result->data;
+        // configure_tools confirmation now returns the canonical manifest.
+        expect($data['agent_id'])->toBe($callingId)
+            ->and($data)->toHaveKey('tools');
     });
 
     test('with enabled false removes the tool', function (): void {
-        [$tool, $service, $toolSettings] = makeAgentTool();
+        // configure_tools without agent_id operates on the calling agent
+        // — the resolver hits the live agents table, so the row has to
+        // exist for the test to drive a successful apply.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-remove@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
-        $agent        = new Agent();
-        $agent->id    = 7;
-        $agent->name  = 'Alpha';
-        $agent->user_id = 99;
-        $service->allows('getAgentByAgentId')->andReturn($agent);
+
+        $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id'              => $ownerId,
+            'name'                 => 'Calling',
+            'description'          => null,
+            'system_prompt'        => null,
+            'notes'                => null,
+            'max_steps'            => 10,
+            'allow_followup'       => 1,
+            'retry_after_minutes'  => 0,
+            'max_retries'          => 0,
+            'is_active'            => 1,
+            'created_at'           => date('Y-m-d H:i:s'),
+            'updated_at'           => date('Y-m-d H:i:s'),
+        ]);
+
         $toolSettings->shouldReceive('disableTool')
             ->once()
-            ->with(7, 99, 'Spora\\Tools\\TimeTool');
+            ->with($callingId, $ownerId, 'Spora\\Tools\\TimeTool');
         $toolSettings->shouldNotReceive('enableTool');
         $toolSettings->allows('getAllToolsStatus')->andReturn([]);
         $toolSettings->allows('getToolsOperations')->andReturn([]);
@@ -1023,27 +1059,40 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 'action' => 'configure_tools',
                 'tools'  => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => false]],
             ],
-            7,
-            99,
+            $callingId,
+            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
     });
 
     test('sets per-operation auto_approve overrides via patchOperationOverride', function (): void {
-        [$tool, $service, $toolSettings] = makeAgentTool();
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-op-override@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
-        $agent        = new Agent();
-        $agent->id    = 7;
-        $agent->name  = 'Alpha';
-        $agent->user_id = 99;
-        $service->allows('getAgentByAgentId')->andReturn($agent);
+
+        $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id'              => $ownerId,
+            'name'                 => 'Calling',
+            'description'          => null,
+            'system_prompt'        => null,
+            'notes'                => null,
+            'max_steps'            => 10,
+            'allow_followup'       => 1,
+            'retry_after_minutes'  => 0,
+            'max_retries'          => 0,
+            'is_active'            => 1,
+            'created_at'           => date('Y-m-d H:i:s'),
+            'updated_at'           => date('Y-m-d H:i:s'),
+        ]);
+
         $toolSettings->allows('enableTool')->andReturn(['tool' => ['tool_class' => 'X', 'tool_name' => 'x']]);
         // auto_approve=true → default_requires_approval=0
         $toolSettings->shouldReceive('patchOperationOverride')
             ->once()
-            ->with(7, 99, 'Spora\\Tools\\TimeTool', 'now', [
+            ->with($callingId, $ownerId, 'Spora\\Tools\\TimeTool', 'now', [
                 'enabled'                   => 1,
                 'default_requires_approval' => 0,
             ])
@@ -1060,8 +1109,8 @@ describe('AgentTool::execute — configure_tools', function (): void {
                     'operations' => [['name' => 'now', 'auto_approve' => true]],
                 ]],
             ],
-            7,
-            99,
+            $callingId,
+            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
@@ -1082,13 +1131,45 @@ describe('AgentTool::execute — read_agent', function (): void {
             ->and($result->content)->toContain('authenticated user');
     });
 
-    test('rejects when neither template_id nor agent_id is provided', function (): void {
-        [$tool] = makeAgentTool();
+    test('read_agent without agent_id falls through to the calling agent', function (): void {
+        // `read_agent` without agent_id is the live replacement for
+        // `read_agent_configuration` — same in-place semantics. The
+        // orchestrator passes the calling agent id as the second
+        // argument; this test mirrors that contract.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'read-agent-self@example.com');
 
-        $result = $tool->execute(['action' => 'read_agent'], 7, 99);
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
 
-        expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('either `template_id` or `agent_id` is required');
+        $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id'              => $ownerId,
+            'name'                 => 'Calling',
+            'description'          => null,
+            'system_prompt'        => null,
+            'notes'                => null,
+            'max_steps'            => 10,
+            'allow_followup'       => 1,
+            'retry_after_minutes'  => 0,
+            'max_retries'          => 0,
+            'is_active'            => 1,
+            'created_at'           => date('Y-m-d H:i:s'),
+            'updated_at'           => date('Y-m-d H:i:s'),
+        ]);
+
+        $result = $tool->execute(
+            ['action' => 'read_agent'],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeTrue();
+        /** @var array<string, mixed> $data */
+        $data = $result->data;
+        expect($data['agent_id'])->toBe($callingId)
+            ->and($data['name'])->toBe('Calling');
     });
 
     test('returns the canonical manifest by agent_id', function (): void {
@@ -1167,6 +1248,146 @@ describe('AgentTool::execute — read_agent', function (): void {
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('not found or not owned');
+    });
+
+    test('rejects template_id identifier (runtime identity is agent_id, not template_id)', function (): void {
+        // `template_id` is a creation label, not an identity. Sending it
+        // to read_agent surfaces a "this is no longer an identifier"
+        // error so the LLM doesn't loop on a payload that will never
+        // resolve.
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            ['action' => 'read_agent', 'template_id' => 'weather-agent'],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('`template_id` is no longer an identifier')
+            ->and($result->content)->toContain('use the numeric `agent_id`');
+    });
+
+    test('read_agent with agent_id=0 fails fast', function (): void {
+        // `agent_id` must be a positive integer — zero falls through to
+        // the "must be a positive integer" failure rather than being
+        // silently mis-routed to the calling agent.
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            ['action' => 'read_agent', 'agent_id' => 0],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('`agent_id` must be a positive integer');
+    });
+});
+
+describe('AgentTool::execute — configure_tools (agent_id scoped)', function (): void {
+    // Configure_tools gained an optional `agent_id` parameter: omitted → calling
+    // agent; supplied → that agent (user-scoped). Task #46 trace exposed the
+    // bug where the omitted form silently operated on the calling agent and
+    // left a freshly-created agent #6 with zero tools.
+
+    test('configures the targeted agent, not the caller', function (): void {
+        // Two distinct agents owned by the same user. configure_tools
+        // (agent_id: $target) must apply to $target, not the caller.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'ct-targeted@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+
+        $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Caller',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        $targetId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Target',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $toolSettings->shouldReceive('enableTool')
+            ->once()
+            ->with($targetId, $ownerId, 'Spora\\Tools\\TimeTool')
+            ->andReturn(['tool' => ['tool_class' => 'X', 'tool_name' => 'x']]);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action'   => 'configure_tools',
+                'agent_id' => $targetId,
+                'tools'    => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true, 'operations' => []]],
+            ],
+            $callerId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeTrue();
+        /** @var array<string, mixed> $data */
+        $data = $result->data;
+        // The manifest emitted by configure_tools is the targeted agent's,
+        // not the caller's.
+        expect($data['agent_id'])->toBe($targetId);
+    });
+
+    test('refuses to configure another user\'s agent', function (): void {
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'ct-cross-owner@example.com');
+        $otherId = bootAuth($auth, 'ct-cross-other@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+
+        $otherAgent = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Owned',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $toolSettings->shouldNotReceive('enableTool');
+
+        $result = $tool->execute(
+            [
+                'action'   => 'configure_tools',
+                'agent_id' => $otherAgent,
+                'tools'    => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true, 'operations' => []]],
+            ],
+            7,
+            $otherId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('not found or not owned');
+    });
+
+    test('rejects template_id identifier on configure_tools', function (): void {
+        // `template_id` was an old identifier on read_agent and never made
+        // sense as a configure_tools target. The resolver refuses it
+        // explicitly so the LLM knows to re-send with a numeric pk.
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            [
+                'action'      => 'configure_tools',
+                'template_id' => 'weather-agent',
+                'tools'       => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true]],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('`template_id` is no longer an identifier')
+            ->and($result->content)->toContain('use the numeric `agent_id`');
     });
 });
 
