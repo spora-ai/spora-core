@@ -143,3 +143,20 @@ test('valid minimal payload passes validation with no warnings', function (): vo
     expect($result->isValid())->toBeTrue();
     expect($result->warnings())->toBe([]);
 });
+
+test('validate accepts a payload without a tools block', function (): void {
+    // The LLM-facing create_agent flow runs with no `tools` block —
+    // the agent row is created and configure_tools applies the toolset
+    // separately. The validator must accept the no-tools shape without
+    // firing TOOLS_NOT_LIST or any other tool-related error.
+    $raw = [
+        'id' => 'no-tools', 'name' => 'No Tools', 'version' => '1.0.0',
+        'agent' => ['max_steps' => 5, 'system_prompt' => 'hello'],
+        'required_plugins' => [],
+    ];
+    $result = validatePayload($raw);
+    expect($result->isValid())->toBeTrue();
+
+    $codes = array_column($result->errors(), 'code');
+    expect($codes)->not->toContain('TOOLS_NOT_LIST');
+});

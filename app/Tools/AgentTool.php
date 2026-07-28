@@ -24,20 +24,25 @@ use Spora\Tools\ValueObjects\ToolResult;
  * operator-facing notes, discover the tools it could enable, and create
  * new agents on behalf of the current user.
  *
- * All operations scope to the calling agent (`$agentId` from
- * `Orchestrator::safeExecute()`); the tool never accepts an `agent_id`
- * argument, so an agent cannot rewrite a sibling. `create_agent` reuses
- * {@see AgentTemplateImporter::importPayload()} so the LLM path and the
- * operator upload endpoint share validation, warnings, and tool-activation
- * semantics.
+ * All operations except `read_agent` scope to the calling agent
+ * (`$agentId` from `Orchestrator::safeExecute()`); the tool never accepts
+ * an `agent_id` argument on its mutating operations, so an agent cannot
+ * rewrite a sibling. `read_agent` is the explicit exception — it accepts
+ * `agent_id` (or `template_id`, if present) so the LLM can verify a
+ * freshly-imported agent's state after `create_agent` /
+ * `configure_tools`. Ownership is still scoped to the authenticated user.
  *
- * Tool activation is intentionally NOT exposed as an agent operation.
+ * `create_agent` reuses {@see AgentTemplateImporter::importPayload()} so
+ * the LLM path and the operator upload endpoint share validation,
+ * warnings, and tool-activation semantics. The LLM-facing flow runs the
+ * two-phase create → configure_tools pattern (see
+ * skills/agent-creation/SKILL.md) so a single call does not have to make
+ * N nested decisions about per-tool/per-operation overrides.
+ *
+ * Tool activation on the calling agent is exposed as `configure_tools`.
  * `get_available_tools` returns rich per-tool metadata so the agent can
- * either (a) spawn a sub-agent with a chosen toolset via `create_agent`,
- * or (b) realise activation is operator-only. Direct activation of a tool
- * on the calling agent happens through the operator-facing API
- * (`POST /api/v1/agents/{id}/tools/{toolId}/enable`, where `{toolId}` is
- * the tool's `#[Tool(name:)]` value).
+ * either (a) plan a toolset to apply via `configure_tools`, or (b) spawn
+ * a sub-agent with a chosen toolset via `create_agent`.
  *
  * Operations:
  *   - read_agent_configuration  (enabled, no approval)
@@ -47,6 +52,8 @@ use Spora\Tools\ValueObjects\ToolResult;
  *   - write_notes_overwrite     (disabled, requires approval — destructive)
  *   - get_available_tools       (disabled, no approval)
  *   - create_agent              (disabled, requires approval)
+ *   - configure_tools           (disabled, requires approval)
+ *   - read_agent                (disabled, no approval)
  */
 #[Tool(
     name: 'agent',
@@ -121,14 +128,41 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolOperation(
     name: 'create_agent',
     description: 'Create a new agent from an Agent Template-shaped payload (id, name, version, agent{}, '
-               . 'tools[], required_plugins[]). The schema is strict — payloads that put `name` inside '
-               . 'agent{}, send `operations` as strings instead of `[{name: ...}]` objects, or use a '
-               . 'short version like "1.0" instead of semver "1.0.0" will fail validation. Strongly '
+               . 'required_plugins[]). The schema is strict — payloads that put `name` inside agent{}, '
+               . 'send `operations` as strings instead of `[{name: ...}]` objects, or use a short '
+               . 'version like "1.0" instead of semver "1.0.0" will fail validation. Strongly '
                . 'recommend reading the agent-creation skill first (skill action: read, name: '
-               . 'agent-creation, filename: SKILL.md) so you do not waste approval cycles on a malformed '
-               . 'payload.',
+               . 'agent-creation, filename: SKILL.md) so you do not waste approval cycles on a '
+               . 'malformed payload. Note: the LLM-facing flow does NOT pass a `tools[]` block here — '
+               . 'after the agent row is created, call `configure_tools` to apply a toolset, then '
+               . '`read_agent` to verify what actually committed. Operator-upload templates (file '
+               . 'upload endpoint) keep the nested `tools[]` shape and apply it atomically.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'configure_tools',
+    description: 'Enable or disable tools and per-operation overrides on the calling agent. '
+               . 'Takes a `tools` list with `{ tool_class, enabled, operations: [{name, enabled?, auto_approve?}] }`. '
+               . 'A tool with `enabled: false` removes it from the agent. '
+               . 'Omit `operations` to inherit defaults; pass `[{name:"now"}]` to enable one, '
+               . '`[{name:"now", enabled:false}]` to disable one, '
+               . '`[{name:"now", auto_approve:true}]` to enable auto-approve. '
+               . 'Returns the updated per-tool/per-operation state. Use `read_agent` afterwards to verify.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'read_agent',
+    description: 'Read the full configuration of a specific agent — `id`, `name`, `description`, '
+               . '`system_prompt`, enabled tools, and per-operation `enabled` / `requires_approval` state. '
+               . 'Use this to verify what was actually committed by `create_agent` and `configure_tools` — '
+               . 'silent drops do occur, so the read-back is the source of truth. '
+               . 'Identify the target by `template_id` (the same string used in `create_agent`\'s `id`) '
+               . 'or by `agent_id` (the numeric primary key returned by `create_agent`). '
+               . 'This is the only AgentTool operation that takes an agent identifier.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: false,
 )]
 #[ToolParameter(
     name: 'agent',
@@ -174,8 +208,35 @@ use Spora\Tools\ValueObjects\ToolResult;
               . 'produce warnings rather than aborting the import. Ignored by every other '
               . 'operation; omit this key entirely when calling read_agent_configuration, '
               . 'read_notes, write_notes, write_notes_overwrite, write_agent_configuration, '
-              . 'or get_available_tools.',
+              . 'configure_tools, read_agent, or get_available_tools.',
     required: ['create_agent'],
+)]
+#[ToolParameter(
+    name: 'tools',
+    type: 'array',
+    description: 'ONLY for configure_tools: a list of `{ tool_class, enabled, operations: [...] }` entries. '
+              . 'Each operation entry may set `enabled` (default true) and `auto_approve` (default false). '
+              . 'A tool with `enabled: false` removes it from the agent. '
+              . 'Ignored by every other operation; omit this key entirely when calling '
+              . 'read_agent_configuration, read_notes, write_notes, write_notes_overwrite, '
+              . 'write_agent_configuration, get_available_tools, create_agent, or read_agent.',
+    required: ['configure_tools'],
+)]
+#[ToolParameter(
+    name: 'template_id',
+    type: 'string',
+    description: 'ONLY for read_agent: the `id` string from the Agent Template format '
+              . '(e.g. "weather-agent", or "core/core-assistant"). Mutually exclusive with '
+              . '`agent_id`; prefer whichever is more convenient. Ignored by every other '
+              . 'operation.',
+    required: false,
+)]
+#[ToolParameter(
+    name: 'agent_id',
+    type: 'integer',
+    description: 'ONLY for read_agent: the numeric primary key returned by `create_agent`. '
+              . 'Mutually exclusive with `template_id`. Ignored by every other operation.',
+    required: false,
 )]
 final class AgentTool extends AbstractTool
 {
@@ -212,6 +273,8 @@ final class AgentTool extends AbstractTool
             'write_notes_overwrite'     => $this->writeNotes($agentId, $arguments, 'overwrite'),
             'get_available_tools'       => $this->getAvailableTools($agentId, $userId),
             'create_agent'              => $this->createAgent($userId, $arguments),
+            'configure_tools'           => $this->configureTools($agentId, $userId, $arguments),
+            'read_agent'                => $this->readAgent($userId, $arguments),
             default                     => ToolResult::fail("Invalid action '{$operation}'."),
         };
     }
@@ -231,6 +294,15 @@ final class AgentTool extends AbstractTool
             'write_notes_overwrite'     => 'Replace the agent\'s notes wholesale (destructive).',
             'get_available_tools'       => 'List available tools with configuration status.',
             'create_agent'              => 'Create a new agent from the provided template payload.',
+            'configure_tools'           => sprintf(
+                'Configure this agent\'s toolset (%d entries).',
+                is_array($arguments['tools'] ?? null) ? count($arguments['tools']) : 0,
+            ),
+            'read_agent'                => sprintf(
+                'Read agent state (%s).',
+                isset($arguments['template_id']) ? 'template_id: ' . $arguments['template_id']
+                    : (isset($arguments['agent_id']) ? 'agent_id: ' . $arguments['agent_id'] : 'no identifier'),
+            ),
             default                     => "Agent tool: {$operation}",
         };
     }
@@ -664,6 +736,189 @@ final class AgentTool extends AbstractTool
                 'warnings'      => $result->warnings,
             ],
         );
+    }
+
+    /**
+     * Apply a toolset + per-operation overrides to the calling agent.
+     *
+     * Two-phase agent creation pairs this with `create_agent`: the LLM
+     * creates the skeletal agent first, then calls `configure_tools` to
+     * enable tools and per-operation overrides. This avoids forcing the
+     * LLM to make N nested decisions (one per tools[i].operations[j])
+     * inside a single approved `create_agent` call.
+     *
+     * The implementation routes through `AgentToolSettingsServiceInterface`
+     * — the existing operator-side surface — so the LLM-facing path and
+     * the operator-facing API share the same enable / override semantics.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    private function configureTools(int $agentId, ?int $userId, array $arguments): ToolResult
+    {
+        if ($userId === null) {
+            return ToolResult::fail('configure_tools requires an authenticated user.');
+        }
+        $entries = $arguments['tools'] ?? [];
+        if (!is_array($entries) || ($entries !== [] && !array_is_list($entries))) {
+            return ToolResult::fail('configure_tools: `tools` must be an array.');
+        }
+
+        // Validate every entry before mutating anything so a half-applied
+        // toolset never lands in the database. Collect the per-entry work
+        // plan, then apply it once we know the whole input is well-formed.
+        $plan = [];
+        foreach ($entries as $i => $entry) {
+            $parsed = $this->parseConfigureToolEntry($entry, $i, $userId);
+            if ($parsed instanceof ToolResult) {
+                return $parsed;
+            }
+            $plan[] = $parsed;
+        }
+
+        foreach ($plan as $step) {
+            if ($step['enable']) {
+                $this->toolSettings->enableTool($agentId, $userId, $step['tool_class']);
+            } else {
+                $this->toolSettings->disableTool($agentId, $userId, $step['tool_class']);
+            }
+            foreach ($step['operations'] as $op) {
+                $this->toolSettings->patchOperationOverride(
+                    $agentId,
+                    $userId,
+                    $step['tool_class'],
+                    $op['name'],
+                    [
+                        'enabled'                   => $op['enabled'] ? 1 : 0,
+                        'default_requires_approval' => $op['auto_approve'] ? 0 : 1,
+                    ],
+                );
+            }
+        }
+
+        // Return the post-change effective state via getAvailableTools so
+        // the LLM sees the same wire shape it would have seen from a
+        // follow-up get_available_tools call.
+        return $this->getAvailableTools($agentId, $userId);
+    }
+
+    /**
+     * Validate one `tools[i]` entry and return the work plan, or a
+     * ToolResult on failure.
+     *
+     * @param mixed $entry
+     * @return array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>}|ToolResult
+     */
+    private function parseConfigureToolEntry($entry, int $i, int $userId): array|ToolResult
+    {
+        if (!is_array($entry)) {
+            return ToolResult::fail("configure_tools: tool entry #{$i} must be an object.");
+        }
+        $toolClass = is_string($entry['tool_class'] ?? null) ? $entry['tool_class'] : '';
+        if ($toolClass === '') {
+            return ToolResult::fail("configure_tools: tool entry #{$i} is missing `tool_class`.");
+        }
+        $enable = (bool) ($entry['enabled'] ?? true);
+
+        $operations = [];
+        $ops = $entry['operations'] ?? [];
+        if (is_array($ops) && $ops !== []) {
+            foreach ($ops as $j => $op) {
+                if (!is_array($op) || !isset($op['name']) || !is_string($op['name']) || $op['name'] === '') {
+                    return ToolResult::fail(
+                        "configure_tools: operations[{$i}][{$j}] must be `{name, enabled?, auto_approve?}`.",
+                    );
+                }
+                $operations[] = [
+                    'name'         => $op['name'],
+                    'enabled'      => (bool) ($op['enabled'] ?? true),
+                    'auto_approve' => (bool) ($op['auto_approve'] ?? false),
+                ];
+            }
+        }
+
+        return ['tool_class' => $toolClass, 'enable' => $enable, 'operations' => $operations];
+    }
+
+    /**
+     * Read a specific agent's full state by `template_id` or `agent_id`.
+     *
+     * This is the only AgentTool operation that accepts an agent
+     * identifier — it exists so the LLM can verify what `create_agent`
+     * and `configure_tools` actually committed. Both inputs are scoped to
+     * the authenticated user: cross-user reads are refused, never
+     * transparently returned as "not found" only when the agent exists.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    private function readAgent(?int $userId, array $arguments): ToolResult
+    {
+        if ($userId === null) {
+            return ToolResult::fail('read_agent requires an authenticated user.');
+        }
+        $templateId = is_string($arguments['template_id'] ?? null) ? trim((string) $arguments['template_id']) : '';
+        $agentIdRaw = $arguments['agent_id'] ?? null;
+        $agentId    = is_int($agentIdRaw) ? $agentIdRaw
+            : (is_numeric($agentIdRaw) ? (int) $agentIdRaw : 0);
+        if ($templateId === '' && $agentId === 0) {
+            return ToolResult::fail('read_agent: either `template_id` or `agent_id` is required.');
+        }
+
+        $agent = $this->resolveReadAgentTarget($userId, $templateId, $agentId);
+        if ($agent === null) {
+            return ToolResult::fail('Agent not found or not owned by this user.');
+        }
+
+        $payload = AgentResource::toArray($agent);
+        /** @var \Illuminate\Database\Eloquent\Collection<int, \Spora\Models\AgentTool> $agentToolRows */
+        $agentToolRows = $agent->agentTools;
+        $enabledTools = [];
+        foreach ($agentToolRows as $toolRow) {
+            $enabledTools[] = [
+                'tool_class' => (string) $toolRow->tool_class,
+                'tool_name'  => (string) $toolRow->tool_name,
+            ];
+        }
+        $payload['enabled_tools'] = $enabledTools;
+
+        return ToolResult::ok(
+            "Configuration for agent #{$agent->id} ('{$agent->name}').",
+            $payload,
+        );
+    }
+
+    /**
+     * Resolve the read_agent target to an Agent row owned by $userId.
+     *
+     * `template_id` takes precedence over `agent_id` when both are
+     * supplied. `template_id` currently resolves only when the agents
+     * table exposes the column; if it does not, the LLM is expected to
+     * supply `agent_id` (the primary key returned by `create_agent`).
+     * Returns null on miss — the caller surfaces the standard failure.
+     */
+    private function resolveReadAgentTarget(int $userId, string $templateId, int $agentId): ?Agent
+    {
+        if ($templateId !== '') {
+            $schema = (new Agent())->getConnection()->getSchemaBuilder();
+            if ($schema->hasColumn('agents', 'template_id')) {
+                return Agent::query()
+                    ->where('user_id', $userId)
+                    ->where('template_id', $templateId)
+                    ->first();
+            }
+            // Fall back to the primary key — the LLM sometimes echoes the
+            // template id back as a numeric pk.
+            if (is_numeric($templateId)) {
+                return Agent::query()
+                    ->where('user_id', $userId)
+                    ->where('id', (int) $templateId)
+                    ->first();
+            }
+            return null;
+        }
+        return Agent::query()
+            ->where('user_id', $userId)
+            ->where('id', $agentId)
+            ->first();
     }
 
     /**

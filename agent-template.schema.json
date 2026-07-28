@@ -4,7 +4,7 @@
   "title": "Spora Agent Template",
   "description": "A reusable agent definition: name, system prompt, tool activations, and per-operation auto-approve defaults. Settings (passwords, secrets) are NEVER included — recipients must configure them in Settings → Tools after import.",
   "type": "object",
-  "required": ["id", "name", "version", "agent", "tools"],
+  "required": ["id", "name", "version", "agent"],
   "additionalProperties": false,
   "properties": {
     "$schema": {

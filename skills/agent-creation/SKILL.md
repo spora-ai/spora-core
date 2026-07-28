@@ -1,12 +1,12 @@
 ---
 name: agent-creation
-description: "When the user asks to create, set up, scaffold, or configure a new Spora agent, sub-agent, or specialised assistant; OR when a sub-task needs a toolset different from the calling agent's. Use for tasks like 'create me a weather agent', 'I need a research sub-agent', or 'scaffold a translator'. Do NOT use for editing the current agent's notes or routine fields — those go through write_notes / write_agent_configuration directly. Recommended tools: agent (operations read_agent_configuration, get_available_tools, read_notes, write_notes, create_agent, write_agent_configuration)."
+description: "When the user asks to create, set up, scaffold, or configure a new Spora agent, sub-agent, or specialised assistant; OR when a sub-task needs a toolset different from the calling agent's. Use for tasks like 'create me a weather agent', 'I need a research sub-agent', or 'scaffold a translator'. Do NOT use for editing the current agent's notes or routine fields — those go through write_notes / write_agent_configuration directly. Recommended tools: agent (operations read_agent_configuration, get_available_tools, read_notes, write_notes, create_agent, configure_tools, read_agent, write_agent_configuration)."
 license: Apache-2.0
 metadata:
   author: spora-ai
-  version: "1.0"
+  version: "1.1"
   allowedByDefault: false
-  requiresTools: "agent:read_agent_configuration,agent:get_available_tools,agent:read_notes,agent:write_notes,agent:create_agent,agent:write_agent_configuration"
+  requiresTools: "agent:read_agent_configuration,agent:get_available_tools,agent:read_notes,agent:write_notes,agent:create_agent,agent:configure_tools,agent:read_agent,agent:write_agent_configuration"
 ---
 
 # Agent creation
@@ -30,10 +30,10 @@ Before building the payload:
 
 1. **Read the current configuration** via `agent(action: "read_agent_configuration")` so you know what an existing agent looks like in this codebase (column names, prompt shape, toolset style).
 2. **List available tools** via `agent(action: "get_available_tools")`. The version-1 payload tells you:
-   - `tool_class` — the FQCN to put in the template.
-   - `call_name` — the LLM-facing identifier. **`tool_class` is what `create_agent` needs**, not `call_name`.
-   - `operations` — STRING list (`["current", "forecast"]`). Convert to objects (`[{name: "current"}, {name: "forecast"}]`) before placing inside `payload.tools[].operations`.
-   - `needs_configuration: false` — only enable a tool whose config is complete; `create_agent` will produce a warning otherwise.
+   - `tool_class` — the FQCN to put in the template / use in `configure_tools`.
+   - `call_name` — the LLM-facing identifier. **`tool_class` is what `create_agent` and `configure_tools` need**, not `call_name`.
+   - `operations` — STRING list (`["current", "forecast"]`). Convert to objects (`[{name: "current"}, {name: "forecast"}]`) before placing inside `configure_tools`'s `tools[].operations`.
+   - `needs_configuration: false` — only enable a tool whose config is complete; `configure_tools` will produce a warning otherwise.
 3. **Read notes** via `agent(action: "read_notes")` if you need to remember prior decisions for this agent.
 
 ## Minimal-toolset protocol
@@ -50,6 +50,17 @@ Prefer `core` tools over plugin tools when both would suffice. Plugins add insta
 
 Only ask when the answer changes the design materially — name (only if you have multiple plausible names), description, system-prompt persona, or whether the agent needs explicit approval on each tool call. Otherwise decide and proceed.
 
+## Two-phase flow (LLM-facing)
+
+The LLM does NOT create an agent and configure its tools in one call. Use:
+
+1. **`create_agent`** — skeletal record: `id`, `name`, `version`, `agent{}`, `required_plugins[]`. **No `tools[]` block.** Use this when you want to make a new agent and (maybe) configure it later.
+2. **`read_agent`** — read back the just-created agent by `agent_id` (the numeric pk returned by `create_agent`) to confirm the skeletal record actually committed.
+3. **`configure_tools`** — enable / disable tools and per-operation overrides on the calling agent. Takes a `tools` list of `{tool_class, enabled, operations: [{name, enabled?, auto_approve?}]}`.
+4. **`read_agent`** again — verify the toolset is exactly what you wanted.
+
+Do NOT try to send a `tools[]` block inside the `create_agent` payload from the LLM-facing path. That nested shape is reserved for **operator-upload templates** — the same shape as the dashboard file-upload endpoint (`POST /api/v1/agent-templates/import`). The LLM-facing path goes through `configure_tools` only, one toolset decision per call, after the agent row exists.
+
 ## Schema reference
 
 This is the literal shape of the `payload` argument to `create_agent`. It mirrors `agent-template.schema.json`. Validate against the schema; do not improvise.
@@ -62,7 +73,7 @@ This is the literal shape of the `payload` argument to `create_agent`. It mirror
 | `name` | yes | Human-readable template name. **Top level** — not inside `agent{}`. |
 | `version` | yes | Semver. Regex: `^[0-9]+\.[0-9]+\.[0-9]+([+-].+)?$`. **Three-part** (`1.0.0`, not `1` or `1.0`). |
 | `agent` | yes | Object — the agent record fields. **No `name`** here. |
-| `tools` | yes | Array of `{tool_class, enabled, operations}`. |
+| `tools` | no | Array of `{tool_class, enabled, operations}` — operator-upload only. The LLM-facing path leaves this out and uses `configure_tools` instead. |
 | `required_plugins` | no | Array of plugin slugs (FQCN prefixes). |
 
 ### `agent{}` allowed keys only
@@ -79,13 +90,43 @@ Strict — `additionalProperties: false`. Allowed keys:
 
 **`name` is NOT allowed inside `agent{}`.** Common mistake — the LLM reads `read_agent_configuration` and copies the shape verbatim.
 
-### `tools[]` allowed keys only
+### `configure_tools` shape (LLM-facing)
 
-Each tool is `{tool_class, enabled, operations}`:
+The `tools` argument is a list of `{ tool_class, enabled, operations }`:
+
+```json
+{
+  "tools": [
+    {
+      "tool_class": "Spora\\Plugins\\Weather\\Tools\\WeatherApiTool",
+      "enabled": true,
+      "operations": [
+        { "name": "current",  "enabled": true },
+        { "name": "forecast", "enabled": true },
+        { "name": "search",   "enabled": true },
+        { "name": "astronomy","enabled": true }
+      ]
+    },
+    {
+      "tool_class": "Spora\\Tools\\TimeTool",
+      "enabled": true,
+      "operations": [
+        { "name": "now",    "enabled": true, "auto_approve": true },
+        { "name": "format", "enabled": true, "auto_approve": true }
+      ]
+    }
+  ]
+}
+```
 
 - `tool_class` — FQCN string (e.g. `Spora\Tools\TimeTool`). Get this from `get_available_tools`. **Not** `call_name`.
-- `enabled` — boolean.
+- `enabled` — boolean. `false` removes the tool from the agent entirely.
 - `operations` — array of `{name, enabled?, auto_approve?}`. **`get_available_tools` returns strings; you must wrap them in objects.**
+- Omit `operations` to inherit the tool's per-operation defaults.
+
+### Operator-upload `tools[]` (file upload endpoint only)
+
+Each tool is `{tool_class, enabled, operations}` — same shape as the LLM-facing `configure_tools` block. The validator accepts both paths.
 
 ### `required_plugins[]`
 
@@ -101,6 +142,8 @@ Plugin slugs (e.g. `weather`) — lowercase, slug pattern `^[a-z0-9][a-z0-9_-]*$
 | `Field 'version' must be a non-empty string` | Sent version as int | Send `"1.0.0"` (string, semver 3-part) |
 | `Field 'version' does not match pattern /^[0-9]+\.[0-9]+\.[0-9]+...$/` | Sent `"1.0"` | Send `"1.0.0"` |
 | `Tool entry is missing boolean 'enabled'` | Omitted `enabled` | Add `"enabled": true` (or `false`) |
+| `configure_tools` returns "must be an object" | Sent a non-object tool entry | Wrap in `{ ... }` |
+| `configure_tools` returns `operations[i][j]` shape complaint | `name` missing from an op entry | Wrap as `[{name: "now", enabled: true}]` |
 
 After three identical validation errors, **stop and ask the operator** — re-reading this skill won't help if the schema is genuinely unknown to you.
 
@@ -124,9 +167,13 @@ To verify a write took effect, call `read_agent_configuration` afterwards. If a 
 
 ## Approval
 
-`create_agent` requires operator approval per call. Briefly state what the new agent will do before submitting, so the operator can sign off without re-reading the payload.
+- `create_agent` — operator approval per call. Briefly state what the new agent will do before submitting, so the operator can sign off without re-reading the payload.
+- `configure_tools` — operator approval per call. Brief summary of the toolset change.
+- `read_agent` — no approval.
 
 ## Worked example
+
+The example below shows an **operator-upload** payload (nested `tools[]`); the LLM-facing flow splits this into a `create_agent` call (no `tools` block) followed by a `configure_tools` call with the same shape as the `tools` array below.
 
 ```json
 {
@@ -160,7 +207,7 @@ To verify a write took effect, call `read_agent_configuration` afterwards. If a 
       ]
     }
   ],
-  "required_plugins": ["Spora\\Plugins\\Weather"]
+  "required_plugins": ["weather"]
 }
 ```
 

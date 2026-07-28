@@ -817,6 +817,283 @@ describe('AgentTool::describeAction', function (): void {
         expect($tool->describeAction(['action' => 'write_notes_overwrite']))
             ->toBe("Replace the agent's notes wholesale (destructive).");
     });
+
+    test('renders the entry count for configure_tools', function (): void {
+        [$tool] = makeAgentTool();
+
+        expect($tool->describeAction(['action' => 'configure_tools']))
+            ->toBe("Configure this agent's toolset (0 entries).");
+
+        expect($tool->describeAction([
+            'action' => 'configure_tools',
+            'tools'  => [
+                ['tool_class' => 'A', 'enabled' => true],
+                ['tool_class' => 'B', 'enabled' => false],
+            ],
+        ]))->toBe("Configure this agent's toolset (2 entries).");
+    });
+
+    test('renders the identifier for read_agent', function (): void {
+        [$tool] = makeAgentTool();
+
+        expect($tool->describeAction(['action' => 'read_agent']))
+            ->toBe('Read agent state (no identifier).');
+        expect($tool->describeAction(['action' => 'read_agent', 'template_id' => 'core/x']))
+            ->toBe('Read agent state (template_id: core/x).');
+        expect($tool->describeAction(['action' => 'read_agent', 'agent_id' => 42]))
+            ->toBe('Read agent state (agent_id: 42).');
+    });
+});
+
+describe('AgentTool::execute — configure_tools', function (): void {
+    test('rejects when userId is null', function (): void {
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            ['action' => 'configure_tools', 'tools' => []],
+            7,
+            null,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('authenticated user');
+    });
+
+    test('rejects a non-array `tools` argument', function (): void {
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            ['action' => 'configure_tools', 'tools' => 'not-an-array'],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('must be an array');
+    });
+
+    test('rejects a tool entry missing tool_class', function (): void {
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            ['action' => 'configure_tools', 'tools' => [['enabled' => true]]],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('missing `tool_class`');
+    });
+
+    test('rejects a malformed operations entry', function (): void {
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\TimeTool',
+                    'enabled'    => true,
+                    'operations' => [['enabled' => true]],
+                ]],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('operations[0][0]');
+    });
+
+    test('enables a tool on the calling agent and returns the readback', function (): void {
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $agent        = new Agent();
+        $agent->id    = 7;
+        $agent->name  = 'Alpha';
+        $agent->user_id = 99;
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $toolSettings->shouldReceive('enableTool')
+            ->once()
+            ->with(7, 99, 'Spora\\Tools\\TimeTool')
+            ->andReturn(['tool' => ['tool_class' => 'Spora\\Tools\\TimeTool', 'tool_name' => 'time']]);
+        $toolSettings->shouldNotReceive('disableTool');
+        // getAvailableTools readback:
+        $toolSettings->allows('getAllToolsStatus')->andReturn([
+            [
+                'tool_class'       => 'Spora\\Tools\\TimeTool',
+                'tool_name'        => 'time',
+                'is_enabled'       => true,
+                'can_enable'       => true,
+                'missing_required' => [],
+            ],
+        ]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true, 'operations' => []]],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeTrue();
+    });
+
+    test('with enabled false removes the tool', function (): void {
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $agent        = new Agent();
+        $agent->id    = 7;
+        $agent->name  = 'Alpha';
+        $agent->user_id = 99;
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $toolSettings->shouldReceive('disableTool')
+            ->once()
+            ->with(7, 99, 'Spora\\Tools\\TimeTool');
+        $toolSettings->shouldNotReceive('enableTool');
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => false]],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeTrue();
+    });
+
+    test('sets per-operation auto_approve overrides via patchOperationOverride', function (): void {
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $agent        = new Agent();
+        $agent->id    = 7;
+        $agent->name  = 'Alpha';
+        $agent->user_id = 99;
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $toolSettings->allows('enableTool')->andReturn(['tool' => ['tool_class' => 'X', 'tool_name' => 'x']]);
+        // auto_approve=true → default_requires_approval=0
+        $toolSettings->shouldReceive('patchOperationOverride')
+            ->once()
+            ->with(7, 99, 'Spora\\Tools\\TimeTool', 'now', [
+                'enabled'                   => 1,
+                'default_requires_approval' => 0,
+            ])
+            ->andReturn([]);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\TimeTool',
+                    'enabled'    => true,
+                    'operations' => [['name' => 'now', 'auto_approve' => true]],
+                ]],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeTrue();
+    });
+});
+
+describe('AgentTool::execute — read_agent', function (): void {
+    test('rejects when userId is null', function (): void {
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            ['action' => 'read_agent', 'agent_id' => 7],
+            7,
+            null,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('authenticated user');
+    });
+
+    test('rejects when neither template_id nor agent_id is provided', function (): void {
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(['action' => 'read_agent'], 7, 99);
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('either `template_id` or `agent_id` is required');
+    });
+
+    test('returns the full config by agent_id', function (): void {
+        // Real DB so the Agent::query() lookup in resolveReadAgentTarget
+        // has something to find. Boot auth + create the agent row.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'read-agent-owner@example.com');
+
+        [$tool] = makeAgentTool();
+
+        $agentId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id'              => $ownerId,
+            'name'                 => 'Alpha',
+            'description'          => null,
+            'system_prompt'        => null,
+            'notes'                => null,
+            'max_steps'            => 10,
+            'allow_followup'       => 1,
+            'retry_after_minutes'  => 0,
+            'max_retries'          => 0,
+            'is_active'            => 1,
+            'created_at'           => date('Y-m-d H:i:s'),
+            'updated_at'           => date('Y-m-d H:i:s'),
+        ]);
+
+        $result = $tool->execute(['action' => 'read_agent', 'agent_id' => $agentId], 7, $ownerId);
+
+        expect($result->success)->toBeTrue();
+        /** @var array<string, mixed> $data */
+        $data = $result->data;
+        expect($data['id'])->toBe($agentId)
+            ->and($data['name'])->toBe('Alpha')
+            ->and($data)->toHaveKey('enabled_tools');
+    });
+
+    test('does not return another user\'s agent', function (): void {
+        $auth     = bootAuthLayer();
+        $ownerId  = bootAuth($auth, 'read-agent-cross-owner@example.com');
+        $otherId  = bootAuth($auth, 'read-agent-cross-other@example.com');
+
+        [$tool] = makeAgentTool();
+
+        $agentId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id'              => $ownerId,
+            'name'                 => 'Owned',
+            'description'          => null,
+            'system_prompt'        => null,
+            'notes'                => null,
+            'max_steps'            => 10,
+            'allow_followup'       => 1,
+            'retry_after_minutes'  => 0,
+            'max_retries'          => 0,
+            'is_active'            => 1,
+            'created_at'           => date('Y-m-d H:i:s'),
+            'updated_at'           => date('Y-m-d H:i:s'),
+        ]);
+
+        // The cross-user read returns "Agent not found or not owned by this user."
+        // — never the underlying agent's payload.
+        $result = $tool->execute(['action' => 'read_agent', 'agent_id' => $agentId], 7, $otherId);
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('not found or not owned');
+    });
 });
 
 test('create_agent validation error references the agent-creation skill', function (): void {
