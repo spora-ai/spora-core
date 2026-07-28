@@ -1669,3 +1669,558 @@ test('write_agent_configuration silently drops unknown keys (confirmed via read_
         ->and($readData['system_prompt'])->toBe('updated')
         ->and($readData['notes'])->toBe('pre-existing notes');
 });
+
+describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function (): void {
+    // The OpenAI assistant tool-call channel (and some other providers)
+    // can serialize a single-element array as `{item: [...]}` instead
+    // of `[...]`. This is a known quirk — see unwrapSingleItemArray().
+    // Both the outer `tools` array and each per-tool `operations` list
+    // get the same defensive treatment. The unwrap fires ONLY when the
+    // input is unambiguously the wrap (a non-list assoc array with the
+    // single key `item`); multi-key objects pass through untouched so
+    // the usual validation message surfaces.
+
+    test('outer `tools` wrapped as {item: [...]} succeeds and lands on the targeted agent', function (): void {
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'cfg-unwrap-outer@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+
+        $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Caller',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        $targetId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Target',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $toolSettings->shouldReceive('enableTool')
+            ->once()
+            ->with($targetId, $ownerId, 'Spora\\Tools\\TimeTool')
+            ->andReturn(['tool' => ['tool_class' => 'X', 'tool_name' => 'x']]);
+        $toolSettings->shouldReceive('patchOperationOverride')->andReturn([]);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $entry = [
+            'tool_class' => 'Spora\\Tools\\TimeTool',
+            'enabled'    => true,
+            'operations' => [['name' => 'now', 'enabled' => true]],
+        ];
+        $result = $tool->execute(
+            [
+                'action'   => 'configure_tools',
+                'agent_id' => $targetId,
+                // Outer single-element array wrapped as `{item: [...]}`.
+                'tools'    => ['item' => [$entry]],
+            ],
+            $callerId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeTrue(
+            'unwrap should land the tool on agent_id when outer is wrapped; got: ' . $result->content,
+        );
+    });
+
+    test('inner `operations` wrapped as {item: [...]} succeeds', function (): void {
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'cfg-unwrap-inner@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+
+        $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Caller',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        $targetId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Target',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $toolSettings->shouldReceive('enableTool')->once();
+        $toolSettings->shouldReceive('patchOperationOverride')
+            ->once()
+            ->with($targetId, $ownerId, 'Spora\\Tools\\TimeTool', 'now', [
+                'enabled'                   => 1,
+                'default_requires_approval' => 0,
+            ])
+            ->andReturn([]);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action'   => 'configure_tools',
+                'agent_id' => $targetId,
+                'tools'    => [[
+                    'tool_class' => 'Spora\\Tools\\TimeTool',
+                    'enabled'    => true,
+                    // Inner array for `operations` wrapped as `{item: [...]}`.
+                    'operations' => ['item' => [['name' => 'now', 'auto_approve' => true]]],
+                ]],
+            ],
+            $callerId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeTrue(
+            'inner unwrap should land the op override; got: ' . $result->content,
+        );
+    });
+
+    test('inner `operations` wrapped as {item: [...]} works on the calling-agent path too', function (): void {
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'cfg-unwrap-self@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+
+        $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Caller',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $toolSettings->shouldReceive('enableTool')->once();
+        $toolSettings->allows('patchOperationOverride')->andReturn([]);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                // No agent_id → calling-agent fallback.
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\TimeTool',
+                    'enabled'    => true,
+                    'operations' => ['item' => [['name' => 'now']]],
+                ]],
+            ],
+            $callerId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeTrue();
+    });
+
+    test('multikey object {item: ..., other: ...} is left alone — not silently unwrapped', function (): void {
+        // The unwrap is gated to single-key `{item: ...}` containers. A
+        // multi-key object is left as-is so the validator surfaces the
+        // usual "must be an array" message rather than silently mutating
+        // shape — never auto-correct on legitimate payloads.
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => ['item' => ['enabled' => true], 'foo' => 'bar'],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('`tools` must be an array');
+    });
+
+    test('plain (non-quirk) payloads are still validated the same way', function (): void {
+        // Smoke test: the unwrap doesn't change behavior for the
+        // canonical shape — legitimate loads survive untouched.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'cfg-plain@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+
+        $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Caller',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $toolSettings->shouldReceive('enableTool')->once();
+        $toolSettings->allows('patchOperationOverride')->andReturn([]);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [
+                    [
+                        'tool_class' => 'Spora\\Tools\\TimeTool',
+                        'enabled'    => true,
+                        'operations' => [['name' => 'now', 'enabled' => true]],
+                    ],
+                ],
+            ],
+            $callerId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeTrue();
+    });
+});
+
+describe('AgentTool::execute — create_agent {item: [...]} unwrap', function (): void {
+    // Same single-key {item: ...} quirk surfaces in create_agent's
+    // `required_plugins` field — same defensive treatment as configure_tools.
+
+    test('auto-unwraps required_plugins {item: [...]} quirk', function (): void {
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $agent = stubManifestAgent(42, 'X');
+        $service->shouldReceive('createAgent')->once()->andReturn($agent);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $out = $tool->execute(
+            [
+                'action'  => 'create_agent',
+                'payload' => [
+                    'name'             => 'X',
+                    // OpenAI tool-call channel wraps single-element array
+                    // as `{item: [...]}`. Without the unwrap, this triggers
+                    // 'isListOfStrings' failure with an unhelpful message.
+                    'required_plugins' => ['item' => ['weather', 'calendar']],
+                ],
+            ],
+            7,
+            99,
+        );
+
+        expect($out->success)->toBeTrue(
+            'openai {item: [...]} should unwrap; got: ' . $out->content,
+        );
+    });
+});
+
+describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', function (): void {
+    // Issue B in the PR #170 review: write_agent_configuration used to
+    // silently ignore agent_id and patch the calling agent. After this
+    // commit, supplying agent_id routes the patch to that agent (with
+    // the same user-scoping as read_agent / configure_tools).
+
+    test('agent_id routes the patch to the targeted agent (not the caller)', function (): void {
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'wc-target@example.com');
+
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+
+        $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Caller',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        $targetId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Target',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        // `updateAgentByAgentId` is called with the TARGET id, not the caller.
+        $updated = stubManifestAgent($targetId, 'Renamed');
+        $service->shouldReceive('updateAgentByAgentId')
+            ->once()
+            ->with($targetId, Mockery::on(static fn(array $p) => ($p['name'] ?? null) === 'Renamed'))
+            ->andReturn($updated);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action'   => 'write_agent_configuration',
+                'agent_id' => $targetId,
+                'agent'    => ['name' => 'Renamed'],
+            ],
+            $callerId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeTrue();
+        /** @var array<string, mixed> $data */
+        $data = $result->data;
+        expect($data['agent_id'])->toBe($targetId)
+            ->and($data['name'])->toBe('Renamed');
+    });
+
+    test('omitted agent_id still falls through to the calling agent (back-compat)', function (): void {
+        // Back-compat with the pre-PR-#170 behaviour where omitting
+        // agent_id meant "patch the executor's caller" — kept as the
+        // soft-redirect default so existing prompts keep working.
+        // The resolve helper short-circuits on missing key, so no DB
+        // lookup is required here.
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $service->shouldReceive('updateAgentByAgentId')
+            ->once()
+            ->with(7, Mockery::type('array'))
+            ->andReturn(stubManifestAgent(7, 'Renamed'));
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action' => 'write_agent_configuration',
+                'agent'  => ['description' => 'patched'],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeTrue();
+    });
+
+
+    describe('AgentTool::execute — list_agents (discovery surface)', function (): void {
+        test('returns an empty list when the agent service has no rows', function (): void {
+            [$tool, $service] = makeAgentTool();
+            /** @var MockInterface $service */
+            $service->shouldReceive('getAgentsForUser')
+                ->once()
+                ->with(99)
+                ->andReturn([]);
+
+            $result = $tool->execute(['action' => 'list_agents'], 7, 99);
+
+            expect($result->success)->toBeTrue()
+                ->and($result->content)->toContain('No agents')
+                ->and($result->data)->toBe(['agents' => []]);
+        });
+
+        test('returns a slim id/name/description list of every owned agent', function (): void {
+            [$tool, $service] = makeAgentTool();
+            /** @var MockInterface $service */
+            // Mirrors the AgentResource shape produced by AgentService::agentResource,
+            // minus the rest. The handler strips unrelated keys before exposing the
+            // payload — cheaper to test against the exact upstream shape than to
+            // rely on AgentResource's contract.
+            $service->shouldReceive('getAgentsForUser')
+                ->once()
+                ->with(99)
+                ->andReturn([
+                    ['id' => 4,  'name' => 'Custom Agent', 'description' => 'does X'],
+                    ['id' => 7,  'name' => 'Wetter-Agent',  'description' => null],
+                    ['id' => 11, 'name' => 'Travel',        'description' => ''],
+                ]);
+
+            $result = $tool->execute(['action' => 'list_agents'], 7, 99);
+
+            expect($result->success)->toBeTrue()
+                ->and($result->data['agents'])->toBe([
+                    ['agent_id' => 4,  'name' => 'Custom Agent', 'description' => 'does X'],
+                    ['agent_id' => 7,  'name' => 'Wetter-Agent',  'description' => null],
+                    ['agent_id' => 11, 'name' => 'Travel',        'description' => ''],
+                ])
+                ->and($result->content)->toContain('#4 Custom Agent — does X')
+                ->and($result->content)->toContain('#7 Wetter-Agent')
+                ->and($result->content)->toContain('#11 Travel');
+        });
+
+        test('returns an empty list when called with a null userId (no auth)', function (): void {
+            // The executor always passes $userId in production; this is the
+            // no-auth / caller-only path we don't want crashing the LLM
+            // mid-conversation with a permission error.
+            [$tool, $service] = makeAgentTool();
+            /** @var MockInterface $service */
+            $service->shouldNotReceive('getAgentsForUser');
+
+            $result = $tool->execute(['action' => 'list_agents'], 7, null);
+
+            expect($result->success)->toBeTrue()
+                ->and($result->data)->toBe(['agents' => []])
+                ->and($result->content)->toContain('No agents');
+        });
+
+        test('does not leak system_prompt / cell_id / tools from the upstream AgentResource', function (): void {
+            // list_agents is the LLM's cheap discovery surface, not a
+            // configuration read. system_prompt can be long; cell_id, max_steps,
+            // and the agent's toolset were never asked for and would only make
+            // the LLM context window bigger. Pin the slim shape so an upstream
+            // AgentResource change doesn't silently leak.
+            [$tool, $service] = makeAgentTool();
+            /** @var MockInterface $service */
+            $service->shouldReceive('getAgentsForUser')
+                ->once()
+                ->andReturn([[
+                    'id'             => 4,
+                    'name'           => 'Custom Agent',
+                    'description'    => 'does X',
+                    'system_prompt'  => 'very long system prompt hidden from discovery',
+                    'cell_id'        => 'agent-custom',
+                    'max_steps'      => 10,
+                    'tools'          => ['send_email'],
+                    'is_pinned'      => true,
+                ]]);
+
+            $result = $tool->execute(['action' => 'list_agents'], 7, 99);
+            /** @var array{agents: array<int, array<string, mixed>>} $data */
+            $data = $result->data;
+            $row  = $data['agents'][0];
+
+            expect(array_keys($row))->toBe(['agent_id', 'name', 'description']);
+        });
+    });
+
+    test('cross-user agent_id returns "not found or not owned"', function (): void {
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'wc-owner@example.com');
+        $otherId = bootAuth($auth, 'wc-other@example.com');
+
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+
+        $otherAgent = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Owned',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        $service->shouldNotReceive('updateAgentByAgentId');
+
+        $result = $tool->execute(
+            [
+                'action'   => 'write_agent_configuration',
+                'agent_id' => $otherAgent,
+                'agent'    => ['name' => 'Hacked'],
+            ],
+            7,
+            $otherId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('not found or not owned');
+    });
+});
+
+describe('AgentTool::execute — update_agent (canonical, with write_agent_configuration soft-redirect)', function (): void {
+    // The soft-redirect keeps every prompt that learned the old
+    // name mutating the same row; structured-data shape is
+    // unchanged. The deprecation note is prepended to content only.
+
+    test('canonical update_agent path: patches the targeted agent and returns the manifest', function (): void {
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $service->shouldReceive('updateAgentByAgentId')
+            ->once()
+            ->with(7, ['description' => 'updated'])
+            ->andReturn(stubManifestAgent(7, 'Alpha'));
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            ['action' => 'update_agent', 'agent' => ['description' => 'updated']],
+            7,
+        );
+
+        expect($result->success)->toBeTrue()
+            ->and($result->content)->not->toContain('deprecated')
+            ->and($result->data['name'])->toBe('Alpha');
+    });
+
+    test('legacy write_agent_configuration name soft-redirects to update_agent', function (): void {
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $service->shouldReceive('updateAgentByAgentId')
+            ->once()
+            ->with(7, ['description' => 'updated'])
+            ->andReturn(stubManifestAgent(7, 'Alpha'));
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            ['action' => 'write_agent_configuration', 'agent' => ['description' => 'updated']],
+            7,
+        );
+
+        expect($result->success)->toBeTrue()
+            ->and($result->content)->toContain('deprecated: write_agent_configuration')
+            ->and($result->content)->toContain('update_agent')
+            ->and($result->data['name'])->toBe('Alpha');
+    });
+
+    test('legacy write_agent_configuration soft-redirect propagates the underlying success', function (): void {
+        // Smoke check that the redirect doesn't accidentally swallow
+        // the manifest payload — assert the data and the
+        // deprecation-prefix both land on the success path.
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $service->shouldReceive('updateAgentByAgentId')
+            ->once()
+            ->with(7, ['description' => 'x'])
+            ->andReturn(stubManifestAgent(7, 'Alpha'));
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action' => 'write_agent_configuration',
+                'agent'  => ['description' => 'x', 'notes' => 'sneaky'],
+            ],
+            7,
+        );
+
+        expect($result->success)->toBeTrue()
+            ->and($result->content)->toContain('deprecated')
+            ->and($result->data['name'])->toBe('Alpha');
+    });
+
+    test('legacy write_agent_configuration treats agent_id the same as update_agent', function (): void {
+        // Cross-user soft-redirect path: write_agent_configuration
+        // (deprecated) -> update_agent (canonical) -> resolver ->
+        // user-scope "not found". The deprecation note is only
+        // prepended on success, so the failure comes through clean.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'red-owner@example.com');
+        $otherId = bootAuth($auth, 'red-other@example.com');
+        $otherAgent = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id' => $ownerId, 'name' => 'Owned',
+            'max_steps' => 10, 'allow_followup' => 1,
+            'retry_after_minutes' => 0, 'max_retries' => 0,
+            'is_active' => 1,
+            'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $service->shouldNotReceive('updateAgentByAgentId');
+
+        $result = $tool->execute(
+            [
+                'action'   => 'write_agent_configuration',
+                'agent_id' => $otherAgent,
+                'agent'    => ['name' => 'Hacked'],
+            ],
+            7,
+            $otherId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('not found or not owned')
+            ->and($result->content)->not->toContain('deprecated'); // failure path skips the prefix
+    });
+});
