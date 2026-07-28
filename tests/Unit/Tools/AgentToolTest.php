@@ -13,6 +13,7 @@ use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Schema\OperationSchemaFilter;
 use Spora\Tools\Schema\ToolParameterSchemaBuilder;
+use Spora\Tools\TimeTool;
 
 /**
  * @return array{0: AgentTool, 1: AgentServiceInterface, 2: AgentToolSettingsServiceInterface}
@@ -504,21 +505,28 @@ describe('AgentTool::execute — get_available_tools', function (): void {
             ->and($first['is_enabled'])->toBeFalse()
             ->and($first['needs_configuration'])->toBeFalse();
 
-        // `$content` is the new LLM-facing contract — a compact versioned
-        // JSON payload, not a one-liner summary.
+        // `$content` is the v2 LLM-facing contract. The slim shape drops
+        // `tool_name` (overlaps with `tool_class`), `call_name` (used by
+        // tool invocation, not agent configuration), `category`,
+        // `icon`, and the nested `source` — replaced by a flat
+        // `plugin_slug`.
         $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
-        expect($payload['version'])->toBe(1)
+        expect($payload['version'])->toBe(2)
             ->and($payload['count'])->toBe(1);
         $tool = $payload['tools'][0];
         expect($tool['tool_class'])->toBe('Spora\\Tools\\CalculatorTool')
-            ->and($tool['tool_name'])->toBe('calculator')
-            ->and($tool['call_name'])->toBe('calculator')
+            ->and($tool['display_name'])->toBeString()
             ->and($tool['description'])->toBeString()
+            ->and($tool['plugin_slug'])->toBeNull()
             ->and($tool['enabled'])->toBeFalse()
             ->and($tool['ready_to_enable'])->toBeTrue()
-            ->and($tool['missing_required'])->toBe([])
-            ->and($tool['source']['kind'])->toBe('core')
-            ->and($tool['source']['slug'])->toBeNull();
+            ->and($tool['missing_required'])->toBe([]);
+        // Old fields are gone — the slim shape dropped them on purpose.
+        expect($tool)->not->toHaveKey('tool_name')
+            ->and($tool)->not->toHaveKey('call_name')
+            ->and($tool)->not->toHaveKey('category')
+            ->and($tool)->not->toHaveKey('icon')
+            ->and($tool)->not->toHaveKey('source');
     });
 
     test('flags needs_configuration when can_enable is false', function (): void {
@@ -569,7 +577,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         // reflection (PluginLoader is final and cannot be mocked).
         $toolSettings->allows('getAllToolsStatus')->andReturn([
             [
-                'tool_class'       => Spora\Tools\TimeTool::class,
+                'tool_class'       => TimeTool::class,
                 'tool_name'        => 'time',
                 'is_enabled'       => false,
                 'can_enable'       => true,
@@ -588,7 +596,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
              */
             public function tools(): array
             {
-                return [Spora\Tools\TimeTool::class];
+                return [TimeTool::class];
             }
         };
         $ref = new ReflectionClass($pluginLoader);
@@ -603,10 +611,10 @@ describe('AgentTool::execute — get_available_tools', function (): void {
 
         $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
         $row = $payload['tools'][0];
-        expect($row['call_name'])->toBe('tavily:time')
-            ->and($row['source']['kind'])->toBe('plugin')
-            ->and($row['source']['slug'])->toBe('tavily')
-            ->and($row['source']['name'])->toBe('Tavily');
+        // v2 slim shape: plugin slug is a flat field, not a `source` object.
+        expect($row['plugin_slug'])->toBe('tavily')
+            ->and($row)->not->toHaveKey('call_name')
+            ->and($row)->not->toHaveKey('source');
     });
 
     test('renders per-operation enabled + requires_approval from effective state', function (): void {

@@ -502,6 +502,11 @@ final class AgentTool extends AbstractTool
                 $toolClass,
                 $this->iconResolver?->resolve($toolClass),
             );
+            // `$enriched` retains the legacy operator-side shape (used as
+            // `result_data` on the persisted tool_calls row) so the
+            // operator-facing UI's `tool_name` / `category` / `icon`
+            // expectations stay intact. The LLM-facing `$content`
+            // (`$agentFacing` below) carries the slimmer v2 shape.
             $enriched[] = [
                 'tool_class'         => $toolClass,
                 'tool_name'          => $summary['tool_name'],
@@ -531,20 +536,17 @@ final class AgentTool extends AbstractTool
     /**
      * Build the LLM-facing payload for `get_available_tools`.
      *
-     * Shape (version 1):
+     * Shape (version 2):
      * ```
      * {
-     *   "version": 1,
+     *   "version": 2,
      *   "count": <int>,
      *   "tools": [
      *     {
      *       "tool_class": "Spora\\Tools\\...",
-     *       "tool_name": "calculator",
-     *       "call_name": "calculator"  |  "tavily:tavily_search"  (plugin-qualified),
      *       "display_name": "Calculator",
      *       "description": "...",
-     *       "category": "productivity",
-     *       "source": {"kind": "core|plugin|app", "slug": "tavily"|null, "name": "Tavily"|null},
+     *       "plugin_slug": null | "tavily",
      *       "enabled": <bool>,
      *       "ready_to_enable": <bool>,
      *       "missing_required": ["api_key", ...],
@@ -554,15 +556,19 @@ final class AgentTool extends AbstractTool
      * }
      * ```
      *
-     * The default response deliberately OMITS full parameter schemas — the
-     * LLM can call `create_agent` with `tools[]` entries by `tool_name`
-     * without needing the schema. A future `get_tool_details` operation
-     * can add schema drill-down.
+     * Why version 2: the v1 payload exposed `tool_name`, `call_name`,
+     * `category`, `source`, and `icon`. Each is useful for the operator
+     * UI but redundant for the LLM — `tool_name` overlaps with
+     * `tool_class`, `call_name` is for tool invocation rather than
+     * agent configuration, `category` and `icon` are operator-UI
+     * concerns, and `source` is a debugger's-eye view. The LLM only
+     * needs the FQCN (for `configure_tools`), the current enabled
+     * state, the missing-config sentinel, and the per-operation
+     * details. v2 cuts per-tool payload size roughly in half.
      *
      * Precedence rules:
-     *   - `call_name` is the exact LLM-facing identifier. Plain for core
-     *     tools, `<pluginSlug>:<toolName>` for plugin tools (so the LLM
-     *     never confuses two plugins that happen to share a plain name).
+     *   - `tool_class` is the FQCN the LLM passes to `configure_tools`.
+     *     Use `plugin_slug` (or null for core) for `required_plugins[]`.
      *   - `enabled` reflects current `agent_tools` row presence.
      *   - `ready_to_enable` mirrors the operator API's `can_enable`
      *     semantic (no missing required settings). A tool may be enabled
@@ -572,8 +578,13 @@ final class AgentTool extends AbstractTool
      *   - `missing_required` lists only the required setting keys; no
      *     effective values are exposed to avoid leaking credentials.
      *
-     * @param list<array<string, mixed>> $rows Legacy per-agent status rows
-     *        (already enriched with display_name, category, icon by the caller).
+     * The default response deliberately OMITS full parameter schemas — the
+     * LLM can call `configure_tools` with `operations: [{name, ...}]`
+     * entries without needing the schema. A future `get_tool_details`
+     * operation can add schema drill-down.
+     *
+     * @param list<array<string, mixed>> $rows Per-agent status rows
+     *        (already enriched with display_name, description by the caller).
      * @param array<string, list<array{operation: string, effective_enabled: bool, effective_requires_approval: bool}>> $operationsByClass
      *        Effective per-operation enablement/approval state, keyed by tool_class.
      * @return array<string, mixed>
@@ -585,21 +596,16 @@ final class AgentTool extends AbstractTool
         $tools = [];
         foreach ($rows as $row) {
             $toolClass = (string) $row['tool_class'];
-            $toolName  = (string) $row['tool_name'];
-            $slug      = $this->pluginLoader?->getSlugForToolClass($toolClass);
-            $source    = $this->buildToolSource($toolClass, $slug);
+            $pluginSlug = $this->pluginLoader?->getSlugForToolClass($toolClass);
             $toolOperations = $this->buildAgentFacingOperations(
                 (array) ($row['operations'] ?? []),
                 $operationsByClass[$toolClass] ?? [],
             );
             $tools[] = [
                 'tool_class'       => $toolClass,
-                'tool_name'        => $toolName,
-                'call_name'        => $slug !== null ? "{$slug}:{$toolName}" : $toolName,
                 'display_name'     => (string) $row['display_name'],
                 'description'      => (string) ($row['description'] ?? ''),
-                'category'         => (string) $row['category'],
-                'source'           => $source,
+                'plugin_slug'      => $pluginSlug,
                 'enabled'          => (bool) $row['is_enabled'],
                 'ready_to_enable'  => $row['needs_configuration'] === false,
                 'missing_required' => (array) $row['missing_required'],
@@ -608,7 +614,7 @@ final class AgentTool extends AbstractTool
         }
 
         return [
-            'version' => 1,
+            'version' => 2,
             'count'   => count($tools),
             'tools'   => $tools,
         ];
@@ -646,40 +652,6 @@ final class AgentTool extends AbstractTool
             ];
         }
         return $out;
-    }
-
-    /**
-     * @return array{kind: string, slug: string|null, name: string|null}
-     */
-    private function buildToolSource(string $toolClass, ?string $pluginSlug): array
-    {
-        if ($pluginSlug !== null) {
-            $manifest = $this->pluginLoader?->getPluginManifest($pluginSlug);
-            $name = is_array($manifest) ? ($manifest['name'] ?? null) : null;
-            return [
-                'kind' => 'plugin',
-                'slug' => $pluginSlug,
-                'name' => is_string($name) && $name !== '' ? $name : null,
-            ];
-        }
-        // No plugin owns the class. Distinguish "core" (ships with spora-core)
-        // from "app" (registered by the operator's app/App.php) by checking
-        // whether the class is in the core tool_classes list — that's the
-        // closest signal we have without an explicit App-vs-core flag.
-        $coreClasses = [
-            'Spora\\Tools\\TimeTool',
-            'Spora\\Tools\\CalculatorTool',
-            'Spora\\Tools\\ReadUrlTool',
-            'Spora\\Tools\\UserInfoTool',
-            'Spora\\Tools\\HandoverTool',
-            'Spora\\Tools\\AgentTool',
-            'Spora\\Tools\\SkillTool',
-        ];
-        return [
-            'kind' => in_array($toolClass, $coreClasses, true) ? 'core' : 'app',
-            'slug' => null,
-            'name' => null,
-        ];
     }
 
     /**
