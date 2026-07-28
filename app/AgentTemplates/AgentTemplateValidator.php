@@ -40,7 +40,7 @@ final class AgentTemplateValidator
 
     private const ALLOWED_AGENT_KEYS = [
         'description', 'system_prompt', 'notes', 'max_steps',
-        'allow_continuation', 'retry_after_minutes', 'max_retries',
+        'allow_followup', 'retry_after_minutes', 'max_retries',
     ];
 
     private const ALLOWED_METADATA_KEYS = ['category', 'icon'];

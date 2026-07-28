@@ -64,15 +64,19 @@ use Spora\Tools\ValueObjects\ToolResult;
     name: 'read_agent_configuration',
     description: 'Read the full configuration of the calling agent (name, description, '
                . 'system prompt, notes, max steps, continuation, retry, pin/archive/favorite, '
-               . 'enabled tools).',
+               . 'enabled tools). ... Read full docs: skills/agent-creation/SKILL.md.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
 #[ToolOperation(
     name: 'write_agent_configuration',
-    description: 'Update editable fields on the calling agent (name, description, system '
-               . 'prompt, max steps, continuation, retry, pin/archive/favorite). Notes are '
-               . 'managed through read_notes/write_notes, not this operation.',
+    description: 'Update editable fields on this agent (name, description, system_prompt, max_steps, '
+               . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived, is_favorite). '
+               . 'Notes MUST go through write_notes / write_notes_overwrite — they are stripped from '
+               . 'this patch. Unknown keys (llm_driver_config_id, anything else outside the allowlist) '
+               . 'are silently dropped at the database layer; call read_agent_configuration afterwards '
+               . 'to confirm the change took effect. For full allowlist and common pitfalls, read the '
+               . 'agent-creation skill (skill action: read, name: agent-creation, filename: SKILL.md).',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
@@ -108,42 +112,53 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'enabled/requires_approval state. Tools that need configuration to '
                . 'become activatable are flagged via `ready_to_enable: false`. '
                . 'Use this to plan a sub-agent via `create_agent`; tool activation on '
-               . 'the calling agent itself is operator-only and not exposed here.',
+               . 'the calling agent itself is operator-only and not exposed here. When '
+               . 'planning a sub-agent, also read the agent-creation skill (skill action: '
+               . 'read, name: agent-creation).',
     enabledByDefault: false,
     requiresApprovalByDefault: false,
 )]
 #[ToolOperation(
     name: 'create_agent',
-    description: 'Create a new agent owned by the current user from an Agent Template-shaped '
-               . 'payload (id, name, version, agent{}, tools[], required_plugins[]). Tools '
-               . 'are activated with default settings when their plugin is loaded; tools '
-               . 'missing a plugin or required configuration produce warnings, not errors.',
+    description: 'Create a new agent from an Agent Template-shaped payload (id, name, version, agent{}, '
+               . 'tools[], required_plugins[]). The schema is strict — payloads that put `name` inside '
+               . 'agent{}, send `operations` as strings instead of `[{name: ...}]` objects, or use a '
+               . 'short version like "1.0" instead of semver "1.0.0" will fail validation. Strongly '
+               . 'recommend reading the agent-creation skill first (skill action: read, name: '
+               . 'agent-creation, filename: SKILL.md) so you do not waste approval cycles on a malformed '
+               . 'payload.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
 #[ToolParameter(
     name: 'agent',
     type: 'object',
-    description: 'For write_agent_configuration: a partial agent with the fields to update. '
-              . 'Allowed keys: name, description, system_prompt, max_steps, allow_followup, '
-              . 'retry_after_minutes, max_retries, is_pinned, is_archived, is_favorite. '
-              . '`notes` is intentionally not accepted here — use write_notes.',
+    description: 'ONLY for write_agent_configuration: a partial agent with the fields to '
+              . 'update. Allowed keys: name, description, system_prompt, max_steps, '
+              . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived, '
+              . 'is_favorite. `notes` is intentionally not accepted here — use write_notes. '
+              . 'Ignored by every other operation; omit this key entirely when calling '
+              . 'read_agent_configuration, read_notes, write_notes, write_notes_overwrite, '
+              . 'get_available_tools, or create_agent.',
     required: ['write_agent_configuration'],
 )]
 #[ToolParameter(
     name: 'content',
     type: 'string',
-    description: 'For write_notes and write_notes_overwrite: the markdown segment to write. '
-              . 'Combined with `mode` against the current notes (ignored by every other op).',
+    description: 'ONLY for write_notes and write_notes_overwrite: the markdown segment to '
+              . 'write. Combined with `mode` against the current notes. Ignored by every '
+              . 'other operation; omit this key entirely when calling read_agent_configuration, '
+              . 'read_notes, write_agent_configuration, get_available_tools, or create_agent.',
     required: ['write_notes', 'write_notes_overwrite'],
 )]
 #[ToolParameter(
     name: 'mode',
     type: 'string',
-    description: 'For write_notes: how to combine `content` with the existing notes. '
+    description: 'ONLY for write_notes: how to combine `content` with the existing notes. '
               . '`append` (default, safe) keeps existing notes and adds new content; '
               . '`prepend` puts new content before. Wholesale replacement is a separate '
-              . '`write_notes_overwrite` operation (requires operator approval).',
+              . '`write_notes_overwrite` operation (requires operator approval). Ignored by '
+              . 'every other operation.',
     required: false,
     enum: ['append', 'prepend'],
     default: 'append',
@@ -151,9 +166,15 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'payload',
     type: 'object',
-    description: 'For create_agent: an Agent Template payload — same shape as the operator '
-              . 'upload endpoint. Required plugins are NOT auto-installed; missing plugins '
-              . 'produce warnings rather than aborting the import.',
+    description: 'ONLY for create_agent: an Agent Template payload — same shape as the '
+              . 'operator upload endpoint. The schema is strict and the validation messages '
+              . 'on failure are unforgiving — see the agent-creation skill '
+              . '(skill action: read, name: agent-creation, filename: SKILL.md) for the '
+              . 'exact shape. Required plugins are NOT auto-installed; missing plugins '
+              . 'produce warnings rather than aborting the import. Ignored by every other '
+              . 'operation; omit this key entirely when calling read_agent_configuration, '
+              . 'read_notes, write_notes, write_notes_overwrite, write_agent_configuration, '
+              . 'or get_available_tools.',
     required: ['create_agent'],
 )]
 final class AgentTool extends AbstractTool
@@ -612,7 +633,9 @@ final class AgentTool extends AbstractTool
                 => 'create_agent: payload object is required.',
             !$validation->isValid()
                 => 'create_agent: payload failed validation: '
-                   . $this->summarizeValidationErrors($validation),
+                   . $this->summarizeValidationErrors($validation)
+                   . ' Re-read the agent-creation skill (skill action: read, name: agent-creation, '
+                   . 'filename: SKILL.md) for the exact schema.',
             default => null,
         };
         if ($error !== null) {

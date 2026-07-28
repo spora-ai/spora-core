@@ -36,7 +36,7 @@ test('applyTemplate("core/core-assistant") persists per-operation auto_approve o
     expect((int) $nowOverride->default_requires_approval)->toBe(0);
 });
 
-test('applyTemplate maps allow_continuation to allow_followup on the Agent row', function (): void {
+test('applyTemplate persists allow_followup from the agent{} block', function (): void {
     $result = $this->importer->applyTemplate($this->userId, 'core/core-assistant');
     expect((bool) $result->agent->allow_followup)->toBeTrue();
 });
@@ -95,4 +95,43 @@ test('importPayload refuses disabled tools (no row inserted)', function (): void
 test('applyTemplate throws when the template id is unknown', function (): void {
     expect(fn() => $this->importer->applyTemplate($this->userId, 'does-not-exist'))
         ->toThrow(RuntimeException::class);
+});
+
+test('importPayload accepts skills/agent-creation/example.json round-trip with zero errors', function (): void {
+    // The example.json fixture is the worked example at the bottom of
+    // skills/agent-creation/SKILL.md — it's what the LLM is told to copy
+    // when assembling a new agent. The fixture references the Weather
+    // plugin's WeatherApiTool which is NOT registered in the test
+    // tool_classes list, so it produces a TOOL_PLUGIN_MISSING warning.
+    // That is non-blocking (the warning is intentional, not a regression),
+    // and required_plugins also produces PLUGIN_MISSING. The validator's
+    // hard errors (UNKNOWN_*, *_PATTERN, *_INVALID) must NOT fire — the
+    // schema is correct; only the runtime plugin lookup is ambiguous.
+    $examplePath = BASE_PATH . '/skills/agent-creation/example.json';
+    expect(is_file($examplePath))->toBeTrue();
+
+    $payload = json_decode((string) file_get_contents($examplePath), true, 512, JSON_THROW_ON_ERROR);
+    /** @var array<string, mixed> $payload */
+
+    // Pre-flight: the example payload must validate cleanly on its own.
+    // If the validator reports errors here, the skill's worked example is
+    // already broken — fix it before publishing.
+    $validation = (new Spora\AgentTemplates\AgentTemplateValidator())->validate($payload);
+    expect($validation->errors())->toBe([]);
+
+    $result = $this->importer->importPayload($this->userId, $payload);
+
+    expect($result->agent)->toBeInstanceOf(Agent::class);
+    expect($result->agent->name)->toBe('Weather Agent');
+
+    $warningCodes = array_column($result->warnings, 'code');
+    expect($warningCodes)->not->toContain('VERSION_PATTERN')
+        ->and($warningCodes)->not->toContain('UNKNOWN_AGENT_KEY')
+        ->and($warningCodes)->not->toContain('UNKNOWN_TOP_LEVEL_KEY');
+
+    // The fixture intentionally references a plugin that is not loaded
+    // here, so PLUGIN_MISSING and TOOL_PLUGIN_MISSING are the only
+    // warnings — both are non-blocking by design.
+    expect($warningCodes)->toContain('TOOL_PLUGIN_MISSING')
+        ->and($warningCodes)->toContain('PLUGIN_MISSING');
 });

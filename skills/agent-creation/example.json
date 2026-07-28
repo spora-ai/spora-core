@@ -1,0 +1,33 @@
+{
+  "$schema": "https://spora.dev/agent-template.schema.json",
+  "id": "weather-agent",
+  "name": "Weather Agent",
+  "version": "1.0.0",
+  "agent": {
+    "description": "Answers weather questions: current conditions, forecasts, location search, and astronomy (sunrise/sunset, moon phase) worldwide.",
+    "system_prompt": "You are the 'Weather Agent'. Use the Weather API tool to answer questions about weather, forecasts, and astronomy (sunrise/sunset, moon phase). Reply in the user's language. If a location is ambiguous, ask briefly or use the location-search operation. Always state the timezone when the user asks for a time.",
+    "max_steps": 10,
+    "allow_followup": true
+  },
+  "tools": [
+    {
+      "tool_class": "Spora\\Plugins\\Weather\\Tools\\WeatherApiTool",
+      "enabled": true,
+      "operations": [
+        { "name": "current",  "enabled": true },
+        { "name": "forecast", "enabled": true },
+        { "name": "search",   "enabled": true },
+        { "name": "astronomy","enabled": true }
+      ]
+    },
+    {
+      "tool_class": "Spora\\Tools\\TimeTool",
+      "enabled": true,
+      "operations": [
+        { "name": "now",    "enabled": true, "auto_approve": true },
+        { "name": "format", "enabled": true, "auto_approve": true }
+      ]
+    }
+  ],
+  "required_plugins": ["weather"]
+}

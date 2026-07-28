@@ -8,7 +8,7 @@
     "description": "Tiny.",
     "system_prompt": "Be brief.",
     "max_steps": 5,
-    "allow_continuation": true,
+    "allow_followup": true,
     "retry_after_minutes": 0,
     "max_retries": 0
   },

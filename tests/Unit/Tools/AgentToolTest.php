@@ -9,6 +9,10 @@ use Spora\Models\Agent;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Tools\AgentTool;
+use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\Attributes\ToolParameter;
+use Spora\Tools\Schema\OperationSchemaFilter;
+use Spora\Tools\Schema\ToolParameterSchemaBuilder;
 
 /**
  * @return array{0: AgentTool, 1: AgentServiceInterface, 2: AgentToolSettingsServiceInterface}
@@ -813,4 +817,141 @@ describe('AgentTool::describeAction', function (): void {
         expect($tool->describeAction(['action' => 'write_notes_overwrite']))
             ->toBe("Replace the agent's notes wholesale (destructive).");
     });
+});
+
+test('create_agent validation error references the agent-creation skill', function (): void {
+    // The create_agent failure path appends a single-line pointer at the
+    // agent-creation skill so the LLM knows where to find the schema on the
+    // next attempt instead of retrying the same broken payload.
+    [$tool] = makeAgentTool();
+
+    // Deliberately broken: `version` is an int (must be a non-empty string),
+    // and `name` is placed inside `agent{}` (top-level only).
+    $result = $tool->execute(
+        [
+            'action'  => 'create_agent',
+            'payload' => [
+                'id'      => 'broken-agent',
+                'name'    => 'Broken Agent',
+                'version' => 1,
+                'agent'   => ['name' => 'wrong-location'],
+                'tools'   => [],
+            ],
+        ],
+        7,
+        99,
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain('payload failed validation')
+        ->and($result->content)->toContain('agent-creation')
+        ->and($result->content)->toContain('skill action: read');
+});
+
+test('AgentTool operation descriptions mention the agent-creation skill on relevant operations', function (): void {
+    // The skill pointer is only useful if it reaches the LLM-facing schema.
+    // Reflect over the class-level #[ToolOperation] attributes and assert
+    // each operation that the skill covers carries a pointer to it.
+    $reflection = new ReflectionClass(AgentTool::class);
+    $byName = [];
+    foreach ($reflection->getAttributes(ToolOperation::class) as $attr) {
+        /** @var ToolOperation $op */
+        $op = $attr->newInstance();
+        $byName[$op->name] = $op->description;
+    }
+
+    expect($byName)->toHaveKey('write_agent_configuration')
+        ->and($byName)->toHaveKey('create_agent')
+        ->and($byName)->toHaveKey('get_available_tools')
+        ->and($byName['write_agent_configuration'])->toContain('agent-creation')
+        ->and($byName['create_agent'])->toContain('agent-creation')
+        ->and($byName['get_available_tools'])->toContain('agent-creation');
+});
+
+test('AgentTool schema narrows action-required params per operation', function (): void {
+    // The four #[ToolParameter] declarations each carry a `required: [...]`
+    // list of operation names. OperationSchemaFilter narrows the schema's
+    // `required[]` to the operations the agent can actually invoke, and
+    // strips the side channel before the schema reaches the LLM.
+    $schema = ToolParameterSchemaBuilder::build(AgentTool::class);
+
+    // create_agent only → payload is required, agent is not.
+    $createOnly = OperationSchemaFilter::filter($schema, ['create_agent'], 'action');
+    expect($createOnly['required'])->toContain('payload')
+        ->and($createOnly['required'])->not->toContain('agent')
+        ->and($createOnly)->not->toHaveKey('__required_when');
+
+    // write_agent_configuration only → agent is required, payload is not.
+    $writeOnly = OperationSchemaFilter::filter($schema, ['write_agent_configuration'], 'action');
+    expect($writeOnly['required'])->toContain('agent')
+        ->and($writeOnly['required'])->not->toContain('payload');
+});
+
+test('write_agent_configuration silently drops unknown keys (confirmed via read_agent_configuration)', function (): void {
+    // Two-part pin: (1) the AgentTool layer forwards `notes` stripping
+    // (`unset($patch['notes'])` in writeConfiguration), and (2) the
+    // resulting read_agent_configuration response is the canonical
+    // EDITABLE_AGENT_FIELDS allowlist — unknown keys never surface back.
+    // Covers the "notes vs. config" gotcha called out in the
+    // agent-creation skill's `write_agent_configuration` workflow section.
+    [$tool, $service, $toolSettings] = makeAgentTool();
+    /** @var MockInterface $toolSettings */
+    /** @var MockInterface $service */
+
+    // AgentTool strips `notes` defensively; `name` and `system_prompt`
+    // pass through; `foo` and `enable_tools` flow through to the service
+    // (which is what actually drops them against the allowlist).
+    $agent = new Agent();
+    $agent->id = 7;
+    $agent->user_id = 99;
+    $agent->name = 'New Name';
+    $agent->notes = 'pre-existing notes';
+    $agent->system_prompt = 'updated';
+
+    $service->shouldReceive('updateAgentByAgentId')
+        ->once()
+        ->with(
+            7,
+            Mockery::on(static function (array $patch): bool {
+                // `notes` is stripped by the tool; the rest passes through.
+                // The AgentService then enforces the EDITABLE_AGENT_FIELDS
+                // allowlist, so the unknown keys are dropped downstream.
+                return !array_key_exists('notes', $patch)
+                    && ($patch['name'] ?? null) === 'New Name'
+                    && ($patch['system_prompt'] ?? null) === 'updated';
+            }),
+        )
+        ->andReturn($agent);
+    $service->allows('getAgentByAgentId')->andReturn($agent);
+
+    $writeResult = $tool->execute(
+        [
+            'action' => 'write_agent_configuration',
+            'agent'  => [
+                'name'         => 'New Name',
+                'system_prompt' => 'updated',
+                'foo'          => 'bar',
+                'enable_tools' => ['time'],
+                'notes'        => 'should be stripped',
+            ],
+        ],
+        7,
+        99,
+    );
+
+    expect($writeResult->success)->toBeTrue();
+
+    // Confirm via read_agent_configuration: AgentResource only emits the
+    // canonical allowlist, so unknown keys never appear in the LLM's
+    // confirmation loop. The `notes` strip also held — the field on the
+    // returned resource is the pre-existing value, not the sneaky patch.
+    $readResult = $tool->execute(['action' => 'read_agent_configuration'], 7, 99);
+    expect($readResult->success)->toBeTrue();
+    /** @var array<string, mixed> $readData */
+    $readData = $readResult->data;
+    expect($readData)->not->toHaveKey('foo')
+        ->and($readData)->not->toHaveKey('enable_tools')
+        ->and($readData['name'])->toBe('New Name')
+        ->and($readData['system_prompt'])->toBe('updated')
+        ->and($readData['notes'])->toBe('pre-existing notes');
 });
