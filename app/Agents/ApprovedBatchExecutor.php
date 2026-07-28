@@ -20,9 +20,19 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
 /**
- * Executes the batch of tool calls that were paused for human approval.
- * Holds the orchestrator by ref to call back into `resolveToolByName`,
- * `safeExecute`, `appendHistory`, and `tick` (mirrors {@see ToolCallExecutor}).
+ * Resumes a task paused for human approval.
+ *
+ * Behaviour by WorkerMode:
+ *   - Sync:  approved tools run inline; partial approvals keep the task
+ *           paused with the un-approved set in pending_state.
+ *   - Worker: the approval is persisted (status='APPROVED', executed_at=NULL)
+ *             and the daemon's next runTick() picks up the work. Long-running
+ *             tools never block the HTTP response in this mode.
+ *
+ * Tool calls in `pending_state` that the user did not include in the approval
+ * batch stay PENDING_APPROVAL — never silently executed with the LLM's
+ * original arguments, never auto-rejected. The UI may re-render via
+ * TaskService::approveTask()'s Mercure publish.
  */
 final class ApprovedBatchExecutor
 {
@@ -32,31 +42,61 @@ final class ApprovedBatchExecutor
         private readonly ?LoggerInterface $logger = null,
     ) {}
 
+    /**
+     * @param list<array{provider_call_id: string, arguments: array<string, mixed>}> $approvedBatch
+     */
     public function execute(int $taskId, array $approvedBatch): void
     {
         [$task, $state] = $this->loadTaskAndStateForResume($taskId);
 
         try {
             $this->logger?->info('Task resumed after approval', [
-                'task_id' => $task->id,
+                'task_id'        => $task->id,
                 'approved_count' => count($approvedBatch),
+                'pending_count'  => count($state->pendingToolCalls),
+                'worker_mode'    => $this->workerMode === WorkerMode::Sync ? 'sync' : 'worker',
             ]);
 
-            $approvedMap = $this->indexApprovedBatch($approvedBatch);
-            // The operation each pending tool call was dispatched against is
-            // persisted on ToolCallModel.operation when the orchestrator first
-            // queued it (see ToolCallExecutor::createPendingRecord). Resume
-            // needs it so SchemaValidator can narrow per-op `required[]`
-            // bindings — without the op, validator would re-fail with
-            // "Required argument 'epoch' is missing" for, e.g., a `format`
-            // op whose `epoch` is bound only to the `format` op.
+            $approvedMap  = $this->indexApprovedBatch($approvedBatch);
+            // Operation-per-call narrows per-op `required[]` against the
+            // op the call was actually dispatched on (see
+            // ToolCallExecutor::createPendingRecord). Without it, validators
+            // re-fail with "Required argument '<x>' is missing" for args bound
+            // only to a specific op.
             $operationMap = $this->indexPersistedOperations($taskId);
+
+            /** @var list<DriverToolCall> $remaining */
+            $remaining = [];
 
             foreach ($state->pendingToolCalls as $pendingToolCall) {
                 $operationName = $operationMap[$pendingToolCall->providerCallId] ?? null;
-                $this->executeApprovedToolCall($pendingToolCall, $approvedMap, $task, $state, $taskId, $operationName);
+                $approvedArgs  = $approvedMap[$pendingToolCall->providerCallId] ?? null;
+
+                // Partial-approval guard: a tool call in saved state but
+                // absent from this batch is left PENDING_APPROVAL. The
+                // previous implementation fell back to the LLM's
+                // `proposed_arguments` and ran the un-approved tool —
+                // which is what "the other approval was dropped" looked like.
+                if ($approvedArgs === null) {
+                    $remaining[] = $pendingToolCall;
+                    continue;
+                }
+
+                if ($this->workerMode === WorkerMode::Sync) {
+                    $this->executeOneApprovedToolCall($pendingToolCall, $approvedArgs, $task, $state, $taskId, $operationName);
+                } else {
+                    $this->recordApprovalOnly($taskId, $pendingToolCall->providerCallId, $approvedArgs);
+                }
             }
 
+            if ($remaining !== []) {
+                $this->reopenForRemainingPending($task, $state, $remaining);
+                return;
+            }
+
+            // No in-state remaining calls — any PENDING_APPROVAL rows left
+            // in the DB are dangling (in DB but not in saved state), a
+            // state/DB-drift case still worth handling.
             $this->cleanupStrandedApprovals($task, $taskId);
             $this->completeResume($taskId);
         } catch (Throwable $e) {
@@ -70,10 +110,10 @@ final class ApprovedBatchExecutor
      */
     private function loadTaskAndStateForResume(int $taskId): array
     {
-        $task = null;
+        $task  = null;
         $state = null;
 
-        Capsule::connection()->transaction(function () use ($taskId, &$task, &$state) {
+        Capsule::connection()->transaction(function () use ($taskId, &$task, &$state): void {
             /** @var Task $task */
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
 
@@ -110,7 +150,8 @@ final class ApprovedBatchExecutor
     }
 
     /**
-     * @return array<string, array>
+     * @param list<array{provider_call_id: string, arguments: array<string, mixed>}> $approvedBatch
+     * @return array<string, array<string, mixed>>
      */
     private function indexApprovedBatch(array $approvedBatch): array
     {
@@ -122,11 +163,6 @@ final class ApprovedBatchExecutor
     }
 
     /**
-     * Bulk-loads the `operation` each PENDING_APPROVAL tool_call was queued
-     * for. Returned as `provider_call_id → operation`. Rows from before the
-     * `operation` column existed (or older rows that pre-date the Skills
-     * work) are skipped — validators fall back to no narrowing for those.
-     *
      * @return array<string, string>
      */
     private function indexPersistedOperations(int $taskId): array
@@ -145,15 +181,19 @@ final class ApprovedBatchExecutor
         return $map;
     }
 
-    private function executeApprovedToolCall(
+    /**
+     * Sync-mode path: validate + execute + record result.
+     *
+     * @param array<string, mixed> $approvedArgs
+     */
+    private function executeOneApprovedToolCall(
         DriverToolCall $pendingToolCall,
-        array $approvedMap,
+        array $approvedArgs,
         Task $task,
         AgentState $state,
         int $taskId,
-        ?string $operationName = null,
+        ?string $operationName,
     ): void {
-        $approvedArgs = $approvedMap[$pendingToolCall->providerCallId] ?? $pendingToolCall->arguments;
         $toolInstance = $this->orchestrator->resolveToolByName($pendingToolCall->toolName);
 
         try {
@@ -165,6 +205,53 @@ final class ApprovedBatchExecutor
 
         $result = $this->orchestrator->safeExecute($toolInstance, $approvedArgs, $state->agentId, $taskId);
         $this->recordResumeExecutionResult($task, $taskId, $pendingToolCall, $approvedArgs, $result);
+    }
+
+    /**
+     * Worker-mode path: persist only. The next {@see TickPhaseRunner::runTick()}
+     * picks up the row (matched by `executed_at IS NULL`) and runs the tool.
+     *
+     * @param array<string, mixed> $approvedArgs
+     */
+    private function recordApprovalOnly(int $taskId, string $providerCallId, array $approvedArgs): void
+    {
+        ToolCallModel::where('task_id', $taskId)
+            ->where('provider_call_id', $providerCallId)
+            ->update([
+                'status'             => 'APPROVED',
+                'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
+                // `executed_at IS NULL` is the "approved, awaiting execution"
+                // sentinel — TickPhaseRunner::executeApprovedPendingTools()
+                // picks it up. Don't set executed_at here.
+            ]);
+    }
+
+    private function reopenForRemainingPending(Task $task, AgentState $state, array $remaining): void
+    {
+        $remainingState = new AgentState(
+            taskId: $state->taskId,
+            agentId: $state->agentId,
+            pendingToolCalls: $remaining,
+            messageSnapshot: $state->messageSnapshot,
+            stepCount: $state->stepCount,
+            maxSteps: $state->maxSteps,
+            pausedAt: date('Y-m-d\TH:i:s\Z'),
+        );
+
+        Task::where('id', $task->id)->update([
+            'status'        => 'PENDING_APPROVAL',
+            'pending_state' => $remainingState->toJson(),
+        ]);
+
+        $this->logger?->info('Partial approval — task re-paused for remaining tools', [
+            'task_id'         => $task->id,
+            'remaining_count' => count($remaining),
+            'remaining_tools' => implode(', ', array_unique(array_map(
+                static fn(DriverToolCall $tc): string => $tc->toolName,
+                $remaining,
+            ))),
+            'worker_mode'     => $this->workerMode === WorkerMode::Sync ? 'sync' : 'worker',
+        ]);
     }
 
     private function recordResumeValidationFailure(
@@ -218,7 +305,6 @@ final class ApprovedBatchExecutor
                 'executed_at'        => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
 
-        // Append the tool result into history so the LLM sees it on the next tick.
         $this->orchestrator->appendHistory(
             taskId: $task->id,
             role: 'tool',
@@ -230,9 +316,15 @@ final class ApprovedBatchExecutor
         );
     }
 
+    /**
+     * Mark rows that exist in the DB with status=PENDING_APPROVAL but are
+     * NOT in the saved `pending_state` as REJECTED. Handles state/DB drift
+     * (concurrency bugs, manual edits, retries from older code paths) — NOT
+     * partial approval; partial approval branches off before this is called
+     * so legitimate "still awaiting decision" rows are not affected.
+     */
     private function cleanupStrandedApprovals(Task $task, int $taskId): void
     {
-        // Clean up any stranded PENDING_APPROVAL records from concurrency bugs.
         $danglingTools = ToolCallModel::where('task_id', $taskId)
             ->where('status', 'PENDING_APPROVAL')
             ->get();

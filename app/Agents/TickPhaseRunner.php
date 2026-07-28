@@ -19,6 +19,7 @@ use Spora\Models\Task;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\ScrubDataUrls;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
 use Throwable;
@@ -51,6 +52,12 @@ final class TickPhaseRunner
             return;
         }
 
+        // Worker-mode pickup: tools the user approved via the HTTP endpoint
+        // were persisted with `executed_at IS NULL` by
+        // ApprovedBatchExecutor::execute(). Run them now, before the LLM
+        // round-trip, so the next assistant message sees the results.
+        $this->executeApprovedPendingToolsForTask($task);
+
         try {
             $context = $this->prepareTickContext($task);
         } catch (RuntimeException $e) {
@@ -66,6 +73,120 @@ final class TickPhaseRunner
         } catch (Throwable $e) {
             $this->handleTickFailure($taskId, $context, $e);
         }
+    }
+
+    /**
+     * Worker-mode pickup path. Finds rows in the post-approval,
+     * pre-execution sentinel state (`status='APPROVED' AND executed_at IS NULL`)
+     * and runs each one. No-op when the daemon picks up a Sync-mode task
+     * (Sync mode already executes + sets executed_at in the HTTP path).
+     */
+    private function executeApprovedPendingToolsForTask(Task $task): void
+    {
+        $pendingRows = ToolCallModel::where('task_id', $task->id)
+            ->where('status', 'APPROVED')
+            ->whereNull('executed_at')
+            ->orderBy('id')
+            ->get();
+
+        if ($pendingRows->isEmpty()) {
+            return;
+        }
+
+        $operationMap = ToolCallModel::where('task_id', $task->id)
+            ->whereIn('status', ['PENDING_APPROVAL', 'AWAITING_FINAL_APPROVAL', 'APPROVED'])
+            ->get(['provider_call_id', 'operation'])
+            ->mapWithKeys(static function (ToolCallModel $row): array {
+                $op = $row->getAttribute('operation');
+                return is_string($op) && $op !== ''
+                    ? [(string) $row->getAttribute('provider_call_id') => $op]
+                    : [];
+            })
+            ->all();
+
+        foreach ($pendingRows as $row) {
+            $providerCallId = (string) $row->getAttribute('provider_call_id');
+            $approvedArgs  = is_string($row->getAttribute('approved_arguments'))
+                ? json_decode((string) $row->getAttribute('approved_arguments'), true, 512, JSON_THROW_ON_ERROR)
+                : (array) $row->getAttribute('approved_arguments');
+            $toolName      = (string) $row->getAttribute('tool_name');
+            $operationName = $operationMap[$providerCallId] ?? null;
+
+            $this->executeOneApprovedPendingTool($task, $providerCallId, $toolName, $approvedArgs, $operationName);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $approvedArgs
+     */
+    private function executeOneApprovedPendingTool(
+        Task $task,
+        string $providerCallId,
+        string $toolName,
+        array $approvedArgs,
+        ?string $operationName,
+    ): void {
+        $toolInstance = $this->orchestrator->resolveToolByName($toolName);
+
+        try {
+            SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema(), $operationName);
+        } catch (Throwable $e) {
+            $this->recordApprovedFailure($task, $providerCallId, $toolName, 'Validation Error: ' . $e->getMessage());
+            return;
+        }
+
+        // safeExecute() catches every Throwable internally and returns a
+        // failure ToolResult, so this call never re-throws under normal
+        // operation. The success-path update below records whatever the
+        // tool returned (success or failure) and stamps executed_at.
+        $result = $this->orchestrator->safeExecute($toolInstance, $approvedArgs, $task->agent_id, $task->id);
+
+        // Query-builder update() intentionally bypasses Eloquent casts
+        // (the `array` cast would re-encode the JSON string and
+        // double-encode the value — same anti-pattern PR #150 fixed).
+        ToolCallModel::where('task_id', $task->id)
+            ->where('provider_call_id', $providerCallId)
+            ->update([
+                'result_content' => ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
+                'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
+                'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
+            ]);
+
+        $this->orchestrator->appendHistory(
+            taskId: $task->id,
+            role: 'tool',
+            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
+            context: new HistoryMessageContext(
+                toolCallId: $providerCallId,
+                toolName: $toolName,
+            ),
+        );
+    }
+
+    private function recordApprovedFailure(
+        Task $task,
+        string $providerCallId,
+        string $toolName,
+        string $message,
+    ): void {
+        $scrubbed = ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($message));
+
+        ToolCallModel::where('task_id', $task->id)
+            ->where('provider_call_id', $providerCallId)
+            ->update([
+                'result_content' => $scrubbed,
+                'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
+            ]);
+
+        $this->orchestrator->appendHistory(
+            taskId: $task->id,
+            role: 'tool',
+            content: $scrubbed,
+            context: new HistoryMessageContext(
+                toolCallId: $providerCallId,
+                toolName: $toolName,
+            ),
+        );
     }
 
     private function lockRunningTaskForTick(int $taskId): ?Task
