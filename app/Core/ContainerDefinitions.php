@@ -74,6 +74,7 @@ use Spora\Http\UserProfileController;
 use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
+use Spora\Services\AgentManifest;
 use Spora\Services\AgentService;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsService;
@@ -733,6 +734,13 @@ final class ContainerDefinitions
                 return new AgentToolSettingsService(
                     $c->get(ToolConfigService::class),
                     $c->get(LLMConfigService::class),
+                );
+            },
+
+            AgentManifest::class => static function (ContainerInterface $c): AgentManifest {
+                return new AgentManifest(
+                    $c->get(AgentToolSettingsServiceInterface::class),
+                    $c->get(ToolIconResolver::class),
                 );
             },
 
