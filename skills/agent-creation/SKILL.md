@@ -101,6 +101,8 @@ Plugin slugs (e.g. `weather`) — lowercase, slug pattern `^[a-z0-9][a-z0-9_-]*$
 | `Field 'version' must be a non-empty string` | Sent version as int | Send `"1.0.0"` (string, semver 3-part) |
 | `Field 'version' does not match pattern /^[0-9]+\.[0-9]+\.[0-9]+...$/` | Sent `"1.0"` | Send `"1.0.0"` |
 | `Tool entry is missing boolean 'enabled'` | Omitted `enabled` | Add `"enabled": true` (or `false`) |
+| `Field 'X' must be an array` (where X is `tools`, `operations`, or `required_plugins`) | LLM wrapped arrays as `{item: [...]}` or `{items: [...]}` — some tool-call generators emit nested arrays inside a single-key object | Send plain JSON arrays `[ ... ]` directly. The server applies a structural unbox as a best-effort fallback; emit plain arrays whenever possible. |
+| `Tool entry is missing boolean 'enabled'` (with `enabled: "true"` in the payload) | Sent booleans as stringified scalars | Send real JSON booleans (`true` / `false`), not strings. The server applies a type-aware coercion as a best-effort fallback; emit plain booleans whenever possible. |
 
 After three identical validation errors, **stop and ask the operator** — re-reading this skill won't help if the schema is genuinely unknown to you.
 

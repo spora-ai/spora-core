@@ -136,6 +136,50 @@ test('complete handles multiple parallel tool calls', function (): void {
         ->and($response->toolCalls[1]->arguments)->toBe(['x' => 1]);
 });
 
+test('complete unboxes tool-call arguments wrapped as {item: [...]} at any depth', function (): void {
+    // M3-M3 (and similar LLM tool-call generators) wrap nested arrays as
+    // {item: [...]}; the validator fails when `tools` is an object instead
+    // of an array. The driver unwraps before the tool ever sees the payload.
+    $payload = json_encode([
+        'id'      => 'chatcmpl-wrapped',
+        'choices' => [[
+            'finish_reason' => 'tool_calls',
+            'message'       => [
+                'role'       => 'assistant',
+                'content'    => null,
+                'tool_calls' => [
+                    [
+                        'id'       => 'call_w',
+                        'type'     => 'function',
+                        'function' => [
+                            'name'      => 'create_agent',
+                            'arguments' => json_encode([
+                                'action' => 'create_agent',
+                                'payload' => [
+                                    'id'   => 'weather-agent',
+                                    'tools' => ['item' => [['tool_class' => 'X']]],
+                                    'required_plugins' => ['item' => ['weather']],
+                                ],
+                            ]),
+                        ],
+                    ],
+                ],
+            ],
+        ]],
+        'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 1],
+    ]);
+
+    $client = new MockHttpClient(new MockResponse($payload, ['http_code' => 200]));
+    $driver = makeOpenAIDriver($client);
+
+    $response = $driver->complete(makeRequest());
+
+    expect($response->toolCalls[0]->arguments['payload']['tools'])
+        ->toBe([['tool_class' => 'X']])
+        ->and($response->toolCalls[0]->arguments['payload']['required_plugins'])
+        ->toBe(['weather']);
+});
+
 // Error handling
 
 test('complete throws LLMRateLimitException on HTTP 429', function (): void {

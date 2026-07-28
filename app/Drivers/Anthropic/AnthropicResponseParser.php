@@ -6,6 +6,7 @@ namespace Spora\Drivers\Anthropic;
 
 use Psr\Log\LoggerInterface;
 use Spora\Drivers\Utilities\LLMContentParser;
+use Spora\Drivers\Utilities\ToolArgumentsNormalizer;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall;
 use Spora\Drivers\ValueObjects\Usage;
@@ -88,7 +89,7 @@ final class AnthropicResponseParser
             $toolCalls[] = new ToolCall(
                 providerCallId: (string) ($block['id'] ?? ''),
                 toolName: (string) ($block['name'] ?? ''),
-                arguments: (array) ($block['input'] ?? []),
+                arguments: ToolArgumentsNormalizer::unboxItemWrappers((array) ($block['input'] ?? [])),
             );
         }
 

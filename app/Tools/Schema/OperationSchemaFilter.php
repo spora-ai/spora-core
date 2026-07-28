@@ -65,7 +65,30 @@ final class OperationSchemaFilter
         }
 
         $requiredWhen = $schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY] ?? [];
-        $required     = $schema['required'] ?? [];
+        if ($requiredWhen !== []) {
+            // Drop per-op-bound properties whose binding does not intersect
+            // the allowed set — the LLM should not see (or worse, send)
+            // `agent: []` on a `read_notes` call. Properties with no binding
+            // (truly shared across all ops) survive untouched.
+            $properties = array_filter(
+                $properties,
+                static function (string $name) use ($requiredWhen, $allowedOpsSet): bool {
+                    $binding = $requiredWhen[$name] ?? null;
+                    if ($binding === null) {
+                        return true;
+                    }
+                    foreach ($binding as $op) {
+                        if (isset($allowedOpsSet[$op])) {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+                ARRAY_FILTER_USE_KEY,
+            );
+        }
+
+        $required = $schema['required'] ?? [];
         if ($requiredWhen !== []) {
             $required = array_values(array_filter(
                 $required,
@@ -142,6 +165,32 @@ final class OperationSchemaFilter
             return $schema;
         }
 
+        // Drop per-op-bound properties whose binding does not include the
+        // current operation — see {@see filter()} for the agent-level
+        // equivalent. Same invariant holds here at runtime: the tool's
+        // own validator would no-op on a missing key, but the runtime
+        // doesn't need those properties at all.
+        $properties = $schema['properties'] ?? [];
+        if (is_object($properties)) {
+            $properties = (array) $properties;
+        }
+        $properties = array_filter(
+            $properties,
+            static function (string $name) use ($requiredWhen, $operationName): bool {
+                $binding = $requiredWhen[$name] ?? null;
+                if ($binding === null) {
+                    return true;
+                }
+                foreach ($binding as $op) {
+                    if ($op === $operationName) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+            ARRAY_FILTER_USE_KEY,
+        );
+
         $narrowed = array_values(array_filter(
             $required,
             static function (string $name) use ($requiredWhen, $operationName): bool {
@@ -158,7 +207,8 @@ final class OperationSchemaFilter
             },
         ));
 
-        $schema['required'] = $narrowed;
+        $schema['properties'] = $properties === [] ? new stdClass() : $properties;
+        $schema['required']   = $narrowed;
         unset($schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY]);
 
         return $schema;

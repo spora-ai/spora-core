@@ -10,6 +10,7 @@ use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\Utilities\LLMContentParser;
 use Spora\Drivers\Utilities\ThinkingTagExtractor;
+use Spora\Drivers\Utilities\ToolArgumentsNormalizer;
 use Spora\Drivers\ValueObjects\ContentBlock;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
@@ -309,9 +310,12 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     private function parseToolArguments(mixed $rawArguments): array
     {
         if (is_string($rawArguments)) {
-            return json_decode($rawArguments, true) ?? [];
+            $decoded = json_decode($rawArguments, true);
+            $args = is_array($decoded) ? $decoded : [];
+        } else {
+            $args = (array) $rawArguments;
         }
-        return (array) $rawArguments;
+        return ToolArgumentsNormalizer::unboxItemWrappers($args);
     }
 
     /**

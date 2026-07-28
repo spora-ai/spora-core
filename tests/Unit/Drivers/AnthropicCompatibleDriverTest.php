@@ -121,6 +121,36 @@ test('complete handles multiple parallel tool calls', function (): void {
         ->and($response->toolCalls[1]->arguments)->toBe(['x' => 99]);
 });
 
+test('complete unboxes Anthropic tool_use input wrapped as {item: [...]}', function (): void {
+    // Defensive: Anthropic-compatible drivers don't currently wrap, but a
+    // third-party model on the Anthropic protocol might. Same unboxer as
+    // the OpenAI driver so the agent-facing tool layer is identical.
+    $payload = json_encode([
+        'id'         => 'msg-wrapped',
+        'stop_reason' => 'tool_use',
+        'content'    => [[
+            'type'  => 'tool_use',
+            'id'    => 'toolu_w',
+            'name'  => 'create_agent',
+            'input' => [
+                'payload' => [
+                    'tools'            => ['item' => [['tool_class' => 'X']]],
+                    'required_plugins' => ['item' => ['weather']],
+                ],
+            ],
+        ]],
+    ]);
+
+    $client = new MockHttpClient(new MockResponse($payload, ['http_code' => 200]));
+    $driver = makeAnthropicDriver($client);
+    $response = $driver->complete(makeAnthropicRequest());
+
+    expect($response->toolCalls[0]->arguments['payload']['tools'])
+        ->toBe([['tool_class' => 'X']])
+        ->and($response->toolCalls[0]->arguments['payload']['required_plugins'])
+        ->toBe(['weather']);
+});
+
 // Message conversion — tool result batching
 
 test('consecutive tool result messages are batched into one user turn', function (): void {

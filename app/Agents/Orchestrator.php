@@ -15,6 +15,7 @@ use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
+use Spora\Drivers\Utilities\ToolArgumentsNormalizer;
 use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\Task;
@@ -29,6 +30,7 @@ use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
+use Spora\Tools\Schema\ToolParameterSchemaBuilder;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -298,6 +300,13 @@ final class Orchestrator implements OrchestratorInterface
         $attrs    = $ref->getAttributes(Tool::class);
         $toolName = $attrs !== [] ? $attrs[0]->newInstance()->name : get_class($toolInstance);
 
+        // Coerce stringified booleans/ints/numbers to their declared types
+        // before the tool sees them — some LLM tool-call generators emit
+        // scalar values as strings (e.g. `"enabled": "true"`). The tool's
+        // own JSON-Schema-driven validator would otherwise reject the call
+        // with a "must be a boolean" error before the tool logic runs.
+        $arguments = self::coerceToolArguments($toolInstance, $arguments);
+
         // Arguments may contain PII — never log them.
         $this->logger?->debug('Tool dispatch', [
             'tool'      => $toolName,
@@ -419,6 +428,37 @@ final class Orchestrator implements OrchestratorInterface
     private function buildToolDefinitions(array $enabledClasses, int $agentId, ?int $userId = null): array
     {
         return $this->toolDefinitionBuilder->buildToolDefinitions($enabledClasses, $agentId, $userId);
+    }
+
+    /**
+     * Coerce stringified booleans/ints/numbers to their declared schema types.
+     *
+     * Reads the tool's `#[ToolParameter]` schema via {@see ToolParameterSchemaBuilder::build()}
+     * and walks `$arguments`, replacing string values whose declared type is
+     * `boolean` / `integer` / `number` with the parsed value. Properties with
+     * no schema entry (free-form `payload` objects, side channels) are left
+     * alone — the tool's own validator surfaces a clearer error than we could.
+     *
+     * See {@see ToolArgumentsNormalizer::coerceScalarStrings()} for the underlying
+     * walker. Centralised here so any tool that goes through `safeExecute`
+     * benefits without each tool having to opt in.
+     *
+     * @param  array<mixed> $arguments
+     * @return array<mixed>
+     */
+    private static function coerceToolArguments(ToolInterface $toolInstance, array $arguments): array
+    {
+        try {
+            $schema = ToolParameterSchemaBuilder::build($toolInstance);
+        } catch (Throwable) {
+            return $arguments;
+        }
+        $schemaProperties = $schema['properties'];
+        $properties = is_array($schemaProperties) ? $schemaProperties : [];
+        if ($properties === []) {
+            return $arguments;
+        }
+        return ToolArgumentsNormalizer::coerceScalarStrings($arguments, $properties);
     }
 
     private function buildLlmConfigBlock(array $llmSettings): string
