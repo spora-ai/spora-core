@@ -65,3 +65,58 @@ test('null content is converted to empty string for Anthropic', function (): voi
     ]);
     expect($messages[0]['content'])->toBe('');
 });
+
+test('unsigned thinking blocks are dropped from the Anthropic outbound assistant message', function (): void {
+    // Cross-driver guard: agents that started on the OpenAI driver
+    // store unsigned thinking blocks from `reasoning_content`; the
+    // Anthropic path must drop them instead of forwarding
+    // `{signature: ''}` (Anthropic 400s that).
+    $builder = makeAnthropicRequestBuilder('claude-3-5-sonnet-20241022');
+    $messages = $builder->convertMessages([
+        [
+            'role' => 'assistant',
+            'content' => [
+                ['type' => 'thinking', 'text' => 'unsigned reasoning', 'signature' => ''],
+                ['type' => 'text', 'text' => 'visible answer'],
+            ],
+        ],
+    ]);
+
+    $content = $messages[0]['content'];
+    expect($content)->toBeArray();
+
+    $thinkingBlocks = array_values(array_filter(
+        $content,
+        static fn(array $b): bool => ($b['type'] ?? '') === 'thinking',
+    ));
+    expect($thinkingBlocks)->toBe([]);
+
+    $textBlocks = array_values(array_filter(
+        $content,
+        static fn(array $b): bool => ($b['type'] ?? '') === 'text',
+    ));
+    expect($textBlocks)->toBe([['type' => 'text', 'text' => 'visible answer']]);
+});
+
+test('signed thinking blocks from a previous Anthropic turn still replay byte-identical', function (): void {
+    // Companion to the unsigned-skip test above; pins the PR #163
+    // chain-continuity contract on the Anthropic outbound path.
+    $builder = makeAnthropicRequestBuilder('claude-3-5-sonnet-20241022');
+    $messages = $builder->convertMessages([
+        [
+            'role' => 'assistant',
+            'content' => [
+                ['type' => 'thinking', 'text' => 'plan', 'signature' => 'sig-keep-me'],
+                ['type' => 'text', 'text' => 'answer'],
+            ],
+        ],
+    ]);
+
+    $content = $messages[0]['content'];
+    expect($content[0])->toBe([
+        'type' => 'thinking',
+        'thinking' => 'plan',
+        'signature' => 'sig-keep-me',
+    ]);
+    expect($content[1])->toBe(['type' => 'text', 'text' => 'answer']);
+});

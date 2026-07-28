@@ -9,6 +9,7 @@ use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\Utilities\LLMContentParser;
+use Spora\Drivers\Utilities\ThinkingTagExtractor;
 use Spora\Drivers\ValueObjects\ContentBlock;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
@@ -169,7 +170,8 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     {
         $choice = $data['choices'][0] ?? [];
         $message = $choice['message'] ?? [];
-        $parsedContent = LLMContentParser::parse($message['content'] ?? null);
+        $blocks = $this->resolveMessageBlocks($message);
+        $parsedContent = LLMContentParser::parse($blocks);
 
         if (($choice['finish_reason'] ?? '') === 'tool_calls') {
             return $this->buildToolCallsResponse($data, $message, $parsedContent);
@@ -177,6 +179,83 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 
         $usage = $this->buildUsage(is_array($data['usage'] ?? null) ? $data['usage'] : null);
         return $this->buildTextResponse($data, $parsedContent, $usage);
+    }
+
+    /**
+     * Convert an OpenAI assistant message into the ordered list of
+     * provider blocks the {@see LLMContentParser} dispatcher can
+     * normalise. Reasoning is sourced from `message.reasoning_content`
+     * (OpenAI o-series, DeepSeek, MiniMax-M3) → `message.reasoning` →
+     * inline reasoning tags inside `message.content`; both can be
+     * present and are concatenated with a blank line.
+     *
+     * The emitted `ContentBlock::thinking` carries an empty `signature`
+     * — OpenAI-compatible hosts don't sign chain-of-thought. The
+     * Anthropic outbound path drops unsigned thinking blocks instead
+     * of forwarding them, so a mid-task driver switch cannot break
+     * Anthropic chain continuity.
+     *
+     * @param  array<string, mixed> $message
+     * @return list<array<string, mixed>>
+     */
+    private function resolveMessageBlocks(array $message): array
+    {
+        $structured = $this->extractStructuredReasoning($message);
+
+        $rawContent = $message['content'] ?? null;
+        $cleanedText = '';
+        $inlineReasoning = '';
+        if (is_string($rawContent)) {
+            $split = ThinkingTagExtractor::split($rawContent);
+            $cleanedText = $split['text'];
+            $inlineReasoning = $split['reasoning'];
+        }
+
+        $reasoningParts = array_filter(
+            [$structured, $inlineReasoning],
+            static fn(string $part): bool => $part !== '',
+        );
+        $totalReasoning = implode("\n\n", $reasoningParts);
+
+        $blocks = [];
+        if ($totalReasoning !== '') {
+            $blocks[] = ['type' => 'thinking', 'thinking' => $totalReasoning, 'signature' => ''];
+        }
+        if (is_string($rawContent)) {
+            if ($cleanedText !== '') {
+                $blocks[] = ['type' => 'text', 'text' => $cleanedText];
+            }
+        } elseif (is_array($rawContent)) {
+            foreach ($rawContent as $part) {
+                if (is_array($part)) {
+                    $blocks[] = $part;
+                }
+            }
+        }
+
+        return $blocks;
+    }
+
+    /**
+     * First non-empty `reasoning_content` / `reasoning` value on the
+     * message (structured field wins). Empty string is treated as
+     * "absent" so a `reasoning_content: ""` payload doesn't surface
+     * an empty reasoning block.
+     *
+     * @param  array<string, mixed> $message
+     */
+    private function extractStructuredReasoning(array $message): string
+    {
+        foreach (['reasoning_content', 'reasoning'] as $key) {
+            $value = $message[$key] ?? null;
+            if (is_string($value)) {
+                $trimmed = trim($value);
+                if ($trimmed !== '') {
+                    return $trimmed;
+                }
+            }
+        }
+        return '';
     }
 
     /**

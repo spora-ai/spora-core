@@ -9,11 +9,17 @@ use Spora\Drivers\Exceptions\UnknownContentBlockTypeException;
 /**
  * Provider-neutral content block with lossless Anthropic reasoning replay.
  *
- * Anthropic requires `thinking` text and its opaque `signature` to be replayed
- * byte-identically on the next turn; mutating either breaks chain continuity.
- * `redacted_thinking.data` is a distinct encrypted payload that clients cannot
- * decrypt. `metadata` preserves provider sub-fields until one becomes
- * load-bearing enough to promote to a typed property.
+ * Anthropic requires `thinking` text and its opaque `signature` to be
+ * replayed byte-identical on the next turn; mutating either breaks chain
+ * continuity. `redacted_thinking.data` is an encrypted payload clients
+ * cannot decrypt.
+ *
+ * Unsigned `thinking` blocks (`signature === ''`) are also accepted: the
+ * OpenAI compatible driver sources them from `message.reasoning_content`,
+ * `message.reasoning`, or inline reasoning tags, and the Anthropic
+ * outbound path drops them so an unsigned block can never invalidate an
+ * Anthropic chain. `metadata` preserves provider sub-fields that don't
+ * yet warrant a typed property.
  */
 final readonly class ContentBlock
 {

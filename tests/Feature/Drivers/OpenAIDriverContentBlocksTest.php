@@ -6,9 +6,11 @@ namespace Tests\Feature\Drivers;
 
 use ReflectionMethod;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Drivers\ValueObjects\ContentBlock;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\ToolCall;
 use Symfony\Component\HttpClient\MockHttpClient;
+use Symfony\Component\HttpClient\Response\MockResponse;
 
 /**
  * Plan §12 B2b — OpenAI driver content-block wire shape.
@@ -104,4 +106,226 @@ test('parsed contentBlocks and textContent flow through buildToolCallsResponse',
     expect($response->content)->toBe('I should look this up.');
     expect($response->toolCalls)->toHaveCount(1);
     expect($response->contentBlocks)->toBe([]);
+});
+
+// OpenAI compatible driver — reasoning surfacing.
+// Reasoning lands in `contentBlocks[]` as a `ContentBlock::TYPE_THINKING`
+// entry with an empty signature (OpenAI hosts don't sign chain-of-thought).
+test('parseResponse surfaces reasoning_content as an unsigned thinking block', function (): void {
+    $payload = json_encode([
+        'id' => 'chatcmpl-o1',
+        'choices' => [
+            [
+                'finish_reason' => 'stop',
+                'message' => [
+                    'role' => 'assistant',
+                    'content' => 'Final answer.',
+                    'reasoning_content' => "Plan: outline, then answer.\nStep 1: derive.",
+                ],
+            ],
+        ],
+        'usage' => ['prompt_tokens' => 5, 'completion_tokens' => 12],
+    ]);
+
+    $client = new MockHttpClient(new MockResponse($payload, ['http_code' => 200]));
+    $driver = new OpenAICompatibleDriver(
+        apiKey: 'test',
+        model: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        httpClient: $client,
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+
+    $response = $driver->complete(new LLMRequest(
+        systemPrompt: 'You are helpful.',
+        messages: [],
+        tools: [],
+    ));
+
+    expect($response->content)->toBe('Final answer.')
+        ->and($response->contentBlocks)->toHaveCount(2);
+
+    $thinking = $response->contentBlocks[0];
+    expect($thinking)->toBeInstanceOf(ContentBlock::class)
+        ->and($thinking->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($thinking->text)->toBe("Plan: outline, then answer.\nStep 1: derive.")
+        ->and($thinking->signature)->toBe('');
+
+    $text = $response->contentBlocks[1];
+    expect($text->type)->toBe(ContentBlock::TYPE_TEXT)
+        ->and($text->text)->toBe('Final answer.');
+});
+
+test('parseResponse falls back to message.reasoning when reasoning_content is absent', function (): void {
+    $payload = json_encode([
+        'id' => 'chatcmpl-deepseek',
+        'choices' => [
+            [
+                'finish_reason' => 'stop',
+                'message' => [
+                    'role' => 'assistant',
+                    'content' => 'short answer',
+                    'reasoning' => 'chain of thought',
+                ],
+            ],
+        ],
+        'usage' => ['prompt_tokens' => 5, 'completion_tokens' => 2],
+    ]);
+
+    $client = new MockHttpClient(new MockResponse($payload, ['http_code' => 200]));
+    $driver = new OpenAICompatibleDriver(
+        apiKey: 'test',
+        model: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        httpClient: $client,
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+
+    $response = $driver->complete(new LLMRequest(
+        systemPrompt: 'You are helpful.',
+        messages: [],
+        tools: [],
+    ));
+
+    $thinking = $response->contentBlocks[0];
+    expect($thinking->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($thinking->text)->toBe('chain of thought')
+        ->and($thinking->signature)->toBe('');
+});
+
+test('parseResponse extracts inline reasoning tags from message.content when no structured field is set', function (): void {
+    $tag_open = '<' . 'think' . '>';
+    $tag_close = '<' . '/' . 'think' . '>';
+    $payload = json_encode([
+        'id' => 'chatcmpl-distilled',
+        'choices' => [
+            [
+                'finish_reason' => 'stop',
+                'message' => [
+                    'role' => 'assistant',
+                    'content' => "Visible answer. {$tag_open}internal reasoning step{$tag_close} trailing text.",
+                ],
+            ],
+        ],
+        'usage' => ['prompt_tokens' => 5, 'completion_tokens' => 6],
+    ]);
+
+    $client = new MockHttpClient(new MockResponse($payload, ['http_code' => 200]));
+    $driver = new OpenAICompatibleDriver(
+        apiKey: 'test',
+        model: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        httpClient: $client,
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+
+    $response = $driver->complete(new LLMRequest(
+        systemPrompt: 'You are helpful.',
+        messages: [],
+        tools: [],
+    ));
+
+    expect($response->contentBlocks)->toHaveCount(2);
+    expect($response->contentBlocks[0]->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($response->contentBlocks[0]->text)->toBe('internal reasoning step')
+        ->and($response->contentBlocks[0]->signature)->toBe('')
+        ->and($response->contentBlocks[1]->type)->toBe(ContentBlock::TYPE_TEXT)
+        ->and($response->contentBlocks[1]->text)->toBe('Visible answer. trailing text.')
+        ->and($response->content)->toBe('Visible answer. trailing text.');
+});
+
+test('parseResponse propagates reasoning_content on tool_calls responses', function (): void {
+    // PR #161 scenario: o-series emit `reasoning_content` on the same
+    // turn they ask for a tool call; the chain-of-thought must persist
+    // alongside the tool-call request.
+    $payload = json_encode([
+        'id' => 'chatcmpl-o1-tool',
+        'choices' => [
+            [
+                'finish_reason' => 'tool_calls',
+                'message' => [
+                    'role' => 'assistant',
+                    'content' => null,
+                    'reasoning_content' => 'Plan: query the knowledge base first.',
+                    'tool_calls' => [
+                        [
+                            'id' => 'call_1',
+                            'type' => 'function',
+                            'function' => ['name' => 'lookup', 'arguments' => '{}'],
+                        ],
+                    ],
+                ],
+            ],
+        ],
+        'usage' => ['prompt_tokens' => 10, 'completion_tokens' => 5],
+    ]);
+
+    $client = new MockHttpClient(new MockResponse($payload, ['http_code' => 200]));
+    $driver = new OpenAICompatibleDriver(
+        apiKey: 'test',
+        model: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        httpClient: $client,
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+
+    $response = $driver->complete(new LLMRequest(
+        systemPrompt: 'You are helpful.',
+        messages: [],
+        tools: [],
+    ));
+
+    expect($response->content)->toBeNull()
+        ->and($response->toolCalls)->toHaveCount(1)
+        ->and($response->contentBlocks)->toHaveCount(1);
+
+    $thinking = $response->contentBlocks[0];
+    expect($thinking->type)->toBe(ContentBlock::TYPE_THINKING)
+        ->and($thinking->text)->toBe('Plan: query the knowledge base first.')
+        ->and($thinking->signature)->toBe('');
+});
+
+test('parseResponse emits no thinking block when no reasoning field and no inline tags are present', function (): void {
+    // A plain response must not produce a `type === thinking` entry,
+    // otherwise the frontend's `reasoningForEntry` would render an
+    // empty foldout. The `text` block survives into contentBlocks so
+    // $response->content round-trips.
+    $payload = json_encode([
+        'id' => 'chatcmpl-plain',
+        'choices' => [
+            [
+                'finish_reason' => 'stop',
+                'message' => ['role' => 'assistant', 'content' => 'just an answer'],
+            ],
+        ],
+        'usage' => ['prompt_tokens' => 1, 'completion_tokens' => 4],
+    ]);
+
+    $client = new MockHttpClient(new MockResponse($payload, ['http_code' => 200]));
+    $driver = new OpenAICompatibleDriver(
+        apiKey: 'test',
+        model: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        httpClient: $client,
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+
+    $response = $driver->complete(new LLMRequest(
+        systemPrompt: 'You are helpful.',
+        messages: [],
+        tools: [],
+    ));
+
+    expect($response->content)->toBe('just an answer');
+
+    $thinkingBlocks = array_filter(
+        $response->contentBlocks,
+        static fn(ContentBlock $b): bool => $b->type === ContentBlock::TYPE_THINKING,
+    );
+    expect($thinkingBlocks)->toBe([]);
 });

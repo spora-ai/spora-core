@@ -7,12 +7,12 @@ namespace Spora\Drivers\ValueObjects;
 /**
  * Normalized result of one provider completion.
  *
- * Reasoning is reachable only via signed `contentBlocks[]` of
- * `type === ContentBlock::TYPE_THINKING` — those carry the provider's
- * `signature` byte-identical and are replayed on the next turn. Unsigned
- * inline `<think>…</think>` tags from the model's text are stripped by
- * {@see \Spora\Drivers\Utilities\TextBlockParser} and intentionally
- * not surfaced.
+ * Reasoning is reachable via `contentBlocks[]` entries of
+ * `type === ContentBlock::TYPE_THINKING`. Anthropic carries the
+ * provider's `signature` for byte-identical replay; the OpenAI driver
+ * emits unsigned blocks sourced from `reasoning_content` /
+ * `reasoning` / inline tags — the Anthropic outbound path drops them
+ * so a mid-task driver switch cannot break chain continuity.
  */
 final readonly class LLMResponse
 {
