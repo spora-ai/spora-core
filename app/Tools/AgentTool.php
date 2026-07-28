@@ -151,7 +151,9 @@ use Spora\Tools\ValueObjects\ToolResult;
                . '`[{name:"now", auto_approve:true}]` to enable auto-approve. '
                . 'Returns the canonical agent manifest (Markdown wrapper + '
                . 'structured JSON) so you can verify what landed without a '
-               . 'follow-up `read_agent` call.',
+               . 'follow-up `read_agent` call. See the agent-creation skill '
+               . '(skill action: read, name: agent-creation, filename: SKILL.md) '
+               . 'for the slim two-phase flow.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
@@ -163,7 +165,9 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'silent drops do occur, so the read-back is the source of truth. '
                . 'Identify the target by `agent_id` (the numeric primary key returned by `create_agent`). '
                . 'Omit `agent_id` to read the calling agent (same as the deprecated '
-               . '`read_agent_configuration` operation).',
+               . '`read_agent_configuration` operation). For the slim two-phase agent-creation '
+               . 'flow, see the agent-creation skill (skill action: read, name: agent-creation, '
+               . 'filename: SKILL.md).',
     enabledByDefault: false,
     requiresApprovalByDefault: false,
 )]

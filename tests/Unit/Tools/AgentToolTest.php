@@ -1544,9 +1544,13 @@ test('AgentTool operation descriptions mention the agent-creation skill on relev
 
     expect($byName)->toHaveKey('write_agent_configuration')
         ->and($byName)->toHaveKey('create_agent')
+        ->and($byName)->toHaveKey('configure_tools')
+        ->and($byName)->toHaveKey('read_agent')
         ->and($byName)->toHaveKey('get_available_tools')
         ->and($byName['write_agent_configuration'])->toContain('agent-creation')
         ->and($byName['create_agent'])->toContain('agent-creation')
+        ->and($byName['configure_tools'])->toContain('agent-creation')
+        ->and($byName['read_agent'])->toContain('agent-creation')
         ->and($byName['get_available_tools'])->toContain('agent-creation');
 });
 
