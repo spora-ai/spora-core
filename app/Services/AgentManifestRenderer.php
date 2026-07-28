@@ -70,6 +70,7 @@ final class AgentManifestRenderer
             'name'                => $manifest['name'] ?? null,
             'description'         => $manifest['description'] ?? null,
             'system_prompt'       => $manifest['system_prompt'] ?? null,
+            'notes'               => $manifest['notes'] ?? null,
             'template_id'         => $manifest['template_id'] ?? null,
             'version'             => $manifest['version'] ?? null,
             'max_steps'           => $manifest['max_steps'] ?? null,

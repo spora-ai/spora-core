@@ -128,6 +128,7 @@ final class AgentManifest
             'name'                => $agent->name,
             'description'         => $agent->description,
             'system_prompt'       => $agent->system_prompt,
+            'notes'               => $agent->notes,
             'template_id'         => null,
             'version'             => null,
             'max_steps'           => (int) $agent->max_steps,

@@ -36,9 +36,12 @@ function makeAgentTool(): array
     $agentService = Mockery::mock(AgentServiceInterface::class);
     /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
     $toolSettings = Mockery::mock(AgentToolSettingsServiceInterface::class);
+    // Real AgentManifest wired to the same mocked settings service so
+    // tests can drive the per-tool/per-op state through it.
+    $manifest = new Spora\Services\AgentManifest($toolSettings, null);
 
     return [
-        new AgentTool($agentService, $toolSettings, $importer, $validator),
+        new AgentTool($agentService, $toolSettings, $importer, $validator, $manifest),
         $agentService,
         $toolSettings,
     ];
@@ -75,9 +78,10 @@ function makeAgentToolWithPlugins(): array
     $pluginLoader = new Spora\Plugins\PluginLoader([], null);
     /** @var Spora\Services\ToolIconResolver&MockInterface $iconResolver */
     $iconResolver = Mockery::mock(Spora\Services\ToolIconResolver::class);
+    $manifest = new Spora\Services\AgentManifest($toolSettings, $iconResolver);
 
     return [
-        new AgentTool($service, $toolSettings, $importer, $validator, $pluginLoader, $iconResolver),
+        new AgentTool($service, $toolSettings, $importer, $validator, $manifest, $pluginLoader, $iconResolver),
         $service,
         $toolSettings,
         $pluginLoader,
@@ -95,28 +99,58 @@ function stubAgent(int $id = 1, string $name = 'Test Agent', ?string $notes = nu
     return $agent;
 }
 
+/**
+ * Build a fully-populated Agent fixture for the canonical manifest path.
+ * AgentManifest reads `max_steps`, `allow_followup`, `is_pinned`, etc.
+ * directly off the model; the legacy stubAgent() leaves them null which
+ * trips the PHPStan-checked casts. Returns the populated Agent.
+ */
+function stubManifestAgent(int $id, string $name = 'Test'): Agent
+{
+    $agent = new Agent();
+    $agent->id                  = $id;
+    $agent->user_id             = 99;
+    $agent->name                = $name;
+    $agent->description         = null;
+    $agent->system_prompt       = null;
+    $agent->notes               = null;
+    $agent->max_steps           = 10;
+    // Eloquent casts bool props as `bool`, so the fixture must hold true/false
+    // — assigning 0/1 trips PHPStan and silently deserialises to false either
+    // way at runtime.
+    $agent->allow_followup      = true;
+    $agent->is_pinned           = false;
+    $agent->is_archived         = false;
+    $agent->is_favorite         = false;
+    $agent->retry_after_minutes = 0;
+    $agent->max_retries         = 0;
+    return $agent;
+}
+
 describe('AgentTool::execute — read_agent_configuration', function (): void {
-    test('returns the agent resource plus enabled_tools', function (): void {
+    test('returns the canonical manifest with Markdown content', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
-        $agent        = new Agent();
-        $agent->id    = 7;
-        $agent->name  = 'Alpha';
-        $agent->notes = null;
+        $agent = stubManifestAgent(id: 7, name: 'Alpha');
         $service->allows('getAgentByAgentId')->andReturn($agent);
-        $toolSettings->allows("getAllToolsStatus")->andReturn([
-            ['tool_class' => 'Foo', 'tool_name' => 'foo', 'is_enabled' => true, 'can_enable' => true, 'missing_required' => []],
-        ]);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
 
         $result = $tool->execute(['action' => 'read_agent_configuration'], 7, 99);
 
         expect($result->success)->toBeTrue();
         /** @var array<string, mixed> $data */
         $data = $result->data;
-        expect($data['id'])->toBe(7)
+        expect($data['agent_id'])->toBe(7)
             ->and($data['name'])->toBe('Alpha')
-            ->and($data['enabled_tools'])->toBe([]);
+            ->and($data['tools'])->toBe([])
+            ->and($data['missing_required'])->toBe([]);
+        // result_content is the Markdown wrapper — preamble + two JSON blocks.
+        expect($result->content)
+            ->toContain("## Agent #7 \u{2014} Alpha")
+            ->toContain('### Base config')
+            ->toContain('### Tool config');
     });
 
     test('returns failure when Agent::find returns null', function (): void {
@@ -133,13 +167,18 @@ describe('AgentTool::execute — read_agent_configuration', function (): void {
 });
 
 describe('AgentTool::execute — write_agent_configuration', function (): void {
-    test('forwards patch through AgentServiceInterface::updateAgentByAgentId', function (): void {
+    test('forwards patch through AgentServiceInterface::updateAgentByAgentId and returns the canonical manifest', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
         $service->shouldReceive('updateAgentByAgentId')
             ->once()
-            ->andReturn(stubAgent(7, 'Alpha', null));
+            ->andReturn(stubManifestAgent(7, 'Alpha'));
+        // AgentManifest needs both per-agent status and per-op state to
+        // render the manifest — emit empty lists so tests that don't care
+        // about tools just see `tools: []`.
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
 
         $result = $tool->execute(
             ['action' => 'write_agent_configuration', 'agent' => ['description' => 'updated']],
@@ -149,7 +188,12 @@ describe('AgentTool::execute — write_agent_configuration', function (): void {
         expect($result->success)->toBeTrue();
         /** @var array<string, mixed> $data */
         $data = $result->data;
-        expect($data['name'])->toBe('Alpha');
+        // Now returns the canonical manifest shape, not the legacy
+        // AgentResource shape.
+        expect($data['agent_id'])->toBe(7)
+            ->and($data['name'])->toBe('Alpha')
+            ->and($data['tools'])->toBe([])
+            ->and($data['missing_required'])->toBe([]);
     });
 
     test('silently drops `notes` from the patch (notes are write_notes-only)', function (): void {
@@ -160,7 +204,9 @@ describe('AgentTool::execute — write_agent_configuration', function (): void {
         $service->shouldReceive('updateAgentByAgentId')
             ->once()
             ->with(7, ['description' => 'x'])
-            ->andReturn(stubAgent(7));
+            ->andReturn(stubManifestAgent(7, 'Alpha'));
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
 
         $result = $tool->execute(
             [
@@ -428,7 +474,7 @@ describe('AgentTool::execute — read_notes', function (): void {
 });
 
 describe('AgentTool::execute — write_agent_configuration — happy path', function (): void {
-    test('forwards patch and returns the updated resource', function (): void {
+    test('forwards patch and returns the manifest', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
@@ -440,7 +486,9 @@ describe('AgentTool::execute — write_agent_configuration — happy path', func
         $service->allows('getAgentByAgentId')->andReturn($agent);
         $service->shouldReceive('updateAgentByAgentId')
             ->once()
-            ->andReturn(stubAgent(7, 'Renamed'));
+            ->andReturn(stubManifestAgent(7, 'Renamed'));
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
 
         $result = $tool->execute(
             ['action' => 'write_agent_configuration', 'agent' => ['name' => 'Renamed']],
@@ -451,7 +499,10 @@ describe('AgentTool::execute — write_agent_configuration — happy path', func
         expect($result->success)->toBeTrue();
         /** @var array<string, mixed> $data */
         $data = $result->data;
-        expect($data['name'])->toBe('Renamed');
+        // Manifest shape carries agent_id (not id) and the tool block.
+        expect($data['agent_id'])->toBe(7)
+            ->and($data['name'])->toBe('Renamed')
+            ->and($data['tools'])->toBe([]);
     });
 
     test('returns failure when the agent disappears mid-write', function (): void {
@@ -1040,13 +1091,19 @@ describe('AgentTool::execute — read_agent', function (): void {
             ->and($result->content)->toContain('either `template_id` or `agent_id` is required');
     });
 
-    test('returns the full config by agent_id', function (): void {
+    test('returns the canonical manifest by agent_id', function (): void {
         // Real DB so the Agent::query() lookup in resolveReadAgentTarget
         // has something to find. Boot auth + create the agent row.
         $auth    = bootAuthLayer();
         $ownerId = bootAuth($auth, 'read-agent-owner@example.com');
 
-        [$tool] = makeAgentTool();
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        // The AgentManifest path runs after resolveReadAgentTarget — drive
+        // it to an empty manifest so the test stays focused on the
+        // dispatch + resource shape, not the tools subsystem.
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
 
         $agentId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id'              => $ownerId,
@@ -1068,9 +1125,18 @@ describe('AgentTool::execute — read_agent', function (): void {
         expect($result->success)->toBeTrue();
         /** @var array<string, mixed> $data */
         $data = $result->data;
-        expect($data['id'])->toBe($agentId)
+        // Manifest shape (agent_id, name, tools[]), not the legacy
+        // AgentResource shape (id, enabled_tools).
+        expect($data['agent_id'])->toBe($agentId)
             ->and($data['name'])->toBe('Alpha')
-            ->and($data)->toHaveKey('enabled_tools');
+            ->and($data)->toHaveKey('tools')
+            ->and($data)->toHaveKey('missing_required')
+            ->and($data)->toHaveKey('warnings');
+        // result_content is the Markdown wrapper — preamble + two JSON blocks.
+        expect($result->content)
+            ->toContain("## Agent #{$agentId} \u{2014} Alpha")
+            ->toContain('### Base config')
+            ->toContain('### Tool config');
     });
 
     test('does not return another user\'s agent', function (): void {
@@ -1209,6 +1275,12 @@ test('write_agent_configuration silently drops unknown keys (confirmed via read_
         ->andReturn($agent);
     $service->allows('getAgentByAgentId')->andReturn($agent);
 
+    // Manifest render needs per-tool status + per-op state. Empty lists
+    // are fine for this test — it asserts which keys SURVIVE in the
+    // response, not which tools are configured.
+    $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+    $toolSettings->allows('getToolsOperations')->andReturn([]);
+
     $writeResult = $tool->execute(
         [
             'action' => 'write_agent_configuration',
@@ -1226,10 +1298,11 @@ test('write_agent_configuration silently drops unknown keys (confirmed via read_
 
     expect($writeResult->success)->toBeTrue();
 
-    // Confirm via read_agent_configuration: AgentResource only emits the
-    // canonical allowlist, so unknown keys never appear in the LLM's
-    // confirmation loop. The `notes` strip also held — the field on the
-    // returned resource is the pre-existing value, not the sneaky patch.
+    // Confirm via read_agent_configuration: the manifest only emits the
+    // canonical allowlist (base-config + tool-config blocks), so unknown
+    // keys never appear in the LLM's confirmation loop. The `notes`
+    // strip also held — the field on the returned manifest is the
+    // pre-existing value, not the sneaky patch.
     $readResult = $tool->execute(['action' => 'read_agent_configuration'], 7, 99);
     expect($readResult->success)->toBeTrue();
     /** @var array<string, mixed> $readData */

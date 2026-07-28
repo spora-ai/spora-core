@@ -9,6 +9,8 @@ use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\AgentTemplates\ValidationResult;
 use Spora\Models\Agent;
 use Spora\Plugins\PluginLoader;
+use Spora\Services\AgentManifest;
+use Spora\Services\AgentManifestRenderer;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
@@ -270,6 +272,7 @@ final class AgentTool extends AbstractTool
         private readonly AgentToolSettingsServiceInterface $toolSettings,
         private readonly AgentTemplateImporter $templateImporter,
         private readonly AgentTemplateValidator $templateValidator,
+        private readonly AgentManifest $manifest,
         private readonly ?PluginLoader $pluginLoader = null,
         private readonly ?ToolIconResolver $iconResolver = null,
     ) {}
@@ -326,22 +329,7 @@ final class AgentTool extends AbstractTool
             return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
-        $payload = AgentResource::toArray($agent);
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \Spora\Models\AgentTool> $agentToolRows */
-        $agentToolRows = $agent->agentTools;
-        $enabledTools = [];
-        foreach ($agentToolRows as $toolRow) {
-            $enabledTools[] = [
-                'tool_class' => (string) $toolRow->tool_class,
-                'tool_name'  => (string) $toolRow->tool_name,
-            ];
-        }
-        $payload['enabled_tools'] = $enabledTools;
-
-        return ToolResult::ok(
-            "Configuration for agent #{$agentId} ('{$agent->name}').",
-            $payload,
-        );
+        return $this->renderManifestResult($agent);
     }
 
     /**
@@ -370,10 +358,24 @@ final class AgentTool extends AbstractTool
             return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
-        return ToolResult::ok(
-            "Updated agent #{$agentId}.",
-            AgentResource::toArray($agent),
-        );
+        // `$agent` already carries `user_id` from `updateAgentByAgentId` —
+        // enough for {@see AgentManifest::toArray()} to look up the
+        // per-agent tool rows. Re-reading through `getAgent` would just
+        // re-hit the DB for an unchanged row.
+        return $this->renderManifestResult($agent);
+    }
+
+    /**
+     * Build a {@see ToolResult} carrying the canonical manifest as
+     * `result_data` and the {@see AgentManifestRenderer} Markdown as
+     * `result_content`. Used by every read/write path that has an Agent
+     * row in hand (read_agent_configuration, write_agent_configuration,
+     * read_agent, configure_tools confirmation, create_agent confirmation).
+     */
+    private function renderManifestResult(Agent $agent): ToolResult
+    {
+        $manifest = $this->manifest->toArray($agent);
+        return ToolResult::ok(AgentManifestRenderer::markdown($manifest), $manifest);
     }
 
     private function readNotes(int $agentId): ToolResult
@@ -885,12 +887,12 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * Read a specific agent's full state by `template_id` or `agent_id`.
+     * Read a specific agent's full state by `agent_id`.
      *
      * This is the only AgentTool operation that accepts an agent
      * identifier — it exists so the LLM can verify what `create_agent`
-     * and `configure_tools` actually committed. Both inputs are scoped to
-     * the authenticated user: cross-user reads are refused, never
+     * and `configure_tools` actually committed. Input is scoped to the
+     * authenticated user: cross-user reads are refused, never
      * transparently returned as "not found" only when the agent exists.
      *
      * @param array<string, mixed> $arguments
@@ -901,24 +903,7 @@ final class AgentTool extends AbstractTool
         if ($target instanceof ToolResult) {
             return $target;
         }
-        $agent = $target;
-
-        $payload = AgentResource::toArray($agent);
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \Spora\Models\AgentTool> $agentToolRows */
-        $agentToolRows = $agent->agentTools;
-        $enabledTools = [];
-        foreach ($agentToolRows as $toolRow) {
-            $enabledTools[] = [
-                'tool_class' => (string) $toolRow->tool_class,
-                'tool_name'  => (string) $toolRow->tool_name,
-            ];
-        }
-        $payload['enabled_tools'] = $enabledTools;
-
-        return ToolResult::ok(
-            "Configuration for agent #{$agent->id} ('{$agent->name}').",
-            $payload,
-        );
+        return $this->renderManifestResult($target);
     }
 
     /**
