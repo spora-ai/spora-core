@@ -41,7 +41,7 @@ function makeAgentTool(): array
     $manifest = new Spora\Services\AgentManifest($toolSettings, null);
 
     return [
-        new AgentTool($agentService, $toolSettings, $importer, $validator, $manifest),
+        new AgentTool($agentService, $toolSettings, $manifest),
         $agentService,
         $toolSettings,
     ];
@@ -81,7 +81,7 @@ function makeAgentToolWithPlugins(): array
     $manifest = new Spora\Services\AgentManifest($toolSettings, $iconResolver);
 
     return [
-        new AgentTool($service, $toolSettings, $importer, $validator, $manifest, $pluginLoader, $iconResolver),
+        new AgentTool($service, $toolSettings, $manifest, $pluginLoader, $iconResolver),
         $service,
         $toolSettings,
         $pluginLoader,
@@ -774,11 +774,17 @@ describe('AgentTool::execute — get_available_tools', function (): void {
 });
 
 describe('AgentTool::execute — create_agent', function (): void {
+    // The LLM-facing create_agent accepts a SLIM payload
+    // (name, description, system_prompt, max_steps, allow_followup,
+    // retry_after_minutes, max_retries, required_plugins). The full
+    // agent-template.schema.json shape is reserved for the
+    // operator-upload endpoint at POST /api/v1/agent-templates/import.
+
     test('rejects when userId is null', function (): void {
         [$tool] = makeAgentTool();
 
         $result = $tool->execute(
-            ['action' => 'create_agent', 'payload' => ['id' => 'x']],
+            ['action' => 'create_agent', 'payload' => ['name' => 'X']],
             7,
             null,
         );
@@ -793,43 +799,109 @@ describe('AgentTool::execute — create_agent', function (): void {
         $result = $tool->execute(['action' => 'create_agent'], 7, 99);
 
         expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('payload');
+            ->and($result->content)->toContain('`payload`');
     });
 
-    test('rejects invalid payload via validator', function (): void {
-        [$tool] = makeAgentTool();
-
-        // Shape is missing the required top-level keys (id, name, version)
-        // so the validator fails before any DB write.
-        $out = $tool->execute(
-            ['action' => 'create_agent', 'payload' => ['agent' => [], 'tools' => []]],
-            7,
-            99,
-        );
-
-        expect($out->success)->toBeFalse()
-            ->and($out->content)->toContain('payload failed validation');
-    });
-
-    test('happy path: validates and imports a complete payload', function (): void {
-        // Booting auth so the importer can resolve the agent's user_id FK
-        // against the in-memory SQLite db seeded by Pest's beforeEach.
-        $auth   = bootAuthLayer();
-        $userId = bootAuth($auth, 'creator@example.com');
+    test('rejects the legacy `agent{}` wrapper with a literal fix', function (): void {
         [$tool] = makeAgentTool();
 
         $out = $tool->execute(
             [
                 'action'  => 'create_agent',
                 'payload' => [
-                    'id'      => 'new-agent',
-                    'name'    => 'New Agent',
-                    'version' => '1.0.0',
-                    'agent'   => [
-                        'description' => 'created via AgentTool',
-                        'notes'       => 'runbook step 1',
+                    'name'  => 'X',
+                    'agent' => ['description' => 'wrong-location'],
+                ],
+            ],
+            7,
+            99,
+        );
+
+        expect($out->success)->toBeFalse()
+            ->and($out->content)->toContain('do NOT wrap fields in an `agent{}` block');
+    });
+
+    test('rejects the legacy `tools[]` block with a redirect to configure_tools', function (): void {
+        [$tool] = makeAgentTool();
+
+        $out = $tool->execute(
+            [
+                'action'  => 'create_agent',
+                'payload' => [
+                    'name'  => 'X',
+                    'tools' => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true]],
+                ],
+            ],
+            7,
+            99,
+        );
+
+        expect($out->success)->toBeFalse()
+            ->and($out->content)->toContain('`tools[]` is no longer accepted here')
+            ->and($out->content)->toContain('configure_tools(agent_id: N');
+    });
+
+    test('rejects required_plugins sent as a bare string with a literal fix', function (): void {
+        // The task #46 trace showed the LLM sending
+        // required_plugins: 'weather' (and also {item: 'weather'}). Both
+        // come back from the LLM as bare values rather than arrays.
+        [$tool] = makeAgentTool();
+
+        foreach (['weather', ['item' => 'weather']] as $bad) {
+            $out = $tool->execute(
+                [
+                    'action'  => 'create_agent',
+                    'payload' => [
+                        'name'             => 'X',
+                        'required_plugins' => $bad,
                     ],
-                    'tools'   => [],
+                ],
+                7,
+                99,
+            );
+
+            expect($out->success)->toBeFalse()
+                ->and($out->content)->toContain('`required_plugins` must be an array of strings')
+                ->and($out->content)->toContain('Send `"required_plugins": ["weather"]`');
+        }
+    });
+
+    test('happy path: slim payload creates the agent and emits the manifest', function (): void {
+        $auth   = bootAuthLayer();
+        $userId = bootAuth($auth, 'creator-slim@example.com');
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        // Real AgentService writes would hit the DB; mock the LLM-side
+        // helper to return a fully-populated Agent fixture so the
+        // manifest renders cleanly.
+        $agent = stubManifestAgent(id: 42, name: 'New Agent');
+        $agent->description   = 'created via AgentTool';
+        $agent->system_prompt = 'You are the New Agent.';
+        $agent->max_steps = 12;
+        $service->shouldReceive('createAgent')
+            ->once()
+            ->with($userId, Mockery::on(static function (array $data): bool {
+                return ($data['name'] ?? null) === 'New Agent'
+                    && ($data['max_steps'] ?? null) === 12
+                    && ($data['allow_followup'] ?? null) === true;
+            }))
+            ->andReturn($agent);
+        // AgentManifest reads the per-agent status + ops; empty lists
+        // are fine when the test is asserting shape, not tool contents.
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $out = $tool->execute(
+            [
+                'action'  => 'create_agent',
+                'payload' => [
+                    'name'                => 'New Agent',
+                    'description'         => 'created via AgentTool',
+                    'system_prompt'       => 'You are the New Agent.',
+                    'max_steps'           => 12,
+                    'allow_followup'      => true,
+                    'required_plugins'    => ['weather'],
                 ],
             ],
             7,
@@ -839,12 +911,21 @@ describe('AgentTool::execute — create_agent', function (): void {
         expect($out->success)->toBeTrue();
         /** @var array<string, mixed> $data */
         $data = $out->data;
-        /** @var array<string, mixed> $agentRow */
-        $agentRow = $data['agent'];
-        expect($agentRow['name'])->toBe('New Agent')
-            ->and($agentRow['description'])->toBe('created via AgentTool')
-            ->and($agentRow['notes'])->toBe('runbook step 1')
-            ->and($data['tools_enabled'])->toBe([]);
+        // Canonical manifest shape, not the legacy {'agent': {...}, 'tools_enabled': [...]}.
+        expect($data['agent_id'])->toBe(42)
+            ->and($data['name'])->toBe('New Agent')
+            ->and($data['description'])->toBe('created via AgentTool')
+            ->and($data['system_prompt'])->toBe('You are the New Agent.')
+            ->and($data['max_steps'])->toBe(12)
+            ->and($data['allow_followup'])->toBeTrue()
+            ->and($data['tools'])->toBe([]);
+
+        // result_content is the standard Markdown wrapper. The intro
+        // line names the new agent id and points the LLM at the next
+        // two calls (configure_tools + read_agent).
+        expect($out->content)
+            ->toContain('Configure tools next with `configure_tools(agent_id:')
+            ->toContain('## Agent #42');
     });
 });
 
@@ -1391,23 +1472,20 @@ describe('AgentTool::execute — configure_tools (agent_id scoped)', function ()
     });
 });
 
-test('create_agent validation error references the agent-creation skill', function (): void {
-    // The create_agent failure path appends a single-line pointer at the
+test('create_agent validation errors append the agent-creation skill pointer', function (): void {
+    // Each create_agent failure path appends a single-line pointer at the
     // agent-creation skill so the LLM knows where to find the schema on the
     // next attempt instead of retrying the same broken payload.
     [$tool] = makeAgentTool();
 
-    // Deliberately broken: `version` is an int (must be a non-empty string),
-    // and `name` is placed inside `agent{}` (top-level only).
+    // Deliberately broken: legacy wrapper shape (top-level `name` inside
+    // `agent{}`) trips the explicit "do not wrap in agent{}" branch.
     $result = $tool->execute(
         [
             'action'  => 'create_agent',
             'payload' => [
-                'id'      => 'broken-agent',
-                'name'    => 'Broken Agent',
-                'version' => 1,
-                'agent'   => ['name' => 'wrong-location'],
-                'tools'   => [],
+                'name'  => 'Broken',
+                'agent' => ['description' => 'wrong-location'],
             ],
         ],
         7,
@@ -1415,7 +1493,6 @@ test('create_agent validation error references the agent-creation skill', functi
     );
 
     expect($result->success)->toBeFalse()
-        ->and($result->content)->toContain('payload failed validation')
         ->and($result->content)->toContain('agent-creation')
         ->and($result->content)->toContain('skill action: read');
 });

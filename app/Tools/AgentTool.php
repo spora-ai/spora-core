@@ -4,14 +4,10 @@ declare(strict_types=1);
 
 namespace Spora\Tools;
 
-use Spora\AgentTemplates\AgentTemplateImporter;
-use Spora\AgentTemplates\AgentTemplateValidator;
-use Spora\AgentTemplates\ValidationResult;
 use Spora\Models\Agent;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentManifest;
 use Spora\Services\AgentManifestRenderer;
-use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
@@ -129,28 +125,34 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'create_agent',
-    description: 'Create a new agent from an Agent Template-shaped payload (id, name, version, agent{}, '
-               . 'required_plugins[]). The schema is strict — payloads that put `name` inside agent{}, '
-               . 'send `operations` as strings instead of `[{name: ...}]` objects, or use a short '
-               . 'version like "1.0" instead of semver "1.0.0" will fail validation. Strongly '
-               . 'recommend reading the agent-creation skill first (skill action: read, name: '
-               . 'agent-creation, filename: SKILL.md) so you do not waste approval cycles on a '
-               . 'malformed payload. Note: the LLM-facing flow does NOT pass a `tools[]` block here — '
-               . 'after the agent row is created, call `configure_tools` to apply a toolset, then '
-               . '`read_agent` to verify what actually committed. Operator-upload templates (file '
-               . 'upload endpoint) keep the nested `tools[]` shape and apply it atomically.',
+    description: 'Create a new agent from a slim payload: `name` (required, top level), '
+               . '`description`, `system_prompt`, `max_steps`, `allow_followup`, '
+               . '`retry_after_minutes`, `max_retries`, `required_plugins` (array of '
+               . 'plugin slugs). Do NOT wrap fields in an `agent{}` block; do NOT '
+               . 'send a `tools[]` block here — after the agent row exists, call '
+               . '`configure_tools(agent_id: N, tools: [...])` to apply a toolset, '
+               . 'then `read_agent(agent_id: N)` to verify. The full '
+               . 'agent-template schema (id/version/agent{}/tools[]) is reserved '
+               . 'for the operator-upload endpoint at '
+               . 'POST /api/v1/agent-templates/import and will be rejected on this '
+               . 'surface. Read the agent-creation skill first (skill action: read, '
+               . 'name: agent-creation, filename: SKILL.md).',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
 #[ToolOperation(
     name: 'configure_tools',
-    description: 'Enable or disable tools and per-operation overrides on the calling agent. '
-               . 'Takes a `tools` list with `{ tool_class, enabled, operations: [{name, enabled?, auto_approve?}] }`. '
+    description: 'Enable or disable tools and per-operation overrides on an agent. '
+               . 'Takes `agent_id` (the numeric pk returned by `create_agent`; '
+               . 'omit to operate on the calling agent) and a `tools` list of '
+               . '`{ tool_class, enabled, operations: [{name, enabled?, auto_approve?}] }`. '
                . 'A tool with `enabled: false` removes it from the agent. '
                . 'Omit `operations` to inherit defaults; pass `[{name:"now"}]` to enable one, '
                . '`[{name:"now", enabled:false}]` to disable one, '
                . '`[{name:"now", auto_approve:true}]` to enable auto-approve. '
-               . 'Returns the updated per-tool/per-operation state. Use `read_agent` afterwards to verify.',
+               . 'Returns the canonical agent manifest (Markdown wrapper + '
+               . 'structured JSON) so you can verify what landed without a '
+               . 'follow-up `read_agent` call.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
@@ -202,15 +204,18 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'payload',
     type: 'object',
-    description: 'ONLY for create_agent: an Agent Template payload — same shape as the '
-              . 'operator upload endpoint. The schema is strict and the validation messages '
-              . 'on failure are unforgiving — see the agent-creation skill '
-              . '(skill action: read, name: agent-creation, filename: SKILL.md) for the '
-              . 'exact shape. Required plugins are NOT auto-installed; missing plugins '
-              . 'produce warnings rather than aborting the import. Ignored by every '
-              . 'other operation; omit this key entirely when calling read_notes, '
-              . 'write_notes, write_notes_overwrite, write_agent_configuration, '
-              . 'configure_tools, read_agent, or get_available_tools.',
+    description: 'ONLY for create_agent: a slim Agent record — top-level '
+              . '`name` (required), `description`, `system_prompt`, `max_steps`, '
+              . '`allow_followup`, `retry_after_minutes`, `max_retries`, and '
+              . '`required_plugins` (array of plugin slugs). Do NOT nest fields '
+              . 'under `agent{}` and do NOT send `tools[]` — the LLM-facing flow '
+              . 'is two-phase (create_agent → configure_tools(agent_id: N) → '
+              . 'read_agent(agent_id: N)). The full Agent Template shape '
+              . '(with id/version/agent{}/tools[]) is reserved for the '
+              . 'operator-upload endpoint at POST /api/v1/agent-templates/import. '
+              . 'See the agent-creation skill (skill action: read, name: '
+              . 'agent-creation, filename: SKILL.md) for the exact shape and '
+              . 'Common-mistakes table. Ignored by every other operation.',
     required: ['create_agent'],
 )]
 #[ToolParameter(
@@ -264,8 +269,6 @@ final class AgentTool extends AbstractTool
     public function __construct(
         private readonly AgentServiceInterface $agentService,
         private readonly AgentToolSettingsServiceInterface $toolSettings,
-        private readonly AgentTemplateImporter $templateImporter,
-        private readonly AgentTemplateValidator $templateValidator,
         private readonly AgentManifest $manifest,
         private readonly ?PluginLoader $pluginLoader = null,
         private readonly ?ToolIconResolver $iconResolver = null,
@@ -666,36 +669,160 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * Run the shared pre-import guards (user, payload, validator) and
-     * return a `ToolResult` on the first failure, or the validated payload
-     * on success. Kept out of createAgent() to drop that method below the
+     * Slim `create_agent` payload validator. Returns either the prepared
+     * AgentService-ready data shape or a failure ToolResult. Extracted
+     * from {@see self::createAgent()} so the dispatcher stays under the
      * SonarCloud S1142 3-return ceiling.
      *
+     * Slim shape (mirrors {@see AgentService::createAgent()}):
+     *   - name                  required, 1..200 chars
+     *   - description           optional, ≤2000 chars
+     *   - system_prompt        optional
+     *   - max_steps             optional int 1..100, default 10
+     *   - allow_followup        optional bool, default true
+     *   - retry_after_minutes   optional int, default 0
+     *   - max_retries          optional int, default 0
+     *   - required_plugins      optional list<string> of slugs
+     *
+     * The agent-template.schema.json shape (id, name, version, agent{},
+     * required_plugins[]) is reserved for the operator-upload
+     * endpoint at POST /api/v1/agent-templates/import. Driving the
+     * operator flow through an AgentTool's LLM-facing surface was the
+     * root cause of the task #46 failures — too many nested keys, too
+     * easy to put `name` inside agent{} or send `required_plugins` as
+     * `{item: "..."}` instead of `["..."]`.
+     *
      * @param array<string, mixed> $arguments
-     * @return array{userId: int, payload: array<string, mixed>}|ToolResult
+     * @return array<string, mixed>|ToolResult
      */
-    private function prepareCreateAgent(?int $userId, array $arguments): array|ToolResult
+    private function validateCreateAgentPayload(?int $userId, array $arguments): array|ToolResult
     {
-        $payload = (array) ($arguments['payload'] ?? []);
-        $validation = $this->templateValidator->validate($payload);
-        // Collapse the three independent failure paths into a single match
-        // arm so the method stays under the S1142 3-return ceiling.
+        $raw = $arguments['payload'] ?? null;
+        // The match collapses the four independent failure paths into
+        // one branch so this method stays under the 3-return ceiling.
         $error = match (true) {
             $userId === null
                 => 'create_agent requires an authenticated user.',
-            $payload === []
-                => 'create_agent: payload object is required.',
-            !$validation->isValid()
-                => 'create_agent: payload failed validation: '
-                   . $this->summarizeValidationErrors($validation)
-                   . ' Re-read the agent-creation skill (skill action: read, name: agent-creation, '
-                   . 'filename: SKILL.md) for the exact schema.',
-            default => null,
+            !is_array($raw) || $raw === []
+                => 'create_agent: `payload` object is required.',
+            isset($raw['agent']) && is_array($raw['agent'])
+                => 'create_agent: send a slim payload (name, description, system_prompt, ...) — '
+                   . 'do NOT wrap fields in an `agent{}` block. See the agent-creation skill '
+                   . '(skill action: read, name: agent-creation, filename: SKILL.md).',
+            isset($raw['tools']) && $raw['tools'] !== []
+                => 'create_agent: `tools[]` is no longer accepted here. Create the agent first, '
+                   . 'then call `configure_tools(agent_id: N, tools: [...])` to apply a toolset. '
+                   . 'See the agent-creation skill.',
+            default => $this->createAgentPayloadErrors($raw),
         };
-        if ($error !== null) {
+        if ($error instanceof ToolResult) {
+            return $error;
+        }
+        if (is_string($error)) {
             return ToolResult::fail($error);
         }
-        return ['userId' => $userId, 'payload' => $payload];
+        // Also verify the name. The error list above leaves the
+        // unset-name case unreported — surface it here.
+        $name = is_string($raw['name'] ?? null) ? trim($raw['name']) : '';
+        if ($name === '' || strlen($name) > 200) {
+            return ToolResult::fail(
+                'create_agent: `name` is required (1..200 chars). '
+                . 'Send `name: "..."` at the top level of the payload, not inside `agent{}`.',
+            );
+        }
+        // Normalize into AgentService::createAgent's expected shape.
+        return [
+            'name'                => $name,
+            'description'         => is_string($raw['description'] ?? null) ? $raw['description'] : null,
+            'system_prompt'       => is_string($raw['system_prompt'] ?? null) ? $raw['system_prompt'] : null,
+            'llm_driver_config_id' => null,
+            'max_steps'           => (int) ($raw['max_steps'] ?? 10),
+            'allow_followup'      => (bool) ($raw['allow_followup'] ?? true),
+        ];
+    }
+
+    /**
+     * Validate the slim payload's option keys (`max_steps`,
+     * `allow_followup`, `retry_after_minutes`, `max_retries`,
+     * `required_plugins`). Returns null on success or a ToolResult on
+     * failure. Pulled out so {@see self::validateCreateAgentPayload()}
+     * stays under the S1142 3-return ceiling.
+     *
+     * @param mixed $raw
+     */
+    private function createAgentPayloadErrors(mixed $raw): ?ToolResult
+    {
+        if (!is_array($raw)) {
+            return ToolResult::fail('create_agent: `payload` object is required.');
+        }
+        // Each rule emits a literal "send X instead" example so the
+        // LLM can copy-paste the fix rather than guess.
+        if (array_key_exists('max_steps', $raw)
+            && (!is_int($raw['max_steps']) || $raw['max_steps'] < 1 || $raw['max_steps'] > 100)
+        ) {
+            return ToolResult::fail(
+                'create_agent: `max_steps` must be an integer in 1..100. '
+                . 'Send `"max_steps": 10` (note: not a string).',
+            );
+        }
+        if (array_key_exists('allow_followup', $raw) && !is_bool($raw['allow_followup'])) {
+            return ToolResult::fail(
+                'create_agent: `allow_followup` must be a boolean. '
+                . 'Send `"allow_followup": true`, not the string `"true"`.',
+            );
+        }
+        if (array_key_exists('retry_after_minutes', $raw)
+            && (!is_int($raw['retry_after_minutes']) || $raw['retry_after_minutes'] < 0)
+        ) {
+            return ToolResult::fail(
+                'create_agent: `retry_after_minutes` must be a non-negative integer.',
+            );
+        }
+        if (array_key_exists('max_retries', $raw)
+            && (!is_int($raw['max_retries']) || $raw['max_retries'] < 0)
+        ) {
+            return ToolResult::fail(
+                'create_agent: `max_retries` must be a non-negative integer.',
+            );
+        }
+        if (array_key_exists('required_plugins', $raw)) {
+            $plugins = $raw['required_plugins'];
+            // `required_plugins` arrived from the LLM as a string, an
+            // object (the `{item: "weather"}` OpenAI serialization wrap),
+            // or an array of strings. Accept only the canonical array
+            // shape — the failure message tells the LLM exactly what
+            // to send.
+            if (!is_array($plugins) || (!$this->isListOfStrings($plugins) && $plugins !== [])) {
+                return ToolResult::fail(
+                    'create_agent: `required_plugins` must be an array of strings. '
+                    . 'Send `"required_plugins": ["weather"]`, not `{"item": "weather"}` or `["weather"]` '
+                    . 'wrapped in an object. Get slugs from `get_available_tools` under the `plugin_slug` field.',
+                );
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param mixed $value
+     */
+    private function isListOfStrings(mixed $value): bool
+    {
+        if (!is_array($value)) {
+            return false;
+        }
+        if ($value === []) {
+            return true;
+        }
+        if (!array_is_list($value)) {
+            return false;
+        }
+        foreach ($value as $entry) {
+            if (!is_string($entry)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -703,20 +830,22 @@ final class AgentTool extends AbstractTool
      */
     private function createAgent(?int $userId, array $arguments): ToolResult
     {
-        $prepared = $this->prepareCreateAgent($userId, $arguments);
-        if ($prepared instanceof ToolResult) {
-            return $prepared;
+        $data = $this->validateCreateAgentPayload($userId, $arguments);
+        if ($data instanceof ToolResult) {
+            return $data;
         }
 
-        $result = $this->templateImporter->importPayload($prepared['userId'], $prepared['payload']);
-
+        $agent = $this->agentService->createAgent($userId, $data);
+        // Output the canonical manifest + a one-line "next steps"
+        // pointer. The LLM gets the same shape it would get from a
+        // follow-up `read_agent(agent_id: N)`.
+        $intro = "Created agent #{$agent->id} ('{$agent->name}'). "
+               . "Configure tools next with `configure_tools(agent_id: {$agent->id}, tools: [...])` "
+               . "and verify with `read_agent(agent_id: {$agent->id})`.";
+        $manifest = $this->manifest->toArray($agent);
         return ToolResult::ok(
-            "Created agent #{$result->agent->id} ('{$result->agent->name}').",
-            [
-                'agent'         => AgentResource::toArray($result->agent),
-                'tools_enabled' => $result->toolsEnabled,
-                'warnings'      => $result->warnings,
-            ],
+            $intro . "\n\n" . AgentManifestRenderer::markdown($manifest),
+            $manifest,
         );
     }
 
@@ -1001,14 +1130,5 @@ final class AgentTool extends AbstractTool
     private function humanBytes(int $length): string
     {
         return $length . ' chars';
-    }
-
-    private function summarizeValidationErrors(ValidationResult $result): string
-    {
-        $messages = [];
-        foreach ($result->errors() as $error) {
-            $messages[] = $error['message'];
-        }
-        return implode('; ', $messages);
     }
 }
