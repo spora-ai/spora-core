@@ -127,42 +127,70 @@ function stubManifestAgent(int $id, string $name = 'Test'): Agent
     return $agent;
 }
 
-describe('AgentTool::execute — read_agent_configuration', function (): void {
-    test('returns the canonical manifest with Markdown content', function (): void {
-        [$tool, $service, $toolSettings] = makeAgentTool();
+describe('AgentTool::execute — read_agent_configuration (deprecated, soft-redirect)', function (): void {
+    // `read_agent_configuration` is the legacy name. It now redirects to
+    // `read_agent(self)` so any task that learned the old name still
+    // gets the canonical manifest. The deprecation note is prepended to
+    // `result_content`. Hard-remove in a later release.
+
+    test('soft-redirects to read_agent(self) and returns the canonical manifest', function (): void {
+        // Real DB: the redirect path goes through read_agent(self),
+        // which queries the agents table by id.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'redirect-self@example.com');
+        [$tool, , $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
-        $agent = stubManifestAgent(id: 7, name: 'Alpha');
-        $service->allows('getAgentByAgentId')->andReturn($agent);
         $toolSettings->allows('getAllToolsStatus')->andReturn([]);
         $toolSettings->allows('getToolsOperations')->andReturn([]);
 
-        $result = $tool->execute(['action' => 'read_agent_configuration'], 7, 99);
+        $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'user_id'              => $ownerId,
+            'name'                 => 'Alpha',
+            'description'          => null,
+            'system_prompt'        => null,
+            'notes'                => null,
+            'max_steps'            => 10,
+            'allow_followup'       => 1,
+            'retry_after_minutes'  => 0,
+            'max_retries'          => 0,
+            'is_active'            => 1,
+            'created_at'           => date('Y-m-d H:i:s'),
+            'updated_at'           => date('Y-m-d H:i:s'),
+        ]);
+
+        $result = $tool->execute(
+            ['action' => 'read_agent_configuration'],
+            $callingId,
+            $ownerId,
+        );
 
         expect($result->success)->toBeTrue();
         /** @var array<string, mixed> $data */
         $data = $result->data;
-        expect($data['agent_id'])->toBe(7)
-            ->and($data['name'])->toBe('Alpha')
-            ->and($data['tools'])->toBe([])
-            ->and($data['missing_required'])->toBe([]);
-        // result_content is the Markdown wrapper — preamble + two JSON blocks.
+        expect($data['agent_id'])->toBe($callingId)
+            ->and($data['name'])->toBe('Alpha');
+        // The deprecation note reaches the LLM in `result_content` so
+        // any model trained on the old operation name pivots.
         expect($result->content)
-            ->toContain("## Agent #7 \u{2014} Alpha")
-            ->toContain('### Base config')
-            ->toContain('### Tool config');
+            ->toContain('_(deprecated: read_agent_configuration')
+            ->toContain("## Agent #{$callingId} \u{2014} Alpha");
     });
 
-    test('returns failure when Agent::find returns null', function (): void {
-        [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
-        $service->allows('getAgentByAgentId')->andReturn(null);
+    test('returns failure when the calling agent row does not exist', function (): void {
+        // No real row, so the redirect → read_agent(self) returns
+        // AGENT_NOT_FOUND. Kept as a smoke test for the failure path.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'redirect-missing@example.com');
+        [$tool] = makeAgentTool();
 
-        $result = $tool->execute(['action' => 'read_agent_configuration'], 999);
+        $result = $tool->execute(
+            ['action' => 'read_agent_configuration'],
+            999,
+            $ownerId,
+        );
 
         expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('not found');
+            ->and($result->content)->toContain('not found or not owned');
     });
 });
 
@@ -669,12 +697,14 @@ describe('AgentTool::execute — get_available_tools', function (): void {
     });
 
     test('renders per-operation enabled + requires_approval from effective state', function (): void {
-        // Use AgentTool as the target: it ships 7 #[ToolOperation] entries
-        // with a mix of enabledByDefault / requiresApprovalByDefault flags,
-        // and `getToolsOperations` is easy to drive from a mock. The
+        // Use AgentTool as the target: it ships a mix of
+        // #[ToolOperation] entries with varied
+        // enabledByDefault / requiresApprovalByDefault flags, and
+        // `getToolsOperations` is easy to drive from a mock. The
         // presenter enumerates operations in declaration order, so we
-        // expect `read_agent_configuration` first and `write_agent_configuration`
-        // second in the response.
+        // pin `read_agent` (enabled, no approval) and
+        // `write_agent_configuration` (disabled, requires approval) as
+        // the two anchors for the assertion.
         [$tool, $service, $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
@@ -695,7 +725,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         $toolSettings->allows('getToolsOperations')->andReturn([
             [
                 'tool_class'                  => AgentTool::class,
-                'operation'                   => 'read_agent_configuration',
+                'operation'                   => 'read_agent',
                 'effective_enabled'           => true,
                 'effective_requires_approval' => false,
             ],
@@ -712,12 +742,12 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
         $opsByName = [];
         foreach ($payload['tools'][0]['operations'] as $op) {
-            if (in_array($op['name'], ['read_agent_configuration', 'write_agent_configuration'], true)) {
+            if (in_array($op['name'], ['read_agent', 'write_agent_configuration'], true)) {
                 $opsByName[$op['name']] = $op;
             }
         }
-        expect($opsByName['read_agent_configuration']['enabled'])->toBeTrue()
-            ->and($opsByName['read_agent_configuration']['requires_approval'])->toBeFalse();
+        expect($opsByName['read_agent']['enabled'])->toBeTrue()
+            ->and($opsByName['read_agent']['requires_approval'])->toBeFalse();
         expect($opsByName['write_agent_configuration']['enabled'])->toBeFalse()
             ->and($opsByName['write_agent_configuration']['requires_approval'])->toBeTrue();
     });
@@ -753,9 +783,12 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         foreach ($payload['tools'][0]['operations'] as $op) {
             $opsByName[$op['name']] = $op;
         }
-        // read_agent_configuration: enabledByDefault=true, requiresApprovalByDefault=false
-        expect($opsByName['read_agent_configuration']['enabled'])->toBeTrue()
-            ->and($opsByName['read_agent_configuration']['requires_approval'])->toBeFalse();
+        // read_agent: enabledByDefault=false, requiresApprovalByDefault=false —
+        // same defaults the existing agent had before the action split
+        // (read_agent_configuration was also a disabled-by-default op
+        // until the first time the operator enabled it).
+        expect($opsByName['read_agent']['enabled'])->toBeFalse()
+            ->and($opsByName['read_agent']['requires_approval'])->toBeFalse();
         // write_agent_configuration: enabledByDefault=false, requiresApprovalByDefault=true
         expect($opsByName['write_agent_configuration']['enabled'])->toBeFalse()
             ->and($opsByName['write_agent_configuration']['requires_approval'])->toBeTrue();
@@ -1596,12 +1629,33 @@ test('write_agent_configuration silently drops unknown keys (confirmed via read_
 
     expect($writeResult->success)->toBeTrue();
 
-    // Confirm via read_agent_configuration: the manifest only emits the
+    // Confirm via read_agent(self): the manifest only emits the
     // canonical allowlist (base-config + tool-config blocks), so unknown
     // keys never appear in the LLM's confirmation loop. The `notes`
     // strip also held — the field on the returned manifest is the
     // pre-existing value, not the sneaky patch.
-    $readResult = $tool->execute(['action' => 'read_agent_configuration'], 7, 99);
+    //
+    // Real DB so read_agent(self) can resolve the calling-agent row.
+    // The $service mock above only stubs the write path; the read
+    // path goes through Agent::query() on the live connection.
+    $auth    = bootAuthLayer();
+    $ownerId = bootAuth($auth, 'write-then-read@example.com');
+    Illuminate\Database\Capsule\Manager::table('agents')->insert([
+        'id'                  => 7,
+        'user_id'              => $ownerId,
+        'name'                 => 'New Name',
+        'description'          => 'pre-existing',
+        'system_prompt'        => 'updated',
+        'notes'                => 'pre-existing notes',
+        'max_steps'            => 10,
+        'allow_followup'       => 1,
+        'retry_after_minutes'  => 0,
+        'max_retries'          => 0,
+        'is_active'            => 1,
+        'created_at'           => date('Y-m-d H:i:s'),
+        'updated_at'           => date('Y-m-d H:i:s'),
+    ]);
+    $readResult = $tool->execute(['action' => 'read_agent'], 7, $ownerId);
     expect($readResult->success)->toBeTrue();
     /** @var array<string, mixed> $readData */
     $readData = $readResult->data;

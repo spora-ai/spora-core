@@ -43,7 +43,11 @@ use Spora\Tools\ValueObjects\ToolResult;
  * a sub-agent with a chosen toolset via `create_agent`.
  *
  * Operations:
- *   - read_agent_configuration  (enabled, no approval)
+ *   - read_agent               (disabled, no approval; takes optional agent_id,
+ *                                otherwise reads the calling agent)
+ *   - read_agent_configuration (DEPRECATED — soft-redirected to read_agent(self);
+ *                                kept for one release to avoid breaking historical
+ *                                tasks that learned the old name)
  *   - write_agent_configuration (disabled, requires approval)
  *   - read_notes                (enabled, no approval)
  *   - write_notes               (enabled, no approval; append/prepend only)
@@ -65,21 +69,16 @@ use Spora\Tools\ValueObjects\ToolResult;
     category: 'agent',
     icon: 'bot',
 )]
-#[ToolOperation(
-    name: 'read_agent_configuration',
-    description: 'Read the full configuration of the calling agent (name, description, '
-               . 'system prompt, notes, max steps, continuation, retry, pin/archive/favorite, '
-               . 'enabled tools). ... Read full docs: skills/agent-creation/SKILL.md.',
-    enabledByDefault: true,
-    requiresApprovalByDefault: false,
-)]
+// `read_agent_configuration` is no longer a class-level ToolOperation —
+// it duplicates `read_agent(self)`. The legacy name is soft-redirected
+// to `read_agent({})` in {@see self::execute()} below.
 #[ToolOperation(
     name: 'write_agent_configuration',
     description: 'Update editable fields on this agent (name, description, system_prompt, max_steps, '
                . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived, is_favorite). '
                . 'Notes MUST go through write_notes / write_notes_overwrite — they are stripped from '
                . 'this patch. Unknown keys (llm_driver_config_id, anything else outside the allowlist) '
-               . 'are silently dropped at the database layer; call read_agent_configuration afterwards '
+               . 'are silently dropped at the database layer; call read_agent afterwards '
                . 'to confirm the change took effect. For full allowlist and common pitfalls, read the '
                . 'agent-creation skill (skill action: read, name: agent-creation, filename: SKILL.md).',
     enabledByDefault: false,
@@ -278,8 +277,16 @@ final class AgentTool extends AbstractTool
     {
         $operation = $this->getOperationName($arguments);
 
+        // Soft-redirect the deprecated read_agent_configuration to
+        // read_agent(self). One read action surfaces from the LLM's
+        // side; the legacy name keeps returning manifest shape for
+        // any task that learned the old enum. Hard-remove in a later
+        // release.
+        if ($operation === 'read_agent_configuration') {
+            return $this->redirectReadAgentConfiguration($agentId, $userId);
+        }
+
         return match ($operation) {
-            'read_agent_configuration'  => $this->readConfiguration($agentId),
             'write_agent_configuration' => $this->writeConfiguration($agentId, $arguments),
             'read_notes'                => $this->readNotes($agentId),
             'write_notes'               => $this->writeNotes($agentId, $arguments, 'append'),
@@ -321,15 +328,10 @@ final class AgentTool extends AbstractTool
         };
     }
 
-    private function readConfiguration(int $agentId): ToolResult
-    {
-        $agent = $this->agentService->getAgentByAgentId($agentId);
-        if ($agent === null) {
-            return ToolResult::fail(self::AGENT_NOT_FOUND);
-        }
-
-        return $this->renderManifestResult($agent);
-    }
+    // `readConfiguration` (used by the deprecated `read_agent_configuration`
+    // operation) used to live here. The dispatch now redirects to
+    // `read_agent(self)` directly via
+    // {@see self::redirectReadAgentConfiguration()} so the method is gone.
 
     /**
      * @param array<string, mixed> $arguments
@@ -1048,6 +1050,26 @@ final class AgentTool extends AbstractTool
             return $target;
         }
         return $this->renderManifestResult($target);
+    }
+
+    /**
+     * Soft-redirect for the deprecated `read_agent_configuration`
+     * operation. Routes to `read_agent(self)` and prepends a single
+     * deprecation note to the result content so any LLM that learned
+     * the old name still gets a usable response while the next release
+     * hard-removes the operation.
+     */
+    private function redirectReadAgentConfiguration(int $callingAgentId, ?int $userId): ToolResult
+    {
+        $result = $this->readAgent($callingAgentId, $userId, []);
+        if (!$result->success) {
+            return $result;
+        }
+        return ToolResult::ok(
+            "_(deprecated: read_agent_configuration — use `read_agent` without `agent_id`)_\n\n"
+            . $result->content,
+            $result->data,
+        );
     }
 
     /**

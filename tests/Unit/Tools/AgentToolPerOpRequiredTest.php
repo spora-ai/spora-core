@@ -23,12 +23,12 @@ it('declares `agent` as required only for write_agent_configuration', function (
     expect($schema['__required_when']['agent'] ?? null)
         ->toBe(['write_agent_configuration']);
 
-    // Agent allowed only read/write_configuration → agent stays required.
+    // Agent allowed only write_agent_configuration → `agent` stays required.
     $writeOnly = OperationSchemaFilter::filter($schema, ['write_agent_configuration'], 'action');
     expect($writeOnly['required'])->toContain('agent');
 
-    // Agent allowed only read_agent_configuration → `agent` is dropped.
-    $readOnly = OperationSchemaFilter::filter($schema, ['read_agent_configuration'], 'action');
+    // Agent allowed only read_agent → `agent` is dropped.
+    $readOnly = OperationSchemaFilter::filter($schema, ['read_agent'], 'action');
     expect($readOnly['required'])->not->toContain('agent');
 
     // Empty allowed-set (tool disabled) → `agent` drops out too.
@@ -50,12 +50,12 @@ it('declares `content` as required for write_notes and write_notes_overwrite', f
     $overwrite = OperationSchemaFilter::filter($schema, ['write_notes_overwrite'], 'action');
     expect($overwrite['required'])->toContain('content');
 
-    // read_notes / read_agent_configuration → content drops out.
+    // read_notes / read_agent → content drops out.
     $read = OperationSchemaFilter::filter($schema, ['read_notes'], 'action');
     expect($read['required'])->not->toContain('content');
 
-    $readConfig = OperationSchemaFilter::filter($schema, ['read_agent_configuration'], 'action');
-    expect($readConfig['required'])->not->toContain('content');
+    $readAgent = OperationSchemaFilter::filter($schema, ['read_agent'], 'action');
+    expect($readAgent['required'])->not->toContain('content');
 });
 
 it('declares `payload` as required only for create_agent', function (): void {
@@ -83,7 +83,9 @@ it('keeps `action` and `mode` as globally required or enum-restricted regardless
     $schema = ToolParameterSchemaBuilder::build(AgentTool::class);
 
     // `action` is the synthesized discriminator — always required.
-    foreach (['write_notes', 'create_agent', 'read_agent_configuration'] as $op) {
+    // Enum covers the live operations; `read_agent_configuration` was
+    // removed when it became a soft-redirect to `read_agent(self)`.
+    foreach (['write_notes', 'create_agent', 'read_agent', 'configure_tools'] as $op) {
         $filtered = OperationSchemaFilter::filter($schema, [$op], 'action');
         expect($filtered['required'])->toContain('action')
             ->and($filtered['properties']['action']['enum'])->toContain($op);
