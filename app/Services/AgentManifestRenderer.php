@@ -50,6 +50,10 @@ final class AgentManifestRenderer
         $tools     = (array) ($manifest['tools'] ?? []);
         $total     = count($tools);
         $enabled   = count(array_filter($tools, static fn(array $t): bool => (bool) $t['enabled']));
+        $disabled  = array_values(array_map(
+            static fn(array $t): string => (string) $t['tool_class'],
+            array_filter($tools, static fn(array $t): bool => !(bool) $t['enabled']),
+        ));
         $missing   = count((array) ($manifest['missing_required'] ?? []));
 
         $header = sprintf(
@@ -64,6 +68,15 @@ final class AgentManifestRenderer
             $total,
             $missing,
         );
+
+        // Operators who want to know which classes are inactive
+        // without scanning the trailing tools[] block get the FQCNs
+        // enumerated here. Cheap: just short class names, no
+        // description or per-op state. Empty list omitted entirely so
+        // the all-enabled case stays clean.
+        $disabledLine = $disabled === []
+            ? null
+            : 'Disabled: ' . implode(', ', $disabled);
 
         $base = [
             'agent_id'            => $agentId,
@@ -85,19 +98,26 @@ final class AgentManifestRenderer
         $toolBlock = [
             'tools'            => $tools,
             'missing_required' => $manifest['missing_required'] ?? [],
+            // Per-op override audit trail — emitted in tool-block since
+            // it documents the toolset the operator is reading about.
+            'overrides'        => $manifest['overrides'] ?? [],
             'warnings'         => $manifest['warnings'] ?? [],
         ];
 
-        return implode("\n\n", [
-            $header,
-            $statusLine,
-            "### Base config\n\n```json\n"
-                . self::prettyJson($base)
-                . "\n```",
-            "### Tool config\n\n```json\n"
-                . self::prettyJson($toolBlock)
-                . "\n```",
-        ]) . "\n";
+        return implode("\n\n", array_filter(
+            [
+                $header,
+                $statusLine,
+                $disabledLine,
+                "### Base config\n\n```json\n"
+                    . self::prettyJson($base)
+                    . "\n```",
+                "### Tool config\n\n```json\n"
+                    . self::prettyJson($toolBlock)
+                    . "\n```",
+            ],
+            static fn(?string $line): bool => $line !== null,
+        )) . "\n";
     }
 
     /**

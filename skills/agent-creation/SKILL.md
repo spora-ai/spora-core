@@ -1,12 +1,12 @@
 ---
 name: agent-creation
-description: "When the user asks to create, set up, scaffold, or configure a new Spora agent, sub-agent, or specialised assistant; OR when a sub-task needs a toolset different from the calling agent's. Use for tasks like 'create me a weather agent', 'I need a research sub-agent', or 'scaffold a translator'. Do NOT use for editing the current agent's notes or routine fields — those go through write_notes / write_agent_configuration directly. Recommended tools: agent (operations read_agent, get_available_tools, read_notes, write_notes, create_agent, configure_tools, write_agent_configuration)."
+description: "When the user asks to create, set up, scaffold, or configure a new Spora agent, sub-agent, or specialised assistant; OR when a sub-task needs a toolset different from the calling agent's; OR when the user wants to edit an existing agent's configuration (name, description, system_prompt, scheduling, flags). Use for tasks like 'create me a weather agent', 'I need a research sub-agent', 'scaffold a translator', or 'rename agent 42 to Translation bot'. Do NOT use for editing the current agent's notes — those go through write_notes. Recommended tools: agent (operations create_agent, configure_tools, read_agent, update_agent, list_agents, get_available_tools, read_notes, write_notes, write_notes_overwrite)."
 license: Apache-2.0
 metadata:
   author: spora-ai
-  version: "2.0"
+  version: "2.1"
   allowedByDefault: false
-  requiresTools: "agent:read_agent,agent:get_available_tools,agent:read_notes,agent:write_notes,agent:create_agent,agent:configure_tools,agent:write_agent_configuration"
+  requiresTools: "agent:create_agent,agent:configure_tools,agent:read_agent,agent:update_agent,agent:list_agents,agent:get_available_tools,agent:read_notes,agent:write_notes"
 ---
 
 # Agent creation
@@ -22,7 +22,17 @@ Trigger on any of:
 - "Configure a new assistant like this one but with different tools"
 - Any time the operator's intent is "make me a new agent" or "add a new assistant".
 
-Do NOT use this skill for editing the *current* agent's notes (use `write_notes`) or for changing the current agent's name/system prompt (use `write_agent_configuration` directly — it's the right tool for in-place edits).
+Do NOT use this skill for editing the *current* agent's notes (use `write_notes`) or for changing the current agent's name/system prompt (use `update_agent` directly — it's the right tool for in-place edits).
+
+## List your existing agents before creating a new one
+
+Before driving the create-agent flow, run `agent(action: "list_agents")` if there's any chance the user already has agents you could reuse or rename. The operator's most common reason to ask "create me a translator agent" is that they lost the agent_id after a turn boundary — `create_agent` returns a fresh pk each time it runs, so the cheap recovery is:
+
+```json
+{ "action": "list_agents" }
+```
+
+Returns a slim list of `{agent_id, name, description}` rows (`#4 Custom Agent — does X`) owned by the current user, ordered newest-first. Empty list means "go ahead and create". If the agent you want already exists at row N, skip step 1 — call `update_agent(agent_id: N, agent: {…})` or `configure_tools(agent_id: N, tools: […])` directly. `update_agent` accepts an optional `agent_id`; omitting it edits the calling agent.
 
 ## Mandatory pre-flight
 
@@ -84,8 +94,6 @@ Every agent read/write operation speaks this shape. `result_content` is the Mark
   "tools": [
     {
       "tool_class": "Spora\\Plugins\\Weather\\Tools\\WeatherApiTool",
-      "display_name": "Weather API",
-      "description": "Fetch weather data…",
       "icon": "sun",
       "enabled": true,
       "operations": [
@@ -104,8 +112,11 @@ Every agent read/write operation speaks this shape. `result_content` is the Mark
 
 Key invariants:
 
-- `agent_id` is the numeric primary key. **`template_id` is no longer an identifier** — templates are creation labels, and multiple agents can share one. Always carry forward the numeric `agent_id` from `create_agent`.
+- `agent_id` is the numeric primary key. **`template_id` is no longer an identifier** — templates are creation labels, and multiple agents can share one. Always carry forward the numeric `agent_id` from `create_agent` (or `list_agents`).
+- Per-tool entries in `tools[]` carry only `tool_class`, `icon`, `enabled`, and `operations[]` — slim by design, since `read_agent` / `update_agent` / `configure_tools` responses run on every LLM turn. Browsing-style enrichment (`display_name`, `description`) stays on `get_available_tools` (operator-facing). Pin the slim shape in your reply so an upstream change can't silently bloat the response.
 - `tools[]` lists every registered tool (with `enabled: true|false`) so you can see at a glance what's active and what isn't. Per-tool `operations[]` carries the effective `enabled` / `requires_approval` state after per-agent overrides fold in.
+- The Markdown preamble adds a `Disabled: ClassA, ClassB, …` line under the status line when at least one tool is disabled. The line is omitted entirely on the all-enabled case so the all-green path stays clean.
+- `overrides[]` carries the per-operation audit trail — `{tool_class, operation, enabled, default_requires_approval}` rows for every op where the operator actively overrode the tool's default. **`enabled` and `default_requires_approval` are nullable**: `null` means the operator kept the tool's default for that field, `true|false` means the operator explicitly set it. This is what proves a `configure_tools` patch with `auto_approve: true` actually persisted — the `tools[i].operations[j].requires_approval` effective value would show `false` either way, but `overrides[]` is the only place that records "the operator's call landed on this op".
 - `missing_required: ["<tool_class>:<setting_key>", ...]` lists configuration that blocks enablement. `[]` means no blockers.
 - `warnings: []` is empty on success. Operator-upload templates may populate it with `TOOL_PLUGIN_MISSING` notes.
 
@@ -118,6 +129,22 @@ The LLM does NOT create an agent and configure its tools in one call. Use:
 3. **`read_agent(agent_id: <the new id>)`** — verify the toolset is exactly what you wanted.
 
 Call them in order. The result_content of each ends with the canonical manifest (via the two-JSON-block Markdown wrapper) so you can confirm what landed without a follow-up read.
+
+## Sub-agent isolation
+
+AgentTool itself ships with **inconsistent defaults by design**. Verbatim from `app/Tools/AgentTool.php`:
+
+| Operation | `enabledByDefault` | `requiresApprovalByDefault` |
+| --- | --- | --- |
+| `read_notes`, `write_notes`, `list_agents` | `true` | `false` |
+| `read_agent`, `get_available_tools` | `false` | `false` |
+| `update_agent` (and deprecated `write_agent_configuration`), `create_agent`, `configure_tools`, `write_notes_overwrite` | `false` | `true` |
+
+In plain terms: a freshly-enabled sub-agent **can read its own notes, append notes, and list its sibling agents**, but it cannot create / edit / configure any agent (including itself) without an operator tap. That's the safe default for a research or worker agent.
+
+If you need to fully lock the sub-agent out of `agent` — i.e. exclude the tool entirely from its manifest — disable the `agent` tool at the agent-level in the dashboard, not per-operation. Per-op `enabled: false` keeps the entries visible in the manifest so you can audit the intent (the operator can still see "this op is disabled on purpose"), while a fully-disabled tool entry is dropped from `tools[]` entirely.
+
+The Markdown preamble of every `read_agent` / `configure_tools` response shows the disabled FQCNs in a single `Disabled: ClassA, ClassB, …` line so the operator can scan the perimeter at a glance without parsing the trailing `tools[]` block.
 
 ### Step 1 — `create_agent`
 
@@ -224,6 +251,27 @@ The LLM-facing `create_agent` accepts only a slim subset of the agent-template s
 | `agent_id` | no | Numeric pk returned by `create_agent`. Omit to operate on the calling agent. Cross-user agent ids return "not found". |
 | `tools` | yes | Array of `{ tool_class, enabled?, operations?: [{ name, enabled?, auto_approve? }] }`. Empty array is valid (removes everything on the targeted agent — usually not what you want). |
 
+#### Delta syntax
+
+Even for a single-operation change, **send the full tool object** (including `tool_class`) inside `tools[]`. There is no path-tool / op-id dotted-address syntax — every entry is the complete tool record. For example, to flip `TimeTool.now.auto_approve` from true to false:
+
+```json
+{
+  "action": "configure_tools",
+  "agent_id": 6,
+  "tools": [
+    {
+      "tool_class": "Spora\\Tools\\TimeTool",
+      "operations": [
+        { "name": "now", "auto_approve": false }
+      ]
+    }
+  ]
+}
+```
+
+If the same entry is sent without `tool_class`, the resolver can't bind the operation to a tool and the call fails validation. Omit a field to keep its current value; send a value to override it.
+
 Each tool entry:
 
 - `tool_class` — FQCN string. **Get this from `get_available_tools`.** NOT `call_name` (v2 removed) and NOT `tool_name` (v2 removed).
@@ -239,21 +287,35 @@ The slim `create_agent` + `configure_tools(agent_id?)` flow fixes these directly
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `do NOT wrap fields in an agent{} block` | Sent legacy `agent: { name, description, ... }` | Send a slim flat payload: `{ name, description, ... }` at top level |
+| `do NOT wrap fields in an agent{} block` | Sent legacy `agent: { name, description, ... }` to `update_agent` (this is the right shape for `update_agent`, not `create_agent`) — or sent `agent: {…}` to `create_agent` | For `create_agent`: send the slim flat payload `{ name, description, ... }` at top level. For `update_agent`: keep the `agent: { … }` wrapper — that's the canonical shape. |
 | `tools[]` is no longer accepted here | Sent `tools: [...]` inside `create_agent` payload | Create the agent first, then call `configure_tools(agent_id: N, tools: [...])` |
-| `required_plugins must be an array of strings` | Sent a bare string (`"weather"`) or `{item: "weather"}` wrap | Send `"required_plugins": ["weather"]` — an array of slug strings from `get_available_tools.plugin_slug` |
+| `required_plugins must be an array of strings` | Sent a bare string (`"weather"`) | Send `"required_plugins": ["weather"]` — an array of slug strings from `get_available_tools.plugin_slug` |
 | `max_steps must be an integer in 1..100` | Sent a string or out-of-range int | Send `max_steps: 10` (integer, not string) |
 | `allow_followup must be a boolean` | Sent the string `"true"` | Send `allow_followup: true` (real bool, not string) |
-| `\`template_id\` is no longer an identifier` | Sent `template_id: "weather-agent"` to `read_agent` or `configure_tools` | Use the numeric `agent_id` you got from `create_agent` |
+| `\`template_id\` is no longer an identifier` | Sent `template_id: "weather-agent"` to `read_agent`, `configure_tools`, `update_agent`, or `list_agents` | Use the numeric `agent_id` you got from `create_agent` (or `list_agents`) |
 | `\`agent_id\` must be a positive integer` | Sent zero, a string, or omitted entirely + couldn't fall back | Use a numeric `agent_id`; if omitted is intended, the agent must exist as the calling agent |
-| `configure_tools: operations[0][item]` | Sent inner arrays wrapped as `{item: [...]}` (an OpenAI serialization quirk) | Send the array literally: `[{name: "now", enabled: true}]` |
+| `configure_tools: operations[0][item]` | Sent inner arrays wrapped as `{item: […]}` (an OpenAI-tools serialization quirk) | Send the array literally: `[{name: "now", enabled: true}]` — the tool auto-unwraps the `{item: …}` quirk defensively, but plain arrays are preferred |
 | `configure_tools: tool entry #N must be an object` | Sent the tool entry as a string or array | Wrap each entry in `{...}` |
+| `_deprecation note_` on `update_agent` response | Sent `write_agent_configuration` (the legacy alias) | Use `update_agent` — both reach the same handler; the deprecation prefix just signals the call's audit-log entry |
 
 After three identical validation errors, **stop and ask the operator** — re-reading this skill won't help if the schema is genuinely unknown to you.
 
-## `write_agent_configuration` workflow (in-place edits to the **current** agent)
+## `update_agent` workflow (in-place edits to **any** agent)
 
-Use this for editing the calling agent, not for creating a new one. Accepts a partial `agent` object; the result is the canonical manifest (Markdown + result_data).
+Use this for editing any agent you own, not for creating a new one. The canonical name is **`update_agent`**. The legacy `write_agent_configuration` name still works as a soft-redirect (deprecated — both names hit the same handler; the response gets a `_(deprecated: write_agent_configuration — use update_agent)_` prefix on the legacy name).
+
+Accepts an `agent_id` (numeric pk) and a partial `agent` object. Omitting `agent_id` patches the calling agent (back-compat path). The result is the canonical manifest (Markdown + `result_data`).
+
+```json
+{
+  "action": "update_agent",
+  "agent_id": 6,
+  "agent": {
+    "description": "Updated description.",
+    "system_prompt": "Updated persona…"
+  }
+}
+```
 
 Allowed keys inside the `agent` object:
 
@@ -267,7 +329,7 @@ Allowed keys inside the `agent` object:
 - `llm_driver_config_id` — operator-only; stripped silently.
 - Any other key — silently dropped at the database layer.
 
-To verify a write took effect, call `read_agent` afterwards (no `agent_id` — reads the calling agent) and look at the manifest. If a field you sent is not in the returned payload, it was dropped — don't assume success.
+To verify a write took effect, call `read_agent(agent_id: <id>)` (or just `read_agent` for the calling agent) and look at the manifest. If a field you sent is not in the returned payload, it was dropped — don't assume success.
 
 ## `read_agent` (read any agent by id; or read self)
 
@@ -279,6 +341,8 @@ To verify a write took effect, call `read_agent` afterwards (no `agent_id` — r
 
 - `create_agent` — operator approval per call. Briefly state what the new agent will do before submitting, so the operator can sign off without re-reading the payload.
 - `configure_tools` — operator approval per call. Brief summary of the toolset change.
+- `update_agent` — operator approval per call. Brief summary of the patch (which `agent_id`, which keys).
+- `list_agents` — no approval.
 - `read_agent` — no approval.
 
 ## Operator-upload shape (file upload endpoint only)

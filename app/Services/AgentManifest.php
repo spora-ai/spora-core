@@ -33,13 +33,16 @@ use Spora\Tools\ToolSchemaPresenter;
  *   "is_favorite": <bool>,
  *
  *   // Tool config — separate sub-document. Empty when the agent has no tools.
+ *   // Each entry is slim (FQCN + icon + enablement + per-op state) on
+ *   // purpose: `display_name` and `description` are useful when an agent
+ *   // browses tools, but balloon the LLM context for `read_agent`,
+ *   // `update_agent`, and `configure_tools` responses. Operators who
+ *   // want descriptive metadata call `get_available_tools` instead.
  *   "tools": [
  *     {
- *       "tool_class":   <FQCN>,
- *       "display_name": <string>,
- *       "description":  <string>,
- *       "icon":         <string|null>,
- *       "enabled":      <bool>,
+ *       "tool_class": <FQCN>,
+ *       "icon":       <string|null>,
+ *       "enabled":    <bool>,
  *       "operations": [
  *         { "name": <string>, "enabled": <bool>, "requires_approval": <bool> }
  *       ]
@@ -48,9 +51,16 @@ use Spora\Tools\ToolSchemaPresenter;
  *
  *   // Diagnostics — surfaced on read paths, ignored on write/create inputs.
  *   "missing_required": <list<string>>,   // tool-class keys missing config
+ *   "overrides":        <list<...>>,      // per-op override rows (audit trail)
  *   "warnings":         <list<string>>     // human-readable caveats
  * }
- * ```
+ *
+ * The `overrides` list makes `auto_approve: true|false` and per-op
+ * `enabled` overrides auditable: each row carries the FQCN + operation +
+ * the explicit override value (either nullable = "default was kept" or a
+ * 0|1 bool = "override was set"). Operators who want to confirm a
+ * `configure_tools` patch landed the way they asked can diff the
+ * response's `overrides[]` against what they sent.
  *
  * Single source of truth so the LLM-facing `read_agent` Markdown, the
  * `configure_tools` confirmation, and the public REST response can not
@@ -87,6 +97,7 @@ final class AgentManifest
 
         $tools = [];
         $missingRequired = [];
+        $overrides = [];
         foreach ($rows as $row) {
             $toolClass = (string) $row['tool_class'];
             $summary = ToolSchemaPresenter::summarize(
@@ -113,13 +124,41 @@ final class AgentManifest
 
             $operations = $this->mergeOperations($declaredOperations, $effective);
 
+            // Audit trail for per-operation overrides. `enabled` and
+            // `default_requires_approval` are nullable on the
+            // resolver's row — null means "default kept", non-null
+            // means "this override was set on this agent". Operators
+            // who want to verify their `configure_tools(tools[i].
+            // operations[j]: {auto_approve: true})` landed the way
+            // they asked look at this list, not at the
+            // `tools[i].operations[j]` block's
+            // `requires_approval` effective value (which folds
+            // default + override together and loses the override
+            // source).
+            foreach ($effective as $effectiveRow) {
+                $auditEnabled  = $effectiveRow['enabled']                   ?? null;
+                $auditApproval = $effectiveRow['default_requires_approval'] ?? null;
+                if ($auditEnabled === null && $auditApproval === null) {
+                    continue;
+                }
+                $overrides[] = [
+                    'tool_class'                => (string) $effectiveRow['tool_class'],
+                    'operation'                 => (string) $effectiveRow['operation'],
+                    'enabled'                   => $auditEnabled === null ? null : (bool) $auditEnabled,
+                    'default_requires_approval' => $auditApproval === null ? null : (bool) $auditApproval,
+                ];
+            }
+
             $tools[] = [
-                'tool_class'   => $toolClass,
-                'display_name' => (string) $summary['display_name'],
-                'description'  => (string) $summary['description'],
-                'icon'         => $summary['icon'] ?? null,
-                'enabled'      => $enabled,
-                'operations'   => $operations,
+                // Slim shape per-PR-#170 review: drop display_name +
+                // description from per-tool entries since they're only
+                // useful when an agent browses tools, not when an LLM
+                // configures one. Operators who want descriptive
+                // metadata call `get_available_tools` instead.
+                'tool_class' => $toolClass,
+                'icon'       => $summary['icon'] ?? null,
+                'enabled'    => $enabled,
+                'operations' => $operations,
             ];
         }
 
@@ -140,6 +179,7 @@ final class AgentManifest
             'is_favorite'         => (bool) ($agent->is_favorite ?? false),
             'tools'               => $tools,
             'missing_required'    => $missingRequired,
+            'overrides'           => $overrides,
             'warnings'            => [],
         ];
     }
@@ -181,8 +221,17 @@ final class AgentManifest
     }
 
     /**
-     * @param list<array{tool_class: string, operation: string, effective_enabled: bool, effective_requires_approval: bool}> $rows
-     * @return array<string, list<array{operation: string, effective_enabled: bool, effective_requires_approval: bool}>>
+     * Index the per-operation rows by their tool_class. Each row also
+     * carries the explicit override columns (`enabled`,
+     * `default_requires_approval`) — typed as `int|null` because
+     * the resolver inserts null when the operator didn't override the
+     * corresponding default. `mergeOperations` reads `operation`,
+     * `effective_enabled`, `effective_requires_approval`; the override
+     * fields are read separately by `toArray()` when emitting
+     * `overrides[]` for the audit trail.
+     *
+     * @param list<array{tool_class: string, operation: string, enabled: int|null, default_requires_approval: int|null, effective_enabled: bool, effective_requires_approval: bool}> $rows
+     * @return array<string, list<array{tool_class: string, operation: string, enabled: int|null, default_requires_approval: int|null, effective_enabled: bool, effective_requires_approval: bool}>>
      */
     private function indexOperationsByToolClass(array $rows): array
     {
