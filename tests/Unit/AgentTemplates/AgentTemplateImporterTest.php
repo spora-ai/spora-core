@@ -36,7 +36,7 @@ test('applyTemplate("core/core-assistant") persists per-operation auto_approve o
     expect((int) $nowOverride->default_requires_approval)->toBe(0);
 });
 
-test('applyTemplate maps allow_continuation to allow_followup on the Agent row', function (): void {
+test('applyTemplate persists allow_followup from the agent{} block', function (): void {
     $result = $this->importer->applyTemplate($this->userId, 'core/core-assistant');
     expect((bool) $result->agent->allow_followup)->toBeTrue();
 });

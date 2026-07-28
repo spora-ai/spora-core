@@ -8,7 +8,7 @@
     "description": "Spora's general-purpose starter agent.",
     "system_prompt": "You are a helpful AI assistant. Use the tools available to you when appropriate, and explain your reasoning before taking action.",
     "max_steps": 10,
-    "allow_continuation": true,
+    "allow_followup": true,
     "retry_after_minutes": 0,
     "max_retries": 0
   },

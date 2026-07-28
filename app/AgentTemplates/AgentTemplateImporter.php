@@ -371,7 +371,7 @@ final class AgentTemplateImporter
     {
         $agent = $template->agent();
         $now = date(self::DATETIME_FORMAT);
-        $allowFollowup = (bool) ($agent['allow_continuation'] ?? true);
+        $allowFollowup = (bool) ($agent['allow_followup'] ?? true);
 
         return Capsule::table('agents')->insertGetId([
             'user_id'             => $userId,

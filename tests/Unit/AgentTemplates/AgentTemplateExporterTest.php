@@ -104,7 +104,7 @@ test('export() omits operations that have no explicit override', function (): vo
     expect($tool['operations'])->toBe([]);
 });
 
-test('export() preserves allow_followup → allow_continuation mapping', function (): void {
+test('export() persists allow_followup on the agent{} block', function (): void {
     $agent = Agent::create([
         'user_id'        => $this->userId,
         'name'           => 'Contin',
@@ -114,7 +114,7 @@ test('export() preserves allow_followup → allow_continuation mapping', functio
     ]);
 
     $exported = makeExporter()->export($agent);
-    expect($exported['template']->raw()['agent']['allow_continuation'])->toBeFalse();
+    expect($exported['template']->raw()['agent']['allow_followup'])->toBeFalse();
 });
 
 test('export() derives id from the agent name as a plain slug (no `core/` prefix)', function (): void {
@@ -287,4 +287,66 @@ test('PluginLoader::getComposerNameForSlug() returns null when composer.json is 
     expect($loader->getComposerNameForSlug('no-json'))->toBeNull();
 
     @rmdir($tmp);
+});
+
+test('round-trip imports then exports the bundled core-assistant.json identically', function (): void {
+    // Pin both halves of the rename (allow_continuation → allow_followup) at
+    // once: the importer reads `allow_followup` from the agent{} block and
+    // writes it to the DB column; the exporter reads the DB column and emits
+    // `allow_followup` in the agent{} block. A round-trip through both
+    // layers must deep-equal on the agent{} block and on the per-tool
+    // operations, otherwise one of the two halves has drifted.
+    $sourcePath = BASE_PATH . '/agent-templates/core-assistant.json';
+    expect(is_file($sourcePath))->toBeTrue();
+
+    $source = json_decode((string) file_get_contents($sourcePath), true, 512, JSON_THROW_ON_ERROR);
+    /** @var array<string, mixed> $source */
+
+    $importer = makeImporter();
+    $created = $importer->applyTemplate($this->userId, 'core/core-assistant');
+
+    $exported = makeExporter()->export($created->agent);
+    $exportedRaw = $exported['template']->raw();
+
+    // The exporter derives `id` from the agent name (slugs to
+    // 'spora-core-agent' rather than preserving the source's
+    // 'core/core-assistant' namespace), and resets version + required_plugins,
+    // so those parts of the payload are NOT expected to match. The agent{}
+    // block and tools[].operations[] however must deep-equal — that's what
+    // catches a half-finished rename of allow_continuation. Key order is
+    // not preserved (the exporter writes keys in code order, the validator
+    // accepts them in declaration order), tool order follows the agent_tools
+    // primary key, and per-tool operation order follows the override row id,
+    // so use loose equality on the agent{} block and sort tools by
+    // tool_class (and operations by name) before comparing.
+    expect($exportedRaw['agent'])->toEqual($source['agent']);
+
+    $sortByToolClass = static fn(array $a, array $b): int
+        => strcmp((string) $a['tool_class'], (string) $b['tool_class']);
+    $sortByName = static fn(array $a, array $b): int
+        => strcmp((string) $a['name'], (string) $b['name']);
+
+    $exportedTools = $exportedRaw['tools'];
+    $sourceTools = $source['tools'];
+    usort($exportedTools, $sortByToolClass);
+    usort($sourceTools, $sortByToolClass);
+
+    $exportedOps = array_map(
+        static function (array $t) use ($sortByName): array {
+            $ops = $t['operations'];
+            usort($ops, $sortByName);
+            return $ops;
+        },
+        $exportedTools,
+    );
+    $sourceOps = array_map(
+        static function (array $t) use ($sortByName): array {
+            $ops = $t['operations'];
+            usort($ops, $sortByName);
+            return $ops;
+        },
+        $sourceTools,
+    );
+
+    expect($exportedOps)->toEqual($sourceOps);
 });

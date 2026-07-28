@@ -117,7 +117,7 @@ final class AgentTemplateExporter
     {
         $block = [
             'max_steps'           => (int) $agent->max_steps,
-            'allow_continuation'  => (bool) $agent->allow_followup,
+            'allow_followup'      => (bool) $agent->allow_followup,
             'retry_after_minutes' => (int) ($agent->retry_after_minutes ?? 0),
             'max_retries'         => (int) ($agent->max_retries ?? 0),
         ];
