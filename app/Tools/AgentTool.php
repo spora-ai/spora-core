@@ -252,6 +252,19 @@ final class AgentTool extends AbstractTool
      */
     private const AGENT_NOT_FOUND = 'Agent not found.';
 
+    /**
+     * Prefix on every `configure_tools` validation failure message.
+     * Centralised to keep the S1192 "duplicate literal" rule green and to
+     * let consumers locate every fail site with a single grep.
+     */
+    private const CONFIGURE_TOOLS_ERR_PREFIX = 'configure_tools: ';
+
+    /**
+     * Prefix on every `read_agent` validation failure message. Same
+     * rationale as {@see self::CONFIGURE_TOOLS_ERR_PREFIX}.
+     */
+    private const READ_AGENT_ERR_PREFIX = 'read_agent: ';
+
     public function __construct(
         private readonly AgentServiceInterface $agentService,
         private readonly AgentToolSettingsServiceInterface $toolSettings,
@@ -300,8 +313,7 @@ final class AgentTool extends AbstractTool
             ),
             'read_agent'                => sprintf(
                 'Read agent state (%s).',
-                isset($arguments['template_id']) ? 'template_id: ' . $arguments['template_id']
-                    : (isset($arguments['agent_id']) ? 'agent_id: ' . $arguments['agent_id'] : 'no identifier'),
+                $this->describeReadAgentTarget($arguments),
             ),
             default                     => "Agent tool: {$operation}",
         };
@@ -755,26 +767,130 @@ final class AgentTool extends AbstractTool
      */
     private function configureTools(int $agentId, ?int $userId, array $arguments): ToolResult
     {
-        if ($userId === null) {
-            return ToolResult::fail('configure_tools requires an authenticated user.');
-        }
         $entries = $arguments['tools'] ?? [];
-        if (!is_array($entries) || ($entries !== [] && !array_is_list($entries))) {
-            return ToolResult::fail('configure_tools: `tools` must be an array.');
+        // Validate every entry up-front via {@see self::buildConfigureToolsPlan()}
+        // so a half-applied toolset never lands in the database. The plan
+        // builder returns either a typed array (apply it) or a fail
+        // ToolResult (return as-is). Match collapses the three independent
+        // failure paths into one branch so this method stays under the
+        // SonarCloud S1142 3-return ceiling.
+        $planOrFail = match (true) {
+            $userId === null
+                => ToolResult::fail('configure_tools requires an authenticated user.'),
+            !is_array($entries) || ($entries !== [] && !array_is_list($entries))
+                => ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . '`tools` must be an array.'),
+            default => $this->buildConfigureToolsPlan($entries),
+        };
+        if ($planOrFail instanceof ToolResult) {
+            return $planOrFail;
         }
+        $this->applyConfigureToolsPlan($agentId, $userId, $planOrFail);
+        // Return the post-change effective state via getAvailableTools so
+        // the LLM sees the same wire shape it would have seen from a
+        // follow-up get_available_tools call.
+        return $this->getAvailableTools($agentId, $userId);
+    }
 
-        // Validate every entry before mutating anything so a half-applied
-        // toolset never lands in the database. Collect the per-entry work
-        // plan, then apply it once we know the whole input is well-formed.
+    /**
+     * Validate every entry in `tools` and return the work plan, or a
+     * failure ToolResult on the first malformed entry.
+     *
+     * @param  mixed $entries
+     * @return list<array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>}>|ToolResult
+     */
+    private function buildConfigureToolsPlan(mixed $entries): array|ToolResult
+    {
         $plan = [];
         foreach ($entries as $i => $entry) {
-            $parsed = $this->parseConfigureToolEntry($entry, $i, $userId);
-            if ($parsed instanceof ToolResult) {
-                return $parsed;
+            $step = $this->parseConfigureToolEntry($entry, $i);
+            if ($step instanceof ToolResult) {
+                return $step;
             }
-            $plan[] = $parsed;
+            $plan[] = $step;
         }
+        return $plan;
+    }
 
+    /**
+     * Validate one `tools[i]` entry and return the work step, or a
+     * ToolResult on failure.
+     *
+     * @param  mixed $entry
+     * @return array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>}|ToolResult
+     */
+    private function parseConfigureToolEntry(mixed $entry, int $i): array|ToolResult
+    {
+        // The two object-shape checks collapse through {@see self::shapeToolEntryFailure()}
+        // into one branch — combined with the operations-fail branch and
+        // the success return, this method stays at three returns total
+        // (S1142 ceiling).
+        $shapeFail = $this->shapeToolEntryFailure($entry, $i);
+        if ($shapeFail !== null) {
+            return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . $shapeFail);
+        }
+        $toolClass = (string) ($entry['tool_class'] ?? '');
+
+        $operations = $this->parseConfigureToolOperations($entry['operations'] ?? [], $i);
+        if ($operations instanceof ToolResult) {
+            return $operations;
+        }
+        return ['tool_class' => $toolClass, 'enable' => (bool) ($entry['enabled'] ?? true), 'operations' => $operations];
+    }
+
+    /**
+     * Return the failure message for the two object-shape checks, or null
+     * when the entry passes both. Extracted so {@see self::parseConfigureToolEntry()}
+     * stays under the SonarCloud S1142 3-return ceiling.
+     */
+    private function shapeToolEntryFailure(mixed $entry, int $i): ?string
+    {
+        if (!is_array($entry)) {
+            return "tool entry #{$i} must be an object.";
+        }
+        if (!isset($entry['tool_class']) || !is_string($entry['tool_class']) || $entry['tool_class'] === '') {
+            return "tool entry #{$i} is missing `tool_class`.";
+        }
+        return null;
+    }
+
+    /**
+     * Validate a `tools[i].operations` value and return the typed list, or
+     * a failure ToolResult on the first malformed operation. Empty /
+     * missing operations is legal — the operation default then applies.
+     *
+     * @param  mixed $ops
+     * @return list<array{name: string, enabled: bool, auto_approve: bool}>|ToolResult
+     */
+    private function parseConfigureToolOperations(mixed $ops, int $i): array|ToolResult
+    {
+        if (!is_array($ops) || $ops === []) {
+            return [];
+        }
+        $out = [];
+        foreach ($ops as $j => $op) {
+            if (!is_array($op) || !isset($op['name']) || !is_string($op['name']) || $op['name'] === '') {
+                return ToolResult::fail(
+                    self::CONFIGURE_TOOLS_ERR_PREFIX . "operations[{$i}][{$j}] must be `{name, enabled?, auto_approve?}`.",
+                );
+            }
+            $out[] = [
+                'name'         => $op['name'],
+                'enabled'      => (bool) ($op['enabled'] ?? true),
+                'auto_approve' => (bool) ($op['auto_approve'] ?? false),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Apply the validated `configure_tools` plan. Separated from
+     * {@see self::configureTools()} so the validator stays under the
+     * SonarCloud S1142 3-return ceiling.
+     *
+     * @param  list<array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>}> $plan
+     */
+    private function applyConfigureToolsPlan(int $agentId, int $userId, array $plan): void
+    {
         foreach ($plan as $step) {
             if ($step['enable']) {
                 $this->toolSettings->enableTool($agentId, $userId, $step['tool_class']);
@@ -794,49 +910,6 @@ final class AgentTool extends AbstractTool
                 );
             }
         }
-
-        // Return the post-change effective state via getAvailableTools so
-        // the LLM sees the same wire shape it would have seen from a
-        // follow-up get_available_tools call.
-        return $this->getAvailableTools($agentId, $userId);
-    }
-
-    /**
-     * Validate one `tools[i]` entry and return the work plan, or a
-     * ToolResult on failure.
-     *
-     * @param mixed $entry
-     * @return array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>}|ToolResult
-     */
-    private function parseConfigureToolEntry($entry, int $i, int $userId): array|ToolResult
-    {
-        if (!is_array($entry)) {
-            return ToolResult::fail("configure_tools: tool entry #{$i} must be an object.");
-        }
-        $toolClass = is_string($entry['tool_class'] ?? null) ? $entry['tool_class'] : '';
-        if ($toolClass === '') {
-            return ToolResult::fail("configure_tools: tool entry #{$i} is missing `tool_class`.");
-        }
-        $enable = (bool) ($entry['enabled'] ?? true);
-
-        $operations = [];
-        $ops = $entry['operations'] ?? [];
-        if (is_array($ops) && $ops !== []) {
-            foreach ($ops as $j => $op) {
-                if (!is_array($op) || !isset($op['name']) || !is_string($op['name']) || $op['name'] === '') {
-                    return ToolResult::fail(
-                        "configure_tools: operations[{$i}][{$j}] must be `{name, enabled?, auto_approve?}`.",
-                    );
-                }
-                $operations[] = [
-                    'name'         => $op['name'],
-                    'enabled'      => (bool) ($op['enabled'] ?? true),
-                    'auto_approve' => (bool) ($op['auto_approve'] ?? false),
-                ];
-            }
-        }
-
-        return ['tool_class' => $toolClass, 'enable' => $enable, 'operations' => $operations];
     }
 
     /**
@@ -852,21 +925,11 @@ final class AgentTool extends AbstractTool
      */
     private function readAgent(?int $userId, array $arguments): ToolResult
     {
-        if ($userId === null) {
-            return ToolResult::fail('read_agent requires an authenticated user.');
+        $target = $this->resolveReadAgentTarget($userId, $arguments);
+        if ($target instanceof ToolResult) {
+            return $target;
         }
-        $templateId = is_string($arguments['template_id'] ?? null) ? trim((string) $arguments['template_id']) : '';
-        $agentIdRaw = $arguments['agent_id'] ?? null;
-        $agentId    = is_int($agentIdRaw) ? $agentIdRaw
-            : (is_numeric($agentIdRaw) ? (int) $agentIdRaw : 0);
-        if ($templateId === '' && $agentId === 0) {
-            return ToolResult::fail('read_agent: either `template_id` or `agent_id` is required.');
-        }
-
-        $agent = $this->resolveReadAgentTarget($userId, $templateId, $agentId);
-        if ($agent === null) {
-            return ToolResult::fail('Agent not found or not owned by this user.');
-        }
+        $agent = $target;
 
         $payload = AgentResource::toArray($agent);
         /** @var \Illuminate\Database\Eloquent\Collection<int, \Spora\Models\AgentTool> $agentToolRows */
@@ -887,37 +950,88 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * Resolve the read_agent target to an Agent row owned by $userId.
+     * Validate and resolve the read_agent target. Returns the Agent row
+     * on success, or a failure ToolResult. Split out from
+     * {@see self::readAgent()} so that method stays under SonarCloud's
+     * S1142 3-return ceiling.
      *
-     * `template_id` takes precedence over `agent_id` when both are
-     * supplied. `template_id` currently resolves only when the agents
-     * table exposes the column; if it does not, the LLM is expected to
+     * `template_id` takes precedence over `agent_id`. If the agents table
+     * does not yet expose a `template_id` column, the LLM is expected to
      * supply `agent_id` (the primary key returned by `create_agent`).
-     * Returns null on miss — the caller surfaces the standard failure.
+     *
+     * @param  array<string, mixed> $arguments
+     * @return Agent|ToolResult
      */
-    private function resolveReadAgentTarget(int $userId, string $templateId, int $agentId): ?Agent
+    private function resolveReadAgentTarget(?int $userId, array $arguments): Agent|ToolResult
     {
-        if ($templateId !== '') {
-            $schema = (new Agent())->getConnection()->getSchemaBuilder();
-            if ($schema->hasColumn('agents', 'template_id')) {
-                return Agent::query()
-                    ->where('user_id', $userId)
-                    ->where('template_id', $templateId)
-                    ->first();
-            }
-            // Fall back to the primary key — the LLM sometimes echoes the
-            // template id back as a numeric pk.
-            if (is_numeric($templateId)) {
-                return Agent::query()
-                    ->where('user_id', $userId)
-                    ->where('id', (int) $templateId)
-                    ->first();
-            }
-            return null;
+        $templateId = is_string($arguments['template_id'] ?? null) ? trim((string) $arguments['template_id']) : '';
+        $agentId    = $this->parseReadAgentId($arguments['agent_id'] ?? null);
+
+        if ($userId === null) {
+            return ToolResult::fail('read_agent requires an authenticated user.');
         }
+        if ($templateId === '' && $agentId === 0) {
+            return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . 'either `template_id` or `agent_id` is required.');
+        }
+        // The not-found case returns a fail directly via the null-coalesce
+        // so this method stays at three explicit returns total.
+        return $this->fetchAgentForRead($userId, $templateId, $agentId)
+            ?? ToolResult::fail(self::READ_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
+    }
+
+    /**
+     * Parse `$arguments['agent_id']` into a strict non-negative int. LLM
+     * tooling can deliver the int as a JSON number or a numeric string;
+     * anything else is treated as "not supplied".
+     */
+    private function parseReadAgentId(mixed $raw): int
+    {
+        if (is_int($raw)) {
+            return $raw;
+        }
+        return is_numeric($raw) ? (int) $raw : 0;
+    }
+
+    /**
+     * Render the read_agent target identifier for `describeAction()`.
+     * Pulled out so the dispatch match stays free of nested ternaries.
+     *
+     * @param  array<string, mixed> $arguments
+     */
+    private function describeReadAgentTarget(array $arguments): string
+    {
+        if (isset($arguments['template_id']) && is_string($arguments['template_id']) && $arguments['template_id'] !== '') {
+            return 'template_id: ' . $arguments['template_id'];
+        }
+        if (isset($arguments['agent_id']) && $arguments['agent_id'] !== '') {
+            return 'agent_id: ' . $arguments['agent_id'];
+        }
+        return 'no identifier';
+    }
+
+    /**
+     * Run the right Agent query for the supplied identifier pair.
+     * Returns null on miss. Early-return for `template_id` (the dominant
+     * lookup) keeps this method under the SonarCloud S1142 3-return
+     * ceiling — the second branch handles the two remaining cases.
+     */
+    private function fetchAgentForRead(int $userId, string $templateId, int $agentId): ?Agent
+    {
+        if ($templateId !== ''
+            && (new Agent())->getConnection()->getSchemaBuilder()->hasColumn('agents', 'template_id')
+        ) {
+            return Agent::query()
+                ->where('user_id', $userId)
+                ->where('template_id', $templateId)
+                ->first();
+        }
+        // Match collapses the no-template_id-column and no-identifier-supplied
+        // cases so the function's three returns map cleanly to the three
+        // outcomes: hit, miss-on-template_id, miss-on-agent_id.
+        $id = $templateId !== '' && is_numeric($templateId) ? (int) $templateId : $agentId;
         return Agent::query()
             ->where('user_id', $userId)
-            ->where('id', $agentId)
+            ->where('id', $id)
             ->first();
     }
 
