@@ -81,7 +81,7 @@ GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [
 > **Architecture deep-dive:** The Orchestrator loop, tick phases, worker modes, and plugin system are documented in [docs/01_architecture.md](docs/01_architecture.md) and [docs/11_agent_loop_async.md](docs/11_agent_loop_async.md).
 
 ### Testing
-- Backend: `composer test` (Pest)
+- Backend: `composer test` (Pest); `composer test:parallel` runs the suite in `--parallel --processes=auto --max-batch-size=50` mode (~22s wall-time on a typical PR, vs ~270s serially). Always prefer `composer test:parallel` for the full suite — serial mode is reserved for debugging a specific failing test.
 - Frontend unit: `composer frontend:test` (Vitest)
 - E2E: not wired up — no Playwright dep, no `frontend/tests/e2e/` (see [docs/09_frontend.md](docs/09_frontend.md))
 

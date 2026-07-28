@@ -61,7 +61,7 @@ Prefer core tools (`plugin_slug: null`) over plugin tools when both would suffic
 
 Every agent read/write operation speaks this shape. `result_content` is the Markdown wrapper; `result_data` is the same structure as structured JSON.
 
-```markdown
+````markdown
 ## Agent #6 — Weather Agent
 
 1 of 18 tools enabled. 0 missing required config.
@@ -108,7 +108,7 @@ Every agent read/write operation speaks this shape. `result_content` is the Mark
   "warnings": []
 }
 ```
-```
+````
 
 Key invariants:
 
@@ -183,7 +183,7 @@ Capture the `agent_id` from `result_data.agent_id` (or the Markdown preamble) fo
 
 ### Step 2 — `configure_tools(agent_id: <new id>)`
 
-`configure_tools` accepts an optional `agent_id`. **Pass it.** The omission of `agent_id` falls back to the calling agent — fine when you really do want in-place edits on the caller, but the LLM-facing flow always targets the agent just created:
+`configure_tools` accepts an optional `agent_id`. **Always pass it** in the create-then-configure flow so the right agent gets configured; omitting `agent_id` falls back to the calling agent (in-place edit semantics, useful but rarely what you want after `create_agent`):
 
 ```json
 {

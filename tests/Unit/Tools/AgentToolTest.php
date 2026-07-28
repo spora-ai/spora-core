@@ -812,9 +812,17 @@ describe('AgentTool::execute — create_agent', function (): void {
     // retry_after_minutes, max_retries, required_plugins). The full
     // agent-template.schema.json shape is reserved for the
     // operator-upload endpoint at POST /api/v1/agent-templates/import.
+    //
+    // `user_id` is sourced from the calling Agent's row — async callers
+    // don't have a session, and the new agent is owned by the same user
+    // as the agent that created it. See `listAgents()` for the same
+    // pattern.
 
-    test('rejects when userId is null', function (): void {
-        [$tool] = makeAgentTool();
+    test('fails closed when the calling agent cannot be resolved', function (): void {
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $service->allows('getAgentByAgentId')->andReturn(null);
+        $service->shouldNotReceive('createAgent');
 
         $result = $tool->execute(
             ['action' => 'create_agent', 'payload' => ['name' => 'X']],
@@ -823,20 +831,24 @@ describe('AgentTool::execute — create_agent', function (): void {
         );
 
         expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('authenticated user');
+            ->and($result->content)->toContain('Agent not found');
     });
 
     test('rejects missing payload', function (): void {
-        [$tool] = makeAgentTool();
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
 
-        $result = $tool->execute(['action' => 'create_agent'], 7, 99);
+        $result = $tool->execute(['action' => 'create_agent'], 7, null);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('`payload`');
     });
 
     test('rejects the legacy `agent{}` wrapper with a literal fix', function (): void {
-        [$tool] = makeAgentTool();
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
 
         $out = $tool->execute(
             [
@@ -847,7 +859,7 @@ describe('AgentTool::execute — create_agent', function (): void {
                 ],
             ],
             7,
-            99,
+            null,
         );
 
         expect($out->success)->toBeFalse()
@@ -855,7 +867,9 @@ describe('AgentTool::execute — create_agent', function (): void {
     });
 
     test('rejects the legacy `tools[]` block with a redirect to configure_tools', function (): void {
-        [$tool] = makeAgentTool();
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
 
         $out = $tool->execute(
             [
@@ -866,7 +880,7 @@ describe('AgentTool::execute — create_agent', function (): void {
                 ],
             ],
             7,
-            99,
+            null,
         );
 
         expect($out->success)->toBeFalse()
@@ -874,13 +888,16 @@ describe('AgentTool::execute — create_agent', function (): void {
             ->and($out->content)->toContain('configure_tools(agent_id: N');
     });
 
-    test('rejects required_plugins sent as a bare string with a literal fix', function (): void {
-        // The task #46 trace showed the LLM sending
-        // required_plugins: 'weather' (and also {item: 'weather'}). Both
-        // come back from the LLM as bare values rather than arrays.
-        [$tool] = makeAgentTool();
+    test('rejects required_plugins even when sent as a valid slug array', function (): void {
+        // `required_plugins` is reserved for the operator-upload
+        // agent-template schema; the LLM-facing slim payload will
+        // never store it, so we surface a clear "not accepted here"
+        // message instead of silently dropping the field.
+        [$tool, $service] = makeAgentTool();
+        /** @var MockInterface $service */
+        $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
 
-        foreach (['weather', ['item' => 'weather']] as $bad) {
+        foreach ([['weather'], ['item' => 'weather']] as $bad) {
             $out = $tool->execute(
                 [
                     'action'  => 'create_agent',
@@ -890,31 +907,68 @@ describe('AgentTool::execute — create_agent', function (): void {
                     ],
                 ],
                 7,
-                99,
+                null,
             );
 
             expect($out->success)->toBeFalse()
-                ->and($out->content)->toContain('`required_plugins` must be an array of strings')
-                ->and($out->content)->toContain('Send `"required_plugins": ["weather"]`');
+                ->and($out->content)->toContain('`required_plugins` is reserved for the operator-upload endpoint')
+                ->and($out->content)->toContain('POST /api/v1/agent-templates/import');
         }
     });
 
-    test('happy path: slim payload creates the agent and emits the manifest', function (): void {
-        $auth   = bootAuthLayer();
-        $userId = bootAuth($auth, 'creator-slim@example.com');
+    test('persists retry_after_minutes and max_retries from the slim payload', function (): void {
+        // The slim payload validates retry_after_minutes / max_retries
+        // for shape and forwards them into AgentService::createAgent.
+        // Pin both that the values land on the createAgent call (a
+        // silent drop would have left the DB row at the default 0).
+        // The owning user_id comes from the calling agent's row, not
+        // from the dispatcher's parameter.
         [$tool, $service, $toolSettings] = makeAgentTool();
         /** @var MockInterface $toolSettings */
         /** @var MockInterface $service */
+        $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7, name: 'Caller'));
+        $service->shouldReceive('createAgent')
+            ->once()
+            ->withArgs(function (int $userIdArg, array $data): bool {
+                return $userIdArg === 99
+                    && $data['retry_after_minutes'] === 30
+                    && $data['max_retries'] === 2;
+            })
+            ->andReturn(stubManifestAgent(id: 42, name: 'Retries Agent'));
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $out = $tool->execute(
+            [
+                'action'  => 'create_agent',
+                'payload' => [
+                    'name'                => 'Retries Agent',
+                    'retry_after_minutes' => 30,
+                    'max_retries'         => 2,
+                ],
+            ],
+            7,
+            null,
+        );
+
+        expect($out->success)->toBeTrue();
+    });
+
+    test('happy path: slim payload creates the agent and emits the manifest', function (): void {
         // Real AgentService writes would hit the DB; mock the LLM-side
         // helper to return a fully-populated Agent fixture so the
         // manifest renders cleanly.
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var MockInterface $toolSettings */
+        /** @var MockInterface $service */
+        $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7, name: 'Caller'));
         $agent = stubManifestAgent(id: 42, name: 'New Agent');
         $agent->description   = 'created via AgentTool';
         $agent->system_prompt = 'You are the New Agent.';
         $agent->max_steps = 12;
         $service->shouldReceive('createAgent')
             ->once()
-            ->with($userId, Mockery::on(static function (array $data): bool {
+            ->with(99, Mockery::on(static function (array $data): bool {
                 return ($data['name'] ?? null) === 'New Agent'
                     && ($data['max_steps'] ?? null) === 12
                     && ($data['allow_followup'] ?? null) === true;
@@ -934,11 +988,10 @@ describe('AgentTool::execute — create_agent', function (): void {
                     'system_prompt'       => 'You are the New Agent.',
                     'max_steps'           => 12,
                     'allow_followup'      => true,
-                    'required_plugins'    => ['weather'],
                 ],
             ],
             7,
-            $userId,
+            null,
         );
 
         expect($out->success)->toBeTrue();
@@ -1509,7 +1562,9 @@ test('create_agent validation errors append the agent-creation skill pointer', f
     // Each create_agent failure path appends a single-line pointer at the
     // agent-creation skill so the LLM knows where to find the schema on the
     // next attempt instead of retrying the same broken payload.
-    [$tool] = makeAgentTool();
+    [$tool, $service] = makeAgentTool();
+    /** @var MockInterface $service */
+    $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
 
     // Deliberately broken: legacy wrapper shape (top-level `name` inside
     // `agent{}`) trips the explicit "do not wrap in agent{}" branch.
@@ -1522,7 +1577,7 @@ test('create_agent validation errors append the agent-creation skill pointer', f
             ],
         ],
         7,
-        99,
+        null,
     );
 
     expect($result->success)->toBeFalse()
@@ -1878,16 +1933,16 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
 
 describe('AgentTool::execute — create_agent {item: [...]} unwrap', function (): void {
     // Same single-key {item: ...} quirk surfaces in create_agent's
-    // `required_plugins` field — same defensive treatment as configure_tools.
+    // `required_plugins` field — same defensive unwrap as
+    // configure_tools. The unwrap keeps the validation message
+    // accurate: `required_plugins` is rejected because the slim
+    // payload doesn't store it, not because the value was malformed.
 
-    test('auto-unwraps required_plugins {item: [...]} quirk', function (): void {
-        [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+    test('rejects {item: [...]} required_plugins with the reserved message', function (): void {
+        [$tool, $service] = makeAgentTool();
         /** @var MockInterface $service */
-        $agent = stubManifestAgent(42, 'X');
-        $service->shouldReceive('createAgent')->once()->andReturn($agent);
-        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
-        $toolSettings->allows('getToolsOperations')->andReturn([]);
+        $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
+        $service->shouldNotReceive('createAgent');
 
         $out = $tool->execute(
             [
@@ -1895,18 +1950,20 @@ describe('AgentTool::execute — create_agent {item: [...]} unwrap', function ()
                 'payload' => [
                     'name'             => 'X',
                     // OpenAI tool-call channel wraps single-element array
-                    // as `{item: [...]}`. Without the unwrap, this triggers
-                    // 'isListOfStrings' failure with an unhelpful message.
+                    // as `{item: [...]}`. The unwrap catches the wrap so
+                    // the validation message names the right cause
+                    // (the slim payload rejects required_plugins),
+                    // not a malformed-value complaint.
                     'required_plugins' => ['item' => ['weather', 'calendar']],
                 ],
             ],
             7,
-            99,
+            null,
         );
 
-        expect($out->success)->toBeTrue(
-            'openai {item: [...]} should unwrap; got: ' . $out->content,
-        );
+        expect($out->success)->toBeFalse()
+            ->and($out->content)->toContain('`required_plugins` is reserved for the operator-upload endpoint')
+            ->and($out->content)->not->toContain('must be an array of strings');
     });
 });
 
@@ -1996,12 +2053,19 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
         test('returns an empty list when the agent service has no rows', function (): void {
             [$tool, $service] = makeAgentTool();
             /** @var MockInterface $service */
+            $agent = new Agent();
+            $agent->id = 7;
+            $agent->user_id = 99;
+            $service->allows('getAgentByAgentId')->andReturn($agent);
             $service->shouldReceive('getAgentsForUser')
                 ->once()
                 ->with(99)
                 ->andReturn([]);
 
-            $result = $tool->execute(['action' => 'list_agents'], 7, 99);
+            // The handler sources user_id from the calling Agent, not
+            // from the dispatcher param — pass null to make the
+            // "user_id comes from the agent" invariant explicit.
+            $result = $tool->execute(['action' => 'list_agents'], 7, null);
 
             expect($result->success)->toBeTrue()
                 ->and($result->content)->toContain('No agents')
@@ -2011,6 +2075,10 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
         test('returns a slim id/name/description list of every owned agent', function (): void {
             [$tool, $service] = makeAgentTool();
             /** @var MockInterface $service */
+            $agent = new Agent();
+            $agent->id = 7;
+            $agent->user_id = 99;
+            $service->allows('getAgentByAgentId')->andReturn($agent);
             // Mirrors the AgentResource shape produced by AgentService::agentResource,
             // minus the rest. The handler strips unrelated keys before exposing the
             // payload — cheaper to test against the exact upstream shape than to
@@ -2024,7 +2092,7 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
                     ['id' => 11, 'name' => 'Travel',        'description' => ''],
                 ]);
 
-            $result = $tool->execute(['action' => 'list_agents'], 7, 99);
+            $result = $tool->execute(['action' => 'list_agents'], 7, null);
 
             expect($result->success)->toBeTrue()
                 ->and($result->data['agents'])->toBe([
@@ -2037,19 +2105,21 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
                 ->and($result->content)->toContain('#11 Travel');
         });
 
-        test('returns an empty list when called with a null userId (no auth)', function (): void {
-            // The executor always passes $userId in production; this is the
-            // no-auth / caller-only path we don't want crashing the LLM
-            // mid-conversation with a permission error.
+        test('returns AGENT_NOT_FOUND when the calling agent cannot be resolved', function (): void {
+            // The executor's calling-agent lookup failed (e.g. agent
+            // was deleted mid-task). Fail-closed at the type system:
+            // the dispatcher has no way to forward user_id anyway,
+            // and surfacing the resolution error matches the contract
+            // used by read_agent / configure_tools.
             [$tool, $service] = makeAgentTool();
             /** @var MockInterface $service */
+            $service->allows('getAgentByAgentId')->andReturn(null);
             $service->shouldNotReceive('getAgentsForUser');
 
             $result = $tool->execute(['action' => 'list_agents'], 7, null);
 
-            expect($result->success)->toBeTrue()
-                ->and($result->data)->toBe(['agents' => []])
-                ->and($result->content)->toContain('No agents');
+            expect($result->success)->toBeFalse()
+                ->and($result->content)->toContain('Agent not found');
         });
 
         test('does not leak system_prompt / cell_id / tools from the upstream AgentResource', function (): void {
@@ -2060,6 +2130,10 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
             // AgentResource change doesn't silently leak.
             [$tool, $service] = makeAgentTool();
             /** @var MockInterface $service */
+            $agent = new Agent();
+            $agent->id = 7;
+            $agent->user_id = 99;
+            $service->allows('getAgentByAgentId')->andReturn($agent);
             $service->shouldReceive('getAgentsForUser')
                 ->once()
                 ->andReturn([[
@@ -2073,7 +2147,7 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
                     'is_pinned'      => true,
                 ]]);
 
-            $result = $tool->execute(['action' => 'list_agents'], 7, 99);
+            $result = $tool->execute(['action' => 'list_agents'], 7, null);
             /** @var array{agents: array<int, array<string, mixed>>} $data */
             $data = $result->data;
             $row  = $data['agents'][0];

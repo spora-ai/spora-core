@@ -192,9 +192,13 @@ final class OperationSchemaFilter
         if (is_object($properties)) {
             $properties = (array) $properties;
         }
-        if ($properties !== []) {
-            $schema['properties'] = array_filter($properties, $opIntersects, ARRAY_FILTER_USE_KEY);
-        }
+        $filtered = $properties === []
+            ? $properties
+            : array_filter($properties, $opIntersects, ARRAY_FILTER_USE_KEY);
+        // Match `filter()`'s empty-array-→-stdClass coercion so downstream
+        // schema walkers see a consistent object shape regardless of
+        // whether every property was dropped or none was.
+        $schema['properties'] = $filtered === [] ? new stdClass() : $filtered;
 
         return $schema;
     }

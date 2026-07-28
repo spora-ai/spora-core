@@ -1146,6 +1146,7 @@ final class ContainerDefinitions
                         mercure: $c->get(MercurePublisherInterface::class),
                         toolConfigService: $c->get(ToolConfigService::class),
                         toolCallSerializer: $c->get(ToolCallSerializer::class),
+                        agentService: $c->get(AgentServiceInterface::class),
                     ),
                 );
             },

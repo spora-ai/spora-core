@@ -21,6 +21,7 @@ use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Plugins\PluginLoader;
+use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
@@ -63,6 +64,7 @@ final class Orchestrator implements OrchestratorInterface
     public readonly ?ToolCallSerializer $toolCallSerializer;
     public readonly ?LLMConfigService $llmConfigService;
     public readonly ?PluginLoader $pluginLoader;
+    public readonly ?AgentServiceInterface $agentService;
 
     public function __construct(
         DriverFactory $driverFactory,
@@ -79,6 +81,7 @@ final class Orchestrator implements OrchestratorInterface
         $this->toolCallSerializer    = $config->toolCallSerializer;
         $this->llmConfigService      = $config->llmConfigService;
         $this->pluginLoader          = $config->pluginLoader;
+        $this->agentService          = $config->agentService;
         $this->driverFactory         = $driverFactory;
         $this->errorClassifier       = new ErrorClassifier();
         $this->llmConfigResolver     = new LlmConfigResolver($config->llmConfigService);
@@ -292,16 +295,29 @@ final class Orchestrator implements OrchestratorInterface
         array $arguments,
         int $agentId,
         int $taskId,
-        ?int $userId = null,
     ): ToolResult {
         $ref      = new ReflectionClass($toolInstance);
         $attrs    = $ref->getAttributes(Tool::class);
         $toolName = $attrs !== [] ? $attrs[0]->newInstance()->name : get_class($toolInstance);
 
+        // Source the calling user's id from the calling Agent's row
+        // — tools never see a session-derived `$userId`. When the
+        // orchestrator runs without AgentService (e.g. a minimal
+        // boot-auth test harness), the tool's $userId stays null and
+        // the tool's own getAgentByAgentId() fallback applies.
+        $userId = null;
+        if ($this->agentService !== null) {
+            $callingAgent = $this->agentService->getAgentByAgentId($agentId);
+            if ($callingAgent !== null) {
+                $userId = (int) $callingAgent->user_id;
+            }
+        }
+
         // Arguments may contain PII — never log them.
         $this->logger?->debug('Tool dispatch', [
             'tool'      => $toolName,
             'agent_id'  => $agentId,
+            'user_id'   => $userId,
             'task_id'   => $taskId,
             'arguments' => $arguments,
         ]);

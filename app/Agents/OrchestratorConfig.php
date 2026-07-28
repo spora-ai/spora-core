@@ -7,6 +7,7 @@ namespace Spora\Agents;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Plugins\PluginLoader;
+use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
@@ -31,6 +32,10 @@ final class OrchestratorConfig
         public readonly ?ToolConfigService $toolConfigService = null,
         public readonly ?ToolCallSerializer $toolCallSerializer = null,
         public readonly ?LLMConfigService $llmConfigService = null,
+        // Source of calling-user_id for tool dispatch. The Orchestrator
+        // resolves the calling user's id from the calling agent's row
+        // — tools never receive a session-derived userId.
+        public readonly ?AgentServiceInterface $agentService = null,
         public readonly WorkerMode $workerMode = WorkerMode::Sync,
     ) {}
 }

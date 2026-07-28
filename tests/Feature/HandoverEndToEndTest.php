@@ -18,6 +18,7 @@ use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
+use Spora\Services\AgentService;
 use Spora\Services\HandoverService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\TaskService;
@@ -131,6 +132,7 @@ function handoverE2eBuildOrchestrator(
         $driverFactoryInner,
         new OrchestratorConfig(
             toolInstances: [new StubInputTool()],
+            agentService: new AgentService(),
         ),
     );
 
@@ -148,6 +150,7 @@ function handoverE2eBuildOrchestrator(
         $driverFactory,
         new OrchestratorConfig(
             toolInstances: [new StubInputTool(), $handoverTool],
+            agentService: new AgentService(),
         ),
     );
 

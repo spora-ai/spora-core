@@ -163,7 +163,7 @@ final class ApprovedBatchExecutor
             return;
         }
 
-        $result = $this->orchestrator->safeExecute($toolInstance, $approvedArgs, $state->agentId, $taskId, $task->user_id);
+        $result = $this->orchestrator->safeExecute($toolInstance, $approvedArgs, $state->agentId, $taskId);
         $this->recordResumeExecutionResult($task, $taskId, $pendingToolCall, $approvedArgs, $result);
     }
 

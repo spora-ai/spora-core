@@ -62,17 +62,23 @@ final class AgentService implements AgentServiceInterface
 
     public function createAgent(int $userId, array $data): Agent
     {
+        // Whitelist the inbound data to the editable columns so a
+        // caller can't smuggle non-Agent columns (notes, required_plugins,
+        // etc.) into the insert.
+        $allowed = array_intersect_key($data, array_flip(self::EDITABLE_AGENT_FIELDS));
         $id = Capsule::table('agents')->insertGetId([
             'user_id'                => $userId,
-            'name'                   => $data['name'],
-            'description'            => $data['description'] ?? null,
-            'system_prompt'          => $data['system_prompt'] ?? null,
-            'llm_driver_config_id'   => $data['llm_driver_config_id'] ?? null,
-            'max_steps'              => (int) ($data['max_steps'] ?? 10),
-            'allow_followup'         => (bool) ($data['allow_followup'] ?? true) ? 1 : 0,
+            'name'                   => $allowed['name'],
+            'description'            => $allowed['description'] ?? null,
+            'system_prompt'          => $allowed['system_prompt'] ?? null,
+            'llm_driver_config_id'   => $allowed['llm_driver_config_id'] ?? null,
+            'max_steps'              => (int) ($allowed['max_steps'] ?? 10),
+            'allow_followup'         => (bool) ($allowed['allow_followup'] ?? true) ? 1 : 0,
+            'retry_after_minutes'    => (int) ($allowed['retry_after_minutes'] ?? 0),
+            'max_retries'            => (int) ($allowed['max_retries'] ?? 0),
             'is_active'              => 1,
-            'created_at'            => date(self::DATETIME_FORMAT),
-            'updated_at'            => date(self::DATETIME_FORMAT),
+            'created_at'             => date(self::DATETIME_FORMAT),
+            'updated_at'             => date(self::DATETIME_FORMAT),
         ]);
 
         return Agent::find($id);
