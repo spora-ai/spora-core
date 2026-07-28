@@ -19,7 +19,11 @@ use stdClass;
  * Per-parameter `required[]` is also narrowed: a parameter declared with
  * `#[ToolParameter(required: ['format'])` (or any list of op names) only
  * stays required when at least one of those ops survives the action-enum
- * filter. The builder stashes this per-op binding in a single schema-level
+ * filter. Likewise the parameter itself is dropped from `properties` when
+ * its binding does not intersect the allowed-op set — advertising
+ * per-op-bound parameters the LLM cannot use pollutes the audit log with
+ * defensive empty stubs (`agent: []`, `content: ""`, `payload: []`) on every
+ * call. The builder stashes this per-op binding in a single schema-level
  * side-channel (`__required_when`, keyed by property name) that this filter
  * reads and strips before the schema is serialised to the LLM. The filter
  * passes the side-channel through unchanged when no per-op parameters are
@@ -82,6 +86,26 @@ final class OperationSchemaFilter
                     return false;
                 },
             ));
+            // Drop per-op-bound properties whose binding doesn't intersect
+            // the active op set. Truly shared properties (no entry in
+            // $requiredWhen) survive untouched. ARRAY_FILTER_USE_KEY makes
+            // the walker key-driven so we can inspect the binding by name.
+            $properties = array_filter(
+                $properties,
+                static function (string $name) use ($requiredWhen, $allowedOpsSet): bool {
+                    $binding = $requiredWhen[$name] ?? null;
+                    if ($binding === null) {
+                        return true;
+                    }
+                    foreach ($binding as $op) {
+                        if (isset($allowedOpsSet[$op])) {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+                ARRAY_FILTER_USE_KEY,
+            );
         }
 
         $schema['type']             = $schema['type'] ?? 'object';
@@ -142,24 +166,35 @@ final class OperationSchemaFilter
             return $schema;
         }
 
-        $narrowed = array_values(array_filter(
-            $required,
-            static function (string $name) use ($requiredWhen, $operationName): bool {
-                $binding = $requiredWhen[$name] ?? null;
-                if ($binding === null) {
+        $opIntersects = static function (string $name) use ($requiredWhen, $operationName): bool {
+            $binding = $requiredWhen[$name] ?? null;
+            if ($binding === null) {
+                return true;
+            }
+            foreach ($binding as $op) {
+                if ($op === $operationName) {
                     return true;
                 }
-                foreach ($binding as $op) {
-                    if ($op === $operationName) {
-                        return true;
-                    }
-                }
-                return false;
-            },
-        ));
+            }
+            return false;
+        };
+
+        $narrowed = array_values(array_filter($required, $opIntersects));
 
         $schema['required'] = $narrowed;
         unset($schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY]);
+
+        // Narrow `properties` to match. Per-op-bound properties whose
+        // binding does not include the active op are dropped in lockstep
+        // with `required[]` so the runtime validator sees a schema that
+        // actually matches the op being executed.
+        $properties = $schema['properties'] ?? [];
+        if (is_object($properties)) {
+            $properties = (array) $properties;
+        }
+        if ($properties !== []) {
+            $schema['properties'] = array_filter($properties, $opIntersects, ARRAY_FILTER_USE_KEY);
+        }
 
         return $schema;
     }
