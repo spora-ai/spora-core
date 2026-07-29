@@ -25,7 +25,6 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
-use Spora\Services\ScrubDataUrls;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigService;
@@ -41,7 +40,7 @@ final class Orchestrator implements OrchestratorInterface
     public const DB_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
 
     /** ISO 8601 / RFC 3339 format used for the AgentState `pausedAt` field. */
-    private const ISO8601_UTC = 'Y-m-d\TH:i:s\Z';
+    public const ISO8601_UTC_FORMAT = 'Y-m-d\TH:i:s\Z';
 
     /** Package-private extracted services; read by `TickPhaseRunner` and the other extracted services via the orchestrator. */
     public readonly DriverFactory $driverFactory;
@@ -53,6 +52,8 @@ final class Orchestrator implements OrchestratorInterface
     public readonly ApprovedBatchExecutor $approvedBatchExecutor;
     public readonly TickPhaseRunner $tickPhaseRunner;
     public readonly ToolCallExecutor $toolCallExecutor;
+    public readonly AgentDecisionProcessor $agentDecisionProcessor;
+    public readonly AgentStateResolver $agentStateResolver;
     public readonly WorkerMode $workerMode;
 
     /** @var list<object> */
@@ -104,6 +105,8 @@ final class Orchestrator implements OrchestratorInterface
             $config->toolCallSerializer,
         );
         $this->toolCallExecutor      = new ToolCallExecutor($this);
+        $this->agentDecisionProcessor = new AgentDecisionProcessor($this);
+        $this->agentStateResolver     = new AgentStateResolver($this, $config->workerMode);
     }
 
     // Public API
@@ -213,13 +216,34 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Execute the batch of tool calls that were paused for human approval.
-     *
      * {@inheritDoc}
      */
-    public function resume(int $taskId, array $approvedBatch): void
+    public function resume(int $taskId, array $decisions): void
     {
-        $this->approvedBatchExecutor->execute($taskId, $approvedBatch);
+        $shouldTick = false;
+
+        Capsule::connection()->transaction(function () use ($taskId, $decisions, &$shouldTick): void {
+            $task = $this->agentStateResolver->loadPendingTask($taskId);
+            $state = $this->agentStateResolver->loadAgentState($task);
+
+            [$approvedBatch, $rejectedBatch] = $this->agentDecisionProcessor->splitDecisions($decisions, $state);
+            $remainingState = $this->agentStateResolver->buildRemainingAgentState($state, $rejectedBatch);
+
+            $this->agentDecisionProcessor->markRejectionBatch($task, $rejectedBatch);
+
+            $shouldTick = $this->agentStateResolver->applyResumeTransition($task, $approvedBatch, $remainingState);
+
+            if ($approvedBatch !== []) {
+                $this->approvedBatchExecutor->execute($taskId, $approvedBatch);
+                if ($this->workerMode === WorkerMode::Sync) {
+                    $shouldTick = Task::where('id', $taskId)->value('status') === 'RUNNING';
+                }
+            }
+        });
+
+        if ($shouldTick) {
+            $this->tick($taskId);
+        }
     }
 
     public function reject(int $taskId, string $reason): void
@@ -228,18 +252,8 @@ final class Orchestrator implements OrchestratorInterface
         $state = null;
 
         Capsule::connection()->transaction(function () use ($taskId, &$task, &$state) {
-            /** @var Task $task */
-            $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
-
-            if ($task->status !== 'PENDING_APPROVAL') {
-                throw new InvalidTaskTransitionException("Task {$taskId} is not awaiting approval.");
-            }
-            if ($task->pending_state === null) {
-                $state = new AgentState(taskId: $task->id, agentId: $task->agent_id, pendingToolCalls: [], messageSnapshot: [], stepCount: $task->step_count, maxSteps: $task->max_steps, pausedAt: date(self::ISO8601_UTC));
-            } else {
-                $state = AgentState::fromJson($task->pending_state);
-            }
-
+            $task = $this->agentStateResolver->loadPendingTask($taskId);
+            $state = $this->agentStateResolver->loadAgentState($task);
             $task->pending_state = null;
             $task->save();
         });
@@ -248,36 +262,8 @@ final class Orchestrator implements OrchestratorInterface
             if (!$task instanceof Task || !$state instanceof AgentState) {
                 throw new TaskStateMissingException('Failed to resolve task or state during reject.');
             }
-
-            $pendingModels = ToolCallModel::where('task_id', $taskId)
-                ->where('status', 'PENDING_APPROVAL')
-                ->get();
-
-            ToolCallModel::where('task_id', $taskId)
-                ->where('status', 'PENDING_APPROVAL')
-                ->update(['status' => 'REJECTED']);
-
-            foreach ($pendingModels as $model) {
-                $this->appendHistory(
-                    taskId: $task->id,
-                    role: 'tool',
-                    content: ScrubDataUrls::scrub("Action rejected by user: {$reason}"),
-                    context: new HistoryMessageContext(
-                        toolCallId: $model->provider_call_id,
-                        toolName: $model->tool_name,
-                    ),
-                );
-            }
-
-            $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
-            Task::where('id', $taskId)->update(['status' => $taskStatus]);
-
-            if ($this->workerMode === WorkerMode::Sync) {
-                // Tick is called after the transaction commits so the LLM round-trip
-                // does not hold the lockForUpdate open for its full duration.
-                $this->tick($taskId);
-            }
-
+            $this->agentStateResolver->recordBulkRejection($task, $reason);
+            $this->agentStateResolver->transitionTaskAfterRejection($taskId);
         } catch (Throwable $e) {
             Task::where('id', $taskId)->update([
                 'status'         => 'FAILED',
@@ -288,7 +274,6 @@ final class Orchestrator implements OrchestratorInterface
             throw $e;
         }
     }
-
 
     public function safeExecute(
         ToolInterface $toolInstance,

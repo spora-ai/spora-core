@@ -232,13 +232,12 @@ final class DatabaseSchemaInstaller
         // added but never executed (e.g. stamp was manually touched). For plugins,
         // use codeVersion from the manifest (plugin authors control the version).
         if ($component === 'core') {
-            // run() returns full file paths, so extract the migration name (basename without .php).
-            $lastMigrationFile = end($ranMigrations) ?: '';
-            $lastMigrationName = $lastMigrationFile !== '' ? str_replace('.php', '', basename($lastMigrationFile)) : '';
-            $actualVersion    = 0;
-
-            if ($lastMigrationName !== '' && preg_match('/^(\d+)/', $lastMigrationName, $matches)) {
-                $actualVersion = (int) $matches[1];
+            $actualVersion = $storedVersion;
+            foreach ($ranMigrations as $migrationFile) {
+                $migrationName = str_replace('.php', '', basename($migrationFile));
+                if (preg_match('/^(\d+)/', $migrationName, $matches)) {
+                    $actualVersion = max($actualVersion, (int) $matches[1]);
+                }
             }
 
             $this->upsertVersion($component, $actualVersion);

@@ -683,14 +683,14 @@ describe('TaskService — approveTask', function (): void {
 
         $orchestrator->shouldReceive('resume')
             ->once()
-            ->with($task->id, [['provider_call_id' => 'c1', 'arguments' => ['x' => 1]]])
+            ->with($task->id, [['provider_call_id' => 'c1', 'decision' => 'approve', 'arguments' => ['x' => 1]]])
             ->andReturnUsing(function () use ($task): void {
                 Task::where('id', $task->id)->update(['status' => 'RUNNING']);
             });
 
         $service = new TaskService($orchestrator, $mercure);
         $result  = $service->approveTask($task->id, $userId, [
-            ['provider_call_id' => 'c1', 'arguments' => ['x' => 1]],
+            ['provider_call_id' => 'c1', 'decision' => 'approve', 'arguments' => ['x' => 1]],
         ]);
 
         expect($result['status'])->toBe('RUNNING');

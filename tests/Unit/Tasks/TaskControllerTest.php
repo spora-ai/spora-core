@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Http\ContinueTaskDispatcher;
+use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Http\TaskController;
 use Spora\Models\Agent;
@@ -26,7 +27,7 @@ function makeTaskController(?TaskServiceInterface $taskService = null): array
     $authService = bootAuthLayer();
     $taskService ??= Mockery::mock(TaskServiceInterface::class);
     $mediaCapability = new TaskMediaCapabilityService();
-    $controller  = new TaskController($authService, $taskService, $mediaCapability, new ContinueTaskDispatcher($taskService, $mediaCapability));
+    $controller  = new TaskController($authService, $taskService, $mediaCapability, new ContinueTaskDispatcher($taskService, $mediaCapability), new DecisionsRequestValidator($taskService));
     $authMiddleware = new Spora\Http\Middleware\AuthMiddleware($authService);
     $csrfService = new Spora\Security\CsrfTokenService();
     $csrfMiddleware = new Spora\Http\Middleware\CsrfMiddleware($csrfService);
@@ -339,6 +340,15 @@ it('show respects since_sequence to filter task history', function (): void {
 
 it('approve returns 409 when task is not PENDING_APPROVAL', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTaskWithHistory')
+        ->once()
+        ->andReturn([
+            'tool_calls' => [[
+                'provider_call_id' => 'call_abc',
+                'operation' => 'default',
+                'parameter_schema' => ['type' => 'object', 'properties' => [], 'required' => []],
+            ]],
+        ]);
     $taskService->expects('approveTask')
         ->once()
         ->with(Mockery::any(), Mockery::any(), Mockery::any())
@@ -357,8 +367,11 @@ it('approve returns 409 when task is not PENDING_APPROVAL', function (): void {
     ]);
 
     $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve", [
-        'provider_call_id' => 'call_abc',
-        'arguments'        => ['key' => 'value'],
+        'decisions' => [[
+            'provider_call_id' => 'call_abc',
+            'decision' => 'approve',
+            'arguments' => ['key' => 'value'],
+        ]],
     ]);
     $req->attributes->set('taskId', $task->id);
 
@@ -366,7 +379,7 @@ it('approve returns 409 when task is not PENDING_APPROVAL', function (): void {
     expect($resp->getStatusCode())->toBe(409);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-it('approve calls orchestrator resume and returns updated task', function (): void {
+it('approve forwards normalized decisions and returns updated task', function (): void {
     $taskResource = [
         'id'          => 1,
         'agent_id'    => 1,
@@ -380,12 +393,25 @@ it('approve calls orchestrator resume and returns updated task', function (): vo
     ];
 
     $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTaskWithHistory')
+        ->once()
+        ->with(1, 1)
+        ->andReturn([
+            'tool_calls' => [[
+                'provider_call_id' => 'call_abc',
+                'operation' => 'default',
+                'parameter_schema' => ['type' => 'object', 'properties' => [], 'required' => []],
+            ]],
+        ]);
     $taskService->expects('approveTask')
         ->once()
-        ->withArgs(function (int $taskId, int $userId, array $approvals): bool {
+        ->withArgs(function (int $taskId, int $userId, array $decisions): bool {
             return $taskId === 1 && $userId === 1
-                && $approvals[0]['provider_call_id'] === 'call_abc'
-                && $approvals[0]['arguments'] === ['key' => 'value'];
+                && $decisions === [[
+                    'provider_call_id' => 'call_abc',
+                    'decision' => 'approve',
+                    'arguments' => ['key' => 'value'],
+                ]];
         })
         ->andReturn($taskResource);
 
@@ -402,14 +428,54 @@ it('approve calls orchestrator resume and returns updated task', function (): vo
     ]);
 
     $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve", [
-        'provider_call_id' => 'call_abc',
-        'arguments'        => ['key' => 'value'],
+        'decisions' => [[
+            'provider_call_id' => 'call_abc',
+            'decision' => 'approve',
+            'arguments' => ['key' => 'value'],
+        ]],
     ]);
     $req->attributes->set('taskId', $task->id);
 
     $resp = $controller->approve($req);
     expect($resp->getStatusCode())->toBe(200);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('approve maps orchestrator decision validation failures to 422', function (): void {
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTaskWithHistory')->once()->andReturn([
+        'tool_calls' => [['provider_call_id' => 'call_abc', 'operation' => 'default']],
+    ]);
+    $taskService->expects('approveTask')
+        ->once()
+        ->andThrow(new InvalidArgumentException("provider_call_id 'call_abc' is not pending approval."));
+
+    [$controller, $authService] = makeTaskController($taskService);
+    seedUserAndAgent($authService);
+
+    $req = jsonRequest('POST', '/api/v1/tasks/1/approve', [
+        'decisions' => [['provider_call_id' => 'call_abc', 'decision' => 'reject']],
+    ]);
+    $req->attributes->set('taskId', 1);
+
+    $resp = $controller->approve($req);
+    expect($resp->getStatusCode())->toBe(422);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('approve rejects legacy and empty decisions payloads', function (array $payload): void {
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    [$controller, $authService] = makeTaskController($taskService);
+    seedUserAndAgent($authService);
+
+    $req = jsonRequest('POST', '/api/v1/tasks/1/approve', $payload);
+    $req->attributes->set('taskId', 1);
+
+    $resp = $controller->approve($req);
+    expect($resp->getStatusCode())->toBe(422);
+})->with([
+    'legacy single call' => [['provider_call_id' => 'call_abc', 'arguments' => []]],
+    'legacy approval batch' => [['approvals' => [['provider_call_id' => 'call_abc', 'arguments' => []]]]],
+    'empty decisions' => [['decisions' => []]],
+])->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // reject()
 
@@ -474,102 +540,6 @@ it('reject calls orchestrator reject and returns 200', function (): void {
     $req->attributes->set('taskId', $task->id);
 
     $resp = $controller->reject($req);
-    expect($resp->getStatusCode())->toBe(200);
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
-
-// Fix: legacy approve format must have a non-empty provider_call_id
-
-it('approve returns 422 when legacy format omits provider_call_id', function (): void {
-    $taskService = Mockery::mock(TaskServiceInterface::class);
-
-    [$controller, $authService] = makeTaskController($taskService);
-    [$userId, $agent] = seedUserAndAgent($authService);
-
-    $task = Task::create([
-        'agent_id'    => $agent->id,
-        'user_id'     => $userId,
-        'status'      => 'PENDING_APPROVAL',
-        'user_prompt' => 'test',
-        'step_count'  => 0,
-        'max_steps'   => 10,
-    ]);
-
-    // Legacy format with no provider_call_id at all
-    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve", ['arguments' => ['x' => 1]]);
-    $req->attributes->set('taskId', $task->id);
-
-    $resp = $controller->approve($req);
-    expect($resp->getStatusCode())->toBe(422);
-
-    $body = json_decode($resp->getContent(), true);
-    expect($body['error']['code'])->toBe('VALIDATION_ERROR');
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
-
-it('approve returns 422 when legacy format has empty string provider_call_id', function (): void {
-    $taskService = Mockery::mock(TaskServiceInterface::class);
-
-    [$controller, $authService] = makeTaskController($taskService);
-    [$userId, $agent] = seedUserAndAgent($authService);
-
-    $task = Task::create([
-        'agent_id'    => $agent->id,
-        'user_id'     => $userId,
-        'status'      => 'PENDING_APPROVAL',
-        'user_prompt' => 'test',
-        'step_count'  => 0,
-        'max_steps'   => 10,
-    ]);
-
-    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve", [
-        'provider_call_id' => '   ', // whitespace-only
-        'arguments'        => [],
-    ]);
-    $req->attributes->set('taskId', $task->id);
-
-    $resp = $controller->approve($req);
-    expect($resp->getStatusCode())->toBe(422);
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
-
-it('approve legacy format with valid provider_call_id still calls orchestrator resume', function (): void {
-    $taskResource = [
-        'id'          => 1,
-        'agent_id'    => 1,
-        'status'      => 'RUNNING',
-        'user_prompt' => 'test',
-        'final_response' => null,
-        'step_count'  => 0,
-        'max_steps'   => 10,
-        'created_at'  => null,
-        'updated_at'  => null,
-    ];
-
-    $taskService = Mockery::mock(TaskServiceInterface::class);
-    $taskService->expects('approveTask')
-        ->once()
-        ->withArgs(function (int $taskId, int $userId, array $batch): bool {
-            return $batch[0]['provider_call_id'] === 'call_valid';
-        })
-        ->andReturn($taskResource);
-
-    [$controller, $authService] = makeTaskController($taskService);
-    [$userId, $agent] = seedUserAndAgent($authService);
-
-    $task = Task::create([
-        'agent_id'    => $agent->id,
-        'user_id'     => $userId,
-        'status'      => 'PENDING_APPROVAL',
-        'user_prompt' => 'test',
-        'step_count'  => 0,
-        'max_steps'   => 10,
-    ]);
-
-    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/approve", [
-        'provider_call_id' => 'call_valid',
-        'arguments'        => ['x' => 1],
-    ]);
-    $req->attributes->set('taskId', $task->id);
-
-    $resp = $controller->approve($req);
     expect($resp->getStatusCode())->toBe(200);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 

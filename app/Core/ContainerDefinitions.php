@@ -66,6 +66,7 @@ use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
 use Spora\Http\ScheduledRunController;
 use Spora\Http\SseController;
+use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\TaskController;
 use Spora\Http\ToolController;
 use Spora\Http\UserController;
@@ -926,6 +927,13 @@ final class ContainerDefinitions
                     $c->get(TaskServiceInterface::class),
                     $c->get(TaskMediaCapabilityService::class),
                     $c->get(ContinueTaskDispatcher::class),
+                    $c->get(DecisionsRequestValidator::class),
+                );
+            },
+
+            DecisionsRequestValidator::class => static function (ContainerInterface $c): DecisionsRequestValidator {
+                return new DecisionsRequestValidator(
+                    $c->get(TaskServiceInterface::class),
                 );
             },
 

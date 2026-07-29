@@ -136,7 +136,7 @@ interface TaskServiceInterface
     public function getTaskWithHistory(int $taskId, int $userId, ?int $sinceSequence = null): ?array;
 
     /**
-     * @param list<array{provider_call_id: string, arguments: array<string, mixed>}> $approvals
+     * @param list<array{provider_call_id: string, decision: 'approve'|'reject', arguments?: array<string, mixed>, reason?: string}> $decisions
      * @return array{
      *     id: int,
      *     agent_id: int,
@@ -157,7 +157,7 @@ interface TaskServiceInterface
      *     retry_after?: string
      * }
      */
-    public function approveTask(int $taskId, int $userId, array $approvals): array;
+    public function approveTask(int $taskId, int $userId, array $decisions): array;
 
     /**
      * @return array{

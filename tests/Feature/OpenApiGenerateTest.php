@@ -134,6 +134,20 @@ describe('OpenAPI specification generation', function (): void {
         }
     });
 
+    it('documents per-call approval decisions on the approve endpoint', function (): void {
+        $spec = openApiTestSpec();
+        $operation = openApiTestFindOperation($spec, 'POST', '/api/v1/tasks/{taskId}/approve');
+
+        expect($operation)->not->toBeNull();
+        expect($operation->requestBody)->not->toBeNull();
+        expect($operation->requestBody->required)->toBeTrue();
+
+        $content = $operation->requestBody->content['application/json']->schema;
+        expect($content->required)->toContain('decisions');
+        expect($content->properties[0]->property)->toBe('decisions');
+        expect($content->properties[0]->items->properties[1]->enum)->toBe(['approve', 'reject']);
+    });
+
     it('tags operations by the first /api/v1/ segment', function (): void {
         $spec = openApiTestSpec();
 

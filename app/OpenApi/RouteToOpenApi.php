@@ -13,6 +13,7 @@ use OpenApi\Annotations\PathItem;
 use OpenApi\Annotations\Response;
 use OpenApi\Annotations\SecurityScheme;
 use OpenApi\Annotations\Server;
+use ReflectionAttribute;
 use ReflectionMethod;
 use Spora\Core\RouteDefinitions;
 use Spora\Http\Middleware\AdminMiddleware;
@@ -149,66 +150,70 @@ final class RouteToOpenApi
         $parameters = $this->parametersFromPath($entry);
         $security = $this->securityFromMiddleware($entry['middleware'], $entry['method']);
         $responses = $this->defaultResponses();
+        $operation = [
+            'method' => strtolower($entry['method']),
+            'summary' => $summary,
+            'tags' => $tags,
+            'parameters' => $parameters,
+            'security' => $security,
+            'responses' => $responses,
+        ];
+        if ($entry['method'] === 'POST') {
+            $requestBody = $this->requestBodyFromHandler($entry['handler']);
+            if ($requestBody !== null) {
+                $operation['requestBody'] = $requestBody;
+            }
+        }
 
         match ($entry['method']) {
-            'GET' => $pathItem->get = new OA\Get([
-                'method' => 'get',
-                'summary' => $summary,
-                'tags' => $tags,
-                'parameters' => $parameters,
-                'security' => $security,
-                'responses' => $responses,
-            ]),
-            'POST' => $pathItem->post = new OA\Post([
-                'method' => 'post',
-                'summary' => $summary,
-                'tags' => $tags,
-                'parameters' => $parameters,
-                'security' => $security,
-                'responses' => $responses,
-            ]),
-            'PUT' => $pathItem->put = new OA\Put([
-                'method' => 'put',
-                'summary' => $summary,
-                'tags' => $tags,
-                'parameters' => $parameters,
-                'security' => $security,
-                'responses' => $responses,
-            ]),
-            'PATCH' => $pathItem->patch = new OA\Patch([
-                'method' => 'patch',
-                'summary' => $summary,
-                'tags' => $tags,
-                'parameters' => $parameters,
-                'security' => $security,
-                'responses' => $responses,
-            ]),
-            'DELETE' => $pathItem->delete = new OA\Delete([
-                'method' => 'delete',
-                'summary' => $summary,
-                'tags' => $tags,
-                'parameters' => $parameters,
-                'security' => $security,
-                'responses' => $responses,
-            ]),
-            'HEAD' => $pathItem->head = new OA\Head([
-                'method' => 'head',
-                'summary' => $summary,
-                'tags' => $tags,
-                'parameters' => $parameters,
-                'security' => $security,
-                'responses' => $responses,
-            ]),
-            'OPTIONS' => $pathItem->options = new OA\Options([
-                'method' => 'options',
-                'summary' => $summary,
-                'tags' => $tags,
-                'parameters' => $parameters,
-                'security' => $security,
-                'responses' => $responses,
-            ]),
+            'GET' => $pathItem->get = new OA\Get($operation),
+            'POST' => $pathItem->post = new OA\Post($operation),
+            'PUT' => $pathItem->put = new OA\Put($operation),
+            'PATCH' => $pathItem->patch = new OA\Patch($operation),
+            'DELETE' => $pathItem->delete = new OA\Delete($operation),
+            'HEAD' => $pathItem->head = new OA\Head($operation),
+            'OPTIONS' => $pathItem->options = new OA\Options($operation),
             default => null,
         };
+    }
+
+    /**
+     * @param array{0:string, 1:string} $handler
+     */
+    private function requestBodyFromHandler(array $handler): ?OA\RequestBody
+    {
+        [$class, $method] = $handler;
+        if (!class_exists($class)) {
+            return null;
+        }
+
+        $attributes = (new ReflectionMethod($class, $method))->getAttributes(
+            \OpenApi\Attributes\RequestBody::class,
+            ReflectionAttribute::IS_INSTANCEOF,
+        );
+
+        if ($attributes === []) {
+            return null;
+        }
+
+        $requestBody = $attributes[0]->newInstance();
+        $nested = $requestBody->_unmerged;
+        $requestBody->_unmerged = [];
+
+        if (!is_array($requestBody->content)) {
+            $requestBody->content = [];
+        }
+
+        foreach ($nested as $content) {
+            if ($content instanceof OA\JsonContent) {
+                $requestBody->content['application/json'] = new OA\MediaType([
+                    'mediaType' => 'application/json',
+                    'schema' => $content,
+                ]);
+            }
+        }
+
+        return $requestBody;
     }
 
     /**

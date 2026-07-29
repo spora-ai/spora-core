@@ -30,15 +30,14 @@ interface OrchestratorInterface
     public function tick(int $taskId): void;
 
     /**
-     * Execute the batch of tool calls that were paused for human approval.
+     * Apply per-call approval or rejection decisions to a task paused for human review.
      *
-     * @param  int   $taskId
-     * @param  list<array{provider_call_id: string, arguments: array<string, mixed>}>  $approvedBatch
-     *               One entry per pending tool call. Each entry carries the provider_call_id
-     *               (to correlate with pending_state) and the arguments confirmed (or edited) by the human.
-     *               Arguments are validated against the tool's JSON Schema before execution.
+     * Approved calls execute with the confirmed arguments. Rejected calls are recorded
+     * in tool history so the model can choose an alternative action.
+     *
+     * @param  list<array{provider_call_id: string, decision: 'approve'|'reject', arguments?: array<string, mixed>, reason?: string}>  $decisions
      */
-    public function resume(int $taskId, array $approvedBatch): void;
+    public function resume(int $taskId, array $decisions): void;
 
     /**
      * @param  int    $taskId

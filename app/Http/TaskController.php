@@ -7,6 +7,7 @@ namespace Spora\Http;
 use Carbon\Carbon;
 use InvalidArgumentException;
 use JsonException;
+use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
@@ -29,6 +30,7 @@ final class TaskController
         private readonly TaskServiceInterface $taskService,
         private readonly TaskMediaCapabilityService $mediaCapability,
         private readonly ContinueTaskDispatcher $continuationDispatcher,
+        private readonly DecisionsRequestValidator $decisionsValidator,
     ) {}
 
     /**
@@ -180,6 +182,30 @@ final class TaskController
     /**
      * POST /api/v1/tasks/{taskId}/approve
      */
+    #[OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(
+            type: 'object',
+            required: ['decisions'],
+            properties: [
+                new OA\Property(
+                    property: 'decisions',
+                    type: 'array',
+                    minItems: 1,
+                    items: new OA\Items(
+                        type: 'object',
+                        required: ['provider_call_id', 'decision'],
+                        properties: [
+                            new OA\Property(property: 'provider_call_id', type: 'string'),
+                            new OA\Property(property: 'decision', type: 'string', enum: ['approve', 'reject']),
+                            new OA\Property(property: 'arguments', type: 'object', description: 'Required when decision is approve.', additionalProperties: true),
+                            new OA\Property(property: 'reason', type: 'string', description: 'Optional when decision is reject.'),
+                        ],
+                    ),
+                ),
+            ],
+        ),
+    )]
     public function approve(Request $request): JsonResponse
     {
         $userId = $this->authService->currentUserId();
@@ -191,25 +217,36 @@ final class TaskController
             return $this->invalidJsonResponse();
         }
 
-        $batch = $this->parseAndValidateApprovalBatch($body);
-        if ($batch instanceof JsonResponse) {
-            return $batch;
+        $decisions = $this->decisionsValidator->parseAndValidate($body, $taskId, $userId);
+        if ($decisions instanceof JsonResponse) {
+            return $decisions;
         }
 
-        return $this->approveTaskOrError($taskId, $userId, $batch);
+        return $this->approveTaskOrError($taskId, $userId, $decisions);
     }
 
     /**
-     * @param list<array<string, mixed>> $batch
+     * @param list<array<string, mixed>> $decisions
      */
-    private function approveTaskOrError(int $taskId, int $userId, array $batch): JsonResponse
+    private function approveTaskOrError(int $taskId, int $userId, array $decisions): JsonResponse
     {
         try {
-            $task = $this->taskService->approveTask($taskId, $userId, $batch);
+            $task = $this->taskService->approveTask($taskId, $userId, $decisions);
             return new JsonResponse(['data' => ['task' => $task]]);
         } catch (InvalidArgumentException $e) {
-            return $this->errorForException($e);
+            if ($e->getMessage() === self::ERR_TASK_NOT_FOUND || $e->getMessage() === 'Task is not pending approval.') {
+                return $this->errorForException($e);
+            }
+            return $this->validationErrorResponse($e);
         }
+    }
+
+    private function validationErrorResponse(InvalidArgumentException $e): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $e->getMessage()]],
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+        );
     }
 
     private function invalidJsonResponse(): JsonResponse
@@ -220,49 +257,6 @@ final class TaskController
         );
     }
 
-    /**
-     * Accept either a modern batch payload { "approvals": [...] }
-     * or the legacy single-tool format { "provider_call_id": "...", "arguments": {...} },
-     * then validate each entry has a provider_call_id and normalize object
-     * arguments to arrays (stdClass can leak in from JSON-decoded request bodies).
-     *
-     * @return list<array<string, mixed>>|JsonResponse
-     */
-    private function parseAndValidateApprovalBatch(array $body): array|JsonResponse
-    {
-        if (isset($body['approvals']) && is_array($body['approvals'])) {
-            $batch = $body['approvals'];
-        } else {
-            $providerId = trim((string) ($body['provider_call_id'] ?? ''));
-            if ($providerId === '') {
-                return new JsonResponse(
-                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required.']],
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
-            }
-            $batch = [[
-                'provider_call_id' => $providerId,
-                'arguments'        => (array) ($body['arguments'] ?? []),
-            ]];
-        }
-
-        foreach ($batch as $item) {
-            if (!isset($item['provider_call_id'])) {
-                return new JsonResponse(
-                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required in all approvals.']],
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
-            }
-        }
-        foreach ($batch as &$item) {
-            if (isset($item['arguments']) && is_object($item['arguments'])) {
-                $item['arguments'] = (array) $item['arguments'];
-            }
-        }
-        unset($item);
-
-        return $batch;
-    }
 
     /**
      * POST /api/v1/tasks/{taskId}/reject
