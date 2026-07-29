@@ -145,6 +145,7 @@ function approvalFeatureHarness(
         $taskService,
         $mediaCapability,
         new ContinueTaskDispatcher($taskService, $mediaCapability),
+        new Spora\Http\DecisionsRequestValidator($taskService),
     );
 
     return [
