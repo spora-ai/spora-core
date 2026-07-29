@@ -48,7 +48,7 @@ jobs:
         run: composer install --no-interaction --prefer-dist
 
       - name: Run Pest (parallel, with coverage)
-        run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --coverage-clover=coverage.xml
+        run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --coverage-clover=coverage.xml --fail-on-risky
 
       - name: Upload coverage.xml
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -79,7 +79,7 @@ jobs:
         run: composer install --no-interaction --prefer-dist
 
       - name: Run Pest (parallel)
-        run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50
+        run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --fail-on-risky
 
   static-analysis:
     name: PHPStan
