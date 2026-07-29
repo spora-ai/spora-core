@@ -73,20 +73,12 @@ final class AgentPictureController
             return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
         }
 
+        $fileError = $this->validateUploadedFile($request);
+        if ($fileError !== null) {
+            return $fileError;
+        }
         $file = $request->files->get('file');
-        if (!$file instanceof UploadedFile) {
-            return $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST);
-        }
-        if (!$file->isValid()) {
-            return $this->error('BAD_REQUEST', 'Upload failed: ' . $file->getErrorMessage(), Response::HTTP_BAD_REQUEST);
-        }
-        if ($file->getSize() > self::MAX_AVATAR_BYTES) {
-            return $this->error(
-                'PAYLOAD_TOO_LARGE',
-                sprintf('Avatar image exceeds %d bytes.', self::MAX_AVATAR_BYTES),
-                Response::HTTP_REQUEST_ENTITY_TOO_LARGE,
-            );
-        }
+        assert($file instanceof UploadedFile);
 
         $bytes = file_get_contents($file->getPathname());
         if ($bytes === false) {
@@ -123,6 +115,30 @@ final class AgentPictureController
                 'agent'  => $fresh !== null ? AgentResource::toArray($fresh, null, null, $this->pictureService) : null,
             ],
         ], Response::HTTP_CREATED);
+    }
+
+    /**
+     * Validate the multipart upload request before the controller reads the
+     * file body. Centralises the 4 guard clauses so `uploadImage()` stays
+     * under the cognitive-complexity ceiling.
+     */
+    private function validateUploadedFile(Request $request): ?JsonResponse
+    {
+        $file = $request->files->get('file');
+        if (!$file instanceof UploadedFile) {
+            return $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST);
+        }
+        if (!$file->isValid()) {
+            return $this->error('BAD_REQUEST', 'Upload failed: ' . $file->getErrorMessage(), Response::HTTP_BAD_REQUEST);
+        }
+        if ($file->getSize() > self::MAX_AVATAR_BYTES) {
+            return $this->error(
+                'PAYLOAD_TOO_LARGE',
+                sprintf('Avatar image exceeds %d bytes.', self::MAX_AVATAR_BYTES),
+                Response::HTTP_REQUEST_ENTITY_TOO_LARGE,
+            );
+        }
+        return null;
     }
 
     /**

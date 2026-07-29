@@ -248,7 +248,7 @@ final class AgentPictureService
         $palette = $picture->palette_key !== null
             ? Palette::tryFrom($picture->palette_key) ?? self::DEFAULT_PALETTE
             : self::DEFAULT_PALETTE;
-        $variantKey = $picture->variant_key ?? $this->resolveVariantKey($picture->agent_id, $archetype);
+        $variantKey = $picture->variant_key ?? $this->resolveVariantKey($picture->agent_id);
 
         return [
             'kind'             => 'avatar',
@@ -262,7 +262,7 @@ final class AgentPictureService
         ];
     }
 
-    private function resolveVariantKey(int $agentId, Archetype $archetype): string
+    private function resolveVariantKey(int $agentId): string
     {
         $hash = $this->fnv1a((string) $agentId);
         $index = $hash % 3;

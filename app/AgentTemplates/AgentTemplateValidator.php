@@ -477,83 +477,128 @@ final class AgentTemplateValidator
                 'path'     => 'metadata.' . $key,
             ]);
         }
-        if (isset($metadata['category']) && !in_array($metadata['category'], self::ALLOWED_CATEGORIES, true)) {
+        if (isset($metadata['category'])) {
+            $this->validateMetadataEnum(
+                $result,
+                'category',
+                $metadata['category'],
+                self::ALLOWED_CATEGORIES,
+                'METADATA_CATEGORY_UNKNOWN',
+            );
+        }
+        $this->validateMetadataStringField($result, 'icon', $metadata['icon'] ?? null, 'METADATA_ICON_TYPE');
+        $this->validateMetadataEnumWithType(
+            $result,
+            'archetype',
+            $metadata['archetype'] ?? null,
+            self::ALLOWED_ARCHETYPES,
+            'METADATA_ARCHETYPE_TYPE',
+            'METADATA_ARCHETYPE_UNKNOWN',
+        );
+        $this->validateMetadataEnumWithType(
+            $result,
+            'variant_key',
+            $metadata['variant_key'] ?? null,
+            self::ALLOWED_VARIANTS,
+            'METADATA_VARIANT_KEY_TYPE',
+            'METADATA_VARIANT_KEY_UNKNOWN',
+        );
+        $this->validateMetadataEnumWithType(
+            $result,
+            'palette_key',
+            $metadata['palette_key'] ?? null,
+            self::ALLOWED_PALETTES,
+            'METADATA_PALETTE_KEY_TYPE',
+            'METADATA_PALETTE_KEY_UNKNOWN',
+        );
+    }
+
+    /**
+     * Validate that a metadata string field either is null or is a string.
+     * Returns early on null so the per-field validator functions stay under
+     * the cognitive-complexity ceiling.
+     *
+     * @param mixed $value
+     */
+    private function validateMetadataStringField(ValidationResult $result, string $field, mixed $value, string $errorCode): void
+    {
+        if ($value === null) {
+            return;
+        }
+        if (!is_string($value)) {
+            $result->addError([
+                'code'     => $errorCode,
+                'severity' => 'error',
+                'message'  => "Field 'metadata.{$field}' must be a string.",
+                'path'     => 'metadata.' . $field,
+            ]);
+        }
+    }
+
+    /**
+     * Validate a metadata field that is both a string AND constrained to
+     * an enum. Both checks share the same shape so the call sites stay
+     * compact.
+     *
+     * @param list<string> $allowed
+     * @param mixed $value
+     */
+    private function validateMetadataEnum(
+        ValidationResult $result,
+        string $field,
+        mixed $value,
+        array $allowed,
+        string $unknownCode,
+    ): void {
+        if (!in_array($value, $allowed, true)) {
             $result->addWarning([
-                'code'     => 'METADATA_CATEGORY_UNKNOWN',
+                'code'     => $unknownCode,
                 'severity' => 'warning',
                 'message'  => sprintf(
-                    "Unknown category '%s'. Expected one of: %s.",
-                    (string) $metadata['category'],
-                    implode(', ', self::ALLOWED_CATEGORIES),
+                    "Unknown %s '%s'. Expected one of: %s.",
+                    $field,
+                    (string) $value,
+                    implode(', ', $allowed),
                 ),
-                'path'     => 'metadata.category',
+                'path'     => 'metadata.' . $field,
             ]);
         }
-        if (isset($metadata['icon']) && !is_string($metadata['icon'])) {
-            $result->addError([
-                'code'     => 'METADATA_ICON_TYPE',
-                'severity' => 'error',
-                'message'  => "Field 'metadata.icon' must be a string.",
-                'path'     => 'metadata.icon',
-            ]);
+    }
+
+    /**
+     * Validate a metadata field that is both a string AND constrained to
+     * an enum. Emits an error when the value isn't a string, and a warning
+     * when the value is a string but not in the allowed list.
+     *
+     * @param list<string> $allowed
+     * @param mixed $value
+     */
+    private function validateMetadataEnumWithType(
+        ValidationResult $result,
+        string $field,
+        mixed $value,
+        array $allowed,
+        string $typeErrorCode,
+        string $unknownCode,
+    ): void {
+        if ($value === null) {
+            return;
         }
-        if (isset($metadata['archetype']) && !is_string($metadata['archetype'])) {
-            $result->addError([
-                'code'     => 'METADATA_ARCHETYPE_TYPE',
-                'severity' => 'error',
-                'message'  => "Field 'metadata.archetype' must be a string.",
-                'path'     => 'metadata.archetype',
-            ]);
-        } elseif (isset($metadata['archetype']) && !in_array($metadata['archetype'], self::ALLOWED_ARCHETYPES, true)) {
-            $result->addWarning([
-                'code'     => 'METADATA_ARCHETYPE_UNKNOWN',
-                'severity' => 'warning',
-                'message'  => sprintf(
-                    "Unknown archetype '%s'. Expected one of: %s.",
-                    (string) $metadata['archetype'],
-                    implode(', ', self::ALLOWED_ARCHETYPES),
-                ),
-                'path'     => 'metadata.archetype',
-            ]);
+        if (!is_string($value)) {
+            $this->addStringTypeError($result, $field, $typeErrorCode);
+            return;
         }
-        if (isset($metadata['variant_key']) && !is_string($metadata['variant_key'])) {
-            $result->addError([
-                'code'     => 'METADATA_VARIANT_KEY_TYPE',
-                'severity' => 'error',
-                'message'  => "Field 'metadata.variant_key' must be a string.",
-                'path'     => 'metadata.variant_key',
-            ]);
-        } elseif (isset($metadata['variant_key']) && !in_array($metadata['variant_key'], self::ALLOWED_VARIANTS, true)) {
-            $result->addWarning([
-                'code'     => 'METADATA_VARIANT_KEY_UNKNOWN',
-                'severity' => 'warning',
-                'message'  => sprintf(
-                    "Unknown variant_key '%s'. Expected one of: %s.",
-                    (string) $metadata['variant_key'],
-                    implode(', ', self::ALLOWED_VARIANTS),
-                ),
-                'path'     => 'metadata.variant_key',
-            ]);
-        }
-        if (isset($metadata['palette_key']) && !is_string($metadata['palette_key'])) {
-            $result->addError([
-                'code'     => 'METADATA_PALETTE_KEY_TYPE',
-                'severity' => 'error',
-                'message'  => "Field 'metadata.palette_key' must be a string.",
-                'path'     => 'metadata.palette_key',
-            ]);
-        } elseif (isset($metadata['palette_key']) && !in_array($metadata['palette_key'], self::ALLOWED_PALETTES, true)) {
-            $result->addWarning([
-                'code'     => 'METADATA_PALETTE_KEY_UNKNOWN',
-                'severity' => 'warning',
-                'message'  => sprintf(
-                    "Unknown palette_key '%s'. Expected one of: %s.",
-                    (string) $metadata['palette_key'],
-                    implode(', ', self::ALLOWED_PALETTES),
-                ),
-                'path'     => 'metadata.palette_key',
-            ]);
-        }
+        $this->validateMetadataEnum($result, $field, $value, $allowed, $unknownCode);
+    }
+
+    private function addStringTypeError(ValidationResult $result, string $field, string $code): void
+    {
+        $result->addError([
+            'code'     => $code,
+            'severity' => 'error',
+            'message'  => "Field 'metadata.{$field}' must be a string.",
+            'path'     => 'metadata.' . $field,
+        ]);
     }
 
     /**

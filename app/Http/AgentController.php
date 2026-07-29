@@ -147,11 +147,11 @@ final class AgentController
         $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
+        $bodyOrError = $this->decodeBodyOrError($request);
+        if ($bodyOrError instanceof JsonResponse) {
+            return $bodyOrError;
         }
+        $body = $bodyOrError;
 
         $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived', 'is_favorite'];
         $data = array_intersect_key($body, array_flip($allowed));
@@ -184,6 +184,22 @@ final class AgentController
         }
 
         return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]]);
+    }
+
+    /**
+     * Decode the JSON body, returning a 400 JsonResponse on parse failure.
+     * Extracted from `update()` so the controller body stays under the
+     * cognitive-complexity ceiling (S1142's 3-return limit).
+     *
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function decodeBodyOrError(Request $request): array|JsonResponse
+    {
+        try {
+            return $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
+        }
     }
 
     /**
@@ -223,6 +239,18 @@ final class AgentController
                 );
             }
         }
+        $typeError = $this->validateProfilePictureTypes($picture);
+        if ($typeError !== null) {
+            return $typeError;
+        }
+        return $this->validateProfilePictureEnums($picture);
+    }
+
+    /**
+     * @param array<string, mixed> $picture
+     */
+    private function validateProfilePictureTypes(array $picture): ?JsonResponse
+    {
         foreach (['archetype', 'variant_key', 'palette_key'] as $key) {
             if (array_key_exists($key, $picture) && !is_string($picture[$key])) {
                 return $this->unprocessable(
@@ -231,6 +259,14 @@ final class AgentController
                 );
             }
         }
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $picture
+     */
+    private function validateProfilePictureEnums(array $picture): ?JsonResponse
+    {
         try {
             if (isset($picture['archetype'])) {
                 $this->pictureService->normaliseArchetype((string) $picture['archetype']);
