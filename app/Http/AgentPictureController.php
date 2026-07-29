@@ -85,6 +85,21 @@ final class AgentPictureController
             return $validationError;
         }
 
+        return $this->performUpload($request, $file, $bytes, $agentId, $userId);
+    }
+
+    /**
+     * Run the byte-path (MediaArchive → agent_pictures write) after the
+     * controller has finished the input validations. Extracted from
+     * `uploadImage()` so the controller stays under the 3-return ceiling.
+     */
+    private function performUpload(
+        Request $request,
+        UploadedFile $file,
+        string $bytes,
+        int $agentId,
+        int $userId,
+    ): JsonResponse {
         $clientName = $file->getClientOriginalName();
         $asset = $this->mediaArchive->ingest(new MediaIngestRequest(
             bytes: $bytes,
@@ -115,6 +130,20 @@ final class AgentPictureController
      */
     private function validateUpload(UploadedFile $file, string $bytes, int $agentId): ?JsonResponse
     {
+        $sizeError = $this->validateUploadSize($file);
+        if ($sizeError !== null) {
+            return $sizeError;
+        }
+        return $this->validateUploadMime($bytes, $agentId);
+    }
+
+    /**
+     * Validate the upload's integrity + size. Returns 4xx JsonResponse on
+     * failure, null on success. Extracted from validateUpload() so both
+     * stay under the 3-return ceiling (S1142).
+     */
+    private function validateUploadSize(UploadedFile $file): ?JsonResponse
+    {
         if (!$file->isValid()) {
             return $this->error('BAD_REQUEST', 'Upload failed: ' . $file->getErrorMessage(), Response::HTTP_BAD_REQUEST);
         }
@@ -125,6 +154,15 @@ final class AgentPictureController
                 Response::HTTP_REQUEST_ENTITY_TOO_LARGE,
             );
         }
+        return null;
+    }
+
+    /**
+     * Validate the upload's MIME type against the agent's allowed-image
+     * set. Returns 4xx JsonResponse on failure, null on success.
+     */
+    private function validateUploadMime(string $bytes, int $agentId): ?JsonResponse
+    {
         $sniffedMime = $this->sniffer->sniffFromBytes($bytes);
         if (!$this->allowedTypes->isAllowed($sniffedMime, $agentId)) {
             return $this->error(
