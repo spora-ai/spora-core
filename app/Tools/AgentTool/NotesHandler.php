@@ -94,16 +94,28 @@ final class NotesHandler
             return ToolResult::fail('write_notes: content is required.');
         }
         $content = (string) $arguments['content'];
-        if ($defaultMode === 'append' || $defaultMode === 'prepend') {
-            $requested = (string) ($arguments['mode'] ?? $defaultMode);
-            if (!in_array($requested, self::APPEND_MODES, true)) {
-                return ToolResult::fail(
-                    "write_notes: invalid mode '{$requested}'. Allowed: " . implode(', ', self::APPEND_MODES) . '.',
-                );
-            }
-            return [$content, $requested];
+
+        $resolvedMode = $this->resolveMode($arguments, $defaultMode);
+        if ($resolvedMode instanceof ToolResult) {
+            return $resolvedMode;
         }
-        return [$content, $defaultMode];
+
+        return [$content, $resolvedMode];
+    }
+
+    /** @return string|ToolResult */
+    private function resolveMode(array $arguments, string $defaultMode): string|ToolResult
+    {
+        if ($defaultMode !== 'append' && $defaultMode !== 'prepend') {
+            return $defaultMode;
+        }
+        $requested = (string) ($arguments['mode'] ?? $defaultMode);
+        if (!in_array($requested, self::APPEND_MODES, true)) {
+            return ToolResult::fail(
+                "write_notes: invalid mode '{$requested}'. Allowed: " . implode(', ', self::APPEND_MODES) . '.',
+            );
+        }
+        return $requested;
     }
 
     /**

@@ -111,8 +111,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'agent-template schema (id/version/agent{}/tools[]/required_plugins) is '
                . 'reserved for the operator-upload endpoint at '
                . 'POST /api/v1/agent-templates/import and will be rejected on this surface. '
-               . 'Read the agent-creation skill first (skill action: read, name: agent-creation, '
-               . 'filename: SKILL.md).',
+               . 'Read the agent-creation skill first ' . self::AGENT_CREATION_SKILL_HINT . '.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
@@ -143,8 +142,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'Identify the target by `agent_id` (the numeric primary key returned by `create_agent`). '
                . 'Omit `agent_id` to read the calling agent (same as the deprecated '
                . '`read_agent_configuration` operation). For the slim two-phase agent-creation '
-               . 'flow, see the agent-creation skill (skill action: read, name: agent-creation, '
-               . 'filename: SKILL.md).',
+               . 'flow, see the agent-creation skill ' . self::AGENT_CREATION_SKILL_HINT . '.',
     enabledByDefault: false,
     requiresApprovalByDefault: false,
 )]
@@ -157,8 +155,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'follow-up operations, and this is the cheapest way to recover it after '
                . 'a turn boundary. Archived and pinned state is preserved (call '
                . '`read_agent` for the full manifest). Empty when the user has no agents. '
-               . 'See the agent-creation skill (skill action: read, name: agent-creation, '
-               . 'filename: SKILL.md).',
+               . 'See the agent-creation skill ' . self::AGENT_CREATION_SKILL_HINT . '.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
@@ -477,6 +474,44 @@ final class AgentTool extends AbstractTool
      */
     private function configureTools(int $agentId, ?int $userId, array $arguments): ToolResult
     {
+        $context = $this->resolveConfigureToolsContext($userId, $agentId, $arguments);
+        if ($context instanceof ToolResult) {
+            return $context;
+        }
+
+        [$target, $plan] = $context;
+        $this->configurePlanner->apply($target->id, $userId, $plan);
+        return $this->renderFreshAgentAfterConfigure($userId, $target->id);
+    }
+
+    /**
+     * @param  array<string, mixed> $arguments
+     * @return array{0: Agent, 1: list<mixed>}|ToolResult
+     */
+    private function resolveConfigureToolsContext(?int $userId, int $agentId, array $arguments): array|ToolResult
+    {
+        $entries = $this->runConfigureToolsPrecheck($userId, $arguments);
+        if ($entries instanceof ToolResult) {
+            return $entries;
+        }
+
+        $plan = $this->configurePlanner->buildPlan($entries);
+        if ($plan instanceof ToolResult) {
+            return $plan;
+        }
+
+        $target = $this->resolveAgentToolTarget($userId, $agentId, $arguments);
+        return $target instanceof ToolResult ? $target : [$target, $plan];
+    }
+
+    /**
+     * Original check order: userId, then `tools` array shape.
+     *
+     * @param  array<string, mixed>          $arguments
+     * @return list<mixed>|ToolResult
+     */
+    private function runConfigureToolsPrecheck(?int $userId, array $arguments): array|ToolResult
+    {
         if ($userId === null) {
             return ToolResult::fail('configure_tools requires an authenticated user.');
         }
@@ -486,18 +521,7 @@ final class AgentTool extends AbstractTool
             return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . '`tools` must be an array.');
         }
 
-        $plan = $this->configurePlanner->buildPlan($entries);
-        if ($plan instanceof ToolResult) {
-            return $plan;
-        }
-
-        $target = $this->resolveAgentToolTarget($userId, $agentId, $arguments);
-        if ($target instanceof ToolResult) {
-            return $target;
-        }
-        $this->configurePlanner->apply($target->id, $userId, $plan);
-
-        return $this->renderFreshAgentAfterConfigure($userId, $target->id);
+        return $entries;
     }
 
     private function renderFreshAgentAfterConfigure(int $userId, int $agentId): ToolResult
@@ -599,6 +623,12 @@ final class AgentTool extends AbstractTool
         if ($raw === null) {
             return $callingAgentId;
         }
+
+        return $this->parsePositiveAgentId($raw);
+    }
+
+    private function parsePositiveAgentId(mixed $raw): int|ToolResult
+    {
         if (is_int($raw) && $raw > 0) {
             return $raw;
         }
@@ -606,9 +636,7 @@ final class AgentTool extends AbstractTool
             return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_ID_POSITIVE_INTEGER_MSG);
         }
         $n = (int) $raw;
-        return $n > 0
-            ? $n
-            : ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_ID_POSITIVE_INTEGER_MSG);
+        return $n > 0 ? $n : ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_ID_POSITIVE_INTEGER_MSG);
     }
 
     /**
@@ -628,24 +656,30 @@ final class AgentTool extends AbstractTool
             return $callingAgentId;
         }
 
-        $raw = $arguments['agent_id'];
+        return $this->parseAndValidateWriteConfigurationTargetId($userId, $arguments['agent_id']);
+    }
+
+    private function parseAndValidateWriteConfigurationTargetId(int $userId, mixed $raw): int|ToolResult
+    {
         if (is_int($raw) && $raw > 0) {
-            $resolvedId = $raw;
-        } elseif (is_numeric($raw)) {
-            $n = (int) $raw;
-            if ($n <= 0) {
-                return ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . self::AGENT_ID_POSITIVE_INTEGER_MSG);
-            }
-            $resolvedId = $n;
-        } else {
+            return $this->ensureAgentOwnedByUser($userId, $raw);
+        }
+        if (!is_numeric($raw)) {
             return ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . self::AGENT_ID_POSITIVE_INTEGER_MSG);
         }
+        $n = (int) $raw;
+        return $n > 0
+            ? $this->ensureAgentOwnedByUser($userId, $n)
+            : ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . self::AGENT_ID_POSITIVE_INTEGER_MSG);
+    }
 
+    private function ensureAgentOwnedByUser(int $userId, int $agentId): int|ToolResult
+    {
         return Agent::query()
             ->where('user_id', $userId)
-            ->where('id', $resolvedId)
+            ->where('id', $agentId)
             ->exists()
-                ? $resolvedId
+                ? $agentId
                 : ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
     }
 }

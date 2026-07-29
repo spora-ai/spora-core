@@ -51,6 +51,15 @@ final class SlimPayloadValidator
             return $error;
         }
 
+        return $this->buildValidatedCreateAgent($raw);
+    }
+
+    /**
+     * @param  array<string, mixed> $raw
+     * @return array<string, mixed>|ToolResult
+     */
+    private function buildValidatedCreateAgent(array $raw): array|ToolResult
+    {
         $name = is_string($raw['name'] ?? null) ? trim($raw['name']) : '';
         if ($name === '' || strlen($name) > self::NAME_MAX_LENGTH) {
             return ToolResult::fail(
@@ -251,6 +260,16 @@ final class SlimPayloadValidator
         if (!is_array($raw) || $raw === []) {
             return ToolResult::fail('create_agent: `payload` object is required.');
         }
+
+        $nestedError = $this->nestedNamedBlockError($raw);
+        return $nestedError ?? $this->createAgentPayloadErrors($raw);
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     */
+    private function nestedNamedBlockError(array $raw): ?ToolResult
+    {
         if (isset($raw['agent']) && is_array($raw['agent'])) {
             return ToolResult::fail(
                 'create_agent: send a slim payload (name, description, system_prompt, ...) — '
@@ -265,7 +284,7 @@ final class SlimPayloadValidator
                 . 'See the agent-creation skill.',
             );
         }
-        return $this->createAgentPayloadErrors($raw);
+        return null;
     }
 
     /**
