@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Delight\Auth\Role;
+use Monolog\Logger;
+use Spora\Core\Extension\PluginManager;
 use Spora\Core\Kernel;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -146,6 +148,44 @@ function pluginAdminGate_stateChangeRequest(string $method, string $path, ?array
 }
 
 /**
+ * PluginManager stand-in that never spawns composer. The production
+ * factory in ContainerDefinitions hands Process the real argv, so a
+ * request reaching PluginsController would otherwise run `composer require`
+ * and pollute composer.json / composer.lock.
+ */
+function pluginAdminGate_fakePluginManager(): PluginManager
+{
+    $processFactory = static function (array $argv, string $cwd): object {
+        return new class {
+            public function run(): void {}
+            public function getExitCode(): int
+            {
+                return 0;
+            }
+            public function getOutput(): string
+            {
+                return 'Installing plugin (test fake)';
+            }
+            public function getErrorOutput(): string
+            {
+                return '';
+            }
+            public function isSuccessful(): bool
+            {
+                return true;
+            }
+        };
+    };
+
+    return new PluginManager(
+        new Logger('test'),
+        $processFactory,
+        new Spora\Core\Paths(sys_get_temp_dir()),
+        'composer',
+    );
+}
+
+/**
  * Decode a JSON response body and assert it is a non-empty array with the
  * standard `{ "error": { "code": …, "message": … } }` envelope shape.
  * `$body` is the array; the `code` is returned so callers can assert on
@@ -254,12 +294,11 @@ test('AdminMiddleware runs BEFORE the feature flag gate (non-admin gets FORBIDDE
 });
 
 test('POST /api/v1/plugins reaches the controller for a logged-in admin (no 403)', function (): void {
-    // Positive lock-in: admin path is not blocked. The controller may then
-    // succeed or fail downstream (e.g. composer missing in the test
-    // container) — the assertion is only that the admin gate passed.
     pluginAdminGate_makeUser('admin-reaches@example.com', admin: true);
 
-    $kernel   = new Kernel(pluginAdminGate_cleanPaths());
+    $kernel = new Kernel(pluginAdminGate_cleanPaths());
+    $kernel->getContainer()->set(PluginManager::class, pluginAdminGate_fakePluginManager());
+
     $response = $kernel->handle(pluginAdminGate_stateChangeRequest(
         'POST',
         PLUGIN_ADMIN_GATE_INSTALL_PATH,
@@ -270,8 +309,6 @@ test('POST /api/v1/plugins reaches the controller for a logged-in admin (no 403)
     expect($response->getStatusCode())->not->toBe(403);
 
     // If the response is an error envelope, it must NOT be FORBIDDEN.
-    // (A 500 from a missing composer binary, etc., is acceptable — the
-    // admin gate passed, which is what we're proving.)
     if (str_contains($response->headers->get('Content-Type', '') ?: '', 'application/json')) {
         $body = json_decode($response->getContent(), true);
         if (is_array($body) && isset($body['error']['code']) && is_string($body['error']['code'])) {

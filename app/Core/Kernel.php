@@ -311,7 +311,11 @@ final class Kernel implements KernelInterface
         }
         ini_set('display_errors', '0');
 
-        set_error_handler(function (int $errno, string $errstr, string $errfile, int $errline): bool {
+        // Capture $logger, not $this: a closure on PHP's error-handler
+        // stack that captures $this forms an unbreakable cycle, so
+        // __destruct can't restore_error_handler().
+        $logger = $this->container->get(LoggerInterface::class);
+        set_error_handler(static function (int $errno, string $errstr, string $errfile, int $errline) use ($logger): bool {
             if (!(error_reporting() & $errno)) {
                 return true;
             }
@@ -322,7 +326,7 @@ final class Kernel implements KernelInterface
                 E_NOTICE, E_USER_NOTICE => 'info',
                 default => 'error',
             };
-            $this->container->get(LoggerInterface::class)->$logLevel(
+            $logger->$logLevel(
                 sprintf('PHP error %d: %s in %s:%d', $errno, $errstr, $errfile, $errline),
             );
 

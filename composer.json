@@ -88,9 +88,9 @@
         "install:db": "@php bin/spora spora:install",
         "seed": "@php bin/spora db:seed",
         "test": "./vendor/bin/pest",
-        "test:parallel": "./vendor/bin/pest --parallel --processes=auto --max-batch-size=50",
-        "test:coverage": "./vendor/bin/pest --coverage --coverage-html=coverage",
-        "test:coverage:clover": "./vendor/bin/pest --coverage-clover=coverage.xml",
+        "test:parallel": "./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --fail-on-risky",
+        "test:coverage": "./vendor/bin/pest --coverage --coverage-html=coverage --fail-on-risky",
+        "test:coverage:clover": "./vendor/bin/pest --coverage-clover=coverage.xml --fail-on-risky",
         "analyse": "./vendor/bin/phpstan analyse --memory-limit=2G",
         "format": "./vendor/bin/php-cs-fixer fix",
         "openapi": "@php bin/spora-build openapi:generate"
