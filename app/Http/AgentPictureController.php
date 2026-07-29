@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use RuntimeException;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\AvatarFileReadFailedException;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
@@ -145,7 +145,7 @@ final class AgentPictureController
     {
         $bytes = file_get_contents($file->getPathname());
         if ($bytes === false) {
-            throw new RuntimeException('Could not read uploaded file.');
+            throw AvatarFileReadFailedException::onPath($file->getPathname());
         }
         return $bytes;
     }
