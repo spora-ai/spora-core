@@ -87,9 +87,9 @@ final class AgentPictureController
      */
     private function prepareUpload(Request $request, int $agentId, int $userId): array|JsonResponse
     {
-        $agent = $this->agentService->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
+        $agentError = $this->resolveAgentForUpload($agentId, $userId);
+        if ($agentError instanceof JsonResponse) {
+            return $agentError;
         }
 
         $file = $request->files->get('file');
@@ -103,6 +103,20 @@ final class AgentPictureController
         }
 
         return ['file' => $file, 'bytes' => $prepared];
+    }
+
+    /**
+     * Look up the agent for an upload. Returns null on success, or a 4xx
+     * JsonResponse on failure. Extracted from {@see prepareUpload()} so that
+     * helper stays under the 3-return ceiling (S1142).
+     */
+    private function resolveAgentForUpload(int $agentId, int $userId): ?JsonResponse
+    {
+        $agent = $this->agentService->getAgent($agentId, $userId);
+        if ($agent === null) {
+            return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
+        }
+        return null;
     }
 
     /**
