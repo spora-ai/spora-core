@@ -17,6 +17,7 @@ use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
+use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
@@ -221,6 +222,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container->allows('get')->with(ToolConfigService::class)->andReturn(Mockery::mock(ToolConfigService::class));
         $container->allows('get')->with(MercurePublisherInterface::class)->andReturn(Mockery::mock(MercurePublisherInterface::class));
         $container->allows('get')->with(LoggerInterface::class)->andReturn(Mockery::mock(LoggerInterface::class));
+        $container->allows('get')->with(AgentServiceInterface::class)->andReturnNull();
 
         $mercure = Mockery::mock(MercurePublisherInterface::class);
         $mercure->allows('publishUpdate')->andReturnNull();

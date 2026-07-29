@@ -129,3 +129,68 @@ it('strips the __required_when side channel before the schema reaches the LLM', 
 
     expect($filtered)->not->toHaveKey(ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY);
 });
+
+it('drops per-op-bound properties from the LLM-facing schema when no allowed op intersects', function (): void {
+    // Mirrors the AgentTool real case: agent calls read_notes, but the
+    // schema also declares `agent` (write_agent_configuration only),
+    // `content` (write_notes / write_notes_overwrite only), and a shared
+    // `mode`. Without the property drop, the LLM sees the three params in
+    // its tool definition and emits defensive empty stubs on every call.
+    $schema = [
+        'type' => 'object',
+        'properties' => [
+            'action'  => ['type' => 'string', 'enum' => ['read_notes', 'write_notes', 'write_agent_configuration']],
+            'agent'   => ['type' => 'object'],
+            'content' => ['type' => 'string'],
+            'mode'    => ['type' => 'string'],
+        ],
+        'required' => ['action'],
+        ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY => [
+            'agent'   => ['write_agent_configuration'],
+            'content' => ['write_notes'],
+        ],
+    ];
+
+    $filtered = OperationSchemaFilter::filter($schema, ['read_notes'], 'action');
+
+    expect($filtered['properties'])->not->toHaveKey('agent')
+        ->and($filtered['properties'])->not->toHaveKey('content')
+        ->and($filtered['properties'])->toHaveKey('mode');
+});
+
+it('keeps per-op-bound properties when an allowed op intersects', function (): void {
+    $schema = [
+        'type' => 'object',
+        'properties' => [
+            'action' => ['type' => 'string', 'enum' => ['write_agent_configuration']],
+            'agent'  => ['type' => 'object'],
+        ],
+        'required' => ['action'],
+        ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY => ['agent' => ['write_agent_configuration']],
+    ];
+
+    $filtered = OperationSchemaFilter::filter($schema, ['write_agent_configuration'], 'action');
+
+    expect($filtered['properties'])->toHaveKey('agent');
+});
+
+it('drops per-op-bound properties at runtime in filterForOperation', function (): void {
+    // Runtime counterpart: the SchemaValidator narrows `properties` the
+    // same way it narrows `required[]`, so per-op-bound props whose binding
+    // does not include the active op are stripped before validation.
+    $schema = [
+        'type' => 'object',
+        'properties' => [
+            'action'  => ['type' => 'string', 'enum' => ['read_notes', 'write_notes']],
+            'content' => ['type' => 'string'],
+            'mode'    => ['type' => 'string'],
+        ],
+        'required' => ['action'],
+        ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY => ['content' => ['write_notes']],
+    ];
+
+    $filtered = OperationSchemaFilter::filterForOperation($schema, 'read_notes');
+
+    expect($filtered['properties'])->not->toHaveKey('content')
+        ->and($filtered['properties'])->toHaveKey('mode');
+});

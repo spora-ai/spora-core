@@ -135,3 +135,24 @@ test('importPayload accepts skills/agent-creation/example.json round-trip with z
     expect($warningCodes)->toContain('TOOL_PLUGIN_MISSING')
         ->and($warningCodes)->toContain('PLUGIN_MISSING');
 });
+
+test('importPayload without a tools block creates the agent row but skips tool activation', function (): void {
+    // The LLM-facing create_agent path runs with no nested `tools` block;
+    // the agent row should be created cleanly and toolsEnabled should be
+    // empty so the LLM can call configure_tools separately to apply the
+    // toolset.
+    $raw = [
+        'id' => 'no-tools', 'name' => 'No Tools', 'version' => '1.0.0',
+        'agent' => ['max_steps' => 5, 'system_prompt' => 'x'],
+        'required_plugins' => [],
+    ];
+
+    $result = $this->importer->importPayload($this->userId, $raw);
+
+    expect($result->agent)->toBeInstanceOf(Agent::class);
+    expect($result->agent->name)->toBe('No Tools');
+    expect($result->toolsEnabled)->toBe([]);
+
+    $tools = AgentTool::where('agent_id', $result->agent->id)->get();
+    expect(count($tools))->toBe(0);
+});

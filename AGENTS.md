@@ -81,7 +81,7 @@ GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [
 > **Architecture deep-dive:** The Orchestrator loop, tick phases, worker modes, and plugin system are documented in [docs/01_architecture.md](docs/01_architecture.md) and [docs/11_agent_loop_async.md](docs/11_agent_loop_async.md).
 
 ### Testing
-- Backend: `composer test` (Pest)
+- Backend: **always run `composer test:parallel` for verification (~22s on a typical PR).** Never run `composer test` or `vendor/bin/pest` (serial) for the full suite — they take ~270s. Serial Pest is reserved for debugging one specific failing test. A parallel run may report 0–12 `risky` tests across reruns (well-known parallel-isolation flake); if `passed + risky == total` and there are no `failed`, the suite is clean — proceed.
 - Frontend unit: `composer frontend:test` (Vitest)
 - E2E: not wired up — no Playwright dep, no `frontend/tests/e2e/` (see [docs/09_frontend.md](docs/09_frontend.md))
 

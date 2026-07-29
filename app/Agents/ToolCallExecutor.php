@@ -216,7 +216,6 @@ final class ToolCallExecutor
             $toolCall->arguments,
             $agent->id,
             $task->id,
-            $task->user_id,
         );
 
         \Illuminate\Database\Capsule\Manager::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {

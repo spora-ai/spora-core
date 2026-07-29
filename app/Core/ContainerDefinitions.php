@@ -74,6 +74,7 @@ use Spora\Http\UserProfileController;
 use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
+use Spora\Services\AgentManifest;
 use Spora\Services\AgentService;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsService;
@@ -736,6 +737,13 @@ final class ContainerDefinitions
                 );
             },
 
+            AgentManifest::class => static function (ContainerInterface $c): AgentManifest {
+                return new AgentManifest(
+                    $c->get(AgentToolSettingsServiceInterface::class),
+                    $c->get(ToolIconResolver::class),
+                );
+            },
+
             UserServiceInterface::class => static fn(): UserServiceInterface => new UserService(),
         ];
     }
@@ -1039,22 +1047,24 @@ final class ContainerDefinitions
             TimeTool::class => static fn(): TimeTool => new TimeTool(),
             CalculatorTool::class => static fn(): CalculatorTool => new CalculatorTool(),
 
-            // AgentTool reuses AgentTemplateImporter for the create_agent
-            // operation so the LLM path shares validation + activation
-            // semantics with the operator upload endpoint. AgentService
-            // owns read_agent_configuration / write_*_notes through the
-            // shared EDITABLE_AGENT_FIELDS allowlist. PluginLoader and
-            // ToolIconResolver are only used by get_available_tools to
-            // label the source of each tool and resolve icons — both
-            // remain optional so unit tests can omit them.
+            // AgentTool.create_agent now uses AgentService::createAgent
+            // (slim payload) and AgentManifest for output; the
+            // LLM-facing flow no longer needs AgentTemplateImporter /
+            // AgentTemplateValidator — those stay in
+            // AgentTemplateController for the operator-upload path.
+            // PluginLoader and ToolIconResolver are only used by
+            // get_available_tools to label the source of each tool and
+            // resolve icons — both remain optional so unit tests can
+            // omit them.
             AgentTool::class => static function (ContainerInterface $c): AgentTool {
                 return new AgentTool(
                     $c->get(AgentServiceInterface::class),
                     $c->get(AgentToolSettingsServiceInterface::class),
-                    $c->get(AgentTemplateImporter::class),
-                    $c->get(AgentTemplateValidator::class),
-                    $c->has(PluginLoader::class) ? $c->get(PluginLoader::class) : null,
-                    $c->has(ToolIconResolver::class) ? $c->get(ToolIconResolver::class) : null,
+                    $c->get(AgentManifest::class),
+                    new AgentTool\AgentToolCollaborators(
+                        pluginLoader: $c->has(PluginLoader::class) ? $c->get(PluginLoader::class) : null,
+                        iconResolver: $c->has(ToolIconResolver::class) ? $c->get(ToolIconResolver::class) : null,
+                    ),
                 );
             },
 
@@ -1138,6 +1148,7 @@ final class ContainerDefinitions
                         mercure: $c->get(MercurePublisherInterface::class),
                         toolConfigService: $c->get(ToolConfigService::class),
                         toolCallSerializer: $c->get(ToolCallSerializer::class),
+                        agentService: $c->get(AgentServiceInterface::class),
                     ),
                 );
             },

@@ -95,11 +95,15 @@ final class AgentTemplateImporter
 
         // The closure returns a tuple (agentId, toolsEnabled) so the
         // outer scope can unpack both without a by-ref parameter on
-        // applyTools.
+        // applyTools. Skip the tools-application step when the payload
+        // has no `tools` block — the LLM-facing create_agent flow runs
+        // this path and applies the toolset separately via configure_tools.
         [$agentId, $toolsEnabled] = Capsule::connection()->transaction(
             function () use ($userId, $template, $registeredTools, &$warnings): array {
                 $agentId = $this->createAgent($userId, $template);
-                $toolsEnabled = $this->applyTools($agentId, $template, $registeredTools, $warnings);
+                $toolsEnabled = array_key_exists('tools', $template->raw())
+                    ? $this->applyTools($agentId, $template, $registeredTools, $warnings)
+                    : [];
                 return [$agentId, $toolsEnabled];
             },
         );

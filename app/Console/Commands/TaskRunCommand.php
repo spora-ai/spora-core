@@ -133,6 +133,7 @@ final class TaskRunCommand extends Command
                 notificationService: $this->container->get(NotificationService::class),
                 mercure: $this->mercure,
                 toolConfigService: $this->container->get(\Spora\Services\ToolConfigService::class),
+                agentService: $this->container->get(\Spora\Services\AgentServiceInterface::class),
             ),
         );
     }
