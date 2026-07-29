@@ -7,6 +7,7 @@ namespace Spora\Services;
 use DateTimeInterface;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
+use Spora\Services\AgentPictures\AgentPictureService;
 
 /**
  * Agent → wire-format array mapping. Single source of truth for the shape
@@ -32,6 +33,13 @@ final class AgentResource
      *     entry (callers without DI access can pass null and the wire payload
      *     still parses; the frontend's <Icon> component falls back to
      *     'puzzle' on missing keys).
+     * @param ?AgentPictureService $pictureService  When provided, the
+     *     `profile_picture` field is included in the wire payload (the
+     *     resolved `archetype`, `variant_key`, `palette_key`, plus the
+     *     derived `fg_color`/`bg_color`, or the uploaded image URL).
+     *     When null — e.g. from the `?select=id,name` projection — the
+     *     field is omitted. The dashboard / sidebar / agent-detail render
+     *     sites always pass a service.
      *
      * @return array<string, mixed>
      */
@@ -39,6 +47,7 @@ final class AgentResource
         Agent $agent,
         ?bool $supportsImageInput = null,
         ?ToolIconResolver $iconResolver = null,
+        ?AgentPictureService $pictureService = null,
     ): array {
         /** @var \Illuminate\Database\Eloquent\Collection<int, AgentTool> $tools */
         $tools = $agent->agentTools;
@@ -77,6 +86,10 @@ final class AgentResource
 
         if ($supportsImageInput !== null) {
             $payload['llm_supports_image_input'] = $supportsImageInput;
+        }
+
+        if ($pictureService !== null) {
+            $payload['profile_picture'] = $pictureService->toWireShape((int) $agent->id);
         }
 
         return $payload;

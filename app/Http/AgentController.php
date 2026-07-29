@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
+use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\ToolIconResolver;
@@ -41,6 +43,7 @@ final class AgentController
         private readonly AgentServiceInterface $agentService,
         private readonly ?DriverFactory $driverFactory = null,
         private readonly ?ToolIconResolver $toolIconResolver = null,
+        private readonly ?AgentPictureService $pictureService = null,
     ) {}
 
     /**
@@ -114,7 +117,7 @@ final class AgentController
         $agent = $this->agentService->createAgent($userId, $data);
 
         return new JsonResponse(
-            ['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver)]],
+            ['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]],
             Response::HTTP_CREATED,
         );
     }
@@ -133,7 +136,7 @@ final class AgentController
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver)]]);
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]]);
     }
 
     /**
@@ -169,7 +172,79 @@ final class AgentController
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver)]]);
+        // profile_picture is a nested object — handled after the agents-row
+        // write so a 422 on the picture payload doesn't block a successful
+        // name/description/system_prompt PATCH. The avatar write is idempotent
+        // and free of side effects (no event emission, no async jobs).
+        if (is_array($body['profile_picture'] ?? null) && $this->pictureService !== null) {
+            $pictureError = $this->applyProfilePicture($agentId, $body['profile_picture']);
+            if ($pictureError !== null) {
+                return $pictureError;
+            }
+        }
+
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]]);
+    }
+
+    /**
+     * Apply the `profile_picture` nested object to the agent's picture row.
+     * Surfaces a 422 with the field path when the payload is invalid; returns
+     * null on success.
+     */
+    private function applyProfilePicture(int $agentId, array $picture): ?JsonResponse
+    {
+        $error = $this->validateProfilePicture($picture);
+        if ($error !== null) {
+            return $error;
+        }
+
+        $this->pictureService->updateAvatar(
+            $agentId,
+            isset($picture['archetype']) ? (string) $picture['archetype'] : null,
+            isset($picture['variant_key']) ? (string) $picture['variant_key'] : null,
+            isset($picture['palette_key']) ? (string) $picture['palette_key'] : null,
+        );
+        return null;
+    }
+
+    /**
+     * Validate the profile_picture nested payload shape. Returns a 422
+     * JsonResponse on the first invalid field, or null when the payload
+     * is well-formed.
+     */
+    private function validateProfilePicture(array $picture): ?JsonResponse
+    {
+        $allowed = ['archetype', 'variant_key', 'palette_key'];
+        foreach (array_keys($picture) as $key) {
+            if (!in_array($key, $allowed, true)) {
+                return $this->unprocessable(
+                    'PROFILE_PICTURE_UNKNOWN_KEY',
+                    "Unknown field 'profile_picture.{$key}'.",
+                );
+            }
+        }
+        foreach (['archetype', 'variant_key', 'palette_key'] as $key) {
+            if (array_key_exists($key, $picture) && !is_string($picture[$key])) {
+                return $this->unprocessable(
+                    'PROFILE_PICTURE_TYPE',
+                    "Field 'profile_picture.{$key}' must be a string.",
+                );
+            }
+        }
+        try {
+            if (isset($picture['archetype'])) {
+                $this->pictureService->normaliseArchetype((string) $picture['archetype']);
+            }
+            if (isset($picture['variant_key'])) {
+                $this->pictureService->normaliseVariantKey((string) $picture['variant_key']);
+            }
+            if (isset($picture['palette_key'])) {
+                $this->pictureService->normalisePalette((string) $picture['palette_key']);
+            }
+        } catch (InvalidArgumentException $e) {
+            return $this->unprocessable('PROFILE_PICTURE_VALUE', $e->getMessage());
+        }
+        return null;
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Spora\Core;
 
 use Spora\Http\AgentController;
 use Spora\Http\AgentOverrideController;
+use Spora\Http\AgentPictureController;
 use Spora\Http\AgentTemplateController;
 use Spora\Http\AgentToolController;
 use Spora\Http\AppsController;
@@ -94,6 +95,13 @@ final class RouteDefinitions
         $r->addRoute('GET', self::ROUTE_AGENTS_ID, [AgentController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PATCH', self::ROUTE_AGENTS_ID, [AgentController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_AGENTS_ID, [AgentController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // Agent picture — image upload + delete. Avatar-only fields
+        // (archetype/variant_key/palette_key) ride on PATCH /api/v1/agents/{id}
+        // via the `profile_picture` nested object — only the image-file
+        // path needs a multipart endpoint.
+        $r->addRoute('POST', '/api/v1/agents/{id}/picture/image', [AgentPictureController::class, 'uploadImage'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', '/api/v1/agents/{id}/picture/image', [AgentPictureController::class, 'deleteImage'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('POST', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentToolController::class, 'enableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentToolController::class, 'disableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);

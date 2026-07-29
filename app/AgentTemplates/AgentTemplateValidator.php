@@ -55,11 +55,21 @@ final class AgentTemplateValidator
         'allow_followup', 'retry_after_minutes', 'max_retries',
     ];
 
-    private const ALLOWED_METADATA_KEYS = ['category', 'icon'];
+    private const ALLOWED_METADATA_KEYS = ['category', 'icon', 'archetype', 'variant_key', 'palette_key'];
 
     private const ALLOWED_CATEGORIES = [
         'general', 'productivity', 'research', 'communication', 'media', 'data', 'automation',
     ];
+
+    private const ALLOWED_ARCHETYPES = [
+        'assistant', 'researcher', 'analyst', 'writer', 'coder', 'explorer', 'advisor', 'creative',
+    ];
+
+    private const ALLOWED_PALETTES = [
+        'slate', 'red', 'orange', 'amber', 'green', 'teal', 'blue', 'indigo', 'violet', 'pink',
+    ];
+
+    private const ALLOWED_VARIANTS = ['v0', 'v1', 'v2'];
 
     /**
      * @param array<string, mixed> $raw
@@ -485,6 +495,63 @@ final class AgentTemplateValidator
                 'severity' => 'error',
                 'message'  => "Field 'metadata.icon' must be a string.",
                 'path'     => 'metadata.icon',
+            ]);
+        }
+        if (isset($metadata['archetype']) && !is_string($metadata['archetype'])) {
+            $result->addError([
+                'code'     => 'METADATA_ARCHETYPE_TYPE',
+                'severity' => 'error',
+                'message'  => "Field 'metadata.archetype' must be a string.",
+                'path'     => 'metadata.archetype',
+            ]);
+        } elseif (isset($metadata['archetype']) && !in_array($metadata['archetype'], self::ALLOWED_ARCHETYPES, true)) {
+            $result->addWarning([
+                'code'     => 'METADATA_ARCHETYPE_UNKNOWN',
+                'severity' => 'warning',
+                'message'  => sprintf(
+                    "Unknown archetype '%s'. Expected one of: %s.",
+                    (string) $metadata['archetype'],
+                    implode(', ', self::ALLOWED_ARCHETYPES),
+                ),
+                'path'     => 'metadata.archetype',
+            ]);
+        }
+        if (isset($metadata['variant_key']) && !is_string($metadata['variant_key'])) {
+            $result->addError([
+                'code'     => 'METADATA_VARIANT_KEY_TYPE',
+                'severity' => 'error',
+                'message'  => "Field 'metadata.variant_key' must be a string.",
+                'path'     => 'metadata.variant_key',
+            ]);
+        } elseif (isset($metadata['variant_key']) && !in_array($metadata['variant_key'], self::ALLOWED_VARIANTS, true)) {
+            $result->addWarning([
+                'code'     => 'METADATA_VARIANT_KEY_UNKNOWN',
+                'severity' => 'warning',
+                'message'  => sprintf(
+                    "Unknown variant_key '%s'. Expected one of: %s.",
+                    (string) $metadata['variant_key'],
+                    implode(', ', self::ALLOWED_VARIANTS),
+                ),
+                'path'     => 'metadata.variant_key',
+            ]);
+        }
+        if (isset($metadata['palette_key']) && !is_string($metadata['palette_key'])) {
+            $result->addError([
+                'code'     => 'METADATA_PALETTE_KEY_TYPE',
+                'severity' => 'error',
+                'message'  => "Field 'metadata.palette_key' must be a string.",
+                'path'     => 'metadata.palette_key',
+            ]);
+        } elseif (isset($metadata['palette_key']) && !in_array($metadata['palette_key'], self::ALLOWED_PALETTES, true)) {
+            $result->addWarning([
+                'code'     => 'METADATA_PALETTE_KEY_UNKNOWN',
+                'severity' => 'warning',
+                'message'  => sprintf(
+                    "Unknown palette_key '%s'. Expected one of: %s.",
+                    (string) $metadata['palette_key'],
+                    implode(', ', self::ALLOWED_PALETTES),
+                ),
+                'path'     => 'metadata.palette_key',
             ]);
         }
     }

@@ -8,6 +8,7 @@ use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Spora\Drivers\DriverFactory;
 use Throwable;
 
@@ -87,6 +88,11 @@ final class Agent extends Model
     public function toolCalls(): HasMany
     {
         return $this->hasMany(ToolCall::class);
+    }
+
+    public function profilePicture(): HasOne
+    {
+        return $this->hasOne(AgentPicture::class, 'agent_id');
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
+use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\Exceptions\AgentNotFoundException;
 
 /**
@@ -45,6 +46,7 @@ final class AgentService implements AgentServiceInterface
 
     public function __construct(
         private readonly ?ToolIconResolver $toolIconResolver = null,
+        private readonly ?AgentPictureService $pictureService = null,
     ) {}
 
 
@@ -194,6 +196,6 @@ final class AgentService implements AgentServiceInterface
 
     private function agentResource(Agent $agent): array
     {
-        return AgentResource::toArray($agent, null, $this->toolIconResolver);
+        return AgentResource::toArray($agent, null, $this->toolIconResolver, $this->pictureService);
     }
 }

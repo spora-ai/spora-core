@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\AgentTemplates;
 
 use Spora\Models\Agent;
+use Spora\Models\AgentPicture;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
@@ -37,6 +38,7 @@ final class AgentTemplateExporter
     {
         $tools = $this->buildToolsSection($agent);
         $agentBlock = $this->buildAgentBlock($agent);
+        $metadata = $this->buildMetadata($agent);
 
         $raw = [
             '$schema'  => 'https://spora.dev/agent-template.schema.json',
@@ -46,10 +48,7 @@ final class AgentTemplateExporter
             'agent'    => $agentBlock,
             'tools'    => $tools,
             'required_plugins' => $this->buildRequiredPlugins($tools),
-            'metadata' => [
-                'category' => 'general',
-                'icon'     => 'puzzle',
-            ],
+            'metadata' => $metadata,
         ];
 
         if ($agent->description !== null && $agent->description !== '') {
@@ -65,6 +64,39 @@ final class AgentTemplateExporter
             'template'       => $template,
             'inline_warning' => AgentTemplateImporter::SETTINGS_NOT_EXPORTED_WARNING,
         ];
+    }
+
+    /**
+     * Build the `metadata` block. Includes the agent's profile picture
+     * fields (archetype / variant_key / palette_key) when present so a
+     * re-import preserves the original look. Returns only the legacy
+     * `category` + `icon` defaults when the agent has no picture row —
+     * matches the pre-feature behaviour.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildMetadata(Agent $agent): array
+    {
+        $picture = AgentPicture::where('agent_id', $agent->id)->first();
+        if ($picture === null) {
+            return [
+                'category' => 'general',
+                'icon'     => 'puzzle',
+            ];
+        }
+
+        $metadata = ['category' => 'general'];
+        if ($picture->archetype !== null) {
+            $metadata['archetype'] = $picture->archetype;
+            if ($picture->variant_key !== null) {
+                $metadata['variant_key'] = $picture->variant_key;
+            }
+        }
+        if ($picture->palette_key !== null) {
+            $metadata['palette_key'] = $picture->palette_key;
+        }
+        $metadata['icon'] = 'puzzle';
+        return $metadata;
     }
 
     /**
