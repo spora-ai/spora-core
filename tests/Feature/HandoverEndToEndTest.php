@@ -219,6 +219,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
         // Step 4 (cont'd): Approve the tool call.
         $orch->resume($source->id, [[
             'provider_call_id' => HANDOVER_E2E_PROVIDER_CALL_ID,
+            'decision' => 'approve',
             'arguments' => [
                 'target_agent_id' => $targetAgentId,
                 'context_summary' => HANDOVER_E2E_SUMMARY,
@@ -306,6 +307,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
 
         $orch->resume($source->id, [[
             'provider_call_id' => HANDOVER_E2E_PROVIDER_CALL_ID,
+            'decision' => 'approve',
             'arguments' => [
                 'target_agent_id' => $targetAgentId,
                 'context_summary' => HANDOVER_E2E_SUMMARY,
@@ -361,6 +363,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
         $source = $orch->start($sourceAgentId, HANDOVER_E2E_HAPPY_PROMPT, maxSteps: 10);
         $orch->resume($source->id, [[
             'provider_call_id' => HANDOVER_E2E_PROVIDER_CALL_ID,
+            'decision' => 'approve',
             'arguments' => [
                 'target_agent_id' => $targetAgentId,
                 'context_summary' => HANDOVER_E2E_SUMMARY,

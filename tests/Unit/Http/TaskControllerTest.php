@@ -116,12 +116,16 @@ describe('TaskController::store', function (): void {
 });
 
 describe('TaskController::approve', function (): void {
-    test('returns 200 on successful approval with batch payload', function (): void {
+    test('returns 200 on successful approval with decisions payload', function (): void {
         [$controller, $authService] = makeTaskController();
         bootAuth($authService);
 
         $request = jsonRequest('POST', '/api/v1/tasks/1/approve', [
-            'approvals' => [['provider_call_id' => 'abc', 'arguments' => []]],
+            'decisions' => [[
+                'provider_call_id' => 'abc',
+                'decision' => 'approve',
+                'arguments' => [],
+            ]],
         ]);
         $request->attributes->set('taskId', 1);
         $response = $controller->approve($request);
@@ -129,7 +133,7 @@ describe('TaskController::approve', function (): void {
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
     });
 
-    test('returns 200 on successful approval with legacy single-tool payload', function (): void {
+    test('returns 422 for the removed legacy payload', function (): void {
         [$controller, $authService] = makeTaskController();
         bootAuth($authService);
 
@@ -140,7 +144,7 @@ describe('TaskController::approve', function (): void {
         $request->attributes->set('taskId', 1);
         $response = $controller->approve($request);
 
-        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
     });
 
     test('returns 400 on invalid JSON', function (): void {
@@ -154,7 +158,7 @@ describe('TaskController::approve', function (): void {
         expect($response->getStatusCode())->toBe(Response::HTTP_BAD_REQUEST);
     });
 
-    test('returns 422 when provider_call_id is missing (legacy mode)', function (): void {
+    test('returns 422 when decisions are missing', function (): void {
         [$controller, $authService] = makeTaskController();
         bootAuth($authService);
 
@@ -165,12 +169,25 @@ describe('TaskController::approve', function (): void {
         expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
     });
 
-    test('returns 422 when an entry in batch lacks provider_call_id', function (): void {
+    test('returns 422 when a decision lacks provider_call_id', function (): void {
         [$controller, $authService] = makeTaskController();
         bootAuth($authService);
 
         $request = jsonRequest('POST', '/api/v1/tasks/1/approve', [
-            'approvals' => [['arguments' => []]],
+            'decisions' => [['decision' => 'reject']],
+        ]);
+        $request->attributes->set('taskId', 1);
+        $response = $controller->approve($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+    });
+
+    test('returns 422 when decision is not supported', function (): void {
+        [$controller, $authService] = makeTaskController();
+        bootAuth($authService);
+
+        $request = jsonRequest('POST', '/api/v1/tasks/1/approve', [
+            'decisions' => [['provider_call_id' => 'abc', 'decision' => 'skip']],
         ]);
         $request->attributes->set('taskId', 1);
         $response = $controller->approve($request);
@@ -183,7 +200,7 @@ describe('TaskController::approve', function (): void {
         bootAuth($authService);
 
         $request = jsonRequest('POST', '/api/v1/tasks/999999/approve', [
-            'approvals' => [['provider_call_id' => 'x']],
+            'decisions' => [['provider_call_id' => 'x', 'decision' => 'reject']],
         ]);
         $request->attributes->set('taskId', 999999);
         $response = $controller->approve($request);

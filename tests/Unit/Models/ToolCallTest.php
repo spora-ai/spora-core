@@ -84,12 +84,18 @@ it('casts JSON columns to arrays and dates to Carbon', function (): void {
         'proposed_arguments'  => ['x' => 1],
         'approved_arguments'  => ['x' => 1],
         'result_data'         => ['ok' => true],
+        'rejected_at'         => '2025-01-01 11:00:00',
+        'rejected_by'         => $userId,
+        'reject_reason'       => 'Rejected in test',
         'executed_at'         => '2025-01-01 12:00:00',
     ]);
 
     expect($call->proposed_arguments)->toBeArray()
         ->and($call->approved_arguments)->toBeArray()
         ->and($call->result_data)->toBeArray()
+        ->and($call->rejected_at)->toBeInstanceOf(Carbon\Carbon::class)
+        ->and($call->rejected_by)->toBeInt()
+        ->and($call->reject_reason)->toBeString()
         ->and($call->executed_at)->toBeInstanceOf(Carbon\Carbon::class);
 });
 
@@ -124,9 +130,11 @@ it('belongs to a task, agent, and approver', function (): void {
         'status'              => 'EXECUTED',
         'proposed_arguments'  => [],
         'approved_by'         => $userId,
+        'rejected_by'         => $userId,
     ]);
 
     expect($call->task)->toBeInstanceOf(Task::class)
         ->and($call->agent)->toBeInstanceOf(Agent::class)
-        ->and($call->approvedBy)->toBeInstanceOf(User::class);
+        ->and($call->approvedBy)->toBeInstanceOf(User::class)
+        ->and($call->rejectedBy)->toBeInstanceOf(User::class);
 });

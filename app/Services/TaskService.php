@@ -121,7 +121,7 @@ final class TaskService implements TaskServiceInterface
     /**
      * @inheritDoc
      */
-    public function approveTask(int $taskId, int $userId, array $approvals): array
+    public function approveTask(int $taskId, int $userId, array $decisions): array
     {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
@@ -132,7 +132,7 @@ final class TaskService implements TaskServiceInterface
             throw new InvalidArgumentException('Task is not pending approval.');
         }
 
-        $this->orchestrator->resume($task->id, $approvals);
+        $this->orchestrator->resume($task->id, $decisions);
         $fresh = $task->fresh();
 
         $resource = $this->taskResource($fresh);

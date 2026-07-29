@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Agents;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use ReflectionClass;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
@@ -213,13 +214,166 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Execute the batch of tool calls that were paused for human approval.
-     *
      * {@inheritDoc}
      */
-    public function resume(int $taskId, array $approvedBatch): void
+    public function resume(int $taskId, array $decisions): void
     {
-        $this->approvedBatchExecutor->execute($taskId, $approvedBatch);
+        $shouldTick = false;
+
+        Capsule::connection()->transaction(function () use ($taskId, $decisions, &$shouldTick): void {
+            /** @var Task $task */
+            $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
+
+            if ($task->status !== 'PENDING_APPROVAL') {
+                throw new InvalidTaskTransitionException("Task {$taskId} is not awaiting approval.");
+            }
+
+            $state = $task->pending_state === null
+                ? new AgentState(taskId: $task->id, agentId: $task->agent_id, pendingToolCalls: [], messageSnapshot: [], stepCount: $task->step_count, maxSteps: $task->max_steps, pausedAt: date(self::ISO8601_UTC))
+                : AgentState::fromJson($task->pending_state);
+
+            [$approvedBatch, $rejectedBatch] = $this->splitDecisions($decisions, $state);
+            $rejectedIds = array_column($rejectedBatch, 'provider_call_id');
+            $remainingCalls = array_values(array_filter(
+                $state->pendingToolCalls,
+                static fn($call): bool => !in_array($call->providerCallId, $rejectedIds, true),
+            ));
+            $remainingState = new AgentState(
+                taskId: $state->taskId,
+                agentId: $state->agentId,
+                pendingToolCalls: $remainingCalls,
+                messageSnapshot: $state->messageSnapshot,
+                stepCount: $state->stepCount,
+                maxSteps: $state->maxSteps,
+                pausedAt: date(self::ISO8601_UTC),
+            );
+
+            foreach ($rejectedBatch as $rejected) {
+                /** @var ToolCallModel|null $model */
+                $model = ToolCallModel::where('task_id', $taskId)
+                    ->where('provider_call_id', $rejected['provider_call_id'])
+                    ->where('status', 'PENDING_APPROVAL')
+                    ->first();
+
+                if ($model === null) {
+                    throw new InvalidArgumentException("provider_call_id '{$rejected['provider_call_id']}' is not pending approval.");
+                }
+
+                $model->update([
+                    'status'        => 'REJECTED',
+                    'rejected_at'   => date(self::DB_TIMESTAMP_FORMAT),
+                    'rejected_by'   => $task->user_id,
+                    'reject_reason' => $rejected['reason'],
+                ]);
+
+                $this->appendHistory(
+                    taskId: $task->id,
+                    role: 'tool',
+                    content: ScrubDataUrls::scrub("Action rejected by user: {$rejected['reason']}"),
+                    context: new HistoryMessageContext(
+                        toolCallId: $model->provider_call_id,
+                        toolName: $model->tool_name,
+                    ),
+                );
+            }
+
+            if ($approvedBatch !== []) {
+                $task->pending_state = $remainingState->toJson();
+                $task->save();
+                $this->approvedBatchExecutor->execute($taskId, $approvedBatch);
+                $shouldTick = $this->workerMode === WorkerMode::Sync
+                    && Task::where('id', $taskId)->value('status') === 'RUNNING';
+                return;
+            }
+
+            $hasPendingApprovals = ToolCallModel::where('task_id', $taskId)
+                ->where('status', 'PENDING_APPROVAL')
+                ->exists();
+
+            if ($hasPendingApprovals) {
+                $task->pending_state = $remainingState->toJson();
+                $task->save();
+                return;
+            }
+
+            $task->pending_state = null;
+            $task->status = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
+            $task->save();
+            $shouldTick = $this->workerMode === WorkerMode::Sync;
+        });
+
+        if ($shouldTick) {
+            $this->tick($taskId);
+        }
+    }
+
+    /**
+     * @param list<array<string, mixed>> $decisions
+     * @return array{
+     *     list<array{provider_call_id: string, arguments: array<string, mixed>}>,
+     *     list<array{provider_call_id: string, reason: string}>
+     * }
+     */
+    private function splitDecisions(array $decisions, AgentState $state): array
+    {
+        if ($decisions === []) {
+            throw new InvalidArgumentException('decisions must be a non-empty array.');
+        }
+
+        $pendingIds = [];
+        foreach ($state->pendingToolCalls as $pendingToolCall) {
+            $pendingIds[$pendingToolCall->providerCallId] = true;
+        }
+
+        $approvedBatch = [];
+        $rejectedBatch = [];
+
+        /** @var list<mixed> $decisions */
+        foreach ($decisions as $index => $decision) {
+            if (!is_array($decision)) {
+                throw new InvalidArgumentException("Decision at index {$index} must be an array.");
+            }
+
+            /** @var array<string, mixed> $decision */
+            $providerCallId = $decision['provider_call_id'] ?? null;
+            if (!is_string($providerCallId) || trim($providerCallId) === '') {
+                throw new InvalidArgumentException('provider_call_id is required in every decision.');
+            }
+            $providerCallId = trim($providerCallId);
+
+            if (!isset($pendingIds[$providerCallId])) {
+                throw new InvalidArgumentException("provider_call_id '{$providerCallId}' is not pending approval.");
+            }
+
+            $choice = $decision['decision'] ?? null;
+            if (!is_string($choice) || !in_array($choice, ['approve', 'reject'], true)) {
+                throw new InvalidArgumentException("decision must be either 'approve' or 'reject'.");
+            }
+
+            if ($choice === 'approve') {
+                $arguments = $decision['arguments'] ?? null;
+                if (!is_array($arguments)) {
+                    throw new InvalidArgumentException('arguments is required for approve decisions.');
+                }
+                $approvedBatch[] = [
+                    'provider_call_id' => $providerCallId,
+                    'arguments'        => $arguments,
+                ];
+                continue;
+            }
+
+            $reason = $decision['reason'] ?? 'User rejected';
+            if (!is_string($reason)) {
+                throw new InvalidArgumentException('reason must be a string.');
+            }
+            $reason = trim($reason);
+            $rejectedBatch[] = [
+                'provider_call_id' => $providerCallId,
+                'reason'           => $reason === '' ? 'User rejected' : $reason,
+            ];
+        }
+
+        return [$approvedBatch, $rejectedBatch];
     }
 
     public function reject(int $taskId, string $reason): void

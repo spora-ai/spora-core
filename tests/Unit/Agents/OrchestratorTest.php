@@ -530,7 +530,7 @@ it('resume executes the approved OutputTool, appends history, and re-dispatches 
     expect($task->status)->toBe('PENDING_APPROVAL');
 
     // New batch format: list<{provider_call_id, arguments}>.
-    $orch->resume($task->id, [['provider_call_id' => 'call_r', 'arguments' => ['x' => 99]]]);
+    $orch->resume($task->id, [['provider_call_id' => 'call_r', 'decision' => 'approve', 'arguments' => ['x' => 99]]]);
 
     $task->refresh();
     // 2 LLM turns: tick 1 (tool call paused) + tick 2 (after resume).
@@ -591,7 +591,7 @@ it('keeps the task status as PENDING_APPROVAL during tool execution to prevent a
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
 
-    $orch->resume($task->id, [['provider_call_id' => 'call_race', 'arguments' => []]]);
+    $orch->resume($task->id, [['provider_call_id' => 'call_race', 'decision' => 'approve', 'arguments' => []]]);
 
     expect($checkerTool->statusInsideTool)->toBe('PENDING_APPROVAL', 'The task status should NOT flip to RUNNING before the tool finishes executing.');
 
@@ -642,11 +642,148 @@ it('resume throws InvalidArgumentException when approved arguments fail schema v
     expect($task->status)->toBe('PENDING_APPROVAL');
 
     // Human forgot the required 'recipient' field — schema validation must catch this gracefully now.
-    $orch->resume($task->id, [['provider_call_id' => 'call_schema', 'arguments' => []]]);
+    $orch->resume($task->id, [['provider_call_id' => 'call_schema', 'decision' => 'approve', 'arguments' => []]]);
 
     $toolCall = ToolCallModel::where('provider_call_id', 'call_schema')->first();
     expect($toolCall->status)->toBe('APPROVED')
         ->and($toolCall->result_content)->toContain(VALIDATION_ERROR);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('resume routes mixed approve and reject decisions atomically', function (): void {
+    [$agentId, $userId] = seedAgent();
+
+    $callCount = 0;
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(function () use (&$callCount) {
+        $callCount++;
+        return $callCount === 1
+            ? new LLMResponse(null, [
+                new DriverToolCall('call_approved', 'stub_output', ['x' => 1]),
+                new DriverToolCall('call_rejected', 'stub_output', ['x' => 2]),
+            ], 5, 3, 'cmp_1')
+            : new LLMResponse('Decisions applied.', [], 5, 3, 'cmp_2');
+    });
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'Mixed decisions', maxSteps: 10);
+
+    $orch->resume($task->id, [
+        ['provider_call_id' => 'call_approved', 'decision' => 'approve', 'arguments' => ['x' => 99]],
+        ['provider_call_id' => 'call_rejected', 'decision' => 'reject', 'reason' => 'Wrong target'],
+    ]);
+
+    $approved = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_approved')->first();
+    $rejected = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_rejected')->first();
+    $history = TaskHistory::where('task_id', $task->id)->where('tool_call_id', 'call_rejected')->first();
+
+    expect($approved->status)->toBe('APPROVED')
+        ->and($approved->executed_at)->not->toBeNull()
+        ->and($rejected->status)->toBe('REJECTED')
+        ->and($rejected->rejected_by)->toBe($userId)
+        ->and($rejected->reject_reason)->toBe('Wrong target')
+        ->and($rejected->rejected_at)->not->toBeNull()
+        ->and($history->content)->toBe('Action rejected by user: Wrong target');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('resume keeps a task pending after a reject-only partial decision', function (): void {
+    [$agentId] = seedAgent();
+
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->once()->andReturn(new LLMResponse(null, [
+        new DriverToolCall('call_rejected', 'stub_output', ['x' => 1]),
+        new DriverToolCall('call_pending', 'stub_output', ['x' => 2]),
+    ], 5, 3, 'cmp_1'));
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'Partial reject', maxSteps: 10);
+
+    $orch->resume($task->id, [[
+        'provider_call_id' => 'call_rejected',
+        'decision' => 'reject',
+    ]]);
+
+    $task->refresh();
+    $state = AgentState::fromJson((string) $task->pending_state);
+    expect($task->status)->toBe('PENDING_APPROVAL')
+        ->and($state->pendingToolCalls)->toHaveCount(1)
+        ->and($state->pendingToolCalls[0]->providerCallId)->toBe('call_pending')
+        ->and(ToolCallModel::where('provider_call_id', 'call_rejected')->value('reject_reason'))->toBe('User rejected');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('resume rejects an unknown provider call without mutating pending rows', function (): void {
+    [$agentId] = seedAgent();
+
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->once()->andReturn(new LLMResponse(null, [
+        new DriverToolCall('call_known', 'stub_output', []),
+    ], 5, 3, 'cmp_1'));
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'Unknown decision', maxSteps: 10);
+
+    expect(fn() => $orch->resume($task->id, [[
+        'provider_call_id' => 'call_unknown',
+        'decision' => 'reject',
+    ]]))->toThrow(InvalidArgumentException::class, 'not pending approval');
+
+    expect(ToolCallModel::where('provider_call_id', 'call_known')->value('status'))->toBe('PENDING_APPROVAL')
+        ->and(TaskHistory::where('task_id', $task->id)->where('role', 'tool')->count())->toBe(0);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('resume validates every decision field before changing state', function (): void {
+    [$agentId] = seedAgent();
+
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->once()->andReturn(new LLMResponse(null, [
+        new DriverToolCall('call_known', 'stub_output', []),
+    ], 5, 3, 'cmp_1'));
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'Invalid decisions', maxSteps: 10);
+
+    $invalidDecisions = [
+        ['invalid item'],
+        [[]],
+        [['provider_call_id' => 'call_known', 'decision' => 'skip']],
+        [['provider_call_id' => 'call_known', 'decision' => 'approve']],
+        [['provider_call_id' => 'call_known', 'decision' => 'reject', 'reason' => []]],
+    ];
+
+    foreach ($invalidDecisions as $decisions) {
+        expect(fn() => $orch->resume($task->id, $decisions))->toThrow(InvalidArgumentException::class);
+    }
+
+    expect(ToolCallModel::where('provider_call_id', 'call_known')->value('status'))->toBe('PENDING_APPROVAL');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('resume rolls back when a state call no longer has a pending database row', function (): void {
+    [$agentId] = seedAgent();
+
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->once()->andReturn(new LLMResponse(null, [
+        new DriverToolCall('call_drifted', 'stub_output', []),
+    ], 5, 3, 'cmp_1'));
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'Drifted decision', maxSteps: 10);
+    ToolCallModel::where('provider_call_id', 'call_drifted')->update(['status' => 'REJECTED']);
+
+    expect(fn() => $orch->resume($task->id, [[
+        'provider_call_id' => 'call_drifted',
+        'decision' => 'reject',
+    ]]))->toThrow(InvalidArgumentException::class, 'not pending approval');
+
+    expect(TaskHistory::where('task_id', $task->id)->where('role', 'tool')->count())->toBe(0);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -1932,7 +2069,7 @@ it('resume cleans up dangling PENDING_APPROVAL rows that drift from the saved st
     Task::where('id', $task->id)->update(['pending_state' => json_encode($stateArray)]);
 
     // Approve only call_a; call_b is dangling and must be rejected by cleanup.
-    $orch->resume($task->id, [['provider_call_id' => 'call_a', 'arguments' => ['x' => 99]]]);
+    $orch->resume($task->id, [['provider_call_id' => 'call_a', 'decision' => 'approve', 'arguments' => ['x' => 99]]]);
 
     $task->refresh();
     expect($task->status)->toBe('COMPLETED');
@@ -1995,7 +2132,7 @@ it('partial approval in sync mode leaves un-approved tool calls PENDING_APPROVAL
     expect($task->status)->toBe('PENDING_APPROVAL');
 
     // Approve only call_a. call_b should NOT execute silently.
-    $orch->resume($task->id, [['provider_call_id' => 'call_a', 'arguments' => ['x' => 99]]]);
+    $orch->resume($task->id, [['provider_call_id' => 'call_a', 'decision' => 'approve', 'arguments' => ['x' => 99]]]);
 
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');  // task stays paused
@@ -2098,7 +2235,7 @@ it('partial approval in worker mode defers the approved tool and keeps the un-ap
         workerMode: WorkerMode::Worker,
     );
 
-    $orch->resume($task->id, [['provider_call_id' => 'call_a', 'arguments' => ['x' => 99]]]);
+    $orch->resume($task->id, [['provider_call_id' => 'call_a', 'decision' => 'approve', 'arguments' => ['x' => 99]]]);
 
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
@@ -2153,13 +2290,13 @@ it('a second approval round finishes a partially-approved set without re-prompti
     expect($task->status)->toBe('PENDING_APPROVAL');
 
     // Round 1: approve only call_a.
-    $orch->resume($task->id, [['provider_call_id' => 'call_a', 'arguments' => ['x' => 99]]]);
+    $orch->resume($task->id, [['provider_call_id' => 'call_a', 'decision' => 'approve', 'arguments' => ['x' => 99]]]);
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
     expect($callCount)->toBe(1);
 
     // Round 2: approve call_b — task should now complete.
-    $orch->resume($task->id, [['provider_call_id' => 'call_b', 'arguments' => ['x' => 77]]]);
+    $orch->resume($task->id, [['provider_call_id' => 'call_b', 'decision' => 'approve', 'arguments' => ['x' => 77]]]);
     $task->refresh();
     expect($task->status)->toBe('COMPLETED')
         ->and($callCount)->toBe(2)
@@ -2455,7 +2592,7 @@ it('worker-mode resume returns immediately and defers tool execution to the next
 
     // HTTP-equivalent path: resume() with one approval. Should record
     // the approval and return without touching the tool or LLM.
-    $orch->resume($task->id, [['provider_call_id' => 'call_slow', 'arguments' => ['x' => 99]]]);
+    $orch->resume($task->id, [['provider_call_id' => 'call_slow', 'decision' => 'approve', 'arguments' => ['x' => 99]]]);
 
     // Tool still has NOT been executed (no executed_at) — the HTTP
     // path only recorded the approval. llmFirst is wired with
@@ -2499,7 +2636,7 @@ it('worker-mode resume returns immediately and defers tool execution to the next
 // resume() — exception path: task is marked RESUME_FAILED
 // ---------------------------------------------------------------------------
 
-it('resume marks task RESUME_FAILED and re-throws when the recursive tick fails', function (): void {
+it('classifies a failure from the post-transaction resume tick normally', function (): void {
     [$agentId] = seedAgent();
 
     $callCount = 0;
@@ -2523,7 +2660,7 @@ it('resume marks task RESUME_FAILED and re-throws when the recursive tick fails'
     expect($task->status)->toBe('PENDING_APPROVAL');
 
     try {
-        $orch->resume($task->id, [['provider_call_id' => 'call_x', 'arguments' => []]]);
+        $orch->resume($task->id, [['provider_call_id' => 'call_x', 'decision' => 'approve', 'arguments' => []]]);
         PHPUnit\Framework\Assert::fail('Expected RuntimeException to propagate from recursive tick');
     } catch (RuntimeException $e) {
         // Expected
@@ -2531,8 +2668,8 @@ it('resume marks task RESUME_FAILED and re-throws when the recursive tick fails'
 
     $task->refresh();
     expect($task->status)->toBe('FAILED')
-        ->and($task->error_code)->toBe('RESUME_FAILED')
-        ->and($task->error_message)->toContain('Task resume failed:');
+        ->and($task->error_code)->toBe('UNKNOWN')
+        ->and($task->error_message)->toBe('An unexpected error occurred. Please try again.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -2804,38 +2941,26 @@ it('resolveToolByName throws when the LLM invokes an unknown tool name', functio
 // resume() with pending_state = null recovery path
 // ---------------------------------------------------------------------------
 
-it('resume reconstructs an empty AgentState when pending_state is null but status is PENDING_APPROVAL', function (): void {
+it('resume rejects an empty decisions list when pending_state is null', function (): void {
     [$agentId] = seedAgent();
 
-    $callCount = 0;
     $mock = Mockery::mock(LLMDriverInterface::class);
-    $mock->allows('complete')->andReturnUsing(function () use (&$callCount) {
-        $callCount++;
-        // First call: pause for approval.
-        if ($callCount === 1) {
-            return new LLMResponse(null, [new DriverToolCall('call_rec', 'stub_output', [])], 5, 3, 'cmp_1');
-        }
-        // Second call: nothing to do — empty pending list.
-        return new LLMResponse('Recovered from null pending state.', [], 5, 3, 'cmp_2');
-    });
+    $mock->allows('complete')->once()->andReturn(
+        new LLMResponse(null, [new DriverToolCall('call_rec', 'stub_output', [])], 5, 3, 'cmp_1'),
+    );
 
     $tools = [new StubOutputTool()];
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Null pending state test', maxSteps: 10);
 
-    $task->refresh();
-    expect($task->status)->toBe('PENDING_APPROVAL');
-
-    // Manually clear pending_state to simulate a corrupted task.
     Task::where('id', $task->id)->update(['pending_state' => null]);
 
-    // Resume with an empty batch — should still complete without throwing.
-    $orch->resume($task->id, []);
+    expect(fn() => $orch->resume($task->id, []))
+        ->toThrow(InvalidArgumentException::class, 'decisions must be a non-empty array');
 
     $task->refresh();
-    expect($task->status)->toBe('COMPLETED')
-        ->and($task->final_response)->toBe('Recovered from null pending state.');
+    expect($task->status)->toBe('PENDING_APPROVAL');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------

@@ -335,12 +335,6 @@ final class ApprovedBatchExecutor
     {
         $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
         Task::where('id', $taskId)->update(['status' => $taskStatus]);
-
-        if ($this->workerMode === WorkerMode::Sync) {
-            // Tick is called after the transaction commits so the LLM round-trip
-            // does not hold the lockForUpdate open for its full duration.
-            $this->orchestrator->tick($taskId);
-        }
     }
 
     private function markResumeFailed(int $taskId, Throwable $e): void

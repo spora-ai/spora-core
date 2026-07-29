@@ -78,13 +78,20 @@ class StubTaskService implements TaskServiceInterface
             'max_steps' => 10,
             'created_at' => null,
             'updated_at' => null,
-            'tool_calls' => [],
+            'tool_calls' => array_map(
+                static fn(string $providerCallId): array => [
+                    'provider_call_id' => $providerCallId,
+                    'operation' => 'default',
+                    'parameter_schema' => ['type' => 'object', 'properties' => [], 'required' => []],
+                ],
+                ['abc', 'p1', 'call_abc', 'call_valid'],
+            ),
             'history' => [],
             'totals' => [],
         ];
     }
 
-    public function approveTask(int $taskId, int $userId, array $approvals): array
+    public function approveTask(int $taskId, int $userId, array $decisions): array
     {
         if ($taskId === 999999) {
             throw new InvalidArgumentException('Task not found.');

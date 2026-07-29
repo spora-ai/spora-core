@@ -26,6 +26,9 @@ use Illuminate\Support\Carbon;
  * @property array<string,mixed>|null $result_data
  * @property int|null         $approved_by
  * @property string|null      $approval_note
+ * @property Carbon|null      $rejected_at
+ * @property int|null         $rejected_by
+ * @property string|null      $reject_reason
  * @property Carbon|null      $executed_at
  * @property Carbon|null      $created_at
  * @property Carbon|null      $updated_at
@@ -53,6 +56,9 @@ final class ToolCall extends Model
         'result_data',
         'approved_by',
         'approval_note',
+        'rejected_at',
+        'rejected_by',
+        'reject_reason',
         'executed_at',
     ];
 
@@ -63,6 +69,9 @@ final class ToolCall extends Model
         'result_data'             => 'array',
         'operation'              => 'string',
         'operation_description'  => 'string',
+        'rejected_at'            => 'datetime',
+        'rejected_by'            => 'integer',
+        'reject_reason'          => 'string',
         'executed_at'            => 'datetime',
     ];
 
@@ -79,5 +88,10 @@ final class ToolCall extends Model
     public function approvedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function rejectedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'rejected_by');
     }
 }

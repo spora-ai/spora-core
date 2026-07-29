@@ -7,6 +7,8 @@ namespace Spora\Http;
 use Carbon\Carbon;
 use InvalidArgumentException;
 use JsonException;
+use OpenApi\Attributes as OA;
+use Spora\Agents\SchemaValidator;
 use Spora\Auth\AuthService;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
@@ -180,6 +182,30 @@ final class TaskController
     /**
      * POST /api/v1/tasks/{taskId}/approve
      */
+    #[OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(
+            type: 'object',
+            required: ['decisions'],
+            properties: [
+                new OA\Property(
+                    property: 'decisions',
+                    type: 'array',
+                    minItems: 1,
+                    items: new OA\Items(
+                        type: 'object',
+                        required: ['provider_call_id', 'decision'],
+                        properties: [
+                            new OA\Property(property: 'provider_call_id', type: 'string'),
+                            new OA\Property(property: 'decision', type: 'string', enum: ['approve', 'reject']),
+                            new OA\Property(property: 'arguments', type: 'object', description: 'Required when decision is approve.', additionalProperties: true),
+                            new OA\Property(property: 'reason', type: 'string', description: 'Optional when decision is reject.'),
+                        ],
+                    ),
+                ),
+            ],
+        ),
+    )]
     public function approve(Request $request): JsonResponse
     {
         $userId = $this->authService->currentUserId();
@@ -191,24 +217,27 @@ final class TaskController
             return $this->invalidJsonResponse();
         }
 
-        $batch = $this->parseAndValidateApprovalBatch($body);
-        if ($batch instanceof JsonResponse) {
-            return $batch;
+        $decisions = $this->parseAndValidateDecisions($body, $taskId, $userId);
+        if ($decisions instanceof JsonResponse) {
+            return $decisions;
         }
 
-        return $this->approveTaskOrError($taskId, $userId, $batch);
+        return $this->approveTaskOrError($taskId, $userId, $decisions);
     }
 
     /**
-     * @param list<array<string, mixed>> $batch
+     * @param list<array<string, mixed>> $decisions
      */
-    private function approveTaskOrError(int $taskId, int $userId, array $batch): JsonResponse
+    private function approveTaskOrError(int $taskId, int $userId, array $decisions): JsonResponse
     {
         try {
-            $task = $this->taskService->approveTask($taskId, $userId, $batch);
+            $task = $this->taskService->approveTask($taskId, $userId, $decisions);
             return new JsonResponse(['data' => ['task' => $task]]);
         } catch (InvalidArgumentException $e) {
-            return $this->errorForException($e);
+            if ($e->getMessage() === self::ERR_TASK_NOT_FOUND || $e->getMessage() === 'Task is not pending approval.') {
+                return $this->errorForException($e);
+            }
+            return $this->validationErrorResponse($e->getMessage());
         }
     }
 
@@ -221,47 +250,101 @@ final class TaskController
     }
 
     /**
-     * Accept either a modern batch payload { "approvals": [...] }
-     * or the legacy single-tool format { "provider_call_id": "...", "arguments": {...} },
-     * then validate each entry has a provider_call_id and normalize object
-     * arguments to arrays (stdClass can leak in from JSON-decoded request bodies).
-     *
-     * @return list<array<string, mixed>>|JsonResponse
+     * @return list<array{provider_call_id: string, decision: 'approve'|'reject', arguments?: array<string, mixed>, reason?: string}>|JsonResponse
      */
-    private function parseAndValidateApprovalBatch(array $body): array|JsonResponse
+    private function parseAndValidateDecisions(array $body, int $taskId, int $userId): array|JsonResponse
     {
-        if (isset($body['approvals']) && is_array($body['approvals'])) {
-            $batch = $body['approvals'];
-        } else {
-            $providerId = trim((string) ($body['provider_call_id'] ?? ''));
-            if ($providerId === '') {
-                return new JsonResponse(
-                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required.']],
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
-            }
-            $batch = [[
-                'provider_call_id' => $providerId,
-                'arguments'        => (array) ($body['arguments'] ?? []),
-            ]];
+        $rawDecisions = $body['decisions'] ?? null;
+        if (!is_array($rawDecisions) || $rawDecisions === [] || !array_is_list($rawDecisions)) {
+            return $this->validationErrorResponse('decisions must be a non-empty array.');
         }
 
-        foreach ($batch as $item) {
-            if (!isset($item['provider_call_id'])) {
-                return new JsonResponse(
-                    ['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'provider_call_id is required in all approvals.']],
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
+        $decisions = [];
+        foreach ($rawDecisions as $item) {
+            if (!is_array($item)) {
+                return $this->validationErrorResponse('Every decision must be an object.');
             }
-        }
-        foreach ($batch as &$item) {
-            if (isset($item['arguments']) && is_object($item['arguments'])) {
-                $item['arguments'] = (array) $item['arguments'];
-            }
-        }
-        unset($item);
 
-        return $batch;
+            $providerCallId = $item['provider_call_id'] ?? null;
+            if (!is_string($providerCallId) || trim($providerCallId) === '') {
+                return $this->validationErrorResponse('provider_call_id is required in every decision.');
+            }
+            $providerCallId = trim($providerCallId);
+
+            $choice = $item['decision'] ?? null;
+            if (!is_string($choice) || !in_array($choice, ['approve', 'reject'], true)) {
+                return $this->validationErrorResponse("decision must be either 'approve' or 'reject'.");
+            }
+
+            if ($choice === 'approve') {
+                $arguments = $item['arguments'] ?? null;
+                if (!is_array($arguments)) {
+                    return $this->validationErrorResponse('arguments is required for approve decisions.');
+                }
+                $decisions[] = [
+                    'provider_call_id' => $providerCallId,
+                    'decision'         => 'approve',
+                    'arguments'        => $arguments,
+                ];
+                continue;
+            }
+
+            $reason = $item['reason'] ?? 'User rejected';
+            if (!is_string($reason)) {
+                return $this->validationErrorResponse('reason must be a string.');
+            }
+            $reason = trim($reason);
+            $decisions[] = [
+                'provider_call_id' => $providerCallId,
+                'decision'         => 'reject',
+                'reason'           => $reason === '' ? 'User rejected' : $reason,
+            ];
+        }
+
+        $task = $this->taskService->getTaskWithHistory($taskId, $userId);
+        if ($task === null) {
+            return $this->notFoundResponse();
+        }
+
+        $toolCalls = [];
+        foreach ($task['tool_calls'] as $toolCall) {
+            $providerCallId = $toolCall['provider_call_id'] ?? null;
+            if (is_string($providerCallId)) {
+                $toolCalls[$providerCallId] = $toolCall;
+            }
+        }
+
+        foreach ($decisions as $decision) {
+            $toolCall = $toolCalls[$decision['provider_call_id']] ?? null;
+            if ($toolCall === null) {
+                return $this->validationErrorResponse("provider_call_id '{$decision['provider_call_id']}' is not pending approval.");
+            }
+            if ($decision['decision'] !== 'approve') {
+                continue;
+            }
+
+            $schema = $toolCall['parameter_schema'] ?? [];
+            $operation = $toolCall['operation'] ?? null;
+            try {
+                SchemaValidator::validate(
+                    $decision['arguments'],
+                    is_array($schema) ? $schema : [],
+                    is_string($operation) && $operation !== '' ? $operation : null,
+                );
+            } catch (InvalidArgumentException $e) {
+                return $this->validationErrorResponse($e->getMessage());
+            }
+        }
+
+        return $decisions;
+    }
+
+    private function validationErrorResponse(string $message): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $message]],
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+        );
     }
 
     /**
