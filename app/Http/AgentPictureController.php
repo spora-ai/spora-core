@@ -92,16 +92,32 @@ final class AgentPictureController
             return $agentError;
         }
 
-        $file = $request->files->get('file');
-        if ($file instanceof UploadedFile) {
-            $prepared = $this->prepareUploadFile($file, $agentId);
-            if ($prepared instanceof JsonResponse) {
-                return $prepared;
-            }
-            return ['file' => $file, 'bytes' => $prepared];
+        $bytesOrError = $this->readAndValidateUpload($request, $agentId);
+        if ($bytesOrError instanceof JsonResponse) {
+            return $bytesOrError;
         }
 
-        return $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST);
+        return ['file' => $request->files->get('file'), 'bytes' => $bytesOrError];
+    }
+
+    /**
+     * Read the uploaded file off the request and run the size+MIME
+     * validations. Returns the bytes on success or a 4xx JsonResponse on
+     * failure. Extracted from {@see prepareUpload()} so that helper stays
+     * under the 3-return ceiling (S1142).
+     */
+    private function readAndValidateUpload(Request $request, int $agentId): string|JsonResponse
+    {
+        $file = $request->files->get('file');
+        if (!$file instanceof UploadedFile) {
+            return $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST);
+        }
+        $bytes = $this->readFileBytes($file);
+        $validationError = $this->validateUpload($file, $bytes, $agentId);
+        if ($validationError !== null) {
+            return $validationError;
+        }
+        return $bytes;
     }
 
     /**
@@ -116,23 +132,6 @@ final class AgentPictureController
             return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
         }
         return null;
-    }
-
-    /**
-     * Read + validate the uploaded file after the controller has confirmed
-     * `instanceof UploadedFile` and the agent exists. Returns the bytes on
-     * success or a 4xx JsonResponse on failure. Extracted from
-     * {@see prepareUpload()} so that helper stays under the 3-return
-     * ceiling (S1142).
-     */
-    private function prepareUploadFile(UploadedFile $file, int $agentId): string|JsonResponse
-    {
-        $bytes = $this->readFileBytes($file);
-        $validationError = $this->validateUpload($file, $bytes, $agentId);
-        if ($validationError !== null) {
-            return $validationError;
-        }
-        return $bytes;
     }
 
     /**
