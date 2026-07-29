@@ -22,17 +22,15 @@ use Throwable;
 /**
  * Resumes a task paused for human approval.
  *
- * Behaviour by WorkerMode:
- *   - Sync:  approved tools run inline; partial approvals keep the task
- *           paused with the un-approved set in pending_state.
- *   - Worker: the approval is persisted (status='APPROVED', executed_at=NULL)
- *             and the daemon's next runTick() picks up the work. Long-running
- *             tools never block the HTTP response in this mode.
+ * Worker-mode contracts:
+ *   - Sync: approved tools run inline.
+ *   - Worker: the approval is persisted with `executed_at=NULL`; the daemon's
+ *     next `runTick()` runs the tool (so long-running tools don't block the
+ *     HTTP response).
  *
- * Tool calls in `pending_state` that the user did not include in the approval
- * batch stay PENDING_APPROVAL — never silently executed with the LLM's
- * original arguments, never auto-rejected. The UI may re-render via
- * TaskService::approveTask()'s Mercure publish.
+ * Partial approval: tool calls in `pending_state` that the user did NOT
+ * include in the approval batch stay PENDING_APPROVAL — never silently
+ * executed with the LLM's original arguments.
  */
 final class ApprovedBatchExecutor
 {
@@ -58,11 +56,8 @@ final class ApprovedBatchExecutor
             ]);
 
             $approvedMap  = $this->indexApprovedBatch($approvedBatch);
-            // Operation-per-call narrows per-op `required[]` against the
-            // op the call was actually dispatched on (see
-            // ToolCallExecutor::createPendingRecord). Without it, validators
-            // re-fail with "Required argument '<x>' is missing" for args bound
-            // only to a specific op.
+            // Operation-per-call narrows per-op `required[]` against the op the call was
+            // actually dispatched on — see ToolCallExecutor::createPendingRecord.
             $operationMap = $this->indexPersistedOperations($taskId);
 
             /** @var list<DriverToolCall> $remaining */
@@ -72,11 +67,7 @@ final class ApprovedBatchExecutor
                 $operationName = $operationMap[$pendingToolCall->providerCallId] ?? null;
                 $approvedArgs  = $approvedMap[$pendingToolCall->providerCallId] ?? null;
 
-                // Partial-approval guard: a tool call in saved state but
-                // absent from this batch is left PENDING_APPROVAL. The
-                // previous implementation fell back to the LLM's
-                // `proposed_arguments` and ran the un-approved tool —
-                // which is what "the other approval was dropped" looked like.
+                // Partial-approval guard: absent from the batch = not approved, stays pending.
                 if ($approvedArgs === null) {
                     $remaining[] = $pendingToolCall;
                     continue;
@@ -94,9 +85,8 @@ final class ApprovedBatchExecutor
                 return;
             }
 
-            // No in-state remaining calls — any PENDING_APPROVAL rows left
-            // in the DB are dangling (in DB but not in saved state), a
-            // state/DB-drift case still worth handling.
+            // Any PENDING_APPROVAL rows left in the DB here are dangling (in DB but not
+            // in saved state) — a state/DB-drift case, distinct from partial approval.
             $this->cleanupStrandedApprovals($task, $taskId);
             $this->completeResume($taskId);
         } catch (Throwable $e) {
@@ -182,8 +172,6 @@ final class ApprovedBatchExecutor
     }
 
     /**
-     * Sync-mode path: validate + execute + record result.
-     *
      * @param array<string, mixed> $approvedArgs
      */
     private function executeOneApprovedToolCall(
@@ -208,8 +196,9 @@ final class ApprovedBatchExecutor
     }
 
     /**
-     * Worker-mode path: persist only. The next {@see TickPhaseRunner::runTick()}
-     * picks up the row (matched by `executed_at IS NULL`) and runs the tool.
+     * Worker-mode: persist the approval only. `executed_at IS NULL` is the
+     * "approved, awaiting execution" sentinel that {@see TickPhaseRunner::runTick()}
+     * picks up — don't set executed_at here.
      *
      * @param array<string, mixed> $approvedArgs
      */
@@ -220,9 +209,6 @@ final class ApprovedBatchExecutor
             ->update([
                 'status'             => 'APPROVED',
                 'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
-                // `executed_at IS NULL` is the "approved, awaiting execution"
-                // sentinel — TickPhaseRunner::executeApprovedPendingTools()
-                // picks it up. Don't set executed_at here.
             ]);
     }
 
@@ -317,11 +303,10 @@ final class ApprovedBatchExecutor
     }
 
     /**
-     * Mark rows that exist in the DB with status=PENDING_APPROVAL but are
-     * NOT in the saved `pending_state` as REJECTED. Handles state/DB drift
-     * (concurrency bugs, manual edits, retries from older code paths) — NOT
-     * partial approval; partial approval branches off before this is called
-     * so legitimate "still awaiting decision" rows are not affected.
+     * Marks DB rows stuck in PENDING_APPROVAL with no matching entry in the
+     * saved `pending_state` as REJECTED. State/DB-drift only — partial-approval
+     * branches off before this point so legitimate "still awaiting decision"
+     * rows are not affected.
      */
     private function cleanupStrandedApprovals(Task $task, int $taskId): void
     {

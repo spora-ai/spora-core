@@ -52,10 +52,8 @@ final class TickPhaseRunner
             return;
         }
 
-        // Worker-mode pickup: tools the user approved via the HTTP endpoint
-        // were persisted with `executed_at IS NULL` by
-        // ApprovedBatchExecutor::execute(). Run them now, before the LLM
-        // round-trip, so the next assistant message sees the results.
+        // Worker-mode pickup: run approved tools persisted with `executed_at IS NULL`
+        // before the LLM round-trip so the next assistant message sees the results.
         $this->executeApprovedPendingToolsForTask($task);
 
         try {
@@ -76,10 +74,10 @@ final class TickPhaseRunner
     }
 
     /**
-     * Worker-mode pickup path. Finds rows in the post-approval,
-     * pre-execution sentinel state (`status='APPROVED' AND executed_at IS NULL`)
-     * and runs each one. No-op when the daemon picks up a Sync-mode task
-     * (Sync mode already executes + sets executed_at in the HTTP path).
+     * Worker-mode pickup: runs rows in the post-approval / pre-execution
+     * sentinel state (`status='APPROVED' AND executed_at IS NULL`) so the
+     * daemon picks up the work that {@see ApprovedBatchExecutor::execute()}
+     * deferred from the HTTP path.
      */
     private function executeApprovedPendingToolsForTask(Task $task): void
     {
@@ -135,15 +133,11 @@ final class TickPhaseRunner
             return;
         }
 
-        // safeExecute() catches every Throwable internally and returns a
-        // failure ToolResult, so this call never re-throws under normal
-        // operation. The success-path update below records whatever the
-        // tool returned (success or failure) and stamps executed_at.
+        // safeExecute() catches every Throwable internally — no outer try/catch needed.
         $result = $this->orchestrator->safeExecute($toolInstance, $approvedArgs, $task->agent_id, $task->id);
 
-        // Query-builder update() intentionally bypasses Eloquent casts
-        // (the `array` cast would re-encode the JSON string and
-        // double-encode the value — same anti-pattern PR #150 fixed).
+        // Query-builder update() bypasses Eloquent's `array` cast on `approved_arguments`,
+        // which would double-encode the JSON string. Same anti-pattern PR #150 fixed.
         ToolCallModel::where('task_id', $task->id)
             ->where('provider_call_id', $providerCallId)
             ->update([
