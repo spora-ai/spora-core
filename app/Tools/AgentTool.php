@@ -246,7 +246,15 @@ final class AgentTool extends AbstractTool
 
     private const AGENT_CREATION_SKILL_HINT      = '(skill action: read, name: agent-creation, filename: SKILL.md)';
 
-    private readonly AgentToolCollaborators $collaborators;
+    private readonly NotesHandler $notesHandler;
+
+    private readonly CatalogPresenter $catalogPresenter;
+
+    private readonly ConfigurePlanner $configurePlanner;
+
+    private readonly SlimPayloadValidator $payloadValidator;
+
+    private readonly AgentTargetResolver $targetResolver;
 
     public function __construct(
         private readonly AgentServiceInterface $agentService,
@@ -254,32 +262,12 @@ final class AgentTool extends AbstractTool
         private readonly AgentManifest $manifest,
         ?AgentToolCollaborators $collaborators = null,
     ) {
-        $this->collaborators = $collaborators ?? new AgentToolCollaborators();
-    }
-
-    private function notesHandler(): NotesHandler
-    {
-        return $this->collaborators->notesHandler($this->agentService);
-    }
-
-    private function catalogPresenter(): CatalogPresenter
-    {
-        return $this->collaborators->catalogPresenter($this->agentService, $this->toolSettings);
-    }
-
-    private function configurePlanner(): ConfigurePlanner
-    {
-        return $this->collaborators->configurePlanner($this->toolSettings);
-    }
-
-    private function payloadValidator(): SlimPayloadValidator
-    {
-        return $this->collaborators->payloadValidator();
-    }
-
-    private function targetResolver(): AgentTargetResolver
-    {
-        return $this->collaborators->targetResolver();
+        $collaborators      ??= new AgentToolCollaborators();
+        $this->notesHandler      = $collaborators->notesHandler($agentService);
+        $this->catalogPresenter  = $collaborators->catalogPresenter($agentService, $toolSettings);
+        $this->configurePlanner  = $collaborators->configurePlanner($toolSettings);
+        $this->payloadValidator  = $collaborators->payloadValidator();
+        $this->targetResolver    = $collaborators->targetResolver();
     }
 
     public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
@@ -295,10 +283,10 @@ final class AgentTool extends AbstractTool
 
         return match ($operation) {
             'update_agent'              => $this->writeConfiguration($agentId, $userId, $arguments),
-            'read_notes'                => $this->notesHandler()->read($agentId),
-            'write_notes'               => $this->notesHandler()->write($agentId, $arguments, 'append'),
-            'write_notes_overwrite'     => $this->notesHandler()->write($agentId, $arguments, 'overwrite'),
-            'get_available_tools'       => $this->catalogPresenter()->present($agentId, $userId),
+            'read_notes'                => $this->notesHandler->read($agentId),
+            'write_notes'               => $this->notesHandler->write($agentId, $arguments, 'append'),
+            'write_notes_overwrite'     => $this->notesHandler->write($agentId, $arguments, 'overwrite'),
+            'get_available_tools'       => $this->catalogPresenter->present($agentId, $userId),
             'create_agent'              => $this->createAgent($agentId, $arguments),
             'configure_tools'           => $this->configureTools($agentId, $userId, $arguments),
             'read_agent'                => $this->readAgent($agentId, $userId, $arguments),
@@ -345,7 +333,7 @@ final class AgentTool extends AbstractTool
 
     private function writeConfiguration(int $callingAgentId, ?int $userId, array $arguments): ToolResult
     {
-        $targetId = $this->targetResolver()->resolveWriteConfigurationTargetId(
+        $targetId = $this->targetResolver->resolveWriteConfigurationTargetId(
             $userId ?? 0,
             $callingAgentId,
             $arguments,
@@ -458,7 +446,7 @@ final class AgentTool extends AbstractTool
             return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
-        $data = $this->payloadValidator()->validateCreateAgentPayload($arguments);
+        $data = $this->payloadValidator->validateCreateAgentPayload($arguments);
         if ($data instanceof ToolResult) {
             return $data;
         }
@@ -491,7 +479,7 @@ final class AgentTool extends AbstractTool
         }
 
         [$target, $plan] = $context;
-        $this->configurePlanner()->apply($target->id, $userId, $plan);
+        $this->configurePlanner->apply($target->id, $userId, $plan);
         return $this->renderFreshAgentAfterConfigure($userId, $target->id);
     }
 
@@ -506,12 +494,12 @@ final class AgentTool extends AbstractTool
             return $entries;
         }
 
-        $plan = $this->configurePlanner()->buildPlan($entries);
+        $plan = $this->configurePlanner->buildPlan($entries);
         if ($plan instanceof ToolResult) {
             return $plan;
         }
 
-        $target = $this->targetResolver()->resolveAgentToolTarget($userId, $agentId, $arguments);
+        $target = $this->targetResolver->resolveAgentToolTarget($userId, $agentId, $arguments);
         return $target instanceof ToolResult ? $target : [$target, $plan];
     }
 
@@ -560,7 +548,7 @@ final class AgentTool extends AbstractTool
         if ($userId === null) {
             return ToolResult::fail('read_agent requires an authenticated user.');
         }
-        $target = $this->targetResolver()->resolveAgentToolTarget($userId, $callingAgentId, $arguments);
+        $target = $this->targetResolver->resolveAgentToolTarget($userId, $callingAgentId, $arguments);
         return $target instanceof ToolResult
             ? $target
             : $this->renderManifestResult($target);
