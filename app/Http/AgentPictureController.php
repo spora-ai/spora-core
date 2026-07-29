@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
@@ -73,31 +74,21 @@ final class AgentPictureController
             return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
         }
 
-        $fileError = $this->validateUploadedFile($request);
-        if ($fileError !== null) {
-            return $fileError;
-        }
         $file = $request->files->get('file');
-        assert($file instanceof UploadedFile);
-
-        $bytes = file_get_contents($file->getPathname());
-        if ($bytes === false) {
-            return $this->error('READ_FAILED', 'Could not read uploaded file.', Response::HTTP_INTERNAL_SERVER_ERROR);
+        if (!$file instanceof UploadedFile) {
+            return $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST);
         }
 
-        $sniffedMime = $this->sniffer->sniffFromBytes($bytes);
-        if (!$this->allowedTypes->isAllowed($sniffedMime, $agentId)) {
-            return $this->error(
-                'UNSUPPORTED_MEDIA_TYPE',
-                sprintf('MIME type "%s" is not in the upload allowlist.', $sniffedMime),
-                Response::HTTP_UNSUPPORTED_MEDIA_TYPE,
-            );
+        $bytes = $this->readFileBytes($file);
+        $validationError = $this->validateUpload($file, $bytes, $agentId);
+        if ($validationError !== null) {
+            return $validationError;
         }
 
         $clientName = $file->getClientOriginalName();
         $asset = $this->mediaArchive->ingest(new MediaIngestRequest(
             bytes: $bytes,
-            mime: $sniffedMime,
+            mime: $this->sniffer->sniffFromBytes($bytes),
             filename: $clientName !== ''
                 ? Utf8Sanitizer::scrubString($clientName)
                 : null,
@@ -118,16 +109,12 @@ final class AgentPictureController
     }
 
     /**
-     * Validate the multipart upload request before the controller reads the
-     * file body. Centralises the 4 guard clauses so `uploadImage()` stays
-     * under the cognitive-complexity ceiling.
+     * Run the upload-side validations (file size, MIME allowlist) after
+     * the controller has already confirmed the file is an UploadedFile and
+     * read its bytes. Returns 4xx JsonResponse on failure, null on success.
      */
-    private function validateUploadedFile(Request $request): ?JsonResponse
+    private function validateUpload(UploadedFile $file, string $bytes, int $agentId): ?JsonResponse
     {
-        $file = $request->files->get('file');
-        if (!$file instanceof UploadedFile) {
-            return $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST);
-        }
         if (!$file->isValid()) {
             return $this->error('BAD_REQUEST', 'Upload failed: ' . $file->getErrorMessage(), Response::HTTP_BAD_REQUEST);
         }
@@ -138,7 +125,29 @@ final class AgentPictureController
                 Response::HTTP_REQUEST_ENTITY_TOO_LARGE,
             );
         }
+        $sniffedMime = $this->sniffer->sniffFromBytes($bytes);
+        if (!$this->allowedTypes->isAllowed($sniffedMime, $agentId)) {
+            return $this->error(
+                'UNSUPPORTED_MEDIA_TYPE',
+                sprintf('MIME type "%s" is not in the upload allowlist.', $sniffedMime),
+                Response::HTTP_UNSUPPORTED_MEDIA_TYPE,
+            );
+        }
         return null;
+    }
+
+    /**
+     * Read the uploaded file's bytes; throw on read failure. The controller
+     * path is the only caller (the multipart upload decoding), so the
+     * exception bubbles up to the Symfony exception handler.
+     */
+    private function readFileBytes(UploadedFile $file): string
+    {
+        $bytes = file_get_contents($file->getPathname());
+        if ($bytes === false) {
+            throw new RuntimeException('Could not read uploaded file.');
+        }
+        return $bytes;
     }
 
     /**

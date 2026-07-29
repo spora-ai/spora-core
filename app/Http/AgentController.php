@@ -153,6 +153,22 @@ final class AgentController
         }
         $body = $bodyOrError;
 
+        $agent = $this->applyAgentPatch($agentId, $userId, $body);
+        if ($agent instanceof JsonResponse) {
+            return $agent;
+        }
+
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]]);
+    }
+
+    /**
+     * Apply the agents-row write plus the optional profile_picture nested
+     * object. Returns the updated Agent on success, or a JsonResponse (404
+     * or 422) on failure. Extracted from `update()` so the controller stays
+     * under the 3-return ceiling (S1142).
+     */
+    private function applyAgentPatch(int $agentId, int $userId, array $body): Agent|JsonResponse
+    {
         $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived', 'is_favorite'];
         $data = array_intersect_key($body, array_flip($allowed));
 
@@ -167,7 +183,6 @@ final class AgentController
         }
 
         $agent = $this->agentService->updateAgent($agentId, $userId, $data);
-
         if ($agent === null) {
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
@@ -183,7 +198,7 @@ final class AgentController
             }
         }
 
-        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]]);
+        return $agent;
     }
 
     /**
