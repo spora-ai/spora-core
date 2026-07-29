@@ -10,13 +10,9 @@ use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
- * Notes mutations on an Agent row: `read_notes`, `write_notes`,
- * `write_notes_overwrite`. Extracted from AgentTool so the tool class
- * stays under SonarCloud S1448's 20-method ceiling.
- *
- * `combineNotes` and `humanBytes` are pure helpers used by the two
- * write paths — they live here for proximity to the write logic that
- * owns the format decision.
+ * Notes mutations on an Agent row: `read_notes`, `write_notes`, and
+ * `write_notes_overwrite`. `combineNotes` and `humanBytes` are pure
+ * helpers used by the write paths.
  */
 final class NotesHandler
 {

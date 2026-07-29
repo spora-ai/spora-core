@@ -8,19 +8,18 @@ use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
- * Per-operation validation + apply for `configure_tools`. Extracted
- * from AgentTool so the tool class stays under SonarCloud S1448's
- * 20-method ceiling.
+ * Per-operation validation + apply for `configure_tools`.
  *
  * Flow:
- *   1. `buildConfigureToolsPlan` walks each `tools[i]` entry once.
- *   2. `parseConfigureToolEntry` validates the entry's shape.
- *   3. `parseConfigureToolOperations` validates the entry's operations
- *      (defensively `unwrapSingleItemArray`-ing the `{item: […]}` quirk).
- *   4. `applyConfigureToolsPlan` writes each plan step through
- *      `AgentToolSettingsServiceInterface` — the existing operator-side
- *      surface — so the LLM-facing path and the operator-facing API
- *      share the same enable / override semantics.
+ *   1. `buildPlan` walks each `tools[i]` entry once
+ *   2. `parseEntry` validates the entry's shape
+ *   3. `parseOperations` validates the entry's operations
+ *      (defensively `unwrapSingleItemArray`-ing the OpenAI
+ *      `{item: [...]}` quirk)
+ *   4. `apply` writes each plan step through
+ *      `AgentToolSettingsServiceInterface` so the LLM-facing path
+ *      and the operator-facing API share the same enable / override
+ *      semantics.
  */
 final class ConfigurePlanner
 {

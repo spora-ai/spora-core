@@ -22,29 +22,13 @@ use Spora\Tools\ValueObjects\ToolResult;
  * operator-facing notes, discover the tools it could enable, and create
  * new agents on behalf of the current user.
  *
- * Operations that carry an `agent_id` parameter (`read_agent`,
- * `configure_tools`, `update_agent` / its deprecated alias
- * `write_agent_configuration`) accept either the calling agent or any
- * user-owned agent by primary key. `read_agent_configuration` is a
- * legacy soft-redirect to `read_agent(self)`; its `#[ToolOperation]`
- * entry was removed (see {@see self::execute()}). Ownership is always
- * scoped to the authenticated user — cross-user reads are refused, never
- * silently substituted. The LLM-facing agent-creation flow is the
- * two-phase create → configure_tools pattern documented in
- * skills/agent-creation/SKILL.md.
- *
- * Composition: the work that powers this tool is split across four
- * collaborators. They live under `Spora\Tools\AgentTool\` so the tool
- * class stays under SonarCloud S1448's 20-method ceiling.
- *
- *   - {@see NotesHandler}            — `read_notes` + `write_notes` + notes formatting
- *   - {@see CatalogPresenter}        — `get_available_tools` + the LLM-facing v2 payload
- *   - {@see ConfigurePlanner}        — `configure_tools` plan/parse/apply
- *   - {@see SlimPayloadValidator}    — `create_agent` slim payload validation
- *
- * Each collaborator is instantiated inside this class's constructor
- * from the same dependencies so unit tests can opt out via the
- * optional constructor parameters when they need to swap a stub.
+ * Operations carrying an `agent_id` (`read_agent`, `configure_tools`,
+ * `update_agent` and its deprecated alias `write_agent_configuration`)
+ * accept either the calling agent or any user-owned agent by primary
+ * key. Ownership is always scoped to the authenticated user — cross-
+ * user reads are refused, never silently substituted. The LLM-facing
+ * agent-creation flow is the two-phase create → configure_tools
+ * pattern documented in skills/agent-creation/SKILL.md.
  */
 #[Tool(
     name: 'agent',
@@ -257,16 +241,11 @@ final class AgentTool extends AbstractTool
 {
     private const AGENT_NOT_FOUND = 'Agent not found.';
 
-    // Per-operation error prefixes — centralised so consumers can locate
-    // every fail site with a single grep and so SonarCloud S1192's
-    // "duplicate literal" rule stays green.
+    // Centralised so consumers can locate every fail site with a single grep.
     private const CONFIGURE_TOOLS_ERR_PREFIX = 'configure_tools: ';
     private const READ_AGENT_ERR_PREFIX      = 'read_agent: ';
     private const WRITE_AGENT_ERR_PREFIX     = 'update_agent: ';
 
-    // Common shapes used in `#[ToolOperation]` description strings. Hoisted
-    // here so every site carries the same wording and so SonarCloud S1192
-    // can see the constant, not duplicated substrings.
     private const AGENT_CREATION_SKILL_HINT      = '(skill action: read, name: agent-creation, filename: SKILL.md)';
     private const AGENT_ID_POSITIVE_INTEGER_MSG  = '`agent_id` must be a positive integer.';
 
@@ -356,13 +335,6 @@ final class AgentTool extends AbstractTool
         };
     }
 
-    /**
-     * `update_agent` writes the editable agent fields and returns the
-     * canonical manifest so the LLM can verify what landed without a
-     * follow-up `read_agent` call.
-     *
-     * @param array<string, mixed> $arguments
-     */
     private function writeConfiguration(int $callingAgentId, ?int $userId, array $arguments): ToolResult
     {
         $targetId = $this->resolveWriteConfigurationTargetId(
@@ -385,10 +357,9 @@ final class AgentTool extends AbstractTool
 
     private function notesOnlyPatchFail(array $arguments): ToolResult
     {
-        // `notes` is intentionally not writable through this surface —
-        // it goes through write_notes / write_notes_overwrite. Distinguish
-        // "no agent object" from "agent object carried only notes" so the
-        // LLM knows which retry to send.
+        // `notes` is intentionally not writable through this surface — it
+        // goes through write_notes / write_notes_overwrite. The "only
+        // notes" distinction tells the LLM which retry to send.
         $patch = (array) ($arguments['agent'] ?? []);
         $hadOnlyNotes = array_keys($patch) === ['notes'];
         $message = $hadOnlyNotes
@@ -408,11 +379,6 @@ final class AgentTool extends AbstractTool
         return $patch === [] ? null : $patch;
     }
 
-    /**
-     * Build a {@see ToolResult} carrying the canonical manifest as
-     * `result_data` and the Markdown wrapper as `result_content`. Used
-     * by every read/write path that has an Agent row in hand.
-     */
     private function renderManifestResult(Agent $agent): ToolResult
     {
         $manifest = $this->manifest->toArray($agent);
@@ -501,17 +467,11 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * Two-phase agent-creation complement to {@see self::createAgent()}:
-     * the LLM creates the skeletal agent first, then calls
-     * `configure_tools` to enable tools and per-operation overrides. This
-     * avoids forcing N nested decisions (one per
-     * tools[i].operations[j]) inside a single approved call.
-     *
-     * Routes through `AgentToolSettingsServiceInterface` — the existing
-     * operator-side surface — so the LLM-facing path and the
-     * operator-facing API share the same enable / override semantics.
-     * The result is the canonical agent manifest so the LLM can verify
-     * what committed without a follow-up `read_agent` call.
+     * Two-phase complement to {@see self::createAgent()}: the LLM creates
+     * the skeletal agent first, then calls `configure_tools` to enable
+     * tools and per-operation overrides — avoids forcing N nested
+     * decisions (one per `tools[i].operations[j]`) inside a single
+     * approved call.
      *
      * @param array<string, mixed> $arguments
      */
@@ -521,9 +481,6 @@ final class AgentTool extends AbstractTool
             return ToolResult::fail('configure_tools requires an authenticated user.');
         }
 
-        // Validate the payload shape before the target resolver so
-        // malformed inputs surface the schema error without a wasted
-        // DB lookup. Order mirrors {@see self::createAgent()}.
         $entries = SlimPayloadValidator::unwrapSingleItemArray($arguments['tools'] ?? []);
         if (!is_array($entries) || ($entries !== [] && !array_is_list($entries))) {
             return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . '`tools` must be an array.');
@@ -545,9 +502,8 @@ final class AgentTool extends AbstractTool
 
     private function renderFreshAgentAfterConfigure(int $userId, int $agentId): ToolResult
     {
-        // Re-read after the apply so the manifest renders with the
-        // post-change rows + override state. User-scoped to keep the
-        // re-read on the same row the resolver already validated.
+        // User-scoped re-read so the manifest sees the same row the
+        // resolver already validated.
         $fresh = Agent::query()
             ->where('user_id', $userId)
             ->where('id', $agentId)
@@ -559,10 +515,8 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * Reads the full state of a specific agent. `agent_id` is optional —
-     * omit to read the calling agent. Cross-user reads are refused;
-     * see {@see self::resolveAgentToolTarget()} for the three input
-     * modes (agent_id / omitted / malformed).
+     * Cross-user reads are refused; omitted `agent_id` resolves to the
+     * calling agent.
      *
      * @param array<string, mixed> $arguments
      */
@@ -578,10 +532,8 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * Soft-redirect for the deprecated `read_agent_configuration`
-     * operation. The legacy name still resolves through `execute()` so a
-     * prompt that learned it keeps working until the next release
-     * hard-removes it.
+     * Soft-redirect for the deprecated `read_agent_configuration` name;
+     * hard-remove in a later release.
      */
     private function redirectReadAgentConfiguration(int $callingAgentId, ?int $userId): ToolResult
     {
@@ -596,11 +548,6 @@ final class AgentTool extends AbstractTool
         );
     }
 
-    /**
-     * Soft-redirect for the deprecated `write_agent_configuration` name.
-     *
-     * @param array<string, mixed> $arguments
-     */
     private function redirectWriteAgentConfiguration(int $callingAgentId, ?int $userId, array $arguments): ToolResult
     {
         $result = $this->writeConfiguration($callingAgentId, $userId, $arguments);
@@ -613,16 +560,13 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * Three input modes drive the resolution:
-     *   1. `agent_id` supplied and positive → look up that agent, scoped
-     *      to the authenticated user (cross-user reads return "not found").
-     *   2. `agent_id` omitted → fall back to the calling agent.
-     *   3. `agent_id` malformed (zero / non-numeric) → fail with a clear
-     *      validation message so the LLM knows what to retry.
+     * Three input modes:
+     *   1. `agent_id` positive → user-scoped lookup (cross-user → not found)
+     *   2. omitted → calling agent
+     *   3. malformed (zero / non-numeric) → validation failure
      *
-     * `template_id` is refused because templates are creation labels
-     * (multiple agents can share one) and can never resolve to a single
-     * row.
+     * `template_id` is refused: templates are creation labels, not row
+     * identifiers (multiple agents can share one).
      *
      * @param  array<string, mixed> $arguments
      * @return Agent|ToolResult
@@ -649,10 +593,6 @@ final class AgentTool extends AbstractTool
             ?? ToolResult::fail(self::READ_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
     }
 
-    /**
-     * @param  array<string, mixed> $arguments
-     * @return int|ToolResult
-     */
     private function resolvePositiveAgentId(array $arguments, int $callingAgentId): int|ToolResult
     {
         $raw = $arguments['agent_id'] ?? null;
@@ -672,14 +612,9 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * Resolve the target agent id for `update_agent` (and the
-     * deprecated `write_agent_configuration` alias). The
-     * omitted-`agent_id` case resolves directly to the calling agent
-     * without a DB lookup — a pre-cancel caller (e.g. an operator-API
-     * row not yet bound to a user) still resolves without an extra
-     * round-trip. The service-level row check (and
-     * `updateAgentByAgentId`'s own null-on-miss) handles a row that
-     * doesn't exist for the caller.
+     * Omitted `agent_id` resolves to the calling agent without a DB
+     * lookup — a pre-cancel caller (e.g. an operator-API row not yet
+     * bound to a user) still resolves without an extra round-trip.
      *
      * @param  array<string, mixed> $arguments
      * @return int|ToolResult

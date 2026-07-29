@@ -12,19 +12,15 @@ use Spora\Tools\ToolSchemaPresenter;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
- * Presents the available-tool catalog to the LLM (`get_available_tools`)
- * and the catalog row helper used by the LLM-facing payload builder.
- * Extracted from AgentTool so the tool class stays under SonarCloud
- * S1448's 20-method ceiling.
+ * Presents the available-tool catalog to the LLM (`get_available_tools`).
  *
- * Two payload shapes are emitted:
- *  - `$enriched` (legacy operator-side shape) becomes the persisted
- *    `tool_calls.result_data` and keeps the operator UI expectations
- *    (tool_name, category, icon) intact.
- *  - `$agentFacing` (slim v2) becomes the LLM-facing JSON body and
- *    drops `tool_name` / `call_name` / `category` / `icon` / `source`
- *    since each is redundant for an LLM that already has `tool_class`
- *    and wants to call `configure_tools` next.
+ * Emits two shapes:
+ *   - `$enriched` (legacy operator-side) becomes the persisted
+ *     `tool_calls.result_data` and keeps the operator UI's
+ *     `tool_name`/`category`/`icon` expectations intact.
+ *   - `$agentFacing` (slim v2) drops those fields because they're
+ *     redundant for an LLM that already has `tool_class` and wants to
+ *     call `configure_tools` next.
  */
 final class CatalogPresenter
 {
@@ -36,11 +32,9 @@ final class CatalogPresenter
     ) {}
 
     /**
-     * `get_available_tools` executor. `userId` is nullable because the
-     * orchestrator fills it from the calling Agent's row; null is the
-     * "minimal boot" fallback that resolves itself from the row anyway.
-     *
-     * @return ToolResult
+     * `get_available_tools` executor. `userId` is nullable as a "minimal
+     * boot" fallback — the orchestrator normally fills it from the
+     * calling Agent's row.
      */
     public function present(int $agentId, ?int $userId): ToolResult
     {
@@ -87,32 +81,19 @@ final class CatalogPresenter
     }
 
     /**
-     * Build the LLM-facing payload for `get_available_tools`. v2 dropped
-     * `tool_name`, `call_name`, `category`, `icon`, and `source` — each
-     * is redundant for the LLM (overlaps with `tool_class`, operator-UI
-     * concerns, etc.). The LLM only needs the FQCN (for
-     * `configure_tools`), the current enabled state, the missing-config
-     * sentinel, and the per-operation details.
+     * v2 dropped `tool_name` / `call_name` / `category` / `icon` /
+     * `source` — each is redundant for the LLM (overlaps with
+     * `tool_class`, operator-UI concerns, etc.).
      *
-     * Precedence rules:
-     *   - `tool_class` is the FQCN the LLM passes to `configure_tools`.
-     *     Use `plugin_slug` (or null for core) for `required_plugins[]`.
-     *   - `enabled` reflects current `agent_tools` row presence.
-     *   - `ready_to_enable` mirrors `can_enable` (no missing required
-     *     settings). A tool may be enabled with missing required settings
-     *     — the server inserts the row and returns a warning, but it is
-     *     NOT activatable as `enabled` on the LLM's side without config.
-     *   - `missing_required` lists only the required setting keys; no
-     *     effective values are exposed to avoid leaking credentials.
+     * `missing_required` lists only the required setting keys; no
+     * effective values are exposed to avoid leaking credentials.
+     * Full parameter schemas are deliberately omitted — the LLM can
+     * call `configure_tools` with `operations: [{name, …}]` entries
+     * without needing the schema.
      *
-     * The default response deliberately OMITS full parameter schemas —
-     * the LLM can call `configure_tools` with `operations: [{name, …}]`
-     * entries without needing the schema. A future `get_tool_details`
-     * operation can add schema drill-down.
-     *
-     * @param  list<array<string, mixed>> $rows              Per-agent status rows (already enriched with display_name, description by the caller).
+     * @param  list<array<string, mixed>> $rows Per-agent status rows (already enriched by the caller).
      * @param  array<string, list<array{operation: string, effective_enabled: bool, effective_requires_approval: bool}>> $operationsByClass
-     *         Effective per-operation enablement/approval state, keyed by tool_class.
+     *         Effective per-op state, keyed by tool_class.
      * @return array<string, mixed>
      */
     private function buildAgentFacingToolRows(array $rows, array $operationsByClass): array

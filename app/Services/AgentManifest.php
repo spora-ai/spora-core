@@ -132,11 +132,8 @@ final class AgentManifest
     }
 
     /**
-     * Build the per-tool manifest row, the missing-required sentinel
-     * entries, and the override audit-trail entries for a single
-     * per-agent tool status row. Extracted from {@see self::toArray()}
-     * so the orchestrator stays under SonarCloud S3776's 15-cognitive-
-     * complexity ceiling.
+     * Build the per-tool manifest row + missing-required + override
+     * audit-trail for a single status row.
      *
      * Declared ops come from the tool's own `#[ToolOperation]`
      * attribute set, not from `getAllToolsStatus` (which carries
@@ -163,10 +160,9 @@ final class AgentManifest
         $overrideAudit = self::overrideAuditFor($effective);
 
         return [
-            // Slim shape per-PR-#170 review: drop display_name +
-            // description from per-tool entries since they're only
-            // useful when an agent browses tools, not when an LLM
-            // configures one. Operators who want descriptive
+            // Slim per-tool entry: drop display_name + description since
+            // they're only useful when an agent browses tools, not when
+            // an LLM configures one. Operators who want descriptive
             // metadata call `get_available_tools` instead.
             'tool_entry'       => [
                 'tool_class' => $toolClass,

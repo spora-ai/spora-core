@@ -7,11 +7,7 @@ namespace Spora\Tools\AgentTool;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
- * Validates the slim `create_agent` payload. Extracted from AgentTool
- * so the tool class stays under SonarCloud S1448's 20-method ceiling
- * AND so the cognitive complexity of the validator chain (which
- * previously hit 17/15 on `createAgentPayloadErrors`) can be reduced
- * by splitting each rule into its own private helper.
+ * Validates the slim `create_agent` payload.
  *
  * The agent-template.schema.json shape (id, name, version, agent{},
  * required_plugins[]) is reserved for the operator-upload endpoint at
@@ -247,9 +243,8 @@ final class SlimPayloadValidator
     }
 
     /**
-     * Shape the error short-circuit for the outer {@see self::validateCreateAgentPayload()}
-     * call. Kept as a separate method so the orchestrator function
-     * stays under SonarCloud S1142's 3-return ceiling.
+     * Short-circuit the slim-payload shape checks so the orchestrator
+     * function only needs one return.
      */
     private function shapeError(mixed $raw): ?ToolResult
     {
