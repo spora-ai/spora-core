@@ -309,6 +309,39 @@ final class PluginLoader
         return is_string($name) && $name !== '' ? $name : null;
     }
 
+    /**
+     * Inverse of {@see getComposerNameForSlug()}: resolve a Composer
+     * `vendor/name` package string back to the on-disk slug of the
+     * loaded plugin that ships it.
+     *
+     * Walks every loaded plugin's directory and reads its
+     * `composer.json#name`. Used by the agent-template importer to
+     * decide whether an `required_plugins` entry from an exported
+     * template (vendor/name) is satisfied by the current instance —
+     * there is no slug-keyed map to consult directly.
+     *
+     * Returns null when no loaded plugin declares that package name,
+     * a `composer.json` is unreadable, or the `name` field is missing.
+     * Callers should treat null as "PLUGIN_MISSING".
+     */
+    public function getSlugForPackageName(string $package): ?string
+    {
+        if ($package === '') {
+            return null;
+        }
+        foreach ($this->pluginDirs as $slug => $dir) {
+            $decoded = $this->readComposerJson($dir);
+            if (!is_array($decoded)) {
+                continue;
+            }
+            $name = $decoded['name'] ?? null;
+            if (is_string($name) && $name === $package) {
+                return $slug;
+            }
+        }
+        return null;
+    }
+
     /** @return array<string, mixed>|null */
     private function readComposerJson(string $dir): ?array
     {

@@ -160,3 +160,44 @@ test('validate accepts a payload without a tools block', function (): void {
     $codes = array_column($result->errors(), 'code');
     expect($codes)->not->toContain('TOOLS_NOT_LIST');
 });
+
+test('required_plugins accepts Composer vendor/name strings', function (): void {
+    $base = [
+        'id' => 'pkgs', 'name' => 'Pkgs', 'version' => '1.0.0',
+        'agent' => ['max_steps' => 5, 'system_prompt' => 'x'],
+        'tools' => [],
+    ];
+
+    $good = $base + ['required_plugins' => [
+        'spora-ai/spora-plugin-minimax',
+        'spora-ai/spora-plugin-memories',
+        'vendor.name/pkg_name',
+    ]];
+    expect(validatePayload($good)->isValid())->toBeTrue();
+});
+
+test('required_plugins rejects bare slugs, uppercase, empty segments, and other malformed shapes', function (): void {
+    $base = [
+        'id' => 'bad', 'name' => 'Bad', 'version' => '1.0.0',
+        'agent' => ['max_steps' => 5, 'system_prompt' => 'x'],
+        'tools' => [],
+    ];
+
+    $cases = [
+        'bare slug'             => 'weather',
+        'uppercase vendor'      => 'Spora-AI/spora-plugin-minimax',
+        'leading slash'         => '/spora-ai/spora-plugin-minimax',
+        'trailing slash'        => 'spora-ai/spora-plugin-minimax/',
+        'double slash'          => 'spora-ai//spora-plugin-minimax',
+        'empty vendor'          => '/spora-plugin-minimax',
+        'empty package'         => 'spora-ai/',
+        'whitespace'            => 'spora ai/spora',
+    ];
+
+    foreach ($cases as $label => $bad) {
+        $payload = $base + ['required_plugins' => [$bad]];
+        $result = validatePayload($payload);
+        $codes = array_column($result->errors(), 'code');
+        expect($codes)->toContain('REQUIRED_PLUGINS_INVALID');
+    }
+});

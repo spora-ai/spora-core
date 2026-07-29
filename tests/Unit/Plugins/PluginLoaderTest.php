@@ -635,3 +635,59 @@ test('getSlugForApp() returns null for an app not claimed by any loaded plugin',
     $loader->boot();
     expect($loader->getSlugForApp(new Tests\Fixtures\StubSampleApp()))->toBeNull();
 });
+
+test('getSlugForPackageName() returns the slug whose composer.json#name matches', function (): void {
+    // The ToolsPlugin fixture ships composer.json#name =
+    // 'spora-ai/spora-fixture-tools-plugin' (added in the same change as
+    // the fixture). The inverse helper must resolve it back to the slug.
+    $loader = makeToolsPluginLoader();
+    expect($loader->getSlugForPackageName('spora-ai/spora-fixture-tools-plugin'))
+        ->toBe('tools-plugin');
+});
+
+test('getSlugForPackageName() returns null for an unknown package', function (): void {
+    $loader = new PluginLoader([]);
+    expect($loader->getSlugForPackageName('spora-ai/spora-does-not-exist'))->toBeNull();
+});
+
+test('getSlugForPackageName() returns null for an empty string', function (): void {
+    $loader = new PluginLoader([]);
+    expect($loader->getSlugForPackageName(''))->toBeNull();
+});
+
+test('getSlugForPackageName() skips plugins whose composer.json is unreadable', function (): void {
+    // Two plugins under one dir: one with composer.json, one without.
+    // The helper must find the one with composer.json and skip the other.
+    $dir = sys_get_temp_dir() . '/spora_pkg_lookup_' . uniqid();
+    mkdir($dir . '/with-composer', 0o777, true);
+    mkdir($dir . '/no-composer', 0o777, true);
+
+    file_put_contents($dir . '/with-composer/plugin.json', json_encode([
+        'slug'  => 'with-composer',
+        'class' => 'Tests\\Fixtures\\Plugins\\ManifestPlugin\\Plugin',
+    ]));
+    file_put_contents($dir . '/with-composer/composer.json', json_encode([
+        'name' => 'spora-ai/spora-with-composer',
+    ]));
+    file_put_contents($dir . '/no-composer/plugin.json', json_encode([
+        'slug'  => 'no-composer',
+        'class' => 'Tests\\Fixtures\\Plugins\\NamedPlugin\\NamedPlugin',
+    ]));
+
+    try {
+        $loader = new PluginLoader([$dir], null);
+        $loader->boot();
+
+        expect($loader->getSlugForPackageName('spora-ai/spora-with-composer'))
+            ->toBe('with-composer');
+        expect($loader->getSlugForPackageName('spora-ai/no-composer'))
+            ->toBeNull();
+    } finally {
+        @unlink($dir . '/with-composer/composer.json');
+        @unlink($dir . '/with-composer/plugin.json');
+        @rmdir($dir . '/with-composer');
+        @unlink($dir . '/no-composer/plugin.json');
+        @rmdir($dir . '/no-composer');
+        @rmdir($dir);
+    }
+});

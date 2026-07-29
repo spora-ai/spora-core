@@ -38,11 +38,11 @@ test('AgentTemplate skips non-list and non-array entries when reading tools', fu
 
 test('AgentTemplate filters requiredPlugins to strings and drops empties', function (): void {
     $raw = [
-        'required_plugins' => ['weather', '', null, 42, 'minimax', '   '],
+        'required_plugins' => ['spora-ai/spora-plugin-weather', '', null, 42, 'spora-ai/spora-plugin-minimax', '   '],
     ];
     $template = new AgentTemplate(raw: $raw);
 
-    expect($template->requiredPlugins())->toBe(['weather', 'minimax', '   ']);
+    expect($template->requiredPlugins())->toBe(['spora-ai/spora-plugin-weather', 'spora-ai/spora-plugin-minimax', '   ']);
 });
 
 test('AgentTemplate::addWarning + hasWarnings round-trip', function (): void {

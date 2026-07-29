@@ -350,3 +350,51 @@ test('round-trip imports then exports the bundled core-assistant.json identicall
 
     expect($exportedOps)->toEqual($sourceOps);
 });
+
+test('export() then importPayload() round-trips on the same loader with zero PLUGIN_MISSING', function (): void {
+    // Pin the vendor/name contract end-to-end: the exporter emits a
+    // Composer package name, the importer resolves it back to a slug via
+    // PluginLoader::getSlugForPackageName(). If either half regressed,
+    // a fresh export would re-import with PLUGIN_MISSING for an agent
+    // the operator just created on the same instance.
+    $loader = makeToolsPluginLoader();
+
+    $agent = Agent::create([
+        'user_id'   => $this->userId,
+        'name'      => 'Round Trip',
+        'max_steps' => 5,
+        'is_active' => true,
+    ]);
+    Spora\Models\AgentTool::create([
+        'agent_id'   => $agent->id,
+        'tool_class' => TestTool::class,
+        'tool_name'  => 'test',
+    ]);
+
+    $exported = makeExporter($loader)->export($agent);
+    $payload = $exported['template']->raw();
+
+    // Exporter emits Composer package name, not slug.
+    expect($payload['required_plugins'])->toBe(['spora-ai/spora-fixture-tools-plugin']);
+
+    // Re-import through the operator-upload path on the SAME loader:
+    // the validator must accept the package name, the importer must
+    // resolve it to 'tools-plugin', and no PLUGIN_MISSING warning fires.
+    $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new Spora\Core\SecurityManager($key);
+    $logger   = new Monolog\Logger('test');
+    $toolConfig = new Spora\Services\ToolConfigService(
+        $security,
+        $logger,
+        [Spora\Tools\TimeTool::class, Spora\Tools\CalculatorTool::class, TestTool::class],
+    );
+    $paths = new Spora\Core\Paths(BASE_PATH);
+    $importer = new AgentTemplateImporter($toolConfig, $loader, $paths);
+
+    $validation = (new Spora\AgentTemplates\AgentTemplateValidator())->validate($payload);
+    expect($validation->errors())->toBe([]);
+
+    $result = $importer->importPayload($this->userId, $payload);
+    $codes = array_column($result->warnings, 'code');
+    expect($codes)->not->toContain('PLUGIN_MISSING');
+});

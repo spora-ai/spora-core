@@ -9,6 +9,6 @@
     "max_steps": 10
   },
   "tools": [],
-  "required_plugins": ["weather"],
+  "required_plugins": ["spora-ai/spora-plugin-weather"],
   "metadata": { "category": "research", "icon": "sun" }
 }

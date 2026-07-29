@@ -28,8 +28,9 @@ use Spora\Tools\Attributes\ToolOperation;
  * configures them later in Settings → Tools.
  *
  * Plugins are NEVER auto-installed. A template whose required_plugins
- * slugs are not loaded produces a PLUGIN_MISSING warning but does not
- * abort the import.
+ * Composer package names (vendor/name, e.g. `spora-ai/spora-plugin-minimax`)
+ * do not resolve to any loaded plugin produces a PLUGIN_MISSING warning
+ * but does not abort the import.
  */
 final class AgentTemplateImporter
 {
@@ -121,25 +122,34 @@ final class AgentTemplateImporter
     }
 
     /**
-     * Aggregate PLUGIN_MISSING warnings for any `required_plugins` slug that
-     * is not currently loaded. Non-fatal — operators install plugins manually.
+     * Aggregate PLUGIN_MISSING warnings for any `required_plugins` Composer
+     * package name that does not resolve to a loaded plugin. Each entry is
+     * a `vendor/name` string (e.g. `spora-ai/spora-plugin-minimax`); the
+     * importer resolves it to the on-disk slug via
+     * {@see PluginLoader::getSlugForPackageName()} before comparing
+     * against the installed set. Non-fatal — operators install plugins
+     * manually.
      *
      * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
      */
     private function collectPluginWarnings(AgentTemplate $template, array &$warnings): void
     {
-        $installedPlugins = array_keys($this->plugins->getPlugins());
-        foreach ($template->requiredPlugins() as $slug) {
-            if (in_array($slug, $installedPlugins, true)) {
+        $installedSlugs = array_keys($this->plugins->getPlugins());
+        foreach ($template->requiredPlugins() as $package) {
+            if ($this->plugins->getSlugForPackageName($package) !== null) {
                 continue;
             }
             $warnings[] = [
                 'code'     => 'PLUGIN_MISSING',
                 'severity' => 'warning',
-                'message'  => sprintf("Plugin '%s' is required but not installed.", $slug),
+                'message'  => sprintf("Plugin '%s' is required but not installed.", $package),
                 'path'     => 'required_plugins',
             ];
         }
+        // $installedSlugs is unused after the rewrite; kept as a debug-only
+        // anchor to make the intent obvious — the validator's vendor/name
+        // contract is the source of truth, not the slug map.
+        unset($installedSlugs);
     }
 
     /**
