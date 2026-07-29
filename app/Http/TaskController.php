@@ -254,51 +254,9 @@ final class TaskController
      */
     private function parseAndValidateDecisions(array $body, int $taskId, int $userId): array|JsonResponse
     {
-        $rawDecisions = $body['decisions'] ?? null;
-        if (!is_array($rawDecisions) || $rawDecisions === [] || !array_is_list($rawDecisions)) {
-            return $this->validationErrorResponse('decisions must be a non-empty array.');
-        }
-
-        $decisions = [];
-        foreach ($rawDecisions as $item) {
-            if (!is_array($item)) {
-                return $this->validationErrorResponse('Every decision must be an object.');
-            }
-
-            $providerCallId = $item['provider_call_id'] ?? null;
-            if (!is_string($providerCallId) || trim($providerCallId) === '') {
-                return $this->validationErrorResponse('provider_call_id is required in every decision.');
-            }
-            $providerCallId = trim($providerCallId);
-
-            $choice = $item['decision'] ?? null;
-            if (!is_string($choice) || !in_array($choice, ['approve', 'reject'], true)) {
-                return $this->validationErrorResponse("decision must be either 'approve' or 'reject'.");
-            }
-
-            if ($choice === 'approve') {
-                $arguments = $item['arguments'] ?? null;
-                if (!is_array($arguments)) {
-                    return $this->validationErrorResponse('arguments is required for approve decisions.');
-                }
-                $decisions[] = [
-                    'provider_call_id' => $providerCallId,
-                    'decision'         => 'approve',
-                    'arguments'        => $arguments,
-                ];
-                continue;
-            }
-
-            $reason = $item['reason'] ?? 'User rejected';
-            if (!is_string($reason)) {
-                return $this->validationErrorResponse('reason must be a string.');
-            }
-            $reason = trim($reason);
-            $decisions[] = [
-                'provider_call_id' => $providerCallId,
-                'decision'         => 'reject',
-                'reason'           => $reason === '' ? 'User rejected' : $reason,
-            ];
+        $parsed = $this->parseDecisionsList($body);
+        if ($parsed instanceof JsonResponse) {
+            return $parsed;
         }
 
         $task = $this->taskService->getTaskWithHistory($taskId, $userId);
@@ -306,6 +264,107 @@ final class TaskController
             return $this->notFoundResponse();
         }
 
+        $error = $this->validateDecisionsAgainstTask($parsed, $task);
+        return $error ?? $parsed;
+    }
+
+    /**
+     * @return list<array{provider_call_id: string, decision: 'approve'|'reject', arguments?: array<string, mixed>, reason?: string}>|JsonResponse
+     */
+    private function parseDecisionsList(array $body): array|JsonResponse
+    {
+        $raw = $body['decisions'] ?? null;
+        if (!is_array($raw) || $raw === [] || !array_is_list($raw)) {
+            return $this->validationErrorResponse('decisions must be a non-empty array.');
+        }
+
+        $decisions = [];
+        foreach ($raw as $item) {
+            $decisions[] = $parsed = $this->parseSingleDecision($item);
+            if ($parsed instanceof JsonResponse) {
+                return $parsed;
+            }
+        }
+        return $decisions;
+    }
+
+    /**
+     * @return array{provider_call_id: string, decision: 'approve'|'reject', arguments?: array<string, mixed>, reason?: string}|JsonResponse
+     */
+    private function parseSingleDecision(mixed $item): array|JsonResponse
+    {
+        if (!is_array($item)) {
+            return $this->validationErrorResponse('Every decision must be an object.');
+        }
+        $providerCallId = trim((string) ($item['provider_call_id'] ?? ''));
+        if ($providerCallId === '') {
+            return $this->validationErrorResponse('provider_call_id is required in every decision.');
+        }
+        $choice = $item['decision'] ?? null;
+        if ($choice === 'approve') {
+            return $this->parseApprovedDecision($item, $providerCallId);
+        }
+        if ($choice === 'reject') {
+            return $this->parseRejectedDecision($item, $providerCallId);
+        }
+        return $this->validationErrorResponse("decision must be either 'approve' or 'reject'.");
+    }
+
+    /**
+     * @return array{provider_call_id: string, decision: 'approve', arguments: array<string, mixed>}|JsonResponse
+     */
+    private function parseApprovedDecision(array $item, string $providerCallId): array|JsonResponse
+    {
+        $arguments = $item['arguments'] ?? null;
+        if (!is_array($arguments)) {
+            return $this->validationErrorResponse('arguments is required for approve decisions.');
+        }
+        return [
+            'provider_call_id' => $providerCallId,
+            'decision'         => 'approve',
+            'arguments'        => $arguments,
+        ];
+    }
+
+    /**
+     * @return array{provider_call_id: string, decision: 'reject', reason: string}|JsonResponse
+     */
+    private function parseRejectedDecision(array $item, string $providerCallId): array|JsonResponse
+    {
+        $reason = $item['reason'] ?? 'User rejected';
+        if (!is_string($reason)) {
+            return $this->validationErrorResponse('reason must be a string.');
+        }
+        $reason = trim($reason);
+        return [
+            'provider_call_id' => $providerCallId,
+            'decision'         => 'reject',
+            'reason'           => $reason === '' ? 'User rejected' : $reason,
+        ];
+    }
+
+    /**
+     * @param list<array{provider_call_id: string, decision: 'approve'|'reject', arguments?: array<string, mixed>, reason?: string}> $decisions
+     * @param array<string, mixed> $task
+     */
+    private function validateDecisionsAgainstTask(array $decisions, array $task): ?JsonResponse
+    {
+        $toolCalls = $this->indexToolCallsByProviderCallId($task);
+        foreach ($decisions as $decision) {
+            $error = $this->validateDecisionAgainstToolCalls($decision, $toolCalls);
+            if ($error !== null) {
+                return $error;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $task
+     * @return array<string, array<string, mixed>>
+     */
+    private function indexToolCallsByProviderCallId(array $task): array
+    {
         $toolCalls = [];
         foreach ($task['tool_calls'] as $toolCall) {
             $providerCallId = $toolCall['provider_call_id'] ?? null;
@@ -313,30 +372,40 @@ final class TaskController
                 $toolCalls[$providerCallId] = $toolCall;
             }
         }
+        return $toolCalls;
+    }
 
-        foreach ($decisions as $decision) {
-            $toolCall = $toolCalls[$decision['provider_call_id']] ?? null;
-            if ($toolCall === null) {
-                return $this->validationErrorResponse("provider_call_id '{$decision['provider_call_id']}' is not pending approval.");
-            }
-            if ($decision['decision'] !== 'approve') {
-                continue;
-            }
-
-            $schema = $toolCall['parameter_schema'] ?? [];
-            $operation = $toolCall['operation'] ?? null;
-            try {
-                SchemaValidator::validate(
-                    $decision['arguments'],
-                    is_array($schema) ? $schema : [],
-                    is_string($operation) && $operation !== '' ? $operation : null,
-                );
-            } catch (InvalidArgumentException $e) {
-                return $this->validationErrorResponse($e->getMessage());
-            }
+    /**
+     * @param array{provider_call_id: string, decision: 'approve'|'reject', arguments?: array<string, mixed>, reason?: string} $decision
+     * @param array<string, array<string, mixed>> $toolCalls
+     */
+    private function validateDecisionAgainstToolCalls(array $decision, array $toolCalls): ?JsonResponse
+    {
+        $toolCall = $toolCalls[$decision['provider_call_id']] ?? null;
+        if ($toolCall === null) {
+            return $this->validationErrorResponse("provider_call_id '{$decision['provider_call_id']}' is not pending approval.");
         }
+        if ($decision['decision'] !== 'approve') {
+            return null;
+        }
+        return $this->validateApprovedArguments($decision['arguments'], $toolCall);
+    }
 
-        return $decisions;
+    /**
+     * @param array<string, mixed> $arguments
+     * @param array<string, mixed> $toolCall
+     */
+    private function validateApprovedArguments(array $arguments, array $toolCall): ?JsonResponse
+    {
+        $schema = is_array($toolCall['parameter_schema'] ?? null) ? $toolCall['parameter_schema'] : [];
+        $operation = $toolCall['operation'] ?? null;
+        $resolvedOperation = is_string($operation) && $operation !== '' ? $operation : null;
+        try {
+            SchemaValidator::validate($arguments, $schema, $resolvedOperation);
+        } catch (InvalidArgumentException $e) {
+            return $this->validationErrorResponse($e->getMessage());
+        }
+        return null;
     }
 
     private function validationErrorResponse(string $message): JsonResponse
