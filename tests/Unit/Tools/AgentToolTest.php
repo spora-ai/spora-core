@@ -81,7 +81,10 @@ function makeAgentToolWithPlugins(): array
     $manifest = new Spora\Services\AgentManifest($toolSettings, $iconResolver);
 
     return [
-        new AgentTool($service, $toolSettings, $manifest, $pluginLoader, $iconResolver),
+        new AgentTool($service, $toolSettings, $manifest, new AgentTool\AgentToolCollaborators(
+            pluginLoader: $pluginLoader,
+            iconResolver: $iconResolver,
+        )),
         $service,
         $toolSettings,
         $pluginLoader,

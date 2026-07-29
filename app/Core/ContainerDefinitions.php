@@ -1061,8 +1061,10 @@ final class ContainerDefinitions
                     $c->get(AgentServiceInterface::class),
                     $c->get(AgentToolSettingsServiceInterface::class),
                     $c->get(AgentManifest::class),
-                    $c->has(PluginLoader::class) ? $c->get(PluginLoader::class) : null,
-                    $c->has(ToolIconResolver::class) ? $c->get(ToolIconResolver::class) : null,
+                    new AgentTool\AgentToolCollaborators(
+                        pluginLoader: $c->has(PluginLoader::class) ? $c->get(PluginLoader::class) : null,
+                        iconResolver: $c->has(ToolIconResolver::class) ? $c->get(ToolIconResolver::class) : null,
+                    ),
                 );
             },
 
