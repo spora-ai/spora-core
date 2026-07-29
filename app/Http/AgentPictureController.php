@@ -97,13 +97,29 @@ final class AgentPictureController
             return $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST);
         }
 
+        $prepared = $this->prepareUploadFile($file, $agentId);
+        if ($prepared instanceof JsonResponse) {
+            return $prepared;
+        }
+
+        return ['file' => $file, 'bytes' => $prepared];
+    }
+
+    /**
+     * Read + validate the uploaded file after the controller has confirmed
+     * `instanceof UploadedFile` and the agent exists. Returns the bytes on
+     * success or a 4xx JsonResponse on failure. Extracted from
+     * {@see prepareUpload()} so that helper stays under the 3-return
+     * ceiling (S1142).
+     */
+    private function prepareUploadFile(UploadedFile $file, int $agentId): string|JsonResponse
+    {
         $bytes = $this->readFileBytes($file);
         $validationError = $this->validateUpload($file, $bytes, $agentId);
         if ($validationError !== null) {
             return $validationError;
         }
-
-        return ['file' => $file, 'bytes' => $bytes];
+        return $bytes;
     }
 
     /**
