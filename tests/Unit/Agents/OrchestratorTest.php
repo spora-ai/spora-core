@@ -1874,10 +1874,21 @@ it('handleToolCalls writes a System Error ToolCall when LLM calls a tool that is
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
-// resume() — dangling PENDING_APPROVAL records
+// resume() — dangling PENDING_APPROVAL records (DB/State drift)
+//
+// "Dangling" here means: a ToolCall row exists in the DB with status
+// PENDING_APPROVAL but is NOT present in the saved `pending_state` JSON.
+// That's a state/DB drift case (concurrency bugs, manual edits, retries
+// from older code paths) — the resume path marks those rows REJECTED.
+//
+// Partial-approval (a tool call IS in `pending_state` but the user didn't
+// include it in the approval batch) is a separate case handled below —
+// those rows stay PENDING_APPROVAL so the user can decide on a later
+// round instead of being silently executed with the LLM's original
+// arguments.
 // ---------------------------------------------------------------------------
 
-it('resume cleans up stranded PENDING_APPROVAL records not covered by the approved batch', function (): void {
+it('resume cleans up dangling PENDING_APPROVAL rows that drift from the saved state', function (): void {
     [$agentId] = seedAgent();
 
     $callCount = 0;
@@ -1940,6 +1951,548 @@ it('resume cleans up stranded PENDING_APPROVAL records not covered by the approv
         ->first();
     expect($discarded)->not->toBeNull()
         ->and($discarded->content)->toContain('discarded');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// resume() — partial-approval semantics (sync mode)
+//
+// "Partial approval" = the user explicitly approves some of the pending
+// tool calls in the batch but not others. The previous implementation
+// fell through `$approvedMap[$id] ?? $pendingToolCall->arguments` and
+// silently executed the un-approved calls with the LLM's original
+// arguments — that's the "the other approval was dropped" bug. The
+// new behaviour: un-approved tool calls stay PENDING_APPROVAL, the
+// task stays PENDING_APPROVAL, `pending_state` is rewritten with only
+// the remaining calls, and the LLM is not called this round.
+// ---------------------------------------------------------------------------
+
+it('partial approval in sync mode leaves un-approved tool calls PENDING_APPROVAL and re-pauses the task', function (): void {
+    [$agentId] = seedAgent();
+
+    $callCount = 0;
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(function () use (&$callCount) {
+        $callCount++;
+
+        // Only one LLM round-trip is allowed: the initial pause. After
+        // the partial approval the task must remain PENDING_APPROVAL,
+        // so the second LLM call must NOT happen — the loop in
+        // `completeResume()` would otherwise trigger it via `tick()`.
+        return $callCount === 1
+            ? new LLMResponse(null, [
+                new DriverToolCall('call_a', 'stub_output', ['x' => 1]),
+                new DriverToolCall('call_b', 'stub_output', ['x' => 2]),
+            ], 5, 3, 'cmp_1')
+            : new LLMResponse('UNEXPECTED — partial approval must not tick the LLM.', [], 5, 3, 'cmp_X');
+    });
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'Partial approval sync', maxSteps: 10);
+
+    $task->refresh();
+    expect($task->status)->toBe('PENDING_APPROVAL');
+
+    // Approve only call_a. call_b should NOT execute silently.
+    $orch->resume($task->id, [['provider_call_id' => 'call_a', 'arguments' => ['x' => 99]]]);
+
+    $task->refresh();
+    expect($task->status)->toBe('PENDING_APPROVAL');  // task stays paused
+    expect($callCount)->toBe(1);                       // exactly one LLM round-trip
+
+    // call_a row is APPROVED and executed; call_b is untouched.
+    $rowA = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_a')->first();
+    $rowB = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_b')->first();
+    expect($rowA)->not->toBeNull()
+        ->and($rowA->status)->toBe('APPROVED')
+        ->and($rowA->executed_at)->not->toBeNull()
+        ->and($rowA->approved_arguments)->toBe(['x' => 99])
+        ->and($rowA->result_content)->not->toBeNull();
+    expect($rowB)->not->toBeNull()
+        ->and($rowB->status)->toBe('PENDING_APPROVAL')   // still waiting
+        ->and($rowB->executed_at)->toBeNull()
+        ->and($rowB->result_content)->toBeNull();
+
+    // pending_state was rewritten to contain only call_b.
+    $state = AgentState::fromJson((string) $task->pending_state);
+    $ids = array_map(static fn(DriverToolCall $tc): string => $tc->providerCallId, $state->pendingToolCalls);
+    expect($ids)->toBe(['call_b']);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// resume() — partial-approval semantics (worker mode)
+// ---------------------------------------------------------------------------
+
+it('partial approval in worker mode defers the approved tool and keeps the un-approved set pending for a later round', function (): void {
+    [$agentId] = seedAgent();
+
+    $llm = Mockery::mock(LLMDriverInterface::class);
+    // Worker mode: the LLM must NOT be called during the resume HTTP path.
+    // The worker daemon calls it later when it picks up the QUEUED task.
+    $llm->shouldNotReceive('complete');
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+
+    // Seed a RUNNING task with two parallel PENDING_APPROVAL rows so
+    // we're testing the resume() path in isolation. (Driving an LLM
+    // round-trip in worker mode requires going through the daemon's
+    // QUEUED→RUNNING dance, which is exercised in the worker-mode
+    // pickup e2e test below.)
+    $task = Task::create([
+        'agent_id'    => $agentId,
+        'user_id'     => Agent::find($agentId)->user_id,
+        'status'      => 'PENDING_APPROVAL',
+        'user_prompt' => 'Partial approval worker',
+        'step_count'  => 1,
+        'max_steps'   => 10,
+    ]);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Partial approval worker']);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => null]);
+
+    $state = new AgentState(
+        taskId: $task->id,
+        agentId: $agentId,
+        pendingToolCalls: [
+            new DriverToolCall('call_a', 'stub_output', ['x' => 1]),
+            new DriverToolCall('call_b', 'stub_output', ['x' => 2]),
+        ],
+        messageSnapshot: [],
+        stepCount: 1,
+        maxSteps: 10,
+        pausedAt: date('Y-m-d\TH:i:s\Z'),
+    );
+    Task::where('id', $task->id)->update(['pending_state' => $state->toJson()]);
+
+    ToolCallModel::insert([
+        [
+            'task_id'                  => $task->id,
+            'agent_id'                 => $agentId,
+            'provider_call_id'         => 'call_a',
+            'tool_name'                => 'stub_output',
+            'tool_class'               => StubOutputTool::class,
+            'tool_type'                => 'output',
+            'operation'                => 'default',
+            'operation_description'    => 'a',
+            'status'                   => 'PENDING_APPROVAL',
+            'proposed_arguments'       => json_encode(['x' => 1]),
+        ],
+        [
+            'task_id'                  => $task->id,
+            'agent_id'                 => $agentId,
+            'provider_call_id'         => 'call_b',
+            'tool_name'                => 'stub_output',
+            'tool_class'               => StubOutputTool::class,
+            'tool_type'                => 'output',
+            'operation'                => 'default',
+            'operation_description'    => 'b',
+            'status'                   => 'PENDING_APPROVAL',
+            'proposed_arguments'       => json_encode(['x' => 2]),
+        ],
+    ]);
+
+    $orch = makeOrchestrator(
+        mockDriverFactory($llm),
+        $tools,
+        workerMode: WorkerMode::Worker,
+    );
+
+    $orch->resume($task->id, [['provider_call_id' => 'call_a', 'arguments' => ['x' => 99]]]);
+
+    $task->refresh();
+    expect($task->status)->toBe('PENDING_APPROVAL');
+
+    // call_a row: APPROVED + executed_at=NULL (sentinel — wait for the daemon)
+    $rowA = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_a')->first();
+    expect($rowA)->not->toBeNull()
+        ->and($rowA->status)->toBe('APPROVED')
+        ->and($rowA->executed_at)->toBeNull()
+        ->and($rowA->approved_arguments)->toBe(['x' => 99]);
+    $rowB = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_b')->first();
+    expect($rowB)->not->toBeNull()
+        ->and($rowB->status)->toBe('PENDING_APPROVAL')
+        ->and($rowB->executed_at)->toBeNull();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// resume() — two-round sequence completes the partially-approved set
+// ---------------------------------------------------------------------------
+
+it('a second approval round finishes a partially-approved set without re-prompting for the already-approved tool', function (): void {
+    [$agentId] = seedAgent();
+
+    $callCount = 0;
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(function () use (&$callCount) {
+        $callCount++;
+
+        if ($callCount === 1) {
+            // Round 1: pause with two parallel tool calls.
+            return new LLMResponse(null, [
+                new DriverToolCall('call_a', 'stub_output', ['x' => 1]),
+                new DriverToolCall('call_b', 'stub_output', ['x' => 2]),
+            ], 5, 3, 'cmp_1');
+        }
+
+        if ($callCount === 2) {
+            // Round 2: after both have been executed, the LLM sees the
+            // results and produces a final text response.
+            return new LLMResponse('Both approved.', [], 5, 3, 'cmp_2');
+        }
+
+        throw new RuntimeException("Unexpected LLM call #$callCount");
+    });
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'Two-round approval', maxSteps: 10);
+
+    $task->refresh();
+    expect($task->status)->toBe('PENDING_APPROVAL');
+
+    // Round 1: approve only call_a.
+    $orch->resume($task->id, [['provider_call_id' => 'call_a', 'arguments' => ['x' => 99]]]);
+    $task->refresh();
+    expect($task->status)->toBe('PENDING_APPROVAL');
+    expect($callCount)->toBe(1);
+
+    // Round 2: approve call_b — task should now complete.
+    $orch->resume($task->id, [['provider_call_id' => 'call_b', 'arguments' => ['x' => 77]]]);
+    $task->refresh();
+    expect($task->status)->toBe('COMPLETED')
+        ->and($callCount)->toBe(2)
+        ->and($task->step_count)->toBe(2)
+        ->and($task->final_response)->toBe('Both approved.');
+
+    $rowA = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_a')->first();
+    $rowB = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_b')->first();
+    expect($rowA->status)->toBe('APPROVED')
+        ->and($rowA->executed_at)->not->toBeNull();
+    expect($rowB->status)->toBe('APPROVED')
+        ->and($rowB->executed_at)->not->toBeNull();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// runTick() — executes approved-but-pending tools before the LLM round-trip
+// ---------------------------------------------------------------------------
+
+it('runTick() picks up APPROVED + executed_at NULL rows and runs them before the LLM call (worker-mode pickup path)', function (): void {
+    [$agentId] = seedAgent();
+
+    $callCount = 0;
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(function () use (&$callCount) {
+        $callCount++;
+        return new LLMResponse('Done after pickup.', [], 5, 3, 'cmp_1');
+    });
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+
+    // Seed a RUNNING task with one pre-existing APPROVED row that's
+    // waiting for execution (the worker-mode resume sentinel shape).
+    $task = Task::create([
+        'agent_id'    => $agentId,
+        'user_id'     => Agent::find($agentId)->user_id,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'Worker pickup test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Worker pickup test']);
+
+    ToolCallModel::create([
+        'task_id'               => $task->id,
+        'agent_id'              => $agentId,
+        'provider_call_id'      => 'call_pickup',
+        'tool_name'             => 'stub_output',
+        'tool_class'            => StubOutputTool::class,
+        'tool_type'             => 'output',
+        'operation'             => 'default',
+        'operation_description' => 'Pickup',
+        'status'                => 'APPROVED',
+        'proposed_arguments'    => json_encode(['x' => 42]),
+        'approved_arguments'    => json_encode(['x' => 42]),
+        // executed_at intentionally NULL — the sentinel.
+    ]);
+
+    $orch->tick($task->id);
+
+    // tick() must have run the approved tool before the LLM call.
+    $row = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_pickup')->first();
+    expect($row)->not->toBeNull()
+        ->and($row->status)->toBe('APPROVED')
+        ->and($row->executed_at)->not->toBeNull()
+        ->and($row->result_content)->not->toBeNull();
+
+    // The LLM saw the tool result on its round-trip.
+    expect($callCount)->toBe(1);
+
+    $task->refresh();
+    expect($task->status)->toBe('COMPLETED')
+        ->and($task->final_response)->toBe('Done after pickup.');
+
+    // The tool result must be present in history so the LLM could
+    // have seen it on the round-trip.
+    $toolHistory = TaskHistory::where('task_id', $task->id)
+        ->where('role', 'tool')
+        ->where('tool_call_id', 'call_pickup')
+        ->first();
+    expect($toolHistory)->not->toBeNull();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// runTick() worker-mode pickup — failure paths
+//
+// When the daemon's tick() picks up an APPROVED-but-not-yet-executed row,
+// the row may still hit SchemaValidator failure (approved_arguments don't
+// match the schema) or tool execution failure (the tool throws). Both
+// must record the failure result and stamp executed_at so the LLM's
+// next round-trip sees the error instead of retrying forever.
+// ---------------------------------------------------------------------------
+
+it('runTick() worker-mode pickup records a Validation Error when the approved arguments fail the schema', function (): void {
+    [$agentId] = seedAgent();
+
+    $llmCalls = 0;
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(function () use (&$llmCalls) {
+        $llmCalls++;
+        return new LLMResponse('Done after validation error.', [], 5, 3, 'cmp_vfail');
+    });
+
+    $tools = [new StubOutputToolWithSchema()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+
+    $task = Task::create([
+        'agent_id'    => $agentId,
+        'user_id'     => Agent::find($agentId)->user_id,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'Validation failure in pickup',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Validation failure in pickup']);
+
+    // Approved args intentionally lack the required 'recipient' field.
+    ToolCallModel::create([
+        'task_id'               => $task->id,
+        'agent_id'              => $agentId,
+        'provider_call_id'      => 'call_vfail_pickup',
+        'tool_name'             => 'stub_output_with_schema',
+        'tool_class'            => StubOutputToolWithSchema::class,
+        'tool_type'             => 'output',
+        'operation'             => 'default',
+        'operation_description' => 'Pickup validation failure',
+        'status'                => 'APPROVED',
+        'proposed_arguments'    => json_encode(['x' => 1]),
+        'approved_arguments'    => json_encode(['x' => 1]),
+    ]);
+
+    $orch->tick($task->id);
+
+    $row = ToolCallModel::where('task_id', $task->id)
+        ->where('provider_call_id', 'call_vfail_pickup')
+        ->first();
+    expect($row)->not->toBeNull()
+        ->and($row->status)->toBe('APPROVED')
+        ->and($row->executed_at)->not->toBeNull()
+        ->and($row->result_content)->toContain('Validation Error')
+        ->and($row->result_content)->toContain('recipient');
+
+    $toolHistory = TaskHistory::where('task_id', $task->id)
+        ->where('role', 'tool')
+        ->where('tool_call_id', 'call_vfail_pickup')
+        ->first();
+    expect($toolHistory)->not->toBeNull()
+        ->and($toolHistory->content)->toContain('Validation Error');
+
+    expect($llmCalls)->toBe(1);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('runTick() worker-mode pickup persists the failure result when safeExecute returns a failing ToolResult', function (): void {
+    [$agentId] = seedAgent();
+
+    $llmCalls = 0;
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(function () use (&$llmCalls) {
+        $llmCalls++;
+        return new LLMResponse('Done after tool failure.', [], 5, 3, 'cmp_sysfail');
+    });
+
+    // safeExecute converts a thrown exception into a failing ToolResult;
+    // the persistence path here asserts the worker-mode pickup writes
+    // that failure result_content + stamps executed_at.
+    $tools = [new ThrowingTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+
+    $task = Task::create([
+        'agent_id'    => $agentId,
+        'user_id'     => Agent::find($agentId)->user_id,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'Throwing tool in pickup',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Throwing tool in pickup']);
+
+    ToolCallModel::create([
+        'task_id'               => $task->id,
+        'agent_id'              => $agentId,
+        'provider_call_id'      => 'call_throw_pickup',
+        'tool_name'             => 'throwing_tool',
+        'tool_class'            => ThrowingTool::class,
+        'tool_type'             => 'output',
+        'operation'             => 'default',
+        'operation_description' => 'Pickup tool failure',
+        'status'                => 'APPROVED',
+        'proposed_arguments'    => json_encode([]),
+        'approved_arguments'    => json_encode([]),
+    ]);
+
+    $orch->tick($task->id);
+
+    $row = ToolCallModel::where('task_id', $task->id)
+        ->where('provider_call_id', 'call_throw_pickup')
+        ->first();
+    expect($row)->not->toBeNull()
+        ->and($row->status)->toBe('APPROVED')
+        ->and($row->executed_at)->not->toBeNull()
+        ->and($row->result_content)->toContain('System Error')
+        ->and($row->result_content)->toContain('Community plugin exploded');
+
+    $toolHistory = TaskHistory::where('task_id', $task->id)
+        ->where('role', 'tool')
+        ->where('tool_call_id', 'call_throw_pickup')
+        ->first();
+    expect($toolHistory)->not->toBeNull()
+        ->and($toolHistory->content)->toContain('System Error');
+
+    expect($llmCalls)->toBe(1);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// resume() — worker-mode pickup via daemon (full e2e shape)
+//
+// Reviewer-facing description: in worker mode, the HTTP endpoint must
+// return <50ms with status=QUEUED — the long-running tool is executed
+// only when the worker daemon picks the task up and calls tick().
+// ---------------------------------------------------------------------------
+
+it('worker-mode resume returns immediately and defers tool execution to the next tick', function (): void {
+    [$agentId] = seedAgent();
+
+    // We use StubOutputTool (which is already registered) as the
+    // "slow" tool. The test asserts the worker-mode pickup contract
+    // via ToolCallModel.executed_at: NOT NULL after the daemon's tick.
+    $llmSecond = Mockery::mock(LLMDriverInterface::class);
+    $llmSecond->allows('complete')->andReturn(new LLMResponse('Done after worker pickup.', [], 5, 3, 'cmp_2'));
+
+    // The LLM the resume HTTP path would use if it mistakenly fired —
+    // configured with shouldNotReceive so any call here fails the test.
+    $llmFirst = Mockery::mock(LLMDriverInterface::class);
+    $llmFirst->shouldNotReceive('complete');
+
+    $tools = [new StubOutputTool()];
+    enableToolsForAgent($agentId, $tools);
+
+    // Seed a PENDING_APPROVAL task with one PENDING_APPROVAL row so
+    // we're testing the resume() / tick() pickup contract in
+    // isolation. Driving an LLM round-trip to set up the pause would
+    // require the worker-mode QUEUED→RUNNING dance, which is exercised
+    // in WorkerModeTest.
+    $task = Task::create([
+        'agent_id'    => $agentId,
+        'user_id'     => Agent::find($agentId)->user_id,
+        'status'      => 'PENDING_APPROVAL',
+        'user_prompt' => 'Worker pickup e2e',
+        'step_count'  => 1,
+        'max_steps'   => 10,
+    ]);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Worker pickup e2e']);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => null]);
+
+    $state = new AgentState(
+        taskId: $task->id,
+        agentId: $agentId,
+        pendingToolCalls: [
+            new DriverToolCall('call_slow', 'stub_output', ['x' => 1]),
+        ],
+        messageSnapshot: [],
+        stepCount: 1,
+        maxSteps: 10,
+        pausedAt: date('Y-m-d\TH:i:s\Z'),
+    );
+    Task::where('id', $task->id)->update(['pending_state' => $state->toJson()]);
+
+    ToolCallModel::create([
+        'task_id'                  => $task->id,
+        'agent_id'                 => $agentId,
+        'provider_call_id'         => 'call_slow',
+        'tool_name'                => 'stub_output',
+        'tool_class'               => StubOutputTool::class,
+        'tool_type'                => 'output',
+        'operation'                => 'default',
+        'operation_description'    => 'slow',
+        'status'                   => 'PENDING_APPROVAL',
+        'proposed_arguments'       => json_encode(['x' => 1]),
+    ]);
+
+    $orch = makeOrchestrator(
+        mockDriverFactory($llmFirst),
+        $tools,
+        workerMode: WorkerMode::Worker,
+    );
+
+    $task->refresh();
+    expect($task->status)->toBe('PENDING_APPROVAL');
+    expect(ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_slow')->first()->executed_at)->toBeNull();
+
+    // HTTP-equivalent path: resume() with one approval. Should record
+    // the approval and return without touching the tool or LLM.
+    $orch->resume($task->id, [['provider_call_id' => 'call_slow', 'arguments' => ['x' => 99]]]);
+
+    // Tool still has NOT been executed (no executed_at) — the HTTP
+    // path only recorded the approval. llmFirst is wired with
+    // shouldNotReceive('complete') so any LLM call would also fail.
+    expect(ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_slow')->first()->executed_at)->toBeNull();
+
+    $task->refresh();
+    // All approved (only one tool call here) → pending_state cleared,
+    // task marked QUEUED for the daemon to pick up. Compare against
+    // the partial-approval test where pending_state stays populated.
+    expect($task->status)->toBe('QUEUED')
+        ->and($task->pending_state)->toBeNull();
+
+    // Now simulate the worker daemon picking up the task. The
+    // production worker (`bin/spora task:run <id>`) does a
+    // QUEUED → RUNNING transition inside a lockForUpdate transaction
+    // BEFORE calling tick(), since Orchestrator::tick() is a no-op
+    // on QUEUED tasks (lockRunningTaskForTick only proceeds when the
+    // task is already RUNNING). Mirror that here.
+    Task::where('id', $task->id)->update(['status' => 'RUNNING']);
+
+    // Now swap to a fresh orchestrator + an LLM that returns the final
+    // answer on its one round-trip.
+    $orch = makeOrchestrator(
+        mockDriverFactory($llmSecond),
+        $tools,
+        workerMode: WorkerMode::Worker,
+    );
+    $orch->tick($task->id);
+
+    $row = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_slow')->first();
+    expect($row->status)->toBe('APPROVED')
+        ->and($row->executed_at)->not->toBeNull();
+
+    $task->refresh();
+    expect($task->status)->toBe('COMPLETED')
+        ->and($task->final_response)->toBe('Done after worker pickup.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
