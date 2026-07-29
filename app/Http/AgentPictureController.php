@@ -93,16 +93,15 @@ final class AgentPictureController
         }
 
         $file = $request->files->get('file');
-        if (!$file instanceof UploadedFile) {
-            return $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST);
+        if ($file instanceof UploadedFile) {
+            $prepared = $this->prepareUploadFile($file, $agentId);
+            if ($prepared instanceof JsonResponse) {
+                return $prepared;
+            }
+            return ['file' => $file, 'bytes' => $prepared];
         }
 
-        $prepared = $this->prepareUploadFile($file, $agentId);
-        if ($prepared instanceof JsonResponse) {
-            return $prepared;
-        }
-
-        return ['file' => $file, 'bytes' => $prepared];
+        return $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST);
     }
 
     /**
