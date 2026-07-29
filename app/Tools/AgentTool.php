@@ -258,7 +258,7 @@ final class AgentTool extends AbstractTool
 
     public function __construct(
         private readonly AgentServiceInterface $agentService,
-        private readonly \Spora\Services\AgentToolSettingsServiceInterface $toolSettings,
+        \Spora\Services\AgentToolSettingsServiceInterface $toolSettings,
         private readonly AgentManifest $manifest,
         ?AgentToolCollaborators $collaborators = null,
     ) {
