@@ -9,9 +9,8 @@ use Spora\Tools\ToolSchemaPresenter;
 
 /**
  * Canonical agent wire format shared by every AgentTool read/write operation
- * (`create_agent` output, `read_agent` output, `configure_tools` output,
- * `write_agent_configuration` output, and the public
- * `GET /api/v1/agents/{id}` JSON-API response).
+ * that hands an Agent row back to the LLM — `create_agent` output,
+ * `read_agent` output, `configure_tools` output, and `update_agent` output.
  *
  * The shape is the canonical reference for the agent manifest:
  *
@@ -54,6 +53,7 @@ use Spora\Tools\ToolSchemaPresenter;
  *   "overrides":        <list<...>>,      // per-op override rows (audit trail)
  *   "warnings":         <list<string>>     // human-readable caveats
  * }
+ * ```
  *
  * The `overrides` list makes `auto_approve: true|false` and per-op
  * `enabled` overrides auditable: each row carries the FQCN + operation +
@@ -62,9 +62,13 @@ use Spora\Tools\ToolSchemaPresenter;
  * `configure_tools` patch landed the way they asked can diff the
  * response's `overrides[]` against what they sent.
  *
- * Single source of truth so the LLM-facing `read_agent` Markdown, the
- * `configure_tools` confirmation, and the public REST response can not
- * drift. Outputs are deterministic so test fixtures hash cleanly.
+ * Single source of truth so the LLM-facing `read_agent` Markdown and
+ * the `configure_tools` confirmation can not drift. Outputs are
+ * deterministic so test fixtures hash cleanly.
+ *
+ * Note: the REST `GET /api/v1/agents/{id}` endpoint renders via
+ * `AgentResource::toArray()` (not this class). This service backs only
+ * the LLM-facing AgentTool operations — see {@see \Spora\Tools\AgentTool}.
  */
 final class AgentManifest
 {
@@ -87,11 +91,11 @@ final class AgentManifest
      */
     public function toArray(Agent $agent): array
     {
-        $userId = (int) $agent->user_id;
+        $userId  = (int) $agent->user_id;
         $agentId = (int) $agent->id;
 
         $rows = $this->toolSettings->getAllToolsStatus($agentId, $userId) ?? [];
-        $operationsByTool = $this->indexOperationsByToolClass(
+        $operationsByTool = self::indexOperationsByToolClass(
             $this->toolSettings->getToolsOperations($agentId, $userId) ?? [],
         );
 
@@ -99,67 +103,10 @@ final class AgentManifest
         $missingRequired = [];
         $overrides = [];
         foreach ($rows as $row) {
-            $toolClass = (string) $row['tool_class'];
-            $summary = ToolSchemaPresenter::summarize(
-                $toolClass,
-                $this->iconResolver?->resolve($toolClass),
-            );
-            // Declared ops come from the tool's own `#[ToolOperation]`
-            // attribute set, not from `getAllToolsStatus` (which carries
-            // enablement flags only). Effective ops come from
-            // `getToolsOperations`, which folds per-agent overrides into
-            // the per-class declared defaults via AgentToolOperationsResolver.
-            $declaredOperations = $summary['operations'];
-            $effective = $operationsByTool[$toolClass] ?? [];
-
-            $enabled = (bool) $row['is_enabled'];
-            // The per-tool missing_required list is a flat string list of
-            // required setting keys (no values) — emits only for enabled
-            // tools that cannot actually fire until config is supplied.
-            if ($enabled && $row['missing_required'] !== []) {
-                foreach ($row['missing_required'] as $key) {
-                    $missingRequired[] = "{$toolClass}:{$key}";
-                }
-            }
-
-            $operations = $this->mergeOperations($declaredOperations, $effective);
-
-            // Audit trail for per-operation overrides. `enabled` and
-            // `default_requires_approval` are nullable on the
-            // resolver's row — null means "default kept", non-null
-            // means "this override was set on this agent". Operators
-            // who want to verify their `configure_tools(tools[i].
-            // operations[j]: {auto_approve: true})` landed the way
-            // they asked look at this list, not at the
-            // `tools[i].operations[j]` block's
-            // `requires_approval` effective value (which folds
-            // default + override together and loses the override
-            // source).
-            foreach ($effective as $effectiveRow) {
-                $auditEnabled  = $effectiveRow['enabled']                   ?? null;
-                $auditApproval = $effectiveRow['default_requires_approval'] ?? null;
-                if ($auditEnabled === null && $auditApproval === null) {
-                    continue;
-                }
-                $overrides[] = [
-                    'tool_class'                => (string) $effectiveRow['tool_class'],
-                    'operation'                 => (string) $effectiveRow['operation'],
-                    'enabled'                   => $auditEnabled === null ? null : (bool) $auditEnabled,
-                    'default_requires_approval' => $auditApproval === null ? null : (bool) $auditApproval,
-                ];
-            }
-
-            $tools[] = [
-                // Slim shape per-PR-#170 review: drop display_name +
-                // description from per-tool entries since they're only
-                // useful when an agent browses tools, not when an LLM
-                // configures one. Operators who want descriptive
-                // metadata call `get_available_tools` instead.
-                'tool_class' => $toolClass,
-                'icon'       => $summary['icon'] ?? null,
-                'enabled'    => $enabled,
-                'operations' => $operations,
-            ];
+            $rowPayload = $this->buildManifestRow($row, $operationsByTool);
+            $tools[]           = $rowPayload['tool_entry'];
+            $missingRequired   = array_merge($missingRequired, $rowPayload['missing_required']);
+            $overrides         = array_merge($overrides, $rowPayload['overrides']);
         }
 
         return [
@@ -185,6 +132,107 @@ final class AgentManifest
     }
 
     /**
+     * Build the per-tool manifest row, the missing-required sentinel
+     * entries, and the override audit-trail entries for a single
+     * per-agent tool status row. Extracted from {@see self::toArray()}
+     * so the orchestrator stays under SonarCloud S3776's 15-cognitive-
+     * complexity ceiling.
+     *
+     * Declared ops come from the tool's own `#[ToolOperation]`
+     * attribute set, not from `getAllToolsStatus` (which carries
+     * enablement flags only). Effective ops come from
+     * `getToolsOperations`, which folds per-agent overrides into the
+     * per-class declared defaults via AgentToolOperationsResolver.
+     *
+     * @param  array<string, mixed> $row
+     * @param  array<string, list<array{tool_class: string, operation: string, enabled: int|null, default_requires_approval: int|null, effective_enabled: bool, effective_requires_approval: bool}>> $operationsByTool
+     * @return array{tool_entry: array<string, mixed>, missing_required: list<string>, overrides: list<array<string, mixed>>}
+     */
+    private function buildManifestRow(array $row, array $operationsByTool): array
+    {
+        $toolClass = (string) $row['tool_class'];
+        $summary = ToolSchemaPresenter::summarize(
+            $toolClass,
+            $this->iconResolver?->resolve($toolClass),
+        );
+
+        $enabled       = (bool) $row['is_enabled'];
+        $effective     = $operationsByTool[$toolClass] ?? [];
+        $operations    = self::mergeOperations($summary['operations'], $effective);
+        $missingReq    = self::missingRequiredFor($toolClass, $enabled, (array) $row['missing_required']);
+        $overrideAudit = self::overrideAuditFor($effective);
+
+        return [
+            // Slim shape per-PR-#170 review: drop display_name +
+            // description from per-tool entries since they're only
+            // useful when an agent browses tools, not when an LLM
+            // configures one. Operators who want descriptive
+            // metadata call `get_available_tools` instead.
+            'tool_entry'       => [
+                'tool_class' => $toolClass,
+                'icon'       => $summary['icon'] ?? null,
+                'enabled'    => $enabled,
+                'operations' => $operations,
+            ],
+            'missing_required' => $missingReq,
+            'overrides'        => $overrideAudit,
+        ];
+    }
+
+    /**
+     * Flat-string list of required-setting keys (no values) — emits
+     * only for enabled tools that cannot actually fire until config
+     * is supplied.
+     *
+     * @param  list<string> $missingRequiredKeys
+     * @return list<string>
+     */
+    private static function missingRequiredFor(string $toolClass, bool $enabled, array $missingRequiredKeys): array
+    {
+        if (!$enabled || $missingRequiredKeys === []) {
+            return [];
+        }
+        $entries = [];
+        foreach ($missingRequiredKeys as $key) {
+            $entries[] = "{$toolClass}:{$key}";
+        }
+        return $entries;
+    }
+
+    /**
+     * Audit trail for per-operation overrides. `enabled` and
+     * `default_requires_approval` are nullable on the resolver's
+     * row — null means "default kept", non-null means "this override
+     * was set on this agent". Operators who want to verify their
+     * `configure_tools(tools[i].operations[j]: {auto_approve: true})`
+     * landed the way they asked look at this list, not at the
+     * `tools[i].operations[j]` block's `requires_approval` effective
+     * value (which folds default + override together and loses the
+     * override source).
+     *
+     * @param  list<array{tool_class: string, operation: string, enabled: int|null, default_requires_approval: int|null, effective_enabled: bool, effective_requires_approval: bool}> $effective
+     * @return list<array<string, mixed>>
+     */
+    private static function overrideAuditFor(array $effective): array
+    {
+        $out = [];
+        foreach ($effective as $row) {
+            $auditEnabled  = $row['enabled']                   ?? null;
+            $auditApproval = $row['default_requires_approval'] ?? null;
+            if ($auditEnabled === null && $auditApproval === null) {
+                continue;
+            }
+            $out[] = [
+                'tool_class'                => (string) $row['tool_class'],
+                'operation'                 => (string) $row['operation'],
+                'enabled'                   => $auditEnabled === null ? null : (bool) $auditEnabled,
+                'default_requires_approval' => $auditApproval === null ? null : (bool) $auditApproval,
+            ];
+        }
+        return $out;
+    }
+
+    /**
      * Merge declared per-operation metadata with the effective (override-aware)
      * enabled / requires_approval state. When no override exists, fall back
      * to the declared default. Always emits a row in declared-operation order
@@ -194,7 +242,7 @@ final class AgentManifest
      * @param list<array{operation: string, effective_enabled: bool, effective_requires_approval: bool}> $effective
      * @return list<array{name: string, enabled: bool, requires_approval: bool}>
      */
-    private function mergeOperations(array $declared, array $effective): array
+    private static function mergeOperations(array $declared, array $effective): array
     {
         if ($declared === []) {
             return [];
@@ -233,7 +281,7 @@ final class AgentManifest
      * @param list<array{tool_class: string, operation: string, enabled: int|null, default_requires_approval: int|null, effective_enabled: bool, effective_requires_approval: bool}> $rows
      * @return array<string, list<array{tool_class: string, operation: string, enabled: int|null, default_requires_approval: int|null, effective_enabled: bool, effective_requires_approval: bool}>>
      */
-    private function indexOperationsByToolClass(array $rows): array
+    private static function indexOperationsByToolClass(array $rows): array
     {
         $indexed = [];
         foreach ($rows as $op) {

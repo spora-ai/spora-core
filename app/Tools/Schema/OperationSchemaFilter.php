@@ -56,61 +56,27 @@ final class OperationSchemaFilter
     {
         $allowedOpsSet = array_flip($allowedOps);
 
-        $properties = $schema['properties'] ?? [];
-        if (is_object($properties)) {
-            $properties = (array) $properties;
-        }
-
-        if (isset($properties[$discriminatorKey]['enum'])) {
-            $properties[$discriminatorKey]['enum'] = array_values(array_filter(
-                $properties[$discriminatorKey]['enum'],
-                static fn($op) => isset($allowedOpsSet[$op]),
-            ));
-        }
+        $properties = self::normaliseProperties($schema['properties'] ?? []);
+        $properties = self::narrowDiscriminatorEnum($properties, $discriminatorKey, $allowedOpsSet);
 
         $requiredWhen = $schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY] ?? [];
-        $required     = $schema['required'] ?? [];
         if ($requiredWhen !== []) {
-            $required = array_values(array_filter(
-                $required,
-                static function (string $name) use ($requiredWhen, $allowedOpsSet): bool {
-                    $binding = $requiredWhen[$name] ?? null;
-                    if ($binding === null) {
-                        return true;
-                    }
-                    foreach ($binding as $op) {
-                        if (isset($allowedOpsSet[$op])) {
-                            return true;
-                        }
-                    }
-                    return false;
-                },
+            $required   = array_values(array_filter(
+                $schema['required'] ?? [],
+                static fn(string $name) => self::bindingIntersects($requiredWhen[$name] ?? null, $allowedOpsSet),
             ));
-            // Drop per-op-bound properties whose binding doesn't intersect
-            // the active op set. Truly shared properties (no entry in
-            // $requiredWhen) survive untouched. ARRAY_FILTER_USE_KEY makes
-            // the walker key-driven so we can inspect the binding by name.
             $properties = array_filter(
                 $properties,
-                static function (string $name) use ($requiredWhen, $allowedOpsSet): bool {
-                    $binding = $requiredWhen[$name] ?? null;
-                    if ($binding === null) {
-                        return true;
-                    }
-                    foreach ($binding as $op) {
-                        if (isset($allowedOpsSet[$op])) {
-                            return true;
-                        }
-                    }
-                    return false;
-                },
+                static fn(string $name) => self::bindingIntersects($requiredWhen[$name] ?? null, $allowedOpsSet),
                 ARRAY_FILTER_USE_KEY,
             );
+        } else {
+            $required = $schema['required'] ?? [];
         }
 
-        $schema['type']             = $schema['type'] ?? 'object';
-        $schema['properties']       = $properties === [] ? new stdClass() : $properties;
-        $schema['required']         = $required;
+        $schema['type']       = $schema['type'] ?? 'object';
+        $schema['properties'] = $properties === [] ? new stdClass() : $properties;
+        $schema['required']   = $required;
         unset($schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY]);
 
         return $schema;
@@ -160,46 +126,97 @@ final class OperationSchemaFilter
             return $schema;
         }
 
-        $required = $schema['required'] ?? [];
+        $properties = self::normaliseProperties($schema['properties'] ?? []);
+        $required   = $schema['required'] ?? [];
         if ($required === []) {
             $schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY] = $requiredWhen;
+            $schema['properties'] = $properties === [] ? new stdClass() : $properties;
             return $schema;
         }
 
-        $opIntersects = static function (string $name) use ($requiredWhen, $operationName): bool {
-            $binding = $requiredWhen[$name] ?? null;
-            if ($binding === null) {
-                return true;
-            }
-            foreach ($binding as $op) {
-                if ($op === $operationName) {
-                    return true;
-                }
-            }
-            return false;
-        };
+        $matchesOp = static fn(string $name) => self::bindingIntersectsOp($requiredWhen[$name] ?? null, $operationName);
 
-        $narrowed = array_values(array_filter($required, $opIntersects));
-
-        $schema['required'] = $narrowed;
-        unset($schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY]);
-
-        // Narrow `properties` to match. Per-op-bound properties whose
-        // binding does not include the active op are dropped in lockstep
-        // with `required[]` so the runtime validator sees a schema that
-        // actually matches the op being executed.
-        $properties = $schema['properties'] ?? [];
-        if (is_object($properties)) {
-            $properties = (array) $properties;
-        }
+        // Narrow `properties` first so per-op-bound properties whose binding
+        // doesn't include the active op are dropped in lockstep with
+        // `required[]` — the runtime validator sees a schema that actually
+        // matches the op being executed.
         $filtered = $properties === []
             ? $properties
-            : array_filter($properties, $opIntersects, ARRAY_FILTER_USE_KEY);
-        // Match `filter()`'s empty-array-→-stdClass coercion so downstream
-        // schema walkers see a consistent object shape regardless of
-        // whether every property was dropped or none was.
+            : array_filter($properties, $matchesOp, ARRAY_FILTER_USE_KEY);
+
         $schema['properties'] = $filtered === [] ? new stdClass() : $filtered;
+        $schema['required']   = array_values(array_filter($required, $matchesOp));
+        unset($schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY]);
 
         return $schema;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function normaliseProperties(mixed $properties): array
+    {
+        if (is_object($properties)) {
+            return (array) $properties;
+        }
+        return is_array($properties) ? $properties : [];
+    }
+
+    /**
+     * @param  array<string, mixed> $properties
+     * @param  array<string, int>   $allowedOpsSet
+     * @return array<string, mixed>
+     */
+    private static function narrowDiscriminatorEnum(array $properties, string $discriminatorKey, array $allowedOpsSet): array
+    {
+        if (!isset($properties[$discriminatorKey]['enum'])) {
+            return $properties;
+        }
+        $properties[$discriminatorKey]['enum'] = array_values(array_filter(
+            $properties[$discriminatorKey]['enum'],
+            static fn($op) => isset($allowedOpsSet[$op]),
+        ));
+        return $properties;
+    }
+
+    /**
+     * True when `$binding` is absent (always-keep) or contains at least
+     * one op in `$allowedOpsSet`. Shared by `filter()`'s two narrowing
+     * passes so the matching rule lives in one place.
+     *
+     * @param  list<string>|null $binding
+     * @param  array<string, int> $allowedOpsSet
+     */
+    private static function bindingIntersects(?array $binding, array $allowedOpsSet): bool
+    {
+        if ($binding === null) {
+            return true;
+        }
+        foreach ($binding as $op) {
+            if (isset($allowedOpsSet[$op])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Single-op counterpart to {@see self::bindingIntersects()} for
+     * `filterForOperation()` — the runtime only cares whether the op
+     * being executed intersects the per-property binding.
+     *
+     * @param  list<string>|null $binding
+     */
+    private static function bindingIntersectsOp(?array $binding, string $operationName): bool
+    {
+        if ($binding === null) {
+            return true;
+        }
+        foreach ($binding as $op) {
+            if ($op === $operationName) {
+                return true;
+            }
+        }
+        return false;
     }
 }
