@@ -69,6 +69,24 @@ final class AgentPictureController
         $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
+        $prepared = $this->prepareUpload($request, $agentId, $userId);
+        if ($prepared instanceof JsonResponse) {
+            return $prepared;
+        }
+
+        return $this->performUpload($request, $prepared['file'], $prepared['bytes'], $agentId, $userId);
+    }
+
+    /**
+     * Resolve the agent, validate the uploaded file, and return the parsed
+     * file + bytes — or a 4xx JsonResponse on any failure. Extracted from
+     * `uploadImage()` so the public action stays under the 3-return
+     * ceiling (S1142) and the helper handles the entire pre-flight path.
+     *
+     * @return array{file: UploadedFile, bytes: string}|JsonResponse
+     */
+    private function prepareUpload(Request $request, int $agentId, int $userId): array|JsonResponse
+    {
         $agent = $this->agentService->getAgent($agentId, $userId);
         if ($agent === null) {
             return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
@@ -85,7 +103,7 @@ final class AgentPictureController
             return $validationError;
         }
 
-        return $this->performUpload($request, $file, $bytes, $agentId, $userId);
+        return ['file' => $file, 'bytes' => $bytes];
     }
 
     /**
