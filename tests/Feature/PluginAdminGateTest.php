@@ -148,14 +148,10 @@ function pluginAdminGate_stateChangeRequest(string $method, string $path, ?array
 }
 
 /**
- * A {@see PluginManager} that never spawns `composer` — the production
- * factory in ContainerDefinitions hands {@see Process} the raw argv and
- * cwd, so a request that reaches PluginsController would otherwise shell
- * out to `composer require spora-ai/spora-plugin-tavily`, which writes
- * to composer.json / composer.lock and pulls the plugin into
- * plugins/spora-plugin-tavily/. Tests that only need to verify the
- * admin-gate wiring swap this in via $container->set(PluginManager::class, …)
- * before dispatching the request.
+ * PluginManager stand-in that never spawns composer. The production
+ * factory in ContainerDefinitions hands Process the real argv, so a
+ * request reaching PluginsController would otherwise run `composer require`
+ * and pollute composer.json / composer.lock.
  */
 function pluginAdminGate_fakePluginManager(): PluginManager
 {
@@ -298,17 +294,9 @@ test('AdminMiddleware runs BEFORE the feature flag gate (non-admin gets FORBIDDE
 });
 
 test('POST /api/v1/plugins reaches the controller for a logged-in admin (no 403)', function (): void {
-    // Positive lock-in: admin path is not blocked. The controller may then
-    // succeed or fail downstream — the assertion is only that the admin
-    // gate passed.
     pluginAdminGate_makeUser('admin-reaches@example.com', admin: true);
 
     $kernel = new Kernel(pluginAdminGate_cleanPaths());
-    // Swap in a fake PluginManager so this test does not shell out to
-    // `composer require spora-ai/spora-plugin-tavily` (which would write
-    // to composer.json / composer.lock and pull the plugin into
-    // plugins/spora-plugin-tavily/ — see commit 9fc36b2 for the prior
-    // revert of that exact contamination).
     $kernel->getContainer()->set(PluginManager::class, pluginAdminGate_fakePluginManager());
 
     $response = $kernel->handle(pluginAdminGate_stateChangeRequest(

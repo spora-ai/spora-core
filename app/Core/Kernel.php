@@ -311,10 +311,9 @@ final class Kernel implements KernelInterface
         }
         ini_set('display_errors', '0');
 
-        // Capture the logger, not $this: a closure that captures $this and
-        // lives on PHP's error-handler stack forms a cycle that the GC
-        // can't break, so __destruct never runs and Pest flags the test
-        // as risky for leaving the handler installed.
+        // Capture $logger, not $this: a closure on PHP's error-handler
+        // stack that captures $this forms an unbreakable cycle, so
+        // __destruct can't restore_error_handler().
         $logger = $this->container->get(LoggerInterface::class);
         set_error_handler(static function (int $errno, string $errstr, string $errfile, int $errline) use ($logger): bool {
             if (!(error_reporting() & $errno)) {
