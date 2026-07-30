@@ -56,15 +56,12 @@ describe('MimeSniffer::sniffFromBytes', function (): void {
     });
 
     it('identifies WAV via the RIFF + WAVE marker pair', function (): void {
-        // Note: the sniffer's first pass iterates magic signatures in
-        // declaration order. `image/webp` registers `offset=0, bytes=RIFF`
-        // as one of its signatures, so a plain RIFF prefix matches that
-        // table entry first and the bytes resolve to `image/webp` until
-        // the table order is changed. This is the historical behaviour;
-        // the test pins it so a future reorder is intentional.
+        // RIFF + WAVE both match — the sniffer reports audio/wav, not
+        // the RIFF opener alone. The compound-signature fix closed a bug
+        // where image/webp's `RIFF` signature used to win over audio/wav
+        // for plain RIFF/WAVE bytes.
         $bytes = 'RIFF' . pack('V', 32) . 'WAVE' . str_repeat("\x00", 32);
-        $detected = makeSniffer()->sniffFromBytes($bytes);
-        expect($detected)->toBeIn(['audio/wav', 'image/webp']);
+        expect(makeSniffer()->sniffFromBytes($bytes))->toBe('audio/wav');
     });
 
     it('identifies OGG via the OggS marker', function (): void {
