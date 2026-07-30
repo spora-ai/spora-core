@@ -860,6 +860,7 @@ final class ContainerDefinitions
                     $c->get(AgentServiceInterface::class),
                     $c->get(DriverFactory::class),
                     $c->get(ToolIconResolver::class),
+                    $c->get(AgentPictureService::class),
                 );
             },
 
