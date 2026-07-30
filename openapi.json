@@ -7,11 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-<<<<<<< HEAD
-        "version": "0.11.1-31-g9d860fa"
-=======
-        "version": "0.11.1-28-gac20e12"
->>>>>>> 1a168b1 (feat(agents): operator-chosen profile picture (archetype avatar or uploaded image))
+        "version": "0.12.1-11-gce3c113"
     },
     "servers": [
         {
@@ -559,8 +555,6 @@
                 ]
             }
         },
-<<<<<<< HEAD
-=======
         "/api/v1/agents/{id}/picture/image": {
             "post": {
                 "tags": [
@@ -621,7 +615,6 @@
                 ]
             }
         },
->>>>>>> 1a168b1 (feat(agents): operator-chosen profile picture (archetype avatar or uploaded image))
         "/api/v1/agents/{id}/tools/{toolId}/enable": {
             "post": {
                 "tags": [
@@ -1292,7 +1285,6 @@
                         }
                     }
                 ],
-<<<<<<< HEAD
                 "requestBody": {
                     "required": true,
                     "content": {
@@ -1340,8 +1332,6 @@
                         }
                     }
                 },
-=======
->>>>>>> 1a168b1 (feat(agents): operator-chosen profile picture (archetype avatar or uploaded image))
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
