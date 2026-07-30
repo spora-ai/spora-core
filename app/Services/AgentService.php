@@ -6,6 +6,10 @@ namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
+use Spora\Models\AgentPicture;
+use Spora\Models\MediaAsset;
+use Spora\Services\AgentPictures\AgentPictureService;
+use Spora\Services\Exceptions\AgentCreateLostException;
 use Spora\Services\Exceptions\AgentNotFoundException;
 
 /**
@@ -45,6 +49,7 @@ final class AgentService implements AgentServiceInterface
 
     public function __construct(
         private readonly ?ToolIconResolver $toolIconResolver = null,
+        private readonly ?AgentPictureService $pictureService = null,
     ) {}
 
 
@@ -52,8 +57,12 @@ final class AgentService implements AgentServiceInterface
     {
         // Dashboard ordering (pinned-first, archived-hidden) lives in
         // spora-frontend PR #52; the backend stays filter-free so the same
-        // payload feeds every consumer.
+        // payload feeds every consumer. The `profilePicture.mediaAsset`
+        // eager-load avoids an N+1 chain when AgentResource serializes
+        // the per-agent picture (one query per agent for the picture row,
+        // plus one per agent for the uploaded image's media_assets row).
         return Agent::where('user_id', $userId)
+            ->with(['agentTools', 'profilePicture.mediaAsset'])
             ->orderByDesc('created_at')
             ->get()
             ->map(fn(Agent $a) => $this->agentResource($a))
@@ -66,22 +75,40 @@ final class AgentService implements AgentServiceInterface
         // caller can't smuggle non-Agent columns (notes, required_plugins,
         // etc.) into the insert.
         $allowed = array_intersect_key($data, array_flip(self::EDITABLE_AGENT_FIELDS));
-        $id = Capsule::table('agents')->insertGetId([
-            'user_id'                => $userId,
-            'name'                   => $allowed['name'],
-            'description'            => $allowed['description'] ?? null,
-            'system_prompt'          => $allowed['system_prompt'] ?? null,
-            'llm_driver_config_id'   => $allowed['llm_driver_config_id'] ?? null,
-            'max_steps'              => (int) ($allowed['max_steps'] ?? 10),
-            'allow_followup'         => (bool) ($allowed['allow_followup'] ?? true) ? 1 : 0,
-            'retry_after_minutes'    => (int) ($allowed['retry_after_minutes'] ?? 0),
-            'max_retries'            => (int) ($allowed['max_retries'] ?? 0),
-            'is_active'              => 1,
-            'created_at'             => date(self::DATETIME_FORMAT),
-            'updated_at'             => date(self::DATETIME_FORMAT),
-        ]);
+        return Capsule::connection()->transaction(
+            function () use ($userId, $allowed): Agent {
+                $id = Capsule::table('agents')->insertGetId([
+                    'user_id'                => $userId,
+                    'name'                   => $allowed['name'],
+                    'description'            => $allowed['description'] ?? null,
+                    'system_prompt'          => $allowed['system_prompt'] ?? null,
+                    'llm_driver_config_id'   => $allowed['llm_driver_config_id'] ?? null,
+                    'max_steps'              => (int) ($allowed['max_steps'] ?? 10),
+                    'allow_followup'         => (bool) ($allowed['allow_followup'] ?? true) ? 1 : 0,
+                    'retry_after_minutes'    => (int) ($allowed['retry_after_minutes'] ?? 0),
+                    'max_retries'            => (int) ($allowed['max_retries'] ?? 0),
+                    'is_active'              => 1,
+                    'created_at'             => date(self::DATETIME_FORMAT),
+                    'updated_at'             => date(self::DATETIME_FORMAT),
+                ]);
 
-        return Agent::find($id);
+                // Persist the default agent_pictures row in the same
+                // transaction so a brand-new agent always has a
+                // `profile_picture` (deterministic default avatar) on
+                // the very next read. Without this, the dashboard
+                // rendered initials for new agents until the operator
+                // touched the picker.
+                if ($this->pictureService !== null) {
+                    $this->pictureService->createDefaultPicture($id);
+                }
+
+                $created = Agent::find($id);
+                if ($created === null) {
+                    throw AgentCreateLostException::forId($id);
+                }
+                return $created;
+            },
+        );
     }
 
     public function getAgent(int $agentId, int $userId): ?Agent
@@ -194,6 +221,18 @@ final class AgentService implements AgentServiceInterface
 
     private function agentResource(Agent $agent): array
     {
-        return AgentResource::toArray($agent, null, $this->toolIconResolver);
+        $picture = $agent->getRelation('profilePicture');
+        $media = $picture instanceof AgentPicture && $picture->media_asset_id !== null
+            ? $picture->getRelation('mediaAsset')
+            : null;
+        return AgentResource::toArray(
+            $agent,
+            null,
+            $this->toolIconResolver,
+            $this->pictureService,
+            $agent->getRelation('agentTools'),
+            $picture instanceof AgentPicture ? $picture : null,
+            $media instanceof MediaAsset ? $media : null,
+        );
     }
 }

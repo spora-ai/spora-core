@@ -19,7 +19,6 @@ use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
-use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigService;

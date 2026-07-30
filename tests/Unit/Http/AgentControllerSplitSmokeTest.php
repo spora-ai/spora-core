@@ -81,10 +81,11 @@ test('All three controllers share a consistent constructor surface', function ()
     expect($tool)->toBeInstanceOf(ReflectionMethod::class);
     expect($override)->toBeInstanceOf(ReflectionMethod::class);
 
-    // CRUD controller takes auth, agentService, DriverFactory, and (since
-    // the per-tool icon chain was added) ToolIconResolver. The tool and
-    // override controllers take 3 (auth + their service + a config helper).
-    expect($crud->getNumberOfParameters())->toBe(4);
+    // CRUD controller takes auth, agentService, DriverFactory, ToolIconResolver
+    // (per-tool icon chain), and (since the agent profile-picture feature)
+    // AgentPictureService. The tool and override controllers take 3 (auth + their
+    // service + a config helper).
+    expect($crud->getNumberOfParameters())->toBe(5);
     expect($tool->getNumberOfParameters())->toBe(3);
     expect($override->getNumberOfParameters())->toBe(3);
 });

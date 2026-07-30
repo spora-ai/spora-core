@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\AgentTemplates;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use InvalidArgumentException;
 use ReflectionClass;
 use Spora\AgentTemplates\Exceptions\AgentImportFailedException;
 use Spora\AgentTemplates\Exceptions\AgentTemplateNotFoundException;
@@ -13,6 +14,7 @@ use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
+use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
@@ -47,6 +49,7 @@ final class AgentTemplateImporter
         private readonly ToolConfigService $toolConfig,
         private readonly PluginLoader $plugins,
         private readonly Paths $paths,
+        private readonly ?AgentPictureService $pictureService = null,
     ) {}
 
     /**
@@ -115,11 +118,50 @@ final class AgentTemplateImporter
             throw new AgentImportFailedException("Agent {$agentId} disappeared mid-import.");
         }
 
+        $this->applyPictureMetadata($agentId, $template, $warnings);
+
         return new ImportResult(
             agent: $agent,
             toolsEnabled: $toolsEnabled,
             warnings: $warnings,
         );
+    }
+
+    /**
+     * Apply the `metadata.archetype` / `variant_key` / `palette_key`
+     * fields to the new agent's picture row. Unknown archetype / palette
+     * values are already surfaced as warnings by {@see AgentTemplateValidator}
+     * before this method runs; we silently skip them here so the import
+     * still creates a usable agent (with the default picture).
+     *
+     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
+     */
+    private function applyPictureMetadata(int $agentId, AgentTemplate $template, array &$warnings): void
+    {
+        if ($this->pictureService === null) {
+            return;
+        }
+
+        $metadata = $template->raw()['metadata'] ?? null;
+        if (!is_array($metadata)) {
+            return;
+        }
+
+        $pictureFields = array_intersect_key($metadata, array_flip(['archetype', 'variant_key', 'palette_key']));
+        if ($pictureFields === []) {
+            return;
+        }
+
+        try {
+            $this->pictureService->applyTemplateMetadata($agentId, $pictureFields);
+        } catch (InvalidArgumentException $e) {
+            $warnings[] = [
+                'code'     => 'PICTURE_METADATA_INVALID',
+                'severity' => 'warning',
+                'message'  => $e->getMessage(),
+                'path'     => 'metadata',
+            ];
+        }
     }
 
     /**

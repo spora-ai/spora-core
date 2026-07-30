@@ -33,41 +33,66 @@ final class MimeSniffer
     public const OCTET_STREAM = 'application/octet-stream';
 
     /**
-     * Magic-byte signatures indexed by their canonical MIME type. Each
-     * signature is `prefix_offset` => `byte_string`. The check requires the
-     * prefix to start at exactly that offset in the input — most formats
-     * store the magic at offset 0, but a few (e.g. MP4) put the ftyp box
-     * at a known fixed offset.
+     * Magic-byte signatures indexed by their canonical MIME type. The
+     * structure is `MIME => list<list<signature>>`. Each MIME has a list
+     * of alternative signature *groups*; every signature inside one group
+     * must match for the group to count as a hit; any group matching
+     * counts as a hit for the MIME. This is what distinguishes
+     * `image/webp` (`RIFF` + `WEBP`, both required) from `audio/wav`
+     * (`RIFF` + `WAVE`, both required): those compound formats are a
+     * single signature group, so the magic table reports them only when
+     * *both* offsets match. Conversely, `audio/mpeg` accepts any of three
+     * sync variants (`0xFF 0xFB`, `0xFF 0xF3`, `ID3`) — each one is its
+     * own single-signature group.
      *
-     * @var array<string, list<array{offset: int, bytes: string}>>
+     * Order of declaration does not matter — `matchMagicTable()` returns
+     * the first MIME whose signature groups include a hit.
+     *
+     * @var array<string, list<list<array{offset: int, bytes: string}>>>
      */
     private const MAGIC_SIGNATURES = [
-        'image/png'  => [['offset' => 0, 'bytes' => "\x89PNG\r\n\x1a\n"]],
-        'image/jpeg' => [['offset' => 0, 'bytes' => "\xFF\xD8\xFF"]],
-        'image/gif'  => [['offset' => 0, 'bytes' => 'GIF87a'], ['offset' => 0, 'bytes' => 'GIF89a']],
+        'image/png'  => [
+            [['offset' => 0, 'bytes' => "\x89PNG\r\n\x1a\n"]],
+        ],
+        'image/jpeg' => [
+            [['offset' => 0, 'bytes' => "\xFF\xD8\xFF"]],
+        ],
+        'image/gif'  => [
+            [['offset' => 0, 'bytes' => 'GIF87a']],
+            [['offset' => 0, 'bytes' => 'GIF89a']],
+        ],
         'image/webp' => [
-            ['offset' => 0, 'bytes' => 'RIFF'],
-            // WebP: 'RIFF????WEBP' — must contain WEBP at offset 8.
-            ['offset' => 8, 'bytes' => 'WEBP'],
+            [
+                ['offset' => 0, 'bytes' => 'RIFF'],
+                ['offset' => 8, 'bytes' => 'WEBP'],
+            ],
         ],
-        'audio/mpeg' => [['offset' => 0, 'bytes' => "\xFF\xFB"], ['offset' => 0, 'bytes' => "\xFF\xF3"], ['offset' => 0, 'bytes' => 'ID3']],
+        'audio/mpeg' => [
+            [['offset' => 0, 'bytes' => "\xFF\xFB"]],
+            [['offset' => 0, 'bytes' => "\xFF\xF3"]],
+            [['offset' => 0, 'bytes' => 'ID3']],
+        ],
         'audio/wav'  => [
-            ['offset' => 0, 'bytes' => 'RIFF'],
-            ['offset' => 8, 'bytes' => 'WAVE'],
+            [
+                ['offset' => 0, 'bytes' => 'RIFF'],
+                ['offset' => 8, 'bytes' => 'WAVE'],
+            ],
         ],
-        'audio/ogg'  => [['offset' => 0, 'bytes' => 'OggS']],
-        'audio/flac' => [['offset' => 0, 'bytes' => 'fLaC']],
+        'audio/ogg'  => [
+            [['offset' => 0, 'bytes' => 'OggS']],
+        ],
+        'audio/flac' => [
+            [['offset' => 0, 'bytes' => 'fLaC']],
+        ],
         'video/mp4'  => [
-            ['offset' => 4, 'bytes' => 'ftyp'],
+            [['offset' => 4, 'bytes' => 'ftyp']],
         ],
         'video/webm' => [
-            ['offset' => 0, 'bytes' => "\x1A\x45\xDF\xA3"],
+            [['offset' => 0, 'bytes' => "\x1A\x45\xDF\xA3"]],
         ],
-        'video/quicktime' => [
-            ['offset' => 4, 'bytes' => 'ftyp'],
-            // qt  marker at offset 8 — checked separately below.
+        'application/pdf' => [
+            [['offset' => 0, 'bytes' => '%PDF-']],
         ],
-        'application/pdf' => [['offset' => 0, 'bytes' => '%PDF-']],
     ];
 
     /**
@@ -246,16 +271,27 @@ final class MimeSniffer
 
     private function matchMagicTable(string $prefix): ?string
     {
-        foreach (self::MAGIC_SIGNATURES as $mime => $signatures) {
-            foreach ($signatures as $sig) {
-                if (strlen($prefix) < $sig['offset'] + strlen($sig['bytes'])) {
-                    continue;
-                }
-                if (substr($prefix, $sig['offset'], strlen($sig['bytes'])) === $sig['bytes']) {
+        foreach (self::MAGIC_SIGNATURES as $mime => $groups) {
+            foreach ($groups as $group) {
+                if ($this->allSignaturesMatch($prefix, $group)) {
                     return $mime;
                 }
             }
         }
         return null;
+    }
+
+    /**
+     * @param list<array{offset: int, bytes: string}> $signatures
+     */
+    private function allSignaturesMatch(string $prefix, array $signatures): bool
+    {
+        foreach ($signatures as $sig) {
+            $end = $sig['offset'] + strlen($sig['bytes']);
+            if (strlen($prefix) < $end || substr($prefix, $sig['offset'], strlen($sig['bytes'])) !== $sig['bytes']) {
+                return false;
+            }
+        }
+        return true;
     }
 }

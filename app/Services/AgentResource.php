@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use DateTimeInterface;
+use Illuminate\Database\Eloquent\Collection;
 use Spora\Models\Agent;
+use Spora\Models\AgentPicture;
 use Spora\Models\AgentTool;
+use Spora\Models\MediaAsset;
+use Spora\Services\AgentPictures\AgentPictureService;
 
 /**
  * Agent → wire-format array mapping. Single source of truth for the shape
@@ -32,6 +36,24 @@ final class AgentResource
      *     entry (callers without DI access can pass null and the wire payload
      *     still parses; the frontend's <Icon> component falls back to
      *     'puzzle' on missing keys).
+     * @param ?AgentPictureService $pictureService  When provided, the
+     *     `profile_picture` field is included in the wire payload (the
+     *     resolved `archetype`, `variant_key`, `palette_key`, plus the
+     *     derived `fg_color`/`bg_color`, or the uploaded image URL).
+     *     When null — e.g. from the `?select=id,name` projection — the
+     *     field is omitted. The dashboard / sidebar / agent-detail render
+     *     sites always pass a service.
+     * @param ?Collection<int, AgentTool> $preloadedTools  Pre-loaded agentTools
+     *     relation (typically passed by AgentService::getAgentsForUser which
+     *     eager-loads `agentTools` to avoid N+1 on the dashboard endpoint).
+     *     When null, AgentResource reads `$agent->agentTools` lazily.
+     * @param ?AgentPicture $preloadedPicture  Pre-loaded profilePicture
+     *     relation. When null, the resource falls back to
+     *     AgentPictureService::toWireShape() which performs its own lookup.
+     * @param ?MediaAsset $preloadedMediaAsset  Pre-loaded mediaAsset for an
+     *     uploaded picture. Ignored when `$preloadedPicture` is null or has
+     *     no `media_asset_id`. Pass alongside `$preloadedPicture` to fully
+     *     avoid N+1 on the dashboard endpoint.
      *
      * @return array<string, mixed>
      */
@@ -39,9 +61,13 @@ final class AgentResource
         Agent $agent,
         ?bool $supportsImageInput = null,
         ?ToolIconResolver $iconResolver = null,
+        ?AgentPictureService $pictureService = null,
+        ?Collection $preloadedTools = null,
+        ?AgentPicture $preloadedPicture = null,
+        ?MediaAsset $preloadedMediaAsset = null,
     ): array {
-        /** @var \Illuminate\Database\Eloquent\Collection<int, AgentTool> $tools */
-        $tools = $agent->agentTools;
+        /** @var Collection<int, AgentTool> $tools */
+        $tools = $preloadedTools ?? $agent->agentTools;
 
         $payload = [
             'id'                   => (int) $agent->id,
@@ -77,6 +103,12 @@ final class AgentResource
 
         if ($supportsImageInput !== null) {
             $payload['llm_supports_image_input'] = $supportsImageInput;
+        }
+
+        if ($pictureService !== null) {
+            $payload['profile_picture'] = $preloadedPicture instanceof AgentPicture
+                ? $pictureService->pictureToWireWithAsset($preloadedPicture, $preloadedMediaAsset)
+                : $pictureService->toWireShape((int) $agent->id);
         }
 
         return $payload;

@@ -133,6 +133,21 @@
         "icon": {
           "type": "string",
           "description": "Bundled icon name from the Spora palette. Defaults to 'puzzle'."
+        },
+        "archetype": {
+          "type": "string",
+          "enum": ["assistant", "researcher", "analyst", "writer", "coder", "explorer", "advisor", "creative"],
+          "description": "Profile-picture archetype. Imported into the new agent's agent_pictures row."
+        },
+        "variant_key": {
+          "type": "string",
+          "enum": ["v0", "v1", "v2"],
+          "description": "Variant index within the chosen archetype. Omit to auto-derive from fnv1a(agent_id) % 3."
+        },
+        "palette_key": {
+          "type": "string",
+          "enum": ["slate", "red", "orange", "amber", "green", "teal", "blue", "indigo", "violet", "pink"],
+          "description": "Predefined FG+BG color pair for the profile picture tile."
         }
       }
     }

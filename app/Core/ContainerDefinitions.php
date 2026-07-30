@@ -50,6 +50,7 @@ use Spora\Http\AppsController;
 use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
 use Spora\Http\ContinueTaskDispatcher;
+use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -66,7 +67,6 @@ use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
 use Spora\Http\ScheduledRunController;
 use Spora\Http\SseController;
-use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\TaskController;
 use Spora\Http\ToolController;
 use Spora\Http\UserController;
@@ -76,6 +76,7 @@ use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentManifest;
+use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentService;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsService;
@@ -725,8 +726,13 @@ final class ContainerDefinitions
             },
 
             AgentServiceInterface::class => static function (ContainerInterface $c): AgentServiceInterface {
-                return new AgentService($c->get(ToolIconResolver::class));
+                return new AgentService(
+                    $c->get(ToolIconResolver::class),
+                    $c->get(AgentPictureService::class),
+                );
             },
+
+            AgentPictureService::class => static fn(): AgentPictureService => new AgentPictureService(),
 
             // Tool enablement, settings overrides, and operation overrides
             // moved here from AgentService so the umbrella stays under the
@@ -854,6 +860,7 @@ final class ContainerDefinitions
                     $c->get(AgentServiceInterface::class),
                     $c->get(DriverFactory::class),
                     $c->get(ToolIconResolver::class),
+                    $c->get(AgentPictureService::class),
                 );
             },
 
@@ -1249,6 +1256,7 @@ final class ContainerDefinitions
                     $c->get(ToolConfigService::class),
                     $c->get(PluginLoader::class),
                     $c->get(Paths::class),
+                    $c->get(AgentPictureService::class),
                 );
             },
 

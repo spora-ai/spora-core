@@ -1120,3 +1120,29 @@ describe('parseImageTypesCsv', function (): void {
             ->toBe(['png']);
     });
 });
+
+describe('AgentController wiring', function (): void {
+    /**
+     * Regression for the avatar-feature rollout: the controller's
+     * `pictureService` property MUST be wired through the DI container.
+     * If the AgentController factory forgets to pass
+     * `$c->get(AgentPictureService::class)`, PHP's nullable constructor
+     * default silently swallows it — the controller resolves cleanly but
+     * `profile_picture` never reaches the wire. The full-suite smoke
+     * (`every factory closure in the definitions array can be invoked`)
+     * can't catch that because resolution succeeds with a null service.
+     */
+    it('injects AgentPictureService into AgentController so profile_picture reaches the wire', function (): void {
+        $kernel = new Kernel();
+        $c = $kernel->getContainer();
+
+        $controller = $c->get(Spora\Http\AgentController::class);
+
+        $ref = new ReflectionClass($controller);
+        $prop = $ref->getProperty('pictureService');
+        $prop->setAccessible(true);
+        $service = $prop->getValue($controller);
+
+        expect($service)->toBeInstanceOf(Spora\Services\AgentPictures\AgentPictureService::class);
+    });
+});

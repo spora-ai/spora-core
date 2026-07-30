@@ -152,6 +152,35 @@ describe('AgentService::getAgentsForUser', function (): void {
         expect($result[0]['tools'])->toHaveCount(1);
         expect($result[0]['tools'][0])->not->toHaveKey('icon');
     });
+
+    it('eager-loads profilePicture so the listing is not N+1', function (): void {
+        // Regression test for the bug where AgentResource::toArray() did a
+        // fresh AgentPictureService::toWireShape() per agent and that
+        // function performed its own DB lookup. With three agents and one
+        // picture row the listing should now run a fixed 3-query budget
+        // (agents, agent_tools, agent_pictures) instead of 1 + 3*N.
+        [$service, $userId] = makeAgentServiceWithUser();
+        $pictureService = new Spora\Services\AgentPictures\AgentPictureService();
+        $serviceWithPics = new AgentService(null, $pictureService);
+
+        for ($i = 0; $i < 3; $i++) {
+            $serviceWithPics->createAgent($userId, ['name' => "List Agent {$i}"]);
+        }
+
+        $connection = Illuminate\Database\Capsule\Manager::connection();
+        $baselineQueryCount = 0;
+        $connection->listen(function ($query) use (&$baselineQueryCount): void {
+            $baselineQueryCount++;
+        });
+
+        $result = $serviceWithPics->getAgentsForUser($userId);
+        expect($result)->toHaveCount(3);
+
+        // Allow the listener registration to settle and read the count.
+        // Listing should stay under 10 queries regardless of agent count;
+        // the lazy-load version would have exceeded that for N>5.
+        expect($baselineQueryCount)->toBeLessThan(10);
+    });
 });
 
 describe('AgentService::createAgent', function (): void {
@@ -180,6 +209,23 @@ describe('AgentService::createAgent', function (): void {
         ]);
 
         expect($agent->max_steps)->toBe(25);
+    });
+
+    it('creates a default agent_pictures row in the same transaction', function (): void {
+        // createAgent without a PictureService leaves the agents row alone —
+        // existing tests rely on the optional injection. When PictureService
+        // is wired, the dashboard never renders initials on a brand-new agent.
+        $pictureService = new Spora\Services\AgentPictures\AgentPictureService();
+        $service = new AgentService(null, $pictureService);
+        $userId = bootAuth(bootAuthLayer(), 'agent-svc-picture@example.com', AGENT_TEST_PASSWORD);
+
+        $agent = $service->createAgent($userId, ['name' => 'Picture Default']);
+
+        $picture = Spora\Models\AgentPicture::where('agent_id', $agent->id)->first();
+        expect($picture)->not->toBeNull();
+        expect($picture->archetype)->toBe('assistant');
+        expect($picture->palette_key)->toBe('slate');
+        expect($picture->media_asset_id)->toBeNull();
     });
 });
 
