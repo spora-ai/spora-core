@@ -16,18 +16,20 @@ use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\ToolConfigService;
+use Spora\Skills\SkillScanner;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\ToolSettingSchema;
 
 /**
  * Applies an Agent Template to the database: creates a new Agent row,
  * enables the template's tools (skipping any whose tool_class is not
  * currently registered), and writes per-operation auto-approve overrides.
  *
- * Settings (passwords, secrets) are NEVER written by this importer —
- * the template shape excludes them. Missing required settings still get
- * a row inserted with a TOOL_NEEDS_CONFIGURATION warning; the operator
- * configures them later in Settings → Tools.
+ * Non-password settings may be written from an operator-exported template
+ * through ToolConfigService's agent-override path. Missing required settings
+ * still produce TOOL_NEEDS_CONFIGURATION warnings.
  *
  * Plugins are NEVER auto-installed. Each entry of `required_plugins` is
  * a Composer `vendor/name` package string (e.g. `spora-ai/spora-plugin-minimax`);
@@ -50,6 +52,7 @@ final class AgentTemplateImporter
         private readonly PluginLoader $plugins,
         private readonly Paths $paths,
         private readonly ?AgentPictureService $pictureService = null,
+        private readonly ?SkillScanner $skillScanner = null,
     ) {}
 
     /**
@@ -203,7 +206,7 @@ final class AgentTemplateImporter
      *
      * @param list<string> $registeredTools
      * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
-     * @return list<array{tool_class: string, enabled: bool, operations_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}>
+     * @return list<array{tool_class: string, enabled: bool, operations_applied: int, settings_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}>
      */
     private function applyTools(
         int $agentId,
@@ -212,8 +215,8 @@ final class AgentTemplateImporter
         array &$warnings,
     ): array {
         $toolsEnabled = [];
-        foreach ($template->tools() as $toolEntry) {
-            $result = $this->applyTool($agentId, $toolEntry, $registeredTools);
+        foreach ($template->tools() as $toolIndex => $toolEntry) {
+            $result = $this->applyTool($agentId, $toolEntry, $registeredTools, $toolIndex, $warnings);
             if ($result['skipped']) {
                 if ($result['warning'] !== null) {
                     $warnings[] = $result['warning'];
@@ -237,10 +240,16 @@ final class AgentTemplateImporter
      *
      * @param array<string, mixed> $toolEntry
      * @param list<string> $registeredTools
-     * @return array{skipped: bool, enabled: bool, warning: ?array{code: string, severity: string, message: string, path?: string}, summary: ?array{tool_class: string, enabled: bool, operations_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}}
+     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
+     * @return array{skipped: bool, enabled: bool, warning: ?array{code: string, severity: string, message: string, path?: string}, summary: ?array{tool_class: string, enabled: bool, operations_applied: int, settings_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}}
      */
-    private function applyTool(int $agentId, array $toolEntry, array $registeredTools): array
-    {
+    private function applyTool(
+        int $agentId,
+        array $toolEntry,
+        array $registeredTools,
+        int $toolIndex,
+        array &$warnings,
+    ): array {
         $empty = ['skipped' => false, 'enabled' => false, 'warning' => null, 'summary' => null];
 
         $toolClass = (string) ($toolEntry['tool_class'] ?? '');
@@ -258,7 +267,7 @@ final class AgentTemplateImporter
         if ($toolClass === '' || !(bool) ($toolEntry['enabled'] ?? false)) {
             $result = $empty;
         } else {
-            $result = $this->applyEnabledTool($agentId, $toolClass, $toolEntry);
+            $result = $this->applyEnabledTool($agentId, $toolClass, $toolEntry, $toolIndex, $warnings);
         }
 
         return $result;
@@ -291,10 +300,16 @@ final class AgentTemplateImporter
      * upsert per-operation overrides. Returns the enabled-shape result.
      *
      * @param array<string, mixed> $toolEntry
-     * @return array{skipped: bool, enabled: bool, warning: ?array{code: string, severity: string, message: string, path?: string}, summary: ?array{tool_class: string, enabled: bool, operations_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}}
+     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
+     * @return array{skipped: bool, enabled: bool, warning: ?array{code: string, severity: string, message: string, path?: string}, summary: ?array{tool_class: string, enabled: bool, operations_applied: int, settings_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}}
      */
-    private function applyEnabledTool(int $agentId, string $toolClass, array $toolEntry): array
-    {
+    private function applyEnabledTool(
+        int $agentId,
+        string $toolClass,
+        array $toolEntry,
+        int $toolIndex,
+        array &$warnings,
+    ): array {
         $now = date(self::DATETIME_FORMAT);
         AgentTool::updateOrCreate(
             ['agent_id' => $agentId, 'tool_class' => $toolClass],
@@ -303,6 +318,15 @@ final class AgentTemplateImporter
                 'created_at' => $now,
                 'updated_at' => $now,
             ],
+        );
+
+        $settings = is_array($toolEntry['settings'] ?? null) ? $toolEntry['settings'] : [];
+        $settingsApplied = $this->applyToolSettings(
+            $agentId,
+            $toolClass,
+            $settings,
+            $toolIndex,
+            $warnings,
         );
 
         $missing = $this->toolConfig->getMissingRequiredSettings(
@@ -330,22 +354,105 @@ final class AgentTemplateImporter
             'skipped'  => false,
             'enabled'  => true,
             'warning'  => $toolWarning,
-            'summary'  => $this->buildEnabledSummary($toolClass, $opsApplied, $toolWarning),
+            'summary'  => $this->buildEnabledSummary($toolClass, $opsApplied, $settingsApplied, $toolWarning),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
+     */
+    private function applyToolSettings(
+        int $agentId,
+        string $toolClass,
+        array $settings,
+        int $toolIndex,
+        array &$warnings,
+    ): int {
+        $schema = [];
+        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
+            $schema[$setting->key] = $setting;
+        }
+
+        $collected = [];
+        foreach ($settings as $key => $value) {
+            $setting = $schema[$key] ?? null;
+            if (!$setting instanceof ToolSetting || $setting->type === 'password') {
+                continue;
+            }
+            if ($setting->type === 'multi-select') {
+                $value = $this->prepareMultiSelectSetting($setting, $value, $toolIndex, $warnings);
+            }
+            $collected[$key] = $value;
+        }
+
+        if ($collected !== []) {
+            $this->toolConfig->putAgentOverride($toolClass, $agentId, $collected);
+        }
+        return count($collected);
+    }
+
+    /**
+     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
+     */
+    private function prepareMultiSelectSetting(
+        ToolSetting $setting,
+        mixed $value,
+        int $toolIndex,
+        array &$warnings,
+    ): string {
+        $items = is_array($value) ? array_values($value) : [];
+        if ($setting->resolveAs === 'skill' && $this->skillScanner !== null) {
+            $items = $this->filterMissingSkills($items, $setting->key, $toolIndex, $warnings);
+        }
+        return json_encode($items, JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * @param list<mixed> $items
+     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
+     * @return list<mixed>
+     */
+    private function filterMissingSkills(array $items, string $key, int $toolIndex, array &$warnings): array
+    {
+        $available = [];
+        foreach ($this->skillScanner?->scan() ?? [] as $skill) {
+            $available[$skill->name()] = true;
+        }
+
+        $filtered = [];
+        foreach ($items as $slug) {
+            if (is_string($slug) && isset($available[$slug])) {
+                $filtered[] = $slug;
+                continue;
+            }
+            $warnings[] = [
+                'code' => 'SKILL_MISSING',
+                'severity' => 'warning',
+                'message' => sprintf("Skill '%s' is not available locally and was dropped.", (string) $slug),
+                'path' => "tools[{$toolIndex}].settings.{$key}",
+            ];
+        }
+        return $filtered;
     }
 
     /**
      * Build the per-tool summary entry for an enabled tool. Extracted to keep
      * `applyTool`'s return-count under the S1142 ceiling.
      *
-     * @return array{tool_class: string, enabled: bool, operations_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}
+     * @return array{tool_class: string, enabled: bool, operations_applied: int, settings_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}
      */
-    private function buildEnabledSummary(string $toolClass, int $opsApplied, ?array $toolWarning): array
-    {
+    private function buildEnabledSummary(
+        string $toolClass,
+        int $opsApplied,
+        int $settingsApplied,
+        ?array $toolWarning,
+    ): array {
         return [
             'tool_class'         => $toolClass,
             'enabled'            => true,
             'operations_applied' => $opsApplied,
+            'settings_applied'   => $settingsApplied,
             'warnings'           => $toolWarning === null ? [] : [$toolWarning],
         ];
     }

@@ -9,34 +9,34 @@ use Spora\Models\AgentPicture;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
+use Spora\Services\ToolConfigService;
 
 /**
  * Builds an {@see AgentTemplate} payload from a persisted Agent.
  *
- * **Settings are NEVER emitted.** No code path reads
- * {@see \Spora\Services\ToolConfigService::getEffectiveSettings()} or
- * {@see \Spora\Services\ToolConfigService::getRawAgentOverride()}.
- * The exporter walks only `agent_tools` and
- * `agent_tool_operation_overrides`. The companion
- * {@see AgentTemplateImporter::SETTINGS_NOT_EXPORTED_WARNING} string
- * is surfaced by the controller so the SPA can show an inline banner
- * before download.
+ * Password-typed keys and user/global cascade values are NEVER emitted.
+ * Only the agent's own override row is included, and only when the operator
+ * opts in via `includeSettings=true`.
  */
 final class AgentTemplateExporter
 {
+    public const SETTINGS_EXPORT_INCLUDED_INFO = 'Included %d tool setting(s) for: %s. Passwords and inherited global/user values are NOT included.';
+
     public function __construct(
         private readonly PluginLoader $pluginLoader,
+        private readonly ToolConfigService $toolConfig,
     ) {}
 
     /**
      * @return array{
      *     template: AgentTemplate,
-     *     inline_warning: string
+     *     inline_warning: string,
+     *     inline_info?: string
      * }
      */
-    public function export(Agent $agent): array
+    public function export(Agent $agent, bool $includeSettings = false): array
     {
-        $tools = $this->buildToolsSection($agent);
+        [$tools, $settingsCount, $settingsTools] = $this->buildToolsSection($agent, $includeSettings);
         $agentBlock = $this->buildAgentBlock($agent);
         $metadata = $this->buildMetadata($agent);
 
@@ -60,10 +60,18 @@ final class AgentTemplateExporter
             source: 'exported',
         );
 
-        return [
+        $result = [
             'template'       => $template,
             'inline_warning' => AgentTemplateImporter::SETTINGS_NOT_EXPORTED_WARNING,
         ];
+        if ($settingsCount > 0) {
+            $result['inline_info'] = sprintf(
+                self::SETTINGS_EXPORT_INCLUDED_INFO,
+                $settingsCount,
+                implode(', ', $settingsTools),
+            );
+        }
+        return $result;
     }
 
     /**
@@ -100,9 +108,9 @@ final class AgentTemplateExporter
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * @return array{list<array<string, mixed>>, int, list<string>}
      */
-    private function buildToolsSection(Agent $agent): array
+    private function buildToolsSection(Agent $agent, bool $includeSettings): array
     {
         $rows = AgentTool::where('agent_id', $agent->id)->get();
         $overrides = AgentToolOperationOverride::where('agent_id', $agent->id)
@@ -110,6 +118,8 @@ final class AgentTemplateExporter
             ->groupBy('tool_class');
 
         $tools = [];
+        $settingsCount = 0;
+        $settingsTools = [];
         foreach ($rows as $row) {
             $toolClass = $row->tool_class;
             $toolOps = $overrides->get($toolClass, collect());
@@ -133,13 +143,36 @@ final class AgentTemplateExporter
                 $operations[] = $entry;
             }
 
-            $tools[] = [
+            $entry = [
                 'tool_class' => $toolClass,
                 'enabled'    => true,
                 'operations' => $operations,
             ];
+            $settings = $includeSettings ? $this->exportToolSettings($toolClass, (int) $agent->id) : [];
+            if ($settings !== []) {
+                $entry['settings'] = $settings;
+                $settingsCount += count($settings);
+                $settingsTools[] = $toolClass;
+            }
+            $tools[] = $entry;
         }
-        return $tools;
+        return [$tools, $settingsCount, $settingsTools];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function exportToolSettings(string $toolClass, int $agentId): array
+    {
+        $override = $this->toolConfig->normalizeMultiSelectValues(
+            $toolClass,
+            $this->toolConfig->getRawAgentOverride($toolClass, $agentId),
+        );
+        $exportable = array_flip($this->toolConfig->getExportableKeys($toolClass));
+        return array_filter(
+            array_intersect_key($override, $exportable),
+            static fn(mixed $value): bool => $value !== null && $value !== '',
+        );
     }
 
     /**

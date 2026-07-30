@@ -124,6 +124,7 @@ use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigNameResolver;
+use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
@@ -1217,7 +1218,11 @@ final class ContainerDefinitions
                 return new AgentTemplateScanner($directories);
             },
 
-            AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
+            AgentTemplateValidator::class => static fn(ContainerInterface $c): AgentTemplateValidator => new AgentTemplateValidator(
+                $c->get(ToolConfigSchemaInspector::class),
+            ),
+
+            ToolConfigSchemaInspector::class => static fn(): ToolConfigSchemaInspector => new ToolConfigSchemaInspector(),
 
             // Skills are scanned in priority order: project, then framework,
             // then each plugin. The `source` label on each root is what
@@ -1257,11 +1262,13 @@ final class ContainerDefinitions
                     $c->get(PluginLoader::class),
                     $c->get(Paths::class),
                     $c->get(AgentPictureService::class),
+                    $c->get(SkillScanner::class),
                 );
             },
 
             AgentTemplateExporter::class => static fn(ContainerInterface $c): AgentTemplateExporter => new AgentTemplateExporter(
                 $c->get(PluginLoader::class),
+                $c->get(ToolConfigService::class),
             ),
 
             MailTemplateServiceInterface::class => static fn(): MailTemplateServiceInterface => new MailTemplateService(),

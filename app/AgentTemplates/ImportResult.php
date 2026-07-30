@@ -19,7 +19,7 @@ use Spora\Models\Agent;
 final class ImportResult
 {
     /**
-     * @param list<array{tool_class: string, enabled: bool, operations_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}> $toolsEnabled
+     * @param list<array{tool_class: string, enabled: bool, operations_applied: int, settings_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}> $toolsEnabled
      * @param list<array{code: string, severity: string, message: string, path?: string}> $warnings
      */
     public function __construct(

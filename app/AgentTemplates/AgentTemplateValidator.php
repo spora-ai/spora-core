@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Spora\AgentTemplates;
 
 use ReflectionClass;
+use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ToolInterface;
+use Spora\Tools\ToolSettingSchema;
 
 /**
  * Validates a parsed Agent Template payload.
@@ -18,11 +21,18 @@ use Spora\Tools\ToolInterface;
  *
  * Errors make the template unusable; warnings are advisory and surface
  * to the operator during import (missing plugins, missing required
- * settings, unknown operation names, …). Settings fields are NEVER
- * validated — they do not exist in the template shape.
+ * settings, unknown operation names, …). Tool settings are validated
+ * against the declaring tool's #[ToolSetting] attributes.
  */
 final class AgentTemplateValidator
 {
+    public const SETTINGS_PASSWORD_KEY_FORBIDDEN = 'SETTINGS_PASSWORD_KEY_FORBIDDEN';
+    public const SETTINGS_UNKNOWN_KEY = 'SETTINGS_UNKNOWN_KEY';
+    public const SETTINGS_INVALID_VALUE_TYPE = 'SETTINGS_INVALID_VALUE_TYPE';
+
+    public function __construct(
+        private readonly ToolConfigSchemaInspector $schemaInspector = new ToolConfigSchemaInspector(),
+    ) {}
     /**
      * Accepts both namespaced (`<source>/<slug>`) and bare (`<slug>`)
      * template ids. The scanner additionally enforces that built-in /
@@ -255,6 +265,73 @@ final class AgentTemplateValidator
         $toolClass = $this->validateToolClass($tool, $path, $seenClasses, $result);
         $this->validateToolEnabledFlag($tool, $path, $result);
         $this->validateToolOperations($tool, $toolClass, $path, $result);
+        if (array_key_exists('settings', $tool)) {
+            $this->validateToolSettings($tool, $toolClass, $path, $result);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $tool
+     */
+    private function validateToolSettings(array $tool, string $toolClass, string $path, ValidationResult $result): void
+    {
+        $settings = $tool['settings'];
+        if (!is_array($settings) || array_is_list($settings) && $settings !== []) {
+            $this->addSettingsTypeError($result, $path . '.settings', 'Settings must be an object.');
+            return;
+        }
+        if (!class_exists($toolClass)) {
+            return;
+        }
+
+        $schema = $this->settingsByKey($toolClass);
+        $passwordKeys = $this->schemaInspector->getPasswordKeys($toolClass);
+        foreach ($settings as $key => $value) {
+            $settingPath = "{$path}.settings.{$key}";
+            if (!isset($schema[$key])) {
+                $this->addSettingsError($result, self::SETTINGS_UNKNOWN_KEY, "Unknown tool setting '{$key}'.", $settingPath);
+            } elseif (in_array($key, $passwordKeys, true)) {
+                $this->addSettingsError($result, self::SETTINGS_PASSWORD_KEY_FORBIDDEN, "Password setting '{$key}' cannot be imported from a template.", $settingPath);
+            } elseif (!$this->isValidSettingValue($schema[$key], $value)) {
+                $this->addSettingsTypeError($result, $settingPath, "Invalid value type for tool setting '{$key}'.");
+            }
+        }
+    }
+
+    /** @return array<string, ToolSetting> */
+    private function settingsByKey(string $toolClass): array
+    {
+        $settings = [];
+        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
+            $settings[$setting->key] = $setting;
+        }
+        return $settings;
+    }
+
+    private function isValidSettingValue(ToolSetting $setting, mixed $value): bool
+    {
+        return match ($setting->type) {
+            'multi-select' => is_array($value)
+                && array_is_list($value)
+                && array_all($value, static fn(mixed $item): bool => is_string($item)),
+            'toggle' => is_bool($value),
+            default => is_scalar($value),
+        };
+    }
+
+    private function addSettingsTypeError(ValidationResult $result, string $path, string $message): void
+    {
+        $this->addSettingsError($result, self::SETTINGS_INVALID_VALUE_TYPE, $message, $path);
+    }
+
+    private function addSettingsError(ValidationResult $result, string $code, string $message, string $path): void
+    {
+        $result->addError([
+            'code' => $code,
+            'severity' => 'error',
+            'message' => $message,
+            'path' => $path,
+        ]);
     }
 
     /**

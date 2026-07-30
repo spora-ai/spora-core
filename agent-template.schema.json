@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://spora.dev/agent-template.schema.json",
   "title": "Spora Agent Template",
-  "description": "A reusable agent definition: name, system prompt, tool activations, and per-operation auto-approve defaults. Settings (passwords, secrets) are NEVER included — recipients must configure them in Settings → Tools after import.",
+  "description": "A reusable agent definition: name, system prompt, tool activations, per-operation auto-approve defaults, and optional per-agent non-secret tool settings.",
   "type": "object",
   "required": ["id", "name", "version", "agent"],
   "additionalProperties": false,
@@ -74,7 +74,7 @@
     },
     "tools": {
       "type": "array",
-      "description": "Tools the agent should have activated. Tools whose tool_class is not currently registered are skipped at import time with a TOOL_PLUGIN_MISSING warning — settings are NEVER exported.",
+      "description": "Tools the agent should have activated. Tools whose tool_class is not currently registered are skipped at import time with a TOOL_PLUGIN_MISSING warning.",
       "items": {
         "type": "object",
         "required": ["tool_class", "enabled", "operations"],
@@ -87,6 +87,11 @@
           "enabled": {
             "type": "boolean",
             "description": "Whether this tool should be enabled for the agent."
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Optional agent-specific tool overrides included only on opt-in export. Password-typed keys and inherited global/user values are excluded; imported values round-trip through the normal agent override settings path."
           },
           "operations": {
             "type": "array",

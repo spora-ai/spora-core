@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
+use Spora\Models\AgentToolOverride;
 
 beforeEach(function (): void {
     $this->importer = makeImporter();
@@ -155,4 +156,75 @@ test('importPayload without a tools block creates the agent row but skips tool a
 
     $tools = AgentTool::where('agent_id', $result->agent->id)->get();
     expect(count($tools))->toBe(0);
+});
+
+test('opt-in export settings round-trip through the importer without secrets', function (): void {
+    $security = new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $toolConfig = new Spora\Services\ToolConfigService($security, new Monolog\Logger('test'), [Tests\Fixtures\TestTool::class]);
+    $plugins = new Spora\Plugins\PluginLoader([]);
+    $importer = new Spora\AgentTemplates\AgentTemplateImporter($toolConfig, $plugins, new Spora\Core\Paths(BASE_PATH));
+    $exporter = new Spora\AgentTemplates\AgentTemplateExporter($plugins, $toolConfig);
+    $source = Agent::create(['user_id' => $this->userId, 'name' => 'Settings Source', 'max_steps' => 5, 'is_active' => true]);
+    AgentTool::create(['agent_id' => $source->id, 'tool_class' => Tests\Fixtures\TestTool::class, 'tool_name' => 'test']);
+    $toolConfig->putAgentOverride(Tests\Fixtures\TestTool::class, (int) $source->id, [
+        'api_key' => 'secret',
+        'max_results' => '25',
+        'allowed_target_agents' => '["1","2"]',
+    ]);
+
+    $payload = $exporter->export($source, true)['template']->raw();
+    $result = $importer->importPayload($this->userId, $payload);
+    $settings = $toolConfig->getRawAgentOverride(Tests\Fixtures\TestTool::class, (int) $result->agent->id);
+
+    expect($settings)->toMatchArray(['max_results' => '25', 'allowed_target_agents' => '["1","2"]'])
+        ->and($settings)->not->toHaveKey('api_key')
+        ->and($result->toolsEnabled[0]['settings_applied'])->toBe(2);
+});
+
+test('missing skill slugs warn and are dropped from imported settings', function (): void {
+    $scanner = new Spora\Skills\SkillScanner([]);
+    $security = new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $toolConfig = new Spora\Services\ToolConfigService($security, new Monolog\Logger('test'), [Spora\Tools\SkillTool::class], $scanner);
+    $importer = new Spora\AgentTemplates\AgentTemplateImporter(
+        $toolConfig,
+        new Spora\Plugins\PluginLoader([]),
+        new Spora\Core\Paths(BASE_PATH),
+        null,
+        $scanner,
+    );
+    $raw = [
+        'id' => 'skills', 'name' => 'Skills', 'version' => '1.0.0',
+        'agent' => ['system_prompt' => 'x'],
+        'tools' => [[
+            'tool_class' => Spora\Tools\SkillTool::class,
+            'enabled' => true,
+            'operations' => [],
+            'settings' => ['allowed_skills' => ['weather']],
+        ]],
+    ];
+
+    $result = $importer->importPayload($this->userId, $raw);
+    $settings = $toolConfig->getRawAgentOverride(Spora\Tools\SkillTool::class, (int) $result->agent->id);
+    $warning = collect($result->warnings)->firstWhere('code', 'SKILL_MISSING');
+
+    expect($settings['allowed_skills'])->toBe('[]')
+        ->and($warning['path'])->toBe('tools[0].settings.allowed_skills');
+});
+
+test('settings are not applied when the tool plugin is missing', function (): void {
+    $raw = [
+        'id' => 'missing', 'name' => 'Missing', 'version' => '1.0.0',
+        'agent' => ['system_prompt' => 'x'],
+        'tools' => [[
+            'tool_class' => 'Missing\\Plugin\\Tool',
+            'enabled' => true,
+            'operations' => [],
+            'settings' => ['anything' => 'value'],
+        ]],
+    ];
+
+    $result = $this->importer->importPayload($this->userId, $raw);
+
+    expect(array_column($result->warnings, 'code'))->toContain('TOOL_PLUGIN_MISSING')
+        ->and(AgentToolOverride::where('agent_id', $result->agent->id)->count())->toBe(0);
 });
