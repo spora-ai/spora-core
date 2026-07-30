@@ -27,10 +27,11 @@ use Spora\Tools\Attributes\ToolOperation;
  * a row inserted with a TOOL_NEEDS_CONFIGURATION warning; the operator
  * configures them later in Settings → Tools.
  *
- * Plugins are NEVER auto-installed. A template whose required_plugins
- * Composer package names (vendor/name, e.g. `spora-ai/spora-plugin-minimax`)
- * do not resolve to any loaded plugin produces a PLUGIN_MISSING warning
- * but does not abort the import.
+ * Plugins are NEVER auto-installed. Each entry of `required_plugins` is
+ * a Composer `vendor/name` package string (e.g. `spora-ai/spora-plugin-minimax`);
+ * the importer resolves it to the installed plugin's slug via
+ * {@see PluginLoader::getSlugForPackageName()} and emits a `PLUGIN_MISSING`
+ * warning when no loaded plugin declares that package. The import is not aborted.
  */
 final class AgentTemplateImporter
 {
@@ -134,7 +135,6 @@ final class AgentTemplateImporter
      */
     private function collectPluginWarnings(AgentTemplate $template, array &$warnings): void
     {
-        $installedSlugs = array_keys($this->plugins->getPlugins());
         foreach ($template->requiredPlugins() as $package) {
             if ($this->plugins->getSlugForPackageName($package) !== null) {
                 continue;
@@ -146,10 +146,6 @@ final class AgentTemplateImporter
                 'path'     => 'required_plugins',
             ];
         }
-        // $installedSlugs is unused after the rewrite; kept as a debug-only
-        // anchor to make the intent obvious — the validator's vendor/name
-        // contract is the source of truth, not the slug map.
-        unset($installedSlugs);
     }
 
     /**
