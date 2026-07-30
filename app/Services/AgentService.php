@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\MediaAsset;
 use Spora\Services\AgentPictures\AgentPictureService;
+use Spora\Services\Exceptions\AgentCreateLostException;
 use Spora\Services\Exceptions\AgentNotFoundException;
 
 /**
@@ -75,7 +75,7 @@ final class AgentService implements AgentServiceInterface
         // caller can't smuggle non-Agent columns (notes, required_plugins,
         // etc.) into the insert.
         $allowed = array_intersect_key($data, array_flip(self::EDITABLE_AGENT_FIELDS));
-        $agent = Capsule::connection()->transaction(
+        return Capsule::connection()->transaction(
             function () use ($userId, $allowed): Agent {
                 $id = Capsule::table('agents')->insertGetId([
                     'user_id'                => $userId,
@@ -104,13 +104,11 @@ final class AgentService implements AgentServiceInterface
 
                 $created = Agent::find($id);
                 if ($created === null) {
-                    throw new RuntimeException("Created agent {$id} disappeared mid-create.");
+                    throw AgentCreateLostException::forId($id);
                 }
                 return $created;
             },
         );
-
-        return $agent;
     }
 
     public function getAgent(int $agentId, int $userId): ?Agent

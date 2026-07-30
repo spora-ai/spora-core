@@ -87,7 +87,12 @@ final class AgentPictureController
         $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
-        $prepared = $this->prepareUpload($request, $agentId, $userId);
+        $agentError = $this->resolveAgentForUpload($agentId, $userId);
+        if ($agentError instanceof JsonResponse) {
+            return $agentError;
+        }
+
+        $prepared = $this->prepareUpload($request);
         if ($prepared instanceof JsonResponse) {
             return $prepared;
         }
@@ -96,22 +101,42 @@ final class AgentPictureController
     }
 
     /**
-     * Resolve the agent, validate the uploaded file (size + declared mime
-     * from the multipart envelope), then read its bytes for MIME sniffing
-     * and image-decoding verification. Returns the parsed file + bytes on
-     * success or a 4xx JsonResponse on any failure. The cheap, non-byte
-     * checks run *before* `file_get_contents()` so the 1 MiB cap actually
-     * bounds upload-path memory consumption.
+     * Validate the uploaded file (size + declared mime from the multipart
+     * envelope), then read its bytes for MIME sniffing and image-decoding
+     * verification. Returns the parsed file + bytes on success or a 4xx
+     * JsonResponse on any failure. The cheap, non-byte checks run *before*
+     * `file_get_contents()` so the 1 MiB cap actually bounds upload-path
+     * memory consumption. Agent ownership is checked in the public
+     * endpoint so this helper stays under the 3-return ceiling (S1142).
      *
      * @return array{file: UploadedFile, bytes: string}|JsonResponse
      */
-    private function prepareUpload(Request $request, int $agentId, int $userId): array|JsonResponse
+    private function prepareUpload(Request $request): array|JsonResponse
     {
-        $agentError = $this->resolveAgentForUpload($agentId, $userId);
-        if ($agentError instanceof JsonResponse) {
-            return $agentError;
+        $file = $this->extractUploadedFile($request);
+        if ($file instanceof JsonResponse) {
+            return $file;
         }
 
+        $bytes = $this->readAndValidateUploadBytes($file);
+        if ($bytes instanceof JsonResponse) {
+            return $bytes;
+        }
+
+        return ['file' => $file, 'bytes' => $bytes];
+    }
+
+    /**
+     * Pull the `file` field off the multipart envelope, ensure it is a real
+     * {@see UploadedFile}, and run the cheap, envelope-level size check
+     * *before* {@see readFileBytes()} so the 1 MiB cap actually bounds
+     * upload-path memory consumption. Extracted from {@see prepareUpload()}
+     * so that helper stays under the 3-return ceiling (S1142).
+     *
+     * @return UploadedFile|JsonResponse
+     */
+    private function extractUploadedFile(Request $request): UploadedFile|JsonResponse
+    {
         $file = $request->files->get('file');
         if (!$file instanceof UploadedFile) {
             return $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST);
@@ -122,6 +147,18 @@ final class AgentPictureController
             return $sizeError;
         }
 
+        return $file;
+    }
+
+    /**
+     * Read the upload's bytes and run the byte-path validations (real
+     * length cap + sniffed MIME + decodable image). Returns the raw bytes
+     * on success or a 4xx JsonResponse on the first failure. Extracted
+     * from {@see prepareUpload()} so that helper stays under the 3-return
+     * ceiling (S1142).
+     */
+    private function readAndValidateUploadBytes(UploadedFile $file): string|JsonResponse
+    {
         $bytes = $this->readFileBytes($file);
         if (strlen($bytes) > self::MAX_AVATAR_BYTES) {
             return $this->error(
@@ -136,13 +173,13 @@ final class AgentPictureController
             return $mimeError;
         }
 
-        return ['file' => $file, 'bytes' => $bytes];
+        return $bytes;
     }
 
     /**
      * Look up the agent for an upload. Returns null on success, or a 4xx
-     * JsonResponse on failure. Extracted from {@see prepareUpload()} so that
-     * helper stays under the 3-return ceiling (S1142).
+     * JsonResponse on failure. Extracted from {@see uploadImage()} so the
+     * controller stays under the 3-return ceiling (S1142).
      */
     private function resolveAgentForUpload(int $agentId, int $userId): ?JsonResponse
     {

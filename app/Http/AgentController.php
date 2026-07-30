@@ -165,7 +165,8 @@ final class AgentController
      * Apply the agents-row write plus the optional profile_picture nested
      * object. Returns the updated Agent on success, or a JsonResponse (404
      * or 422) on failure. Extracted from `update()` so the controller stays
-     * under the 3-return ceiling (S1142).
+     * under the 3-return ceiling (S1142) and 15-cognitive-complexity ceiling
+     * (S3776).
      *
      * The `profile_picture` payload is validated *before* the agents-row
      * write so an invalid picture never partially overwrites the name /
@@ -176,29 +177,11 @@ final class AgentController
     {
         $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived', 'is_favorite'];
         $data = array_intersect_key($body, array_flip($allowed));
+        $this->coerceBooleanFlags($data);
 
-        // Booleans arrive as either real bools or boolean-strings (the form
-        // layer + curl both send 'true'/'false'). Coerce via FILTER_VALIDATE_BOOLEAN
-        // so the service receives a real bool regardless of transport.
-        // notes stays a raw string (markdown) — never coerced.
-        foreach (['is_pinned', 'is_archived', 'is_favorite'] as $boolKey) {
-            if (array_key_exists($boolKey, $data)) {
-                $data[$boolKey] = filter_var($data[$boolKey], FILTER_VALIDATE_BOOLEAN);
-            }
-        }
-
-        // Validate the profile_picture payload shape first. When the key is
-        // present it must be a JSON object — a scalar, list, or null
-        // payload returns 422 so the agents row is never partially updated.
-        if (array_key_exists('profile_picture', $body) && $this->pictureService !== null) {
-            $pictureTypeError = $this->validateProfilePictureType($body['profile_picture']);
-            if ($pictureTypeError !== null) {
-                return $pictureTypeError;
-            }
-            $pictureShapeError = $this->validateProfilePicture($body['profile_picture']);
-            if ($pictureShapeError !== null) {
-                return $pictureShapeError;
-            }
+        $pictureError = $this->validateProfilePicturePayload($body);
+        if ($pictureError !== null) {
+            return $pictureError;
         }
 
         $agent = $this->agentService->updateAgent($agentId, $userId, $data);
@@ -206,21 +189,76 @@ final class AgentController
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        // profile_picture is a nested object — written only when the
-        // payload was a well-formed object (the type guard above ensures
-        // we never hit this branch with a scalar/list/null). Both writes
-        // share the agents table update, so a throw on the picture path
-        // surfaces a 5xx and the operator can re-issue the PATCH.
-        if (is_array($body['profile_picture'] ?? null) && $this->pictureService !== null) {
-            $this->pictureService->updateAvatar(
-                $agentId,
-                isset($body['profile_picture']['archetype']) ? (string) $body['profile_picture']['archetype'] : null,
-                isset($body['profile_picture']['variant_key']) ? (string) $body['profile_picture']['variant_key'] : null,
-                isset($body['profile_picture']['palette_key']) ? (string) $body['profile_picture']['palette_key'] : null,
-            );
-        }
+        $this->applyProfilePictureUpdate($agentId, $body);
 
         return $agent;
+    }
+
+    /**
+     * Coerce the boolean-flag PATCH fields (is_pinned / is_archived /
+     * is_favorite) to real bools. Booleans arrive as either real bools or
+     * boolean-strings (the form layer + curl both send 'true'/'false').
+     * FILTER_VALIDATE_BOOLEAN normalises both to a real bool regardless of
+     * transport. notes stays a raw string (markdown) — never coerced.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function coerceBooleanFlags(array &$data): void
+    {
+        foreach (['is_pinned', 'is_archived', 'is_favorite'] as $boolKey) {
+            if (array_key_exists($boolKey, $data)) {
+                $data[$boolKey] = filter_var($data[$boolKey], FILTER_VALIDATE_BOOLEAN);
+            }
+        }
+    }
+
+    /**
+     * Validate the profile_picture nested payload (type + shape + enum
+     * values). Returns the first 422 JsonResponse on any failure, or null
+     * when the key is absent, the picture service isn't wired, or the
+     * payload is well-formed. Extracted from {@see applyAgentPatch()} so
+     * the controller body stays under the 15-cognitive-complexity ceiling.
+     *
+     * The `profile_picture` payload is validated *before* the agents-row
+     * write so an invalid picture never partially overwrites the name /
+     * description / system_prompt.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function validateProfilePicturePayload(array $body): ?JsonResponse
+    {
+        if (!array_key_exists('profile_picture', $body) || $this->pictureService === null) {
+            return null;
+        }
+        $pictureTypeError = $this->validateProfilePictureType($body['profile_picture']);
+        if ($pictureTypeError !== null) {
+            return $pictureTypeError;
+        }
+        return $this->validateProfilePicture($body['profile_picture']);
+    }
+
+    /**
+     * Write the profile_picture nested object (archetype / variant_key /
+     * palette_key) when the payload is a well-formed object. No-op for
+     * missing / null / scalar / list payloads (the shape guard in
+     * {@see validateProfilePicturePayload()} ensures we never reach this
+     * helper with a non-object). Both writes share the agents table
+     * update, so a throw on the picture path surfaces a 5xx and the
+     * operator can re-issue the PATCH.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function applyProfilePictureUpdate(int $agentId, array $body): void
+    {
+        if (!is_array($body['profile_picture'] ?? null) || $this->pictureService === null) {
+            return;
+        }
+        $this->pictureService->updateAvatar(
+            $agentId,
+            isset($body['profile_picture']['archetype']) ? (string) $body['profile_picture']['archetype'] : null,
+            isset($body['profile_picture']['variant_key']) ? (string) $body['profile_picture']['variant_key'] : null,
+            isset($body['profile_picture']['palette_key']) ? (string) $body['profile_picture']['palette_key'] : null,
+        );
     }
 
     /**
