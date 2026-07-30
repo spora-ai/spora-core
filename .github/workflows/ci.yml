@@ -101,6 +101,20 @@ jobs:
       - name: Run PHPStan
         run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=2G
 
+      # Generated OpenAPI drift + conflict-marker guard. Regenerating the
+      # spec inside CI keeps the committed openapi.json honest — when a
+      # PR adds an endpoint via attributes, `composer openapi` should be
+      # rerun and the result committed; the check below fails if a PR
+      # touches the file without regenerating it, and also blocks merge
+      # conflict markers (`<<<<<<<`) sneaking into the JSON blob.
+      - name: Check OpenAPI drift
+        if: github.event_name == 'pull_request'
+        run: composer openapi:check
+
+      - name: Check for merge-conflict markers
+        if: github.event_name == 'pull_request'
+        run: git diff --check origin/main...HEAD
+
   sonar:
     name: SonarCloud scan
     needs: test
