@@ -166,6 +166,11 @@ final class AgentController
      * object. Returns the updated Agent on success, or a JsonResponse (404
      * or 422) on failure. Extracted from `update()` so the controller stays
      * under the 3-return ceiling (S1142).
+     *
+     * The `profile_picture` payload is validated *before* the agents-row
+     * write so an invalid picture never partially overwrites the name /
+     * description / system_prompt. The two writes are kept in a single
+     * service call so either both succeed or the agents row is unchanged.
      */
     private function applyAgentPatch(int $agentId, int $userId, array $body): Agent|JsonResponse
     {
@@ -182,23 +187,57 @@ final class AgentController
             }
         }
 
+        // Validate the profile_picture payload shape first. When the key is
+        // present it must be a JSON object — a scalar, list, or null
+        // payload returns 422 so the agents row is never partially updated.
+        if (array_key_exists('profile_picture', $body) && $this->pictureService !== null) {
+            $pictureTypeError = $this->validateProfilePictureType($body['profile_picture']);
+            if ($pictureTypeError !== null) {
+                return $pictureTypeError;
+            }
+            $pictureShapeError = $this->validateProfilePicture($body['profile_picture']);
+            if ($pictureShapeError !== null) {
+                return $pictureShapeError;
+            }
+        }
+
         $agent = $this->agentService->updateAgent($agentId, $userId, $data);
         if ($agent === null) {
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        // profile_picture is a nested object — handled after the agents-row
-        // write so a 422 on the picture payload doesn't block a successful
-        // name/description/system_prompt PATCH. The avatar write is idempotent
-        // and free of side effects (no event emission, no async jobs).
+        // profile_picture is a nested object — written only when the
+        // payload was a well-formed object (the type guard above ensures
+        // we never hit this branch with a scalar/list/null). Both writes
+        // share the agents table update, so a throw on the picture path
+        // surfaces a 5xx and the operator can re-issue the PATCH.
         if (is_array($body['profile_picture'] ?? null) && $this->pictureService !== null) {
-            $pictureError = $this->applyProfilePicture($agentId, $body['profile_picture']);
-            if ($pictureError !== null) {
-                return $pictureError;
-            }
+            $this->pictureService->updateAvatar(
+                $agentId,
+                isset($body['profile_picture']['archetype']) ? (string) $body['profile_picture']['archetype'] : null,
+                isset($body['profile_picture']['variant_key']) ? (string) $body['profile_picture']['variant_key'] : null,
+                isset($body['profile_picture']['palette_key']) ? (string) $body['profile_picture']['palette_key'] : null,
+            );
         }
 
         return $agent;
+    }
+
+    /**
+     * Reject non-object `profile_picture` payloads. Returns a 422 when the
+     * caller sent a scalar, list, or null under `profile_picture`; null
+     * when the payload is a JSON object. Called only when the key is
+     * present in the body, so a missing `profile_picture` is not a 422.
+     */
+    private function validateProfilePictureType(mixed $picture): ?JsonResponse
+    {
+        if (!is_array($picture)) {
+            return $this->unprocessable(
+                'PROFILE_PICTURE_TYPE',
+                "Field 'profile_picture' must be a JSON object.",
+            );
+        }
+        return null;
     }
 
     /**
@@ -218,30 +257,10 @@ final class AgentController
     }
 
     /**
-     * Apply the `profile_picture` nested object to the agent's picture row.
-     * Surfaces a 422 with the field path when the payload is invalid; returns
-     * null on success.
-     */
-    private function applyProfilePicture(int $agentId, array $picture): ?JsonResponse
-    {
-        $error = $this->validateProfilePicture($picture);
-        if ($error !== null) {
-            return $error;
-        }
-
-        $this->pictureService->updateAvatar(
-            $agentId,
-            isset($picture['archetype']) ? (string) $picture['archetype'] : null,
-            isset($picture['variant_key']) ? (string) $picture['variant_key'] : null,
-            isset($picture['palette_key']) ? (string) $picture['palette_key'] : null,
-        );
-        return null;
-    }
-
-    /**
      * Validate the profile_picture nested payload shape. Returns a 422
      * JsonResponse on the first invalid field, or null when the payload
-     * is well-formed.
+     * is well-formed. The shape guard (scalar/list/null rejection) is
+     * handled in {@see validateProfilePictureType()} before this runs.
      */
     private function validateProfilePicture(array $picture): ?JsonResponse
     {

@@ -11,12 +11,13 @@ use Spora\Http\AgentPictureController;
 use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Services\AgentPictures\AgentPictureService;
+use Spora\Services\AgentPictures\Archetype;
+use Spora\Services\AgentPictures\Palette;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\LocalAssetStore;
-use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
@@ -155,27 +156,11 @@ function buildController(AgentPictureService $service): AgentPictureController
     $assetStore = new AutoAssetStore($dataUrl, $local, 1_048_576);
     $mediaArchive = \Tests\Support\MediaArchiveTestSupport::buildService($assetStore);
 
-    $converters = \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry();
-    $driverFactory = new \Spora\Drivers\DriverFactory(
-        new \Psr\Log\NullLogger(),
-        new \Spora\Services\LLMConfigService(
-            new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
-            [\Spora\Drivers\OpenAICompatibleDriver::class],
-        ),
-        60,
-    );
-    $allowedTypes = new MediaAllowedTypesService(
-        $converters,
-        $driverFactory,
-        ['png', 'jpeg', 'webp'],
-    );
-
     return new AgentPictureController(
         bootAuthLayer(),
         $agentService,
         $service,
         $mediaArchive,
-        $allowedTypes,
         new MimeSniffer(),
     );
 }
@@ -187,9 +172,25 @@ test('DELETE /agents/{id}/picture/image returns 404 when the agent does not exis
     expect($resp->getStatusCode())->toBe(404);
 });
 
-test('DELETE /agents/{id}/picture/image returns 200 and falls back to defaults', function (): void {
+test('DELETE /agents/{id}/picture/image returns 200 and preserves the previous avatar', function (): void {
     $service = new AgentPictureService();
     $service->updateAvatar(1, 'researcher', 'v1', 'violet');
+
+    $req = Request::create('/api/v1/agents/1/picture/image', 'DELETE');
+    $req->attributes->set('id', 1);
+    $resp = buildController($service)->deleteImage($req);
+
+    expect($resp->getStatusCode())->toBe(200);
+    $picture = AgentPicture::where('agent_id', 1)->first();
+    // detach() restores the operator's prior avatar selection instead of
+    // resetting to the hard-coded defaults — see AgentPictureService::detachImage().
+    expect($picture->archetype)->toBe('researcher');
+    expect($picture->palette_key)->toBe('violet');
+});
+
+test('DELETE /agents/{id}/picture/image falls back to defaults when no avatar was set', function (): void {
+    $service = new AgentPictureService();
+    // No prior updateAvatar — getOrCreate seeds the defaults.
 
     $req = Request::create('/api/v1/agents/1/picture/image', 'DELETE');
     $req->attributes->set('id', 1);
@@ -250,5 +251,67 @@ test('POST /agents/{id}/picture/image accepts a valid PNG and persists the agent
     $picture = AgentPicture::where('agent_id', 1)->first();
     expect($picture)->not->toBeNull();
     expect($picture->media_asset_id)->not->toBeNull();
-    expect($picture->archetype)->toBeNull();
+    // upload preserves the avatar metadata so a follow-up DELETE
+    // restores the operator's prior archetype/palette choice.
+    expect($picture->archetype)->toBe(Archetype::Assistant->value);
+    expect($picture->palette_key)->toBe(Palette::Slate->value);
+});
+
+test('POST /agents/{id}/picture/image rejects a PDF body even when the client says image/png', function (): void {
+    // Bytes look like a PDF (start with %PDF-). The client header lies
+    // and claims image/png. Must be rejected by the byte sniffer +
+    // image decoder.
+    $tmp = tempnam(sys_get_temp_dir(), 'spora-avatar-pdf');
+    file_put_contents($tmp, '%PDF-1.4' . str_repeat("\x00", 256));
+    $uploaded = new UploadedFile($tmp, 'avatar.png', 'image/png', null, true);
+    $req = Request::create('/api/v1/agents/1/picture/image', 'POST');
+    $req->files->set('file', $uploaded);
+    $req->attributes->set('id', 1);
+
+    $resp = buildController(new AgentPictureService())->uploadImage($req);
+
+    expect($resp->getStatusCode())->toBe(415);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('UNSUPPORTED_MEDIA_TYPE');
+    expect(AgentPicture::where('agent_id', 1)->first())->toBeNull();
+});
+
+test('POST /agents/{id}/picture/image rejects plain text even when the LLM does not support images', function (): void {
+    // The agent does not have an LLM driver_config, so the legacy
+    // MediaAllowedTypesService would have rejected image types entirely
+    // while still accepting text. The new avatar-only validator must
+    // still reject text — avatars are always raster, regardless of LLM
+    // capability.
+    $tmp = tempnam(sys_get_temp_dir(), 'spora-avatar-text');
+    file_put_contents($tmp, "Hello, this is plain text.\n" . str_repeat('a', 64));
+    $uploaded = new UploadedFile($tmp, 'avatar.txt', 'text/plain', null, true);
+    $req = Request::create('/api/v1/agents/1/picture/image', 'POST');
+    $req->files->set('file', $uploaded);
+    $req->attributes->set('id', 1);
+
+    $resp = buildController(new AgentPictureService())->uploadImage($req);
+
+    expect($resp->getStatusCode())->toBe(415);
+    expect(AgentPicture::where('agent_id', 1)->first())->toBeNull();
+});
+
+test('POST /agents/{id}/picture/image accepts a valid WebP with the RIFF + WEBP markers', function (): void {
+    // 1x1 valid WebP (smallest possible — RIFF container with VP8 chunk).
+    // bytes (hex):
+    // 52 49 46 46 (=RIFF)
+    // 1a 00 00 00 (=26 bytes follow)
+    // 57 45 42 50 (=WEBP)
+    // 56 50 38 4c (=VP8L)
+    // 0d 00 00 00 (=13 bytes)
+    // 2f 00 00 00 00 00 80 3f 00 00 00 00 00
+    $bytes = "RIFF\x1a\x00\x00\x00WEBPVP8L\x0d\x00\x00\x00\x2f\x00\x00\x00\x00\x00\x80\x3f\x00\x00\x00\x00\x00";
+    $tmp = tempnam(sys_get_temp_dir(), 'spora-avatar-webp');
+    file_put_contents($tmp, $bytes);
+    $uploaded = new UploadedFile($tmp, 'avatar.webp', 'image/webp', null, true);
+    $req = Request::create('/api/v1/agents/1/picture/image', 'POST');
+    $req->files->set('file', $uploaded);
+    $req->attributes->set('id', 1);
+
+    $resp = buildController(new AgentPictureService())->uploadImage($req);
+
+    expect($resp->getStatusCode())->toBe(201);
 });

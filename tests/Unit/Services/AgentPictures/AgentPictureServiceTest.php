@@ -6,10 +6,13 @@ namespace Tests\Unit\Services\AgentPictures;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
+use RuntimeException;
+use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentPictures\Archetype;
 use Spora\Services\AgentPictures\Palette;
+use Spora\Services\Exceptions\AgentPictureNotOwnedException;
 
 /**
  * Unit tests for the AgentPictureService — the single source of truth for
@@ -72,8 +75,8 @@ test('updateAvatar rejects unknown variant_key', function (): void {
 })->throws(InvalidArgumentException::class, "Unknown variant_key 'v9'");
 
 test('updateAvatar clears any attached image', function (): void {
-    $asset = seedMediaAsset();
-    $this->service->attachImage(1, $asset);
+    $asset = seedMediaAsset($this->userId);
+    $this->service->attachImage(agentPictureLoadAgent(1), $asset);
 
     $picture = $this->service->updateAvatar(1, 'researcher', null, 'violet');
 
@@ -81,22 +84,47 @@ test('updateAvatar clears any attached image', function (): void {
     expect($picture->archetype)->toBe('researcher');
 });
 
-test('attachImage swaps in the upload and clears the avatar fields', function (): void {
+test('attachImage swaps in the upload and preserves the avatar fields', function (): void {
     $this->service->updateAvatar(1, 'researcher', 'v1', 'violet');
 
-    $asset = seedMediaAsset();
+    $asset = seedMediaAsset($this->userId);
 
-    $picture = $this->service->attachImage(1, $asset);
+    $picture = $this->service->attachImage(agentPictureLoadAgent(1), $asset);
 
     expect($picture->media_asset_id)->toBe('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
-    expect($picture->archetype)->toBeNull();
-    expect($picture->variant_key)->toBeNull();
-    expect($picture->palette_key)->toBeNull();
+    // avatar fields preserved so detach restores the operator's previous choice
+    expect($picture->archetype)->toBe('researcher');
+    expect($picture->variant_key)->toBe('v1');
+    expect($picture->palette_key)->toBe('violet');
 });
 
-test('detachImage clears the image and falls back to defaults', function (): void {
-    $asset = seedMediaAsset();
-    $this->service->attachImage(1, $asset);
+test('attachImage rejects assets owned by a different user', function (): void {
+    $asset = seedMediaAsset($this->userId + 1);
+    $this->service->attachImage(agentPictureLoadAgent(1), $asset);
+})->throws(AgentPictureNotOwnedException::class);
+
+test('attachImage rejects assets with no owner (legacy rows)', function (): void {
+    $asset = seedMediaAsset(null);
+    $this->service->attachImage(agentPictureLoadAgent(1), $asset);
+})->throws(AgentPictureNotOwnedException::class);
+
+test('detachImage clears the image and preserves the previous avatar', function (): void {
+    $asset = seedMediaAsset($this->userId);
+    $this->service->updateAvatar(1, 'researcher', 'v1', 'violet');
+    $this->service->attachImage(agentPictureLoadAgent(1), $asset);
+
+    $picture = $this->service->detachImage(1);
+
+    expect($picture->media_asset_id)->toBeNull();
+    // avatar fields are preserved so the operator's prior choice comes back
+    expect($picture->archetype)->toBe('researcher');
+    expect($picture->variant_key)->toBe('v1');
+    expect($picture->palette_key)->toBe('violet');
+});
+
+test('detachImage falls back to defaults when there was no previous avatar', function (): void {
+    $asset = seedMediaAsset($this->userId);
+    $this->service->attachImage(agentPictureLoadAgent(1), $asset);
 
     $picture = $this->service->detachImage(1);
 
@@ -105,9 +133,12 @@ test('detachImage clears the image and falls back to defaults', function (): voi
     expect($picture->palette_key)->toBe(Palette::Slate->value);
 });
 
-test('toWireShape returns null for an agent with no picture', function (): void {
+test('toWireShape returns the default avatar shape for an agent with no picture', function (): void {
     $wire = $this->service->toWireShape(1);
-    expect($wire)->toBeNull();
+    expect($wire['kind'])->toBe('avatar');
+    expect($wire['archetype'])->toBe(Archetype::Assistant->value);
+    expect($wire['palette_key'])->toBe(Palette::Slate->value);
+    expect($wire['variant_key'])->toMatch('/^v[0-2]$/');
 });
 
 test('toWireShape returns the resolved avatar shape for an archetype picture', function (): void {
@@ -136,8 +167,8 @@ test('toWireShape resolves variant_key from fnv1a(agent_id) when unset', functio
 });
 
 test('toWireShape returns the image shape for an uploaded picture', function (): void {
-    $asset = seedMediaAsset();
-    $this->service->attachImage(1, $asset);
+    $asset = seedMediaAsset($this->userId);
+    $this->service->attachImage(agentPictureLoadAgent(1), $asset);
 
     $wire = $this->service->toWireShape(1);
 
@@ -178,17 +209,26 @@ test('normaliseVariantKey accepts v0, v1, v2 only', function (): void {
     $this->service->normaliseVariantKey('v3');
 })->throws(InvalidArgumentException::class);
 
-function seedMediaAsset(): MediaAsset
+function seedMediaAsset(?int $userId): MediaAsset
 {
     $id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     Capsule::table('media_assets')->insert([
         'id' => $id,
         'asset_url' => "/api/v1/assets/{$id}.png",
         'storage_mode' => 'local',
-        'user_id' => null,
+        'user_id' => $userId,
         'upload_source' => 'avatar',
         'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
     return MediaAsset::find($id);
+}
+
+function agentPictureLoadAgent(int $agentId): Agent
+{
+    $agent = Agent::query()->find($agentId);
+    if ($agent === null) {
+        throw new RuntimeException("Agent {$agentId} not found in test setup.");
+    }
+    return $agent;
 }

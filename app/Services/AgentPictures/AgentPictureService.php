@@ -7,8 +7,10 @@ namespace Spora\Services\AgentPictures;
 use DateTimeInterface;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
+use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\MediaAsset;
+use Spora\Services\Exceptions\AgentPictureNotOwnedException;
 
 /**
  * Picture editor for Agents — owns the CRUD surface and the wire-format
@@ -24,7 +26,10 @@ use Spora\Models\MediaAsset;
  *         uniqueness across devices/reloads.
  *       - 'vN' with N ∈ [0..2] → keep as-is (operator override).
  *   - `media_asset_id` references a row owned by the same user as the
- *     agent (ownership check is by `media_assets.user_id`).
+ *     agent (ownership check is by `media_assets.user_id`). When the
+ *     asset row has no `user_id` (legacy data), the attach is rejected
+ *     with {@see AgentPictureNotOwnedException} rather than silently
+ *     allowed.
  *
  * The `toWireShape()` method is the single source of truth for the
  * `Agent.profile_picture` JSON contract — the enum colours are resolved
@@ -43,6 +48,22 @@ final class AgentPictureService
     public const DEFAULT_PALETTE = Palette::Slate;
 
     public function getOrCreate(int $agentId): AgentPicture
+    {
+        $existing = AgentPicture::where('agent_id', $agentId)->first();
+        if ($existing instanceof AgentPicture) {
+            return $existing;
+        }
+
+        return $this->createDefaultPicture($agentId);
+    }
+
+    /**
+     * Insert the default picture row for an agent. Idempotent — looks up
+     * the existing row first and returns it when one is already present.
+     * Centralised so creation paths (service, importer, template apply)
+     * share the same defaults.
+     */
+    public function createDefaultPicture(int $agentId): AgentPicture
     {
         $existing = AgentPicture::where('agent_id', $agentId)->first();
         if ($existing instanceof AgentPicture) {
@@ -68,10 +89,10 @@ final class AgentPictureService
     }
 
     /**
-     * Apply an archetype avatar selection. Either `archetype` or
-     * `paletteKey` may be null to leave the existing value untouched;
-     * `variantKey` null means "auto-derive from agent_id" (not "keep"),
-     * so the caller can opt the agent out of an operator override.
+     * Apply an archetype avatar selection. Any null argument leaves the
+     * existing value untouched (partial update). Non-null values are
+     * normalised: `archetype`/`palette_key` against the enum, `variant_key`
+     * against the `v0|v1|v2` regex.
      *
      * @throws InvalidArgumentException on unknown archetype or palette.
      */
@@ -112,40 +133,60 @@ final class AgentPictureService
      * Bind an uploaded image as the agent's picture. The asset must
      * already be ingested via MediaArchiveService::ingest() — this
      * method only sets the FK on the agent_pictures row.
+     *
+     * Ownership invariant: the asset's `user_id` must match the agent's
+     * `user_id`. Mismatches (and assets with a NULL user_id) are rejected
+     * with {@see AgentPictureNotOwnedException} — the HTTP path is
+     * already user-scoped, but the service-level guard prevents future
+     * callers from attaching a cross-user asset by accident.
+     *
+     * The avatar selection (archetype + variant + palette) is preserved
+     * so removing the uploaded image reverts to the operator's previous
+     * avatar choice rather than the hard-coded defaults.
+     *
+     * @throws AgentPictureNotOwnedException when the asset's user does not match.
      */
-    public function attachImage(int $agentId, MediaAsset $asset): AgentPicture
+    public function attachImage(Agent $agent, MediaAsset $asset): AgentPicture
     {
-        $picture = $this->getOrCreate($agentId);
+        $this->assertAssetOwnership($agent, $asset);
+
+        $picture = $this->getOrCreate((int) $agent->id);
 
         Capsule::table('agent_pictures')
             ->where('id', $picture->id)
             ->update([
                 'media_asset_id' => $asset->id,
-                'archetype'      => null,
-                'variant_key'    => null,
-                'palette_key'    => null,
                 'updated_at'     => date(self::DATETIME_FORMAT),
+                // archetype + variant + palette are intentionally untouched
+                // so a follow-up detach restores the operator's previous
+                // avatar selection instead of the hard-coded defaults.
             ]);
         $picture->refresh();
         return $picture;
     }
 
     /**
-     * Clear the uploaded image and fall back to the default archetype
-     * avatar. The underlying `media_assets` row is NOT deleted — binary
-     * GC is a separate ops concern (see backlog).
+     * Clear the uploaded image and fall back to the previously selected
+     * archetype avatar (or the defaults when none was ever picked). The
+     * underlying `media_assets` row is NOT deleted — binary GC is a
+     * separate ops concern (see backlog).
      */
     public function detachImage(int $agentId): AgentPicture
     {
         $picture = $this->getOrCreate($agentId);
 
+        // When an archetype was set previously, preserve it. When only an
+        // image was ever attached, fall back to the service defaults so
+        // the agent always renders something meaningful.
+        $hasArchetype = $picture->archetype !== null || $picture->palette_key !== null;
+
         Capsule::table('agent_pictures')
             ->where('id', $picture->id)
             ->update([
                 'media_asset_id' => null,
-                'archetype'      => self::DEFAULT_ARCHETYPE->value,
-                'variant_key'    => null,
-                'palette_key'    => self::DEFAULT_PALETTE->value,
+                'archetype'      => $hasArchetype ? $picture->archetype : self::DEFAULT_ARCHETYPE->value,
+                'variant_key'    => $hasArchetype ? $picture->variant_key : null,
+                'palette_key'    => $hasArchetype ? $picture->palette_key : self::DEFAULT_PALETTE->value,
                 'updated_at'     => date(self::DATETIME_FORMAT),
             ]);
         $picture->refresh();
@@ -207,18 +248,52 @@ final class AgentPictureService
 
     /**
      * Build the wire-format `profile_picture` payload for an agent.
-     * Returns null when the agent has no picture at all (caller may
-     * treat null as "use defaults").
+     * Returns the default avatar shape when the agent has no persisted
+     * row — callers (HTTP list/create/show) get a uniform contract and
+     * the dashboard renders the deterministic default everywhere instead
+     * of falling back to initials.
      *
-     * @return array<string, mixed>|null
+     * @return array<string, mixed>
      */
-    public function toWireShape(int $agentId): ?array
+    public function toWireShape(int $agentId): array
     {
         $picture = AgentPicture::where('agent_id', $agentId)->first();
         if ($picture instanceof AgentPicture) {
             return $this->pictureToWire($picture);
         }
-        return null;
+        return $this->defaultWireShape($agentId);
+    }
+
+    /**
+     * Build the wire-format shape from an in-memory picture + (optionally)
+     * pre-loaded media-asset. Use this when the caller has already eager-
+     * loaded the picture + media relation, so {@see pictureToWire()} does
+     * not re-query.
+     */
+    public function pictureToWireWithAsset(AgentPicture $picture, ?MediaAsset $asset): array
+    {
+        if ($picture->media_asset_id !== null && $asset instanceof MediaAsset) {
+            return $this->imageWireShape($asset);
+        }
+        return $this->avatarWireShape($picture);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function defaultWireShape(int $agentId): array
+    {
+        $variantKey = $this->resolveVariantKey($agentId);
+        return [
+            'kind'             => 'avatar',
+            'archetype'        => self::DEFAULT_ARCHETYPE->value,
+            'variant_key'      => $variantKey,
+            'palette_key'      => self::DEFAULT_PALETTE->value,
+            'fg_color'         => self::DEFAULT_PALETTE->foreground(),
+            'bg_color'         => self::DEFAULT_PALETTE->background(),
+            'image_url'        => null,
+            'image_updated_at' => null,
+        ];
     }
 
     /**
@@ -228,27 +303,43 @@ final class AgentPictureService
     {
         if ($picture->media_asset_id !== null) {
             $asset = MediaAsset::find($picture->media_asset_id);
-            return [
-                'kind'             => 'image',
-                'archetype'        => null,
-                'variant_key'      => null,
-                'palette_key'      => null,
-                'fg_color'         => null,
-                'bg_color'         => null,
-                'image_url'        => $asset !== null ? $asset->asset_url : null,
-                'image_updated_at' => $asset !== null && $asset->updated_at !== null
-                    ? $asset->updated_at->format(DateTimeInterface::ATOM)
-                    : null,
-            ];
+            return $this->imageWireShape($asset instanceof MediaAsset ? $asset : null);
         }
 
+        return $this->avatarWireShape($picture);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function imageWireShape(?MediaAsset $asset): array
+    {
+        return [
+            'kind'             => 'image',
+            'archetype'        => null,
+            'variant_key'      => null,
+            'palette_key'      => null,
+            'fg_color'         => null,
+            'bg_color'         => null,
+            'image_url'        => $asset !== null ? $asset->asset_url : null,
+            'image_updated_at' => $asset !== null && $asset->updated_at !== null
+                ? $asset->updated_at->format(DateTimeInterface::ATOM)
+                : null,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function avatarWireShape(AgentPicture $picture): array
+    {
         $archetype = $picture->archetype !== null
             ? Archetype::tryFrom($picture->archetype) ?? self::DEFAULT_ARCHETYPE
             : self::DEFAULT_ARCHETYPE;
         $palette = $picture->palette_key !== null
             ? Palette::tryFrom($picture->palette_key) ?? self::DEFAULT_PALETTE
             : self::DEFAULT_PALETTE;
-        $variantKey = $picture->variant_key ?? $this->resolveVariantKey($picture->agent_id);
+        $variantKey = $picture->variant_key ?? $this->resolveVariantKey((int) $picture->agent_id);
 
         return [
             'kind'             => 'avatar',
@@ -260,6 +351,20 @@ final class AgentPictureService
             'image_url'        => null,
             'image_updated_at' => null,
         ];
+    }
+
+    /**
+     * Verify that `asset->user_id` matches `agent->user_id`. Reject assets
+     * owned by a different user or by no user at all (NULL). The HTTP
+     * layer guards this already, but the service contract is the
+     * authoritative one — future internal callers (e.g. agent-tool image
+     * picking) might not have that guarantee.
+     */
+    private function assertAssetOwnership(Agent $agent, MediaAsset $asset): void
+    {
+        if ($asset->user_id === null || (int) $asset->user_id !== (int) $agent->user_id) {
+            throw AgentPictureNotOwnedException::forAsset((int) $agent->id, $asset->id);
+        }
     }
 
     private function resolveVariantKey(int $agentId): string

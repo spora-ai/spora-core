@@ -241,3 +241,53 @@ test('PATCH /agents/{id} profile_picture changes survive the agents table update
     expect($body['data']['agent']['profile_picture']['archetype'])->toBe('analyst');
     expect($body['data']['agent']['profile_picture']['palette_key'])->toBe('violet');
 });
+
+test('PATCH /agents/{id} rejects a string profile_picture with 422 and leaves the name unchanged', function (): void {
+    $userId = bootAuth(bootAuthLayer());
+    seedProfilePictureAgent(13, $userId);
+    \Spora\Models\Agent::query()->find(13)->update(['name' => 'Original']);
+
+    $resp = patchProfilePicture(13, [
+        'name'             => 'Renamed',
+        'profile_picture'  => 'not-an-object',
+    ]);
+
+    expect($resp->getStatusCode())->toBe(422);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('PROFILE_PICTURE_TYPE');
+    // Critical: the agents row is unchanged. The picture payload was
+    // validated BEFORE the name write so a 422 doesn't partial-update.
+    $agent = \Spora\Models\Agent::query()->find(13);
+    expect($agent->name)->toBe('Original');
+});
+
+test('PATCH /agents/{id} rejects a null profile_picture with 422 and leaves the name unchanged', function (): void {
+    $userId = bootAuth(bootAuthLayer());
+    seedProfilePictureAgent(14, $userId);
+    \Spora\Models\Agent::query()->find(14)->update(['name' => 'Original']);
+
+    $resp = patchProfilePicture(14, [
+        'name'             => 'Renamed',
+        'profile_picture'  => null,
+    ]);
+
+    expect($resp->getStatusCode())->toBe(422);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('PROFILE_PICTURE_TYPE');
+    $agent = \Spora\Models\Agent::query()->find(14);
+    expect($agent->name)->toBe('Original');
+});
+
+test('PATCH /agents/{id} with an invalid picture key does not overwrite the agents row', function (): void {
+    $userId = bootAuth(bootAuthLayer());
+    seedProfilePictureAgent(15, $userId);
+    \Spora\Models\Agent::query()->find(15)->update(['name' => 'Original']);
+
+    $resp = patchProfilePicture(15, [
+        'name'             => 'Renamed',
+        'profile_picture'  => ['archetype' => 'astronaut'],
+    ]);
+
+    expect($resp->getStatusCode())->toBe(422);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('PROFILE_PICTURE_VALUE');
+    $agent = \Spora\Models\Agent::query()->find(15);
+    expect($agent->name)->toBe('Original');
+});

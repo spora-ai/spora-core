@@ -6,10 +6,10 @@ namespace Spora\Http;
 
 use Spora\Auth\AuthService;
 use Spora\Http\Exceptions\AvatarFileReadFailedException;
+use Spora\Models\Agent;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
-use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaIngestRequest;
@@ -51,12 +51,30 @@ final class AgentPictureController
      */
     private const MAX_AVATAR_BYTES = 1 * 1024 * 1024;
 
+    /**
+     * Avatar MIME allowlist. Distinct from {@see MediaAllowedTypesService}
+     * because avatars are *always* raster images, regardless of whether
+     * the agent's LLM accepts image input. Pulling the LLM capability
+     * into this check was the original bug: a text-only agent would
+     * reject otherwise-valid PNG/JPEG/WebP uploads, while a PDF or JSON
+     * byte stream could pass whenever the allowlist happened to include
+     * it. Bytes are sniffed (the client `Content-Type` header is ignored),
+     * then decoded to confirm PHP can actually render them — so a
+     * `image/png` Content-Type header with non-image bytes is rejected.
+     *
+     * @var list<string>
+     */
+    private const ALLOWED_AVATAR_MIMES = [
+        'image/png',
+        'image/jpeg',
+        'image/webp',
+    ];
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly AgentServiceInterface $agentService,
         private readonly AgentPictureService $pictureService,
         private readonly MediaArchiveService $mediaArchive,
-        private readonly MediaAllowedTypesService $allowedTypes,
         private readonly MimeSniffer $sniffer,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
     ) {}
@@ -78,10 +96,12 @@ final class AgentPictureController
     }
 
     /**
-     * Resolve the agent, validate the uploaded file, and return the parsed
-     * file + bytes — or a 4xx JsonResponse on any failure. Extracted from
-     * `uploadImage()` so the public action stays under the 3-return
-     * ceiling (S1142) and the helper handles the entire pre-flight path.
+     * Resolve the agent, validate the uploaded file (size + declared mime
+     * from the multipart envelope), then read its bytes for MIME sniffing
+     * and image-decoding verification. Returns the parsed file + bytes on
+     * success or a 4xx JsonResponse on any failure. The cheap, non-byte
+     * checks run *before* `file_get_contents()` so the 1 MiB cap actually
+     * bounds upload-path memory consumption.
      *
      * @return array{file: UploadedFile, bytes: string}|JsonResponse
      */
@@ -92,32 +112,31 @@ final class AgentPictureController
             return $agentError;
         }
 
-        $bytesOrError = $this->readAndValidateUpload($request, $agentId);
-        if ($bytesOrError instanceof JsonResponse) {
-            return $bytesOrError;
-        }
-
-        return ['file' => $request->files->get('file'), 'bytes' => $bytesOrError];
-    }
-
-    /**
-     * Read the uploaded file off the request and run the size+MIME
-     * validations. Returns the bytes on success or a 4xx JsonResponse on
-     * failure. Extracted from {@see prepareUpload()} so that helper stays
-     * under the 3-return ceiling (S1142).
-     */
-    private function readAndValidateUpload(Request $request, int $agentId): string|JsonResponse
-    {
         $file = $request->files->get('file');
         if (!$file instanceof UploadedFile) {
             return $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST);
         }
-        $bytes = $this->readFileBytes($file);
-        $validationError = $this->validateUpload($file, $bytes, $agentId);
-        if ($validationError !== null) {
-            return $validationError;
+
+        $sizeError = $this->validateUploadSize($file);
+        if ($sizeError !== null) {
+            return $sizeError;
         }
-        return $bytes;
+
+        $bytes = $this->readFileBytes($file);
+        if (strlen($bytes) > self::MAX_AVATAR_BYTES) {
+            return $this->error(
+                'PAYLOAD_TOO_LARGE',
+                sprintf('Avatar image exceeds %d bytes.', self::MAX_AVATAR_BYTES),
+                Response::HTTP_REQUEST_ENTITY_TOO_LARGE,
+            );
+        }
+
+        $mimeError = $this->validateUploadMime($bytes);
+        if ($mimeError !== null) {
+            return $mimeError;
+        }
+
+        return ['file' => $file, 'bytes' => $bytes];
     }
 
     /**
@@ -158,7 +177,10 @@ final class AgentPictureController
             uploadSource: 'avatar',
         ));
 
-        $this->pictureService->attachImage($agentId, $asset);
+        $agent = $this->agentService->getAgent($agentId, $userId);
+        if ($agent instanceof Agent) {
+            $this->pictureService->attachImage($agent, $asset);
+        }
 
         $fresh = $this->agentService->getAgent($agentId, $userId);
         return new JsonResponse([
@@ -170,23 +192,11 @@ final class AgentPictureController
     }
 
     /**
-     * Run the upload-side validations (file size, MIME allowlist) after
-     * the controller has already confirmed the file is an UploadedFile and
-     * read its bytes. Returns 4xx JsonResponse on failure, null on success.
-     */
-    private function validateUpload(UploadedFile $file, string $bytes, int $agentId): ?JsonResponse
-    {
-        $sizeError = $this->validateUploadSize($file);
-        if ($sizeError !== null) {
-            return $sizeError;
-        }
-        return $this->validateUploadMime($bytes, $agentId);
-    }
-
-    /**
-     * Validate the upload's integrity + size. Returns 4xx JsonResponse on
-     * failure, null on success. Extracted from validateUpload() so both
-     * stay under the 3-return ceiling (S1142).
+     * Validate the upload's integrity + declared size (from the multipart
+     * envelope). Returns 4xx JsonResponse on failure, null on success.
+     * Runs *before* {@see readFileBytes()} so the size cap actually
+     * bounds upload-path memory consumption; {@see prepareUpload()}
+     * re-checks the actual byte length afterwards.
      */
     private function validateUploadSize(UploadedFile $file): ?JsonResponse
     {
@@ -204,16 +214,29 @@ final class AgentPictureController
     }
 
     /**
-     * Validate the upload's MIME type against the agent's allowed-image
-     * set. Returns 4xx JsonResponse on failure, null on success.
+     * Validate the upload's actual content: sniff the bytes (ignoring the
+     * client-supplied Content-Type header), then ask PHP to decode the
+     * bytes as an image. Returns 4xx JsonResponse on failure, null on
+     * success. Avatars are always raster images; see {@see ALLOWED_AVATAR_MIMES}.
      */
-    private function validateUploadMime(string $bytes, int $agentId): ?JsonResponse
+    private function validateUploadMime(string $bytes): ?JsonResponse
     {
-        $sniffedMime = $this->sniffer->sniffFromBytes($bytes);
-        if (!$this->allowedTypes->isAllowed($sniffedMime, $agentId)) {
+        $sniffedMime = strtolower($this->sniffer->sniffFromBytes($bytes));
+        if (!in_array($sniffedMime, self::ALLOWED_AVATAR_MIMES, true)) {
             return $this->error(
                 'UNSUPPORTED_MEDIA_TYPE',
-                sprintf('MIME type "%s" is not in the upload allowlist.', $sniffedMime),
+                sprintf('MIME type "%s" is not a supported avatar image type.', $sniffedMime),
+                Response::HTTP_UNSUPPORTED_MEDIA_TYPE,
+            );
+        }
+        // Defence in depth: a non-image byte stream with a `image/png`
+        // header should never get past this gate. PHP's decoder only
+        // succeeds for actual images in the raster allowlist.
+        $info = @getimagesizefromstring($bytes);
+        if ($info === false) {
+            return $this->error(
+                'UNSUPPORTED_MEDIA_TYPE',
+                'Avatar image bytes could not be decoded.',
                 Response::HTTP_UNSUPPORTED_MEDIA_TYPE,
             );
         }
