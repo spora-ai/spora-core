@@ -67,7 +67,7 @@ test('importPayload emits PLUGIN_MISSING for required_plugins not loaded', funct
         'id' => 'with-plugin', 'name' => 'With Plugin', 'version' => '1.0.0',
         'agent' => ['max_steps' => 5, 'system_prompt' => 'x'],
         'tools' => [],
-        'required_plugins' => ['definitely-not-installed-plugin'],
+        'required_plugins' => ['spora-ai/spora-plugin-does-not-exist'],
     ];
 
     $result = $this->importer->importPayload($this->userId, $raw);

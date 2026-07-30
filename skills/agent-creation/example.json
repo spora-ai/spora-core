@@ -29,5 +29,5 @@
       ]
     }
   ],
-  "required_plugins": ["weather"]
+  "required_plugins": ["spora-ai/spora-plugin-weather"]
 }

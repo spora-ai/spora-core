@@ -40,8 +40,9 @@ Before driving the flow:
 
 1. **Read the current agent's manifest** via `agent(action: "read_agent")` (no `agent_id` — reads the calling agent) so you know what an existing agent looks like in this codebase. The result has two JSON blocks in `result_content`: a `Base config` block and a `Tool config` block (see *Canonical agent manifest* below).
 2. **List available tools** via `agent(action: "get_available_tools")`. The version-2 payload tells you, per tool:
-   - `tool_class` — the FQCN. **Use this for `configure_tools`.** NOT `call_name` and NOT `tool_name` (both removed in v2).
-   - `plugin_slug` — `null` for core tools, the slug (e.g. `"weather"`) for plugin tools. **Use this for `required_plugins[]`** in `create_agent`. NOT the FQCN.
+    - `tool_class` — the FQCN. **Use this for `configure_tools`.** NOT `call_name` and NOT `tool_name` (both removed in v2).
+    - `plugin_slug` — `null` for core tools, the slug (e.g. `"weather"`) for plugin tools. Used internally to look up the plugin; **NOT** what goes in `required_plugins[]`.
+    - `required_plugins[]` for `create_agent` — a list of Composer `vendor/name` package strings (e.g. `["spora-ai/spora-plugin-weather"]`). Send the package name; the importer resolves it to the installed plugin. NOT the FQCN and NOT the slug.
    - `enabled` — current state on the calling agent (informational; new agents start fresh).
    - `ready_to_enable` — whether configure will succeed without operator setup.
    - `missing_required` — list of setting keys that block enablement (e.g. `["api_key"]`).
@@ -157,7 +158,7 @@ The Markdown preamble of every `read_agent` / `configure_tools` response shows t
     "system_prompt": "You are the 'Weather Agent'. Use the Weather API tool to answer questions about weather, forecasts, and astronomy (sunrise/sunset, moon phase). Reply in the user's language. If a location is ambiguous, ask briefly or use the location-search operation. Always state the timezone when the user asks for a time.",
     "max_steps": 10,
     "allow_followup": true,
-    "required_plugins": ["weather"]
+    "required_plugins": ["spora-ai/spora-plugin-weather"]
   }
 }
 ```
@@ -238,7 +239,7 @@ The LLM-facing `create_agent` accepts only a slim subset of the agent-template s
 | `allow_followup` | no | bool, default true | Whether followup tasks are allowed. |
 | `retry_after_minutes` | no | int, default 0 | Cooldown between auto-retries. |
 | `max_retries` | no | int, default 0 | Max auto-retries per task. |
-| `required_plugins` | no | array of plugin **slug** strings | Each plugin the agent depends on (e.g. `["weather"]`). Get slugs from `get_available_tools` under `plugin_slug`. NOT FQCNs. |
+| `required_plugins` | no | array of Composer `vendor/name` strings | Each plugin the agent depends on (e.g. `["spora-ai/spora-plugin-weather"]`). NOT slugs and NOT FQCNs. |
 
 `additionalProperties: false` — anything else (including the legacy `id`, `version`, `agent{}`, `tools[]`, `template_id`) is rejected with a literal "send X instead" example.
 
@@ -289,7 +290,7 @@ The slim `create_agent` + `configure_tools(agent_id?)` flow fixes these directly
 | --- | --- | --- |
 | `do NOT wrap fields in an agent{} block` | Sent legacy `agent: { name, description, ... }` to `update_agent` (this is the right shape for `update_agent`, not `create_agent`) — or sent `agent: {…}` to `create_agent` | For `create_agent`: send the slim flat payload `{ name, description, ... }` at top level. For `update_agent`: keep the `agent: { … }` wrapper — that's the canonical shape. |
 | `tools[]` is no longer accepted here | Sent `tools: [...]` inside `create_agent` payload | Create the agent first, then call `configure_tools(agent_id: N, tools: [...])` |
-| `required_plugins must be an array of strings` | Sent a bare string (`"weather"`) | Send `"required_plugins": ["weather"]` — an array of slug strings from `get_available_tools.plugin_slug` |
+| `required_plugins must be an array of strings` | Sent a bare string (`"weather"`) | Send `"required_plugins": ["spora-ai/spora-plugin-weather"]` — an array of Composer `vendor/name` package strings, NOT the slug |
 | `max_steps must be an integer in 1..100` | Sent a string or out-of-range int | Send `max_steps: 10` (integer, not string) |
 | `allow_followup must be a boolean` | Sent the string `"true"` | Send `allow_followup: true` (real bool, not string) |
 | `\`template_id\` is no longer an identifier` | Sent `template_id: "weather-agent"` to `read_agent`, `configure_tools`, `update_agent`, or `list_agents` | Use the numeric `agent_id` you got from `create_agent` (or `list_agents`) |

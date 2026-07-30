@@ -30,8 +30,20 @@ final class AgentTemplateValidator
      * accepts a bare slug so user-exported files round-trip cleanly.
      */
     private const ID_PATTERN = '/^([a-z0-9][a-z0-9_-]{0,63}\/)?[a-z0-9][a-z0-9_-]{0,63}$/';
-    private const SLUG_PATTERN = '/^[a-z0-9][a-z0-9_-]*$/';
     private const VERSION_PATTERN = '/^[0-9]+\.[0-9]+\.[0-9]+([+-].+)?$/';
+
+    /**
+     * Each `required_plugins` entry is a Composer `vendor/name`
+     * identifier (e.g. `spora-ai/spora-plugin-minimax`) — the same
+     * shape the exporter emits and the importer resolves back to the
+     * on-disk plugin slug via {@see PluginLoader::getSlugForPackageName()}.
+     *
+     * Allows lowercase letters, digits, dot, underscore, and hyphen in
+     * either segment (mirrors the relaxed Composer name regex while
+     * still rejecting whitespace and `/` placement mistakes such as
+     * leading slashes or empty segments).
+     */
+    private const PACKAGE_NAME_PATTERN = '/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?\/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/';
 
     private const ALLOWED_TOP_KEYS = [
         '$schema', 'id', 'name', 'description', 'version', 'agent', 'tools',
@@ -415,11 +427,11 @@ final class AgentTemplateValidator
             return;
         }
         foreach ($slugs as $index => $slug) {
-            if (!is_string($slug) || !preg_match(self::SLUG_PATTERN, $slug)) {
+            if (!is_string($slug) || !preg_match(self::PACKAGE_NAME_PATTERN, $slug)) {
                 $result->addError([
                     'code'     => 'REQUIRED_PLUGINS_INVALID',
                     'severity' => 'error',
-                    'message'  => "Each entry in 'required_plugins' must match the plugin slug pattern.",
+                    'message'  => "Each entry in 'required_plugins' must be a Composer package name (vendor/name, e.g. 'spora-ai/spora-plugin-minimax').",
                     'path'     => "required_plugins[{$index}]",
                 ]);
             }

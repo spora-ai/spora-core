@@ -118,9 +118,9 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?\\/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
       },
-      "description": "Plugin slugs the template assumes are installed. Missing plugins produce a non-fatal PLUGIN_MISSING warning at import time. Plugins are NEVER auto-installed."
+      "description": "Composer package names (vendor/name, e.g. 'spora-ai/spora-plugin-minimax') of plugins the template assumes are installed. The importer resolves each entry to the on-disk plugin slug via the package name; missing plugins produce a non-fatal PLUGIN_MISSING warning. Plugins are NEVER auto-installed."
     },
     "metadata": {
       "type": "object",
