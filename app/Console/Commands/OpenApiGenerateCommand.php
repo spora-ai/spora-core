@@ -76,7 +76,15 @@ final class OpenApiGenerateCommand extends Command
             $io->error(sprintf('No reference spec at %s to compare against.', $outputPath));
             return Command::FAILURE;
         }
-        if ((string) file_get_contents($outputPath) === $json) {
+        // The `info.version` field is generated from `git describe` at
+        // regeneration time and drifts on every commit (the version string
+        // encodes the current HEAD offset from the last tag). It's pure
+        // informational metadata, not part of the API contract — strip it
+        // on both sides before comparing so a freshly regenerated spec
+        // doesn't always fail the drift check.
+        $normalisedFresh = self::withoutVersionField($json);
+        $normalisedRef   = self::withoutVersionField((string) file_get_contents($outputPath));
+        if ($normalisedFresh === $normalisedRef) {
             $io->success(sprintf('Spec at %s is up to date.', $outputPath));
             return Command::SUCCESS;
         }
@@ -86,6 +94,25 @@ final class OpenApiGenerateCommand extends Command
             $outputPath,
         ));
         return Command::FAILURE;
+    }
+
+    /**
+     * Remove the `info.version` JSON object key so the drift check does
+     * not report a false-positive on the dynamic git-describe output.
+     * Falls back to the original string when the document does not parse.
+     */
+    private static function withoutVersionField(string $json): string
+    {
+        try {
+            $doc = json_decode($json, true, 16, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return $json;
+        }
+        if (!is_array($doc) || !isset($doc['info']['version'])) {
+            return $json;
+        }
+        unset($doc['info']['version']);
+        return (string) json_encode($doc, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     }
 
     private function writeSpec(SymfonyStyle $io, string $outputPath, string $json): int
@@ -168,7 +195,12 @@ final class OpenApiGenerateCommand extends Command
         $committed = is_file($referencePath) ? (string) file_get_contents($referencePath) : null;
         if ($committed === null) {
             $error = sprintf("No reference spec at %s to compare against.\n", $referencePath);
-        } elseif ($error === null && $committed !== $serialised) {
+        } elseif ($error === null && self::withoutVersionField($committed) !== self::withoutVersionField($serialised)) {
+            // The `info.version` field is generated from `git describe` at
+            // regeneration time and drifts on every commit. It's pure
+            // informational metadata, not part of the API contract — strip
+            // it on both sides before comparing so a freshly regenerated
+            // spec doesn't always fail the drift check.
             $error = sprintf(
                 "Spec at %s is stale. Regenerate with `composer openapi`.\n",
                 $referencePath,
