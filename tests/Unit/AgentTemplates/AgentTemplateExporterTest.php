@@ -437,7 +437,34 @@ test('export() opt-in includes only non-secret non-empty agent overrides and inl
     expect($tool['settings'])->toBe(['max_results' => '25'])
         ->and($tool['settings'])->not->toHaveKey('api_key')
         ->and($exported)->toHaveKey('inline_info')
-        ->and($exported['inline_info'])->toContain(TestTool::class);
+        ->and($exported['inline_info'])->not->toContain(TestTool::class)
+        ->and($exported)->not->toHaveKey('inline_warning');
+});
+
+test('export() drops empty-array multi-select overrides (inherit-parent semantics)', function (): void {
+    $agent = Agent::create([
+        'user_id' => $this->userId,
+        'name' => 'Empty Multiselect',
+        'max_steps' => 5,
+        'is_active' => true,
+    ]);
+    Spora\Models\AgentTool::create([
+        'agent_id' => $agent->id,
+        'tool_class' => TestTool::class,
+        'tool_name' => 'test',
+    ]);
+    [$exporter, $toolConfig] = makeExporterWithConfig();
+    // Storing an explicit empty list must NOT round-trip as a non-empty list.
+    $toolConfig->putAgentOverride(TestTool::class, (int) $agent->id, [
+        'allowed_target_agents' => [],
+        'max_results' => '10',
+    ]);
+
+    $exported = $exporter->export($agent, true);
+    $tool = collect($exported['template']->raw()['tools'])->firstWhere('tool_class', TestTool::class);
+
+    expect($tool['settings'])->toBe(['max_results' => '10'])
+        ->and($tool['settings'])->not->toHaveKey('allowed_target_agents');
 });
 
 test('export() default omits settings and opt-in omits inline info when no exportable values exist', function (): void {

@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Spora\AgentTemplates;
 
+use ReflectionClass;
 use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\ToolConfigService;
+use Spora\Tools\Attributes\Tool;
 
 /**
  * Builds an {@see AgentTemplate} payload from a persisted Agent.
@@ -20,7 +22,7 @@ use Spora\Services\ToolConfigService;
  */
 final class AgentTemplateExporter
 {
-    public const SETTINGS_EXPORT_INCLUDED_INFO = 'Included %d tool setting(s) for: %s. Passwords and inherited global/user values are NOT included.';
+    public const SETTINGS_EXPORT_INCLUDED_INFO = 'Included %d tool setting(s) for: %s. Passwords and inherited global/user values are NOT included — recipients must configure those in Settings → Tools after importing.';
 
     public function __construct(
         private readonly PluginLoader $pluginLoader,
@@ -30,7 +32,7 @@ final class AgentTemplateExporter
     /**
      * @return array{
      *     template: AgentTemplate,
-     *     inline_warning: string,
+     *     inline_warning?: string,
      *     inline_info?: string
      * }
      */
@@ -60,16 +62,18 @@ final class AgentTemplateExporter
             source: 'exported',
         );
 
-        $result = [
-            'template'       => $template,
-            'inline_warning' => AgentTemplateImporter::SETTINGS_NOT_EXPORTED_WARNING,
-        ];
+        $result = ['template' => $template];
         if ($settingsCount > 0) {
+            // Drop the warning on the opt-in path — its "settings not included"
+            // text would contradict inline_info. inline_info carries the
+            // post-import setup reminder that the warning used to provide.
             $result['inline_info'] = sprintf(
                 self::SETTINGS_EXPORT_INCLUDED_INFO,
                 $settingsCount,
                 implode(', ', $settingsTools),
             );
+        } else {
+            $result['inline_warning'] = AgentTemplateImporter::SETTINGS_NOT_EXPORTED_WARNING;
         }
         return $result;
     }
@@ -152,7 +156,7 @@ final class AgentTemplateExporter
             if ($settings !== []) {
                 $entry['settings'] = $settings;
                 $settingsCount += count($settings);
-                $settingsTools[] = $toolClass;
+                $settingsTools[] = $this->resolveToolDisplayName($toolClass);
             }
             $tools[] = $entry;
         }
@@ -169,10 +173,37 @@ final class AgentTemplateExporter
             $this->toolConfig->getRawAgentOverride($toolClass, $agentId),
         );
         $exportable = array_flip($this->toolConfig->getExportableKeys($toolClass));
+        // Drop null/''/empty-array — the override row uses these as "inherit
+        // parent" markers; emitting them would tell importers to clear values
+        // the operator never customised.
         return array_filter(
             array_intersect_key($override, $exportable),
-            static fn(mixed $value): bool => $value !== null && $value !== '',
+            static fn(mixed $value): bool => $value !== null && $value !== '' && $value !== [],
         );
+    }
+
+    /**
+     * Resolve a tool class to the human-readable name from its #[Tool]
+     * attribute, falling back to the class basename.
+     */
+    private function resolveToolDisplayName(string $toolClass): string
+    {
+        if (!class_exists($toolClass)) {
+            $parts = explode('\\', $toolClass);
+            return end($parts) ?: $toolClass;
+        }
+        $reflection = new ReflectionClass($toolClass);
+        foreach ($reflection->getAttributes(Tool::class) as $attr) {
+            /** @var Tool $instance */
+            $instance = $attr->newInstance();
+            if ($instance->displayName !== null && $instance->displayName !== '') {
+                return $instance->displayName;
+            }
+            return $instance->name;
+        }
+        $parts = explode('\\', $toolClass);
+        $last = end($parts);
+        return $last !== '' ? $last : $toolClass;
     }
 
     /**
