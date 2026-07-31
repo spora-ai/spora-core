@@ -4,39 +4,43 @@ declare(strict_types=1);
 
 namespace Spora\AgentTemplates;
 
+use ReflectionClass;
 use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
+use Spora\Services\ToolConfigSchemaInspector;
+use Spora\Services\ToolConfigService;
+use Spora\Tools\Attributes\Tool;
 
 /**
  * Builds an {@see AgentTemplate} payload from a persisted Agent.
  *
- * **Settings are NEVER emitted.** No code path reads
- * {@see \Spora\Services\ToolConfigService::getEffectiveSettings()} or
- * {@see \Spora\Services\ToolConfigService::getRawAgentOverride()}.
- * The exporter walks only `agent_tools` and
- * `agent_tool_operation_overrides`. The companion
- * {@see AgentTemplateImporter::SETTINGS_NOT_EXPORTED_WARNING} string
- * is surfaced by the controller so the SPA can show an inline banner
- * before download.
+ * Password-typed keys and user/global cascade values are NEVER emitted.
+ * Only the agent's own override row is included, and only when the operator
+ * opts in via `includeSettings=true`.
  */
 final class AgentTemplateExporter
 {
+    public const SETTINGS_EXPORT_INCLUDED_INFO = 'Included %d tool setting(s) for: %s. Passwords and inherited global/user values are NOT included — recipients must configure those in Settings → Tools after importing.';
+
     public function __construct(
         private readonly PluginLoader $pluginLoader,
+        private readonly ToolConfigService $toolConfig,
+        private readonly ToolConfigSchemaInspector $schemaInspector,
     ) {}
 
     /**
      * @return array{
      *     template: AgentTemplate,
-     *     inline_warning: string
+     *     inline_warning?: string,
+     *     inline_info?: string
      * }
      */
-    public function export(Agent $agent): array
+    public function export(Agent $agent, bool $includeSettings = false): array
     {
-        $tools = $this->buildToolsSection($agent);
+        [$tools, $settingsCount, $settingsTools] = $this->buildToolsSection($agent, $includeSettings);
         $agentBlock = $this->buildAgentBlock($agent);
         $metadata = $this->buildMetadata($agent);
 
@@ -60,10 +64,20 @@ final class AgentTemplateExporter
             source: 'exported',
         );
 
-        return [
-            'template'       => $template,
-            'inline_warning' => AgentTemplateImporter::SETTINGS_NOT_EXPORTED_WARNING,
-        ];
+        $result = ['template' => $template];
+        if ($settingsCount > 0) {
+            // Drop the warning on the opt-in path — its "settings not included"
+            // text would contradict inline_info. inline_info carries the
+            // post-import setup reminder that the warning used to provide.
+            $result['inline_info'] = sprintf(
+                self::SETTINGS_EXPORT_INCLUDED_INFO,
+                $settingsCount,
+                implode(', ', $settingsTools),
+            );
+        } else {
+            $result['inline_warning'] = AgentTemplateImporter::SETTINGS_NOT_EXPORTED_WARNING;
+        }
+        return $result;
     }
 
     /**
@@ -100,9 +114,9 @@ final class AgentTemplateExporter
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * @return array{list<array<string, mixed>>, int, list<string>}
      */
-    private function buildToolsSection(Agent $agent): array
+    private function buildToolsSection(Agent $agent, bool $includeSettings): array
     {
         $rows = AgentTool::where('agent_id', $agent->id)->get();
         $overrides = AgentToolOperationOverride::where('agent_id', $agent->id)
@@ -110,36 +124,104 @@ final class AgentTemplateExporter
             ->groupBy('tool_class');
 
         $tools = [];
+        $settingsCount = 0;
+        $settingsTools = [];
         foreach ($rows as $row) {
             $toolClass = $row->tool_class;
-            $toolOps = $overrides->get($toolClass, collect());
+            $operations = $this->buildOperationOverrides($overrides->get($toolClass, collect()));
 
-            $operations = [];
-            foreach ($toolOps as $op) {
-                // Only emit operations that carry an explicit override.
-                // Inherit-from-default rows (both fields null) are skipped
-                // to keep the exported template minimal.
-                if ($op->enabled === null && $op->default_requires_approval === null) {
-                    continue;
-                }
-                $entry = ['name' => $op->operation];
-                if ($op->enabled !== null) {
-                    $entry['enabled'] = $op->enabled === 1;
-                }
-                if ($op->default_requires_approval !== null) {
-                    // default_requires_approval=0 → auto_approve=true
-                    $entry['auto_approve'] = $op->default_requires_approval === 0;
-                }
-                $operations[] = $entry;
-            }
-
-            $tools[] = [
+            $entry = [
                 'tool_class' => $toolClass,
                 'enabled'    => true,
                 'operations' => $operations,
             ];
+            $settings = $includeSettings ? $this->exportToolSettings($toolClass, (int) $agent->id) : [];
+            if ($settings !== []) {
+                $entry['settings'] = $settings;
+                $settingsCount += count($settings);
+                $settingsTools[] = $this->resolveToolDisplayName($toolClass);
+            }
+            $tools[] = $entry;
         }
-        return $tools;
+        return [$tools, $settingsCount, $settingsTools];
+    }
+
+    /**
+     * Build the per-tool `operations[]` array, skipping operation rows that
+     * carry no explicit override (both columns null).
+     *
+     * @param \Illuminate\Support\Collection<int, AgentToolOperationOverride> $toolOps
+     * @return list<array<string, mixed>>
+     */
+    private function buildOperationOverrides(\Illuminate\Support\Collection $toolOps): array
+    {
+        $operations = [];
+        foreach ($toolOps as $op) {
+            if ($op->enabled === null && $op->default_requires_approval === null) {
+                continue;
+            }
+            $entry = ['name' => $op->operation];
+            if ($op->enabled !== null) {
+                $entry['enabled'] = $op->enabled === 1;
+            }
+            if ($op->default_requires_approval !== null) {
+                // default_requires_approval=0 → auto_approve=true
+                $entry['auto_approve'] = $op->default_requires_approval === 0;
+            }
+            $operations[] = $entry;
+        }
+        return $operations;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function exportToolSettings(string $toolClass, int $agentId): array
+    {
+        $override = $this->schemaInspector->normalizeMultiSelectValuesForTemplate(
+            $toolClass,
+            $this->toolConfig->getRawAgentOverride($toolClass, $agentId),
+        );
+        $exportable = array_flip($this->schemaInspector->getExportableKeys($toolClass));
+        // Drop null/''/empty-array — the override row uses these as "inherit
+        // parent" markers; emitting them would tell importers to clear values
+        // the operator never customised.
+        return array_filter(
+            array_intersect_key($override, $exportable),
+            static fn(mixed $value): bool => $value !== null && $value !== '' && $value !== [],
+        );
+    }
+
+    /**
+     * Resolve a tool class to the human-readable name from its #[Tool]
+     * attribute, falling back to the class basename.
+     */
+    private function resolveToolDisplayName(string $toolClass): string
+    {
+        $basename = $this->toolClassBasename($toolClass);
+        if (!class_exists($toolClass)) {
+            return $basename;
+        }
+        $reflection = new ReflectionClass($toolClass);
+        foreach ($reflection->getAttributes(Tool::class) as $attr) {
+            return $this->displayNameFromAttribute($attr->newInstance());
+        }
+        return $basename;
+    }
+
+    private function displayNameFromAttribute(Tool $instance): string
+    {
+        if ($instance->displayName !== null && $instance->displayName !== '') {
+            return $instance->displayName;
+        }
+        return $instance->name;
+    }
+
+    private function toolClassBasename(string $toolClass): string
+    {
+        $parts = explode('\\', $toolClass);
+        $last = end($parts);
+        return $last !== '' ? $last : $toolClass;
     }
 
     /**
@@ -200,15 +282,7 @@ final class AgentTemplateExporter
     {
         $names = [];
         foreach ($tools as $tool) {
-            $toolClass = is_string($tool['tool_class'] ?? null) ? $tool['tool_class'] : null;
-            if ($toolClass === null) {
-                continue;
-            }
-            $slug = $this->pluginLoader->getSlugForToolClass($toolClass);
-            if ($slug === null) {
-                continue;
-            }
-            $package = $this->pluginLoader->getComposerNameForSlug($slug);
+            $package = $this->resolvePackageForTool($tool);
             if ($package !== null) {
                 $names[$package] = true;
             }
@@ -216,5 +290,27 @@ final class AgentTemplateExporter
         $list = array_keys($names);
         sort($list);
         return $list;
+    }
+
+    /**
+     * Resolve a tool entry to the Composer `vendor/name` package that
+     * ships its `tool_class`. Returns null when the tool class is not
+     * string-coercible, the plugin isn't loaded, or the plugin has no
+     * resolvable Composer package — all silent drops because broken
+     * entries would otherwise block the entire import.
+     *
+     * @param  array<string, mixed>  $tool
+     */
+    private function resolvePackageForTool(array $tool): ?string
+    {
+        $toolClass = is_string($tool['tool_class'] ?? null) ? $tool['tool_class'] : null;
+        if ($toolClass === null) {
+            return null;
+        }
+        $slug = $this->pluginLoader->getSlugForToolClass($toolClass);
+        if ($slug === null) {
+            return null;
+        }
+        return $this->pluginLoader->getComposerNameForSlug($slug);
     }
 }

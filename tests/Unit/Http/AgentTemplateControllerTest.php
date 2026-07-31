@@ -35,7 +35,7 @@ function makeController(): AgentTemplateController
     );
     $validator = new AgentTemplateValidator();
     $importer = new AgentTemplateImporter($toolConfig, $plugins, $paths);
-    $exporter = new AgentTemplateExporter($plugins);
+    $exporter = new AgentTemplateExporter($plugins, $toolConfig, new Spora\Services\ToolConfigSchemaInspector());
     $agentService = new AgentService();
 
     return new AgentTemplateController($auth, $scanner, $validator, $importer, $exporter, $agentService);

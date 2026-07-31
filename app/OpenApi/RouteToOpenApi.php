@@ -147,7 +147,10 @@ final class RouteToOpenApi
     {
         $summary = $this->humaniseHandler($entry['handler']);
         $tags = $this->tagsFromPath($entry['route']);
-        $parameters = $this->parametersFromPath($entry);
+        $parameters = array_merge(
+            $this->parametersFromPath($entry),
+            $this->parametersFromHandler($entry['handler']),
+        );
         $security = $this->securityFromMiddleware($entry['middleware'], $entry['method']);
         $responses = $this->defaultResponses();
         $operation = [
@@ -175,6 +178,27 @@ final class RouteToOpenApi
             'OPTIONS' => $pathItem->options = new OA\Options($operation),
             default => null,
         };
+    }
+
+    /**
+     * @param array{0:string, 1:string} $handler
+     * @return list<Parameter>
+     */
+    private function parametersFromHandler(array $handler): array
+    {
+        [$class, $method] = $handler;
+        if (!class_exists($class)) {
+            return [];
+        }
+
+        $attributes = (new ReflectionMethod($class, $method))->getAttributes(
+            \OpenApi\Attributes\Parameter::class,
+            ReflectionAttribute::IS_INSTANCEOF,
+        );
+        return array_map(
+            static fn(ReflectionAttribute $attribute): Parameter => $attribute->newInstance(),
+            $attributes,
+        );
     }
 
     /**

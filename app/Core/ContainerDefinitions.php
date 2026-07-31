@@ -19,6 +19,7 @@ use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\AgentTemplates\AgentTemplateExporter;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateScanner;
+use Spora\AgentTemplates\AgentTemplateSettingsApplier;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Apps\AppRegistry;
 use Spora\Apps\PluginsApp;
@@ -124,6 +125,7 @@ use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigNameResolver;
+use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
@@ -1219,6 +1221,8 @@ final class ContainerDefinitions
 
             AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
 
+            ToolConfigSchemaInspector::class => static fn(): ToolConfigSchemaInspector => new ToolConfigSchemaInspector(),
+
             // Skills are scanned in priority order: project, then framework,
             // then each plugin. The `source` label on each root is what
             // SkillScanner uses to bucket same-named skills (see
@@ -1257,11 +1261,21 @@ final class ContainerDefinitions
                     $c->get(PluginLoader::class),
                     $c->get(Paths::class),
                     $c->get(AgentPictureService::class),
+                    $c->get(AgentTemplateSettingsApplier::class),
+                );
+            },
+
+            AgentTemplateSettingsApplier::class => static function (ContainerInterface $c): AgentTemplateSettingsApplier {
+                return new AgentTemplateSettingsApplier(
+                    $c->get(ToolConfigService::class),
+                    $c->get(SkillScanner::class),
                 );
             },
 
             AgentTemplateExporter::class => static fn(ContainerInterface $c): AgentTemplateExporter => new AgentTemplateExporter(
                 $c->get(PluginLoader::class),
+                $c->get(ToolConfigService::class),
+                $c->get(ToolConfigSchemaInspector::class),
             ),
 
             MailTemplateServiceInterface::class => static fn(): MailTemplateServiceInterface => new MailTemplateService(),

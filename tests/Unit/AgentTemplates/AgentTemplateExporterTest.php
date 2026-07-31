@@ -11,7 +11,26 @@ use Tests\Fixtures\TestTool;
 
 function makeExporter(?PluginLoader $pluginLoader = null): AgentTemplateExporter
 {
-    return new AgentTemplateExporter($pluginLoader ?? new PluginLoader([]));
+    return makeExporterWithConfig($pluginLoader)[0];
+}
+
+/** @return array{AgentTemplateExporter, Spora\Services\ToolConfigService} */
+function makeExporterWithConfig(?PluginLoader $pluginLoader = null): array
+{
+    $security = new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $toolConfig = new Spora\Services\ToolConfigService(
+        $security,
+        new Monolog\Logger('test'),
+        [Spora\Tools\TimeTool::class, Spora\Tools\SkillTool::class, TestTool::class],
+    );
+    return [
+        new AgentTemplateExporter(
+            $pluginLoader ?? new PluginLoader([]),
+            $toolConfig,
+            new Spora\Services\ToolConfigSchemaInspector(),
+        ),
+        $toolConfig,
+    ];
 }
 
 beforeEach(function (): void {
@@ -397,4 +416,83 @@ test('export() then importPayload() round-trips on the same loader with zero PLU
     $result = $importer->importPayload($this->userId, $payload);
     $codes = array_column($result->warnings, 'code');
     expect($codes)->not->toContain('PLUGIN_MISSING');
+});
+
+test('export() opt-in includes only non-secret non-empty agent overrides and inline info', function (): void {
+    $agent = Agent::create([
+        'user_id' => $this->userId,
+        'name' => 'Settings Export',
+        'max_steps' => 5,
+        'is_active' => true,
+    ]);
+    Spora\Models\AgentTool::create([
+        'agent_id' => $agent->id,
+        'tool_class' => TestTool::class,
+        'tool_name' => 'test',
+    ]);
+    [$exporter, $toolConfig] = makeExporterWithConfig(makeToolsPluginLoader());
+    $toolConfig->putAgentOverride(TestTool::class, (int) $agent->id, [
+        'api_key' => 'secret',
+        'max_results' => '25',
+        'custom_field' => '',
+        'allowed_target_agents' => null,
+    ]);
+
+    $exported = $exporter->export($agent, true);
+    $tool = collect($exported['template']->raw()['tools'])->firstWhere('tool_class', TestTool::class);
+
+    expect($tool['settings'])->toBe(['max_results' => '25'])
+        ->and($tool['settings'])->not->toHaveKey('api_key')
+        ->and($exported)->toHaveKey('inline_info')
+        ->and($exported['inline_info'])->not->toContain(TestTool::class)
+        ->and($exported)->not->toHaveKey('inline_warning');
+});
+
+test('export() drops empty-array multi-select overrides (inherit-parent semantics)', function (): void {
+    $agent = Agent::create([
+        'user_id' => $this->userId,
+        'name' => 'Empty Multiselect',
+        'max_steps' => 5,
+        'is_active' => true,
+    ]);
+    Spora\Models\AgentTool::create([
+        'agent_id' => $agent->id,
+        'tool_class' => TestTool::class,
+        'tool_name' => 'test',
+    ]);
+    [$exporter, $toolConfig] = makeExporterWithConfig();
+    // Storing an explicit empty list must NOT round-trip as a non-empty list.
+    $toolConfig->putAgentOverride(TestTool::class, (int) $agent->id, [
+        'allowed_target_agents' => [],
+        'max_results' => '10',
+    ]);
+
+    $exported = $exporter->export($agent, true);
+    $tool = collect($exported['template']->raw()['tools'])->firstWhere('tool_class', TestTool::class);
+
+    expect($tool['settings'])->toBe(['max_results' => '10'])
+        ->and($tool['settings'])->not->toHaveKey('allowed_target_agents');
+});
+
+test('export() default omits settings and opt-in omits inline info when no exportable values exist', function (): void {
+    $agent = Agent::create([
+        'user_id' => $this->userId,
+        'name' => 'No Settings Export',
+        'max_steps' => 5,
+        'is_active' => true,
+    ]);
+    Spora\Models\AgentTool::create([
+        'agent_id' => $agent->id,
+        'tool_class' => TestTool::class,
+        'tool_name' => 'test',
+    ]);
+    [$exporter, $toolConfig] = makeExporterWithConfig();
+    $toolConfig->putAgentOverride(TestTool::class, (int) $agent->id, ['api_key' => 'secret']);
+
+    $default = $exporter->export($agent);
+    $optIn = $exporter->export($agent, true);
+
+    expect($default['template']->raw()['tools'][0])->not->toHaveKey('settings')
+        ->and($optIn['template']->raw()['tools'][0])->not->toHaveKey('settings')
+        ->and($optIn)->not->toHaveKey('inline_info');
 });

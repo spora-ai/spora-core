@@ -10,6 +10,7 @@ declare(strict_types=1);
  */
 
 use Spora\AgentTemplates\AgentTemplateImporter;
+use Spora\AgentTemplates\AgentTemplateSettingsApplier;
 use Spora\Core\Paths;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\ToolConfigService;
@@ -44,5 +45,11 @@ function makeImporter(): AgentTemplateImporter
     $plugins = new PluginLoader([]);
     $paths = new Paths(BASE_PATH);
 
-    return new AgentTemplateImporter($toolConfig, $plugins, $paths);
+    return new AgentTemplateImporter(
+        $toolConfig,
+        $plugins,
+        $paths,
+        null,
+        new AgentTemplateSettingsApplier($toolConfig, null),
+    );
 }

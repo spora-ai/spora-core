@@ -74,6 +74,24 @@ final class ToolConfigSchemaInspector
     }
 
     /**
+     * Return keys of all #[ToolSetting] attributes where type !== 'password'.
+     * Used by the agent-template exporter to enumerate the agent-override
+     * keys that are safe to embed in a template (no secrets).
+     *
+     * @return list<string>
+     */
+    public function getExportableKeys(string $toolClass): array
+    {
+        $keys = [];
+        foreach (ToolSettingSchema::collect($toolClass) as $instance) {
+            if ($instance->type !== 'password') {
+                $keys[] = $instance->key;
+            }
+        }
+        return $keys;
+    }
+
+    /**
      * Return schema defaults as key => default_value for all #[ToolSetting] fields.
      * Used to pre-seed agent overrides when enabling a tool.
      *
@@ -158,6 +176,25 @@ final class ToolConfigSchemaInspector
             }
         }
         return $keys;
+    }
+
+    /**
+     * Decode multi-select form strings to arrays without coercing their values.
+     *
+     * @param array<string, mixed> $settings
+     * @return array<string, mixed>
+     */
+    public function normalizeMultiSelectValuesForTemplate(string $toolClass, array $settings): array
+    {
+        foreach ($this->getMultiSelectKeys($toolClass) as $key) {
+            $value = $settings[$key] ?? null;
+            if (!is_string($value)) {
+                continue;
+            }
+            $decoded = json_decode($value, true);
+            $settings[$key] = is_array($decoded) ? array_values($decoded) : [];
+        }
+        return $settings;
     }
 
     /**

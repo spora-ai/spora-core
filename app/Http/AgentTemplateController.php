@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use JsonException;
+use OpenApi\Attributes as OA;
 use Spora\AgentTemplates\AgentTemplate;
 use Spora\AgentTemplates\AgentTemplateExporter;
 use Spora\AgentTemplates\AgentTemplateImporter;
@@ -172,6 +173,13 @@ final class AgentTemplateController
     /**
      * GET /api/v1/agents/{id}/export
      */
+    #[OA\Parameter(
+        name: 'include_settings',
+        in: 'query',
+        required: false,
+        description: 'Include non-secret settings from the agent-specific tool override rows.',
+        schema: new OA\Schema(type: 'boolean', default: false),
+    )]
     public function exportAgent(Request $request): JsonResponse
     {
         $userId = $this->auth->currentUserId();
@@ -185,14 +193,21 @@ final class AgentTemplateController
             return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
         }
 
-        $exported = $this->exporter->export($agent);
+        $includeSettings = filter_var(
+            $request->query->get('include_settings', false),
+            FILTER_VALIDATE_BOOLEAN,
+        );
+        $exported = $this->exporter->export($agent, $includeSettings);
 
-        return new JsonResponse([
-            'data' => [
-                'template'       => $exported['template']->raw(),
-                'inline_warning' => $exported['inline_warning'],
-            ],
-        ]);
+        $data = [
+            'template'       => $exported['template']->raw(),
+            'inline_warning' => $exported['inline_warning'],
+        ];
+        if (isset($exported['inline_info'])) {
+            $data['inline_info'] = $exported['inline_info'];
+        }
+
+        return new JsonResponse(['data' => $data]);
     }
 
     private function unauthenticated(): JsonResponse

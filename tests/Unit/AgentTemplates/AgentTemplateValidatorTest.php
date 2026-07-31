@@ -201,3 +201,51 @@ test('required_plugins rejects bare slugs, uppercase, empty segments, and other 
         expect($codes)->toContain('REQUIRED_PLUGINS_INVALID');
     }
 });
+
+test('known non-secret tool settings validate successfully', function (): void {
+    $raw = [
+        'id' => 'settings', 'name' => 'Settings', 'version' => '1.0.0',
+        'agent' => ['system_prompt' => 'x'],
+        'tools' => [[
+            'tool_class' => Tests\Fixtures\TestTool::class,
+            'enabled' => true,
+            'operations' => [],
+            'settings' => ['max_results' => '10', 'allowed_target_agents' => ['1', '2']],
+        ]],
+    ];
+
+    expect(validatePayload($raw)->errors())->toBe([]);
+});
+
+test('password and unknown tool setting keys are rejected', function (): void {
+    $raw = [
+        'id' => 'settings', 'name' => 'Settings', 'version' => '1.0.0',
+        'agent' => ['system_prompt' => 'x'],
+        'tools' => [[
+            'tool_class' => Tests\Fixtures\TestTool::class,
+            'enabled' => true,
+            'operations' => [],
+            'settings' => ['api_key' => 'secret', 'bogus' => 'value'],
+        ]],
+    ];
+
+    $codes = array_column(validatePayload($raw)->errors(), 'code');
+    expect($codes)->toContain(AgentTemplateValidator::SETTINGS_PASSWORD_KEY_FORBIDDEN)
+        ->and($codes)->toContain(AgentTemplateValidator::SETTINGS_UNKNOWN_KEY);
+});
+
+test('multi-select tool setting rejects scalar values', function (): void {
+    $raw = [
+        'id' => 'settings', 'name' => 'Settings', 'version' => '1.0.0',
+        'agent' => ['system_prompt' => 'x'],
+        'tools' => [[
+            'tool_class' => Tests\Fixtures\TestTool::class,
+            'enabled' => true,
+            'operations' => [],
+            'settings' => ['allowed_target_agents' => '1'],
+        ]],
+    ];
+
+    expect(array_column(validatePayload($raw)->errors(), 'code'))
+        ->toContain(AgentTemplateValidator::SETTINGS_INVALID_VALUE_TYPE);
+});
