@@ -204,14 +204,17 @@ final class AgentTemplateExporter
         }
         $reflection = new ReflectionClass($toolClass);
         foreach ($reflection->getAttributes(Tool::class) as $attr) {
-            /** @var Tool $instance */
-            $instance = $attr->newInstance();
-            if ($instance->displayName !== null && $instance->displayName !== '') {
-                return $instance->displayName;
-            }
-            return $instance->name;
+            return $this->displayNameFromAttribute($attr->newInstance());
         }
         return $basename;
+    }
+
+    private function displayNameFromAttribute(Tool $instance): string
+    {
+        if ($instance->displayName !== null && $instance->displayName !== '') {
+            return $instance->displayName;
+        }
+        return $instance->name;
     }
 
     private function toolClassBasename(string $toolClass): string
@@ -279,15 +282,7 @@ final class AgentTemplateExporter
     {
         $names = [];
         foreach ($tools as $tool) {
-            $toolClass = is_string($tool['tool_class'] ?? null) ? $tool['tool_class'] : null;
-            if ($toolClass === null) {
-                continue;
-            }
-            $slug = $this->pluginLoader->getSlugForToolClass($toolClass);
-            if ($slug === null) {
-                continue;
-            }
-            $package = $this->pluginLoader->getComposerNameForSlug($slug);
+            $package = $this->resolvePackageForTool($tool);
             if ($package !== null) {
                 $names[$package] = true;
             }
@@ -295,5 +290,27 @@ final class AgentTemplateExporter
         $list = array_keys($names);
         sort($list);
         return $list;
+    }
+
+    /**
+     * Resolve a tool entry to the Composer `vendor/name` package that
+     * ships its `tool_class`. Returns null when the tool class is not
+     * string-coercible, the plugin isn't loaded, or the plugin has no
+     * resolvable Composer package — all silent drops because broken
+     * entries would otherwise block the entire import.
+     *
+     * @param  array<string, mixed>  $tool
+     */
+    private function resolvePackageForTool(array $tool): ?string
+    {
+        $toolClass = is_string($tool['tool_class'] ?? null) ? $tool['tool_class'] : null;
+        if ($toolClass === null) {
+            return null;
+        }
+        $slug = $this->pluginLoader->getSlugForToolClass($toolClass);
+        if ($slug === null) {
+            return null;
+        }
+        return $this->pluginLoader->getComposerNameForSlug($slug);
     }
 }
