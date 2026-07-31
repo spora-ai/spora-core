@@ -1,6 +1,6 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://spora.dev/plugin.schema.json",
+    "$id": "https://docs.spora-ai.com/schemas/plugin.schema.json",
     "title": "Spora Plugin Manifest",
     "description": "Schema for plugin.json — the manifest every Spora plugin must ship.",
     "type": "object",

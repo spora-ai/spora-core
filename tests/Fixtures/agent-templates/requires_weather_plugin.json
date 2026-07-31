@@ -1,5 +1,5 @@
 {
-  "$schema": "https://spora.dev/agent-template.schema.json",
+  "$schema": "https://docs.spora-ai.com/schemas/agent-template.schema.json",
   "id": "needs-weather",
   "name": "Weather Helper",
   "description": "Template that requires the weather plugin — used to verify PLUGIN_MISSING warning.",

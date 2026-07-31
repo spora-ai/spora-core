@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://spora.dev/agent-template.schema.json",
+  "$id": "https://docs.spora-ai.com/schemas/agent-template.schema.json",
   "title": "Spora Agent Template",
   "description": "A reusable agent definition: name, system prompt, tool activations, per-operation auto-approve defaults, and optional per-agent non-secret tool settings.",
   "type": "object",
@@ -9,7 +9,7 @@
   "properties": {
     "$schema": {
       "type": "string",
-      "description": "JSON Schema $id reference. Always 'https://spora.dev/agent-template.schema.json'."
+      "description": "JSON Schema $id reference. Always 'https://docs.spora-ai.com/schemas/agent-template.schema.json'."
     },
     "id": {
       "type": "string",
