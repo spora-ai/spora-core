@@ -44,7 +44,7 @@
         "friendsofphp/php-cs-fixer": "^3.94",
         "larastan/larastan": "^3.9",
         "mockery/mockery": "^1.6",
-        "pestphp/pest": "^4.0",
+        "pestphp/pest": "^5.0",
         "phpstan/phpstan": "^2.1",
         "phpstan/phpstan-mockery": "^2.0",
         "zircote/swagger-php": "^6.4"
