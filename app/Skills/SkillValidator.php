@@ -9,8 +9,8 @@ namespace Spora\Skills;
  *
  * Validation is manual (no JSON Schema library) to match the
  * {@see \Spora\AgentTemplates\AgentTemplateValidator} convention and keep
- * the runtime dependency surface small. The companion `skill.schema.json`
- * at the framework root mirrors these rules for editor / tooling support.
+ * the runtime dependency surface small. The agentskills.io spec is the
+ * canonical reference; this validator enforces the subset Spora ships.
  *
  * Errors mean the skill cannot be used; warnings are advisory and surface
  * on the skill's summary (oversize body, unknown optional field, etc.).
@@ -22,8 +22,8 @@ final class SkillValidator
 {
     /**
      * 1-64 chars, lowercase alphanumeric + hyphens, no leading/trailing
-     * hyphen, no consecutive hyphens. Mirrors `skill.schema.json#name`.
-     * The negative lookahead `(?![a-z0-9-]*--)` rejects any two
+     * hyphen, no consecutive hyphens. Mirrors the agentskills.io `name`
+     * slug rule. The negative lookahead `(?![a-z0-9-]*--)` rejects any two
      * consecutive hyphens anywhere in the slug.
      */
     private const NAME_PATTERN = '/^(?![a-z0-9-]*--)[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/';

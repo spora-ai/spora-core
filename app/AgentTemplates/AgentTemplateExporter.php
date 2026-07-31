@@ -25,6 +25,13 @@ final class AgentTemplateExporter
 {
     public const SETTINGS_EXPORT_INCLUDED_INFO = 'Included %d tool setting(s) for: %s. Passwords and inherited global/user values are NOT included — recipients must configure those in Settings → Tools after importing.';
 
+    /**
+     * Canonical $schema URL embedded in every exported template. Mirrors
+     * `agent-template.schema.json`'s `$id` — served from docs.spora-ai.com so
+     * editors (VSCode, JetBrains, ajv) can fetch the schema for validation.
+     */
+    public const SCHEMA_URL = 'https://docs.spora-ai.com/schemas/agent-template.schema.json';
+
     public function __construct(
         private readonly PluginLoader $pluginLoader,
         private readonly ToolConfigService $toolConfig,
@@ -45,7 +52,7 @@ final class AgentTemplateExporter
         $metadata = $this->buildMetadata($agent);
 
         $raw = [
-            '$schema'  => 'https://spora.dev/agent-template.schema.json',
+            '$schema'  => self::SCHEMA_URL,
             'id'       => $this->resolveTemplateId($agent),
             'name'     => $agent->name,
             'version'  => '1.0.0',

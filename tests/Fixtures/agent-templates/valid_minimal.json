@@ -1,5 +1,5 @@
 {
-  "$schema": "https://spora.dev/agent-template.schema.json",
+  "$schema": "https://docs.spora-ai.com/schemas/agent-template.schema.json",
   "id": "minimal",
   "name": "Minimal Template",
   "description": "Smallest valid agent template — one tool, one operation.",

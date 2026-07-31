@@ -1,5 +1,5 @@
 {
-  "$schema": "https://spora.dev/agent-template.schema.json",
+  "$schema": "https://docs.spora-ai.com/schemas/agent-template.schema.json",
   "id": "weather-agent",
   "name": "Weather Agent",
   "version": "1.0.0",
