@@ -162,8 +162,18 @@ test('opt-in export settings round-trip through the importer without secrets', f
     $security = new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $toolConfig = new Spora\Services\ToolConfigService($security, new Monolog\Logger('test'), [Tests\Fixtures\TestTool::class]);
     $plugins = new Spora\Plugins\PluginLoader([]);
-    $importer = new Spora\AgentTemplates\AgentTemplateImporter($toolConfig, $plugins, new Spora\Core\Paths(BASE_PATH));
-    $exporter = new Spora\AgentTemplates\AgentTemplateExporter($plugins, $toolConfig);
+    $importer = new Spora\AgentTemplates\AgentTemplateImporter(
+        $toolConfig,
+        $plugins,
+        new Spora\Core\Paths(BASE_PATH),
+        null,
+        new Spora\AgentTemplates\AgentTemplateSettingsApplier($toolConfig, null),
+    );
+    $exporter = new Spora\AgentTemplates\AgentTemplateExporter(
+        $plugins,
+        $toolConfig,
+        new Spora\Services\ToolConfigSchemaInspector(),
+    );
     $source = Agent::create(['user_id' => $this->userId, 'name' => 'Settings Source', 'max_steps' => 5, 'is_active' => true]);
     AgentTool::create(['agent_id' => $source->id, 'tool_class' => Tests\Fixtures\TestTool::class, 'tool_name' => 'test']);
     $toolConfig->putAgentOverride(Tests\Fixtures\TestTool::class, (int) $source->id, [
@@ -190,7 +200,7 @@ test('missing skill slugs warn and are dropped from imported settings', function
         new Spora\Plugins\PluginLoader([]),
         new Spora\Core\Paths(BASE_PATH),
         null,
-        $scanner,
+        new Spora\AgentTemplates\AgentTemplateSettingsApplier($toolConfig, $scanner),
     );
     $raw = [
         'id' => 'skills', 'name' => 'Skills', 'version' => '1.0.0',

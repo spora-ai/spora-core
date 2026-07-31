@@ -16,11 +16,8 @@ use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\ToolConfigService;
-use Spora\Skills\SkillScanner;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
-use Spora\Tools\Attributes\ToolSetting;
-use Spora\Tools\ToolSettingSchema;
 
 /**
  * Applies an Agent Template to the database: creates a new Agent row,
@@ -52,7 +49,7 @@ final class AgentTemplateImporter
         private readonly PluginLoader $plugins,
         private readonly Paths $paths,
         private readonly ?AgentPictureService $pictureService = null,
-        private readonly ?SkillScanner $skillScanner = null,
+        private readonly ?AgentTemplateSettingsApplier $settingsApplier = null,
     ) {}
 
     /**
@@ -321,13 +318,13 @@ final class AgentTemplateImporter
         );
 
         $settings = is_array($toolEntry['settings'] ?? null) ? $toolEntry['settings'] : [];
-        $settingsApplied = $this->applyToolSettings(
+        $settingsApplied = $this->settingsApplier?->apply(
             $agentId,
             $toolClass,
             $settings,
             $toolIndex,
             $warnings,
-        );
+        ) ?? 0;
 
         $missing = $this->toolConfig->getMissingRequiredSettings(
             $toolClass,
@@ -356,84 +353,6 @@ final class AgentTemplateImporter
             'warning'  => $toolWarning,
             'summary'  => $this->buildEnabledSummary($toolClass, $opsApplied, $settingsApplied, $toolWarning),
         ];
-    }
-
-    /**
-     * @param array<string, mixed> $settings
-     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
-     */
-    private function applyToolSettings(
-        int $agentId,
-        string $toolClass,
-        array $settings,
-        int $toolIndex,
-        array &$warnings,
-    ): int {
-        $schema = [];
-        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
-            $schema[$setting->key] = $setting;
-        }
-
-        $collected = [];
-        foreach ($settings as $key => $value) {
-            $setting = $schema[$key] ?? null;
-            if (!$setting instanceof ToolSetting || $setting->type === 'password') {
-                continue;
-            }
-            if ($setting->type === 'multi-select') {
-                $value = $this->prepareMultiSelectSetting($setting, $value, $toolIndex, $warnings);
-            }
-            $collected[$key] = $value;
-        }
-
-        if ($collected !== []) {
-            $this->toolConfig->putAgentOverride($toolClass, $agentId, $collected);
-        }
-        return count($collected);
-    }
-
-    /**
-     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
-     */
-    private function prepareMultiSelectSetting(
-        ToolSetting $setting,
-        mixed $value,
-        int $toolIndex,
-        array &$warnings,
-    ): string {
-        $items = is_array($value) ? array_values($value) : [];
-        if ($setting->resolveAs === 'skill' && $this->skillScanner !== null) {
-            $items = $this->filterMissingSkills($items, $setting->key, $toolIndex, $warnings);
-        }
-        return json_encode($items, JSON_THROW_ON_ERROR);
-    }
-
-    /**
-     * @param list<mixed> $items
-     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
-     * @return list<mixed>
-     */
-    private function filterMissingSkills(array $items, string $key, int $toolIndex, array &$warnings): array
-    {
-        $available = [];
-        foreach ($this->skillScanner?->scan() ?? [] as $skill) {
-            $available[$skill->name()] = true;
-        }
-
-        $filtered = [];
-        foreach ($items as $slug) {
-            if (is_string($slug) && isset($available[$slug])) {
-                $filtered[] = $slug;
-                continue;
-            }
-            $warnings[] = [
-                'code' => 'SKILL_MISSING',
-                'severity' => 'warning',
-                'message' => sprintf("Skill '%s' is not available locally and was dropped.", (string) $slug),
-                'path' => "tools[{$toolIndex}].settings.{$key}",
-            ];
-        }
-        return $filtered;
     }
 
     /**

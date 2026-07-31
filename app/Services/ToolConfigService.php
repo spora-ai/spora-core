@@ -369,27 +369,6 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
-     * Normalize multi-select form strings to their template array shape.
-     *
-     * @param array<string, mixed> $settings
-     * @return array<string, mixed>
-     */
-    public function normalizeMultiSelectValues(string $toolClass, array $settings): array
-    {
-        return $this->schema->normalizeMultiSelectValuesForTemplate($toolClass, $settings);
-    }
-
-    /**
-     * Return keys that are safe to include in an agent template export.
-     *
-     * @return list<string>
-     */
-    public function getExportableKeys(string $toolClass): array
-    {
-        return $this->schema->getExportableKeys($toolClass);
-    }
-
-    /**
      * Return schema defaults as key => default_value for all #[ToolSetting] fields.
      * Used to pre-seed agent overrides when enabling a tool.
      *

@@ -5,11 +5,8 @@ declare(strict_types=1);
 namespace Spora\AgentTemplates;
 
 use ReflectionClass;
-use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Tools\Attributes\ToolOperation;
-use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ToolInterface;
-use Spora\Tools\ToolSettingSchema;
 
 /**
  * Validates a parsed Agent Template payload.
@@ -22,17 +19,28 @@ use Spora\Tools\ToolSettingSchema;
  * Errors make the template unusable; warnings are advisory and surface
  * to the operator during import (missing plugins, missing required
  * settings, unknown operation names, …). Tool settings are validated
- * against the declaring tool's #[ToolSetting] attributes.
+ * by {@see AgentTemplateSettingsValidator}; metadata validation lives
+ * in {@see AgentTemplateMetadataValidator}.
  */
 final class AgentTemplateValidator
 {
-    public const SETTINGS_PASSWORD_KEY_FORBIDDEN = 'SETTINGS_PASSWORD_KEY_FORBIDDEN';
-    public const SETTINGS_UNKNOWN_KEY = 'SETTINGS_UNKNOWN_KEY';
-    public const SETTINGS_INVALID_VALUE_TYPE = 'SETTINGS_INVALID_VALUE_TYPE';
+    // Re-exported for backward compatibility — the constants live on the
+    // settings-validator class so that helper has full ownership of the
+    // shape it validates.
+    public const SETTINGS_PASSWORD_KEY_FORBIDDEN = AgentTemplateSettingsValidator::SETTINGS_PASSWORD_KEY_FORBIDDEN;
+    public const SETTINGS_UNKNOWN_KEY = AgentTemplateSettingsValidator::SETTINGS_UNKNOWN_KEY;
+    public const SETTINGS_INVALID_VALUE_TYPE = AgentTemplateSettingsValidator::SETTINGS_INVALID_VALUE_TYPE;
+
+    private readonly AgentTemplateSettingsValidator $settingsValidator;
+    private readonly AgentTemplateMetadataValidator $metadataValidator;
 
     public function __construct(
-        private readonly ToolConfigSchemaInspector $schemaInspector = new ToolConfigSchemaInspector(),
-    ) {}
+        ?AgentTemplateSettingsValidator $settingsValidator = null,
+        ?AgentTemplateMetadataValidator $metadataValidator = null,
+    ) {
+        $this->settingsValidator = $settingsValidator ?? new AgentTemplateSettingsValidator();
+        $this->metadataValidator = $metadataValidator ?? new AgentTemplateMetadataValidator();
+    }
     /**
      * Accepts both namespaced (`<source>/<slug>`) and bare (`<slug>`)
      * template ids. The scanner additionally enforces that built-in /
@@ -64,22 +72,6 @@ final class AgentTemplateValidator
         'description', 'system_prompt', 'notes', 'max_steps',
         'allow_followup', 'retry_after_minutes', 'max_retries',
     ];
-
-    private const ALLOWED_METADATA_KEYS = ['category', 'icon', 'archetype', 'variant_key', 'palette_key'];
-
-    private const ALLOWED_CATEGORIES = [
-        'general', 'productivity', 'research', 'communication', 'media', 'data', 'automation',
-    ];
-
-    private const ALLOWED_ARCHETYPES = [
-        'assistant', 'researcher', 'analyst', 'writer', 'coder', 'explorer', 'advisor', 'creative',
-    ];
-
-    private const ALLOWED_PALETTES = [
-        'slate', 'red', 'orange', 'amber', 'green', 'teal', 'blue', 'indigo', 'violet', 'pink',
-    ];
-
-    private const ALLOWED_VARIANTS = ['v0', 'v1', 'v2'];
 
     /**
      * @param array<string, mixed> $raw
@@ -123,7 +115,7 @@ final class AgentTemplateValidator
 
         $this->validateTools($raw, $result);
         $this->validateRequiredPlugins($raw, $result);
-        $this->validateMetadata($raw, $result);
+        $this->metadataValidator->validate($raw, $result);
 
         return $result;
     }
@@ -271,73 +263,15 @@ final class AgentTemplateValidator
     }
 
     /**
-     * @param array<string, mixed> $tool
-     */
+         * @param array<string, mixed> $tool
+         */
     private function validateToolSettings(array $tool, string $toolClass, string $path, ValidationResult $result): void
     {
-        $settings = $tool['settings'];
-        if (!is_array($settings) || array_is_list($settings) && $settings !== []) {
-            $this->addSettingsTypeError($result, $path . '.settings', 'Settings must be an object.');
-            return;
-        }
-        if (!class_exists($toolClass)) {
-            return;
-        }
-
-        $schema = $this->settingsByKey($toolClass);
-        $passwordKeys = $this->schemaInspector->getPasswordKeys($toolClass);
-        foreach ($settings as $key => $value) {
-            $settingPath = "{$path}.settings.{$key}";
-            if (!isset($schema[$key])) {
-                $this->addSettingsError($result, self::SETTINGS_UNKNOWN_KEY, "Unknown tool setting '{$key}'.", $settingPath);
-            } elseif (in_array($key, $passwordKeys, true)) {
-                $this->addSettingsError($result, self::SETTINGS_PASSWORD_KEY_FORBIDDEN, "Password setting '{$key}' cannot be imported from a template.", $settingPath);
-            } elseif (!$this->isValidSettingValue($schema[$key], $value)) {
-                $this->addSettingsTypeError($result, $settingPath, "Invalid value type for tool setting '{$key}'.");
-            }
-        }
-    }
-
-    /** @return array<string, ToolSetting> */
-    private function settingsByKey(string $toolClass): array
-    {
-        $settings = [];
-        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
-            $settings[$setting->key] = $setting;
-        }
-        return $settings;
-    }
-
-    private function isValidSettingValue(ToolSetting $setting, mixed $value): bool
-    {
-        return match ($setting->type) {
-            'multi-select' => is_array($value)
-                && array_is_list($value)
-                && array_all($value, static fn(mixed $item): bool => is_string($item)),
-            'toggle' => is_bool($value),
-            default => is_scalar($value),
-        };
-    }
-
-    private function addSettingsTypeError(ValidationResult $result, string $path, string $message): void
-    {
-        $this->addSettingsError($result, self::SETTINGS_INVALID_VALUE_TYPE, $message, $path);
-    }
-
-    private function addSettingsError(ValidationResult $result, string $code, string $message, string $path): void
-    {
-        $result->addError([
-            'code' => $code,
-            'severity' => 'error',
-            'message' => $message,
-            'path' => $path,
-        ]);
+        $this->settingsValidator->validate($tool, $toolClass, $path, $result);
     }
 
     /**
-     * @param array<string, mixed> $tool
      * @param array<string, bool> $seenClasses
-     * @return string The validated tool_class (or '' when missing/invalid).
      */
     private function validateToolClass(array $tool, string $path, array &$seenClasses, ValidationResult $result): string
     {
@@ -523,159 +457,6 @@ final class AgentTemplateValidator
                 ]);
             }
         }
-    }
-
-    /**
-     * @param array<string, mixed> $raw
-     */
-    private function validateMetadata(array $raw, ValidationResult $result): void
-    {
-        if (!array_key_exists('metadata', $raw)) {
-            return;
-        }
-        $metadata = $raw['metadata'];
-        if (!is_array($metadata)) {
-            $result->addError([
-                'code'     => 'METADATA_NOT_OBJECT',
-                'severity' => 'error',
-                'message'  => "Field 'metadata' must be an object.",
-                'path'     => 'metadata',
-            ]);
-            return;
-        }
-        foreach (array_keys($metadata) as $key) {
-            if (in_array($key, self::ALLOWED_METADATA_KEYS, true)) {
-                continue;
-            }
-            $result->addError([
-                'code'     => 'UNKNOWN_METADATA_KEY',
-                'severity' => 'error',
-                'message'  => sprintf("Unknown field 'metadata.%s'.", $key),
-                'path'     => 'metadata.' . $key,
-            ]);
-        }
-        if (isset($metadata['category'])) {
-            $this->validateMetadataEnum(
-                $result,
-                'category',
-                $metadata['category'],
-                self::ALLOWED_CATEGORIES,
-                'METADATA_CATEGORY_UNKNOWN',
-            );
-        }
-        $this->validateMetadataStringField($result, 'icon', $metadata['icon'] ?? null, 'METADATA_ICON_TYPE');
-        $this->validateMetadataEnumWithType(
-            $result,
-            'archetype',
-            $metadata['archetype'] ?? null,
-            self::ALLOWED_ARCHETYPES,
-            'METADATA_ARCHETYPE_TYPE',
-            'METADATA_ARCHETYPE_UNKNOWN',
-        );
-        $this->validateMetadataEnumWithType(
-            $result,
-            'variant_key',
-            $metadata['variant_key'] ?? null,
-            self::ALLOWED_VARIANTS,
-            'METADATA_VARIANT_KEY_TYPE',
-            'METADATA_VARIANT_KEY_UNKNOWN',
-        );
-        $this->validateMetadataEnumWithType(
-            $result,
-            'palette_key',
-            $metadata['palette_key'] ?? null,
-            self::ALLOWED_PALETTES,
-            'METADATA_PALETTE_KEY_TYPE',
-            'METADATA_PALETTE_KEY_UNKNOWN',
-        );
-    }
-
-    /**
-     * Validate that a metadata string field either is null or is a string.
-     * Returns early on null so the per-field validator functions stay under
-     * the cognitive-complexity ceiling.
-     *
-     * @param mixed $value
-     */
-    private function validateMetadataStringField(ValidationResult $result, string $field, mixed $value, string $errorCode): void
-    {
-        if ($value === null) {
-            return;
-        }
-        if (!is_string($value)) {
-            $result->addError([
-                'code'     => $errorCode,
-                'severity' => 'error',
-                'message'  => "Field 'metadata.{$field}' must be a string.",
-                'path'     => 'metadata.' . $field,
-            ]);
-        }
-    }
-
-    /**
-     * Validate a metadata field that is both a string AND constrained to
-     * an enum. Both checks share the same shape so the call sites stay
-     * compact.
-     *
-     * @param list<string> $allowed
-     * @param mixed $value
-     */
-    private function validateMetadataEnum(
-        ValidationResult $result,
-        string $field,
-        mixed $value,
-        array $allowed,
-        string $unknownCode,
-    ): void {
-        if (!in_array($value, $allowed, true)) {
-            $result->addWarning([
-                'code'     => $unknownCode,
-                'severity' => 'warning',
-                'message'  => sprintf(
-                    "Unknown %s '%s'. Expected one of: %s.",
-                    $field,
-                    (string) $value,
-                    implode(', ', $allowed),
-                ),
-                'path'     => 'metadata.' . $field,
-            ]);
-        }
-    }
-
-    /**
-     * Validate a metadata field that is both a string AND constrained to
-     * an enum. Emits an error when the value isn't a string, and a warning
-     * when the value is a string but not in the allowed list.
-     *
-     * @param list<string> $allowed
-     * @param mixed $value
-     */
-    private function validateMetadataEnumWithType(
-        ValidationResult $result,
-        string $field,
-        mixed $value,
-        array $allowed,
-        string $typeErrorCode,
-        string $unknownCode,
-    ): void {
-        if ($value === null) {
-            return;
-        }
-        if (!is_string($value)) {
-            $this->addStringTypeError($result, $field, $typeErrorCode);
-            return;
-        }
-        $this->validateMetadataEnum($result, $field, $value, $allowed, $unknownCode);
-    }
-
-    private function addStringTypeError(ValidationResult $result, string $field, string $code): void
-    {
-        $result->addError([
-            'code'     => $code,
-            'severity' => 'error',
-            'message'  => "Field 'metadata.{$field}' must be a string.",
-            'path'     => 'metadata.' . $field,
-        ]);
     }
 
     /**

@@ -23,7 +23,14 @@ function makeExporterWithConfig(?PluginLoader $pluginLoader = null): array
         new Monolog\Logger('test'),
         [Spora\Tools\TimeTool::class, Spora\Tools\SkillTool::class, TestTool::class],
     );
-    return [new AgentTemplateExporter($pluginLoader ?? new PluginLoader([]), $toolConfig), $toolConfig];
+    return [
+        new AgentTemplateExporter(
+            $pluginLoader ?? new PluginLoader([]),
+            $toolConfig,
+            new Spora\Services\ToolConfigSchemaInspector(),
+        ),
+        $toolConfig,
+    ];
 }
 
 beforeEach(function (): void {

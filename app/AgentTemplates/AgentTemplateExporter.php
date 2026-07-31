@@ -10,6 +10,7 @@ use Spora\Models\AgentPicture;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
+use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 
@@ -27,6 +28,7 @@ final class AgentTemplateExporter
     public function __construct(
         private readonly PluginLoader $pluginLoader,
         private readonly ToolConfigService $toolConfig,
+        private readonly ToolConfigSchemaInspector $schemaInspector,
     ) {}
 
     /**
@@ -126,26 +128,7 @@ final class AgentTemplateExporter
         $settingsTools = [];
         foreach ($rows as $row) {
             $toolClass = $row->tool_class;
-            $toolOps = $overrides->get($toolClass, collect());
-
-            $operations = [];
-            foreach ($toolOps as $op) {
-                // Only emit operations that carry an explicit override.
-                // Inherit-from-default rows (both fields null) are skipped
-                // to keep the exported template minimal.
-                if ($op->enabled === null && $op->default_requires_approval === null) {
-                    continue;
-                }
-                $entry = ['name' => $op->operation];
-                if ($op->enabled !== null) {
-                    $entry['enabled'] = $op->enabled === 1;
-                }
-                if ($op->default_requires_approval !== null) {
-                    // default_requires_approval=0 → auto_approve=true
-                    $entry['auto_approve'] = $op->default_requires_approval === 0;
-                }
-                $operations[] = $entry;
-            }
+            $operations = $this->buildOperationOverrides($overrides->get($toolClass, collect()));
 
             $entry = [
                 'tool_class' => $toolClass,
@@ -164,15 +147,42 @@ final class AgentTemplateExporter
     }
 
     /**
+     * Build the per-tool `operations[]` array, skipping operation rows that
+     * carry no explicit override (both columns null).
+     *
+     * @param \Illuminate\Support\Collection<int, AgentToolOperationOverride> $toolOps
+     * @return list<array<string, mixed>>
+     */
+    private function buildOperationOverrides(\Illuminate\Support\Collection $toolOps): array
+    {
+        $operations = [];
+        foreach ($toolOps as $op) {
+            if ($op->enabled === null && $op->default_requires_approval === null) {
+                continue;
+            }
+            $entry = ['name' => $op->operation];
+            if ($op->enabled !== null) {
+                $entry['enabled'] = $op->enabled === 1;
+            }
+            if ($op->default_requires_approval !== null) {
+                // default_requires_approval=0 → auto_approve=true
+                $entry['auto_approve'] = $op->default_requires_approval === 0;
+            }
+            $operations[] = $entry;
+        }
+        return $operations;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function exportToolSettings(string $toolClass, int $agentId): array
     {
-        $override = $this->toolConfig->normalizeMultiSelectValues(
+        $override = $this->schemaInspector->normalizeMultiSelectValuesForTemplate(
             $toolClass,
             $this->toolConfig->getRawAgentOverride($toolClass, $agentId),
         );
-        $exportable = array_flip($this->toolConfig->getExportableKeys($toolClass));
+        $exportable = array_flip($this->schemaInspector->getExportableKeys($toolClass));
         // Drop null/''/empty-array — the override row uses these as "inherit
         // parent" markers; emitting them would tell importers to clear values
         // the operator never customised.
@@ -188,9 +198,9 @@ final class AgentTemplateExporter
      */
     private function resolveToolDisplayName(string $toolClass): string
     {
+        $basename = $this->toolClassBasename($toolClass);
         if (!class_exists($toolClass)) {
-            $parts = explode('\\', $toolClass);
-            return end($parts) ?: $toolClass;
+            return $basename;
         }
         $reflection = new ReflectionClass($toolClass);
         foreach ($reflection->getAttributes(Tool::class) as $attr) {
@@ -201,6 +211,11 @@ final class AgentTemplateExporter
             }
             return $instance->name;
         }
+        return $basename;
+    }
+
+    private function toolClassBasename(string $toolClass): string
+    {
         $parts = explode('\\', $toolClass);
         $last = end($parts);
         return $last !== '' ? $last : $toolClass;

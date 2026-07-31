@@ -19,6 +19,7 @@ use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\AgentTemplates\AgentTemplateExporter;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateScanner;
+use Spora\AgentTemplates\AgentTemplateSettingsApplier;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Apps\AppRegistry;
 use Spora\Apps\PluginsApp;
@@ -1218,9 +1219,7 @@ final class ContainerDefinitions
                 return new AgentTemplateScanner($directories);
             },
 
-            AgentTemplateValidator::class => static fn(ContainerInterface $c): AgentTemplateValidator => new AgentTemplateValidator(
-                $c->get(ToolConfigSchemaInspector::class),
-            ),
+            AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
 
             ToolConfigSchemaInspector::class => static fn(): ToolConfigSchemaInspector => new ToolConfigSchemaInspector(),
 
@@ -1262,6 +1261,13 @@ final class ContainerDefinitions
                     $c->get(PluginLoader::class),
                     $c->get(Paths::class),
                     $c->get(AgentPictureService::class),
+                    $c->get(AgentTemplateSettingsApplier::class),
+                );
+            },
+
+            AgentTemplateSettingsApplier::class => static function (ContainerInterface $c): AgentTemplateSettingsApplier {
+                return new AgentTemplateSettingsApplier(
+                    $c->get(ToolConfigService::class),
                     $c->get(SkillScanner::class),
                 );
             },
@@ -1269,6 +1275,7 @@ final class ContainerDefinitions
             AgentTemplateExporter::class => static fn(ContainerInterface $c): AgentTemplateExporter => new AgentTemplateExporter(
                 $c->get(PluginLoader::class),
                 $c->get(ToolConfigService::class),
+                $c->get(ToolConfigSchemaInspector::class),
             ),
 
             MailTemplateServiceInterface::class => static fn(): MailTemplateServiceInterface => new MailTemplateService(),
