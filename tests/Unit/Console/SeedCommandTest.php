@@ -57,7 +57,8 @@ it('runs the seeder and reports success', function (): void {
         ->toContain('Starting database seeder...')
         ->toContain('Seeding finished successfully.');
     // Side effect: the admin user was created.
-    expect(Spora\Models\User::where('email', 'admin@spora.local')->exists())->toBeTrue();
+    $user = Spora\Models\User::where('email', 'admin@spora.local')->firstOrFail();
+    expect($user->verified)->toBe(1);
 });
 
 it('generates a fresh storage/secret.key on first run', function (): void {
