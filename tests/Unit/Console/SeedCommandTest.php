@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Delight\Auth\Role;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\SeedCommand;
@@ -58,7 +59,8 @@ it('runs the seeder and reports success', function (): void {
         ->toContain('Seeding finished successfully.');
     // Side effect: the admin user was created.
     $user = Spora\Models\User::where('email', 'admin@spora.local')->firstOrFail();
-    expect($user->verified)->toBe(1);
+    expect($user->verified)->toBe(1)
+        ->and($user->roles_mask)->toBe(Role::ADMIN);
 });
 
 it('generates a fresh storage/secret.key on first run', function (): void {
