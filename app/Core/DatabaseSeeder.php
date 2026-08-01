@@ -50,20 +50,26 @@ final class DatabaseSeeder
         }
         echo "Seeded " . count($mailTemplates) . " Mail Templates.\n";
 
-        // 2. Create or ensure Admin user exists.
+        // 2. Create or ensure Admin user exists. The seeder bypasses the email
+        //    verification flow — the admin must be immediately usable, so
+        //    AuthService::register() is asked to persist `verified = 1` in the
+        //    same write that creates the row.
         $user = User::where('email', 'admin@spora.local')->first();
         if ($user === null) {
-            $userId = $this->authService->register('admin@spora.local', 'password', 'Admin');
+            $userId = $this->authService->register('admin@spora.local', 'password', 'Admin', true);
             echo "Created Admin User: admin@spora.local / password\n";
         } else {
             echo "Admin user already exists.\n";
             $userId = $user->id;
         }
 
-        // 2b. Grant ADMIN role to the user and mark as verified (seeder admin bypasses email verification).
+        // 2b. Grant ADMIN role to the user and ensure the account is active.
+        //    `verified` is set inside register() when the row is created; here
+        //    we only enforce the role + status flags the auth library does not
+        //    manage, so an admin inserted by an older spora-core release is
+        //    still promoted correctly on re-seed.
         User::where('id', $userId)->update([
             'roles_mask' => Role::ADMIN,
-            'verified'   => 1,
             'status'     => 1,
         ]);
 
