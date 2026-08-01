@@ -63,13 +63,15 @@ final class DatabaseSeeder
             $userId = $user->id;
         }
 
-        // 2b. Grant ADMIN role to the user and ensure the account is active.
-        //    `verified` is set inside register() when the row is created; here
-        //    we only enforce the role + status flags the auth library does not
-        //    manage, so an admin inserted by an older spora-core release is
-        //    still promoted correctly on re-seed.
+        // 2b. Re-assert the bootstrap admin's role + verification + status on
+        //    every run. The seeder is the authority on the seeded admin's state:
+        //    AuthService::register() persists verified=1 when the row is first
+        //    created, but on container restarts against a persistent volume the
+        //    admin may have been persisted with stale values by an older
+        //    spora-core release. Re-asserting here is the self-healing path.
         User::where('id', $userId)->update([
             'roles_mask' => Role::ADMIN,
+            'verified'   => 1,
             'status'     => 1,
         ]);
 

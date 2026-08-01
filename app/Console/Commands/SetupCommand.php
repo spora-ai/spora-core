@@ -9,8 +9,6 @@ use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Core\DatabaseSeeder;
-use Spora\Models\Agent;
-use Spora\Models\User;
 use Spora\Services\EmailTemplateLoader;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -20,7 +18,7 @@ use Throwable;
 
 #[AsCommand(
     name: 'spora:setup',
-    description: 'Run migrations and seed a fresh database, or skip seeding on existing installs.',
+    description: 'Run migrations and seed (or reconcile) the database. Idempotent.',
 )]
 final class SetupCommand extends Command
 {
@@ -43,17 +41,15 @@ final class SetupCommand extends Command
             $this->installer->install();
             $output->writeln('<info>Done. Schema is up to date.</info>');
 
-            // Only seed on fresh installation (no users, no agents)
-            $userCount = User::count();
-            $agentCount = Agent::count();
-
-            if ($userCount === 0 && $agentCount === 0) {
-                $output->writeln('<info>Fresh installation — running seeder...</info>');
-                $seeder = new DatabaseSeeder($this->authService, $this->templateLoader, $this->templateImporter);
-                $seeder->run();
-            } else {
-                $output->writeln('<info>Existing installation detected. Skipping seeding.</info>');
-            }
+            // The seeder is fully idempotent (mail templates use firstOrCreate, the
+            // admin upserts roles_mask + status, the agent is applied only if
+            // missing) so we run it on every boot. This is the repair path for
+            // installs that pre-date a fix to the seeded admin — e.g. a persistent
+            // volume where the admin was persisted with verified=0 by an older
+            // spora-core release. Skipping the seeder on existing installs would
+            // hide those bad rows from the admin login flow.
+            $output->writeln('<info>Running database seeder...</info>');
+            (new DatabaseSeeder($this->authService, $this->templateLoader, $this->templateImporter))->run();
 
             return Command::SUCCESS;
         } catch (Throwable $e) {
