@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use Delight\Auth\Role;
-use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Console\Commands\SetupCommand;
 use Spora\Core\Database;
@@ -66,7 +65,7 @@ it('seeds on a fresh install', function (): void {
     expect($tester->getDisplay())
         ->toContain('Running Spora database migrations')
         ->toContain('Schema is up to date')
-        ->toContain('Running database seeder...');
+        ->toContain('Fresh installation — running seeder...');
     // The seeder echoes its own progress to stdout, but those go to raw stdout,
     // not the OutputInterface. Verify the side effect instead: an admin user
     // was created.
@@ -76,12 +75,8 @@ it('seeds on a fresh install', function (): void {
         ->and($user->status)->toBe(1);
 });
 
-it('reconciles a pre-existing admin row on a second run (persistent volume)', function (): void {
-    // Simulate a persistent volume that already has a user + agent from a
-    // previous spora:setup. spora:setup must still run the seeder so the admin
-    // roles_mask / status are re-asserted — the seeder is the repair path for
-    // installs whose admin was persisted with a broken role/status by an older
-    // spora-core release.
+it('skips seeding on a second run when users and agents exist', function (): void {
+    // Pre-seed: create a user+agent so the second command sees an existing install.
     $auth = bootAuthLayer();
     $userId = $auth->register('existing@example.com', 'Password1!', 'Existing');
 
@@ -92,24 +87,12 @@ it('reconciles a pre-existing admin row on a second run (persistent volume)', fu
         'is_active' => true,
     ]);
 
-    // Demote the admin to a state an older spora-core release might have
-    // persisted: unverified, suspended, no admin role.
-    Capsule::table('users')
-        ->where('email', 'admin@spora.local')
-        ->update(['verified' => 0, 'status' => 0, 'roles_mask' => 0]);
-
     $tester = makeSetupTester();
     $tester->execute([]);
 
     expect($tester->getStatusCode())->toBe(Command::SUCCESS);
-    $display = $tester->getDisplay();
-    expect($display)
+    expect($tester->getDisplay())
         ->toContain('Schema is up to date')
-        ->toContain('Running database seeder...');
-    expect(str_contains($display, 'Existing installation detected. Skipping seeding.'))->toBeFalse();
-
-    $admin = Spora\Models\User::where('email', 'admin@spora.local')->firstOrFail();
-    expect($admin->roles_mask)->toBe(Role::ADMIN)
-        ->and($admin->status)->toBe(1)
-        ->and($admin->verified)->toBe(1);
+        ->toContain('Existing installation detected. Skipping seeding.')
+        ->toContain('db:repair-admin');
 });

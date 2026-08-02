@@ -31,6 +31,7 @@ use Spora\Console\Commands\PluginInstallCommand;
 use Spora\Console\Commands\PluginListCommand;
 use Spora\Console\Commands\PluginUninstallCommand;
 use Spora\Console\Commands\PluginUpdateCommand;
+use Spora\Console\Commands\RepairAdminCommand;
 use Spora\Console\Commands\SeedCommand;
 use Spora\Console\Commands\SetupCommand;
 use Spora\Console\Commands\TaskRunCommand;
@@ -1314,6 +1315,10 @@ final class ContainerDefinitions
                     $c->get(AgentTemplateImporter::class),
                     $c->get(Paths::class),
                 );
+            },
+
+            RepairAdminCommand::class => static function (ContainerInterface $c): RepairAdminCommand {
+                return new RepairAdminCommand($c->get(Database::class));
             },
 
             WorkerRunCommand::class => static function (ContainerInterface $c): WorkerRunCommand {

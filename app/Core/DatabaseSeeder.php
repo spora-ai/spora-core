@@ -50,30 +50,25 @@ final class DatabaseSeeder
         }
         echo "Seeded " . count($mailTemplates) . " Mail Templates.\n";
 
-        // 2. Create or ensure Admin user exists. The seeder bypasses the email
-        //    verification flow — the admin must be immediately usable, so
-        //    AuthService::register() is asked to persist `verified = 1` in the
-        //    same write that creates the row.
+        // 2. Create the bootstrap admin if and only if the admin email does not
+        //    already exist. We never patch an existing admin row — doing so on
+        //    every `db:seed` invocation would overwrite operator changes
+        //    (renames, demotions, suspensions) and would re-create a deleted
+        //    admin with the known `password` value baked into this seeder, which
+        //    is a backdoor. Operators who need to repair stale state on an
+        //    existing install should run `bin/spora db:repair-admin` instead.
         $user = User::where('email', 'admin@spora.local')->first();
         if ($user === null) {
             $userId = $this->authService->register('admin@spora.local', 'password', 'Admin', true);
+            User::where('id', $userId)->update([
+                'roles_mask' => Role::ADMIN,
+                'status'     => 1,
+            ]);
             echo "Created Admin User: admin@spora.local / password\n";
         } else {
-            echo "Admin user already exists.\n";
             $userId = $user->id;
+            echo "Admin user already exists.\n";
         }
-
-        // 2b. Re-assert the bootstrap admin's role + verification + status on
-        //    every run. The seeder is the authority on the seeded admin's state:
-        //    AuthService::register() persists verified=1 when the row is first
-        //    created, but on container restarts against a persistent volume the
-        //    admin may have been persisted with stale values by an older
-        //    spora-core release. Re-asserting here is the self-healing path.
-        User::where('id', $userId)->update([
-            'roles_mask' => Role::ADMIN,
-            'verified'   => 1,
-            'status'     => 1,
-        ]);
 
         // 3. Install the Spora Core Agent from the built-in template, if missing.
         //    Recipes are files, not database entities, so we key on the

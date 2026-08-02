@@ -9,6 +9,8 @@ use Spora\Auth\AuthService;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Core\DatabaseSeeder;
+use Spora\Models\Agent;
+use Spora\Models\User;
 use Spora\Services\EmailTemplateLoader;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -18,7 +20,7 @@ use Throwable;
 
 #[AsCommand(
     name: 'spora:setup',
-    description: 'Run migrations and seed (or reconcile) the database. Idempotent.',
+    description: 'Run migrations and seed a fresh database. Existing installs are skipped — use `db:seed` or `db:repair-admin` for repairs.',
 )]
 final class SetupCommand extends Command
 {
@@ -41,15 +43,22 @@ final class SetupCommand extends Command
             $this->installer->install();
             $output->writeln('<info>Done. Schema is up to date.</info>');
 
-            // The seeder is fully idempotent (mail templates use firstOrCreate, the
-            // admin upserts roles_mask + status, the agent is applied only if
-            // missing) so we run it on every boot. This is the repair path for
-            // installs that pre-date a fix to the seeded admin — e.g. a persistent
-            // volume where the admin was persisted with verified=0 by an older
-            // spora-core release. Skipping the seeder on existing installs would
-            // hide those bad rows from the admin login flow.
-            $output->writeln('<info>Running database seeder...</info>');
-            (new DatabaseSeeder($this->authService, $this->templateLoader, $this->templateImporter))->run();
+            // Only seed on a truly fresh install. Re-running the seeder on every
+            // boot would re-create a deleted or renamed bootstrap admin with the
+            // known password baked into the seeder — a backdoor — and would also
+            // overwrite operator changes to the admin row. Operators with stale
+            // state on an existing install should run `bin/spora db:repair-admin`
+            // (idempotent, one-shot) instead.
+            $userCount  = User::count();
+            $agentCount = Agent::count();
+
+            if ($userCount === 0 && $agentCount === 0) {
+                $output->writeln('<info>Fresh installation — running seeder...</info>');
+                (new DatabaseSeeder($this->authService, $this->templateLoader, $this->templateImporter))->run();
+            } else {
+                $output->writeln('<info>Existing installation detected. Skipping seeding.</info>');
+                $output->writeln('<comment>Run `php bin/spora db:repair-admin` if the seeded admin needs promoting (verified=1, Role::ADMIN).</comment>');
+            }
 
             return Command::SUCCESS;
         } catch (Throwable $e) {
