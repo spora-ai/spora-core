@@ -142,7 +142,7 @@ describe('AgentTool::execute — read_agent_configuration (deprecated, soft-redi
         $auth    = bootAuthLayer();
         $ownerId = bootAuth($auth, 'redirect-self@example.com');
         [$tool, , $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
         $toolSettings->allows('getAllToolsStatus')->andReturn([]);
         $toolSettings->allows('getToolsOperations')->andReturn([]);
 
@@ -200,8 +200,8 @@ describe('AgentTool::execute — read_agent_configuration (deprecated, soft-redi
 describe('AgentTool::execute — write_agent_configuration', function (): void {
     test('forwards patch through AgentServiceInterface::updateAgentByAgentId and returns the canonical manifest', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->shouldReceive('updateAgentByAgentId')
             ->once()
             ->andReturn(stubManifestAgent(7, 'Alpha'));
@@ -229,8 +229,8 @@ describe('AgentTool::execute — write_agent_configuration', function (): void {
 
     test('silently drops `notes` from the patch (notes are write_notes-only)', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         // `description` survives the strip so the service still gets called.
         $service->shouldReceive('updateAgentByAgentId')
             ->once()
@@ -255,8 +255,8 @@ describe('AgentTool::execute — write_agent_configuration', function (): void {
         // and we surface a clear failure rather than silently reporting
         // success with no DB write. Operators can use write_notes for that.
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->shouldNotReceive('updateAgentByAgentId');
 
         $result = $tool->execute(
@@ -286,8 +286,8 @@ describe('AgentTool::execute — write_notes', function (): void {
         // Agent existence is checked first, so the LLM sees "Agent not
         // found." rather than a content-shape complaint when both are wrong.
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(null);
 
         $result = $tool->execute(['action' => 'write_notes'], 7);
@@ -298,8 +298,8 @@ describe('AgentTool::execute — write_notes', function (): void {
 
     test('rejects missing content when the agent exists', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $agent = new Agent();
         $agent->id = 7;
         $agent->user_id = 99;
@@ -315,8 +315,8 @@ describe('AgentTool::execute — write_notes', function (): void {
 
     test('rejects invalid mode', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $agent = new Agent();
         $agent->id = 7;
         $agent->user_id = 99;
@@ -338,8 +338,8 @@ describe('AgentTool::execute — write_notes', function (): void {
         // Empty content on append/prepend must not pile up separator
         // characters across repeated LLM calls.
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
@@ -362,8 +362,8 @@ describe('AgentTool::execute — write_notes', function (): void {
 
     test('appends by default and persists via updateAgentByAgentId', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
@@ -391,8 +391,8 @@ describe('AgentTool::execute — write_notes', function (): void {
 
     test('prepends when mode=prepend is passed', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
@@ -423,8 +423,8 @@ describe('AgentTool::execute — write_notes', function (): void {
         // write_notes_overwrite: it discards the LLM's `mode` arg and
         // overwrites the agent's notes wholesale.
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
@@ -455,8 +455,8 @@ describe('AgentTool::execute — write_notes', function (): void {
 
     test('returns failure when Agent::find returns null', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(null);
 
         $result = $tool->execute(
@@ -473,8 +473,8 @@ describe('AgentTool::execute — write_notes', function (): void {
 describe('AgentTool::execute — read_notes', function (): void {
     test('returns notes and length when the agent exists', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
@@ -493,8 +493,8 @@ describe('AgentTool::execute — read_notes', function (): void {
 
     test('returns failure when Agent::find returns null', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(null);
 
         $result = $tool->execute(['action' => 'read_notes'], 7);
@@ -507,8 +507,8 @@ describe('AgentTool::execute — read_notes', function (): void {
 describe('AgentTool::execute — write_agent_configuration — happy path', function (): void {
     test('forwards patch and returns the manifest', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
@@ -538,8 +538,8 @@ describe('AgentTool::execute — write_agent_configuration — happy path', func
 
     test('returns failure when the agent disappears mid-write', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         // updateAgentByAgentId returns null when the agent no longer exists,
         // which the tool surfaces as the standard AGENT_NOT_FOUND failure.
         $service->allows('updateAgentByAgentId')->andReturn(null);
@@ -557,8 +557,8 @@ describe('AgentTool::execute — write_agent_configuration — happy path', func
 describe('AgentTool::execute — get_available_tools', function (): void {
     test('enriches per-agent status with presenter metadata and returns a versioned JSON payload as content', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
@@ -613,8 +613,8 @@ describe('AgentTool::execute — get_available_tools', function (): void {
 
     test('flags needs_configuration when can_enable is false', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
@@ -645,9 +645,9 @@ describe('AgentTool::execute — get_available_tools', function (): void {
 
     test('qualifies call_name with the plugin slug for plugin-owned tools', function (): void {
         [$tool, $service, $toolSettings, $pluginLoader, $iconResolver] = makeAgentToolWithPlugins();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
-        /** @var MockInterface $iconResolver */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
+        /** @var Spora\Services\ToolIconResolver&MockInterface $iconResolver */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
@@ -709,8 +709,8 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         // `write_agent_configuration` (disabled, requires approval) as
         // the two anchors for the assertion.
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
@@ -761,8 +761,8 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         // The presenter should fall back to the operation's
         // enabledByDefault / requiresApprovalByDefault from #[ToolOperation].
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
         $agent->user_id  = 99;
@@ -799,7 +799,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
 
     test('returns failure when the agent does not exist', function (): void {
         [$tool, $service] = makeAgentTool();
-        /** @var MockInterface $service */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(null);
 
         $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
@@ -823,7 +823,7 @@ describe('AgentTool::execute — create_agent', function (): void {
 
     test('fails closed when the calling agent cannot be resolved', function (): void {
         [$tool, $service] = makeAgentTool();
-        /** @var MockInterface $service */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(null);
         $service->shouldNotReceive('createAgent');
 
@@ -839,7 +839,7 @@ describe('AgentTool::execute — create_agent', function (): void {
 
     test('rejects missing payload', function (): void {
         [$tool, $service] = makeAgentTool();
-        /** @var MockInterface $service */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
 
         $result = $tool->execute(['action' => 'create_agent'], 7, null);
@@ -850,7 +850,7 @@ describe('AgentTool::execute — create_agent', function (): void {
 
     test('rejects the legacy `agent{}` wrapper with a literal fix', function (): void {
         [$tool, $service] = makeAgentTool();
-        /** @var MockInterface $service */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
 
         $out = $tool->execute(
@@ -871,7 +871,7 @@ describe('AgentTool::execute — create_agent', function (): void {
 
     test('rejects the legacy `tools[]` block with a redirect to configure_tools', function (): void {
         [$tool, $service] = makeAgentTool();
-        /** @var MockInterface $service */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
 
         $out = $tool->execute(
@@ -897,7 +897,7 @@ describe('AgentTool::execute — create_agent', function (): void {
         // never store it, so we surface a clear "not accepted here"
         // message instead of silently dropping the field.
         [$tool, $service] = makeAgentTool();
-        /** @var MockInterface $service */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
 
         foreach ([['weather'], ['item' => 'weather']] as $bad) {
@@ -927,8 +927,8 @@ describe('AgentTool::execute — create_agent', function (): void {
         // The owning user_id comes from the calling agent's row, not
         // from the dispatcher's parameter.
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7, name: 'Caller'));
         $service->shouldReceive('createAgent')
             ->once()
@@ -962,8 +962,8 @@ describe('AgentTool::execute — create_agent', function (): void {
         // helper to return a fully-populated Agent fixture so the
         // manifest renders cleanly.
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7, name: 'Caller'));
         $agent = stubManifestAgent(id: 42, name: 'New Agent');
         $agent->description   = 'created via AgentTool';
@@ -1142,7 +1142,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
         $ownerId = bootAuth($auth, 'configure-self@example.com');
 
         [$tool, , $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id'              => $ownerId,
@@ -1200,7 +1200,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
         $ownerId = bootAuth($auth, 'configure-remove@example.com');
 
         [$tool, , $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id'              => $ownerId,
@@ -1241,7 +1241,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
         $ownerId = bootAuth($auth, 'configure-op-override@example.com');
 
         [$tool, , $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id'              => $ownerId,
@@ -1310,7 +1310,7 @@ describe('AgentTool::execute — read_agent', function (): void {
         $ownerId = bootAuth($auth, 'read-agent-self@example.com');
 
         [$tool, , $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
         $toolSettings->allows('getAllToolsStatus')->andReturn([]);
         $toolSettings->allows('getToolsOperations')->andReturn([]);
 
@@ -1349,7 +1349,7 @@ describe('AgentTool::execute — read_agent', function (): void {
         $ownerId = bootAuth($auth, 'read-agent-owner@example.com');
 
         [$tool, , $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
         // The AgentManifest path runs after resolveReadAgentTarget — drive
         // it to an empty manifest so the test stays focused on the
         // dispatch + resource shape, not the tools subsystem.
@@ -1468,7 +1468,7 @@ describe('AgentTool::execute — configure_tools (agent_id scoped)', function ()
         $ownerId = bootAuth($auth, 'ct-targeted@example.com');
 
         [$tool, , $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id' => $ownerId, 'name' => 'Caller',
@@ -1514,7 +1514,7 @@ describe('AgentTool::execute — configure_tools (agent_id scoped)', function ()
         $otherId = bootAuth($auth, 'ct-cross-other@example.com');
 
         [$tool, , $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $otherAgent = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id' => $ownerId, 'name' => 'Owned',
@@ -1566,7 +1566,7 @@ test('create_agent validation errors append the agent-creation skill pointer', f
     // agent-creation skill so the LLM knows where to find the schema on the
     // next attempt instead of retrying the same broken payload.
     [$tool, $service] = makeAgentTool();
-    /** @var MockInterface $service */
+    /** @var AgentServiceInterface&MockInterface $service */
     $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
 
     // Deliberately broken: legacy wrapper shape (top-level `name` inside
@@ -1639,8 +1639,8 @@ test('write_agent_configuration silently drops unknown keys (confirmed via read_
     // Covers the "notes vs. config" gotcha called out in the
     // agent-creation skill's `write_agent_configuration` workflow section.
     [$tool, $service, $toolSettings] = makeAgentTool();
-    /** @var MockInterface $toolSettings */
-    /** @var MockInterface $service */
+    /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+    /** @var AgentServiceInterface&MockInterface $service */
 
     // AgentTool strips `notes` defensively; `name` and `system_prompt`
     // pass through; `foo` and `enable_tools` flow through to the service
@@ -1743,7 +1743,7 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
         $ownerId = bootAuth($auth, 'cfg-unwrap-outer@example.com');
 
         [$tool, , $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id' => $ownerId, 'name' => 'Caller',
@@ -1792,7 +1792,7 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
         $ownerId = bootAuth($auth, 'cfg-unwrap-inner@example.com');
 
         [$tool, , $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id' => $ownerId, 'name' => 'Caller',
@@ -1843,7 +1843,7 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
         $ownerId = bootAuth($auth, 'cfg-unwrap-self@example.com');
 
         [$tool, , $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id' => $ownerId, 'name' => 'Caller',
@@ -1901,7 +1901,7 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
         $ownerId = bootAuth($auth, 'cfg-plain@example.com');
 
         [$tool, , $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id' => $ownerId, 'name' => 'Caller',
@@ -1943,7 +1943,7 @@ describe('AgentTool::execute — create_agent {item: [...]} unwrap', function ()
 
     test('rejects {item: [...]} required_plugins with the reserved message', function (): void {
         [$tool, $service] = makeAgentTool();
-        /** @var MockInterface $service */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
         $service->shouldNotReceive('createAgent');
 
@@ -1981,8 +1981,8 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
         $ownerId = bootAuth($auth, 'wc-target@example.com');
 
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
 
         $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id' => $ownerId, 'name' => 'Caller',
@@ -2030,8 +2030,8 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
         // The resolve helper short-circuits on missing key, so no DB
         // lookup is required here.
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->shouldReceive('updateAgentByAgentId')
             ->once()
             ->with(7, Mockery::type('array'))
@@ -2055,7 +2055,7 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
     describe('AgentTool::execute — list_agents (discovery surface)', function (): void {
         test('returns an empty list when the agent service has no rows', function (): void {
             [$tool, $service] = makeAgentTool();
-            /** @var MockInterface $service */
+            /** @var AgentServiceInterface&MockInterface $service */
             $agent = new Agent();
             $agent->id = 7;
             $agent->user_id = 99;
@@ -2077,7 +2077,7 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
 
         test('returns a slim id/name/description list of every owned agent', function (): void {
             [$tool, $service] = makeAgentTool();
-            /** @var MockInterface $service */
+            /** @var AgentServiceInterface&MockInterface $service */
             $agent = new Agent();
             $agent->id = 7;
             $agent->user_id = 99;
@@ -2115,7 +2115,7 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
             // and surfacing the resolution error matches the contract
             // used by read_agent / configure_tools.
             [$tool, $service] = makeAgentTool();
-            /** @var MockInterface $service */
+            /** @var AgentServiceInterface&MockInterface $service */
             $service->allows('getAgentByAgentId')->andReturn(null);
             $service->shouldNotReceive('getAgentsForUser');
 
@@ -2132,7 +2132,7 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
             // the LLM context window bigger. Pin the slim shape so an upstream
             // AgentResource change doesn't silently leak.
             [$tool, $service] = makeAgentTool();
-            /** @var MockInterface $service */
+            /** @var AgentServiceInterface&MockInterface $service */
             $agent = new Agent();
             $agent->id = 7;
             $agent->user_id = 99;
@@ -2165,8 +2165,8 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
         $otherId = bootAuth($auth, 'wc-other@example.com');
 
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
 
         $otherAgent = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'user_id' => $ownerId, 'name' => 'Owned',
@@ -2198,8 +2198,8 @@ describe('AgentTool::execute — update_agent (canonical, with write_agent_confi
 
     test('canonical update_agent path: patches the targeted agent and returns the manifest', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->shouldReceive('updateAgentByAgentId')
             ->once()
             ->with(7, ['description' => 'updated'])
@@ -2219,8 +2219,8 @@ describe('AgentTool::execute — update_agent (canonical, with write_agent_confi
 
     test('legacy write_agent_configuration name soft-redirects to update_agent', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->shouldReceive('updateAgentByAgentId')
             ->once()
             ->with(7, ['description' => 'updated'])
@@ -2244,8 +2244,8 @@ describe('AgentTool::execute — update_agent (canonical, with write_agent_confi
         // the manifest payload — assert the data and the
         // deprecation-prefix both land on the success path.
         [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var MockInterface $toolSettings */
-        /** @var MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->shouldReceive('updateAgentByAgentId')
             ->once()
             ->with(7, ['description' => 'x'])
@@ -2283,7 +2283,7 @@ describe('AgentTool::execute — update_agent (canonical, with write_agent_confi
         ]);
 
         [$tool, $service] = makeAgentTool();
-        /** @var MockInterface $service */
+        /** @var AgentServiceInterface&MockInterface $service */
         $service->shouldNotReceive('updateAgentByAgentId');
 
         $result = $tool->execute(
