@@ -57,10 +57,8 @@ class AuthService
     /**
      * Register a new user and return their new user ID.
      *
-     * @param bool $markAsVerified when true, the user row is created with `verified = 1`
-     *                             (caller confirms the account should bypass email verification).
-     *                             Use this for bootstrap/system accounts — e.g. the seeder admin —
-     *                             so they are immediately usable without an out-of-band email step.
+     * @param bool $markAsVerified when true, bypass email verification and persist `verified = 1`
+     *                             in the same write — for bootstrap/system accounts.
      *
      * @throws InvalidArgumentException if the email or password is invalid
      * @throws EmailTakenException       if a user with that email already exists
@@ -72,10 +70,6 @@ class AuthService
         bool $markAsVerified = false,
     ): int {
         try {
-            // When the caller confirms the account should bypass email verification,
-            // skip the verification callback entirely — no email is sent and the
-            // user row is created with `verified = 1` by delight-im/auth (a null
-            // callback makes the auth library treat the account as auto-verified).
             $verifyCallback = $markAsVerified
                 ? null
                 : $this->emailFlow->buildVerificationCallback($email);

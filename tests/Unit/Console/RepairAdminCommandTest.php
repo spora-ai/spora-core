@@ -12,7 +12,7 @@ use Symfony\Component\Console\Tester\CommandTester;
 function makeRepairAdminTester(): CommandTester
 {
     $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-    $db->bootDatabaseConnectionOnly(); // no-op: already booted by Pest beforeEach
+    $db->bootDatabaseConnectionOnly();
 
     $command = new RepairAdminCommand($db);
     $command->setName('db:repair-admin');
@@ -58,9 +58,6 @@ it('promotes a legacy admin row to verified + Role::ADMIN + status=1', function 
 });
 
 it('preserves existing role bits and only adds Role::ADMIN', function (): void {
-    // Simulate an operator who manually granted themselves another role
-    // (e.g. Role::MODERATOR | an arbitrary custom bitmask). The repair must
-    // not strip those roles when promoting the admin.
     insertLegacyAdmin();
     Capsule::table('users')->where('email', 'admin@spora.local')->update([
         'roles_mask' => Role::ADMIN | 0b10000000,
@@ -93,7 +90,7 @@ it('is idempotent — a second run reports no change', function (): void {
         ->toContain('status:     1 → 1');
 });
 
-it('refuses to create a fresh admin — that path belongs to db:seed on a fresh install', function (): void {
+it('refuses to act when the admin row is missing (security)', function (): void {
     Spora\Models\User::where('email', 'admin@spora.local')->delete();
 
     $tester = makeRepairAdminTester();

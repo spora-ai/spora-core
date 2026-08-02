@@ -39,7 +39,6 @@ final class DatabaseSeeder
 
     public function run(): void
     {
-        // 1. Seed default mail templates first (registration triggers verification emails that need them).
         $mailTemplates = $this->templateLoader->getAll();
 
         foreach ($mailTemplates as $template) {
@@ -50,13 +49,9 @@ final class DatabaseSeeder
         }
         echo "Seeded " . count($mailTemplates) . " Mail Templates.\n";
 
-        // 2. Create the bootstrap admin if and only if the admin email does not
-        //    already exist. We never patch an existing admin row — doing so on
-        //    every `db:seed` invocation would overwrite operator changes
-        //    (renames, demotions, suspensions) and would re-create a deleted
-        //    admin with the known `password` value baked into this seeder, which
-        //    is a backdoor. Operators who need to repair stale state on an
-        //    existing install should run `bin/spora db:repair-admin` instead.
+        // Bootstrap admin. Insert-only: a deleted or renamed admin is left alone
+        // so the seeder cannot be used as a backdoor. Repairs go through
+        //    `bin/spora db:repair-admin`.
         $user = User::where('email', 'admin@spora.local')->first();
         if ($user === null) {
             $userId = $this->authService->register('admin@spora.local', 'password', 'Admin', true);
@@ -70,9 +65,8 @@ final class DatabaseSeeder
             echo "Admin user already exists.\n";
         }
 
-        // 3. Install the Spora Core Agent from the built-in template, if missing.
-        //    Recipes are files, not database entities, so we key on the
-        //    agent name to keep this seeder resilient to template renames.
+        // 3. Install the Spora Core Agent from the built-in template if missing.
+        //    Keyed on agent name so a template id rename leaves the agent in place.
         $existing = \Spora\Models\Agent::where('user_id', $userId)
             ->where('name', 'Spora Core Agent')
             ->first();

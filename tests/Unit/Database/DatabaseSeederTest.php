@@ -67,12 +67,10 @@ it('seeds the admin user and agent successfully', function () {
 it('does not duplicate records if seeder is run twice', function () {
     $seeder = makeSeeder();
 
-    // First run
     ob_start();
     $seeder->run();
     ob_get_clean();
 
-    // Second run
     ob_start();
     $seeder->run();
     $output = ob_get_clean();
@@ -83,11 +81,8 @@ it('does not duplicate records if seeder is run twice', function () {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('does not modify an existing admin row (security)', function () {
-    // Pre-seed an admin row that an operator has customised: different name,
-    // no admin role, suspended. Re-running the seeder (as `db:seed` would do
-    // on an existing install) must not touch this row — patching it would
-    // silently re-grant admin and reactivate the account, a backdoor if the
-    // operator had demoted the user.
+    // Operator-customised admin: renamed, no admin role, suspended. The seeder
+    // must leave it untouched so it cannot re-grant admin via `db:seed`.
     $now = date('Y-m-d H:i:s');
     Capsule::table('users')->insert([
         'email'        => 'admin@spora.local',
@@ -105,7 +100,6 @@ it('does not modify an existing admin row (security)', function () {
         'updated_at'   => $now,
     ]);
 
-    // Add an agent so the Core Agent template application is skipped.
     $existingUserId = (int) Capsule::table('users')->where('email', 'admin@spora.local')->value('id');
     Agent::create([
         'user_id'   => $existingUserId,
@@ -121,9 +115,6 @@ it('does not modify an existing admin row (security)', function () {
     ob_get_clean();
 
     $after = Capsule::table('users')->where('email', 'admin@spora.local')->first();
-
-    // Row is byte-identical (same name, same password hash, no admin role,
-    // still suspended, still unverified). The Core Agent is also untouched.
     expect($after->name)->toBe($before->name)
         ->and((int) $after->verified)->toBe((int) $before->verified)
         ->and((int) $after->roles_mask)->toBe((int) $before->roles_mask)
@@ -131,10 +122,6 @@ it('does not modify an existing admin row (security)', function () {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('does not recreate a deleted admin row (security)', function () {
-    // If an operator deletes the seeded admin (e.g. to replace it with a real
-    // OIDC-managed account), re-running the seeder must not resurrect the
-    // bootstrap admin with the known `password` value — that would be a
-    // backdoor. The seeder must be a no-op when the admin row is absent.
     expect(User::where('email', 'admin@spora.local')->exists())->toBeFalse();
 
     ob_start();

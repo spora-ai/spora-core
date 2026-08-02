@@ -72,7 +72,7 @@ test('register() with an invalid email format throws InvalidArgumentException', 
     expect(fn() => $service->register('not-an-email', 'ValidPass1!', 'Not An Email'))->toThrow(InvalidArgumentException::class);
 });
 
-test('register() with $markAsVerified true persists verified=1 even when an SMTP mailer is wired', function (): void {
+test('register() with $markAsVerified true persists verified=1 and skips the verification email', function (): void {
     $service = bootAuthLayer();
     [$mailer, $captured] = makeCapturingMailer();
     $service->setSystemMailer($mailer);
@@ -82,23 +82,20 @@ test('register() with $markAsVerified true persists verified=1 even when an SMTP
 
     $user = User::where('email', $email)->firstOrFail();
     expect($user->id)->toBe($userId)
-        ->and($user->verified)->toBe(1);
-    // No confirmation email was sent — $markAsVerified suppressed it.
-    expect($captured['verify'])->toBeNull();
+        ->and($user->verified)->toBe(1)
+        ->and($captured['verify'])->toBeNull();
 });
 
-test('register() without $markAsVerified leaves the user unverified when SMTP is wired', function (): void {
+test('register() without $markAsVerified leaves the user unverified and sends the verification email', function (): void {
     $service = bootAuthLayer();
     [$mailer, $captured] = makeCapturingMailer();
     $service->setSystemMailer($mailer);
 
-    $email = 'self-signup@example.com';
-    $service->register($email, 'ValidPass1!', 'Self Signup');
+    $service->register('self-signup@example.com', 'ValidPass1!', 'Self Signup');
 
-    $user = User::where('email', $email)->firstOrFail();
-    expect($user->verified)->toBe(0);
-    // A verification email WAS sent — the default path still asks the user to confirm.
-    expect($captured['verify'])->toBeString()
+    $user = User::where('email', 'self-signup@example.com')->firstOrFail();
+    expect($user->verified)->toBe(0)
+        ->and($captured['verify'])->toBeString()
         ->and($captured['verify'])->not->toBe('');
 });
 

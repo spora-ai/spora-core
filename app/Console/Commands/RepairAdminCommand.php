@@ -15,16 +15,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 
 /**
- * Promote an existing user row to a verified, active admin.
- *
- * Operator-driven, idempotent. Intended for legacy installs whose seeded admin
- * was persisted with `verified = 0` by an older spora-core release — running
- * `db:seed` against such an install would touch unrelated rows, so this
- * command exists as an explicit, narrowly-scoped repair path.
- *
- * The `email` argument defaults to `admin@spora.local`. The command refuses
- * to act when the user row is missing — creating a fresh admin belongs to
- * `db:seed` on a truly fresh install, not to a repair command.
+ * Promote an existing user to verified/admin/active. Operator-driven, idempotent.
+ * Refuses to act when the row is missing so it cannot recreate a deleted admin.
  */
 #[AsCommand(
     name: 'db:repair-admin',
@@ -75,21 +67,9 @@ final class RepairAdminCommand extends Command
             $after = User::where('email', $email)->firstOrFail();
 
             $output->writeln("<info>Repaired admin row '{$email}' (id={$after->id}).</info>");
-            $output->writeln(sprintf(
-                '  verified:   %d → %d',
-                $before['verified'],
-                (int) $after->verified,
-            ));
-            $output->writeln(sprintf(
-                '  roles_mask: %d → %d',
-                $before['roles_mask'],
-                (int) $after->roles_mask,
-            ));
-            $output->writeln(sprintf(
-                '  status:     %d → %d',
-                $before['status'],
-                (int) $after->status,
-            ));
+            $output->writeln(sprintf('  verified:   %d → %d', $before['verified'], (int) $after->verified));
+            $output->writeln(sprintf('  roles_mask: %d → %d', $before['roles_mask'], (int) $after->roles_mask));
+            $output->writeln(sprintf('  status:     %d → %d', $before['status'], (int) $after->status));
 
             return Command::SUCCESS;
         } catch (Throwable $e) {

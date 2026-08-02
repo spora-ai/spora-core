@@ -43,12 +43,9 @@ final class SetupCommand extends Command
             $this->installer->install();
             $output->writeln('<info>Done. Schema is up to date.</info>');
 
-            // Only seed on a truly fresh install. Re-running the seeder on every
-            // boot would re-create a deleted or renamed bootstrap admin with the
-            // known password baked into the seeder — a backdoor — and would also
-            // overwrite operator changes to the admin row. Operators with stale
-            // state on an existing install should run `bin/spora db:repair-admin`
-            // (idempotent, one-shot) instead.
+            // Seed only on a fresh install. Re-running the seeder on every boot
+            // would re-create a deleted or renamed bootstrap admin, which is a
+            // backdoor. Repairs go through `bin/spora db:repair-admin`.
             $userCount  = User::count();
             $agentCount = Agent::count();
 

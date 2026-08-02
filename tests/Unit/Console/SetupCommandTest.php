@@ -54,8 +54,8 @@ function makeSetupTester(): CommandTester
 }
 
 it('seeds on a fresh install', function (): void {
-    // Belt-and-suspenders: the in-memory transaction is rolled back
-    // between tests, but make sure no admin user lingers from a previous run.
+    // Defensive: the per-test transaction is rolled back, but make sure no
+    // admin user lingers from a previous run.
     Spora\Models\User::where('email', 'admin@spora.local')->delete();
 
     $tester = makeSetupTester();
@@ -66,9 +66,7 @@ it('seeds on a fresh install', function (): void {
         ->toContain('Running Spora database migrations')
         ->toContain('Schema is up to date')
         ->toContain('Fresh installation — running seeder...');
-    // The seeder echoes its own progress to stdout, but those go to raw stdout,
-    // not the OutputInterface. Verify the side effect instead: an admin user
-    // was created.
+
     $user = Spora\Models\User::where('email', 'admin@spora.local')->firstOrFail();
     expect($user->verified)->toBe(1)
         ->and($user->roles_mask)->toBe(Role::ADMIN)
@@ -76,7 +74,6 @@ it('seeds on a fresh install', function (): void {
 });
 
 it('skips seeding on a second run when users and agents exist', function (): void {
-    // Pre-seed: create a user+agent so the second command sees an existing install.
     $auth = bootAuthLayer();
     $userId = $auth->register('existing@example.com', 'Password1!', 'Existing');
 
