@@ -57,13 +57,22 @@ class AuthService
     /**
      * Register a new user and return their new user ID.
      *
+     * @param bool $markAsVerified when true, bypass email verification and persist `verified = 1`
+     *                             in the same write — for bootstrap/system accounts.
+     *
      * @throws InvalidArgumentException if the email or password is invalid
      * @throws EmailTakenException       if a user with that email already exists
      */
-    public function register(string $email, string $password, string $displayName): int
-    {
+    public function register(
+        string $email,
+        string $password,
+        string $displayName,
+        bool $markAsVerified = false,
+    ): int {
         try {
-            $verifyCallback = $this->emailFlow->buildVerificationCallback($email);
+            $verifyCallback = $markAsVerified
+                ? null
+                : $this->emailFlow->buildVerificationCallback($email);
 
             $userId = (int) $this->auth->register($email, $password, null, $verifyCallback);
 

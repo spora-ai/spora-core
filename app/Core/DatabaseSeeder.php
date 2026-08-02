@@ -39,7 +39,6 @@ final class DatabaseSeeder
 
     public function run(): void
     {
-        // 1. Seed default mail templates first (registration triggers verification emails that need them).
         $mailTemplates = $this->templateLoader->getAll();
 
         foreach ($mailTemplates as $template) {
@@ -50,26 +49,24 @@ final class DatabaseSeeder
         }
         echo "Seeded " . count($mailTemplates) . " Mail Templates.\n";
 
-        // 2. Create or ensure Admin user exists.
+        // Bootstrap admin. Insert-only: a deleted or renamed admin is left alone
+        // so the seeder cannot be used as a backdoor. Repairs go through
+        //    `bin/spora db:repair-admin`.
         $user = User::where('email', 'admin@spora.local')->first();
         if ($user === null) {
-            $userId = $this->authService->register('admin@spora.local', 'password', 'Admin');
+            $userId = $this->authService->register('admin@spora.local', 'password', 'Admin', true);
+            User::where('id', $userId)->update([
+                'roles_mask' => Role::ADMIN,
+                'status'     => 1,
+            ]);
             echo "Created Admin User: admin@spora.local / password\n";
         } else {
-            echo "Admin user already exists.\n";
             $userId = $user->id;
+            echo "Admin user already exists.\n";
         }
 
-        // 2b. Grant ADMIN role to the user and mark as verified (seeder admin bypasses email verification).
-        User::where('id', $userId)->update([
-            'roles_mask' => Role::ADMIN,
-            'verified'   => 1,
-            'status'     => 1,
-        ]);
-
-        // 3. Install the Spora Core Agent from the built-in template, if missing.
-        //    Recipes are files, not database entities, so we key on the
-        //    agent name to keep this seeder resilient to template renames.
+        // 3. Install the Spora Core Agent from the built-in template if missing.
+        //    Keyed on agent name so a template id rename leaves the agent in place.
         $existing = \Spora\Models\Agent::where('user_id', $userId)
             ->where('name', 'Spora Core Agent')
             ->first();

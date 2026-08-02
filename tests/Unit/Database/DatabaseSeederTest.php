@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Core\DatabaseSeeder;
 use Spora\Core\Paths;
@@ -66,12 +67,10 @@ it('seeds the admin user and agent successfully', function () {
 it('does not duplicate records if seeder is run twice', function () {
     $seeder = makeSeeder();
 
-    // First run
     ob_start();
     $seeder->run();
     ob_get_clean();
 
-    // Second run
     ob_start();
     $seeder->run();
     $output = ob_get_clean();
@@ -79,4 +78,55 @@ it('does not duplicate records if seeder is run twice', function () {
     expect(User::count())->toBe(1);
     expect(Agent::count())->toBe(1);
     expect($output)->toContain('Spora Core Agent already exists');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('does not modify an existing admin row (security)', function () {
+    // Operator-customised admin: renamed, no admin role, suspended. The seeder
+    // must leave it untouched so it cannot re-grant admin via `db:seed`.
+    $now = date('Y-m-d H:i:s');
+    Capsule::table('users')->insert([
+        'email'        => 'admin@spora.local',
+        'password'     => password_hash('custom-password', PASSWORD_BCRYPT),
+        'username'     => 'admin',
+        'status'       => 0,
+        'verified'     => 0,
+        'resettable'   => 1,
+        'roles_mask'   => 0,
+        'registered'   => time(),
+        'last_login'   => null,
+        'force_logout' => 0,
+        'name'         => 'Renamed Operator',
+        'created_at'   => $now,
+        'updated_at'   => $now,
+    ]);
+
+    $existingUserId = (int) Capsule::table('users')->where('email', 'admin@spora.local')->value('id');
+    Agent::create([
+        'user_id'   => $existingUserId,
+        'name'      => 'Spora Core Agent',
+        'max_steps' => 5,
+        'is_active' => true,
+    ]);
+
+    $before = Capsule::table('users')->where('email', 'admin@spora.local')->first();
+
+    ob_start();
+    makeSeeder()->run();
+    ob_get_clean();
+
+    $after = Capsule::table('users')->where('email', 'admin@spora.local')->first();
+    expect($after->name)->toBe($before->name)
+        ->and((int) $after->verified)->toBe((int) $before->verified)
+        ->and((int) $after->roles_mask)->toBe((int) $before->roles_mask)
+        ->and((int) $after->status)->toBe((int) $before->status);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('does not recreate a deleted admin row (security)', function () {
+    expect(User::where('email', 'admin@spora.local')->exists())->toBeFalse();
+
+    ob_start();
+    $output = ob_get_clean();
+
+    expect(User::where('email', 'admin@spora.local')->exists())->toBeFalse()
+        ->and($output)->not->toContain('Created Admin User');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());

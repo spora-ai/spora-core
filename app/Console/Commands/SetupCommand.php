@@ -20,7 +20,7 @@ use Throwable;
 
 #[AsCommand(
     name: 'spora:setup',
-    description: 'Run migrations and seed a fresh database, or skip seeding on existing installs.',
+    description: 'Run migrations and seed a fresh database. Existing installs are skipped — use `db:seed` or `db:repair-admin` for repairs.',
 )]
 final class SetupCommand extends Command
 {
@@ -43,16 +43,18 @@ final class SetupCommand extends Command
             $this->installer->install();
             $output->writeln('<info>Done. Schema is up to date.</info>');
 
-            // Only seed on fresh installation (no users, no agents)
-            $userCount = User::count();
+            // Seed only on a fresh install. Re-running the seeder on every boot
+            // would re-create a deleted or renamed bootstrap admin, which is a
+            // backdoor. Repairs go through `bin/spora db:repair-admin`.
+            $userCount  = User::count();
             $agentCount = Agent::count();
 
             if ($userCount === 0 && $agentCount === 0) {
                 $output->writeln('<info>Fresh installation — running seeder...</info>');
-                $seeder = new DatabaseSeeder($this->authService, $this->templateLoader, $this->templateImporter);
-                $seeder->run();
+                (new DatabaseSeeder($this->authService, $this->templateLoader, $this->templateImporter))->run();
             } else {
                 $output->writeln('<info>Existing installation detected. Skipping seeding.</info>');
+                $output->writeln('<comment>Run `php bin/spora db:repair-admin` if the seeded admin needs promoting (verified=1, Role::ADMIN).</comment>');
             }
 
             return Command::SUCCESS;

@@ -72,6 +72,47 @@ test('register() with an invalid email format throws InvalidArgumentException', 
     expect(fn() => $service->register('not-an-email', 'ValidPass1!', 'Not An Email'))->toThrow(InvalidArgumentException::class);
 });
 
+test('register() with $markAsVerified true persists verified=1 and skips the verification email', function (): void {
+    $service = bootAuthLayer();
+    [$mailer, $captured] = makeCapturingMailer();
+    $service->setSystemMailer($mailer);
+
+    $email = 'bootstrap-admin@example.com';
+    $userId = $service->register($email, 'ValidPass1!', 'Bootstrap', true);
+
+    $user = User::where('email', $email)->firstOrFail();
+    expect($user->id)->toBe($userId)
+        ->and($user->verified)->toBe(1)
+        ->and($captured['verify'])->toBeNull();
+});
+
+test('register() without $markAsVerified leaves the user unverified and sends the verification email', function (): void {
+    $service = bootAuthLayer();
+    [$mailer, $captured] = makeCapturingMailer();
+    $service->setSystemMailer($mailer);
+
+    $service->register('self-signup@example.com', 'ValidPass1!', 'Self Signup');
+
+    $user = User::where('email', 'self-signup@example.com')->firstOrFail();
+    expect($user->verified)->toBe(0)
+        ->and($captured['verify'])->toBeString()
+        ->and($captured['verify'])->not->toBe('');
+});
+
+test('login() works without a confirmation step when the user was registered with $markAsVerified', function (): void {
+    $service = bootAuthLayer();
+    [$mailer] = makeCapturingMailer();
+    $service->setSystemMailer($mailer);
+
+    $email = 'no-confirm@example.com';
+    $service->register($email, 'ValidPass1!', 'No Confirm', true);
+    clearSession();
+
+    $service->login($email, 'ValidPass1!');
+
+    expect($service->currentUserEmail())->toBe($email);
+});
+
 test('register() with a blank password throws InvalidArgumentException', function (): void {
     $service = bootAuthLayer();
 
