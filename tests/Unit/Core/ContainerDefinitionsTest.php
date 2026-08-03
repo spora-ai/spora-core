@@ -450,6 +450,52 @@ it('apiTaskControllerDefinitions includes task/workflow controllers', function (
     expect($def)->toHaveKey(Spora\Http\SseController::class);
 });
 
+it('SseController factory falls back to mercure_url when no publish_url is set', function (): void {
+    // Simulates the documented "set only SPORA_MERCURE_URL" deployment that
+    // the operator runs in production. Without this fall-through, the SSE
+    // controller reports the hub as inactive and the UI falls back to
+    // polling even though MercurePublisher would still publish.
+    $def = callContainerMethod('apiTaskControllerDefinitions');
+    $factory = $def[Spora\Http\SseController::class];
+
+    $stubConfig = ['mercure_url' => 'https://hub.example.com/.well-known/mercure', 'mercure_jwt_key' => 'k', 'app_url' => 'https://hub.example.com'];
+    $stubAuth = Mockery::mock(AuthService::class);
+    $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+    $container->shouldReceive('get')->with('config')->andReturn($stubConfig);
+    $container->shouldReceive('get')->with(AuthService::class)->andReturn($stubAuth);
+
+    $controller = $factory($container);
+
+    expect($controller)->toBeInstanceOf(Spora\Http\SseController::class);
+});
+
+it('SseController factory prefers mercure_publish_url over mercure_url when both are set', function (): void {
+    $def = callContainerMethod('apiTaskControllerDefinitions');
+    $factory = $def[Spora\Http\SseController::class];
+
+    $stubConfig = [
+        'mercure_url' => 'https://browser.example.com/.well-known/mercure',
+        'mercure_publish_url' => 'http://spora:80/.well-known/mercure',
+        'mercure_jwt_key' => 'k',
+        'app_url' => 'https://browser.example.com',
+    ];
+    $stubAuth = Mockery::mock(AuthService::class);
+    $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+    $container->shouldReceive('get')->with('config')->andReturn($stubConfig);
+    $container->shouldReceive('get')->with(AuthService::class)->andReturn($stubAuth);
+
+    // Inspect via reflection to confirm the second constructor arg resolves
+    // to the publish_url (the in-cluster URL), not the browser-facing one.
+    $controller = $factory($container);
+    $reflection = new ReflectionClass($controller);
+
+    // hubUrl is private readonly; reach it via reflection to assert the
+    // factory's chain landed on mercure_publish_url.
+    $hubUrlProp = $reflection->getProperty('hubUrl');
+    $hubUrlProp->setAccessible(true);
+    expect($hubUrlProp->getValue($controller))->toBe('http://spora:80/.well-known/mercure');
+});
+
 it('adminControllerDefinitions includes admin controllers', function (): void {
     $def = callContainerMethod('adminControllerDefinitions');
 

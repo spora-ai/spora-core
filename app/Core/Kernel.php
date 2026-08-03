@@ -195,21 +195,22 @@ final class Kernel implements KernelInterface
             ];
         }
 
-        // Log to stderr — include file/line only in debug mode to avoid leaking paths in production
-        if ($isDebug) {
-            error_log(sprintf(
-                '[Spora] %s: %s in %s:%d',
-                get_class($e),
-                $e->getMessage(),
-                $e->getFile(),
-                $e->getLine(),
-            ));
+        // Route through the framework logger so the configured stream handler
+        // (php://stdout in Docker, storage/spora.log locally) captures the
+        // same context as every other framework line. Fall back to error_log
+        // only when no logger is registered — e.g. a misconfigured container.
+        $logger = $this->container->has(LoggerInterface::class)
+            ? $this->container->get(LoggerInterface::class)
+            : null;
+
+        $message = $isDebug
+            ? sprintf('[Spora] %s: %s in %s:%d', get_class($e), $e->getMessage(), $e->getFile(), $e->getLine())
+            : sprintf('[Spora] %s: %s', get_class($e), $e->getMessage());
+
+        if ($logger !== null) {
+            $logger->error($message, ['exception' => $e]);
         } else {
-            error_log(sprintf(
-                '[Spora] %s: %s',
-                get_class($e),
-                $e->getMessage(),
-            ));
+            error_log($message);
         }
 
         return new JsonResponse($body, Response::HTTP_INTERNAL_SERVER_ERROR);
@@ -317,6 +318,15 @@ final class Kernel implements KernelInterface
         $logger = $this->container->get(LoggerInterface::class);
         set_error_handler(static function (int $errno, string $errstr, string $errfile, int $errline) use ($logger): bool {
             if (!(error_reporting() & $errno)) {
+                return true;
+            }
+
+            // Mirror tests/Pest.php: silence E_DEPRECATED noise from the
+            // delight-im/{auth,db} vendor packages — they ship implicit
+            // nullable parameters to keep PHP 7 compatibility and PHP 8.4/8.5
+            // raise E_DEPRECATED for each one. App-level deprecations still
+            // pass through to the logger untouched.
+            if ($errno === E_DEPRECATED && str_contains($errfile, DIRECTORY_SEPARATOR . 'delight-im' . DIRECTORY_SEPARATOR)) {
                 return true;
             }
 
