@@ -363,7 +363,7 @@ final class MediaArchiveService
         if ($reference->mode === 'data_url' && strlen($bytes) > self::DATA_URL_MAX_BYTES) {
             throw new MediaArchiveException(sprintf(
                 'MediaArchiveService: data_url mode payload of %d bytes exceeds the %d-byte MEDIUMBLOB ceiling. '
-                    . 'Raise asset_store.auto_threshold_bytes above DATA_URL_MAX_BYTES to route larger payloads to LocalAssetStore, or lower max_bytes.',
+                    . 'Lower asset_store.auto_threshold_bytes below DATA_URL_MAX_BYTES to route larger payloads to LocalAssetStore, or switch asset_store.mode to "local".',
                 strlen($bytes),
                 self::DATA_URL_MAX_BYTES,
             ));

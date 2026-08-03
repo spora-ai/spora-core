@@ -219,15 +219,16 @@ final class ContainerDefinitions
                     //   - auto_threshold_bytes: payloads ≤ this become data URLs
                     //   - max_bytes:            hard ceiling per asset
                     //
-                    // The default `auto_threshold_bytes` (1 MiB) is the inline data
-                    // URL ceiling — payloads above it land in LocalAssetStore on
-                    // disk. The 1 MiB default is well under the 16 MiB MEDIUMBLOB
-                    // ceiling (see migration 0064 + `MediaArchiveService::DATA_URL_MAX_BYTES`),
-                    // so the default config never overflows the BLOB column.
+                    // The 1 MiB auto threshold keeps inline payloads well under
+                    // the 16 MiB MEDIUMBLOB ceiling (migration 0064 +
+                    // `MediaArchiveService::DATA_URL_MAX_BYTES`). The default
+                    // `max_bytes` matches that ceiling; operators on
+                    // `local` mode who need larger assets raise this via
+                    // `SPORA_ASSET_STORE_MAX_BYTES`.
                     'asset_store' => [
                         'mode'                 => 'auto',
                         'auto_threshold_bytes' => 1 * 1024 * 1024,
-                        'max_bytes'            => 50 * 1024 * 1024,
+                        'max_bytes'            => DatabaseAssetStore::MAX_BYTES,
                     ],
 
                     // Plugin catalog (Packagist browse) — enabled by default. The
@@ -619,12 +620,8 @@ final class ContainerDefinitions
             },
 
             DatabaseAssetStore::class => static function (ContainerInterface $c): DatabaseAssetStore {
-                // Capped at the MEDIUMBLOB ceiling — payloads above this
-                // land in LocalAssetStore (mode=auto) or raise a clear
-                // AssetTooLargeException (mode=data_url). Pre-0064 the
-                // default was 64 KiB, which matched the legacy BLOB column
-                // and silently truncated anything larger; the migration
-                // raised the column to MEDIUMBLOB, so the default follows.
+                // Default tracks the MEDIUMBLOB ceiling (migration 0064) so
+                // data_url-mode assets never exceed the column capacity.
                 $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? DatabaseAssetStore::MAX_BYTES);
                 if ($max > DatabaseAssetStore::MAX_BYTES) {
                     throw new InvalidArgumentException(sprintf(

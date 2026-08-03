@@ -13,9 +13,8 @@ use Spora\Models\MediaAsset;
  * after the row UUID is allocated, so the opaque URL is in place before
  * the payload lands and a concurrent reader never sees a half-loaded row.
  *
- * The 16 MiB default matches MySQL/MariaDB's MEDIUMBLOB ceiling — see
- * migration 0064 which widens `media_assets.payload` from BLOB (64 KiB)
- * to MEDIUMBLOB. Larger payloads must be routed to {@see LocalAssetStore}.
+ * The 16 MiB default matches the MEDIUMBLOB ceiling (migration 0064).
+ * Larger payloads must be routed to {@see LocalAssetStore}.
  */
 final class DatabaseAssetStore implements AssetStore
 {
