@@ -217,11 +217,18 @@ final class ContainerDefinitions
                     // based on auto_threshold_bytes.
                     //   - mode:                 'auto' | 'data_url' | 'local'
                     //   - auto_threshold_bytes: payloads ≤ this become data URLs
-                    //   - max_bytes:            hard ceiling per asset
+                    //   - max_bytes:            hard ceiling per asset. Defaults
+                    //                          to `DatabaseAssetStore::MAX_BYTES`
+                    //                          so `data_url` payloads never exceed
+                    //                          the MEDIUMBLOB ceiling on
+                    //                          `media_assets.payload` (migration
+                    //                          0064). Raise via
+                    //                          `SPORA_ASSET_STORE_MAX_BYTES` on
+                    //                          `local`-mode deployments.
                     'asset_store' => [
                         'mode'                 => 'auto',
                         'auto_threshold_bytes' => 1 * 1024 * 1024,
-                        'max_bytes'            => 50 * 1024 * 1024,
+                        'max_bytes'            => DatabaseAssetStore::MAX_BYTES,
                     ],
 
                     // Plugin catalog (Packagist browse) — enabled by default. The
@@ -613,7 +620,17 @@ final class ContainerDefinitions
             },
 
             DatabaseAssetStore::class => static function (ContainerInterface $c): DatabaseAssetStore {
-                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 64 * 1024);
+                // Default tracks the MEDIUMBLOB ceiling (migration 0064) so
+                // data_url-mode assets never exceed the column capacity.
+                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? DatabaseAssetStore::MAX_BYTES);
+                if ($max > DatabaseAssetStore::MAX_BYTES) {
+                    throw new InvalidArgumentException(sprintf(
+                        'asset_store.max_bytes=%d exceeds the %d-byte MEDIUMBLOB ceiling '
+                            . 'on media_assets.payload. Lower it or switch asset_store.mode to "local".',
+                        $max,
+                        DatabaseAssetStore::MAX_BYTES,
+                    ));
+                }
                 return new DatabaseAssetStore($max);
             },
         ];

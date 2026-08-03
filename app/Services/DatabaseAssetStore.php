@@ -13,19 +13,15 @@ use Spora\Models\MediaAsset;
  * after the row UUID is allocated, so the opaque URL is in place before
  * the payload lands and a concurrent reader never sees a half-loaded row.
  *
- * The 64 KiB default matches MySQL/MariaDB's stock BLOB ceiling — the
- * column type is locked at creation time on MySQL/TiDB, so the cap can't
- * be raised post-hoc. Larger payloads must be routed to
- * {@see LocalAssetStore} (either explicitly via
- * `asset_store.mode = "local"`, or automatically via {@see AutoAssetStore}'s
- * threshold when in the default `auto` mode). Operators on MySQL whose
- * media commonly exceeds 1 MiB should set `asset_store.mode = "local"`
- * explicitly so the byte ceiling is disk-bound, not BLOB-bound.
+ * The 16 MiB default matches the MEDIUMBLOB ceiling (migration 0064).
+ * Larger payloads must be routed to {@see LocalAssetStore}.
  */
 final class DatabaseAssetStore implements AssetStore
 {
+    public const MAX_BYTES = 16 * 1024 * 1024;
+
     public function __construct(
-        private readonly int $maxBytes = 64 * 1024,
+        private readonly int $maxBytes = self::MAX_BYTES,
     ) {}
 
     public function store(string $bytes, ?string $mime = null, ?string $filename = null): AssetReference
