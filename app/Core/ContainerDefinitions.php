@@ -217,14 +217,14 @@ final class ContainerDefinitions
                     // based on auto_threshold_bytes.
                     //   - mode:                 'auto' | 'data_url' | 'local'
                     //   - auto_threshold_bytes: payloads ≤ this become data URLs
-                    //   - max_bytes:            hard ceiling per asset
-                    //
-                    // The 1 MiB auto threshold keeps inline payloads well under
-                    // the 16 MiB MEDIUMBLOB ceiling (migration 0064 +
-                    // `MediaArchiveService::DATA_URL_MAX_BYTES`). The default
-                    // `max_bytes` matches that ceiling; operators on
-                    // `local` mode who need larger assets raise this via
-                    // `SPORA_ASSET_STORE_MAX_BYTES`.
+                    //   - max_bytes:            hard ceiling per asset. Defaults
+                    //                          to `DatabaseAssetStore::MAX_BYTES`
+                    //                          so `data_url` payloads never exceed
+                    //                          the MEDIUMBLOB ceiling on
+                    //                          `media_assets.payload` (migration
+                    //                          0064). Raise via
+                    //                          `SPORA_ASSET_STORE_MAX_BYTES` on
+                    //                          `local`-mode deployments.
                     'asset_store' => [
                         'mode'                 => 'auto',
                         'auto_threshold_bytes' => 1 * 1024 * 1024,
