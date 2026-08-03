@@ -218,6 +218,12 @@ final class ContainerDefinitions
                     //   - mode:                 'auto' | 'data_url' | 'local'
                     //   - auto_threshold_bytes: payloads ≤ this become data URLs
                     //   - max_bytes:            hard ceiling per asset
+                    //
+                    // The default `auto_threshold_bytes` (1 MiB) is the inline data
+                    // URL ceiling — payloads above it land in LocalAssetStore on
+                    // disk. The 1 MiB default is well under the 16 MiB MEDIUMBLOB
+                    // ceiling (see migration 0064 + `MediaArchiveService::DATA_URL_MAX_BYTES`),
+                    // so the default config never overflows the BLOB column.
                     'asset_store' => [
                         'mode'                 => 'auto',
                         'auto_threshold_bytes' => 1 * 1024 * 1024,
@@ -613,7 +619,21 @@ final class ContainerDefinitions
             },
 
             DatabaseAssetStore::class => static function (ContainerInterface $c): DatabaseAssetStore {
-                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 64 * 1024);
+                // Capped at the MEDIUMBLOB ceiling — payloads above this
+                // land in LocalAssetStore (mode=auto) or raise a clear
+                // AssetTooLargeException (mode=data_url). Pre-0064 the
+                // default was 64 KiB, which matched the legacy BLOB column
+                // and silently truncated anything larger; the migration
+                // raised the column to MEDIUMBLOB, so the default follows.
+                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? DatabaseAssetStore::MAX_BYTES);
+                if ($max > DatabaseAssetStore::MAX_BYTES) {
+                    throw new InvalidArgumentException(sprintf(
+                        'asset_store.max_bytes=%d exceeds the %d-byte MEDIUMBLOB ceiling '
+                            . 'on media_assets.payload. Lower it or switch asset_store.mode to "local".',
+                        $max,
+                        DatabaseAssetStore::MAX_BYTES,
+                    ));
+                }
                 return new DatabaseAssetStore($max);
             },
         ];

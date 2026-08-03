@@ -36,6 +36,15 @@ final class MediaArchiveService
     public const OPAQUE_ASSET_URL_PREFIX = '/api/v1/assets/';
 
     /**
+     * Hard ceiling for `storage_mode = data_url` writes — the bytes
+     * land in `media_assets.payload` (MEDIUMBLOB on MySQL/MariaDB after
+     * migration 0064; SQLite has no intrinsic cap, this 16 MiB applies
+     * as a sanity-bound — `data:image/png;base64,…` balloons the chat
+     * bubble HTML).
+     */
+    public const DATA_URL_MAX_BYTES = 16 * 1024 * 1024;
+
+    /**
      * 64 hex chars = 256 bits of entropy — unguessable even for a row
      * referenced by an attacker-known UUID.
      */
@@ -335,7 +344,7 @@ final class MediaArchiveService
     private function storeAsset(string $bytes, string $mime, ?string $filename): AssetReference
     {
         try {
-            return $this->assetStore->store($bytes, $mime, $filename);
+            $reference = $this->assetStore->store($bytes, $mime, $filename);
         } catch (AssetTooLargeException $e) {
             // Fatal: the operator asked us to keep bytes, so a rejection
             // from the asset-store ceiling can't silently downgrade to
@@ -346,6 +355,21 @@ final class MediaArchiveService
                 $e,
             );
         }
+
+        // Defence-in-depth: a misconfigured AssetStore ceiling above
+        // DATA_URL_MAX_BYTES would still return a `data:` mode reference
+        // here, then truncate in writePayloadToAsset() with SQLSTATE
+        // 22001 — the same bug migration 0064 fixes for the default path.
+        if ($reference->mode === 'data_url' && strlen($bytes) > self::DATA_URL_MAX_BYTES) {
+            throw new MediaArchiveException(sprintf(
+                'MediaArchiveService: data_url mode payload of %d bytes exceeds the %d-byte MEDIUMBLOB ceiling. '
+                    . 'Raise asset_store.auto_threshold_bytes above DATA_URL_MAX_BYTES to route larger payloads to LocalAssetStore, or lower max_bytes.',
+                strlen($bytes),
+                self::DATA_URL_MAX_BYTES,
+            ));
+        }
+
+        return $reference;
     }
 
     private function persist(MediaIngestRequest $request, PersistedAssetFields $fields): MediaAsset
