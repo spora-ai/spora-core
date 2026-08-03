@@ -9,7 +9,6 @@ use Psr\Log\LoggerInterface;
 use Spora\Mailer\LogTransport;
 use Spora\Models\MailTemplate;
 use Spora\Models\User;
-use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mime\Address;
@@ -57,13 +56,10 @@ final class SystemMailer implements MailerInterface
     }
 
     /**
-     * Verify the mailer can be constructed without opening a socket. Catches
-     * configuration mistakes (unsupported driver, missing host, invalid
-     * encryption) early — before callers hand off to transports that insert
-     * side-effect rows (e.g. delight-im confirmation rows) before sending.
-     *
-     * @throws InvalidArgumentException for configuration errors
-     * @throws TransportExceptionInterface if Symfony cannot parse the DSN
+     * Verify the mailer can be constructed without opening a socket.
+     * Callers invoke this before transport side-effects (e.g. delight-im
+     * confirmation rows) so a misconfigured mail setup fails with a clean
+     * 502 instead of locking the user behind a 24h throttle.
      */
     public function assertCanBuildMailer(): void
     {
@@ -208,15 +204,11 @@ final class SystemMailer implements MailerInterface
     }
 
     /**
-     * Build a Symfony Mailer SMTP DSN from configuration.
-     *
-     * Port 587 uses STARTTLS, while port 465 uses implicit TLS. The configured
-     * encryption determines the transport scheme so the SMTP handshake matches
-     * the server's expected protocol.
+     * Port 587 = STARTTLS (smtp://); port 465 = implicit TLS (smtps://).
+     * The configured `mail_encryption` selects the scheme so the handshake
+     * matches the server's expected protocol.
      *
      * @param array<string, mixed> $config
-     * @return string DSN in the form smtp(s)://user:pass@host:port
-     *
      * @throws InvalidArgumentException if host is missing or encryption is unsupported
      */
     private function buildSmtpDsn(array $config): string

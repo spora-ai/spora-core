@@ -294,9 +294,8 @@ final class AuthWorkflow
         try {
             $this->authService->changeEmail((string) $body['email']);
         } catch (TransportExceptionInterface $e) {
-            // The mailer failed AFTER delight-im already wrote the confirmation
-            // row — drop the orphan so the user is not stuck behind the 24h
-            // throttle, then surface a clean 502 instead of a 500.
+            // delight-im already wrote the confirmation row; drop the orphan so
+            // the user is not stuck behind the 24h throttle.
             $this->deletePendingConfirmationFor((string) $body['email']);
 
             return $this->validator->error('EMAIL_SEND_FAILED', 'Could not send the confirmation email: ' . $e->getMessage(), Response::HTTP_BAD_GATEWAY);
@@ -308,9 +307,9 @@ final class AuthWorkflow
     }
 
     /**
-     * Best-effort: remove a pending confirmation row that delight-im wrote
-     * before the SMTP send failed. Without this the user is stuck behind a
-     * 24h throttle even after fixing their mail config.
+     * Remove the orphan `users_confirmations` row that delight-im wrote before
+     * the SMTP send failed. Without this, the user is stuck behind a 24h
+     * throttle even after fixing their mail config.
      */
     private function deletePendingConfirmationFor(string $email): void
     {
@@ -319,7 +318,7 @@ final class AuthWorkflow
                 ->where('email', $email)
                 ->delete();
         } catch (Throwable) {
-            // Best-effort; never let cleanup mask the original transport error.
+            // best-effort
         }
     }
 

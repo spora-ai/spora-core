@@ -5,28 +5,17 @@ declare(strict_types=1);
 namespace Spora\Core;
 
 /**
- * Resolves the public base URL (and optional path prefix) the operator
- * configured for this Spora instance.
+ * Resolves the public base URL the operator configured for this Spora instance.
  *
- * Resolution order for {@see detect()} — first wins:
+ * Resolution order — first wins:
  *
- *   1. `SPORA_APP_URL` env var  — operator-pinned, trusted.
- *   2. The web server's `HTTP_HOST` + scheme (REQUEST_SCHEME or HTTPS) +
- *      SERVER_PORT when running under a web server.
- *   3. `http://localhost` from CLI (worker, console, tests) when neither
- *      of the above is set. The `SPORA_APP_URL` env check still runs first
- *      so operators can pin a public URL for workers and `bin/spora`.
+ *   1. `SPORA_APP_URL` env var
+ *   2. The web server's `HTTP_HOST` + `REQUEST_SCHEME` (or `HTTPS`) + `SERVER_PORT`
+ *   3. `http://localhost` (CLI / worker / console / tests)
  *
- * `HTTP_HOST` is trusted by construction: the operator configures
- * `ServerName` (Apache) / `server_name` (nginx) / equivalent in their
- * reverse-proxy and forwards the Host header unchanged. Operators behind
- * a proxy that rewrites `Host` MUST set `SPORA_APP_URL` explicitly.
- *
- * Intentionally does NOT read `X-Forwarded-*` headers — those can be
- * spoofed by clients and there is no trusted-proxy allowlist at the
- * application layer. The reverse proxy is expected to set the canonical
- * `Host` header, and operators who need a different public URL set
- * `SPORA_APP_URL` in `.env`.
+ * Does NOT read `X-Forwarded-*` — those headers are spoofable and there is
+ * no trusted-proxy allowlist at the application layer. Operators behind a
+ * proxy that rewrites `Host` MUST set `SPORA_APP_URL` in `.env`.
  */
 final class RequestOrigin
 {
@@ -100,9 +89,6 @@ final class RequestOrigin
         return $scheme === 'https' ? 'https' : 'http';
     }
 
-    /**
-     * Drop the port from a host string, preserving IPv6 brackets.
-     */
     private static function stripPort(string $host): string
     {
         if ($host === '') {

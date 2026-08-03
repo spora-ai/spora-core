@@ -16,11 +16,8 @@ use Spora\Services\MailerInterface;
 /**
  * Owns the delight-im callbacks that send transactional emails for
  * registration, email change, password reset, and resend verification.
- *
- * The public base URL and path prefix come in through the constructor so
- * the DI container can wire them from `config.app_url` / `config.app_prefix`
- * at boot — no per-request setter calls. Both default to empty so the
- * class stays usable in tests that don't care about public URLs.
+ * The public base URL and path prefix arrive via the constructor (DI wires
+ * them from `config.app_url` / `config.app_prefix` at boot).
  */
 final class AuthEmailFlow
 {

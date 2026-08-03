@@ -205,9 +205,8 @@ final class AuthController
         }
 
         if ($this->systemMailer !== null) {
-            // Fail fast on broken mail config before delight-im inserts the
-            // confirmation row — otherwise the next attempt trips the 24h
-            // throttle and returns a confusing 500.
+            // Probe before delight-im inserts the confirmation row; otherwise a
+            // bad mail config locks the user behind a 24h throttle.
             try {
                 $this->systemMailer->assertCanBuildMailer();
             } catch (TransportExceptionInterface|InvalidArgumentException $e) {

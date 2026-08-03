@@ -202,11 +202,6 @@ final class ContainerDefinitions
                     'mercure_jwt_key'     => null,
                     'app_url'             => RequestOrigin::detect(),
                     'app_prefix'          => RequestOrigin::detectWithPrefix()[1],
-                    // `app_url` and `app_prefix` are auto-detected from `SPORA_APP_URL`
-                    // and `SPORA_APP_PREFIX` env vars first, then fall back to the
-                    // web server's HTTP_HOST (no X-Forwarded-* reads — those are
-                    // spoofable and Spora has no trusted-proxy allowlist at the
-                    // application layer). Set SPOra_APP_URL in production.
 
                     'plugin_install_enabled' => false,
 
@@ -338,8 +333,6 @@ final class ContainerDefinitions
         $apply('SPORA_MERCURE_URL', 'mercure_url', static fn($v) => $v);
         $apply('SPORA_MERCURE_JWT_KEY', 'mercure_jwt_key', static fn($v) => $v);
         $apply('SPORA_MERCURE_PUBLISH_URL', 'mercure_publish_url', static fn($v) => $v);
-        // SPOra_APP_URL / SPOra_APP_PREFIX are read directly from $_ENV / getenv()
-        // by RequestOrigin, so no env binding is needed here.
         $apply('SPORA_COMPOSER_BINARY', 'composer_binary', static fn($v) => $v);
         $apply('SPORA_PLUGIN_INSTALL_ENABLED', 'plugin_install_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_ASSET_STORE_MODE', 'asset_store.mode', static fn($v) => $v);
