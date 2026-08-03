@@ -767,6 +767,7 @@ final class ContainerDefinitions
                     $c->get(CsrfTokenService::class),
                     $c->get(AuthValidator::class),
                     $c->get(AuthWorkflow::class),
+                    $c->get(SystemMailer::class),
                     $c->get('config'),
                 );
             },
