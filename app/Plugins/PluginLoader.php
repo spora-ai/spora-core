@@ -491,10 +491,8 @@ final class PluginLoader
                 $plugin->register($builder);
             } catch (Throwable $e) {
                 // registerPlugins runs during Kernel construction, before the
-                // container (and its LoggerInterface) is built. error_log()
-                // is the only channel reliably available here; Kernel's boot
-                // failure path will pick up the same message via stderr if
-                // the plugin error becomes fatal.
+                // container (and its LoggerInterface) is built; error_log()
+                // is the only channel reliably available here.
                 error_log(sprintf(
                     '[spora] plugin %s register() failed: %s',
                     $slug,

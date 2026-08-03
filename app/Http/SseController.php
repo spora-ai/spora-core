@@ -10,18 +10,19 @@ use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 /**
- * Provides SSE authentication endpoints for Mercure subscriber tokens.
- *
- * The browser EventSource API cannot attach an Authorization header, so the
- * subscriber token rides in an HttpOnly cookie scoped to the hub path. The
- * frontend opens the EventSource with `withCredentials: true` and the cookie
- * rides the same-origin request to `/.well-known/mercure`.
+ * SSE authentication endpoints for Mercure subscriber tokens. The browser
+ * EventSource API cannot attach a Bearer header, so the subscriber token rides
+ * in an HttpOnly cookie scoped to the hub path; `authorize()` is the path
+ * browsers use (called once before opening the EventSource with
+ * `withCredentials: true`), and `auth()` returns a JSON token for non-browser
+ * clients.
  */
 final class SseController
 {
+    private const HUB_PATH = '/.well-known/mercure';
     private const SUBSCRIBER_COOKIE_NAME = 'mercure_access_token';
     private const SUBSCRIBER_COOKIE_SECURE_NAME = '__Secure-mercure_access_token';
-    private const SUBSCRIBER_COOKIE_PATH = '/.well-known/mercure';
+    private const SUBSCRIBER_COOKIE_PATH = self::HUB_PATH;
     private const SUBSCRIBER_TOKEN_TTL_SECONDS = 3600;
 
     public function __construct(
@@ -32,12 +33,6 @@ final class SseController
         private readonly ?string $appUrl = null,
     ) {}
 
-    /**
-     * GET /api/v1/sse/status
-     *
-     * Returns whether SSE/Mercure is configured and active.
-     * Returns a relative path for hubUrl so the browser resolves it against window.location.origin.
-     */
     public function status(): JsonResponse
     {
         if ($this->hubUrl === null) {
@@ -46,18 +41,10 @@ final class SseController
 
         return new JsonResponse([
             'active' => true,
-            'hubUrl' => $this->publicUrl ?? '/.well-known/mercure',
+            'hubUrl' => $this->publicUrl ?? self::HUB_PATH,
         ]);
     }
 
-    /**
-     * GET /api/v1/sse/authorize
-     *
-     * Sets the subscriber JWT as an HttpOnly cookie scoped to the hub path
-     * and returns the cookie TTL so the frontend can refresh before expiry.
-     * Mirrors `auth()` so non-browser clients still get a JSON token, but
-     * the cookie is the path browsers can carry into `EventSource`.
-     */
     public function authorize(): JsonResponse
     {
         $userId = $this->authService->currentUserId();
@@ -73,7 +60,7 @@ final class SseController
         $isSecure = $this->appUrl !== null && str_starts_with($this->appUrl, 'https://');
 
         $response = new JsonResponse([
-            'hubUrl'  => $this->publicUrl ?? '/.well-known/mercure',
+            'hubUrl'  => $this->publicUrl ?? self::HUB_PATH,
             'expires' => time() + self::SUBSCRIBER_TOKEN_TTL_SECONDS,
         ]);
 
@@ -93,14 +80,6 @@ final class SseController
         return $response;
     }
 
-    /**
-     * GET /api/v1/sse/auth
-     *
-     * Returns the Mercure hub URL and a subscriber-scoped JWT token.
-     * The token is scoped to:
-     *   - topic "user/{userId}/tasks"
-     *   - topic "user/{userId}/notifications"
-     */
     public function auth(): JsonResponse
     {
         $userId = $this->authService->currentUserId();
@@ -115,15 +94,11 @@ final class SseController
         $token = $this->generateSubscriberJwt($userId);
 
         return new JsonResponse([
-            'hubUrl' => $this->publicUrl ?? '/.well-known/mercure',
+            'hubUrl' => $this->publicUrl ?? self::HUB_PATH,
             'token'  => $token,
         ]);
     }
 
-    /**
-     * Generate an HS256 subscriber JWT scoped to task/* and user/{userId}/notifications.
-     * Subscriber role (read-only), not publisher.
-     */
     private function generateSubscriberJwt(int $userId): string
     {
         if ($this->jwtKey === null) {

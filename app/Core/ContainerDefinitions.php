@@ -1007,11 +1007,9 @@ final class ContainerDefinitions
             SseController::class => static function (ContainerInterface $c): SseController {
                 $config = $c->get('config');
                 // mercure_publish_url wins when set so operators who split
-                // browser-facing and in-cluster URLs keep that distinction.
-                // Falls through to mercure_url when only the browser URL is
-                // configured (the documented "single-URL" deployment) so
-                // /api/v1/sse/status reports active instead of falling back
-                // to polling.
+                // browser-facing and in-cluster URLs keep that distinction;
+                // falls through to mercure_url for the "single-URL" deployment
+                // so /api/v1/sse/status reports active instead of polling.
                 $hubUrl = $config['mercure_publish_url'] ?? $config['mercure_url'] ?? null;
 
                 return new SseController(
