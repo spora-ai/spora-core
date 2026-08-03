@@ -41,12 +41,12 @@ require_once __DIR__ . '/Support/AgentTemplateTestSupport.php';
  * Boot a fresh in-memory SQLite database and return a ready-to-use AuthService.
  * Throttling is disabled so tests never hit rate limits.
  */
-function bootAuthLayer(): Spora\Auth\AuthService
+function bootAuthLayer(string $appUrl = '', string $appPrefix = ''): Spora\Auth\AuthService
 {
     $pdo  = Illuminate\Database\Capsule\Manager::connection()->getPdo();
     $auth = new Delight\Auth\Auth($pdo, null, null, false /* throttling off */);
 
-    return new Spora\Auth\AuthService($auth);
+    return new Spora\Auth\AuthService($auth, $appUrl, $appPrefix);
 }
 
 /**

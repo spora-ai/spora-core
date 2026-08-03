@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Auth;
 
 use Delight\Auth\Auth;
+use Delight\Auth\ConfirmationRequestNotFound;
 use Delight\Auth\EmailNotVerifiedException;
 use Delight\Auth\InvalidEmailException;
 use Delight\Auth\NotLoggedInException;
@@ -13,43 +14,27 @@ use Spora\Models\User;
 use Spora\Services\MailerInterface;
 
 /**
- * Email-driven authentication flows: email verification, email change,
- * password reset, and the welcome email. Extracted from {@see AuthService}
- * to keep that class under the S1448 (≤20 methods) limit (php:S1448).
+ * Owns the delight-im callbacks that send transactional emails for
+ * registration, email change, password reset, and resend verification.
  *
- * The facade {@see AuthService} owns the system mailer + app URL configuration
- * and forwards the relevant bits here. This class never throws vendor-agnostic
- * domain exceptions — delight-im exceptions bubble up to the facade.
+ * The public base URL and path prefix come in through the constructor so
+ * the DI container can wire them from `config.app_url` / `config.app_prefix`
+ * at boot — no per-request setter calls. Both default to empty so the
+ * class stays usable in tests that don't care about public URLs.
  */
 final class AuthEmailFlow
 {
-    private ?MailerInterface $systemMailer = null;
-    private ?string $appUrl = null;
-    private ?string $appPrefix = null;
-
-    public function __construct(private readonly Auth $auth) {}
+    public function __construct(
+        private readonly Auth $auth,
+        private readonly string $appUrl = '',
+        private string $appPrefix = '',
+    ) {
+        $this->appPrefix = self::normalizePrefix($appPrefix);
+    }
 
     public function setSystemMailer(MailerInterface $systemMailer): void
     {
         $this->systemMailer = $systemMailer;
-    }
-
-    public function setAppUrl(string $url): void
-    {
-        $this->appUrl = $url;
-    }
-
-    /**
-     * Path prefix under which the app is served (e.g. `/spora` when running
-     * behind a reverse proxy that mounts the app under a sub-path). Empty
-     * string when the app is hosted at the host root. The value is prepended
-     * to every email link so the user lands on the actual UI route after
-     * clicking the verification / password-reset link.
-     */
-    public function setAppPrefix(string $prefix): void
-    {
-        $prefix = '/' . trim($prefix, '/');
-        $this->appPrefix = $prefix === '/' ? '' : $prefix;
     }
 
     /**
@@ -68,7 +53,7 @@ final class AuthEmailFlow
 
     /**
      * Confirm an email address using a selector/token pair.
-     * After successful confirmation, sends the welcome email if SPORA_SEND_WELCOME_EMAIL is enabled.
+     * After successful confirmation, sends the welcome email if SPOra_SEND_WELCOME_EMAIL is enabled.
      *
      * @return array{0: string, 1: string} [old_email, new_email]
      */
@@ -122,9 +107,8 @@ final class AuthEmailFlow
     {
         $this->auth->forgotPassword($email, function (string $selector, string $token) use ($email): void {
             if ($this->systemMailer !== null) {
-                $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-                $prefix  = $this->appPrefix ?? '';
-                $resetUrl = "{$baseUrl}{$prefix}/auth/reset-password/{$selector}?token=" . urlencode($token);
+                $baseUrl = rtrim($this->appUrl !== '' ? $this->appUrl : 'http://localhost', '/');
+                $resetUrl = "{$baseUrl}{$this->appPrefix}/auth/reset-password/{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendPasswordResetEmail($email, $resetUrl);
             }
         });
@@ -150,7 +134,7 @@ final class AuthEmailFlow
 
         try {
             $this->auth->resendConfirmationForEmail($email, $this->sendVerificationEmailViaCallback($email));
-        } catch (\Delight\Auth\ConfirmationRequestNotFound) {
+        } catch (ConfirmationRequestNotFound) {
             // No pending confirmation — nothing to resend; silently return
         }
     }
@@ -160,13 +144,20 @@ final class AuthEmailFlow
      */
     private function sendVerificationEmailViaCallback(string $email, ?string $customVerifyPath = '/auth/verify/'): callable
     {
-        return function (string $selector, string $token) use ($email, $customVerifyPath) {
+        return function (string $selector, string $token) use ($email, $customVerifyPath): void {
             if ($this->systemMailer !== null) {
-                $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-                $prefix  = $this->appPrefix ?? '';
-                $verifyUrl = "{$baseUrl}{$prefix}{$customVerifyPath}{$selector}?token=" . urlencode($token);
+                $baseUrl = rtrim($this->appUrl !== '' ? $this->appUrl : 'http://localhost', '/');
+                $verifyUrl = "{$baseUrl}{$this->appPrefix}{$customVerifyPath}{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendVerificationEmail($email, $verifyUrl);
             }
         };
     }
+
+    private static function normalizePrefix(string $prefix): string
+    {
+        $normalized = '/' . trim($prefix, '/');
+        return $normalized === '/' ? '' : $normalized;
+    }
+
+    private ?MailerInterface $systemMailer = null;
 }
