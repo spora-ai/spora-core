@@ -31,6 +31,40 @@ function captureMailerLogger(): SystemMailerCapturingLogger
     return new SystemMailerCapturingLogger();
 }
 
+test('assertCanBuildMailer succeeds for the log driver without opening a socket', function (): void {
+    $mailer = new SystemMailer(['mail_driver' => 'log']);
+
+    $threw = false;
+    try {
+        $mailer->assertCanBuildMailer();
+    } catch (Throwable) {
+        $threw = true;
+    }
+
+    expect($threw)->toBeFalse();
+});
+
+test('assertCanBuildMailer succeeds for a valid SMTP config without opening a socket', function (): void {
+    $mailer = new SystemMailer([
+        'mail_driver'     => 'smtp',
+        'mail_host'       => 'smtp.example.com',
+        'mail_port'       => 587,
+        'mail_username'   => 'user',
+        'mail_password'   => 'secret',
+        'mail_encryption' => 'tls',
+    ]);
+
+    $mailer->assertCanBuildMailer();
+
+    expect(true)->toBeTrue();
+});
+
+test('assertCanBuildMailer propagates InvalidArgumentException from the mail driver', function (): void {
+    $mailer = new SystemMailer(['mail_driver' => 'carrier_pigeon']);
+
+    $mailer->assertCanBuildMailer();
+})->throws(InvalidArgumentException::class, "Mail driver 'carrier_pigeon' is not supported");
+
 test('SystemMailer with log driver and no logger injected uses NullLogger', function (): void {
     $mailer = new SystemMailer(['mail_driver' => 'log']);
 

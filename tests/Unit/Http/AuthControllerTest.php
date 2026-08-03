@@ -14,6 +14,7 @@ use Spora\Security\CsrfTokenService;
 use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
 use Spora\Services\RateLimiter;
+use Spora\Services\SystemMailer;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -1194,6 +1195,61 @@ describe('AuthController::requestEmailChange', function (): void {
         expect($response->getStatusCode())->toBe(Response::HTTP_CONFLICT);
         $body = json_decode($response->getContent(), true);
         expect($body['error']['code'])->toBe('EMAIL_TAKEN');
+    });
+
+    test('returns 502 when the injected SystemMailer probe fails with InvalidArgumentException', function (): void {
+        [$controller, $authService] = makeAuthController();
+        $userId = $authService->register('chg-probe-iae@example.com', AUTHCTL_TEST_PASSWORD, 'Chg Probe IAE');
+        User::where('id', $userId)->update(['verified' => 1]);
+        simulateLoggedInSession($userId, 'chg-probe-iae@example.com');
+
+        // No SMTP host → buildSmtpDsn throws InvalidArgumentException
+        $systemMailer = new SystemMailer(['mail_driver' => 'smtp']);
+        $controller = new AuthController(
+            $authService,
+            new CsrfTokenService(),
+            new AuthValidator(),
+            new AuthWorkflow($authService, new UserService(), new CsrfTokenService(), new AuthValidator()),
+            $systemMailer,
+        );
+
+        $request = jsonRequest('POST', '/api/v1/auth/email/change-request', [
+            'email' => 'newaddress@example.com',
+        ]);
+        $response = $controller->requestEmailChange($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_BAD_GATEWAY);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('EMAIL_SEND_FAILED');
+        expect($body['error']['message'])->toContain('Could not prepare the confirmation email');
+        expect($body['error']['message'])->toContain('SPORA_MAIL_HOST');
+
+        // The probe must run before delight-im inserts the row — no orphan row left.
+        $orphans = DB::table('users_confirmations')->where('email', 'newaddress@example.com')->count();
+        expect($orphans)->toBe(0);
+    });
+
+    test('proceeds to the workflow when the injected SystemMailer probe succeeds (log driver)', function (): void {
+        [$controller, $authService] = makeAuthController();
+        $userId = $authService->register('chg-probe-ok@example.com', AUTHCTL_TEST_PASSWORD, 'Chg Probe OK');
+        User::where('id', $userId)->update(['verified' => 1]);
+        simulateLoggedInSession($userId, 'chg-probe-ok@example.com');
+
+        $systemMailer = new SystemMailer(['mail_driver' => 'log']);
+        $controller = new AuthController(
+            $authService,
+            new CsrfTokenService(),
+            new AuthValidator(),
+            new AuthWorkflow($authService, new UserService(), new CsrfTokenService(), new AuthValidator()),
+            $systemMailer,
+        );
+
+        $request = jsonRequest('POST', '/api/v1/auth/email/change-request', [
+            'email' => 'newaddress3@example.com',
+        ]);
+        $response = $controller->requestEmailChange($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
     });
 });
 

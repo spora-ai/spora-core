@@ -201,6 +201,7 @@ final class ContainerDefinitions
                     'mercure_url'         => null,
                     'mercure_jwt_key'     => null,
                     'app_url'             => RequestOrigin::detect(),
+                    'app_prefix'          => RequestOrigin::detectWithPrefix()[1],
 
                     'plugin_install_enabled' => false,
 
@@ -333,6 +334,7 @@ final class ContainerDefinitions
         $apply('SPORA_MERCURE_JWT_KEY', 'mercure_jwt_key', static fn($v) => $v);
         $apply('SPORA_MERCURE_PUBLISH_URL', 'mercure_publish_url', static fn($v) => $v);
         $apply('SPORA_APP_URL', 'app_url', static fn($v) => $v);
+        $apply('SPORA_APP_PREFIX', 'app_prefix', static fn($v) => '/' . trim((string) $v, '/'));
         $apply('SPORA_COMPOSER_BINARY', 'composer_binary', static fn($v) => $v);
         $apply('SPORA_PLUGIN_INSTALL_ENABLED', 'plugin_install_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_ASSET_STORE_MODE', 'asset_store.mode', static fn($v) => $v);
@@ -424,6 +426,7 @@ final class ContainerDefinitions
                 $authService = new AuthService($c->get(DelightAuth::class));
                 $authService->setSystemMailer($c->get(SystemMailer::class));
                 $authService->setAppUrl($c->get('config')['app_url'] ?? 'http://localhost');
+                $authService->setAppPrefix($c->get('config')['app_prefix'] ?? '');
                 return $authService;
             },
 

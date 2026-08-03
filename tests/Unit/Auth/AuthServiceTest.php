@@ -196,6 +196,22 @@ describe('AuthService::changeEmail', function (): void {
         expect($captured['verify'])->toStartWith('https://spora.test/auth/verify/');
     });
 
+    test('setAppPrefix prepends the path prefix to the verification URL', function (): void {
+        $service = bootAuthLayer();
+        bootAuth($service, 'change-prefix@example.com');
+
+        [$mailer, $captured] = makeCapturingMailer();
+        $service->setSystemMailer($mailer);
+        $service->setAppUrl('https://spora.fabiangrassl.de');
+        $service->setAppPrefix('/spora');
+
+        $service->changeEmail('change-prefix-target@example.com');
+
+        expect($captured['verify'])->toBeString();
+        expect($captured['verify'])->toStartWith('https://spora.fabiangrassl.de/spora/auth/verify/');
+        expect($captured['verify'])->not->toStartWith('https://spora.fabiangrassl.de/spora/spora/');
+    });
+
     test('logged-out request fails with NotLoggedInException', function (): void {
         clearSession();
         $service = bootAuthLayer();

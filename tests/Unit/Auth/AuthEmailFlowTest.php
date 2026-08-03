@@ -104,3 +104,55 @@ test('setAppUrl is accepted on the flow (used by the facade to forward configura
 
     expect($flow)->toBeInstanceOf(AuthEmailFlow::class);
 });
+
+test('setAppPrefix prepends the path prefix to the verification URL', function (): void {
+    $captured = new ArrayObject();
+    $mailer = new class ($captured) implements MailerInterface {
+        public function __construct(private ArrayObject $captured) {}
+
+        public function sendPasswordResetEmail(string $email, string $resetUrl): bool
+        {
+            $this->captured['reset'] = $resetUrl;
+
+            return true;
+        }
+
+        public function sendVerificationEmail(string $email, string $verificationUrl): bool
+        {
+            $this->captured['verify'] = $verificationUrl;
+
+            return true;
+        }
+
+        public function sendWelcomeEmail(int $userId, string $email): bool
+        {
+            return true;
+        }
+    };
+
+    $flow = bootEmailFlow();
+    $flow->setSystemMailer($mailer);
+    $flow->setAppUrl('https://spora.fabiangrassl.de');
+    $flow->setAppPrefix('/spora');
+
+    $verifyCallback = $flow->buildVerificationCallback('verify@example.com');
+    $verifyCallback('selector', 'token');
+
+    expect($captured['verify'])->toBe('https://spora.fabiangrassl.de/spora/auth/verify/selector?token=token');
+});
+
+test('setAppPrefix normalises leading/trailing slashes and treats bare "/" as empty', function (): void {
+    $flow = bootEmailFlow();
+
+    $flow->setAppPrefix('spora');
+    $r = new ReflectionClass($flow);
+    $prop = $r->getProperty('appPrefix');
+    $prop->setAccessible(true);
+    expect($prop->getValue($flow))->toBe('/spora');
+
+    $flow->setAppPrefix('/trailing/');
+    expect($prop->getValue($flow))->toBe('/trailing');
+
+    $flow->setAppPrefix('/');
+    expect($prop->getValue($flow))->toBe('');
+});

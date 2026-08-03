@@ -54,6 +54,11 @@ class AuthService
         $this->emailFlow->setAppUrl($url);
     }
 
+    public function setAppPrefix(string $prefix): void
+    {
+        $this->emailFlow->setAppPrefix($prefix);
+    }
+
     /**
      * Register a new user and return their new user ID.
      *

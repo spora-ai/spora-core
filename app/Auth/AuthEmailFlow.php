@@ -25,6 +25,7 @@ final class AuthEmailFlow
 {
     private ?MailerInterface $systemMailer = null;
     private ?string $appUrl = null;
+    private ?string $appPrefix = null;
 
     public function __construct(private readonly Auth $auth) {}
 
@@ -36,6 +37,19 @@ final class AuthEmailFlow
     public function setAppUrl(string $url): void
     {
         $this->appUrl = $url;
+    }
+
+    /**
+     * Path prefix under which the app is served (e.g. `/spora` when running
+     * behind a reverse proxy that mounts the app under a sub-path). Empty
+     * string when the app is hosted at the host root. The value is prepended
+     * to every email link so the user lands on the actual UI route after
+     * clicking the verification / password-reset link.
+     */
+    public function setAppPrefix(string $prefix): void
+    {
+        $prefix = '/' . trim($prefix, '/');
+        $this->appPrefix = $prefix === '/' ? '' : $prefix;
     }
 
     /**
@@ -109,7 +123,8 @@ final class AuthEmailFlow
         $this->auth->forgotPassword($email, function (string $selector, string $token) use ($email): void {
             if ($this->systemMailer !== null) {
                 $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-                $resetUrl = "{$baseUrl}/auth/reset-password/{$selector}?token=" . urlencode($token);
+                $prefix  = $this->appPrefix ?? '';
+                $resetUrl = "{$baseUrl}{$prefix}/auth/reset-password/{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendPasswordResetEmail($email, $resetUrl);
             }
         });
@@ -148,7 +163,8 @@ final class AuthEmailFlow
         return function (string $selector, string $token) use ($email, $customVerifyPath) {
             if ($this->systemMailer !== null) {
                 $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-                $verifyUrl = "{$baseUrl}{$customVerifyPath}{$selector}?token=" . urlencode($token);
+                $prefix  = $this->appPrefix ?? '';
+                $verifyUrl = "{$baseUrl}{$prefix}{$customVerifyPath}{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendVerificationEmail($email, $verifyUrl);
             }
         };
