@@ -35,7 +35,7 @@ function makeAuthControllerWithMocks(): array
     $csrfService = new Spora\Security\CsrfTokenService();
     $validator = new Spora\Services\AuthValidator();
     $workflow = new Spora\Services\AuthWorkflow($authService, $userService, $csrfService, $validator);
-    $controller = new AuthController($authService, $csrfService, $validator, $workflow, ['allow_registration' => true]);
+    $controller = new AuthController($authService, $csrfService, $validator, $workflow, null, ['allow_registration' => true]);
 
     return [$controller, $authService];
 }
@@ -52,7 +52,7 @@ function makeAuthControllerWithUserService(): array
     $csrfService = new Spora\Security\CsrfTokenService();
     $validator = new Spora\Services\AuthValidator();
     $workflow = new Spora\Services\AuthWorkflow($authService, $userService, $csrfService, $validator);
-    $controller = new AuthController($authService, $csrfService, $validator, $workflow, ['allow_registration' => true]);
+    $controller = new AuthController($authService, $csrfService, $validator, $workflow, null, ['allow_registration' => true]);
 
     return [$controller, $authService, $userService];
 }

@@ -9,6 +9,7 @@ use Psr\Log\LoggerInterface;
 use Spora\Mailer\LogTransport;
 use Spora\Models\MailTemplate;
 use Spora\Models\User;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mime\Address;
@@ -53,6 +54,20 @@ final class SystemMailer implements MailerInterface
         }
 
         return new Mailer(Transport::fromDsn($dsn));
+    }
+
+    /**
+     * Verify the mailer can be constructed without opening a socket. Catches
+     * configuration mistakes (unsupported driver, missing host, invalid
+     * encryption) early — before callers hand off to transports that insert
+     * side-effect rows (e.g. delight-im confirmation rows) before sending.
+     *
+     * @throws InvalidArgumentException for configuration errors
+     * @throws TransportExceptionInterface if Symfony cannot parse the DSN
+     */
+    public function assertCanBuildMailer(): void
+    {
+        $this->buildMailer();
     }
 
     /**

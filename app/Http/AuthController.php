@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
 use Spora\Services\RateLimiter;
+use Spora\Services\SystemMailer;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 
 /**
  * Handles authentication: registration, login, logout, password reset, and email verification.
@@ -40,6 +43,7 @@ final class AuthController
         private readonly CsrfTokenService $csrfService,
         private readonly AuthValidator $validator,
         private readonly AuthWorkflow $workflow,
+        private readonly ?SystemMailer $systemMailer = null,
         private readonly array $config = [],
     ) {}
 
@@ -198,6 +202,17 @@ final class AuthController
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
             return $this->validator->unauthenticated();
+        }
+
+        if ($this->systemMailer !== null) {
+            // Fail fast on broken mail config before delight-im inserts the
+            // confirmation row — otherwise the next attempt trips the 24h
+            // throttle and returns a confusing 500.
+            try {
+                $this->systemMailer->assertCanBuildMailer();
+            } catch (TransportExceptionInterface|InvalidArgumentException $e) {
+                return $this->validator->error('EMAIL_SEND_FAILED', 'Could not prepare the confirmation email: ' . $e->getMessage(), Response::HTTP_BAD_GATEWAY);
+            }
         }
 
         return $this->workflow->handleEmailChangeRequest($request);

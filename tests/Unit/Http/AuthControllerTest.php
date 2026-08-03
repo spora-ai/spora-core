@@ -40,7 +40,7 @@ function makeAuthController(
     $validator ??= new AuthValidator();
     $workflow = new AuthWorkflow($authService, $userService, $csrfService, $validator);
 
-    $controller = new AuthController($authService, $csrfService, $validator, $workflow, $config);
+    $controller = new AuthController($authService, $csrfService, $validator, $workflow, null, $config);
 
     return [$controller, $authService, $userService, $csrfService];
 }
