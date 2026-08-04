@@ -121,6 +121,24 @@ final class SystemMailer implements MailerInterface
     }
 
     /**
+     * Send an email-change confirmation email to the NEW address requested by
+     * the account holder. Renders the {@code email_change_verification}
+     * template so the recipient sees change-specific wording rather than
+     * signup-only phrasing ("if you did not create an account").
+     *
+     * @param string $email The new address the recipient will confirm
+     * @param string $verificationUrl Full URL the recipient clicks to confirm
+     * @return bool True on success
+     */
+    public function sendEmailChangeVerificationEmail(string $email, string $verificationUrl): bool
+    {
+        return $this->sendTemplatedEmail('email_change_verification', [
+            'email'             => $email,
+            'verification_link' => $verificationUrl,
+        ], [$email]);
+    }
+
+    /**
      * Send a password reset email.
      *
      * @param string $email Recipient email address

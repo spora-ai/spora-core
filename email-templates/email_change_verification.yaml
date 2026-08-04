@@ -1,0 +1,11 @@
+name: email_change_verification
+subject: "Confirm your new email address"
+body_text: |
+  A request was made to change the email address on your Spora account to this address.
+
+  Please click the link below to confirm:
+
+  {{verification_link}}
+
+  If you did not make this request, you can safely ignore this email and your existing email address will remain active.
+body_html: null

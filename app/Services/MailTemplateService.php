@@ -14,6 +14,7 @@ final class MailTemplateService implements MailTemplateServiceInterface
 {
     private const SYSTEM_TEMPLATES = [
         'email_verification',
+        'email_change_verification',
         'password_reset',
         'welcome',
     ];

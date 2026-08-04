@@ -26,7 +26,7 @@ describe('EmailTemplateLoader', function (): void {
             $loader = makeLoader();
             $templates = $loader->getAll();
 
-            expect($templates)->toHaveKeys(['welcome', 'email_verification', 'password_reset', 'scheduled_run_completed']);
+            expect($templates)->toHaveKeys(['welcome', 'email_verification', 'email_change_verification', 'password_reset', 'scheduled_run_completed']);
         });
 
         it('each template has required fields', function (): void {

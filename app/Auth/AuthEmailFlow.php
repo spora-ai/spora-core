@@ -43,26 +43,51 @@ final class AuthEmailFlow
      */
     public function buildVerificationCallback(string $email, ?string $customVerifyPath = '/auth/verify/'): ?callable
     {
-        return $this->systemMailer !== null
-            ? $this->sendVerificationEmailViaCallback($email, $customVerifyPath)
-            : null;
+        if ($this->systemMailer === null) {
+            return null;
+        }
+
+        return $this->buildCallbackFor(
+            $customVerifyPath,
+            fn(string $url): bool => $this->systemMailer->sendVerificationEmail($email, $url),
+        );
+    }
+
+    /**
+     * Build an email-change confirmation callback for delight-im/auth. Mirrors
+     * {@see buildVerificationCallback()} but renders the change recipient
+     * template ({@code email_change_verification}) so the recipient sees
+     * change-specific wording instead of "if you did not create an account".
+     *
+     * @return (callable(string, string): void)|null
+     */
+    public function buildChangeEmailConfirmationCallback(string $email, ?string $customVerifyPath = '/auth/verify/'): ?callable
+    {
+        if ($this->systemMailer === null) {
+            return null;
+        }
+
+        return $this->buildCallbackFor(
+            $customVerifyPath,
+            fn(string $url): bool => $this->systemMailer->sendEmailChangeVerificationEmail($email, $url),
+        );
     }
 
     /**
      * Confirm an email address using a selector/token pair.
      * After successful confirmation, sends the welcome email if SPORA_SEND_WELCOME_EMAIL is enabled.
      *
-     * @return array{0: string, 1: string} [old_email, new_email]
+     * @return array{0: ?string, 1: string} [old_email, new_email] — `old_email` is `null` for an initial signup
+     *                                              and the previous address for an email change.
      */
     public function confirmEmail(string $selector, string $token): array
     {
         $emails = $this->auth->confirmEmail($selector, $token);
-        $oldEmail = $emails[0] ?? '';
+        $oldEmail = $emails[0] ?? null;
         $newEmail = $emails[1] ?? '';
 
         $sendWelcomeEmail = (bool) ($_ENV['SPORA_SEND_WELCOME_EMAIL'] ?? false);
-        // Only send welcome email for initial verification (where old email equals new email)
-        if ($sendWelcomeEmail && $this->systemMailer !== null && $newEmail !== '' && $oldEmail === $newEmail) {
+        if ($sendWelcomeEmail && $this->systemMailer !== null && $newEmail !== '' && $oldEmail === null) {
             $user = User::where('email', $newEmail)->first();
             if ($user !== null) {
                 $this->systemMailer->sendWelcomeEmail((int) $user->id, $newEmail);
@@ -94,7 +119,7 @@ final class AuthEmailFlow
             return;
         }
 
-        $this->auth->changeEmail($newEmail, $this->sendVerificationEmailViaCallback($newEmail));
+        $this->auth->changeEmail($newEmail, $this->buildChangeEmailConfirmationCallback($newEmail));
     }
 
     /**
@@ -130,23 +155,25 @@ final class AuthEmailFlow
         }
 
         try {
-            $this->auth->resendConfirmationForEmail($email, $this->sendVerificationEmailViaCallback($email));
+            $callback = $this->buildVerificationCallback($email);
+            if ($callback !== null) {
+                $this->auth->resendConfirmationForEmail($email, $callback);
+            }
         } catch (ConfirmationRequestNotFound) {
             // No pending confirmation — nothing to resend; silently return
         }
     }
 
     /**
+     * @param callable(string): bool $sender invoked with the rendered verify URL
      * @return callable(string, string): void
      */
-    private function sendVerificationEmailViaCallback(string $email, ?string $customVerifyPath = '/auth/verify/'): callable
+    private function buildCallbackFor(?string $customVerifyPath, callable $sender): callable
     {
-        return function (string $selector, string $token) use ($email, $customVerifyPath): void {
-            if ($this->systemMailer !== null) {
-                $baseUrl = rtrim($this->appUrl !== '' ? $this->appUrl : 'http://localhost', '/');
-                $verifyUrl = "{$baseUrl}{$this->appPrefix}{$customVerifyPath}{$selector}?token=" . urlencode($token);
-                $this->systemMailer->sendVerificationEmail($email, $verifyUrl);
-            }
+        return function (string $selector, string $token) use ($customVerifyPath, $sender): void {
+            $baseUrl = rtrim($this->appUrl !== '' ? $this->appUrl : 'http://localhost', '/');
+            $verifyUrl = "{$baseUrl}{$this->appPrefix}{$customVerifyPath}{$selector}?token=" . urlencode($token);
+            $sender($verifyUrl);
         };
     }
 

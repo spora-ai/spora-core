@@ -192,7 +192,8 @@ class AuthService
      * Confirm an email address using a selector/token pair.
      * After successful confirmation, sends the welcome email if SPORA_SEND_WELCOME_EMAIL is enabled.
      *
-     * @return array{0: string, 1: string} [old_email, new_email]
+     * @return array{0: ?string, 1: string} [old_email, new_email] — `old_email` is `null` for an initial signup
+     *                                              and the previous address for an email change.
      */
     public function confirmEmail(string $selector, string $token): array
     {

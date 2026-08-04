@@ -12,5 +12,6 @@ interface MailerInterface
 {
     public function sendPasswordResetEmail(string $email, string $resetUrl): bool;
     public function sendVerificationEmail(string $email, string $verificationUrl): bool;
+    public function sendEmailChangeVerificationEmail(string $email, string $verificationUrl): bool;
     public function sendWelcomeEmail(int $userId, string $email): bool;
 }

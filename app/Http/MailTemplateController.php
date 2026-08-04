@@ -91,7 +91,7 @@ final class MailTemplateController
 
         // Check if it's a system template first
         $template = \Spora\Models\MailTemplate::find($id);
-        if ($template !== null && in_array($template->name, ['email_verification', 'password_reset', 'welcome'], true)) {
+        if ($template !== null && in_array($template->name, ['email_verification', 'email_change_verification', 'password_reset', 'welcome'], true)) {
             return $this->error(
                 'CANNOT_DELETE_SYSTEM_TEMPLATE',
                 'System templates cannot be deleted.',
