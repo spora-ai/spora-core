@@ -10,8 +10,10 @@ namespace Spora\Core;
  * Resolution order — first wins:
  *
  *   1. `SPORA_APP_URL` env var
- *   2. The web server's `HTTP_HOST` + `REQUEST_SCHEME` (or `HTTPS`) + `SERVER_PORT`
- *   3. `http://localhost` (CLI / worker / console / tests)
+ *   2. The web server's `HTTP_HOST` (request-supplied)
+ *   3. The web server's `SERVER_NAME` (Apache `ServerName` directive, set at
+ *      server bootstrap — trusted because the operator controls it)
+ *   4. `http://localhost` (CLI / worker / console / tests)
  *
  * Does NOT read `X-Forwarded-*` — those headers are spoofable and there is
  * no trusted-proxy allowlist at the application layer. Operators behind a
@@ -60,11 +62,16 @@ final class RequestOrigin
      * Build the public origin from a server-variable array. Public for
      * testing — production code calls {@see detect()}.
      *
+     * Resolution order: `HTTP_HOST` → `SERVER_NAME` → `http://localhost`.
+     *
      * @param array<string, mixed> $server
      */
     public static function detectFrom(array $server): string
     {
         $host = trim((string) ($server['HTTP_HOST'] ?? ''));
+        if ($host === '') {
+            $host = trim((string) ($server['SERVER_NAME'] ?? ''));
+        }
         $url = '';
         if ($host !== '') {
             $scheme = self::resolveScheme($server);

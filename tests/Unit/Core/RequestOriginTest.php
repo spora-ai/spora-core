@@ -50,6 +50,24 @@ test('detectFrom returns http://localhost when host is empty', function (): void
     expect(RequestOrigin::detectFrom([]))->toBe('http://localhost');
 });
 
+test('detectFrom falls back to SERVER_NAME when HTTP_HOST is missing', function (): void {
+    expect(RequestOrigin::detectFrom([
+        'SERVER_NAME' => 'spora.fabiangrassl.de',
+        'SERVER_PORT' => 443,
+        'HTTPS'       => 'on',
+    ]))->toBe('https://spora.fabiangrassl.de');
+});
+
+test('detectFrom prefers HTTP_HOST over SERVER_NAME when both are present', function (): void {
+    // HTTP_HOST carries a forwarded Host header (per-request, possibly client-influenced),
+    // SERVER_NAME is the canonical server-level config. We prefer HTTP_HOST because it
+    // reflects the public origin the operator chose to expose for this request.
+    expect(RequestOrigin::detectFrom([
+        'HTTP_HOST'   => 'public.example.com',
+        'SERVER_NAME' => 'internal.example.com',
+    ]))->toBe('http://public.example.com');
+});
+
 test('detectFrom builds the URL from HTTP_HOST + default http port 80', function (): void {
     expect(RequestOrigin::detectFrom([
         'HTTP_HOST' => 'spora.example.com',
