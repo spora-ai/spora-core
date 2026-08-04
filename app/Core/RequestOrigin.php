@@ -5,71 +5,82 @@ declare(strict_types=1);
 namespace Spora\Core;
 
 /**
- * Resolves the public base URL the operator configured for this Spora instance.
+ * Resolves the public base URL and path prefix from the container `config`
+ * array. The framework's config system (config.php + SPOra_* env vars via
+ * {@see ContainerDefinitions::configDefinition}) is the single
+ * source of truth — this class does NOT read `$_ENV` or `getenv()` directly.
  *
- * Resolution order — first wins:
+ * Resolution order for {@see detect()} — first wins:
  *
- *   1. `SPORA_APP_URL` env var
+ *   1. `config['app_url']` (set by `config.php`, `SPORA_APP_URL`, or the
+ *      default seeder in {@see ContainerDefinitions})
  *   2. The web server's `HTTP_HOST` (request-supplied)
- *   3. The web server's `SERVER_NAME` (Apache `ServerName` directive, set at
- *      server bootstrap — trusted because the operator controls it)
+ *   3. The web server's `SERVER_NAME` (Apache `ServerName`, set at server
+ *      bootstrap — trusted because the operator controls it)
  *   4. `http://localhost` (CLI / worker / console / tests)
+ *
+ * For {@see detectWithPrefix()}, the same fallback applies for the host,
+ * and `config['app_prefix']` (default `/spora`) supplies the path prefix
+ * because the Spora admin UI ships under `public/spora/` and plugins ship
+ * under `public/plugins/<name>/`. Operators hosting their own frontend at
+ * the host root opt out with `app_prefix = ''` in `config.php` or by
+ * exporting `SPORA_APP_PREFIX=""`.
  *
  * Does NOT read `X-Forwarded-*` — those headers are spoofable and there is
  * no trusted-proxy allowlist at the application layer. Operators behind a
- * proxy that rewrites `Host` MUST set `SPORA_APP_URL` in `.env`.
+ * proxy that rewrites `Host` MUST set `app_url` (via `config.php` or
+ * `SPORA_APP_URL`).
  */
 final class RequestOrigin
 {
     private const LOCALHOST_ORIGIN = 'http://localhost';
 
     /**
-     * Resolve the public base URL.
+     * Default path prefix when `config['app_prefix']` is not set.
+     * Matches the packaged admin UI (`public/spora/`) and plugin URLs
+     * (`public/plugins/<name>/`).
      */
-    public static function detect(): string
+    private const DEFAULT_APP_PREFIX = '/spora';
+
+    /**
+     * Resolve the public base URL.
+     *
+     * @param array<string, mixed> $config the container's merged config array
+     */
+    public static function detect(array $config = []): string
     {
-        $configured = self::env('SPORA_APP_URL');
+        $configured = (string) ($config['app_url'] ?? '');
         if ($configured !== '') {
-            $base = rtrim($configured, '/');
-        } elseif (\PHP_SAPI === 'cli') {
-            $base = self::LOCALHOST_ORIGIN;
-        } else {
-            $base = self::detectFrom($_SERVER);
+            return rtrim($configured, '/');
         }
-        return $base;
+
+        if (\PHP_SAPI === 'cli') {
+            return self::LOCALHOST_ORIGIN;
+        }
+
+        return self::buildFromServer($_SERVER);
     }
 
     /**
      * Resolve the public base URL and the path prefix under which Spora is
      * mounted.
      *
-     * Default `SPORA_APP_PREFIX` is `/spora` because the Spora admin UI ships
-     * under that sub-path (`public/spora/`) and Spora plugins ship under
-     * `/plugins/<name>/`. Operators hosting their own frontend at the host
-     * root can pin the prefix to empty by exporting `SPORA_APP_PREFIX=""`.
-     *
+     * @param array<string, mixed> $config the container's merged config array
      * @return array{0: string, 1: string} [baseUrl, pathPrefix]
      *   `pathPrefix` is `/foo`-normalized; empty string when no prefix is set.
      */
-    public static function detectWithPrefix(): array
+    public static function detectWithPrefix(array $config = []): array
     {
-        $envValue = $_ENV['SPORA_APP_PREFIX'] ?? null;
-        if (!is_string($envValue)) {
-            $envValue = getenv('SPORA_APP_PREFIX');
-        }
-        $prefix = is_string($envValue) ? $envValue : '/spora';
+        $prefix = (string) ($config['app_prefix'] ?? self::DEFAULT_APP_PREFIX);
+        $prefix = self::normalizePrefix($prefix);
 
-        $prefix = '/' . trim($prefix, '/');
-        if ($prefix === '/') {
-            $prefix = '';
-        }
-
-        return [self::detect(), $prefix];
+        return [self::detect($config), $prefix];
     }
 
     /**
      * Build the public origin from a server-variable array. Public for
-     * testing — production code calls {@see detect()}.
+     * testing — production code calls {@see detect()} with the container
+     * config.
      *
      * Resolution order: `HTTP_HOST` → `SERVER_NAME` → `http://localhost`.
      *
@@ -90,6 +101,31 @@ final class RequestOrigin
             $url = $port !== $defaultPort ? "{$base}:{$port}" : $base;
         }
         return $url !== '' ? $url : self::LOCALHOST_ORIGIN;
+    }
+
+    /**
+     * Normalize a path prefix value: leading/trailing slashes stripped,
+     * a bare `/` (or empty) collapses to `''`, anything else is wrapped as
+     * `/foo`.
+     */
+    public static function normalizePrefix(string $prefix): string
+    {
+        $normalized = '/' . trim($prefix, '/');
+        return $normalized === '/' ? '' : $normalized;
+    }
+
+    /**
+     * @param array<string, mixed> $server
+     */
+    private static function buildFromServer(array $server): string
+    {
+        $host = (string) $server['HTTP_HOST'];
+        $scheme = self::resolveScheme($server);
+        $defaultPort = $scheme === 'https' ? 443 : 80;
+        $port = (int) ($server['SERVER_PORT'] ?? $defaultPort);
+
+        $url = "{$scheme}://{$host}";
+        return $port !== $defaultPort ? "{$url}:{$port}" : $url;
     }
 
     /**
@@ -116,11 +152,5 @@ final class RequestOrigin
         }
         $colon = strrpos($host, ':');
         return $colon !== false ? substr($host, 0, $colon) : $host;
-    }
-
-    private static function env(string $key): string
-    {
-        $value = $_ENV[$key] ?? getenv($key);
-        return is_string($value) ? trim($value) : '';
     }
 }

@@ -202,6 +202,11 @@ final class ContainerDefinitions
                     'mercure_jwt_key'     => null,
                     'app_url'             => RequestOrigin::detect(),
                     'app_prefix'          => RequestOrigin::detectWithPrefix()[1],
+                    // `app_url` / `app_prefix` are seeded by RequestOrigin when
+                    // neither `config.php` nor `SPORA_APP_URL` / `SPORA_APP_PREFIX`
+                    // (via `$apply()` above) set them. RequestOrigin does NOT
+                    // read $_ENV directly — the framework config system is the
+                    // single source of truth.
 
                     'plugin_install_enabled' => false,
 
@@ -333,6 +338,8 @@ final class ContainerDefinitions
         $apply('SPORA_MERCURE_URL', 'mercure_url', static fn($v) => $v);
         $apply('SPORA_MERCURE_JWT_KEY', 'mercure_jwt_key', static fn($v) => $v);
         $apply('SPORA_MERCURE_PUBLISH_URL', 'mercure_publish_url', static fn($v) => $v);
+        $apply('SPORA_APP_URL', 'app_url', static fn($v) => (string) $v);
+        $apply('SPORA_APP_PREFIX', 'app_prefix', static fn($v) => RequestOrigin::normalizePrefix((string) $v));
         $apply('SPORA_COMPOSER_BINARY', 'composer_binary', static fn($v) => $v);
         $apply('SPORA_PLUGIN_INSTALL_ENABLED', 'plugin_install_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_ASSET_STORE_MODE', 'asset_store.mode', static fn($v) => $v);
@@ -430,6 +437,10 @@ final class ContainerDefinitions
                 $authService->setSystemMailer($c->get(SystemMailer::class));
                 return $authService;
             },
+            // Note: $config['app_url'] / $config['app_prefix'] are seeded by
+            // RequestOrigin in the default config block above when neither
+            // config.php nor the SPOra_* env vars set them. AuthService/AuthEmailFlow
+            // never read $_ENV directly — they consume the merged config only.
 
             CsrfTokenService::class => static function (ContainerInterface $c): CsrfTokenService {
                 return new CsrfTokenService(
