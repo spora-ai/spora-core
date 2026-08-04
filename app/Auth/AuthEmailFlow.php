@@ -24,7 +24,7 @@ final class AuthEmailFlow
     public function __construct(
         private readonly Auth $auth,
         private readonly string $appUrl = '',
-        private string $appPrefix = '',
+        private string $appPrefix = '/spora',
     ) {
         $this->appPrefix = self::normalizePrefix($appPrefix);
     }

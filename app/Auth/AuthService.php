@@ -41,7 +41,7 @@ class AuthService
     public function __construct(
         private readonly Auth $auth,
         string $appUrl = '',
-        string $appPrefix = '',
+        string $appPrefix = '/spora',
     ) {
         $this->emailFlow = new AuthEmailFlow($auth, $appUrl, $appPrefix);
         $this->roleAdmin = new AuthRoleAdmin($auth);

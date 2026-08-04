@@ -11,12 +11,12 @@ use Spora\Services\MailerInterface;
  * exercised through the {@see Spora\Auth\AuthService} facade in
  * AuthServiceTest; this file pins the pure helpers that the facade relies on.
  */
-function bootEmailFlow(?string $appUrl = '', ?string $appPrefix = ''): AuthEmailFlow
+function bootEmailFlow(?string $appUrl = '', ?string $appPrefix = null): AuthEmailFlow
 {
     $pdo  = Illuminate\Database\Capsule\Manager::connection()->getPdo();
     $auth = new Delight\Auth\Auth($pdo, null, null, false /* throttling off */);
 
-    return new AuthEmailFlow($auth, $appUrl ?? '', $appPrefix ?? '');
+    return new AuthEmailFlow($auth, $appUrl ?? '', $appPrefix ?? '/spora');
 }
 
 function capturingMailer(ArrayObject $captured): MailerInterface
@@ -54,7 +54,7 @@ test('buildVerificationCallback returns null when no system mailer is wired', fu
 test('buildVerificationCallback returns a callable when a system mailer is wired', function (): void {
     $captured = new ArrayObject();
 
-    $flow = bootEmailFlow('https://spora.test');
+    $flow = bootEmailFlow('https://spora.test', '');
     $flow->setSystemMailer(capturingMailer($captured));
 
     $callback = $flow->buildVerificationCallback('verify@example.com');
@@ -69,7 +69,7 @@ test('buildVerificationCallback returns a callable when a system mailer is wired
 test('buildVerificationCallback can be invoked with a custom verify path', function (): void {
     $captured = new ArrayObject();
 
-    $flow = bootEmailFlow('https://spora.test');
+    $flow = bootEmailFlow('https://spora.test', '');
     $flow->setSystemMailer(capturingMailer($captured));
 
     $callback = $flow->buildVerificationCallback('custom@example.com', '/custom/verify/');
@@ -83,7 +83,7 @@ test('buildVerificationCallback can be invoked with a custom verify path', funct
 test('constructor accepts appUrl and forwards it into the verification URL', function (): void {
     $captured = new ArrayObject();
 
-    $flow = bootEmailFlow('https://forwarded.example.com');
+    $flow = bootEmailFlow('https://forwarded.example.com', '');
     $flow->setSystemMailer(capturingMailer($captured));
 
     $callback = $flow->buildVerificationCallback('verify@example.com');
@@ -122,15 +122,38 @@ test('constructor normalises the appPrefix value (leading/trailing slashes, bare
     expect($prop->getValue($flow))->toBe('');
 });
 
-test('prefix is empty when neither URL nor prefix is set and no http://localhost:port sneaks in', function (): void {
+test('constructor defaults to /spora when no prefix is given', function (): void {
+    $pdo  = Illuminate\Database\Capsule\Manager::connection()->getPdo();
+    $auth = new Delight\Auth\Auth($pdo, null, null, false);
+
+    $r = new ReflectionClass(AuthEmailFlow::class);
+    $prop = $r->getProperty('appPrefix');
+
+    $flow = new AuthEmailFlow($auth);
+    expect($prop->getValue($flow))->toBe('/spora');
+});
+
+test('prefix is empty when explicitly opted out and no http://localhost:port sneaks in', function (): void {
     $captured = new ArrayObject();
 
-    $flow = bootEmailFlow();
+    $flow = bootEmailFlow('', '');
     $flow->setSystemMailer(capturingMailer($captured));
 
     $callback = $flow->buildVerificationCallback('verify@example.com');
     $callback('selector', 'token');
 
-    // Default fallback when no URL is wired in: http://localhost (no port).
+    // Empty prefix → URL has no /spora segment. Base falls back to http://localhost.
     expect($captured['verify'])->toBe('http://localhost/auth/verify/selector?token=token');
+});
+
+test('default /spora prefix lands the verification URL on the SPA route', function (): void {
+    $captured = new ArrayObject();
+
+    $flow = bootEmailFlow('https://spora.fabiangrassl.de');
+    $flow->setSystemMailer(capturingMailer($captured));
+
+    $callback = $flow->buildVerificationCallback('verify@example.com');
+    $callback('selector', 'token');
+
+    expect($captured['verify'])->toBe('https://spora.fabiangrassl.de/spora/auth/verify/selector?token=token');
 });

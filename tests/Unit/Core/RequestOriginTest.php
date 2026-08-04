@@ -133,7 +133,16 @@ test('detectFrom does NOT read X-Forwarded-* (security: spoofable)', function ()
 // detectWithPrefix()
 // ---------------------------------------------------------------------------
 
-test('detectWithPrefix returns [baseUrl, ""] when no prefix is set', function (): void {
+test('detectWithPrefix returns [baseUrl, "/spora"] by default when SPOra_APP_PREFIX is unset', function (): void {
+    // The Spora admin UI ships under /spora/ (public/spora/) and plugins ship
+    // under /plugins/<name>/. The default reflects that canonical URL space.
+    expect(RequestOrigin::detectWithPrefix())->toBe(['http://localhost', '/spora']);
+});
+
+test('detectWithPrefix treats SPOra_APP_PREFIX="" as an explicit empty (host-root mount)', function (): void {
+    $_ENV['SPORA_APP_PREFIX'] = '';
+    putenv('SPORA_APP_PREFIX=');
+
     expect(RequestOrigin::detectWithPrefix())->toBe(['http://localhost', '']);
 });
 

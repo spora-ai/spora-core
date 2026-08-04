@@ -41,15 +41,24 @@ final class RequestOrigin
 
     /**
      * Resolve the public base URL and the path prefix under which Spora is
-     * mounted (e.g. `/spora` when running behind a reverse-proxy that
-     * mounts the app under a sub-path).
+     * mounted.
+     *
+     * Default `SPORA_APP_PREFIX` is `/spora` because the Spora admin UI ships
+     * under that sub-path (`public/spora/`) and Spora plugins ship under
+     * `/plugins/<name>/`. Operators hosting their own frontend at the host
+     * root can pin the prefix to empty by exporting `SPORA_APP_PREFIX=""`.
      *
      * @return array{0: string, 1: string} [baseUrl, pathPrefix]
      *   `pathPrefix` is `/foo`-normalized; empty string when no prefix is set.
      */
     public static function detectWithPrefix(): array
     {
-        $prefix = self::env('SPORA_APP_PREFIX');
+        $envValue = $_ENV['SPORA_APP_PREFIX'] ?? null;
+        if (!is_string($envValue)) {
+            $envValue = getenv('SPORA_APP_PREFIX');
+        }
+        $prefix = is_string($envValue) ? $envValue : '/spora';
+
         $prefix = '/' . trim($prefix, '/');
         if ($prefix === '/') {
             $prefix = '';

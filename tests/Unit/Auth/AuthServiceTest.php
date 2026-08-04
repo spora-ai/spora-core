@@ -183,7 +183,7 @@ test('changeEmail() throws NotLoggedInException when not logged in', function ()
 
 describe('AuthService::changeEmail', function (): void {
     test('logged-in user can request an email change and the verification URL follows the app URL', function (): void {
-        $service = bootAuthLayer('https://spora.test');
+        $service = bootAuthLayer('https://spora.test', '');
         bootAuth($service, 'change-loggedin@example.com');
 
         [$mailer, $captured] = makeCapturingMailer();
