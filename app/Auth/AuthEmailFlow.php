@@ -50,7 +50,7 @@ final class AuthEmailFlow
 
     /**
      * Confirm an email address using a selector/token pair.
-     * After successful confirmation, sends the welcome email if SPOra_SEND_WELCOME_EMAIL is enabled.
+     * After successful confirmation, sends the welcome email if SPORA_SEND_WELCOME_EMAIL is enabled.
      *
      * @return array{0: string, 1: string} [old_email, new_email]
      */

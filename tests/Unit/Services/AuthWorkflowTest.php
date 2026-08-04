@@ -169,3 +169,48 @@ test('performEmailChangeRequest succeeds when SMTP is healthy', function (): voi
     $body = json_decode($response->getContent(), true);
     expect($body['message'])->toBe('A confirmation email has been sent to your new email address.');
 });
+
+test('cleanup is scoped to the failing user when two users target the same email', function (): void {
+    [$workflow, $authService] = makeWorkflow();
+
+    // Two verified users exist; both will target the same new email.
+    $aliceId = $authService->register('alice-shared@example.com', 'Password1!', 'Alice', true);
+    $bobId   = $authService->register('bob-shared@example.com', 'Password1!', 'Bob', true);
+
+    // Bob already has a pending confirmation row for the shared target email
+    // (e.g. he requested the change earlier and is still inside his 24h
+    // throttle window). His row must survive Alice's failed request.
+    $sharedEmail = 'shared-target@example.com';
+    DB::table('users_confirmations')->insert([
+        'user_id'  => $bobId,
+        'email'    => $sharedEmail,
+        'selector' => 'bob-sel-shared',
+        'token'    => 'bob-token-shared',
+        'expires'  => time() + 86400,
+    ]);
+
+    // Alice attempts the change request with a throwing mailer.
+    simulateLoggedInSession($aliceId, 'alice-shared@example.com');
+    $authService->setSystemMailer(new TransportThrowingMailerStub());
+
+    $request = jsonRequest('POST', '/api/v1/auth/email/change-request', [
+        'email' => $sharedEmail,
+    ]);
+    $response = $workflow->handleEmailChangeRequest($request);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_BAD_GATEWAY);
+
+    // Alice's row (the orphan) is dropped; Bob's pending confirmation
+    // survives — the cleanup must be scoped by user_id, not by email.
+    $aliceRows = DB::table('users_confirmations')
+        ->where('email', $sharedEmail)
+        ->where('user_id', $aliceId)
+        ->count();
+    $bobRows = DB::table('users_confirmations')
+        ->where('email', $sharedEmail)
+        ->where('user_id', $bobId)
+        ->count();
+
+    expect($aliceRows)->toBe(0);
+    expect($bobRows)->toBe(1);
+});

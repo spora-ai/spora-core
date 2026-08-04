@@ -310,12 +310,20 @@ final class AuthWorkflow
      * Remove the orphan `users_confirmations` row that delight-im wrote before
      * the SMTP send failed. Without this, the user is stuck behind a 24h
      * throttle even after fixing their mail config.
+     *
+     * Scoped by `currentUserId()` so a concurrent change-request from a
+     * different user targeting the same email does not drop their row.
      */
     private function deletePendingConfirmationFor(string $email): void
     {
         try {
+            $userId = $this->authService->currentUserId();
+            if ($userId === null) {
+                return;
+            }
             Capsule::table('users_confirmations')
                 ->where('email', $email)
+                ->where('user_id', $userId)
                 ->delete();
         } catch (Throwable) {
             // best-effort
