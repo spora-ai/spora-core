@@ -367,10 +367,6 @@ test('deprecation warnings are logged to Monolog and not output to screen', func
 });
 
 test('E_DEPRECATED originating from the delight-im vendor package is silenced', function (): void {
-    // Positive path: app-level deprecations still reach the log.
-    // The negative path (delight-im/ suppressed) is exercised by the
-    // broader Pest.php suite, which boots Delight\Auth and produces
-    // no spora.WARNING entries.
     $_ENV['SPORA_APP_ENV'] = 'development';
     $_ENV['SPORA_LOG_LEVEL'] = 'debug';
 
@@ -385,10 +381,26 @@ test('E_DEPRECATED originating from the delight-im vendor package is silenced', 
             new Monolog\Handler\StreamHandler($tmpLog, Monolog\Level::Debug),
         ]);
 
-        trigger_error('Test app-level deprecation', E_USER_DEPRECATED);
+        $shimHandler = static fn() => false;
+        $kernelHandler = set_error_handler($shimHandler);
+        restore_error_handler();
 
-        $logContents = file_get_contents($tmpLog);
-        expect($logContents)->toContain('Test app-level deprecation');
+        expect($kernelHandler)
+            ->toBeCallable()
+            ->and($kernelHandler)->not->toBe($shimHandler);
+
+        $vendorFile = DIRECTORY_SEPARATOR . 'fake' . DIRECTORY_SEPARATOR
+            . 'vendor' . DIRECTORY_SEPARATOR . 'delight-im' . DIRECTORY_SEPARATOR
+            . 'auth' . DIRECTORY_SEPARATOR . 'Auth.php';
+        $result = $kernelHandler(E_DEPRECATED, 'vendor: Implicit nullable', $vendorFile, 42);
+        expect($result)->toBeTrue();
+        $logContents = (string) file_get_contents($tmpLog);
+        expect($logContents)->not->toContain('vendor: Implicit nullable');
+
+        trigger_error('app: Implicit nullable', E_USER_DEPRECATED);
+        $logContents = (string) file_get_contents($tmpLog);
+        expect($logContents)->toContain('app: Implicit nullable');
+        expect($logContents)->toContain('16384');
     } finally {
         $kernel->__destruct();
         unset($_ENV['SPORA_APP_ENV'], $_ENV['SPORA_LOG_LEVEL'], $_ENV['SPORA_LOG_PATH']);

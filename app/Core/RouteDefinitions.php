@@ -215,6 +215,7 @@ final class RouteDefinitions
 
         $r->addRoute('GET', '/api/v1/sse/status', [SseController::class, 'status'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/sse/auth', [SseController::class, 'auth'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/sse/authorize', [SseController::class, 'authorize'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', '/api/v1/agents/{id}/templates', [PromptTemplateController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/agents/{id}/templates', [PromptTemplateController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);

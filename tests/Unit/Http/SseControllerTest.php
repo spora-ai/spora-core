@@ -122,6 +122,9 @@ describe('SseController', function (): void {
         expect($cookie)->not->toBeNull();
         expect($cookie->getName())->toBe('mercure_access_token');
         expect($cookie->isSecure())->toBeFalse();
+        expect($cookie->isHttpOnly())->toBeTrue();
+        expect($cookie->getPath())->toBe('/.well-known/mercure');
+        expect($cookie->getSameSite())->toBe(Cookie::SAMESITE_LAX);
     });
 
     it('authorize falls back to mercure_url when only mercure_url is set (no publish_url)', function (): void {
