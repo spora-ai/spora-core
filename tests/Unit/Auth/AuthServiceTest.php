@@ -183,17 +183,30 @@ test('changeEmail() throws NotLoggedInException when not logged in', function ()
 
 describe('AuthService::changeEmail', function (): void {
     test('logged-in user can request an email change and the verification URL follows the app URL', function (): void {
-        $service = bootAuthLayer();
+        $service = bootAuthLayer('https://spora.test', '');
         bootAuth($service, 'change-loggedin@example.com');
 
         [$mailer, $captured] = makeCapturingMailer();
         $service->setSystemMailer($mailer);
-        $service->setAppUrl('https://spora.test');
 
         $service->changeEmail('change-target@example.com');
 
         expect($captured['verify'])->toBeString();
         expect($captured['verify'])->toStartWith('https://spora.test/auth/verify/');
+    });
+
+    test('constructor appPrefix prepends the path prefix to the verification URL', function (): void {
+        $service = bootAuthLayer('https://spora.fabiangrassl.de', '/spora');
+        bootAuth($service, 'change-prefix@example.com');
+
+        [$mailer, $captured] = makeCapturingMailer();
+        $service->setSystemMailer($mailer);
+
+        $service->changeEmail('change-prefix-target@example.com');
+
+        expect($captured['verify'])->toBeString();
+        expect($captured['verify'])->toStartWith('https://spora.fabiangrassl.de/spora/auth/verify/');
+        expect($captured['verify'])->not->toStartWith('https://spora.fabiangrassl.de/spora/spora/');
     });
 
     test('logged-out request fails with NotLoggedInException', function (): void {

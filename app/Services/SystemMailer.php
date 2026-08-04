@@ -56,6 +56,17 @@ final class SystemMailer implements MailerInterface
     }
 
     /**
+     * Verify the mailer can be constructed without opening a socket.
+     * Callers invoke this before transport side-effects (e.g. delight-im
+     * confirmation rows) so a misconfigured mail setup fails with a clean
+     * 502 instead of locking the user behind a 24h throttle.
+     */
+    public function assertCanBuildMailer(): void
+    {
+        $this->buildMailer();
+    }
+
+    /**
      * Send a templated email by name.
      *
      * Loads the MailTemplate by name, renders subject/body with the provided variables,
@@ -183,7 +194,7 @@ final class SystemMailer implements MailerInterface
         return [
             'mail_driver'     => $env('SPORA_MAIL_DRIVER')     ?? $config['mail_driver']     ?? 'php_mail',
             'mail_host'       => $env('SPORA_MAIL_HOST')       ?? $config['mail_host']       ?? null,
-            'mail_port'       => $env('SPORA_MAIL_PORT')       ?? $config['mail_port']       ?? 465,
+            'mail_port'       => $env('SPORA_MAIL_PORT')       ?? $config['mail_port']       ?? 587,
             'mail_username'   => $env('SPORA_MAIL_USERNAME')   ?? $config['mail_username']   ?? null,
             'mail_password'   => $env('SPORA_MAIL_PASSWORD')   ?? $config['mail_password']   ?? null,
             'mail_encryption' => $env('SPORA_MAIL_ENCRYPTION') ?? $config['mail_encryption'] ?? 'tls',
@@ -193,25 +204,20 @@ final class SystemMailer implements MailerInterface
     }
 
     /**
-     * Build a Symfony Mailer SMTPS DSN from configuration.
-     *
-     * Uses the `smtps://` scheme so the connection is implicitly TLS-encrypted
-     * (CWE-319). `mail_encryption` is accepted for backward compatibility but
-     * is no longer appended to the DSN — the encryption is implicit in SMTPS.
-     * A value of `none` is rejected as insecure.
+     * Port 587 = STARTTLS (smtp://); port 465 = implicit TLS (smtps://).
+     * The configured `mail_encryption` selects the scheme so the handshake
+     * matches the server's expected protocol.
      *
      * @param array<string, mixed> $config
-     * @return string DSN in the form smtps://user:pass@host:port
-     *
-     * @throws InvalidArgumentException if host is missing or encryption is `none`
+     * @throws InvalidArgumentException if host is missing or encryption is unsupported
      */
     private function buildSmtpDsn(array $config): string
     {
         $host       = $config['mail_host']       ?? null;
-        $port       = (int) ($config['mail_port']       ?? 465);
+        $port       = (int) ($config['mail_port']       ?? 587);
         $user       = $config['mail_username']   ?? null;
         $pass       = $config['mail_password']   ?? null;
-        $encryption = $config['mail_encryption'] ?? 'tls';
+        $encryption = strtolower((string) ($config['mail_encryption'] ?? 'tls'));
 
         if ($host === null) {
             throw new InvalidArgumentException(
@@ -221,7 +227,13 @@ final class SystemMailer implements MailerInterface
 
         if ($encryption === 'none') {
             throw new InvalidArgumentException(
-                'SMTP mail encryption "none" is insecure. Use SMTPS (default) or set SPORA_MAIL_ENCRYPTION to "tls" / "ssl".',
+                'SMTP mail encryption "none" is insecure. Use "tls" (STARTTLS) or "ssl" (implicit TLS).',
+            );
+        }
+
+        if (!in_array($encryption, ['tls', 'ssl'], true)) {
+            throw new InvalidArgumentException(
+                'SMTP mail encryption must be "tls" (STARTTLS) or "ssl" (implicit TLS).',
             );
         }
 
@@ -235,7 +247,8 @@ final class SystemMailer implements MailerInterface
         }
 
         return sprintf(
-            'smtps://%s%s:%d',
+            '%s://%s%s:%d',
+            $encryption === 'ssl' ? 'smtps' : 'smtp',
             $credentials,
             rawurlencode($host),
             $port,

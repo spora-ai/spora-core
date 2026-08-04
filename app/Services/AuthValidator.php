@@ -106,6 +106,7 @@ final class AuthValidator
             $e instanceof \Delight\Auth\UserAlreadyExistsException => $this->error('EMAIL_TAKEN', 'A user with that email address already exists.', Response::HTTP_CONFLICT),
             $e instanceof \Delight\Auth\EmailNotVerifiedException => $this->error('EMAIL_NOT_VERIFIED', 'You must verify your current email address before changing it.', Response::HTTP_FORBIDDEN),
             $e instanceof \Delight\Auth\NotLoggedInException => $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED),
+            $e instanceof \Delight\Auth\TooManyRequestsException => $this->error('TOO_MANY_REQUESTS', 'Too many requests. Please wait before requesting another email change.', Response::HTTP_TOO_MANY_REQUESTS),
             default => $this->error('AUTH_ERROR', 'An authentication error occurred.', Response::HTTP_INTERNAL_SERVER_ERROR),
         };
     }

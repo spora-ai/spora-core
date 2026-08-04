@@ -6,6 +6,7 @@ namespace Spora\Services;
 
 use DateTime;
 use Delight\Auth\AuthException;
+use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
 use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
@@ -15,6 +16,8 @@ use Spora\Security\CsrfTokenService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
+use Throwable;
 
 /**
  * Workflow helpers extracted from {@see \Spora\Http\AuthController}.
@@ -290,11 +293,41 @@ final class AuthWorkflow
     {
         try {
             $this->authService->changeEmail((string) $body['email']);
+        } catch (TransportExceptionInterface $e) {
+            // delight-im already wrote the confirmation row; drop the orphan so
+            // the user is not stuck behind the 24h throttle.
+            $this->deletePendingConfirmationFor((string) $body['email']);
+
+            return $this->validator->error('EMAIL_SEND_FAILED', 'Could not send the confirmation email: ' . $e->getMessage(), Response::HTTP_BAD_GATEWAY);
         } catch (AuthException $e) {
             return $this->validator->mapEmailChangeRequestError($e);
         }
 
         return new JsonResponse(['message' => 'A confirmation email has been sent to your new email address.'], Response::HTTP_OK);
+    }
+
+    /**
+     * Remove the orphan `users_confirmations` row that delight-im wrote before
+     * the SMTP send failed. Without this, the user is stuck behind a 24h
+     * throttle even after fixing their mail config.
+     *
+     * Scoped by `currentUserId()` so a concurrent change-request from a
+     * different user targeting the same email does not drop their row.
+     */
+    private function deletePendingConfirmationFor(string $email): void
+    {
+        try {
+            $userId = $this->authService->currentUserId();
+            if ($userId === null) {
+                return;
+            }
+            Capsule::table('users_confirmations')
+                ->where('email', $email)
+                ->where('user_id', $userId)
+                ->delete();
+        } catch (Throwable) {
+            // best-effort
+        }
     }
 
     /**

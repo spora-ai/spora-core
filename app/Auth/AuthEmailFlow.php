@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Auth;
 
 use Delight\Auth\Auth;
+use Delight\Auth\ConfirmationRequestNotFound;
 use Delight\Auth\EmailNotVerifiedException;
 use Delight\Auth\InvalidEmailException;
 use Delight\Auth\NotLoggedInException;
@@ -13,29 +14,24 @@ use Spora\Models\User;
 use Spora\Services\MailerInterface;
 
 /**
- * Email-driven authentication flows: email verification, email change,
- * password reset, and the welcome email. Extracted from {@see AuthService}
- * to keep that class under the S1448 (≤20 methods) limit (php:S1448).
- *
- * The facade {@see AuthService} owns the system mailer + app URL configuration
- * and forwards the relevant bits here. This class never throws vendor-agnostic
- * domain exceptions — delight-im exceptions bubble up to the facade.
+ * Owns the delight-im callbacks that send transactional emails for
+ * registration, email change, password reset, and resend verification.
+ * The public base URL and path prefix arrive via the constructor (DI wires
+ * them from `config.app_url` / `config.app_prefix` at boot).
  */
 final class AuthEmailFlow
 {
-    private ?MailerInterface $systemMailer = null;
-    private ?string $appUrl = null;
-
-    public function __construct(private readonly Auth $auth) {}
+    public function __construct(
+        private readonly Auth $auth,
+        private readonly string $appUrl = '',
+        private string $appPrefix = '/spora',
+    ) {
+        $this->appPrefix = self::normalizePrefix($appPrefix);
+    }
 
     public function setSystemMailer(MailerInterface $systemMailer): void
     {
         $this->systemMailer = $systemMailer;
-    }
-
-    public function setAppUrl(string $url): void
-    {
-        $this->appUrl = $url;
     }
 
     /**
@@ -108,8 +104,8 @@ final class AuthEmailFlow
     {
         $this->auth->forgotPassword($email, function (string $selector, string $token) use ($email): void {
             if ($this->systemMailer !== null) {
-                $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-                $resetUrl = "{$baseUrl}/auth/reset-password/{$selector}?token=" . urlencode($token);
+                $baseUrl = rtrim($this->appUrl !== '' ? $this->appUrl : 'http://localhost', '/');
+                $resetUrl = "{$baseUrl}{$this->appPrefix}/auth/reset-password/{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendPasswordResetEmail($email, $resetUrl);
             }
         });
@@ -135,7 +131,7 @@ final class AuthEmailFlow
 
         try {
             $this->auth->resendConfirmationForEmail($email, $this->sendVerificationEmailViaCallback($email));
-        } catch (\Delight\Auth\ConfirmationRequestNotFound) {
+        } catch (ConfirmationRequestNotFound) {
             // No pending confirmation — nothing to resend; silently return
         }
     }
@@ -145,12 +141,20 @@ final class AuthEmailFlow
      */
     private function sendVerificationEmailViaCallback(string $email, ?string $customVerifyPath = '/auth/verify/'): callable
     {
-        return function (string $selector, string $token) use ($email, $customVerifyPath) {
+        return function (string $selector, string $token) use ($email, $customVerifyPath): void {
             if ($this->systemMailer !== null) {
-                $baseUrl = rtrim($this->appUrl ?? 'http://localhost', '/');
-                $verifyUrl = "{$baseUrl}{$customVerifyPath}{$selector}?token=" . urlencode($token);
+                $baseUrl = rtrim($this->appUrl !== '' ? $this->appUrl : 'http://localhost', '/');
+                $verifyUrl = "{$baseUrl}{$this->appPrefix}{$customVerifyPath}{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendVerificationEmail($email, $verifyUrl);
             }
         };
     }
+
+    private static function normalizePrefix(string $prefix): string
+    {
+        $normalized = '/' . trim($prefix, '/');
+        return $normalized === '/' ? '' : $normalized;
+    }
+
+    private ?MailerInterface $systemMailer = null;
 }

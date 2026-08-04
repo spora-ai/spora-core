@@ -31,6 +31,40 @@ function captureMailerLogger(): SystemMailerCapturingLogger
     return new SystemMailerCapturingLogger();
 }
 
+test('assertCanBuildMailer succeeds for the log driver without opening a socket', function (): void {
+    $mailer = new SystemMailer(['mail_driver' => 'log']);
+
+    $threw = false;
+    try {
+        $mailer->assertCanBuildMailer();
+    } catch (Throwable) {
+        $threw = true;
+    }
+
+    expect($threw)->toBeFalse();
+});
+
+test('assertCanBuildMailer succeeds for a valid SMTP config without opening a socket', function (): void {
+    $mailer = new SystemMailer([
+        'mail_driver'     => 'smtp',
+        'mail_host'       => 'smtp.example.com',
+        'mail_port'       => 587,
+        'mail_username'   => 'user',
+        'mail_password'   => 'secret',
+        'mail_encryption' => 'tls',
+    ]);
+
+    $mailer->assertCanBuildMailer();
+
+    expect(true)->toBeTrue();
+});
+
+test('assertCanBuildMailer propagates InvalidArgumentException from the mail driver', function (): void {
+    $mailer = new SystemMailer(['mail_driver' => 'carrier_pigeon']);
+
+    $mailer->assertCanBuildMailer();
+})->throws(InvalidArgumentException::class, "Mail driver 'carrier_pigeon' is not supported");
+
 test('SystemMailer with log driver and no logger injected uses NullLogger', function (): void {
     $mailer = new SystemMailer(['mail_driver' => 'log']);
 
@@ -97,12 +131,11 @@ test('buildMailer with smtp driver and encryption=none throws InvalidArgumentExc
     $mailer->buildMailer();
 })->throws(InvalidArgumentException::class, 'SMTP mail encryption "none" is insecure');
 
-test('buildMailer with smtp driver produces an smtps:// DSN', function (): void {
-    // Inspect the private buildSmtpDsn() via reflection to confirm the scheme.
+test('buildMailer with smtp driver produces an smtp DSN for STARTTLS', function (): void {
     $mailer = new SystemMailer([
         'mail_driver'     => 'smtp',
         'mail_host'       => 'smtp.example.com',
-        'mail_port'       => 465,
+        'mail_port'       => 587,
         'mail_username'   => 'user',
         'mail_password'   => 'secret',
         'mail_encryption' => 'tls',
@@ -111,14 +144,37 @@ test('buildMailer with smtp driver produces an smtps:// DSN', function (): void 
     $reflection = new ReflectionMethod($mailer, 'buildSmtpDsn');
     $dsn = $reflection->invoke($mailer, [
         'mail_host'       => 'smtp.example.com',
-        'mail_port'       => 465,
+        'mail_port'       => 587,
         'mail_username'   => 'user',
         'mail_password'   => 'secret',
         'mail_encryption' => 'tls',
     ]);
 
-    expect($dsn)->toStartWith('smtps://');
+    expect($dsn)->toStartWith('smtp://');
     expect($dsn)->not->toContain('?encryption=');
+    expect($dsn)->toContain(':587');
+});
+
+test('buildMailer with smtp driver produces an smtps DSN for implicit TLS', function (): void {
+    $mailer = new SystemMailer([
+        'mail_driver'     => 'smtp',
+        'mail_host'       => 'smtp.example.com',
+        'mail_port'       => 465,
+        'mail_username'   => 'user',
+        'mail_password'   => 'secret',
+        'mail_encryption' => 'ssl',
+    ]);
+
+    $reflection = new ReflectionMethod($mailer, 'buildSmtpDsn');
+    $dsn = $reflection->invoke($mailer, [
+        'mail_host'       => 'smtp.example.com',
+        'mail_port'       => 465,
+        'mail_username'   => 'user',
+        'mail_password'   => 'secret',
+        'mail_encryption' => 'ssl',
+    ]);
+
+    expect($dsn)->toStartWith('smtps://');
     expect($dsn)->toContain(':465');
 });
 
@@ -133,7 +189,7 @@ test('buildMailer with smtp driver uses default port 465 when not specified', fu
         'mail_host' => 'smtp.example.com',
     ]);
 
-    expect($dsn)->toBe('smtps://smtp.example.com:465');
+    expect($dsn)->toBe('smtp://smtp.example.com:587');
 });
 
 test('buildMailer with smtp driver and username only (no password) returns Mailer', function (): void {

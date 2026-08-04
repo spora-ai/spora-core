@@ -38,20 +38,18 @@ class AuthService
     private readonly AuthEmailFlow $emailFlow;
     private readonly AuthRoleAdmin $roleAdmin;
 
-    public function __construct(private readonly Auth $auth)
-    {
-        $this->emailFlow = new AuthEmailFlow($auth);
+    public function __construct(
+        private readonly Auth $auth,
+        string $appUrl = '',
+        string $appPrefix = '/spora',
+    ) {
+        $this->emailFlow = new AuthEmailFlow($auth, $appUrl, $appPrefix);
         $this->roleAdmin = new AuthRoleAdmin($auth);
     }
 
     public function setSystemMailer(MailerInterface $systemMailer): void
     {
         $this->emailFlow->setSystemMailer($systemMailer);
-    }
-
-    public function setAppUrl(string $url): void
-    {
-        $this->emailFlow->setAppUrl($url);
     }
 
     /**
