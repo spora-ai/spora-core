@@ -6,30 +6,23 @@ namespace Spora\Core;
 
 /**
  * Resolves the public base URL and path prefix from the container `config`
- * array. The framework's config system (config.php + SPOra_* env vars via
- * {@see ContainerDefinitions::configDefinition}) is the single
- * source of truth — this class does NOT read `$_ENV` or `getenv()` directly.
+ * array. Resolution order — first wins:
  *
- * Resolution order for {@see detect()} — first wins:
- *
- *   1. `config['app_url']` (set by `config.php`, `SPORA_APP_URL`, or the
+ *   1. `config['app_url']` (from `config.php`, `SPORA_APP_URL`, or the
  *      default seeder in {@see ContainerDefinitions})
- *   2. The web server's `HTTP_HOST` (request-supplied)
- *   3. The web server's `SERVER_NAME` (Apache `ServerName`, set at server
- *      bootstrap — trusted because the operator controls it)
+ *   2. Web-server `HTTP_HOST` (request-supplied)
+ *   3. Web-server `SERVER_NAME` (Apache `ServerName` — trusted; operator-controlled)
  *   4. `http://localhost` (CLI / worker / console / tests)
  *
- * For {@see detectWithPrefix()}, the same fallback applies for the host,
- * and `config['app_prefix']` (default `/spora`) supplies the path prefix
- * because the Spora admin UI ships under `public/spora/` and plugins ship
- * under `public/plugins/<name>/`. Operators hosting their own frontend at
- * the host root opt out with `app_prefix = ''` in `config.php` or by
- * exporting `SPORA_APP_PREFIX=""`.
+ * For the path prefix: `config['app_prefix']` defaults to `/spora` (the
+ * packaged admin UI lives at `public/spora/`; plugins at
+ * `public/plugins/<name>/`). Operators hosting their own frontend at the
+ * host root opt out by setting `app_prefix = ''` in `config.php` or
+ * `SPORA_APP_PREFIX=""`.
  *
  * Does NOT read `X-Forwarded-*` — those headers are spoofable and there is
- * no trusted-proxy allowlist at the application layer. Operators behind a
- * proxy that rewrites `Host` MUST set `app_url` (via `config.php` or
- * `SPORA_APP_URL`).
+ * no trusted-proxy allowlist. Operators behind a proxy that rewrites `Host`
+ * MUST set `app_url` explicitly.
  */
 final class RequestOrigin
 {
@@ -103,11 +96,6 @@ final class RequestOrigin
         return $url !== '' ? $url : self::LOCALHOST_ORIGIN;
     }
 
-    /**
-     * Normalize a path prefix value: leading/trailing slashes stripped,
-     * a bare `/` (or empty) collapses to `''`, anything else is wrapped as
-     * `/foo`.
-     */
     public static function normalizePrefix(string $prefix): string
     {
         $normalized = '/' . trim($prefix, '/');

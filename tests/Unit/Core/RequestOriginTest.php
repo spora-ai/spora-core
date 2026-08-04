@@ -14,9 +14,7 @@ afterEach(function (): void {
     unset($_SERVER['HTTP_HOST'], $_SERVER['SERVER_PORT'], $_SERVER['REQUEST_SCHEME'], $_SERVER['HTTPS']);
 });
 
-// ---------------------------------------------------------------------------
 // detect(array $config)
-// ---------------------------------------------------------------------------
 
 test('detect returns http://localhost from CLI when config is empty', function (): void {
     expect(RequestOrigin::detect())->toBe('http://localhost');
@@ -45,9 +43,7 @@ test('detect does NOT read SPOra_APP_URL from $_ENV (config system owns it)', fu
     putenv('SPORA_APP_URL');
 });
 
-// ---------------------------------------------------------------------------
 // detectFrom() — HTTP_HOST path
-// ---------------------------------------------------------------------------
 
 test('detectFrom returns http://localhost when host is empty', function (): void {
     expect(RequestOrigin::detectFrom([]))->toBe('http://localhost');
@@ -132,9 +128,7 @@ test('detectFrom does NOT read X-Forwarded-* (security: spoofable)', function ()
     ]))->toBe('http://spora.example.com');
 });
 
-// ---------------------------------------------------------------------------
 // detectWithPrefix(array $config)
-// ---------------------------------------------------------------------------
 
 test('detectWithPrefix returns [baseUrl, "/spora"] by default when config is empty', function (): void {
     // The Spora admin UI ships under /spora/ (public/spora/) and plugins ship
@@ -189,9 +183,7 @@ test('detectWithPrefix does NOT read SPOra_APP_URL or SPOra_APP_PREFIX from $_EN
     putenv('SPORA_APP_PREFIX');
 });
 
-// ---------------------------------------------------------------------------
 // normalizePrefix
-// ---------------------------------------------------------------------------
 
 test('normalizePrefix wraps bare names with leading slash', function (): void {
     expect(RequestOrigin::normalizePrefix('spora'))->toBe('/spora');

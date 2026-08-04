@@ -202,11 +202,6 @@ final class ContainerDefinitions
                     'mercure_jwt_key'     => null,
                     'app_url'             => RequestOrigin::detect(),
                     'app_prefix'          => RequestOrigin::detectWithPrefix()[1],
-                    // `app_url` / `app_prefix` are seeded by RequestOrigin when
-                    // neither `config.php` nor `SPORA_APP_URL` / `SPORA_APP_PREFIX`
-                    // (via `$apply()` above) set them. RequestOrigin does NOT
-                    // read $_ENV directly — the framework config system is the
-                    // single source of truth.
 
                     'plugin_install_enabled' => false,
 
@@ -437,10 +432,6 @@ final class ContainerDefinitions
                 $authService->setSystemMailer($c->get(SystemMailer::class));
                 return $authService;
             },
-            // Note: $config['app_url'] / $config['app_prefix'] are seeded by
-            // RequestOrigin in the default config block above when neither
-            // config.php nor the SPOra_* env vars set them. AuthService/AuthEmailFlow
-            // never read $_ENV directly — they consume the merged config only.
 
             CsrfTokenService::class => static function (ContainerInterface $c): CsrfTokenService {
                 return new CsrfTokenService(
