@@ -1006,11 +1006,16 @@ final class ContainerDefinitions
 
             SseController::class => static function (ContainerInterface $c): SseController {
                 $config = $c->get('config');
+                // mercure_publish_url wins when set (split-URL deployments);
+                // fall through to mercure_url so single-URL setups report active.
+                $hubUrl = $config['mercure_publish_url'] ?? $config['mercure_url'] ?? null;
+
                 return new SseController(
                     $c->get(AuthService::class),
-                    $config['mercure_publish_url'] ?? null,
+                    $hubUrl,
                     $config['mercure_jwt_key'] ?? null,
                     '/.well-known/mercure',
+                    $config['app_url'] ?? null,
                 );
             },
         ];

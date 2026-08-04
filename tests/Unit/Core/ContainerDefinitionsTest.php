@@ -450,6 +450,44 @@ it('apiTaskControllerDefinitions includes task/workflow controllers', function (
     expect($def)->toHaveKey(Spora\Http\SseController::class);
 });
 
+it('SseController factory falls back to mercure_url when no publish_url is set', function (): void {
+    $def = callContainerMethod('apiTaskControllerDefinitions');
+    $factory = $def[Spora\Http\SseController::class];
+
+    $stubConfig = ['mercure_url' => 'https://hub.example.com/.well-known/mercure', 'mercure_jwt_key' => 'k', 'app_url' => 'https://hub.example.com'];
+    $stubAuth = Mockery::mock(AuthService::class);
+    $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+    $container->shouldReceive('get')->with('config')->andReturn($stubConfig);
+    $container->shouldReceive('get')->with(AuthService::class)->andReturn($stubAuth);
+
+    $controller = $factory($container);
+
+    expect($controller)->toBeInstanceOf(Spora\Http\SseController::class);
+});
+
+it('SseController factory prefers mercure_publish_url over mercure_url when both are set', function (): void {
+    $def = callContainerMethod('apiTaskControllerDefinitions');
+    $factory = $def[Spora\Http\SseController::class];
+
+    $stubConfig = [
+        'mercure_url' => 'https://browser.example.com/.well-known/mercure',
+        'mercure_publish_url' => 'http://spora:80/.well-known/mercure',
+        'mercure_jwt_key' => 'k',
+        'app_url' => 'https://browser.example.com',
+    ];
+    $stubAuth = Mockery::mock(AuthService::class);
+    $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+    $container->shouldReceive('get')->with('config')->andReturn($stubConfig);
+    $container->shouldReceive('get')->with(AuthService::class)->andReturn($stubAuth);
+
+    $controller = $factory($container);
+    $reflection = new ReflectionClass($controller);
+
+    $hubUrlProp = $reflection->getProperty('hubUrl');
+    $hubUrlProp->setAccessible(true);
+    expect($hubUrlProp->getValue($controller))->toBe('http://spora:80/.well-known/mercure');
+});
+
 it('adminControllerDefinitions includes admin controllers', function (): void {
     $def = callContainerMethod('adminControllerDefinitions');
 

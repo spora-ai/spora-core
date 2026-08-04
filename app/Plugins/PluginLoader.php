@@ -490,6 +490,8 @@ final class PluginLoader
             try {
                 $plugin->register($builder);
             } catch (Throwable $e) {
+                // Pre-container: error_log() is the only channel reliably
+                // available (LoggerInterface isn't built until Kernel::buildContainer).
                 error_log(sprintf(
                     '[spora] plugin %s register() failed: %s',
                     $slug,

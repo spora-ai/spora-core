@@ -195,21 +195,20 @@ final class Kernel implements KernelInterface
             ];
         }
 
-        // Log to stderr — include file/line only in debug mode to avoid leaking paths in production
-        if ($isDebug) {
-            error_log(sprintf(
-                '[Spora] %s: %s in %s:%d',
-                get_class($e),
-                $e->getMessage(),
-                $e->getFile(),
-                $e->getLine(),
-            ));
+        // Fall back to error_log only when no PSR-3 logger is registered
+        // (pre-construction paths that need a channel before the container is built).
+        $logger = $this->container->has(LoggerInterface::class)
+            ? $this->container->get(LoggerInterface::class)
+            : null;
+
+        $message = $isDebug
+            ? sprintf('[Spora] %s: %s in %s:%d', get_class($e), $e->getMessage(), $e->getFile(), $e->getLine())
+            : sprintf('[Spora] %s: %s', get_class($e), $e->getMessage());
+
+        if ($logger !== null) {
+            $logger->error($message, ['exception' => $e]);
         } else {
-            error_log(sprintf(
-                '[Spora] %s: %s',
-                get_class($e),
-                $e->getMessage(),
-            ));
+            error_log($message);
         }
 
         return new JsonResponse($body, Response::HTTP_INTERNAL_SERVER_ERROR);
@@ -317,6 +316,12 @@ final class Kernel implements KernelInterface
         $logger = $this->container->get(LoggerInterface::class);
         set_error_handler(static function (int $errno, string $errstr, string $errfile, int $errline) use ($logger): bool {
             if (!(error_reporting() & $errno)) {
+                return true;
+            }
+
+            // Silence delight-im/{auth,db} E_DEPRECATED — implicit-nullable
+            // params kept for PHP 7 compat. Mirror: tests/Pest.php.
+            if ($errno === E_DEPRECATED && str_contains($errfile, DIRECTORY_SEPARATOR . 'delight-im' . DIRECTORY_SEPARATOR)) {
                 return true;
             }
 

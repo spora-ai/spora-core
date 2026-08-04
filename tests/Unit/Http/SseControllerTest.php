@@ -9,6 +9,7 @@ use ReflectionMethod;
 use RuntimeException;
 use Spora\Http\Exceptions\MercureConfigurationMissingException;
 use Spora\Http\SseController;
+use Symfony\Component\HttpFoundation\Cookie;
 
 describe('SseController', function (): void {
     it('auth returns 404 when mercure is not configured', function (): void {
@@ -18,6 +19,19 @@ describe('SseController', function (): void {
 
         $controller = new SseController($authService, null, null);
         $response = $controller->auth();
+
+        expect($response->getStatusCode())->toBe(404);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('NOT_CONFIGURED');
+    });
+
+    it('authorize returns 404 when mercure is not configured', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
+        simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
+
+        $controller = new SseController($authService, null, null);
+        $response = $controller->authorize();
 
         expect($response->getStatusCode())->toBe(404);
         $body = json_decode($response->getContent(), true);
@@ -40,6 +54,97 @@ describe('SseController', function (): void {
         // Verify the token is a valid JWT structure (header.payload.signature)
         $parts = explode('.', $body['token']);
         expect(count($parts))->toBe(3);
+    });
+
+    it('authorize sets the subscriber cookie scoped to the hub path', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
+        simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
+
+        $controller = new SseController(
+            $authService,
+            SseControllerTestLiterals::SSE_MERCURE_URL,
+            'test-secret-key-for-jwt-signing-32ch',
+            '/.well-known/mercure',
+            'https://example.com',
+        );
+        $response = $controller->authorize();
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['hubUrl'])->toBe('/.well-known/mercure');
+        expect($body['expires'])->toBeGreaterThan(time());
+
+        $cookies = $response->headers->getCookies();
+        expect($cookies)->not->toBeEmpty();
+
+        $secure = null;
+        foreach ($cookies as $cookie) {
+            if ($cookie->getName() === '__Secure-mercure_access_token') {
+                $secure = $cookie;
+                break;
+            }
+        }
+        expect($secure)->not->toBeNull();
+        expect($secure->isHttpOnly())->toBeTrue();
+        expect($secure->isSecure())->toBeTrue();
+        expect($secure->getPath())->toBe('/.well-known/mercure');
+        expect($secure->getSameSite())->toBe(Cookie::SAMESITE_LAX);
+
+        $parts = explode('.', $secure->getValue());
+        expect(count($parts))->toBe(3);
+        $payload = json_decode(base64_decode(strtr($parts[1], '-_', '+/')), true);
+        expect($payload['mercure']['subscribe'])->toContain("user/{$userId}/tasks");
+    });
+
+    it('authorize uses the unprefixed cookie name when app_url is http', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
+        simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
+
+        $controller = new SseController(
+            $authService,
+            SseControllerTestLiterals::SSE_MERCURE_URL,
+            'test-secret-key-for-jwt-signing-32ch',
+            '/.well-known/mercure',
+            'http://localhost:8081',
+        );
+        $response = $controller->authorize();
+
+        $cookie = null;
+        foreach ($response->headers->getCookies() as $candidate) {
+            if (str_starts_with($candidate->getName(), '__Secure-')) {
+                continue;
+            }
+            $cookie = $candidate;
+            break;
+        }
+        expect($cookie)->not->toBeNull();
+        expect($cookie->getName())->toBe('mercure_access_token');
+        expect($cookie->isSecure())->toBeFalse();
+        expect($cookie->isHttpOnly())->toBeTrue();
+        expect($cookie->getPath())->toBe('/.well-known/mercure');
+        expect($cookie->getSameSite())->toBe(Cookie::SAMESITE_LAX);
+    });
+
+    it('authorize falls back to mercure_url when only mercure_url is set (no publish_url)', function (): void {
+        // The factory wires the same fallback; here we test the path that
+        // matters: with hubUrl passed in (mimicking the DI factory using
+        // mercure_url as a fallback), authorize returns 200 instead of 404.
+        $authService = bootAuthLayer();
+        $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
+        simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
+
+        $controller = new SseController(
+            $authService,
+            'https://hub.example.com/.well-known/mercure', // public URL only
+            'test-secret-key-for-jwt-signing-32ch',
+            '/.well-known/mercure',
+            'https://hub.example.com',
+        );
+        $response = $controller->authorize();
+
+        expect($response->getStatusCode())->toBe(200);
     });
 
     it('auth token has correct mercure subscription topics', function (): void {

@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.12.1-1-g9b2866b"
+        "version": "0.14.0-3-g3e6d805"
     },
     "servers": [
         {
@@ -2829,6 +2829,25 @@
                     "Sse"
                 ],
                 "summary": "Auth Sse",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/sse/authorize": {
+            "get": {
+                "tags": [
+                    "Sse"
+                ],
+                "summary": "Authorize Sse",
                 "parameters": [],
                 "responses": {
                     "default": {
