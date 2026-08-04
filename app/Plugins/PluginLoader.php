@@ -490,9 +490,8 @@ final class PluginLoader
             try {
                 $plugin->register($builder);
             } catch (Throwable $e) {
-                // registerPlugins runs during Kernel construction, before the
-                // container (and its LoggerInterface) is built; error_log()
-                // is the only channel reliably available here.
+                // Pre-container: error_log() is the only channel reliably
+                // available (LoggerInterface isn't built until Kernel::buildContainer).
                 error_log(sprintf(
                     '[spora] plugin %s register() failed: %s',
                     $slug,

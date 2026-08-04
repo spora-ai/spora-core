@@ -195,10 +195,8 @@ final class Kernel implements KernelInterface
             ];
         }
 
-        // Route through the framework logger so the configured stream handler
-        // (php://stdout in Docker, storage/spora.log locally) captures the
-        // same context as every other framework line; fall back to error_log
-        // only when no logger is registered.
+        // Fall back to error_log only when no PSR-3 logger is registered
+        // (pre-construction paths that need a channel before the container is built).
         $logger = $this->container->has(LoggerInterface::class)
             ? $this->container->get(LoggerInterface::class)
             : null;
@@ -321,9 +319,8 @@ final class Kernel implements KernelInterface
                 return true;
             }
 
-            // Silence vendor E_DEPRECATED noise from delight-im/{auth,db}
-            // (implicit-nullable parameters, kept for PHP 7 compat); mirrors
-            // tests/Pest.php.
+            // Silence delight-im/{auth,db} E_DEPRECATED — implicit-nullable
+            // params kept for PHP 7 compat. Mirror: tests/Pest.php.
             if ($errno === E_DEPRECATED && str_contains($errfile, DIRECTORY_SEPARATOR . 'delight-im' . DIRECTORY_SEPARATOR)) {
                 return true;
             }

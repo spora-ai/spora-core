@@ -451,7 +451,6 @@ it('apiTaskControllerDefinitions includes task/workflow controllers', function (
 });
 
 it('SseController factory falls back to mercure_url when no publish_url is set', function (): void {
-    // The "single-URL" deployment that the operator runs in production.
     $def = callContainerMethod('apiTaskControllerDefinitions');
     $factory = $def[Spora\Http\SseController::class];
 
@@ -484,8 +483,6 @@ it('SseController factory prefers mercure_publish_url over mercure_url when both
     $controller = $factory($container);
     $reflection = new ReflectionClass($controller);
 
-    // Confirm the chain landed on mercure_publish_url (in-cluster) rather
-    // than mercure_url (browser-facing).
     $hubUrlProp = $reflection->getProperty('hubUrl');
     $hubUrlProp->setAccessible(true);
     expect($hubUrlProp->getValue($controller))->toBe('http://spora:80/.well-known/mercure');
