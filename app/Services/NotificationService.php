@@ -199,9 +199,10 @@ class NotificationService implements NotificationServiceInterface
     private function buildRunUrl(int|string $taskId): string
     {
         $baseUrl = rtrim((string) ($this->config['app_url'] ?? ''), '/');
-        $prefix  = '/' . trim((string) ($this->config['app_prefix'] ?? ''), '/');
+        $prefix  = \Spora\Core\RequestOrigin::normalizePrefix((string) ($this->config['app_prefix'] ?? ''));
+        $sep     = $prefix === '' ? '' : '/';
 
-        return $baseUrl . $prefix . '/tasks/' . $taskId;
+        return $baseUrl . $prefix . $sep . 'tasks/' . $taskId;
     }
 
     /**
