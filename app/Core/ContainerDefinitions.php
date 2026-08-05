@@ -129,6 +129,8 @@ use Spora\Services\PromptTemplateService;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunService;
 use Spora\Services\ScheduledRunServiceInterface;
+use Spora\Services\SubAgentService;
+use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\SystemMailer;
 use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
@@ -1156,6 +1158,7 @@ final class ContainerDefinitions
             HandoverTool::class => static function (ContainerInterface $c): HandoverTool {
                 return new HandoverTool(
                     $c->get(HandoverServiceInterface::class),
+                    $c->get(SubAgentServiceInterface::class),
                     $c->get(ToolConfigService::class),
                 );
             },
@@ -1182,6 +1185,20 @@ final class ContainerDefinitions
                 // → HandoverTool → HandoverService → Orchestrator. Same pattern as SeedCommand.
                 return new HandoverService(
                     static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
+                );
+            },
+
+            SubAgentServiceInterface::class => static function (ContainerInterface $c): SubAgentServiceInterface {
+                // Same circular-dependency avoidance as HandoverService: the
+                // Orchestrator takes the tool instance list (which includes
+                // HandoverTool), so we resolve it lazily when spawn() is called.
+                $config = $c->get('config');
+                $workerMode = ($config['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker;
+
+                return new SubAgentService(
+                    static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
+                    $c->has(MercurePublisherInterface::class) ? $c->get(MercurePublisherInterface::class) : null,
+                    $workerMode,
                 );
             },
         ];

@@ -7,6 +7,7 @@ namespace Tests\Unit\Tools;
 use Mockery;
 use ReflectionClass;
 use Spora\Services\HandoverServiceInterface;
+use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\AbstractTool;
 use Spora\Tools\Attributes\Tool;
@@ -52,6 +53,7 @@ function instantiateAllTools(): array
         UserInfoTool::class         => new UserInfoTool(),
         HandoverTool::class         => new HandoverTool(
             Mockery::mock(HandoverServiceInterface::class),
+            Mockery::mock(SubAgentServiceInterface::class),
             $configService,
         ),
     ];

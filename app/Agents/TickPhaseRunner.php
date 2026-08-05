@@ -20,6 +20,7 @@ use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\ScrubDataUrls;
+use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
 use Throwable;
@@ -44,6 +45,7 @@ final class TickPhaseRunner
         private readonly ?NotificationService $notificationService = null,
         private readonly ?MercurePublisherInterface $mercure = null,
         private readonly ?ToolCallSerializer $toolCallSerializer = null,
+        private readonly ?SubAgentServiceInterface $subAgent = null,
     ) {}
     public function runTick(int $taskId): void
     {
@@ -327,6 +329,11 @@ final class TickPhaseRunner
         if (!isset($task->data['run_id'])) {
             $this->notificationService?->notifyTaskCompleted($task);
         }
+
+        // If this task was a child of a parent waiting for sub-agents,
+        // check whether the parent is ready to resume now that every
+        // sibling has also terminated.
+        $this->maybeResumeParentForChild($task->id);
     }
 
     /**
@@ -366,6 +373,11 @@ final class TickPhaseRunner
                 if ($failedTask !== null) {
                     $this->notifyFailedAndScheduleRetry($failedTask, $errorCode);
                 }
+
+                // A child task that failed still counts as "terminal" for the
+                // parent's wait — the parent will resume with the failure
+                // message as the tool result.
+                $this->maybeResumeParentForChild($taskId);
             }
         } catch (Throwable) {
             // Ignore failure — DB itself may be unavailable.
@@ -476,5 +488,26 @@ final class TickPhaseRunner
         ];
 
         $this->mercure->publish($task->id, $task->user_id, $taskData);
+    }
+
+    /**
+     * Wrap the SubAgentService hook so existing call sites stay one-line.
+     * Skips silently when DI wasn't wired (e.g. lightweight test harnesses
+     * that don't construct SubAgentService).
+     */
+    private function maybeResumeParentForChild(int $childTaskId): void
+    {
+        if ($this->subAgent === null) {
+            return;
+        }
+
+        try {
+            $this->subAgent->maybeResumeParent($childTaskId);
+        } catch (Throwable $e) {
+            $this->logger?->warning('SubAgentService::maybeResumeParent failed', [
+                'task_id'   => $childTaskId,
+                'exception' => $e->getMessage(),
+            ]);
+        }
     }
 }

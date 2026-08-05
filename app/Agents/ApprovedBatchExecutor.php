@@ -333,6 +333,14 @@ final class ApprovedBatchExecutor
 
     private function completeResume(int $taskId): void
     {
+        // If SubAgentService.spawn() flipped the parent to AWAITING_SUB_AGENTS
+        // mid-batch (any approved sub_agent call), leave that status alone —
+        // the resume happens when every child terminates, not now.
+        $current = Task::where('id', $taskId)->value('status');
+        if ($current === 'AWAITING_SUB_AGENTS') {
+            return;
+        }
+
         $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
         Task::where('id', $taskId)->update(['status' => $taskStatus]);
     }

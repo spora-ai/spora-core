@@ -24,6 +24,7 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigService;
@@ -65,6 +66,7 @@ final class Orchestrator implements OrchestratorInterface
     public readonly ?LLMConfigService $llmConfigService;
     public readonly ?PluginLoader $pluginLoader;
     public readonly ?AgentServiceInterface $agentService;
+    public readonly ?SubAgentServiceInterface $subAgent;
 
     public function __construct(
         DriverFactory $driverFactory,
@@ -82,6 +84,7 @@ final class Orchestrator implements OrchestratorInterface
         $this->llmConfigService      = $config->llmConfigService;
         $this->pluginLoader          = $config->pluginLoader;
         $this->agentService          = $config->agentService;
+        $this->subAgent              = $config->subAgent;
         $this->driverFactory         = $driverFactory;
         $this->errorClassifier       = new ErrorClassifier();
         $this->llmConfigResolver     = new LlmConfigResolver($config->llmConfigService);
@@ -102,6 +105,7 @@ final class Orchestrator implements OrchestratorInterface
             $config->notificationService,
             $config->mercure,
             $config->toolCallSerializer,
+            $config->subAgent,
         );
         $this->toolCallExecutor      = new ToolCallExecutor($this);
         $this->agentDecisionProcessor = new AgentDecisionProcessor($this);
