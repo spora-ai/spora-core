@@ -363,6 +363,128 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         expect($doneCount)->toBe(1);
     });
 
+    it('dispatches the agent bound to the actually-due PENDING entry, ignoring any stale CLAIMED row', function (): void {
+        // Regression: previously the claim did UPDATE-then-SELECT-by-status=CLAIMED.
+        // If a prior worker tick crashed between claim and finalization it would
+        // leave a stale CLAIMED row, and the next tick's re-SELECT would happily
+        // return that older row — dispatching its agent instead of the agent
+        // bound to the row that was just claimed.
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
+
+        $authService = bootAuthLayer();
+        $userId = $authService->register('claim-race@example.com', WORKER_TEST_PASSWORD, 'ClaimRace');
+
+        $agentA = Agent::create([
+            'user_id'   => $userId,
+            'name'      => 'WorkerTestAgentA',
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
+        $agentB = Agent::create([
+            'user_id'   => $userId,
+            'name'      => 'WorkerTestAgentB',
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
+
+        $runA = ScheduledRun::create([
+            'agent_id'        => $agentA->id,
+            'user_id'         => $userId,
+            'raw_prompt'      => 'Stale run',
+            'cron_expression' => DAILY_9AM_CRON,
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+            'next_run_at'     => WORKER_TEST_PAST_DUE_AT,
+        ]);
+
+        $runB = ScheduledRun::create([
+            'agent_id'        => $agentB->id,
+            'user_id'         => $userId,
+            'raw_prompt'      => 'Live run',
+            'cron_expression' => DAILY_9AM_CRON,
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+            'next_run_at'     => WORKER_TEST_PAST_DUE_AT,
+        ]);
+
+        // Stale CLAIMED row for agent A (simulating a crashed prior worker tick).
+        // The OLD buggy claim did `ORDER BY due_at ASC` over CLAIMED rows, so we
+        // give this row the *older* due_at — that is exactly what would make the
+        // buggy code deterministically dispatch agent A here.
+        $staleDueAt = WORKER_TEST_PAST_DUE_AT;
+        $liveDueAt = date(DATETIME_FORMAT, strtotime(WORKER_TEST_PAST_DUE_AT) + 300);
+
+        Capsule::table('scheduled_runs_next')->insert([
+            'scheduled_run_id' => $runA->id,
+            'due_at'           => $staleDueAt,
+            'status'           => ScheduledRunNext::STATUS_CLAIMED,
+            'claimed_at'       => '2025-01-01 09:00:00',
+            'created_at'       => '2025-01-01 09:00:00',
+            'updated_at'       => '2025-01-01 09:00:00',
+        ]);
+
+        Capsule::table('scheduled_runs_next')->insert([
+            'scheduled_run_id' => $runB->id,
+            'due_at'           => $liveDueAt,
+            'status'           => ScheduledRunNext::STATUS_PENDING,
+            'created_at'       => date(DATETIME_FORMAT),
+            'updated_at'       => date(DATETIME_FORMAT),
+        ]);
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        // Orchestrator must be called exactly once, and with agent B's id — not A's.
+        $orchestrator->shouldReceive('start')
+            ->once()
+            ->withArgs(fn(int $agentId, string $prompt, int $maxSteps, $context = null, $scheduledRunId = null): bool => $agentId === $agentB->id)
+            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
+                return Task::create([
+                    'agent_id'    => $agentId,
+                    'user_id'     => 1,
+                    'status'      => 'RUNNING',
+                    'user_prompt' => $prompt,
+                    'max_steps'   => $maxSteps,
+                    'step_count'  => 0,
+                ]);
+            });
+
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+
+        $notificationService = Mockery::mock(NotificationService::class);
+        $notificationService->allows('notifyScheduledRunCompleted')->andReturnNull();
+        $notificationService->allows('sendEmailForScheduledRun')->andReturnNull();
+
+        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+
+        $command = new WorkerRunCommand(
+            $db,
+            $orchestrator,
+            new NullLogger(),
+            $container,
+            $mercure,
+            $notificationService,
+            new Paths(BASE_PATH),
+        );
+
+        $processed = runProcessScheduledRuns($command);
+        expect($processed)->toBe(1);
+
+        $liveEntry = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $runB->id)
+            ->first();
+        expect($liveEntry->status)->toBe(ScheduledRunNext::STATUS_DONE);
+
+        // The stale row stays CLAIMED — the claim is now keyed by the row we
+        // actually marked, so a leftover from a previous tick cannot be picked up.
+        $staleEntry = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $runA->id)
+            ->first();
+        expect($staleEntry->status)->toBe(ScheduledRunNext::STATUS_CLAIMED);
+    });
+
     it('worker creates new PENDING entry after processing a past-due recurring run', function (): void {
         [$command] = makeWorkerRunCommand();
         [$userId, $agentId] = registerAgentInWorkerDb();
@@ -1005,5 +1127,27 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
         // Retry moved from QUEUED to RUNNING
         $retry->refresh();
         expect($retry->status)->toBe('RUNNING');
+    });
+});
+
+describe('Schedule SQL is dialect-portable', function (): void {
+    it('does not embed raw "INSERT OR IGNORE" SQL in the schedule source files', function (): void {
+        // The schedule pipeline used to emit a raw "INSERT OR IGNORE INTO
+        // scheduled_runs_next ..." string. SQLite accepts that, but MariaDB /
+        // MySQL reject it (1064 syntax error near `OR IGNORE INTO ...`).
+        // The fix routes both call sites through Capsule::insertOrIgnore(),
+        // which is dialect-aware. This test guards against the raw literal
+        // creeping back in.
+        $corePath = dirname(__DIR__, 3);
+        $files = [
+            $corePath . '/app/Console/Worker/ScheduledRunProcessor.php',
+            $corePath . '/app/Services/ScheduledRunService.php',
+        ];
+
+        foreach ($files as $file) {
+            $contents = file_get_contents($file);
+            expect($contents)
+                ->not->toContain('INSERT OR IGNORE', "Raw SQLite-only 'INSERT OR IGNORE' literal found in {$file}. Use Capsule::table()->insertOrIgnore() instead so the dialect is handled by the query builder.");
+        }
     });
 });

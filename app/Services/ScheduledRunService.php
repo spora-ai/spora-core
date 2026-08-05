@@ -289,21 +289,24 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 ->setTimezone(new DateTimeZone('UTC'))
                 ->format(self::DB_TIMESTAMP_FORMAT);
 
-            // Remove any stale PENDING/CLAIMED entry for the same due_at so the INSERT
-            // below does not conflict on the unique (scheduled_run_id, due_at) index.
+            // Drop any stale PENDING/CLAIMED entry for the same due_at so the
+            // unique (scheduled_run_id, due_at) index cannot collide. The
+            // ->insertOrIgnore() below is the dialect-portable safety net
+            // (INSERT OR IGNORE on SQLite, INSERT IGNORE on MariaDB/MySQL) for
+            // any concurrent inserter the DELETE missed.
             Capsule::table('scheduled_runs_next')
                 ->where('scheduled_run_id', $run->id)
                 ->where('due_at', $nextDueAt)
                 ->whereIn('status', [ScheduledRunNext::STATUS_PENDING, ScheduledRunNext::STATUS_CLAIMED])
                 ->delete();
 
-            // Use INSERT OR IGNORE as a safety net: if the DELETE above didn't catch a
-            // stale entry (e.g. race with another worker), the unique constraint
-            // violation is silently ignored rather than crashing.
-            Capsule::connection()->statement(
-                "INSERT OR IGNORE INTO scheduled_runs_next (scheduled_run_id, due_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                [$run->id, $nextDueAt, ScheduledRunNext::STATUS_PENDING, $lastRunAt, $lastRunAt],
-            );
+            Capsule::table('scheduled_runs_next')->insertOrIgnore([
+                'scheduled_run_id' => $run->id,
+                'due_at'           => $nextDueAt,
+                'status'           => ScheduledRunNext::STATUS_PENDING,
+                'created_at'       => $lastRunAt,
+                'updated_at'       => $lastRunAt,
+            ]);
 
             // Update cached next_run_at on scheduled_runs
             Capsule::table('scheduled_runs')
