@@ -135,6 +135,7 @@ use Spora\Skills\SkillScanner;
 use Spora\Tools\AgentTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\HandoverTool;
+use Spora\Tools\MediaTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\SkillTool;
 use Spora\Tools\TimeTool;
@@ -738,6 +739,7 @@ final class ContainerDefinitions
                 HandoverTool::class,
                 AgentTool::class,
                 SkillTool::class,
+                MediaTool::class,
             ],
 
             LLMConfigService::class => static function (ContainerInterface $c): LLMConfigService {
@@ -1137,6 +1139,17 @@ final class ContainerDefinitions
                 return new SkillTool(
                     $c->get(SkillScanner::class),
                     $c->get(ToolConfigService::class),
+                );
+            },
+
+            MediaTool::class => static function (ContainerInterface $c): MediaTool {
+                return new MediaTool(
+                    $c->get(MediaArchiveService::class),
+                    $c->get(AuthService::class),
+                    $c->get(ToolConfigService::class),
+                    // Request is optional — null is the existing fallback for
+                    // CLI / worker contexts. publicUrl() falls back to
+                    // $_SERVER['HTTP_HOST'] when no request is bound.
                 );
             },
 
