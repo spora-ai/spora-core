@@ -211,13 +211,12 @@ final class MediaTool extends AbstractTool
         }
 
         $asset = $this->archive->find($assetId);
-        if ($asset === null || !$this->assetInScope($asset, $agentId, $userId)) {
-            return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
-        }
-
         $host = (string) ($this->config['app_url'] ?? '');
-        if ($host === '') {
-            return ToolResult::fail('Public origin is not configured.');
+        $inScope = $asset !== null && $this->assetInScope($asset, $agentId, $userId);
+        if (!$inScope || $host === '') {
+            return ToolResult::fail(!$inScope
+                ? self::ERR_ASSET_NOT_FOUND
+                : 'Public origin is not configured.');
         }
 
         if ($asset->public_access_token === null || $asset->public_access_token === '') {
