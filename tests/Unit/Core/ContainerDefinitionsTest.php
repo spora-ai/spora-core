@@ -508,6 +508,28 @@ it('toolDefinitions includes all tools and tool_instances', function (): void {
     expect($def)->toHaveKey(Spora\Tools\UserInfoTool::class);
 });
 
+it('MediaTool is wired into the container (tool_classes + factory + resolvable instance)', function (): void {
+    // Regression for the MediaTool silo bug: the class existed on disk and
+    // was tested in isolation, but the DI container had no factory for it
+    // and it was absent from the tool_classes array, so the orchestrator
+    // never surfaced it. This test asserts all three wires are in place.
+    $def = callContainerMethod('toolDefinitions');
+
+    expect($def)->toHaveKey(Spora\Tools\MediaTool::class);
+
+    $toolClasses = callContainerMethod('llmDefinitions')['tool_classes'];
+    expect($toolClasses)->toContain(Spora\Tools\MediaTool::class);
+
+    $kernel = new Kernel();
+    $c = $kernel->getContainer();
+    $tool = $c->get(Spora\Tools\MediaTool::class);
+
+    expect($tool)->toBeInstanceOf(Spora\Tools\MediaTool::class);
+
+    unset($kernel);
+    gc_collect_cycles();
+});
+
 it('orchestratorDefinitions includes orchestrator, plugins, and facades', function (): void {
     $def = callContainerMethod('orchestratorDefinitions');
 
