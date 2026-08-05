@@ -94,32 +94,58 @@ final class SubAgentService implements SubAgentServiceInterface
 
     public function maybeResumeParent(int $childTaskId): void
     {
-        $child = Task::find($childTaskId);
-        if ($child === null || $child->parent_task_id === null) {
+        $ready = $this->loadReadyParent($childTaskId);
+        if ($ready === null) {
             return;
         }
+
+        $this->resumeParent($ready['parent'], $ready['siblingIds']);
+    }
+
+    /**
+     * Walk the parent + sibling state for a child task and return the
+     * resolved parent + sibling ids when every precondition holds.
+     *
+     * Returns null when any precondition fails:
+     *   - child is missing or has no parent
+     *   - child is not in a terminal state (COMPLETED / FAILED)
+     *   - parent is missing or no longer in AWAITING_SUB_AGENTS
+     *   - the parent has no recorded spawned siblings
+     *   - any sibling is missing or still running
+     *
+     * The shape is a tagged array (intentionally not a class — the
+     * caller only needs two fields and a class would be premature).
+     *
+     * @return array{parent: Task, siblingIds: list<int>}|null
+     */
+    private function loadReadyParent(int $childTaskId): ?array
+    {
+        $child = Task::find($childTaskId);
+        if ($child === null || $child->parent_task_id === null) {
+            return null;
+        }
         if (!in_array($child->status, ['COMPLETED', 'FAILED'], true)) {
-            return;
+            return null;
         }
 
         $parent = Task::find($child->parent_task_id);
         if ($parent === null || $parent->status !== 'AWAITING_SUB_AGENTS') {
-            return;
+            return null;
         }
 
         $siblingIds = $this->extractSpawnedChildIds($parent);
         if ($siblingIds === []) {
-            return;
+            return null;
         }
 
         foreach ($siblingIds as $siblingId) {
             $sibling = Task::find($siblingId);
             if ($sibling === null || !in_array($sibling->status, ['COMPLETED', 'FAILED'], true)) {
-                return;
+                return null;
             }
         }
 
-        $this->resumeParent($parent, $siblingIds);
+        return ['parent' => $parent, 'siblingIds' => $siblingIds];
     }
 
     private function recordSpawnedChild(Task $parent, int $childId): void
