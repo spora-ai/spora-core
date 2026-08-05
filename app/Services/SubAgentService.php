@@ -121,31 +121,41 @@ final class SubAgentService implements SubAgentServiceInterface
     private function loadReadyParent(int $childTaskId): ?array
     {
         $child = Task::find($childTaskId);
-        if ($child === null || $child->parent_task_id === null) {
-            return null;
-        }
-        if (!in_array($child->status, ['COMPLETED', 'FAILED'], true)) {
+        if (
+            $child === null
+            || $child->parent_task_id === null
+            || !in_array($child->status, ['COMPLETED', 'FAILED'], true)
+        ) {
             return null;
         }
 
         $parent = Task::find($child->parent_task_id);
-        if ($parent === null || $parent->status !== 'AWAITING_SUB_AGENTS') {
-            return null;
-        }
-
         $siblingIds = $this->extractSpawnedChildIds($parent);
-        if ($siblingIds === []) {
+        if (
+            $parent === null
+            || $parent->status !== 'AWAITING_SUB_AGENTS'
+            || $siblingIds === []
+            || !$this->allSiblingsTerminal($siblingIds)
+        ) {
             return null;
-        }
-
-        foreach ($siblingIds as $siblingId) {
-            $sibling = Task::find($siblingId);
-            if ($sibling === null || !in_array($sibling->status, ['COMPLETED', 'FAILED'], true)) {
-                return null;
-            }
         }
 
         return ['parent' => $parent, 'siblingIds' => $siblingIds];
+    }
+
+    /**
+     * @param list<int> $siblingIds
+     */
+    private function allSiblingsTerminal(array $siblingIds): bool
+    {
+        foreach ($siblingIds as $siblingId) {
+            $sibling = Task::find($siblingId);
+            if ($sibling === null || !in_array($sibling->status, ['COMPLETED', 'FAILED'], true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function recordSpawnedChild(Task $parent, int $childId): void
