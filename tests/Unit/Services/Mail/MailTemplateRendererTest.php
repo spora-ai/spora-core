@@ -4,19 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services\Mail;
 
-use League\CommonMark\Environment\Environment;
-use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
-use League\CommonMark\Extension\GithubFlavoredMarkdownExtension;
-use League\CommonMark\MarkdownConverter;
 use Spora\Services\Mail\MailTemplateRenderer;
 
 function mailRenderer(): MailTemplateRenderer
 {
-    $env = new Environment();
-    $env->addExtension(new CommonMarkCoreExtension());
-    $env->addExtension(new GithubFlavoredMarkdownExtension());
-
-    return new MailTemplateRenderer(new MarkdownConverter($env));
+    return MailTemplateRenderer::createDefault();
 }
 
 test('renders markdown to html when no html shell is provided', function () {
@@ -109,4 +101,44 @@ test('treats empty markdown body the same as null when shell has no token', func
     $rendered = mailRenderer()->render([], 'subject', '', '<p>just shell</p>');
 
     expect($rendered->bodyHtml)->toBe('<p>just shell</p>');
+});
+
+test('substitutes the {markdown_html} token with empty string when body is null', function () {
+    $rendered = mailRenderer()->render([], 'subject', null, '<header>{markdown_html}</header>');
+
+    expect($rendered->bodyHtml)->toBe('<header></header>');
+    expect($rendered->bodyHtml)->not->toContain('{markdown_html}');
+});
+
+test('escapes raw html in markdown input so payloads render as visible text', function () {
+    $body = "<script>alert(1)</script>\n\nHello **world**";
+    $rendered = mailRenderer()->render([], 'subject', $body, null);
+
+    expect($rendered->bodyHtml)->not->toContain('<script');
+    expect($rendered->bodyHtml)->toContain('&lt;script&gt;');
+    expect($rendered->bodyHtml)->toContain('<strong>world</strong>');
+});
+
+test('blocks javascript: and vbscript: link schemes in markdown input', function () {
+    $rendered = mailRenderer()->render(
+        [],
+        'subject',
+        '[click](javascript:alert(1)) and [vbs](vbscript:alert(2))',
+        null,
+    );
+
+    expect($rendered->bodyHtml)->not->toContain('javascript:');
+    expect($rendered->bodyHtml)->not->toContain('vbscript:');
+});
+
+test('html-decodes href attribute values in the plain-text Links block', function () {
+    $rendered = mailRenderer()->render(
+        [],
+        'subject',
+        '[click](https://example.test/?a=1&b=2)',
+        null,
+    );
+
+    expect($rendered->bodyText)->toContain('https://example.test/?a=1&b=2');
+    expect($rendered->bodyText)->not->toContain('&amp;');
 });

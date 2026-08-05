@@ -45,7 +45,7 @@ final class MailTemplatesSyncCommand extends Command
                 'check',
                 null,
                 InputOption::VALUE_NONE,
-                'Dry-run: print a diff for every template that would change and exit non-zero on any drift.',
+                'Dry-run: print current vs. desired value for every changed field and exit non-zero on any drift.',
             )
             ->addOption(
                 'force',
@@ -155,7 +155,10 @@ final class MailTemplatesSyncCommand extends Command
         if ($check) {
             $io->writeln("  <comment>[drift]</comment>  {$name}");
             foreach ($diff as $field => $want) {
-                $io->writeln(sprintf('             %s: %s', $field, $this->abbreviate($want)));
+                $have  = $this->abbreviate($row->{$field});
+                $wantA = $this->abbreviate($want);
+                $io->writeln(sprintf('             %s: %s', $field, $wantA));
+                $io->writeln(sprintf('             %s: %s → %s', str_pad('', strlen($field)), $have, $wantA));
             }
             return 'drift';
         }
