@@ -56,10 +56,12 @@ final class MediaAssetSerializer
 
     /**
      * @param string|null $baseUrl Absolute base URL (with scheme + host) the
-     *        caller wants the share link to use. Controllers pass
-     *        `Request::getSchemeAndHttpHost()` so the link points back at
-     *        the requester. When null/empty, falls back to deriving one
-     *        from `$_SERVER['HTTP_HOST']` + `HTTPS`.
+     *        caller wants the share link to use. Controllers pass the
+     *        resolved `config.app_url` (configured via `config.php` /
+     *        `SPORA_APP_URL`, or detected by `RequestOrigin::detect()` at
+     *        boot). When null/empty, the public URL is omitted from the
+     *        payload — share URLs are off when the operator has not
+     *        configured a public origin.
      */
     private function buildPublicUrl(MediaAsset $asset, ?string $baseUrl): ?string
     {
@@ -69,28 +71,9 @@ final class MediaAssetSerializer
         if ($asset->public_access_token === null || $asset->public_access_token === '') {
             return null;
         }
-        $base = $this->normaliseBaseUrl($baseUrl);
-        if ($base === null) {
+        if ($baseUrl === null || $baseUrl === '') {
             return null;
         }
-        return $base . '/api/v1/public/media/' . $asset->id . '?token=' . $asset->public_access_token;
-    }
-
-    /**
-     * Returns an absolute base URL with scheme, or null if neither the
-     * caller-supplied value nor the `HTTP_HOST` fallback yield one.
-     * Split out so the null/empty and fallback paths stay readable.
-     */
-    private function normaliseBaseUrl(?string $baseUrl): ?string
-    {
-        if ($baseUrl !== null && $baseUrl !== '') {
-            return rtrim($baseUrl, '/');
-        }
-        $serverHost = (string) ($_SERVER['HTTP_HOST'] ?? '');
-        if ($serverHost === '') {
-            return null;
-        }
-        $scheme = !empty($_SERVER['HTTPS']) ? 'https' : 'http';
-        return $scheme . '://' . rtrim($serverHost, '/');
+        return rtrim($baseUrl, '/') . '/api/v1/public/media/' . $asset->id . '?token=' . $asset->public_access_token;
     }
 }

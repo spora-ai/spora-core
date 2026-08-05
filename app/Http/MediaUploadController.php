@@ -39,6 +39,7 @@ final class MediaUploadController
         private readonly AuthService $auth,
         private readonly MimeSniffer $sniffer,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
+        private readonly array $config = [],
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -78,7 +79,7 @@ final class MediaUploadController
         ));
 
         return new JsonResponse(
-            ['data' => $this->serializer->serialize($asset, $request->getSchemeAndHttpHost())],
+            ['data' => $this->serializer->serialize($asset, (string) ($this->config['app_url'] ?? ''))],
             Response::HTTP_CREATED,
         );
     }

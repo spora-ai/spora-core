@@ -10,7 +10,6 @@ use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\MediaTool;
-use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Create an Agent row so the FK on media_assets.agent_id resolves. The
@@ -97,7 +96,7 @@ function makeMediaToolAdminAuth(): AuthService
  * exercises the same query path the LLM hits in production. Returns the
  * tool + a cleanup closure that wipes the tmp asset dir.
  */
-function makeMediaToolWithRealArchive(?AuthService $auth = null, ?ToolConfigService $config = null, ?Request $request = null): array
+function makeMediaToolWithRealArchive(?AuthService $auth = null, ?ToolConfigService $config = null, array $globalConfig = []): array
 {
     // Reuse the same builder that MediaArchiveServiceTest uses so we get a
     // fully-wired service (asset store, resolver, converters, decoder).
@@ -106,7 +105,7 @@ function makeMediaToolWithRealArchive(?AuthService $auth = null, ?ToolConfigServ
         $ctx['service'],
         $auth ?? makeMediaToolNonAdminAuth(),
         $config,
-        $request,
+        $globalConfig,
     );
 
     return ['tool' => $tool, 'restore' => $ctx['restore']];
@@ -420,9 +419,12 @@ describe('MediaTool::get_public_url', function (): void {
     it('mints a public_access_token when none exists', function (): void {
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $agentA, userId: 99, publicToken: null);
-        $request = Request::create('https://spora.example/');
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), null, $request);
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+            makeMediaToolNonAdminAuth(),
+            null,
+            ['app_url' => 'https://spora.example/'],
+        );
         try {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
@@ -447,9 +449,12 @@ describe('MediaTool::get_public_url', function (): void {
     it('returns the existing public_access_token when already set', function (): void {
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $agentA, userId: 99, publicToken: 'pre-existing-token');
-        $request = Request::create('https://spora.example/');
 
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), null, $request);
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+            makeMediaToolNonAdminAuth(),
+            null,
+            ['app_url' => 'https://spora.example/'],
+        );
         try {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
@@ -519,27 +524,42 @@ describe('MediaTool::get_public_url', function (): void {
         }
     });
 
-    it('falls back to HTTP_HOST when no request is provided', function (): void {
+    it('returns failure when app_url is not configured', function (): void {
         $agentA = seedMediaToolAgent();
-        $asset = seedMediaAsset(agentId: $agentA, userId: 99, publicToken: 'fallback-token');
+        $asset = seedMediaAsset(agentId: $agentA, userId: 99, publicToken: 'existing-token');
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
         try {
-            $previous = $_SERVER['HTTP_HOST'] ?? null;
-            $_SERVER['HTTP_HOST'] = 'fallback.example';
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $agentA,
                 userId: 99,
             );
 
-            expect($result->data['public_url'])->toContain('fallback.example');
+            expect($result->success)->toBeFalse();
+            expect($result->content)->toContain('Public origin is not configured');
+        } finally {
+            $restore();
+        }
+    });
 
-            if ($previous === null) {
-                unset($_SERVER['HTTP_HOST']);
-            } else {
-                $_SERVER['HTTP_HOST'] = $previous;
-            }
+    it('uses the global config app_url for the public link', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(agentId: $agentA, userId: 99, publicToken: 'fallback-token');
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+            makeMediaToolNonAdminAuth(),
+            null,
+            ['app_url' => 'https://configured.example/'],
+        );
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_public_url', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->data['public_url'])->toContain('configured.example');
         } finally {
             $restore();
         }

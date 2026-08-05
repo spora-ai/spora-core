@@ -62,8 +62,7 @@ test('POST /api/v1/media/{id}/public-token/refresh rotates the token', function 
     $first = \Spora\Models\MediaAsset::query()->find($asset->id)->public_access_token;
     expect($first)->not->toBeNull();
     // Refresh
-    $req2 = Request::create("/api/v1/media/{$asset->id}/public-token/refresh", 'POST');
-    $resp = $controller->refreshPublicToken($asset->id, $req2);
+    $resp = $controller->refreshPublicToken($asset->id);
     expect($resp->getStatusCode())->toBe(200);
     $second = \Spora\Models\MediaAsset::query()->find($asset->id)->public_access_token;
     expect($second)->not->toBe($first);
@@ -75,8 +74,7 @@ test('refresh is forbidden for non-owner non-admin', function (): void {
     $asset = ingestSharedSample(99);
     // Re-fetch the controller with a non-admin caller (user 1).
     [, , $controller] = buildSharingController(false, 1);
-    $req = Request::create("/api/v1/media/{$asset->id}/public-token/refresh", 'POST');
-    $resp = $controller->refreshPublicToken($asset->id, $req);
+    $resp = $controller->refreshPublicToken($asset->id);
     expect($resp->getStatusCode())->toBe(403);
 });
 
@@ -107,7 +105,16 @@ function buildSharingController(bool $isAdmin = true, int $userId = 1): array
             return $this->admin;
         }
     };
-    return [$service, $service, new MediaArchiveController($service, $auth)];
+    return [
+        $service,
+        $service,
+        new MediaArchiveController(
+            $service,
+            $auth,
+            new \Spora\Services\MediaArchive\MediaAssetSerializer(),
+            ['app_url' => 'https://test.example/'],
+        ),
+    ];
 }
 
 function ingestSharedSample(int $userId = 1): \Spora\Models\MediaAsset

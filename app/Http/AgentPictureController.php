@@ -77,6 +77,7 @@ final class AgentPictureController
         private readonly MediaArchiveService $mediaArchive,
         private readonly MimeSniffer $sniffer,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
+        private readonly array $config = [],
     ) {}
 
     /**
@@ -97,7 +98,7 @@ final class AgentPictureController
             return $prepared;
         }
 
-        return $this->performUpload($request, $prepared['file'], $prepared['bytes'], $agentId, $userId);
+        return $this->performUpload($prepared['file'], $prepared['bytes'], $agentId, $userId);
     }
 
     /**
@@ -196,7 +197,6 @@ final class AgentPictureController
      * `uploadImage()` so the controller stays under the 3-return ceiling.
      */
     private function performUpload(
-        Request $request,
         UploadedFile $file,
         string $bytes,
         int $agentId,
@@ -222,7 +222,7 @@ final class AgentPictureController
         $fresh = $this->agentService->getAgent($agentId, $userId);
         return new JsonResponse([
             'data' => [
-                'asset'  => $this->serializer->serialize($asset, $request->getSchemeAndHttpHost()),
+                'asset'  => $this->serializer->serialize($asset, (string) ($this->config['app_url'] ?? '')),
                 'agent'  => $fresh !== null ? AgentResource::toArray($fresh, null, null, $this->pictureService) : null,
             ],
         ], Response::HTTP_CREATED);

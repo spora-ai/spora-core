@@ -98,12 +98,16 @@ final class MediaTool extends AbstractTool
     /** @var string  Single error string used for asset-not-found / not-in-scope responses. */
     private const ERR_ASSET_NOT_FOUND = 'Media asset not found.';
 
+    private readonly array $config;
+
     public function __construct(
         private readonly MediaArchiveService $archive,
         private readonly AuthService $auth,
         private readonly ?ToolConfigService $toolConfigService = null,
-        private readonly ?Request $request = null,
-    ) {}
+        Request|array $request = [],
+    ) {
+        $this->config = is_array($request) ? $request : [];
+    }
 
     public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
@@ -207,8 +211,12 @@ final class MediaTool extends AbstractTool
         }
 
         $asset = $this->archive->find($assetId);
-        if ($asset === null || !$this->assetInScope($asset, $agentId, $userId)) {
-            return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
+        $host = (string) ($this->config['app_url'] ?? '');
+        $inScope = $asset !== null && $this->assetInScope($asset, $agentId, $userId);
+        if (!$inScope || $host === '') {
+            return ToolResult::fail(!$inScope
+                ? self::ERR_ASSET_NOT_FOUND
+                : 'Public origin is not configured.');
         }
 
         if ($asset->public_access_token === null || $asset->public_access_token === '') {
@@ -331,9 +339,13 @@ final class MediaTool extends AbstractTool
 
     private function publicUrl(MediaAsset $asset): string
     {
-        $host = $this->request !== null
-            ? $this->request->getSchemeAndHttpHost()
-            : ($_SERVER['HTTP_HOST'] ?? 'localhost');
+        // The public base URL is the resolved global config value
+        // (`config.app_url` — configured via config.php / SPORA_APP_URL, or
+        // detected by RequestOrigin::detect() at boot). Reading it from the
+        // global config rather than the per-request host keeps share URLs
+        // stable across requests and immune to Host-header spoofing on a
+        // single request.
+        $host = (string) ($this->config['app_url'] ?? '');
 
         return rtrim($host, '/') . '/api/v1/public/media/' . $asset->id . '?token=' . $asset->public_access_token;
     }

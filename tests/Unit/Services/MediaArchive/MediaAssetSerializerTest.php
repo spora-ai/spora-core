@@ -181,9 +181,8 @@ test('serialize() returns null public_url when no token is set', function (): vo
 });
 
 test('serialize() uses the caller-supplied base URL as-is — no scheme prefix is added', function (): void {
-    // Regression: callers pass Request::getSchemeAndHttpHost() (already
-    // includes the scheme). The previous implementation treated that
-    // value as a bare host and prepended another scheme, producing
+    // Regression: callers pass an absolute base URL that already includes
+    // the scheme. The previous implementation treated that value as a bare host and prepended another scheme, producing
     // `https://https://spora.example/...` share links.
     $serializer = new MediaAssetSerializer();
     $payload    = $serializer->serialize(
@@ -207,45 +206,15 @@ test('serialize() strips a trailing slash from the caller-supplied base URL', fu
     expect($payload['public_url'])->not->toContain('//api');
 });
 
-test('serialize() falls back to HTTP_HOST + HTTPS when no base URL is supplied', function (): void {
-    $previous   = $_SERVER['HTTP_HOST'] ?? null;
-    $previousSsl = $_SERVER['HTTPS'] ?? null;
-    $_SERVER['HTTP_HOST'] = 'fallback.example';
-    $_SERVER['HTTPS']     = 'on';
+test('serialize() returns null public_url when no base URL is supplied', function (): void {
+    // The serializer used to fall back to $_SERVER['HTTP_HOST'] + HTTPS when
+    // no base URL was supplied. That fallback was removed: callers are now
+    // expected to pass the resolved `config.app_url` (configured via
+    // config.php / SPORA_APP_URL, or detected by RequestOrigin::detect() at
+    // boot). Without a base URL, `public_url` is null — share URLs are
+    // simply off when the operator has not configured a public origin.
+    $serializer = new MediaAssetSerializer();
+    $payload    = $serializer->serialize(makeMediaAsset(['public_access_token' => 'tok-abc']));
 
-    try {
-        $serializer = new MediaAssetSerializer();
-        $payload    = $serializer->serialize(makeMediaAsset(['public_access_token' => 'tok-abc']));
-
-        expect($payload['public_url'])->toBe(
-            'https://fallback.example/api/v1/public/media/11111111-2222-3333-4444-555555555555?token=tok-abc',
-        );
-    } finally {
-        if ($previous === null) {
-            unset($_SERVER['HTTP_HOST']);
-        } else {
-            $_SERVER['HTTP_HOST'] = $previous;
-        }
-        if ($previousSsl === null) {
-            unset($_SERVER['HTTPS']);
-        } else {
-            $_SERVER['HTTPS'] = $previousSsl;
-        }
-    }
-});
-
-test('serialize() returns null public_url when no base URL is supplied and HTTP_HOST is empty', function (): void {
-    $previous = $_SERVER['HTTP_HOST'] ?? null;
-    unset($_SERVER['HTTP_HOST']);
-
-    try {
-        $serializer = new MediaAssetSerializer();
-        $payload    = $serializer->serialize(makeMediaAsset(['public_access_token' => 'tok-abc']));
-
-        expect($payload['public_url'])->toBeNull();
-    } finally {
-        if ($previous !== null) {
-            $_SERVER['HTTP_HOST'] = $previous;
-        }
-    }
+    expect($payload['public_url'])->toBeNull();
 });
