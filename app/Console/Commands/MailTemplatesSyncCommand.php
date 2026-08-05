@@ -118,39 +118,56 @@ final class MailTemplatesSyncCommand extends Command
         bool $check,
         bool $force,
     ): string {
-        $name   = (string) $template['name'];
-        $status = 'unchanged';
+        $name = (string) $template['name'];
 
         if ($row === null) {
-            if ($check) {
-                $io->writeln("  <comment>[new]</comment>     {$name}");
-                $status = 'drift';
-            } else {
-                $this->mailTemplateService->createTemplate($template);
-                $io->writeln("  <info>[created]</info> {$name}");
-                $status = 'applied';
-            }
-        } else {
-            $diff = $this->diff($template, $row);
-            if ($diff !== []) {
-                if ($check) {
-                    $io->writeln("  <comment>[drift]</comment>  {$name}");
-                    foreach ($diff as $field => $want) {
-                        $io->writeln(sprintf('             %s: %s', $field, $this->abbreviate($want)));
-                    }
-                    $status = 'drift';
-                } elseif (!$force && !$io->confirm("Overwrite '{$name}'?", false)) {
-                    $io->writeln("  <comment>[skipped]</comment> {$name}");
-                    $status = 'skipped';
-                } else {
-                    $this->mailTemplateService->updateTemplate((int) $row->id, $diff);
-                    $io->writeln("  <info>[{$this->labelFor($force)}]</info> {$name}");
-                    $status = $force ? 'forced' : 'applied';
-                }
-            }
+            return $this->createMissing($io, $template, $name, $check);
         }
 
-        return $status;
+        $diff = $this->diff($template, $row);
+        if ($diff === []) {
+            return 'unchanged';
+        }
+
+        return $this->applyDiff($io, $name, $diff, $row, $check, $force);
+    }
+
+    /**
+     * @param array{name: string, subject: string, body: string|null, body_html: string|null} $template
+     */
+    private function createMissing(SymfonyStyle $io, array $template, string $name, bool $check): string
+    {
+        if ($check) {
+            $io->writeln("  <comment>[new]</comment>     {$name}");
+            return 'drift';
+        }
+
+        $this->mailTemplateService->createTemplate($template);
+        $io->writeln("  <info>[created]</info> {$name}");
+        return 'applied';
+    }
+
+    /**
+     * @param array<string, string|null> $diff
+     */
+    private function applyDiff(SymfonyStyle $io, string $name, array $diff, MailTemplate $row, bool $check, bool $force): string
+    {
+        if ($check) {
+            $io->writeln("  <comment>[drift]</comment>  {$name}");
+            foreach ($diff as $field => $want) {
+                $io->writeln(sprintf('             %s: %s', $field, $this->abbreviate($want)));
+            }
+            return 'drift';
+        }
+
+        if (!$force && !$io->confirm("Overwrite '{$name}'?", false)) {
+            $io->writeln("  <comment>[skipped]</comment> {$name}");
+            return 'skipped';
+        }
+
+        $this->mailTemplateService->updateTemplate((int) $row->id, $diff);
+        $io->writeln("  <info>[{$this->labelFor($force)}]</info> {$name}");
+        return $force ? 'forced' : 'applied';
     }
 
     /**
