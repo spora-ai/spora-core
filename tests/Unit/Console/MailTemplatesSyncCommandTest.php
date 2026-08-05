@@ -160,7 +160,7 @@ it('exits non-zero when a YAML template fails to parse', function (): void {
     try {
         $status = $tester->execute([]);
         expect($status)->toBe(Command::FAILURE)
-            ->and($tester->getDisplay())->toContain('YAML parse failed');
+            ->and($tester->getDisplay())->toContain('Setup failed');
     } finally {
         @unlink($emailDir . '/broken.yaml');
         @rmdir($emailDir);

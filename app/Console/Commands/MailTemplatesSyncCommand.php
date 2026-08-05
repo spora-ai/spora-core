@@ -63,15 +63,9 @@ final class MailTemplatesSyncCommand extends Command
 
         try {
             $this->database->bootDatabaseConnectionOnly();
-        } catch (Throwable $e) {
-            $io->error('Database connection failed: ' . $e->getMessage());
-            return Command::FAILURE;
-        }
-
-        try {
             $defaults = $this->templateLoader->getAll();
         } catch (Throwable $e) {
-            $io->error('YAML parse failed: ' . $e->getMessage());
+            $io->error('Setup failed: ' . $e->getMessage());
             return Command::FAILURE;
         }
 
@@ -80,20 +74,22 @@ final class MailTemplatesSyncCommand extends Command
             return Command::SUCCESS;
         }
 
+        return $this->reconcileAll($io, $defaults, $check, $force);
+    }
+
+    /**
+     * @param array<string, array{name: string, subject: string, body: string|null, body_html: string|null}> $defaults
+     */
+    private function reconcileAll(SymfonyStyle $io, array $defaults, bool $check, bool $force): int
+    {
         $rows  = [];
         $drift = 0;
+        $exit  = Command::SUCCESS;
 
         foreach ($defaults as $template) {
-            $name = (string) $template['name'];
-
-            try {
-                $row    = MailTemplate::where('name', $name)->first();
-                $status = $this->reconcile($io, $template, $row, $check, $force);
-            } catch (Throwable $e) {
-                $io->writeln("<error>Template '{$name}' failed: {$e->getMessage()}</error>");
-                return Command::FAILURE;
-            }
-
+            $name   = (string) $template['name'];
+            $row    = MailTemplate::where('name', $name)->first();
+            $status = $this->reconcile($io, $template, $row, $check, $force);
             $rows[] = [$name, $status];
             if ($status === 'drift' || $status === 'skipped') {
                 $drift++;
@@ -104,11 +100,12 @@ final class MailTemplatesSyncCommand extends Command
 
         if ($check && $drift > 0) {
             $io->error(sprintf('%d template(s) drifted from YAML defaults.', $drift));
-            return Command::FAILURE;
+            $exit = Command::FAILURE;
+        } else {
+            $io->success('Mail templates reconciled.');
         }
 
-        $io->success('Mail templates reconciled.');
-        return Command::SUCCESS;
+        return $exit;
     }
 
     /**
@@ -121,39 +118,39 @@ final class MailTemplatesSyncCommand extends Command
         bool $check,
         bool $force,
     ): string {
-        $name = (string) $template['name'];
+        $name   = (string) $template['name'];
+        $status = 'unchanged';
 
         if ($row === null) {
             if ($check) {
                 $io->writeln("  <comment>[new]</comment>     {$name}");
-                return 'drift';
+                $status = 'drift';
+            } else {
+                $this->mailTemplateService->createTemplate($template);
+                $io->writeln("  <info>[created]</info> {$name}");
+                $status = 'applied';
             }
-            $this->mailTemplateService->createTemplate($template);
-            $io->writeln("  <info>[created]</info> {$name}");
-            return 'applied';
-        }
-
-        $diff = $this->diff($template, $row);
-        if ($diff === []) {
-            return 'unchanged';
-        }
-
-        if ($check) {
-            $io->writeln("  <comment>[drift]</comment>  {$name}");
-            foreach ($diff as $field => $want) {
-                $io->writeln(sprintf('             %s: %s', $field, $this->abbreviate($want)));
+        } else {
+            $diff = $this->diff($template, $row);
+            if ($diff !== []) {
+                if ($check) {
+                    $io->writeln("  <comment>[drift]</comment>  {$name}");
+                    foreach ($diff as $field => $want) {
+                        $io->writeln(sprintf('             %s: %s', $field, $this->abbreviate($want)));
+                    }
+                    $status = 'drift';
+                } elseif (!$force && !$io->confirm("Overwrite '{$name}'?", false)) {
+                    $io->writeln("  <comment>[skipped]</comment> {$name}");
+                    $status = 'skipped';
+                } else {
+                    $this->mailTemplateService->updateTemplate((int) $row->id, $diff);
+                    $io->writeln("  <info>[{$this->labelFor($force)}]</info> {$name}");
+                    $status = $force ? 'forced' : 'applied';
+                }
             }
-            return 'drift';
         }
 
-        if (!$force && !$io->confirm("Overwrite '{$name}'?", false)) {
-            $io->writeln("  <comment>[skipped]</comment> {$name}");
-            return 'skipped';
-        }
-
-        $this->mailTemplateService->updateTemplate((int) $row->id, $diff);
-        $io->writeln("  <info>[{$this->labelFor($force)}]</info> {$name}");
-        return $force ? 'forced' : 'applied';
+        return $status;
     }
 
     /**

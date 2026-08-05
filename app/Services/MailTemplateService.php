@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-use RuntimeException;
 use Spora\Models\MailTemplate;
+use Spora\Services\Exceptions\MailTemplateNotFoundException;
 use Spora\Services\Mail\MailTemplateRenderer;
 
 /**
@@ -100,7 +100,7 @@ final class MailTemplateService implements MailTemplateServiceInterface
     {
         $template = MailTemplate::where('name', $name)->first();
         if ($template === null) {
-            throw new RuntimeException("Mail template '{$name}' not found.");
+            throw new MailTemplateNotFoundException("Mail template '{$name}' not found.");
         }
 
         $rendered = $this->renderer->render(
