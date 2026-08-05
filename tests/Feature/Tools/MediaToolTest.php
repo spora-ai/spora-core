@@ -524,6 +524,25 @@ describe('MediaTool::get_public_url', function (): void {
         }
     });
 
+    it('returns failure when app_url is not configured', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(agentId: $agentA, userId: 99, publicToken: 'existing-token');
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_public_url', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->success)->toBeFalse();
+            expect($result->content)->toContain('Public origin is not configured');
+        } finally {
+            $restore();
+        }
+    });
+
     it('uses the global config app_url for the public link', function (): void {
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $agentA, userId: 99, publicToken: 'fallback-token');

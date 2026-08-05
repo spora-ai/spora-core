@@ -234,7 +234,7 @@ final class MediaArchiveController
      *
      * POST /api/v1/media/{id}/public-token/refresh
      */
-    public function refreshPublicToken(string $id, Request $request): JsonResponse
+    public function refreshPublicToken(string $id): JsonResponse
     {
         $asset = $this->mediaArchive->find($id);
         if ($asset === null) {

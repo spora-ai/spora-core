@@ -15,6 +15,7 @@ use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ValueObjects\ToolResult;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Built-in tool for reading the media library.
@@ -97,12 +98,16 @@ final class MediaTool extends AbstractTool
     /** @var string  Single error string used for asset-not-found / not-in-scope responses. */
     private const ERR_ASSET_NOT_FOUND = 'Media asset not found.';
 
+    private readonly array $config;
+
     public function __construct(
         private readonly MediaArchiveService $archive,
         private readonly AuthService $auth,
         private readonly ?ToolConfigService $toolConfigService = null,
-        private readonly array $config = [],
-    ) {}
+        Request|array $request = [],
+    ) {
+        $this->config = is_array($request) ? $request : [];
+    }
 
     public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
@@ -208,6 +213,11 @@ final class MediaTool extends AbstractTool
         $asset = $this->archive->find($assetId);
         if ($asset === null || !$this->assetInScope($asset, $agentId, $userId)) {
             return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
+        }
+
+        $host = (string) ($this->config['app_url'] ?? '');
+        if ($host === '') {
+            return ToolResult::fail('Public origin is not configured.');
         }
 
         if ($asset->public_access_token === null || $asset->public_access_token === '') {

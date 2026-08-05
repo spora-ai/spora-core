@@ -115,8 +115,7 @@ test('MediaArchiveController update returns 404 for unknown id', function (): vo
 
 test('MediaArchiveController refreshPublicToken returns 404 for unknown id', function (): void {
     [, , , , , , , $archiveCtrl] = buildUploadHttpFixtures();
-    $req = Request::create('/api/v1/media/00000000-0000-0000-0000-000000000000/public-token/refresh', 'POST');
-    $resp = $archiveCtrl->refreshPublicToken('00000000-0000-0000-0000-000000000000', $req);
+    $resp = $archiveCtrl->refreshPublicToken('00000000-0000-0000-0000-000000000000');
     expect($resp->getStatusCode())->toBe(404);
 });
 
@@ -270,8 +269,7 @@ test('MediaArchiveController refreshPublicToken mints a fresh token', function (
     $firstToken = $first->public_access_token;
 
     // Refresh
-    $req2 = Request::create("/api/v1/media/{$asset->id}/public-token/refresh", 'POST');
-    $resp = $archiveCtrl->refreshPublicToken($asset->id, $req2);
+    $resp = $archiveCtrl->refreshPublicToken($asset->id);
     expect($resp->getStatusCode())->toBe(200);
     $second = \Spora\Models\MediaAsset::query()->find($asset->id);
     expect($second->public_access_token)->not->toBe($firstToken);

@@ -181,9 +181,8 @@ test('serialize() returns null public_url when no token is set', function (): vo
 });
 
 test('serialize() uses the caller-supplied base URL as-is — no scheme prefix is added', function (): void {
-    // Regression: callers pass Request::getSchemeAndHttpHost() (already
-    // includes the scheme). The previous implementation treated that
-    // value as a bare host and prepended another scheme, producing
+    // Regression: callers pass an absolute base URL that already includes
+    // the scheme. The previous implementation treated that value as a bare host and prepended another scheme, producing
     // `https://https://spora.example/...` share links.
     $serializer = new MediaAssetSerializer();
     $payload    = $serializer->serialize(

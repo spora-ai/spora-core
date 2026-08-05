@@ -98,7 +98,7 @@ final class AgentPictureController
             return $prepared;
         }
 
-        return $this->performUpload($request, $prepared['file'], $prepared['bytes'], $agentId, $userId);
+        return $this->performUpload($prepared['file'], $prepared['bytes'], $agentId, $userId);
     }
 
     /**
@@ -197,7 +197,6 @@ final class AgentPictureController
      * `uploadImage()` so the controller stays under the 3-return ceiling.
      */
     private function performUpload(
-        Request $request,
         UploadedFile $file,
         string $bytes,
         int $agentId,
