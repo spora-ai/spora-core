@@ -7,6 +7,10 @@ namespace Spora\Core;
 use Delight\Auth\Auth as DelightAuth;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
+use League\CommonMark\Environment\Environment as CommonMarkEnvironment;
+use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
+use League\CommonMark\Extension\GithubFlavoredMarkdownExtension;
+use League\CommonMark\MarkdownConverter;
 use Monolog\Handler\StreamHandler;
 use Monolog\Level;
 use Monolog\Logger as MonologLogger;
@@ -25,6 +29,7 @@ use Spora\Apps\AppRegistry;
 use Spora\Apps\PluginsApp;
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\AssetGcCommand;
+use Spora\Console\Commands\MailTemplatesSyncCommand;
 use Spora\Console\Commands\MediaArchiveGcCommand;
 use Spora\Console\Commands\MediaArchiveListCommand;
 use Spora\Console\Commands\PluginInstallCommand;
@@ -96,6 +101,7 @@ use Spora\Services\LLMConfigService;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
 use Spora\Services\LocalAssetStore;
+use Spora\Services\Mail\MailTemplateRenderer;
 use Spora\Services\MailTemplateService;
 use Spora\Services\MailTemplateServiceInterface;
 use Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter;
@@ -343,6 +349,7 @@ final class ContainerDefinitions
         $apply('SPORA_MERCURE_PUBLISH_URL', 'mercure_publish_url', static fn($v) => $v);
         $apply('SPORA_APP_URL', 'app_url', static fn($v) => (string) $v);
         $apply('SPORA_APP_PREFIX', 'app_prefix', static fn($v) => RequestOrigin::normalizePrefix((string) $v));
+        $apply('SPORA_APP_NAME', 'app_name', static fn($v) => (string) $v);
         $apply('SPORA_COMPOSER_BINARY', 'composer_binary', static fn($v) => $v);
         $apply('SPORA_PLUGIN_INSTALL_ENABLED', 'plugin_install_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_ASSET_STORE_MODE', 'asset_store.mode', static fn($v) => $v);
@@ -1238,7 +1245,26 @@ final class ContainerDefinitions
                 return new SystemMailer(
                     $c->get('config'),
                     $c->get(LoggerInterface::class),
+                    $c->get(MailTemplateRenderer::class),
                 );
+            },
+
+            // Markdown → HTML pipeline. CommonMarkCore + GFM gives tables,
+            // strikethrough, autolinks, task lists. Used by SystemMailer and
+            // by anything that renders a MailTemplate body.
+            CommonMarkEnvironment::class => static function (): CommonMarkEnvironment {
+                $env = new CommonMarkEnvironment();
+                $env->addExtension(new CommonMarkCoreExtension());
+                $env->addExtension(new GithubFlavoredMarkdownExtension());
+                return $env;
+            },
+
+            MarkdownConverter::class => static function (ContainerInterface $c): MarkdownConverter {
+                return new MarkdownConverter($c->get(CommonMarkEnvironment::class));
+            },
+
+            MailTemplateRenderer::class => static function (ContainerInterface $c): MailTemplateRenderer {
+                return new MailTemplateRenderer($c->get(MarkdownConverter::class));
             },
 
             // PluginLoader is constructed eagerly in Kernel and added to the
@@ -1321,7 +1347,9 @@ final class ContainerDefinitions
                 $c->get(ToolConfigSchemaInspector::class),
             ),
 
-            MailTemplateServiceInterface::class => static fn(): MailTemplateServiceInterface => new MailTemplateService(),
+            MailTemplateServiceInterface::class => static function (ContainerInterface $c): MailTemplateServiceInterface {
+                return new MailTemplateService($c->get(MailTemplateRenderer::class));
+            },
             PromptTemplateServiceInterface::class => static fn(): PromptTemplateServiceInterface => new PromptTemplateService(),
             EmailTemplateLoader::class => static function (ContainerInterface $c): EmailTemplateLoader {
                 return new EmailTemplateLoader($c->get(Paths::class));
@@ -1361,6 +1389,14 @@ final class ContainerDefinitions
 
             RepairAdminCommand::class => static function (ContainerInterface $c): RepairAdminCommand {
                 return new RepairAdminCommand($c->get(Database::class));
+            },
+
+            MailTemplatesSyncCommand::class => static function (ContainerInterface $c): MailTemplatesSyncCommand {
+                return new MailTemplatesSyncCommand(
+                    $c->get(Database::class),
+                    $c->get(EmailTemplateLoader::class),
+                    $c->get(MailTemplateServiceInterface::class),
+                );
             },
 
             WorkerRunCommand::class => static function (ContainerInterface $c): WorkerRunCommand {

@@ -1,11 +1,16 @@
 name: scheduled_run_completed
-subject: "Scheduled run completed: {{agent_name}}"
-body_text: |
-  Your scheduled run has completed.
+subject: "[{{site_name}}] Scheduled run finished: {{agent_name}}"
+body: |
+  Hi,
 
-  Agent: {{agent_name}}
-  Task ID: {{task_id}}
-  Prompt: {{user_prompt}}
+  your scheduled run has completed. Here's a quick summary:
 
-  You can view the full task history in Spora.
-body_html: null
+  - **Agent**: {{agent_name}}
+  - **Task ID**: {{task_id}}
+  - **Prompt**: {{user_prompt}}
+
+  You can view the full task history and any artifact at:
+
+  [{{run_url}}]({{run_url}})
+
+  — The {{site_name}} team

@@ -107,7 +107,7 @@ final class RequestOrigin
      */
     private static function buildFromServer(array $server): string
     {
-        $host = (string) $server['HTTP_HOST'];
+        $host = self::stripPort((string) $server['HTTP_HOST']);
         $scheme = self::resolveScheme($server);
         $defaultPort = $scheme === 'https' ? 443 : 80;
         $port = (int) ($server['SERVER_PORT'] ?? $defaultPort);

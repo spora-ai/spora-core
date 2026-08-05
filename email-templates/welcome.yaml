@@ -1,12 +1,11 @@
 name: welcome
-subject: "Welcome to Spora"
-body_text: |
-  Hello {{user_name}},
+subject: "Welcome to {{site_name}}"
+body: |
+  Hi {{user_name}},
 
-  Welcome to Spora! Your account has been created with the email {{email}}.
+  welcome aboard! Your {{site_name}} account is ready at **{{email}}**.
 
-  You can now start using your AI agent.
+  You can now create AI agents, schedule runs, and explore the tools. If
+  you have any questions, the documentation and community are a click away.
 
-  Best regards,
-  The Spora Team
-body_html: null
+  — The {{site_name}} team

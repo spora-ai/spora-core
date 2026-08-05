@@ -34,10 +34,10 @@ describe('EmailTemplateLoader', function (): void {
             $templates = $loader->getAll();
 
             foreach ($templates as $name => $template) {
-                expect($template)->toHaveKeys(['name', 'subject', 'body_text']);
+                expect($template)->toHaveKeys(['name', 'subject', 'body']);
                 expect($template['name'])->toBe($name);
                 expect($template['subject'])->toBeString();
-                expect($template['body_text'])->toBeString();
+                expect($template['body'])->toBeString();
             }
         });
     });
@@ -49,7 +49,7 @@ describe('EmailTemplateLoader', function (): void {
 
             expect($template)->not->toBeNull();
             expect($template['name'])->toBe('welcome');
-            expect($template['subject'])->toBe('Welcome to Spora');
+            expect($template['subject'])->toBe('Welcome to {{site_name}}');
         });
 
         it('returns null for non-existent template', function (): void {

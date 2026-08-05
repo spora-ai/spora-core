@@ -1,9 +1,13 @@
 name: email_verification
-subject: "Verify your email address"
-body_text: |
-  Please click the link below to verify your email address:
+subject: "Verify your email address — {{site_name}}"
+body: |
+  Hi there,
 
-  {{verification_link}}
+  please confirm your email address by clicking the link below. The link is
+  valid for the next **24 hours** and can be used once.
 
-  If you did not create an account, please ignore this email.
-body_html: null
+  [Confirm your email address]({{verification_link}})
+
+  If you did not create an account, you can safely ignore this email.
+
+  — The {{site_name}} team

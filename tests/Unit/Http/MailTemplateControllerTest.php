@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Spora\Http\MailTemplateController;
 use Spora\Models\MailTemplate;
+use Spora\Services\Mail\MailTemplateRenderer;
 use Spora\Services\MailTemplateService;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -18,7 +19,7 @@ const MAIL_TEMPLATES_URI = '/api/v1/mail-templates';
 
 function makeMailTemplateController(): array
 {
-    $service = new MailTemplateService();
+    $service = new MailTemplateService(MailTemplateRenderer::createDefault());
     $controller = new MailTemplateController($service);
     return [$controller, $service];
 }
@@ -31,7 +32,7 @@ test('index() returns the list of mail templates', function (): void {
     MailTemplate::create([
         'name' => 'custom_template',
         'subject' => 'Subj',
-        'body_text' => 'Hello',
+        'body' => 'Hello',
     ]);
 
     $response = $controller->index();
@@ -51,7 +52,7 @@ test('store() creates a new template and returns 201', function (): void {
     $request = jsonRequest('POST', MAIL_TEMPLATES_URI, [
         'name' => 'a_new_template',
         'subject' => 'New Subject',
-        'body_text' => 'Body text',
+        'body' => 'Body text',
         'body_html' => '<p>Body html</p>',
     ]);
     $response = $controller->store($request);
@@ -99,7 +100,7 @@ test('show() returns 200 with the template by id', function (): void {
     $template = MailTemplate::create([
         'name' => 'show_test',
         'subject' => 'Subj',
-        'body_text' => 'Hello',
+        'body' => 'Hello',
     ]);
 
     $response = $controller->show($template->id);
@@ -124,7 +125,7 @@ test('update() modifies a template and returns 200', function (): void {
     $template = MailTemplate::create([
         'name' => 'before',
         'subject' => 'Old',
-        'body_text' => 'Old text',
+        'body' => 'Old text',
     ]);
 
     $request = jsonRequest('PUT', "/api/v1/mail-templates/{$template->id}", [
@@ -233,7 +234,7 @@ test('preview() returns 200 with rendered content', function (): void {
     MailTemplate::create([
         'name' => 'render_test',
         'subject' => 'Hello {{name}}',
-        'body_text' => 'Welcome {{name}}',
+        'body' => 'Welcome {{name}}',
         'body_html' => '<p>Welcome {{name}}</p>',
     ]);
 
@@ -244,6 +245,7 @@ test('preview() returns 200 with rendered content', function (): void {
     $body = json_decode($response->getContent(), true);
     expect($body['data']['subject'])->toBe('Hello Alice');
     expect($body['data']['body_text'])->toBe('Welcome Alice');
+    expect($body['data']['body'])->toBe('<p>Welcome Alice</p>');
 });
 
 test('preview() returns 404 for unknown template name', function (): void {

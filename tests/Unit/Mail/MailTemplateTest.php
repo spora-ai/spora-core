@@ -10,49 +10,49 @@ test('render substitutes known placeholders', function () {
     $template = new MailTemplate([
         'name' => 'test',
         'subject' => 'Hello {{user_name}}',
-        'body_text' => 'Your email is {{email}}. Click {{verification_link}}',
+        'body' => 'Your email is {{email}}. Click {{verification_link}}',
         'body_html' => '<p>Hello {{user_name}}</p>',
     ]);
 
     $rendered = $template->render(['user_name' => 'Fabian', 'email' => 'fabian@test.com', 'verification_link' => 'https://example.com/verify']);
 
-    expect($rendered['subject'])->toBe('Hello Fabian');
-    expect($rendered['body_text'])->toBe('Your email is fabian@test.com. Click https://example.com/verify');
-    expect($rendered['body_html'])->toBe('<p>Hello Fabian</p>');
+    expect($rendered->subject)->toBe('Hello Fabian');
+    expect($rendered->bodyText)->toBe('Your email is fabian@test.com. Click https://example.com/verify' . "\n\nLinks:\n- https://example.com/verify");
+    expect($rendered->bodyHtml)->toBe('<p>Hello Fabian</p>');
 });
 
 test('render leaves unknown placeholders intact', function () {
     $template = new MailTemplate(['name' => 'test', 'subject' => 'Hello {{unknown}}']);
     $rendered = $template->render(['user_name' => 'Fabian']);
-    expect($rendered['subject'])->toBe('Hello {{unknown}}');
+    expect($rendered->subject)->toBe('Hello {{unknown}}');
 });
 
 test('render returns null fields as null', function () {
     $template = new MailTemplate([
         'name' => 'test',
         'subject' => 'Hello {{user_name}}',
-        'body_text' => null,
+        'body' => null,
         'body_html' => null,
     ]);
 
     $rendered = $template->render(['user_name' => 'Fabian']);
 
-    expect($rendered['subject'])->toBe('Hello Fabian');
-    expect($rendered['body_text'])->toBeNull();
-    expect($rendered['body_html'])->toBeNull();
+    expect($rendered->subject)->toBe('Hello Fabian');
+    expect($rendered->bodyText)->toBe('');
+    expect($rendered->bodyHtml)->toBe('');
 });
 
 test('render handles empty variables array', function () {
     $template = new MailTemplate([
         'name' => 'test',
         'subject' => 'Hello {{user_name}}',
-        'body_text' => 'No variables here',
+        'body' => 'No variables here',
         'body_html' => '<p>No variables here</p>',
     ]);
 
     $rendered = $template->render([]);
 
-    expect($rendered['subject'])->toBe('Hello {{user_name}}');
-    expect($rendered['body_text'])->toBe('No variables here');
-    expect($rendered['body_html'])->toBe('<p>No variables here</p>');
+    expect($rendered->subject)->toBe('Hello {{user_name}}');
+    expect($rendered->bodyText)->toBe('No variables here');
+    expect($rendered->bodyHtml)->toBe('<p>No variables here</p>');
 });

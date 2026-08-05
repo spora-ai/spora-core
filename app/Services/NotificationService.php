@@ -190,9 +190,18 @@ class NotificationService implements NotificationServiceInterface
                 'agent_name'  => $agent->name,
                 'user_prompt' => $task->user_prompt,
                 'site_name'   => $this->config['app_name'] ?? 'Spora',
+                'run_url'     => $this->buildRunUrl($task->id),
             ],
             [$user->email],
         );
+    }
+
+    private function buildRunUrl(int|string $taskId): string
+    {
+        $baseUrl = rtrim((string) ($this->config['app_url'] ?? ''), '/');
+        $prefix  = '/' . trim((string) ($this->config['app_prefix'] ?? ''), '/');
+
+        return $baseUrl . $prefix . '/tasks/' . $taskId;
     }
 
     /**
