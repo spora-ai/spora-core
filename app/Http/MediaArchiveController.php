@@ -38,6 +38,7 @@ final class MediaArchiveController
         private readonly MediaArchiveService $mediaArchive,
         private readonly AuthService $auth,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
+        private readonly array $config = [],
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -88,7 +89,7 @@ final class MediaArchiveController
             $editable->save();
         }
 
-        return new JsonResponse(['data' => $this->serializer->serialize($editable, $this->requestHost($request))]);
+        return new JsonResponse(['data' => $this->serializer->serialize($editable, $this->configUrl())]);
     }
 
     private function findEditableAsset(string $id): MediaAsset|JsonResponse
@@ -244,7 +245,7 @@ final class MediaArchiveController
         }
         $asset->public_access_token = MediaArchiveService::mintPublicAccessToken();
         $asset->save();
-        return new JsonResponse(['data' => $this->serializer->serialize($asset, $this->requestHost($request))]);
+        return new JsonResponse(['data' => $this->serializer->serialize($asset, $this->configUrl())]);
     }
 
     private function canEdit(MediaAsset $asset): bool
@@ -273,9 +274,16 @@ final class MediaArchiveController
         return is_array($decoded) ? $decoded : [];
     }
 
-    private function requestHost(Request $request): string
+    /**
+     * Resolve the public base URL from the global config. The
+     * controller-scope `Request` is intentionally not used — share URLs
+     * must be stable across requests and trace back to the operator's
+     * configured origin (`config.app_url`), not the host a single
+     * request happened to land on.
+     */
+    private function configUrl(): string
     {
-        return $request->getSchemeAndHttpHost();
+        return (string) ($this->config['app_url'] ?? '');
     }
 
 

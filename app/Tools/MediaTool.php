@@ -15,7 +15,6 @@ use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ValueObjects\ToolResult;
-use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Built-in tool for reading the media library.
@@ -102,7 +101,7 @@ final class MediaTool extends AbstractTool
         private readonly MediaArchiveService $archive,
         private readonly AuthService $auth,
         private readonly ?ToolConfigService $toolConfigService = null,
-        private readonly ?Request $request = null,
+        private readonly array $config = [],
     ) {}
 
     public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
@@ -331,9 +330,13 @@ final class MediaTool extends AbstractTool
 
     private function publicUrl(MediaAsset $asset): string
     {
-        $host = $this->request !== null
-            ? $this->request->getSchemeAndHttpHost()
-            : ($_SERVER['HTTP_HOST'] ?? 'localhost');
+        // The public base URL is the resolved global config value
+        // (`config.app_url` — configured via config.php / SPORA_APP_URL, or
+        // detected by RequestOrigin::detect() at boot). Reading it from the
+        // global config rather than the per-request host keeps share URLs
+        // stable across requests and immune to Host-header spoofing on a
+        // single request.
+        $host = (string) ($this->config['app_url'] ?? '');
 
         return rtrim($host, '/') . '/api/v1/public/media/' . $asset->id . '?token=' . $asset->public_access_token;
     }

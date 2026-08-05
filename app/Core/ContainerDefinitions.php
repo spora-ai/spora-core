@@ -46,6 +46,7 @@ use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Extensions\AppLoader;
 use Spora\Http\AgentController;
 use Spora\Http\AgentOverrideController;
+use Spora\Http\AgentPictureController;
 use Spora\Http\AgentTemplateController;
 use Spora\Http\AgentToolController;
 use Spora\Http\AppsController;
@@ -103,6 +104,7 @@ use Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
+use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaConverterRegistry;
 use Spora\Services\MediaArchive\MediaIngestDecoder;
@@ -927,6 +929,8 @@ final class ContainerDefinitions
                 return new MediaArchiveController(
                     $c->get(MediaArchiveService::class),
                     $c->get(AuthService::class),
+                    new MediaAssetSerializer(),
+                    $c->get('config'),
                 );
             },
 
@@ -936,12 +940,26 @@ final class ContainerDefinitions
                     $c->get(MediaAllowedTypesService::class),
                     $c->get(AuthService::class),
                     $c->get(MimeSniffer::class),
+                    new MediaAssetSerializer(),
+                    $c->get('config'),
                 );
             },
 
             MediaAllowedTypesController::class => static function (ContainerInterface $c): MediaAllowedTypesController {
                 return new MediaAllowedTypesController(
                     $c->get(MediaAllowedTypesService::class),
+                );
+            },
+
+            AgentPictureController::class => static function (ContainerInterface $c): AgentPictureController {
+                return new AgentPictureController(
+                    $c->get(AuthService::class),
+                    $c->get(AgentServiceInterface::class),
+                    $c->get(AgentPictureService::class),
+                    $c->get(MediaArchiveService::class),
+                    $c->get(MimeSniffer::class),
+                    new MediaAssetSerializer(),
+                    $c->get('config'),
                 );
             },
 
@@ -1147,9 +1165,7 @@ final class ContainerDefinitions
                     $c->get(MediaArchiveService::class),
                     $c->get(AuthService::class),
                     $c->get(ToolConfigService::class),
-                    // Request is optional — null is the existing fallback for
-                    // CLI / worker contexts. publicUrl() falls back to
-                    // $_SERVER['HTTP_HOST'] when no request is bound.
+                    $c->get('config'),
                 );
             },
 

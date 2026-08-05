@@ -77,6 +77,7 @@ final class AgentPictureController
         private readonly MediaArchiveService $mediaArchive,
         private readonly MimeSniffer $sniffer,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
+        private readonly array $config = [],
     ) {}
 
     /**
@@ -222,7 +223,7 @@ final class AgentPictureController
         $fresh = $this->agentService->getAgent($agentId, $userId);
         return new JsonResponse([
             'data' => [
-                'asset'  => $this->serializer->serialize($asset, $request->getSchemeAndHttpHost()),
+                'asset'  => $this->serializer->serialize($asset, (string) ($this->config['app_url'] ?? '')),
                 'agent'  => $fresh !== null ? AgentResource::toArray($fresh, null, null, $this->pictureService) : null,
             ],
         ], Response::HTTP_CREATED);

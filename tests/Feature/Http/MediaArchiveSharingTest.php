@@ -107,7 +107,16 @@ function buildSharingController(bool $isAdmin = true, int $userId = 1): array
             return $this->admin;
         }
     };
-    return [$service, $service, new MediaArchiveController($service, $auth)];
+    return [
+        $service,
+        $service,
+        new MediaArchiveController(
+            $service,
+            $auth,
+            new \Spora\Services\MediaArchive\MediaAssetSerializer(),
+            ['app_url' => 'https://test.example/'],
+        ),
+    ];
 }
 
 function ingestSharedSample(int $userId = 1): \Spora\Models\MediaAsset
