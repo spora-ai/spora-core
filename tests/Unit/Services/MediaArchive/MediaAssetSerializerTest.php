@@ -172,3 +172,80 @@ test('serialize() produces JSON that json_encode accepts for the whole payload',
 
     expect(fn(): string => json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE))->not()->toThrow(Throwable::class);
 });
+
+test('serialize() returns null public_url when no token is set', function (): void {
+    $serializer = new MediaAssetSerializer();
+    $payload    = $serializer->serialize(makeMediaAsset(['public_access_token' => null]));
+
+    expect($payload['public_url'])->toBeNull();
+});
+
+test('serialize() uses the caller-supplied base URL as-is — no scheme prefix is added', function (): void {
+    // Regression: callers pass Request::getSchemeAndHttpHost() (already
+    // includes the scheme). The previous implementation treated that
+    // value as a bare host and prepended another scheme, producing
+    // `https://https://spora.example/...` share links.
+    $serializer = new MediaAssetSerializer();
+    $payload    = $serializer->serialize(
+        makeMediaAsset(['public_access_token' => 'tok-abc']),
+        'https://spora.example',
+    );
+
+    expect($payload['public_url'])->toBe(
+        'https://spora.example/api/v1/public/media/11111111-2222-3333-4444-555555555555?token=tok-abc',
+    );
+});
+
+test('serialize() strips a trailing slash from the caller-supplied base URL', function (): void {
+    $serializer = new MediaAssetSerializer();
+    $payload    = $serializer->serialize(
+        makeMediaAsset(['public_access_token' => 'tok-abc']),
+        'https://spora.example/',
+    );
+
+    expect($payload['public_url'])->toStartWith('https://spora.example/api/v1/public/media/');
+    expect($payload['public_url'])->not->toContain('//api');
+});
+
+test('serialize() falls back to HTTP_HOST + HTTPS when no base URL is supplied', function (): void {
+    $previous   = $_SERVER['HTTP_HOST'] ?? null;
+    $previousSsl = $_SERVER['HTTPS'] ?? null;
+    $_SERVER['HTTP_HOST'] = 'fallback.example';
+    $_SERVER['HTTPS']     = 'on';
+
+    try {
+        $serializer = new MediaAssetSerializer();
+        $payload    = $serializer->serialize(makeMediaAsset(['public_access_token' => 'tok-abc']));
+
+        expect($payload['public_url'])->toBe(
+            'https://fallback.example/api/v1/public/media/11111111-2222-3333-4444-555555555555?token=tok-abc',
+        );
+    } finally {
+        if ($previous === null) {
+            unset($_SERVER['HTTP_HOST']);
+        } else {
+            $_SERVER['HTTP_HOST'] = $previous;
+        }
+        if ($previousSsl === null) {
+            unset($_SERVER['HTTPS']);
+        } else {
+            $_SERVER['HTTPS'] = $previousSsl;
+        }
+    }
+});
+
+test('serialize() returns null public_url when no base URL is supplied and HTTP_HOST is empty', function (): void {
+    $previous = $_SERVER['HTTP_HOST'] ?? null;
+    unset($_SERVER['HTTP_HOST']);
+
+    try {
+        $serializer = new MediaAssetSerializer();
+        $payload    = $serializer->serialize(makeMediaAsset(['public_access_token' => 'tok-abc']));
+
+        expect($payload['public_url'])->toBeNull();
+    } finally {
+        if ($previous !== null) {
+            $_SERVER['HTTP_HOST'] = $previous;
+        }
+    }
+});
