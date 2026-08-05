@@ -94,7 +94,7 @@ final class AuthEmailFlow
             }
         }
 
-        return $emails;
+        return [$oldEmail, $newEmail];
     }
 
     /**
