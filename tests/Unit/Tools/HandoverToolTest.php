@@ -36,7 +36,7 @@ describe('HandoverTool::execute', function (): void {
             ->and($result->content)->toBe('target_agent_id is required.');
     });
 
-    test('returns failure when context_summary is missing', function (): void {
+    test('returns failure when prompt is missing', function (): void {
         [$tool] = makeHandoverTool();
 
         $result = $tool->execute(
@@ -47,14 +47,14 @@ describe('HandoverTool::execute', function (): void {
         );
 
         expect($result->success)->toBeFalse()
-            ->and($result->content)->toBe('context_summary is required.');
+            ->and($result->content)->toBe('prompt is required.');
     });
 
     test('returns failure when userId is null', function (): void {
         [$tool] = makeHandoverTool();
 
         $result = $tool->execute(
-            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'context_summary' => 'ctx'],
+            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'prompt' => 'ctx'],
             HANDOVER_AGENT_ID,
             null,
             HANDOVER_TASK_ID,
@@ -68,7 +68,7 @@ describe('HandoverTool::execute', function (): void {
         [$tool] = makeHandoverTool();
 
         $result = $tool->execute(
-            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'context_summary' => 'ctx'],
+            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'prompt' => 'ctx'],
             HANDOVER_AGENT_ID,
             HANDOVER_USER_ID,
             null,
@@ -84,7 +84,7 @@ describe('HandoverTool::execute', function (): void {
             ->andReturn(['allowed_target_agents' => [2, 3]]);
 
         $result = $tool->execute(
-            ['target_agent_id' => 1, 'context_summary' => 'ctx'],
+            ['target_agent_id' => 1, 'prompt' => 'ctx'],
             HANDOVER_AGENT_ID,
             HANDOVER_USER_ID,
             HANDOVER_TASK_ID,
@@ -103,7 +103,7 @@ describe('HandoverTool::execute', function (): void {
             ->andThrow(new InvalidArgumentException('Source task not found.'));
 
         $result = $tool->execute(
-            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'context_summary' => 'ctx'],
+            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'prompt' => 'ctx'],
             HANDOVER_AGENT_ID,
             HANDOVER_USER_ID,
             HANDOVER_TASK_ID,
@@ -124,7 +124,7 @@ describe('HandoverTool::execute', function (): void {
             ->andReturn($newTask);
 
         $result = $tool->execute(
-            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'context_summary' => 'ctx'],
+            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'prompt' => 'ctx'],
             HANDOVER_AGENT_ID,
             HANDOVER_USER_ID,
             HANDOVER_TASK_ID,
@@ -136,7 +136,7 @@ describe('HandoverTool::execute', function (): void {
             ->and($result->data['target_agent_id'])->toBe(HANDOVER_TARGET_AGENT)
             // The content is rendered as markdown in the chat UI, so the
             // "New task #N" reference is a clickable link to the new task.
-            ->and($result->content)->toContain("Handed over to agent #" . HANDOVER_TARGET_AGENT)
+            ->and($result->content)->toContain("Task delegated to agent #" . HANDOVER_TARGET_AGENT)
             ->and($result->content)->toContain("[New task #" . HANDOVER_NEW_TASK_ID . "](/tasks/" . HANDOVER_NEW_TASK_ID . ")");
     });
 });
@@ -146,6 +146,6 @@ describe('HandoverTool::describeAction', function (): void {
         [$tool] = makeHandoverTool();
 
         expect($tool->describeAction(['target_agent_id' => HANDOVER_TARGET_AGENT]))
-            ->toBe('Hand over the current chat to agent #' . HANDOVER_TARGET_AGENT . '.');
+            ->toBe('Hand over the task to agent #' . HANDOVER_TARGET_AGENT . '.');
     });
 });
