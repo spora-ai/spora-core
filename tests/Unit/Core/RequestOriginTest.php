@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Core;
 
+use ReflectionMethod;
 use Spora\Core\RequestOrigin;
 
 beforeEach(function (): void {
@@ -41,6 +42,21 @@ test('detect does NOT read SPOra_APP_URL from $_ENV (config system owns it)', fu
 
     unset($_ENV['SPORA_APP_URL'], $_ENV['SPORA_APP_PREFIX']);
     putenv('SPORA_APP_URL');
+});
+
+test('buildFromServer strips port from HTTP_HOST to avoid the :8080:8080 regression', function (): void {
+    // Regression: PHP's built-in dev server populates HTTP_HOST with the port
+    // already appended (e.g. "localhost:8080") and SERVER_PORT separately.
+    // buildFromServer() must strip the port from HTTP_HOST before appending
+    // SERVER_PORT, otherwise the result is "http://localhost:8080:8080".
+    // detect() cannot exercise this under Pest (PHP_SAPI === 'cli' short-circuits
+    // to 'http://localhost'), so we invoke the private buildFromServer() directly.
+    $method = new ReflectionMethod(RequestOrigin::class, 'buildFromServer');
+
+    expect($method->invoke(null, [
+        'HTTP_HOST'   => 'localhost:8080',
+        'SERVER_PORT' => 8080,
+    ]))->toBe('http://localhost:8080');
 });
 
 // detectFrom() — HTTP_HOST path

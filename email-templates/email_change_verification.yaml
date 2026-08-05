@@ -1,11 +1,14 @@
 name: email_change_verification
-subject: "Confirm your new email address"
-body_text: |
-  A request was made to change the email address on your Spora account to this address.
+subject: "Confirm your new email address — {{site_name}}"
+body: |
+  A request was made to change the email address on your {{site_name}}
+  account to **{{email}}**.
 
-  Please click the link below to confirm:
+  Please confirm by clicking the link below. The old address will keep
+  working if you ignore this email.
 
-  {{verification_link}}
+  [Confirm the new address]({{verification_link}})
 
-  If you did not make this request, you can safely ignore this email and your existing email address will remain active.
-body_html: null
+  If you didn't make this request, no further action is needed.
+
+  — The {{site_name}} team

@@ -157,13 +157,13 @@ test('performEmailChangeRequest succeeds when SMTP is healthy', function (): voi
     \Spora\Models\MailTemplate::create([
         'name'      => 'email_verification',
         'subject'   => 'Verify your email',
-        'body_text' => 'Click: {{verification_link}}',
+        'body' => 'Click: {{verification_link}}',
         'body_html' => '<p>Click: {{verification_link}}</p>',
     ]);
     \Spora\Models\MailTemplate::create([
         'name'      => 'email_change_verification',
         'subject'   => 'Confirm your new email',
-        'body_text' => 'Click: {{verification_link}}',
+        'body' => 'Click: {{verification_link}}',
         'body_html' => '<p>Click: {{verification_link}}</p>',
     ]);
 

@@ -47,7 +47,7 @@ interface MailTemplateServiceInterface
     /**
      * Preview a mail template with variables.
      *
-     * @return array{name: string, subject: string, body_text: string, body_html: string}
+     * @return array{name: string, subject: string, body: string, body_text: string}
      */
     public function previewTemplate(string $name, array $variables): array;
 }

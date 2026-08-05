@@ -19,7 +19,7 @@ use Symfony\Component\Yaml\Yaml;
  */
 final class EmailTemplateLoader
 {
-    /** @var array<string, array{name: string, subject: string, body_text: string, body_html: string|null}|null> */
+    /** @var array<string, array{name: string, subject: string, body: string, body_html: string|null}|null> */
     private ?array $templates = null;
 
     public function __construct(

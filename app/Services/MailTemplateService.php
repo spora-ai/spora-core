@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use RuntimeException;
 use Spora\Models\MailTemplate;
+use Spora\Services\Mail\MailTemplateRenderer;
 
 /**
  * Service for mail template management.
@@ -17,6 +19,7 @@ final class MailTemplateService implements MailTemplateServiceInterface
         'email_change_verification',
         'password_reset',
         'welcome',
+        'scheduled_run_completed',
     ];
 
     public function getAllTemplates(): array
@@ -44,7 +47,7 @@ final class MailTemplateService implements MailTemplateServiceInterface
         $template = MailTemplate::create([
             'name'      => (string) $data['name'],
             'subject'   => (string) $data['subject'],
-            'body_text' => $data['body_text'] ?? null,
+            'body'      => $data['body'] ?? null,
             'body_html' => $data['body_html'] ?? null,
         ]);
 
@@ -64,8 +67,8 @@ final class MailTemplateService implements MailTemplateServiceInterface
         if (isset($data['subject'])) {
             $template->subject = (string) $data['subject'];
         }
-        if (array_key_exists('body_text', $data)) {
-            $template->body_text = $data['body_text'] !== null ? (string) $data['body_text'] : null;
+        if (array_key_exists('body', $data)) {
+            $template->body = $data['body'] !== null ? (string) $data['body'] : null;
         }
         if (array_key_exists('body_html', $data)) {
             $template->body_html = $data['body_html'] !== null ? (string) $data['body_html'] : null;
@@ -96,16 +99,28 @@ final class MailTemplateService implements MailTemplateServiceInterface
     public function previewTemplate(string $name, array $variables): array
     {
         $template = MailTemplate::where('name', $name)->first();
+        if ($template === null) {
+            throw new RuntimeException("Mail template '{$name}' not found.");
+        }
 
-        $rendered = $template->render($variables);
+        $rendered = $this->renderer->render(
+            $variables,
+            $template->subject ?? '',
+            $template->body,
+            $template->body_html,
+        );
 
         return [
-            'name'       => $template->name,
-            'subject'    => $rendered['subject'],
-            'body_text'  => $rendered['body_text'],
-            'body_html'  => $rendered['body_html'],
+            'name'      => $template->name,
+            'subject'   => $rendered->subject,
+            'body'      => $rendered->bodyHtml,
+            'body_text' => $rendered->bodyText,
         ];
     }
+
+    public function __construct(
+        private readonly MailTemplateRenderer $renderer,
+    ) {}
 
     private function serializeTemplate(MailTemplate $template): array
     {
@@ -113,7 +128,7 @@ final class MailTemplateService implements MailTemplateServiceInterface
             'id'        => (int) $template->id,
             'name'      => $template->name,
             'subject'   => $template->subject,
-            'body_text' => $template->body_text,
+            'body'      => $template->body,
             'body_html' => $template->body_html,
         ];
     }

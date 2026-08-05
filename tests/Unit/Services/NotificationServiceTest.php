@@ -361,7 +361,7 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
         MailTemplate::create([
             'name'      => 'scheduled_run_completed',
             'subject'   => 'Run completed: {{agent_name}}',
-            'body_text' => 'Agent {{agent_name}} finished task {{task_id}} (prompt: {{user_prompt}}).',
+            'body' => 'Agent {{agent_name}} finished task {{task_id}} (prompt: {{user_prompt}}).',
             'body_html' => null,
         ]);
 

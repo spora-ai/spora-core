@@ -327,7 +327,7 @@ test('sendTemplatedEmail with a valid template returns true and logs the message
     MailTemplate::create([
         'name'      => 'hello_tmpl',
         'subject'   => 'Hello {{name}}',
-        'body_text' => 'Hi {{name}}, your code is {{code}}.',
+        'body' => 'Hi {{name}}, your code is {{code}}.',
         'body_html' => '<p>Hi {{name}}, your code is {{code}}.</p>',
     ]);
 
@@ -357,7 +357,7 @@ test('sendTemplatedEmail sends to multiple recipients', function (): void {
     MailTemplate::create([
         'name'      => 'broadcast',
         'subject'   => 'Announcement',
-        'body_text' => 'Body',
+        'body' => 'Body',
     ]);
 
     $logger = captureMailerLogger();
@@ -377,7 +377,7 @@ test('sendTemplatedEmail uses the from address from config', function (): void {
     MailTemplate::create([
         'name'      => 'cfg_from',
         'subject'   => 'Subject',
-        'body_text' => 'Body',
+        'body' => 'Body',
     ]);
 
     $logger = captureMailerLogger();
@@ -396,7 +396,7 @@ test('sendTemplatedEmail falls back to default from address when config is empty
     MailTemplate::create([
         'name'      => 'default_from',
         'subject'   => 'Subject',
-        'body_text' => 'Body',
+        'body' => 'Body',
     ]);
 
     $logger = captureMailerLogger();
@@ -411,7 +411,7 @@ test('sendTemplatedEmail falls back to default from name when config is empty', 
     MailTemplate::create([
         'name'      => 'default_from_name',
         'subject'   => 'Subject',
-        'body_text' => 'Body',
+        'body' => 'Body',
     ]);
 
     $logger = captureMailerLogger();
@@ -424,75 +424,44 @@ test('sendTemplatedEmail falls back to default from name when config is empty', 
     expect($logger->records[0]['context']['from'])->toBe('noreply@spora.local');
 });
 
-test('sendTemplatedEmail with only body_text (no body_html) does not throw', function (): void {
-    MailTemplate::create([
-        'name'      => 'text_only',
-        'subject'   => 'Subject',
-        'body_text' => 'Plain text body',
-        'body_html' => null,
-    ]);
-
-    $logger = captureMailerLogger();
-    $mailer = new SystemMailer(['mail_driver' => 'log'], $logger);
-
-    $result = $mailer->sendTemplatedEmail('text_only', [], ['a@example.com']);
-
-    expect($result)->toBeTrue();
-    expect($logger->records)->toHaveCount(1);
-});
-
-test('sendTemplatedEmail with null subject and bodies does not throw', function (): void {
+test('sendTemplatedEmail throws when the rendered body is empty', function (): void {
     MailTemplate::create([
         'name'      => 'all_null',
         'subject'   => null,
-        'body_text' => null,
+        'body' => null,
         'body_html' => null,
     ]);
 
     $logger = captureMailerLogger();
     $mailer = new SystemMailer(['mail_driver' => 'log'], $logger);
 
-    $result = $mailer->sendTemplatedEmail('all_null', [], ['a@example.com']);
-
-    expect($result)->toBeTrue();
+    expect(fn() => $mailer->sendTemplatedEmail('all_null', [], ['a@example.com']))
+        ->toThrow(InvalidArgumentException::class);
 });
 
-test('sendTemplatedEmail with only body_html (no body_text) does not throw', function (): void {
+test('sendTemplatedEmail with body_html shell containing {markdown_html} substitutes the rendered markdown', function (): void {
     MailTemplate::create([
-        'name'      => 'html_only',
-        'subject'   => 'Subject',
-        'body_text' => null,
-        'body_html' => '<p>HTML only</p>',
+        'name'      => 'shell_test',
+        'subject'   => 'Hi {{name}}',
+        'body'      => "# Hello {{name}}\n\nClick below:\n\n- One\n- Two",
+        'body_html' => '<h1>Header</h1>{markdown_html}<footer>End</footer>',
     ]);
 
     $logger = captureMailerLogger();
     $mailer = new SystemMailer(['mail_driver' => 'log'], $logger);
 
-    $result = $mailer->sendTemplatedEmail('html_only', [], ['a@example.com']);
+    $result = $mailer->sendTemplatedEmail('shell_test', ['name' => 'Fabian'], ['x@y.test']);
 
     expect($result)->toBeTrue();
-});
-
-test('sendTemplatedEmail with no body_html and no body_text falls back to empty string', function (): void {
-    MailTemplate::create([
-        'name'    => 'no_body',
-        'subject' => 'Subject',
-    ]);
-
-    $logger = captureMailerLogger();
-    $mailer = new SystemMailer(['mail_driver' => 'log'], $logger);
-
-    // body_text and body_html are null, html falls back to text (also null → '')
-    $result = $mailer->sendTemplatedEmail('no_body', [], ['a@example.com']);
-
-    expect($result)->toBeTrue();
+    expect($logger->records)->toHaveCount(1);
+    expect($logger->records[0]['context']['subject'])->toBe('Hi Fabian');
 });
 
 test('sendTemplatedEmail keeps unknown placeholders intact in the subject', function (): void {
     MailTemplate::create([
         'name'      => 'unknown_placeholder',
         'subject'   => 'Hello {{name}} (ref: {{unknown}})',
-        'body_text' => 'Hi {{name}}',
+        'body' => 'Hi {{name}}',
     ]);
 
     $logger = captureMailerLogger();
@@ -512,7 +481,7 @@ test('sendTemplatedEmail uses env var SPORA_MAIL_FROM over config', function ():
         MailTemplate::create([
             'name'      => 'env_from',
             'subject'   => 'S',
-            'body_text' => 'B',
+            'body' => 'B',
         ]);
 
         $logger = captureMailerLogger();
@@ -544,7 +513,7 @@ test('sendTemplatedEmail uses env var SPORA_MAIL_FROM_NAME over config', functio
         MailTemplate::create([
             'name'      => 'env_from_name',
             'subject'   => 'S',
-            'body_text' => 'B',
+            'body' => 'B',
         ]);
 
         $logger = captureMailerLogger();
@@ -573,7 +542,7 @@ test('sendVerificationEmail renders the email_verification template with verific
     MailTemplate::create([
         'name'      => 'email_verification',
         'subject'   => 'Verify your email: {{verification_link}}',
-        'body_text' => 'Hi {{email}}, click: {{verification_link}}',
+        'body' => 'Hi {{email}}, click: {{verification_link}}',
         'body_html' => '<p>Hi {{email}}, click: {{verification_link}}</p>',
     ]);
 
@@ -598,7 +567,7 @@ test('sendPasswordResetEmail renders the password_reset template with reset_link
     MailTemplate::create([
         'name'      => 'password_reset',
         'subject'   => 'Reset your password: {{reset_link}}',
-        'body_text' => 'Hi {{email}}, click: {{reset_link}}',
+        'body' => 'Hi {{email}}, click: {{reset_link}}',
         'body_html' => '<p>Hi {{email}}, click: {{reset_link}}</p>',
     ]);
 
@@ -623,7 +592,7 @@ test('sendWelcomeEmail uses the user name when found', function (): void {
     MailTemplate::create([
         'name'      => 'welcome',
         'subject'   => 'Welcome {{user_name}}!',
-        'body_text' => 'Hi {{user_name}} ({{email}})',
+        'body' => 'Hi {{user_name}} ({{email}})',
     ]);
 
     $user = User::create([
@@ -649,7 +618,7 @@ test('sendWelcomeEmail falls back to email when user has no name', function (): 
     MailTemplate::create([
         'name'      => 'welcome',
         'subject'   => 'Welcome {{user_name}}!',
-        'body_text' => 'Hi {{user_name}} ({{email}})',
+        'body' => 'Hi {{user_name}} ({{email}})',
     ]);
 
     $user = User::create([
@@ -673,7 +642,7 @@ test('sendWelcomeEmail falls back to email when user is not found', function ():
     MailTemplate::create([
         'name'      => 'welcome',
         'subject'   => 'Welcome {{user_name}}!',
-        'body_text' => 'Hi {{user_name}} ({{email}})',
+        'body' => 'Hi {{user_name}} ({{email}})',
     ]);
 
     $logger = captureMailerLogger();

@@ -9,6 +9,7 @@ use Psr\Log\LoggerInterface;
 use Spora\Mailer\LogTransport;
 use Spora\Models\MailTemplate;
 use Spora\Models\User;
+use Spora\Services\Mail\MailTemplateRenderer;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mime\Address;
@@ -19,12 +20,18 @@ use Symfony\Component\Mime\Email;
  *
  * Reads mail configuration from container config (merged config.php + .env via SPORA_MAIL_* vars).
  * Uses MailTemplate records for templated emails (verification, password reset, welcome, etc.).
+ *
+ * The Markdown body stored on each MailTemplate is rendered into HTML + plain-text
+ * by the optional {@see MailTemplateRenderer}. Without an injected renderer, the
+ * mailer falls back to {@see MailTemplateRenderer::createDefault()} so legacy
+ * callers (notably {@code SystemMailerTest}) keep working without DI wiring.
  */
 final class SystemMailer implements MailerInterface
 {
     public function __construct(
         private readonly array $config,
         private readonly ?LoggerInterface $logger = null,
+        private readonly ?MailTemplateRenderer $renderer = null,
     ) {}
 
     /**
@@ -86,9 +93,20 @@ final class SystemMailer implements MailerInterface
             throw new InvalidArgumentException("Mail template '{$templateName}' not found.");
         }
 
-        $rendered = $template->render($variables);
-        $config   = $this->getMailConfig();
-        $from     = new Address(
+        $renderer = $this->renderer ?? MailTemplateRenderer::createDefault();
+        $rendered = $renderer->render(
+            $variables,
+            $template->subject ?? '',
+            $template->body,
+            $template->body_html,
+        );
+
+        if ($rendered->bodyText === '' && $rendered->bodyHtml === '') {
+            throw new InvalidArgumentException("Mail template '{$templateName}' rendered to an empty body.");
+        }
+
+        $config = $this->getMailConfig();
+        $from   = new Address(
             $config['mail_from'] ?? 'noreply@spora.local',
             $config['mail_from_name'] ?? 'Spora',
         );
@@ -96,9 +114,9 @@ final class SystemMailer implements MailerInterface
         $email = (new Email())
             ->from($from)
             ->to(...$to)
-            ->subject($rendered['subject'] ?? '')
-            ->text($rendered['body_text'] ?? '')
-            ->html($rendered['body_html'] ?? $rendered['body_text'] ?? '');
+            ->subject($rendered->subject)
+            ->text($rendered->bodyText)
+            ->html($rendered->bodyHtml);
 
         $this->buildMailer()->send($email);
 
@@ -117,6 +135,7 @@ final class SystemMailer implements MailerInterface
         return $this->sendTemplatedEmail('email_verification', [
             'email'              => $email,
             'verification_link'  => $verificationUrl,
+            'site_name'          => $this->getMailConfig()['mail_from_name'] ?? 'Spora',
         ], [$email]);
     }
 
@@ -135,6 +154,7 @@ final class SystemMailer implements MailerInterface
         return $this->sendTemplatedEmail('email_change_verification', [
             'email'             => $email,
             'verification_link' => $verificationUrl,
+            'site_name'         => $this->getMailConfig()['mail_from_name'] ?? 'Spora',
         ], [$email]);
     }
 
@@ -150,6 +170,7 @@ final class SystemMailer implements MailerInterface
         return $this->sendTemplatedEmail('password_reset', [
             'email'     => $email,
             'reset_link' => $resetUrl,
+            'site_name' => $this->getMailConfig()['mail_from_name'] ?? 'Spora',
         ], [$email]);
     }
 
@@ -168,6 +189,7 @@ final class SystemMailer implements MailerInterface
         return $this->sendTemplatedEmail('welcome', [
             'user_name' => $userName,
             'email'     => $email,
+            'site_name' => $this->getMailConfig()['mail_from_name'] ?? 'Spora',
         ], [$email]);
     }
 
