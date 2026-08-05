@@ -106,23 +106,29 @@ final class AssetController
      */
     private function canAccessAsset(MediaAsset $asset): bool
     {
-        if ($this->auth->isAdmin()) {
-            return true;
-        }
         $userId = $this->auth->currentUserId();
         if ($userId === null) {
             return false;
         }
+        return $this->auth->isAdmin() || $this->ownsAsset($asset, $userId);
+    }
+
+    /**
+     * Single arm of the ownership union: does the given user own this row
+     * directly (uploaded it themselves) or own the agent that produced it?
+     * Split out so {@see canAccessAsset()} stays under the SonarQube
+     * 3-return brain-overload ceiling.
+     */
+    private function ownsAsset(MediaAsset $asset, int $userId): bool
+    {
         if ($asset->user_id !== null && (int) $asset->user_id === $userId) {
             return true;
         }
-        if ($asset->agent_id !== null) {
-            $agent = (new Agent())->find($asset->agent_id);
-            if ($agent !== null && (int) $agent->user_id === $userId) {
-                return true;
-            }
+        if ($asset->agent_id === null) {
+            return false;
         }
-        return false;
+        $agent = (new Agent())->find($asset->agent_id);
+        return $agent !== null && (int) $agent->user_id === $userId;
     }
 
     private function streamAsset(MediaAsset $asset): Response
