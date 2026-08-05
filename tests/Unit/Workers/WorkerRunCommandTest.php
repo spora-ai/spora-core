@@ -410,19 +410,24 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         ]);
 
         // Stale CLAIMED row for agent A (simulating a crashed prior worker tick).
+        // The OLD buggy claim did `ORDER BY due_at ASC` over CLAIMED rows, so we
+        // give this row the *older* due_at — that is exactly what would make the
+        // buggy code deterministically dispatch agent A here.
+        $staleDueAt = WORKER_TEST_PAST_DUE_AT;
+        $liveDueAt = date(DATETIME_FORMAT, strtotime(WORKER_TEST_PAST_DUE_AT) + 300);
+
         Capsule::table('scheduled_runs_next')->insert([
             'scheduled_run_id' => $runA->id,
-            'due_at'           => WORKER_TEST_PAST_DUE_AT,
+            'due_at'           => $staleDueAt,
             'status'           => ScheduledRunNext::STATUS_CLAIMED,
             'claimed_at'       => '2025-01-01 09:00:00',
             'created_at'       => '2025-01-01 09:00:00',
             'updated_at'       => '2025-01-01 09:00:00',
         ]);
 
-        // Live PENDING row for agent B (the one we actually want to fire).
         Capsule::table('scheduled_runs_next')->insert([
             'scheduled_run_id' => $runB->id,
-            'due_at'           => WORKER_TEST_PAST_DUE_AT,
+            'due_at'           => $liveDueAt,
             'status'           => ScheduledRunNext::STATUS_PENDING,
             'created_at'       => date(DATETIME_FORMAT),
             'updated_at'       => date(DATETIME_FORMAT),
@@ -467,13 +472,13 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         $processed = runProcessScheduledRuns($command);
         expect($processed)->toBe(1);
 
-        // The live entry moved PENDING → DONE.
         $liveEntry = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $runB->id)
             ->first();
         expect($liveEntry->status)->toBe(ScheduledRunNext::STATUS_DONE);
 
-        // The stale CLAIMED row for agent A is left alone — it is no longer picked up.
+        // The stale row stays CLAIMED — the claim is now keyed by the row we
+        // actually marked, so a leftover from a previous tick cannot be picked up.
         $staleEntry = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $runA->id)
             ->first();

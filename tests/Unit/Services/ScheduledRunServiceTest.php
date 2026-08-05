@@ -342,11 +342,7 @@ describe('ScheduledRunService::triggerRun', function (): void {
         expect($captured['prompt'])->toBe('trigger me');
     });
 
-    it('on a recurring run, inserts a fresh PENDING next entry instead of using raw INSERT OR IGNORE', function (): void {
-        // Regression: triggerRun() used to emit a raw "INSERT OR IGNORE INTO
-        // scheduled_runs_next ..." string. SQLite accepts that, but MariaDB /
-        // MySQL reject it (1064 syntax error near `OR IGNORE INTO ...`). The
-        // fixed path goes through Capsule::insertOrIgnore() which is dialect-aware.
+    it('on a recurring run, inserts a fresh PENDING next entry into scheduled_runs_next', function (): void {
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
         $mercure = Mockery::mock(MercurePublisherInterface::class);
         $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
