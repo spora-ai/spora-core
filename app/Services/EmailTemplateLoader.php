@@ -81,6 +81,18 @@ final class EmailTemplateLoader
             return;
         }
 
+        // Reject the pre-Markdown `body_text:` key explicitly. Letting it
+        // through would mean the sync command later sets the column to
+        // `null`, silently erasing a customised body the operator wrote
+        // under the old schema.
+        if (array_key_exists('body_text', $data) && !array_key_exists('body', $data)) {
+            throw new EmailTemplateParseException(sprintf(
+                'Email template "%s" still uses the legacy "body_text:" key. '
+                . 'Rename it to "body:" (Markdown source); see "Customising mail templates" in the Spora documentation.',
+                $file,
+            ));
+        }
+
         $name = (string) $data['name'];
 
         // Project overrides win: skip if a higher-priority dir already provided this template.

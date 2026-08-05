@@ -16,10 +16,23 @@ final class MailTemplateRenderer
      * Used by callers that don't have a DI container handy (e.g. `MailTemplate::render()`,
      * tests, and the `SystemMailer` no-container fallback) so the dependency
      * can be optional at the constructor level.
+     *
+     * Both {@code html_input=escape} and {@code allow_unsafe_links=false} are
+     * intentional: system emails render operator-authored Markdown where
+     * runtime placeholders such as {@code {{user_prompt}}} get filled with
+     * untrusted task content. Raw HTML in the Markdown body is escaped to
+     * entities (`<script>` → `&lt;script&gt;`) so payloads render as visible
+     * text in the recipient's client rather than executing, and the default
+     * `javascript:` and `vbscript:` hrefs are stripped. Operators needing a
+     * raw-HTML shell can opt in via {@code body_html}, which is trusted and
+     * never substituted from request data.
      */
     public static function createDefault(): self
     {
-        $env = new Environment();
+        $env = new Environment([
+            'html_input'         => 'escape',
+            'allow_unsafe_links' => false,
+        ]);
         $env->addExtension(new CommonMarkCoreExtension());
         $env->addExtension(new GithubFlavoredMarkdownExtension());
 
@@ -55,8 +68,7 @@ final class MailTemplateRenderer
         $finalHtml = match (true) {
             $substitutedHtmlShell !== null
                 && str_contains($substitutedHtmlShell, '{markdown_html}')
-                && $renderedHtml !== null
-                => str_replace('{markdown_html}', $renderedHtml, $substitutedHtmlShell),
+                => str_replace('{markdown_html}', $renderedHtml ?? '', $substitutedHtmlShell),
             $substitutedHtmlShell !== null
                 => $substitutedHtmlShell,
             default
@@ -85,7 +97,10 @@ final class MailTemplateRenderer
         $stripped = trim(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
 
         preg_match_all('/<a\s+[^>]*href\s*=\s*"(https?:\/\/[^"]+)"/i', $html, $matches);
-        $urls = array_values(array_unique($matches[1]));
+        $urls = array_values(array_unique(array_map(
+            static fn(string $href): string => html_entity_decode($href, ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+            $matches[1],
+        )));
 
         if ($urls === []) {
             return $stripped;

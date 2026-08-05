@@ -107,6 +107,19 @@ describe('EmailTemplateLoader', function (): void {
                 @unlink($badFile);
             }
         });
-    });
 
+        it('throws EmailTemplateParseException with rename guidance when a template uses the legacy body_text key', function (): void {
+            $legacyFile = BASE_PATH . '/email-templates/_legacy_test_' . uniqid() . '.yaml';
+            file_put_contents($legacyFile, "name: legacy\nsubject: Hi\nbody_text: legacy text\n");
+
+            try {
+                $loader = makeLoader();
+
+                expect(fn() => $loader->getAll())
+                    ->toThrow(EmailTemplateParseException::class);
+            } finally {
+                @unlink($legacyFile);
+            }
+        });
+    });
 });
