@@ -660,6 +660,107 @@ test('sendWelcomeEmail throws when the welcome template is missing', function ()
     $mailer->sendWelcomeEmail(1, 'a@example.com');
 })->throws(InvalidArgumentException::class, "Mail template 'welcome' not found.");
 
+test('buildDashboardUrl with empty app_prefix produces host/dashboard without double slash', function (): void {
+    $mailer = new SystemMailer([
+        'mail_driver' => 'log',
+        'app_url'     => 'https://example.com',
+        'app_prefix'  => '',
+    ]);
+
+    $reflection = new ReflectionMethod($mailer, 'buildDashboardUrl');
+    $url = $reflection->invoke($mailer);
+
+    expect($url)->toBe('https://example.com/dashboard');
+    expect($url)->not->toContain('//dashboard');
+});
+
+test('buildDashboardUrl with app_prefix=/spora produces host/spora/dashboard', function (): void {
+    $mailer = new SystemMailer([
+        'mail_driver' => 'log',
+        'app_url'     => 'https://example.com',
+        'app_prefix'  => '/spora',
+    ]);
+
+    $reflection = new ReflectionMethod($mailer, 'buildDashboardUrl');
+    $url = $reflection->invoke($mailer);
+
+    expect($url)->toBe('https://example.com/spora/dashboard');
+});
+
+test('buildDashboardUrl normalises a bare app_prefix and strips trailing slash', function (): void {
+    $mailer = new SystemMailer([
+        'mail_driver' => 'log',
+        'app_url'     => 'https://example.com/',
+        'app_prefix'  => 'spora/',
+    ]);
+
+    $reflection = new ReflectionMethod($mailer, 'buildDashboardUrl');
+    $url = $reflection->invoke($mailer);
+
+    expect($url)->toBe('https://example.com/spora/dashboard');
+});
+
+test('buildDashboardUrl strips trailing slashes from app_url', function (): void {
+    $mailer = new SystemMailer([
+        'mail_driver' => 'log',
+        'app_url'     => 'https://example.com///',
+        'app_prefix'  => '',
+    ]);
+
+    $reflection = new ReflectionMethod($mailer, 'buildDashboardUrl');
+    $url = $reflection->invoke($mailer);
+
+    expect($url)->toBe('https://example.com/dashboard');
+});
+
+test('buildDashboardUrl preserves IPv6 hostnames verbatim', function (): void {
+    $mailer = new SystemMailer([
+        'mail_driver' => 'log',
+        'app_url'     => 'https://[::1]:8080',
+        'app_prefix'  => '',
+    ]);
+
+    $reflection = new ReflectionMethod($mailer, 'buildDashboardUrl');
+    $url = $reflection->invoke($mailer);
+
+    expect($url)->toBe('https://[::1]:8080/dashboard');
+    expect($url)->not->toContain(':/dashboard');
+});
+
+test('sendWelcomeEmail renders successfully when the template references {{dashboard_url}}', function (): void {
+    MailTemplate::create([
+        'name'      => 'welcome',
+        'subject'   => 'Welcome {{user_name}}',
+        'body'      => 'Open your dashboard: [{{dashboard_url}}]({{dashboard_url}})',
+        'body_html' => '<p>Open <a href="{{dashboard_url}}">{{dashboard_url}}</a></p>',
+    ]);
+
+    $user = User::create([
+        'email'      => 'dashuser@example.com',
+        'username'   => 'dashuser',
+        'name'       => 'Dash User',
+        'password'   => password_hash('Password1!', PASSWORD_BCRYPT),
+        'registered' => time(),
+    ]);
+
+    $logger = captureMailerLogger();
+    $mailer = new SystemMailer([
+        'mail_driver' => 'log',
+        'app_url'     => 'https://example.com',
+        'app_prefix'  => '/spora',
+    ], $logger);
+
+    $result = $mailer->sendWelcomeEmail((int) $user->id, 'dashuser@example.com');
+
+    // The rendered dashboard URL is internal to the Email object (the log
+    // transport only captures to/from/subject), so a successful send proves
+    // the variable is wired through. The exact URL shape is asserted by the
+    // buildDashboardUrl() tests above.
+    expect($result)->toBeTrue();
+    expect($logger->records)->toHaveCount(1);
+    expect($logger->records[0]['context']['subject'])->toBe('Welcome Dash User');
+});
+
 test('sendTestEmail sends a test message and returns true', function (): void {
     $logger = captureMailerLogger();
     $mailer = new SystemMailer(['mail_driver' => 'log'], $logger);
