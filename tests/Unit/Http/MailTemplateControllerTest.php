@@ -189,6 +189,17 @@ test('destroy() returns 409 for email_verification system template', function ()
     expect($body['error']['code'])->toBe('CANNOT_DELETE_SYSTEM_TEMPLATE');
 });
 
+test('destroy() returns 409 for email_change_verification system template', function (): void {
+    [$controller] = makeMailTemplateController();
+    $template = MailTemplate::create(['name' => 'email_change_verification', 'subject' => 'x']);
+
+    $response = $controller->destroy($template->id);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_CONFLICT);
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('CANNOT_DELETE_SYSTEM_TEMPLATE');
+});
+
 test('destroy() returns 409 for password_reset system template', function (): void {
     [$controller] = makeMailTemplateController();
     $template = MailTemplate::create(['name' => 'password_reset', 'subject' => 'x']);

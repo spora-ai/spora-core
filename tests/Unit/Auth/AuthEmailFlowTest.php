@@ -38,6 +38,13 @@ function capturingMailer(ArrayObject $captured): MailerInterface
             return true;
         }
 
+        public function sendEmailChangeVerificationEmail(string $email, string $verificationUrl): bool
+        {
+            $this->captured['change_verify'] = $verificationUrl;
+
+            return true;
+        }
+
         public function sendWelcomeEmail(int $userId, string $email): bool
         {
             return true;
@@ -156,4 +163,38 @@ test('default /spora prefix lands the verification URL on the SPA route', functi
     $callback('selector', 'token');
 
     expect($captured['verify'])->toBe('https://spora.fabiangrassl.de/spora/auth/verify/selector?token=token');
+});
+
+test('buildChangeEmailConfirmationCallback returns null when no system mailer is wired', function (): void {
+    $flow = bootEmailFlow();
+
+    expect($flow->buildChangeEmailConfirmationCallback('any@example.com'))->toBeNull();
+});
+
+test('buildChangeEmailConfirmationCallback writes to sendEmailChangeVerificationEmail (not sendVerificationEmail)', function (): void {
+    $captured = new ArrayObject();
+
+    $flow = bootEmailFlow('https://spora.test', '');
+    $flow->setSystemMailer(capturingMailer($captured));
+
+    $callback = $flow->buildChangeEmailConfirmationCallback('change@example.com');
+    expect($callback)->toBeCallable();
+
+    $callback('selector', 'token');
+
+    expect($captured['change_verify'])->toBe('https://spora.test/auth/verify/selector?token=token');
+    // Signup-template callback must not fire for the change flow.
+    expect($captured->offsetExists('verify') ? $captured['verify'] : null)->toBeNull();
+});
+
+test('buildChangeEmailConfirmationCallback honours the appPrefix', function (): void {
+    $captured = new ArrayObject();
+
+    $flow = bootEmailFlow('https://spora.fabiangrassl.de', '/spora');
+    $flow->setSystemMailer(capturingMailer($captured));
+
+    $callback = $flow->buildChangeEmailConfirmationCallback('change@example.com');
+    $callback('selector', 'token');
+
+    expect($captured['change_verify'])->toBe('https://spora.fabiangrassl.de/spora/auth/verify/selector?token=token');
 });

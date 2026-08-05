@@ -716,6 +716,86 @@ describe('AuthController::verify', function (): void {
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
         expect($body['message'])->toBe('Email verified successfully.');
+        expect($body['kind'])->toBe('signup');
+        expect($body['old_email'])->toBeNull();
+        expect($body['new_email'])->toBe('verify-ok@example.com');
+    });
+
+    test('returns kind=change when the confirmation row points at a different email than the user', function (): void {
+        [$controller, $authService] = makeAuthController();
+        $userId = $authService->register('verify-change@example.com', AUTHCTL_TEST_PASSWORD, 'Verify Change');
+        User::where('id', $userId)->update(['verified' => 1]);
+        simulateLoggedInSession($userId, 'verify-change@example.com');
+
+        $selector = 'chg' . bin2hex(random_bytes(8));
+        $rawToken = 'tok' . bin2hex(random_bytes(8));
+        $hashedToken = \Delight\Auth\TokenHash::from($rawToken);
+
+        // Confirmation row pointing at a new email (different from users.email)
+        DB::table('users_confirmations')->insert([
+            'user_id'  => $userId,
+            'email'    => 'verify-change-new@example.com',
+            'selector' => $selector,
+            'token'    => $hashedToken,
+            'expires'  => time() + 86400,
+        ]);
+
+        $request = Request::create("/api/v1/auth/verify/{$selector}?token=" . urlencode($rawToken), 'GET');
+        $response = $controller->verify($request, $selector);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        $body = json_decode($response->getContent(), true);
+        expect($body['kind'])->toBe('change');
+        expect($body['message'])->toBe('Email address changed successfully.');
+        expect($body['old_email'])->toBe('verify-change@example.com');
+        expect($body['new_email'])->toBe('verify-change-new@example.com');
+
+        // The target user's record was updated to the new email.
+        $updated = User::find($userId);
+        expect($updated->email)->toBe('verify-change-new@example.com');
+
+        // The logged-in session's email sync was applied.
+        expect($_SESSION[\Delight\Auth\Auth::SESSION_FIELD_EMAIL] ?? null)->toBe('verify-change-new@example.com');
+    });
+
+    test('returns kind=change when the requester is logged in as a different user than the confirmation target', function (): void {
+        [$controller, $authService] = makeAuthController();
+        // Target user (A) whose email will be changed.
+        $targetUserId = $authService->register('verify-cross-target@example.com', AUTHCTL_TEST_PASSWORD, 'Cross Target');
+        User::where('id', $targetUserId)->update(['verified' => 1]);
+
+        // Requester (B), logged in but unrelated to the confirmation row.
+        $requesterId = $authService->register('verify-cross-requester@example.com', AUTHCTL_TEST_PASSWORD, 'Cross Requester');
+        simulateLoggedInSession($requesterId, 'verify-cross-requester@example.com');
+
+        $selector = 'crs' . bin2hex(random_bytes(8));
+        $rawToken = 'tok' . bin2hex(random_bytes(8));
+        $hashedToken = \Delight\Auth\TokenHash::from($rawToken);
+
+        // Confirmation row targeting A (not B).
+        DB::table('users_confirmations')->insert([
+            'user_id'  => $targetUserId,
+            'email'    => 'verify-cross-target-new@example.com',
+            'selector' => $selector,
+            'token'    => $hashedToken,
+            'expires'  => time() + 86400,
+        ]);
+
+        $request = Request::create("/api/v1/auth/verify/{$selector}?token=" . urlencode($rawToken), 'GET');
+        $response = $controller->verify($request, $selector);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        $body = json_decode($response->getContent(), true);
+        expect($body['kind'])->toBe('change');
+        expect($body['old_email'])->toBe('verify-cross-target@example.com');
+        expect($body['new_email'])->toBe('verify-cross-target-new@example.com');
+
+        // A's record updated, B untouched.
+        expect(User::find($targetUserId)->email)->toBe('verify-cross-target-new@example.com');
+        expect(User::find($requesterId)->email)->toBe('verify-cross-requester@example.com');
+
+        // The requester's session email is the original — no cross-write.
+        expect($_SESSION[\Delight\Auth\Auth::SESSION_FIELD_EMAIL] ?? null)->toBe('verify-cross-requester@example.com');
     });
 
     test('returns 400 when confirmation token is expired', function (): void {

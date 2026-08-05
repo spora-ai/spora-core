@@ -54,6 +54,12 @@ final class TransportThrowingMailerStub implements MailerInterface
         throw new TransportException('smtp transport refused: ' . $email);
     }
 
+    public function sendEmailChangeVerificationEmail(string $email, string $verificationUrl): bool
+    {
+        $this->sendCalls++;
+        throw new TransportException('smtp transport refused: ' . $email);
+    }
+
     public function sendPasswordResetEmail(string $email, string $resetUrl): bool
     {
         $this->sendCalls++;
@@ -145,11 +151,18 @@ test('performEmailChangeRequest succeeds when SMTP is healthy', function (): voi
     $userId = $authService->register('wf-chg-ok@example.com', 'Password1!', 'WF Chg OK', true);
     simulateLoggedInSession($userId, 'wf-chg-ok@example.com');
 
-    // Seed the email_verification template so the real SystemMailer can
-    // render the body when it sends via the log driver.
+    // Seed the email templates the SystemMailer (log driver) needs to render.
+    // Change-email now uses email_change_verification since PR #N split the
+    // confirmation flow into signup / change templates.
     \Spora\Models\MailTemplate::create([
         'name'      => 'email_verification',
         'subject'   => 'Verify your email',
+        'body_text' => 'Click: {{verification_link}}',
+        'body_html' => '<p>Click: {{verification_link}}</p>',
+    ]);
+    \Spora\Models\MailTemplate::create([
+        'name'      => 'email_change_verification',
+        'subject'   => 'Confirm your new email',
         'body_text' => 'Click: {{verification_link}}',
         'body_html' => '<p>Click: {{verification_link}}</p>',
     ]);

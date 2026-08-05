@@ -30,16 +30,14 @@ function markAccountUnverified(string $email): void
  */
 function makeCapturingMailer(): array
 {
-    $captured = new ArrayObject(['verify' => null, 'reset' => null]);
+    $captured = new ArrayObject(['verify' => null, 'reset' => null, 'change_verify' => null, 'welcome' => null]);
 
     $mailer = new class ($captured) implements MailerInterface {
-        private SystemMailer $inner;
         /** @var ArrayObject */
         private ArrayObject $captured;
 
         public function __construct(ArrayObject $captured)
         {
-            $this->inner = new SystemMailer(['mail_driver' => 'log']);
             $this->captured = $captured;
         }
 
@@ -57,9 +55,18 @@ function makeCapturingMailer(): array
             return true;
         }
 
+        public function sendEmailChangeVerificationEmail(string $email, string $verificationUrl): bool
+        {
+            $this->captured['change_verify'] = $verificationUrl;
+
+            return true;
+        }
+
         public function sendWelcomeEmail(int $userId, string $email): bool
         {
-            return $this->inner->sendWelcomeEmail($userId, $email);
+            $this->captured['welcome'] = ['user_id' => $userId, 'email' => $email];
+
+            return true;
         }
     };
 
@@ -152,6 +159,74 @@ test('confirmEmail() throws InvalidSelectorTokenPairException for unknown select
         ->toThrow(Delight\Auth\InvalidSelectorTokenPairException::class);
 });
 
+test('confirmEmail() sends the welcome email for an initial-signup confirmation (v9 null-old contract)', function (): void {
+    $service = bootAuthLayer();
+    $userId = $service->register('welcome-ok@example.com', 'Password1!', 'Welcome OK');
+
+    [$mailer, $captured] = makeCapturingMailer();
+    $service->setSystemMailer($mailer);
+
+    $selector = 'wco' . bin2hex(random_bytes(8));
+    $rawToken = 'tok' . bin2hex(random_bytes(8));
+    $hashedToken = Delight\Auth\TokenHash::from($rawToken);
+
+    // Confirmation row whose email matches the user's current email —
+    // delight-im collapses $oldEmail to null in this case.
+    Capsule::table('users_confirmations')->insert([
+        'user_id'  => $userId,
+        'email'    => 'welcome-ok@example.com',
+        'selector' => $selector,
+        'token'    => $hashedToken,
+        'expires'  => time() + 86400,
+    ]);
+
+    $_ENV['SPORA_SEND_WELCOME_EMAIL'] = 'true';
+    try {
+        [$oldEmail, $newEmail] = $service->confirmEmail($selector, $rawToken);
+    } finally {
+        unset($_ENV['SPORA_SEND_WELCOME_EMAIL']);
+    }
+
+    expect($oldEmail)->toBeNull();
+    expect($newEmail)->toBe('welcome-ok@example.com');
+    expect($captured['welcome']['user_id'])->toBe($userId);
+    expect($captured['welcome']['email'])->toBe('welcome-ok@example.com');
+});
+
+test('confirmEmail() does NOT send the welcome email for an address-change confirmation (old != null)', function (): void {
+    $service = bootAuthLayer();
+    $userId = $service->register('welcome-skip@example.com', 'Password1!', 'Welcome Skip');
+    User::where('id', $userId)->update(['verified' => 1]);
+
+    [$mailer, $captured] = makeCapturingMailer();
+    $service->setSystemMailer($mailer);
+
+    $selector = 'wsk' . bin2hex(random_bytes(8));
+    $rawToken = 'tok' . bin2hex(random_bytes(8));
+    $hashedToken = Delight\Auth\TokenHash::from($rawToken);
+
+    // Confirmation row pointing at a NEW email — delight-im returns the
+    // previous email as $oldEmail, which is non-null.
+    Capsule::table('users_confirmations')->insert([
+        'user_id'  => $userId,
+        'email'    => 'welcome-skip-new@example.com',
+        'selector' => $selector,
+        'token'    => $hashedToken,
+        'expires'  => time() + 86400,
+    ]);
+
+    $_ENV['SPORA_SEND_WELCOME_EMAIL'] = 'true';
+    try {
+        [$oldEmail, $newEmail] = $service->confirmEmail($selector, $rawToken);
+    } finally {
+        unset($_ENV['SPORA_SEND_WELCOME_EMAIL']);
+    }
+
+    expect($oldEmail)->toBe('welcome-skip@example.com');
+    expect($newEmail)->toBe('welcome-skip-new@example.com');
+    expect($captured['welcome'])->toBeNull();
+});
+
 test('resendVerificationEmail() without system mailer does not throw', function (): void {
     $service = bootAuthLayer();
 
@@ -191,8 +266,10 @@ describe('AuthService::changeEmail', function (): void {
 
         $service->changeEmail('change-target@example.com');
 
-        expect($captured['verify'])->toBeString();
-        expect($captured['verify'])->toStartWith('https://spora.test/auth/verify/');
+        expect($captured['change_verify'])->toBeString();
+        expect($captured['change_verify'])->toStartWith('https://spora.test/auth/verify/');
+        // Signup-template callback must not have fired for the change flow.
+        expect($captured['verify'])->toBeNull();
     });
 
     test('constructor appPrefix prepends the path prefix to the verification URL', function (): void {
@@ -204,9 +281,10 @@ describe('AuthService::changeEmail', function (): void {
 
         $service->changeEmail('change-prefix-target@example.com');
 
-        expect($captured['verify'])->toBeString();
-        expect($captured['verify'])->toStartWith('https://spora.fabiangrassl.de/spora/auth/verify/');
-        expect($captured['verify'])->not->toStartWith('https://spora.fabiangrassl.de/spora/spora/');
+        expect($captured['change_verify'])->toBeString();
+        expect($captured['change_verify'])->toStartWith('https://spora.fabiangrassl.de/spora/auth/verify/');
+        expect($captured['change_verify'])->not->toStartWith('https://spora.fabiangrassl.de/spora/spora/');
+        expect($captured['verify'])->toBeNull();
     });
 
     test('logged-out request fails with NotLoggedInException', function (): void {
@@ -219,6 +297,7 @@ describe('AuthService::changeEmail', function (): void {
             ->toThrow(Delight\Auth\NotLoggedInException::class);
 
         // The callback must not fire when the request is rejected.
+        expect($captured['change_verify'])->toBeNull();
         expect($captured['verify'])->toBeNull();
     });
 
@@ -231,7 +310,7 @@ describe('AuthService::changeEmail', function (): void {
 
         $service->changeEmail('change-target-token@example.com');
 
-        expect($captured['verify'])->toMatch('#\?token=.+#');
+        expect($captured['change_verify'])->toMatch('#\?token=.+#');
     });
 });
 

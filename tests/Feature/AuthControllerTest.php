@@ -290,6 +290,10 @@ test('resetPassword resets password with valid selector and token', function ():
         {
             return $this->inner->sendVerificationEmail($email, $verificationUrl);
         }
+        public function sendEmailChangeVerificationEmail(string $email, string $verificationUrl): bool
+        {
+            return $this->inner->sendEmailChangeVerificationEmail($email, $verificationUrl);
+        }
         public function sendWelcomeEmail(int $userId, string $email): bool
         {
             return $this->inner->sendWelcomeEmail($userId, $email);

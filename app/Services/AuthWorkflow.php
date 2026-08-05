@@ -207,12 +207,19 @@ final class AuthWorkflow
     public function performEmailVerification(string $selector, string $token): JsonResponse
     {
         try {
-            $this->authService->confirmEmail($selector, $token);
+            [$oldEmail, $newEmail] = $this->authService->confirmEmail($selector, $token);
         } catch (AuthException $e) {
             return $this->validator->mapEmailVerificationError($e);
         }
 
-        return new JsonResponse(['message' => 'Email verified successfully.'], Response::HTTP_OK);
+        $kind = $oldEmail === null ? 'signup' : 'change';
+
+        return new JsonResponse([
+            'message'   => $kind === 'signup' ? 'Email verified successfully.' : 'Email address changed successfully.',
+            'kind'      => $kind,
+            'old_email' => $oldEmail,
+            'new_email' => $newEmail,
+        ], Response::HTTP_OK);
     }
 
     public function handleForgotPassword(Request $request, string $clientIp): JsonResponse
