@@ -14,11 +14,11 @@ use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
- * Lets the LLM transfer the running chat to a different agent that the
- * user has pre-approved via the `allowed_target_agents` multi-select.
+ * Lets the LLM hand over a task to a different agent that the user has
+ * pre-approved via the `allowed_target_agents` multi-select.
  *
  * The source task is closed; a new Task is started on the target agent
- * with the LLM-supplied `context_summary` as the first user message and
+ * with the LLM-supplied `prompt` as the first user message and
  * `parent_task_id` linking back to the source for UI breadcrumb rendering.
  *
  * Example front-end usage (for the ToolSettingField "multi-select"):
@@ -27,22 +27,21 @@ use Spora\Tools\ValueObjects\ToolResult;
  * Example LLM-facing schema (for the tool definition):
  *   handover tool
  *     Allowed target agents: ["Legal Agent (#1)", "Sales Agent (#5)"]
- *     parameters: { target_agent_id: int, context_summary: string }
+ *     parameters: { target_agent_id: int, prompt: string }
  */
 #[Tool(
     name: 'handover',
     displayName: 'Handover',
     category: 'agent',
-    description: 'Transfer the current chat to another agent that the user has pre-approved. '
-               . 'Pass context_summary describing the conversation so far. '
-               . 'The new task inherits the source task as its parent.',
+    description: 'Hand over a task to a pre-approved agent. The target starts from `prompt` '
+               . 'alone (source history is not copied); the source task closes.',
     icon: 'arrow-right',
 )]
 #[ToolSetting(
     key: 'allowed_target_agents',
     label: 'Allowed target agents',
     type: 'multi-select',
-    description: 'Agents this agent may hand over the chat to. The LLM sees this list and may only pick from it.',
+    description: 'Agents this agent may hand over tasks to. The LLM sees this list and may only pick from it.',
     required: true,
     // exposeToLlm: the LLM is the consumer of this allowlist. The stored
     // int[] is resolved to "Name (#id)" strings by ToolConfigSchemaInspector
@@ -50,8 +49,8 @@ use Spora\Tools\ValueObjects\ToolResult;
     exposeToLlm: true,
 )]
 #[ToolOperation(
-    name: 'transfer',
-    description: 'Hand the current chat over to a target agent',
+    name: 'handover',
+    description: 'Hand over a task to the target agent',
     enabledByDefault: true,
     // Requires approval: the source task is closed as a side-effect.
     requiresApprovalByDefault: true,
@@ -63,9 +62,11 @@ use Spora\Tools\ValueObjects\ToolResult;
     required: true,
 )]
 #[ToolParameter(
-    name: 'context_summary',
+    name: 'prompt',
     type: 'string',
-    description: 'A short summary of the conversation so far, written for the new agent to read as the first message.',
+    description: 'Self-contained first user message for the new task on the target agent. The target '
+               . 'has NO access to source history, so include the goal, key facts, decisions, pending '
+               . 'items, and any verbatim quotes to preserve. Anything not in this message is lost.',
     required: true,
 )]
 final class HandoverTool extends AbstractTool
@@ -78,7 +79,7 @@ final class HandoverTool extends AbstractTool
     public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
     {
         $targetAgentId = (int) ($arguments['target_agent_id'] ?? 0);
-        $summary       = trim((string) ($arguments['context_summary'] ?? ''));
+        $summary       = trim((string) ($arguments['prompt'] ?? ''));
 
         $error = $this->validateInputs($targetAgentId, $summary, $agentId, $userId, $taskId);
         if ($error !== null) {
@@ -102,7 +103,7 @@ final class HandoverTool extends AbstractTool
             // "[New task #N](/tasks/N)" link becomes a clickable link to the
             // new task. The data payload also carries new_task_id for any
             // consumer that wants to render its own link.
-            content: "Handed over to agent #{$targetAgentId}. [New task #{$newTask->id}](/tasks/{$newTask->id}).",
+            content: "Task delegated to agent #{$targetAgentId}. [New task #{$newTask->id}](/tasks/{$newTask->id}).",
             data: [
                 'handover'         => true,
                 'new_task_id'      => $newTask->id,
@@ -122,7 +123,7 @@ final class HandoverTool extends AbstractTool
     {
         return match (true) {
             $targetAgentId <= 0 => 'target_agent_id is required.',
-            $summary === ''     => 'context_summary is required.',
+            $summary === ''     => 'prompt is required.',
             $userId === null    => 'Handover requires an authenticated user.',
             $taskId === null    => 'Handover requires a current task context.',
             !$this->isTargetAllowed($targetAgentId, $agentId, $userId)
@@ -147,6 +148,6 @@ final class HandoverTool extends AbstractTool
     public function describeAction(array $arguments): string
     {
         $target = $arguments['target_agent_id'] ?? '?';
-        return "Hand over the current chat to agent #{$target}.";
+        return "Hand over the task to agent #{$target}.";
     }
 }

@@ -185,7 +185,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
                         'handover',
                         [
                             'target_agent_id' => $targetAgentId,
-                            'context_summary' => HANDOVER_E2E_SUMMARY,
+                            'prompt' => HANDOVER_E2E_SUMMARY,
                         ],
                     )],
                     inputTokens: 10,
@@ -222,7 +222,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
             'decision' => 'approve',
             'arguments' => [
                 'target_agent_id' => $targetAgentId,
-                'context_summary' => HANDOVER_E2E_SUMMARY,
+                'prompt' => HANDOVER_E2E_SUMMARY,
             ],
         ]]);
 
@@ -288,7 +288,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
                         'handover',
                         [
                             'target_agent_id' => $targetAgentId, // NOT in allowlist (it's empty)
-                            'context_summary' => HANDOVER_E2E_SUMMARY,
+                            'prompt' => HANDOVER_E2E_SUMMARY,
                         ],
                     )],
                     inputTokens: 10,
@@ -310,7 +310,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
             'decision' => 'approve',
             'arguments' => [
                 'target_agent_id' => $targetAgentId,
-                'context_summary' => HANDOVER_E2E_SUMMARY,
+                'prompt' => HANDOVER_E2E_SUMMARY,
             ],
         ]]);
 
@@ -325,7 +325,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
         expect($toolCall->result_content)->toContain('not in the allowed_target_agents list');
     });
 
-    it('first history row of the new task carries the LLM-supplied context_summary', function (): void {
+    it('first history row of the new task carries the LLM-supplied prompt', function (): void {
         $seed   = handoverE2eSeedAgents();
         $sourceAgentId = $seed['sourceAgentId'];
         $targetAgentId = $seed['targetAgentId'];
@@ -348,7 +348,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
                         'handover',
                         [
                             'target_agent_id' => $targetAgentId,
-                            'context_summary' => HANDOVER_E2E_SUMMARY,
+                            'prompt' => HANDOVER_E2E_SUMMARY,
                         ],
                     )],
                     inputTokens: 10,
@@ -366,7 +366,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
             'decision' => 'approve',
             'arguments' => [
                 'target_agent_id' => $targetAgentId,
-                'context_summary' => HANDOVER_E2E_SUMMARY,
+                'prompt' => HANDOVER_E2E_SUMMARY,
             ],
         ]]);
 

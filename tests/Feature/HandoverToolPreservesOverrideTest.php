@@ -67,7 +67,7 @@ it('does not modify the agent_tool_overrides row when the HandoverTool is invoke
     ]);
 
     $result = $tool->execute(
-        arguments: ['target_agent_id' => $targetAgent->id, 'context_summary' => 'ctx'],
+        arguments: ['target_agent_id' => $targetAgent->id, 'prompt' => 'ctx'],
         agentId: $sourceAgent->id,
         userId: $userId,
         taskId: $source->id,
@@ -130,7 +130,7 @@ it('does not wipe the allowlist when the handover is rejected (target not in all
 
     // Target an agent NOT in the allowlist — tool rejects.
     $result = $tool->execute(
-        arguments: ['target_agent_id' => 9999, 'context_summary' => 'ctx'],
+        arguments: ['target_agent_id' => 9999, 'prompt' => 'ctx'],
         agentId: $sourceAgent->id,
         userId: $userId,
         taskId: $source->id,
