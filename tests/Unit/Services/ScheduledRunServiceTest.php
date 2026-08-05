@@ -308,7 +308,7 @@ describe('ScheduledRunService::triggerRun', function (): void {
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
         $mercure = Mockery::mock(MercurePublisherInterface::class);
 
-        $captured = null;
+        $captured = ['agentId' => -1, 'prompt' => '', 'maxSteps' => 0];
         $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps) use (&$captured): Task {
             $captured = ['agentId' => $agentId, 'prompt' => $prompt, 'maxSteps' => $maxSteps];
             return Task::create([
@@ -340,5 +340,46 @@ describe('ScheduledRunService::triggerRun', function (): void {
         expect($result['task_id'])->toBeInt();
         expect($captured['agentId'])->toBe($agentId);
         expect($captured['prompt'])->toBe('trigger me');
+    });
+
+    it('on a recurring run, inserts a fresh PENDING next entry instead of using raw INSERT OR IGNORE', function (): void {
+        // Regression: triggerRun() used to emit a raw "INSERT OR IGNORE INTO
+        // scheduled_runs_next ..." string. SQLite accepts that, but MariaDB /
+        // MySQL reject it (1064 syntax error near `OR IGNORE INTO ...`). The
+        // fixed path goes through Capsule::insertOrIgnore() which is dialect-aware.
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
+            return Task::create([
+                'agent_id'    => $agentId,
+                'user_id'     => 1,
+                'status'      => 'RUNNING',
+                'user_prompt' => $prompt,
+                'max_steps'   => $maxSteps,
+                'step_count'  => 0,
+            ]);
+        });
+        $mercure->allows('publish')->andReturn(true);
+
+        $service = new ScheduledRunService($orchestrator, $mercure);
+        [$userId, $agentId] = createScheduledRunUserAgent();
+
+        $run = ScheduledRun::create([
+            'agent_id'        => $agentId,
+            'user_id'         => $userId,
+            'raw_prompt'      => 'recurring trigger',
+            'cron_expression' => SCHEDULED_RUN_TEST_CRON,
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+
+        $service->triggerRun($run->id, $agentId, $userId);
+
+        $pendingCount = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $run->id)
+            ->where('status', ScheduledRunNext::STATUS_PENDING)
+            ->count();
+
+        expect($pendingCount)->toBe(1);
     });
 });

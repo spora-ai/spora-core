@@ -85,36 +85,40 @@ final class ScheduledRunProcessor
     /**
      * Atomically claim the next due scheduled run and resolve its run/agent.
      *
+     * Uses SELECT … FOR UPDATE inside a transaction so the row we read is the
+     * same row we mark CLAIMED. This avoids the prior read-after-write race
+     * where a follow-up `WHERE status=CLAIMED ORDER BY due_at` could return a
+     * stale CLAIMED row from a previous worker run that crashed between claim
+     * and finalization — which dispatched the wrong agent.
+     *
      * @return array{entry: object, run: ScheduledRun, agent: Agent}|null
      */
     private function claimNextScheduledRun(): ?array
     {
         $now = date(self::DB_DATETIME_FORMAT);
 
-        $claimed = Capsule::table('scheduled_runs_next')
-            ->where('status', ScheduledRunNext::STATUS_PENDING)
-            ->where('due_at', '<=', $now)
-            ->limit(1)
-            ->update([
-                'status'     => ScheduledRunNext::STATUS_CLAIMED,
-                'claimed_at' => $now,
-            ]);
+        return Capsule::connection()->transaction(function () use ($now) {
+            $entry = Capsule::table('scheduled_runs_next')
+                ->where('status', ScheduledRunNext::STATUS_PENDING)
+                ->where('due_at', '<=', $now)
+                ->orderBy('due_at')
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->first();
 
-        if ($claimed <= 0) {
-            return null;
-        }
+            if ($entry === null) {
+                return null;
+            }
 
-        $entry = Capsule::table('scheduled_runs_next')
-            ->where('status', ScheduledRunNext::STATUS_CLAIMED)
-            ->where('due_at', '<=', $now)
-            ->orderBy('due_at')
-            ->first();
+            Capsule::table('scheduled_runs_next')
+                ->where('id', $entry->id)
+                ->update([
+                    'status'     => ScheduledRunNext::STATUS_CLAIMED,
+                    'claimed_at' => $now,
+                ]);
 
-        if ($entry === null) {
-            return null;
-        }
-
-        return $this->resolveClaimedRun($entry);
+            return $this->resolveClaimedRun($entry);
+        });
     }
 
     /**
@@ -225,16 +229,23 @@ final class ScheduledRunProcessor
 
     private function insertRecurringEntry(ScheduledRun $run, string $nextDueAt, string $completedAt): void
     {
+        // Drop any stale PENDING/CLAIMED entry at this exact (scheduled_run_id, due_at)
+        // so the unique index cannot collide. The ->insertOrIgnore() below is the
+        // dialect-portable safety net (INSERT OR IGNORE on SQLite, INSERT IGNORE on
+        // MariaDB/MySQL) for any concurrent inserter the DELETE missed.
         Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $run->id)
             ->where('due_at', $nextDueAt)
             ->whereIn('status', [ScheduledRunNext::STATUS_PENDING, ScheduledRunNext::STATUS_CLAIMED])
             ->delete();
 
-        Capsule::connection()->statement(
-            "INSERT OR IGNORE INTO scheduled_runs_next (scheduled_run_id, due_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            [$run->id, $nextDueAt, ScheduledRunNext::STATUS_PENDING, $completedAt, $completedAt],
-        );
+        Capsule::table('scheduled_runs_next')->insertOrIgnore([
+            'scheduled_run_id' => $run->id,
+            'due_at'           => $nextDueAt,
+            'status'           => ScheduledRunNext::STATUS_PENDING,
+            'created_at'       => $completedAt,
+            'updated_at'       => $completedAt,
+        ]);
     }
 
     private function updateRecurringRun(ScheduledRun $run, string $completedAt, string $nextDueAt): void
