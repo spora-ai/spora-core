@@ -52,15 +52,11 @@ final class SubAgentService implements SubAgentServiceInterface
         $parent = Task::where('id', $parentTaskId)
             ->where('user_id', $userId)
             ->first();
-        if ($parent === null) {
-            throw new InvalidArgumentException('Parent task not found.');
-        }
-
         $targetAgent = Agent::where('id', $targetAgentId)
             ->where('user_id', $userId)
             ->first();
-        if ($targetAgent === null) {
-            throw new InvalidArgumentException('Target agent not found.');
+        if ($parent === null || $targetAgent === null) {
+            throw new InvalidArgumentException('Parent task or target agent not found.');
         }
 
         // Flip to AWAITING_SUB_AGENTS before the child tick — in Sync mode
@@ -136,13 +132,10 @@ final class SubAgentService implements SubAgentServiceInterface
         }
 
         $expectedCount = (int) ($parent->data['sub_agent_expected_count'] ?? 0);
-        if ($expectedCount <= 0) {
-            return;
-        }
-
-        $siblingIds = $this->extractSpawnedChildIds($parent);
+        $siblingIds = $expectedCount > 0 ? $this->extractSpawnedChildIds($parent) : [];
         if (
-            count($siblingIds) !== $expectedCount
+            $expectedCount <= 0
+            || count($siblingIds) !== $expectedCount
             || !$this->allSiblingsTerminal($siblingIds)
         ) {
             return;
@@ -162,11 +155,7 @@ final class SubAgentService implements SubAgentServiceInterface
     private function loadReadyParent(int $childTaskId): ?array
     {
         $child = Task::find($childTaskId);
-        if (
-            $child === null
-            || $child->parent_task_id === null
-            || !in_array($child->status, ['COMPLETED', 'FAILED'], true)
-        ) {
+        if ($child === null || $child->parent_task_id === null) {
             return null;
         }
 
@@ -176,13 +165,11 @@ final class SubAgentService implements SubAgentServiceInterface
         }
 
         $expectedCount = (int) ($parent->data['sub_agent_expected_count'] ?? 0);
-        if ($expectedCount <= 0) {
-            return null;
-        }
-
-        $siblingIds = $this->extractSpawnedChildIds($parent);
+        $siblingIds = $expectedCount > 0 ? $this->extractSpawnedChildIds($parent) : [];
         if (
-            count($siblingIds) !== $expectedCount
+            $expectedCount <= 0
+            || count($siblingIds) !== $expectedCount
+            || !in_array($child->status, ['COMPLETED', 'FAILED'], true)
             || !$this->allSiblingsTerminal($siblingIds)
         ) {
             return null;
