@@ -91,7 +91,7 @@ final class Orchestrator implements OrchestratorInterface
             $config->pluginLoader,
             fn(array $llmSettings): string => $this->buildLlmConfigBlock($llmSettings),
         );
-        $this->retryScheduler        = new RetryScheduler($this, $config->logger, $config->notificationService);
+        $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
         $this->contextWindowRecovery = new ContextWindowRecovery($this, $driverFactory, $config->logger, $config->notificationService);
         $this->approvedBatchExecutor = new ApprovedBatchExecutor($this, $config->workerMode, $config->logger);
         $this->tickPhaseRunner       = new TickPhaseRunner(
@@ -162,6 +162,46 @@ final class Orchestrator implements OrchestratorInterface
             $task->max_steps = $additionalSteps;
         }
 
+        $task->save();
+
+        if ($this->workerMode === WorkerMode::Sync) {
+            $this->tick($task->id);
+        }
+
+        return $task->fresh();
+    }
+
+    /**
+     * Re-run a failed task in place: same task_id, same URL, full conversation
+     * history preserved as LLM context. The LLM sees the original user prompt
+     * plus any failed assistant/tool rows from the previous attempt, which lets
+     * it either retry the failing call or take an alternative path on transient
+     * errors (rate limit, timeout, gateway blip).
+     *
+     * Resets `error_code`, `failure_reason`, `retry_after`, `step_count`,
+     * `retry_of_task_id`, and `status` (FAILED → RUNNING in Sync mode, FAILED →
+     * QUEUED in Async mode). `max_steps` is preserved. No existing history
+     * rows are rewritten; any new rows produced on this re-run come from the
+     * underlying tick, not from retry() itself. `retry_of_task_id` is cleared
+     * so the task becomes claimable by WorkerQueueProcessor's main QUEUED
+     * loop — the chain "ends" as soon as the worker picks the row up, and a
+     * subsequent failure (if any) re-arms it via TickPhaseRunner::
+     * notifyFailedAndScheduleRetry.
+     */
+    public function retry(int $taskId): Task
+    {
+        $task = Task::findOrFail($taskId);
+
+        if ($task->status !== 'FAILED') {
+            throw new InvalidTaskTransitionException('Can only retry failed tasks.');
+        }
+
+        $task->status = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
+        $task->step_count = 0;
+        $task->error_code = null;
+        $task->failure_reason = null;
+        $task->retry_after = null;
+        $task->retry_of_task_id = null;
         $task->save();
 
         if ($this->workerMode === WorkerMode::Sync) {

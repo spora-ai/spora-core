@@ -756,7 +756,7 @@ it('retry returns 409 when task is not FAILED', function (): void {
     expect($resp->getStatusCode())->toBe(409);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-it('retry calls orchestrator->start() with same agent_id and user_prompt', function (): void {
+it('retry calls taskService->retryTask() and returns 200 with the in-place task resource', function (): void {
     $taskResource = [
         'id'          => 2,
         'agent_id'    => 1,
@@ -795,10 +795,10 @@ it('retry calls orchestrator->start() with same agent_id and user_prompt', funct
     $req->attributes->set('taskId', $task->id);
 
     $resp = $controller->retry($req);
-    expect($resp->getStatusCode())->toBe(201);
+    expect($resp->getStatusCode())->toBe(200);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-it('retry returns 201 with the new task resource', function (): void {
+it('retry returns 200 with the in-place task resource', function (): void {
     $taskResource = [
         'id'          => 2,
         'agent_id'    => 1,
@@ -832,7 +832,7 @@ it('retry returns 201 with the new task resource', function (): void {
     $req->attributes->set('taskId', $task->id);
 
     $resp = $controller->retry($req);
-    expect($resp->getStatusCode())->toBe(201);
+    expect($resp->getStatusCode())->toBe(200);
 
     $body = json_decode($resp->getContent(), true);
     expect($body['data']['task']['id'])->toBe(2);

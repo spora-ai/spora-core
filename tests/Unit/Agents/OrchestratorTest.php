@@ -2714,7 +2714,7 @@ it('resolveRequiresApproval uses override row when present, falling back to tool
 // scheduleAutoRetry — when retry policy is configured
 // ---------------------------------------------------------------------------
 
-it('scheduleAutoRetry creates a queued retry task when error code is retryable and retry policy is configured', function (): void {
+it('scheduleAutoRetry schedules the retry in place when error code is retryable and retry policy is configured', function (): void {
     [$agentId] = seedAgent();
 
     // Configure retry policy on the agent.
@@ -2728,8 +2728,8 @@ it('scheduleAutoRetry creates a queued retry task when error code is retryable a
     $mock->allows('complete')->andReturnUsing(function () use (&$callCount) {
         $callCount++;
         // First call: throw rate limit (so the original task fails).
-        // scheduleAutoRetry queues the retry directly without a second LLM call,
-        // so no further invocations are expected on this mock.
+        // scheduleAutoRetry records retry_after on the same task and exits
+        // without a second LLM call.
         if ($callCount === 1) {
             throw new LLMRateLimitException('429 rate limit');
         }
@@ -2760,11 +2760,19 @@ it('scheduleAutoRetry creates a queued retry task when error code is retryable a
     expect($task->status)->toBe('FAILED')
         ->and($task->error_code)->toBe('RATE_LIMIT');
 
-    // A retry task should have been queued.
-    $retryTask = Task::where('retry_of_task_id', $task->id)->first();
-    expect($retryTask)->not->toBeNull()
-        ->and($retryTask->status)->toBe('QUEUED')
-        ->and($retryTask->retry_count)->toBe(1);
+    // The retry is scheduled IN PLACE on the same task: retry_count is
+    // incremented, retry_after points to the future, retry_of_task_id marks
+    // it as part of a chain (self-reference), and status stays FAILED so the
+    // UI countdown banner remains visible.
+    expect($task->retry_count)->toBe(1)
+        ->and($task->retry_after)->not->toBeNull()
+        ->and($task->retry_of_task_id)->toBe($task->id);
+
+    // No separate retry row is created — same task_id is re-ticked.
+    $separateRetries = Task::where('retry_of_task_id', $task->id)
+        ->where('id', '!=', $task->id)
+        ->count();
+    expect($separateRetries)->toBe(0);
 
     // Cleanup
     $agent->retry_after_minutes = 0;
@@ -3836,3 +3844,113 @@ describe('Orchestrator::start — attachment serialization round-trip', function
             ->and($joinedText)->not->toBe('[attachment]');
     })->afterEach(fn() => Spora\Core\Database::resetBootState());
 });
+
+// ---------------------------------------------------------------------------
+// Orchestrator::retry — in-place re-run of a failed task
+// ---------------------------------------------------------------------------
+
+it('retry resets failed-task state in place (error fields cleared, history preserved, task re-ticked)', function (): void {
+    Spora\Core\Database::resetBootState();
+    $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db->boot();
+
+    [$agentId, $userId] = seedAgent();
+
+    $task = Task::create([
+        'user_id'        => $userId,
+        'agent_id'       => $agentId,
+        'status'         => 'FAILED',
+        'user_prompt'    => 'retry me',
+        'step_count'     => 5,
+        'max_steps'      => 10,
+        'error_code'     => 'SERVER_ERROR',
+        'failure_reason' => 'previous failure',
+    ]);
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'retry me']);
+
+    // Mock the LLM to succeed — tick in Sync mode runs immediately and
+    // transitions the task FAILED → RUNNING → COMPLETED.
+    $driver = mockLlm(new LLMResponse('Done.', [], 5, 3, 'cmp_retry'));
+    $orch   = makeOrchestrator(mockDriverFactory($driver), workerMode: WorkerMode::Sync);
+
+    $retried = $orch->retry($task->id);
+
+    // Same task id, no new row created. The original 'user' row is preserved
+    // as LLM context; the post-retry tick adds the assistant response row.
+    expect($retried->id)->toBe($task->id)
+        ->and((string) $retried->status)->toBe('COMPLETED')
+        ->and((string) $retried->user_prompt)->toBe('retry me')
+        ->and((int) $retried->max_steps)->toBe(10)
+        ->and(TaskHistory::where('task_id', $task->id)->count())->toBe(2);
+
+    // Original user message is still there — proof retry() did not rewrite
+    // history, it just reset state and re-ticked.
+    expect(TaskHistory::where('task_id', $task->id)->where('role', 'user')->count())->toBe(1);
+
+    // Pre-retry error fields are gone (cleared by retry()), not leaking from
+    // the failed state — the post-retry success path overwrites them too.
+    expect($retried->error_code)->toBeNull()
+        ->and($retried->failure_reason)->toBeNull();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('retry resets the failed task in place and clears retry_of_task_id so the main QUEUED loop can claim it (Async mode)', function (): void {
+    Spora\Core\Database::resetBootState();
+    $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db->boot();
+
+    [$agentId, $userId] = seedAgent();
+
+    $task = Task::create([
+        'user_id'     => $userId,
+        'agent_id'    => $agentId,
+        'status'      => 'FAILED',
+        'user_prompt' => 'retry me',
+        'step_count'  => 5,
+        'max_steps'   => 10,
+        'error_code'  => 'SERVER_ERROR',
+        'retry_count' => 1,
+    ]);
+    // Simulate the chain marker set by RetryScheduler::dispatchRetryTask.
+    $task->retry_of_task_id = $task->id;
+    $task->save();
+    TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'retry me']);
+
+    $driver = mockLlm(new LLMResponse('Done.', [], 5, 3, 'cmp_retry'));
+    $orch   = makeOrchestrator(mockDriverFactory($driver), workerMode: WorkerMode::Worker);
+
+    $retried = $orch->retry($task->id);
+
+    // In Async (Worker) mode Orchestrator::retry() leaves the task QUEUED for
+    // the worker to pick up. It MUST clear retry_of_task_id so the main
+    // loop's claim predicate (`status='QUEUED' AND retry_of_task_id IS NULL`)
+    // matches the row — otherwise it sits in QUEUED forever and the chain
+    // never completes.
+    expect((string) $retried->status)->toBe('QUEUED')
+        ->and($retried->retry_of_task_id)->toBeNull()
+        ->and($retried->retry_after)->toBeNull()
+        ->and($retried->error_code)->toBeNull()
+        ->and((int) $retried->step_count)->toBe(0)
+        ->and((int) $retried->max_steps)->toBe(10)
+        ->and((int) $retried->retry_count)->toBe(1); // preserved
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('retry throws when the task is not in FAILED status', function (): void {
+    Spora\Core\Database::resetBootState();
+    $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db->boot();
+
+    [$agentId, $userId] = seedAgent();
+
+    $task = Task::create([
+        'user_id'     => $userId,
+        'agent_id'    => $agentId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'already done',
+        'max_steps'   => 10,
+    ]);
+
+    $orch = makeOrchestrator(mockDriverFactory(mockLlm(new LLMResponse('x', [], 1, 1, 'cmp'))));
+
+    expect(fn() => $orch->retry($task->id))
+        ->toThrow(InvalidTaskTransitionException::class, 'Can only retry failed tasks');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
