@@ -117,7 +117,6 @@ test('constructor normalises the appPrefix value (leading/trailing slashes, bare
 
     $r = new ReflectionClass(AuthEmailFlow::class);
     $prop = $r->getProperty('appPrefix');
-    $prop->setAccessible(true);
 
     $flow = new AuthEmailFlow($auth, '', 'spora');
     expect($prop->getValue($flow))->toBe('/spora');
