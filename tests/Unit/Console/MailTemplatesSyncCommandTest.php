@@ -10,6 +10,7 @@ use Spora\Core\Paths;
 use Spora\Models\MailTemplate;
 use Spora\Services\EmailTemplateLoader;
 use Spora\Services\Mail\MailTemplateRenderer;
+use Spora\Services\Mail\MailTemplateSyncService;
 use Spora\Services\MailTemplateService;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -31,8 +32,9 @@ function makeSyncTester(): CommandTester
 
     $loader      = new EmailTemplateLoader(new Paths(BASE_PATH));
     $mailService = new MailTemplateService(MailTemplateRenderer::createDefault());
+    $sync        = new MailTemplateSyncService($loader, $mailService);
 
-    $command = new MailTemplatesSyncCommand($db, $loader, $mailService);
+    $command = new MailTemplatesSyncCommand($sync, $loader);
     $command->setName('mail:templates:sync');
 
     return new CommandTester($command);
@@ -152,8 +154,10 @@ it('exits non-zero when a YAML template fails to parse', function (): void {
 
     $paths  = new Paths($tmpDir);
     $loader = new EmailTemplateLoader($paths);
+    $mailService = new MailTemplateService(MailTemplateRenderer::createDefault());
+    $sync = new MailTemplateSyncService($loader, $mailService);
 
-    $command = new MailTemplatesSyncCommand($db, $loader, new MailTemplateService(MailTemplateRenderer::createDefault()));
+    $command = new MailTemplatesSyncCommand($sync, $loader);
     $command->setName('mail:templates:sync');
     $tester = new CommandTester($command);
 

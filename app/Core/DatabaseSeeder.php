@@ -8,9 +8,8 @@ use Delight\Auth\Role;
 use RuntimeException;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Auth\AuthService;
-use Spora\Models\MailTemplate;
 use Spora\Models\User;
-use Spora\Services\EmailTemplateLoader;
+use Spora\Services\Mail\MailTemplateSyncService;
 
 /**
  * Seeds the database with a default Admin user and an integrated Agent.
@@ -33,21 +32,22 @@ final class DatabaseSeeder
 
     public function __construct(
         private readonly AuthService $authService,
-        private readonly EmailTemplateLoader $templateLoader,
+        private readonly MailTemplateSyncService $mailTemplateSync,
         private readonly AgentTemplateImporter $templateImporter,
     ) {}
 
     public function run(): void
     {
-        $mailTemplates = $this->templateLoader->getAll();
-
-        foreach ($mailTemplates as $template) {
-            MailTemplate::firstOrCreate(
-                ['name' => $template['name']],
-                $template,
-            );
-        }
-        echo "Seeded " . count($mailTemplates) . " Mail Templates.\n";
+        // Sync mail templates against the YAML defaults on disk. New YAMLs
+        // (e.g. added in a later PR) are inserted automatically; rows that
+        // already exist are left untouched unless `$force` is set, so an
+        // operator who customised a template is not silently clobbered.
+        // Use `bin/spora mail:templates:sync --force` to update drifted rows.
+        $statuses = $this->mailTemplateSync->reconcileDefaults(force: false);
+        $created  = array_filter($statuses, static fn(string $s): bool => $s === MailTemplateSyncService::STATUS_CREATED);
+        echo "Synced " . count($statuses) . " Mail Templates"
+            . " (" . count($created) . " new"
+            . ", " . count($statuses) - count($created) . " already present).\n";
 
         // Bootstrap admin. Insert-only: a deleted or renamed admin is left alone
         // so the seeder cannot be used as a backdoor. Repairs go through
