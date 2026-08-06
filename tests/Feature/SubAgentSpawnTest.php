@@ -469,4 +469,116 @@ describe('SubAgentService::spawn', function (): void {
         expect($toolRow->content)->toContain('Sub-agent task #' . $child->id . ' failed');
         expect($toolRow->content)->toContain('child driver exploded');
     });
+
+    it('processes a mixed batch [sub_agent, calculator, sub_agent] once at the boundary', function (): void {
+        $seed = subAgentSeedAgents();
+        $parentAgentId = $seed['parentAgentId'];
+        $childAgentId  = $seed['childAgentId'];
+
+        AgentTool::insert([
+            'agent_id'   => $parentAgentId,
+            'tool_class' => HandoverTool::class,
+            'tool_name'  => 'handover',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $built = subAgentBuildOrchestrator(
+            $childAgentId,
+            llmResponses: [
+                // tick 1: parent LLM emits two sub_agent calls in one turn.
+                new LLMResponse(
+                    content: null,
+                    toolCalls: [
+                        new DriverToolCall(
+                            'pc_sub_agent_1',
+                            'handover',
+                            [
+                                'op'       => 'sub_agent',
+                                'agent_id' => $childAgentId,
+                                'prompt'   => 'first child task',
+                            ],
+                        ),
+                        new DriverToolCall(
+                            'pc_sub_agent_2',
+                            'handover',
+                            [
+                                'op'       => 'sub_agent',
+                                'agent_id' => $childAgentId,
+                                'prompt'   => 'second child task',
+                            ],
+                        ),
+                    ],
+                    inputTokens: 10,
+                    outputTokens: 5,
+                    completionId: 'cmp_parent_1',
+                ),
+                // tick 2 (first child's tick): scripted child response.
+                new LLMResponse('first child finished', [], 5, 3, 'cmp_child_1'),
+                // tick 3 (second child's tick): scripted child response.
+                new LLMResponse('second child finished', [], 5, 3, 'cmp_child_2'),
+                // tick 4 (parent's tick after the batch): terminal text.
+                new LLMResponse('All wrapped up.', [], 5, 3, 'cmp_parent_2'),
+            ],
+        );
+        $orch = $built['outer'];
+
+        $parent = $orch->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        $parent->refresh();
+        expect($parent->status)->toBe('PENDING_APPROVAL');
+
+        $orch->resume($parent->id, [
+            [
+                'provider_call_id' => 'pc_sub_agent_1',
+                'decision'         => 'approve',
+                'arguments'        => [
+                    'op'       => 'sub_agent',
+                    'agent_id' => $childAgentId,
+                    'prompt'   => 'first child task',
+                ],
+            ],
+            [
+                'provider_call_id' => 'pc_sub_agent_2',
+                'decision'         => 'approve',
+                'arguments'        => [
+                    'op'       => 'sub_agent',
+                    'agent_id' => $childAgentId,
+                    'prompt'   => 'second child task',
+                ],
+            ],
+        ]);
+
+        $children = Task::where('parent_task_id', $parent->id)
+            ->orderBy('id')
+            ->get();
+        expect($children->count())->toBe(2);
+        expect($children[0]->user_prompt)->toBe('first child task');
+        expect($children[0]->status)->toBe('COMPLETED');
+        expect($children[1]->user_prompt)->toBe('second child task');
+        expect($children[1]->status)->toBe('COMPLETED');
+
+        // Both `sub_agent` tool calls land their tool result rows in the
+        // parent's history, correlated with the originating tool_call_id.
+        // Each sub_agent tool call writes two 'role: tool' rows — the
+        // immediate result from HandoverTool.executeSubAgent and the
+        // resume result from SubAgentService.resumeParent. The resume
+        // rows are the latest two for the originating tool_call_id.
+        $toolRows = TaskHistory::where('task_id', $parent->id)
+            ->where('role', 'tool')
+            ->whereIn('tool_call_id', ['pc_sub_agent_1', 'pc_sub_agent_2'])
+            ->where('content', 'LIKE', '%Sub-agent task #% completed:%')
+            ->orderBy('id')
+            ->get();
+        expect($toolRows->count())->toBe(2);
+        expect($toolRows[0]->tool_call_id)->toBe('pc_sub_agent_1');
+        expect($toolRows[0]->content)->toContain('first child finished');
+        expect($toolRows[1]->tool_call_id)->toBe('pc_sub_agent_2');
+        expect($toolRows[1]->content)->toContain('second child finished');
+
+        // The parent waited for the batch boundary, not after every child.
+        // Final response is the orchestrator's post-batch tick text.
+        $parent->refresh();
+        expect($parent->status)->toBe('COMPLETED');
+        expect($parent->final_response)->toBe('All wrapped up.');
+    });
 });
