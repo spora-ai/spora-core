@@ -407,83 +407,111 @@ final class AttachmentRowRenderer
      */
     private function collectAttachmentBlocks(TaskHistory $row): array
     {
+        if (!is_array($row->attachments)) {
+            return ['text' => [], 'image' => [], 'metadata' => []];
+        }
+
         $supportsImages = $this->driver !== null && $this->driver->supportsImageInput();
         $textBlocks     = [];
         $imageBlocks    = [];
         $metadataBlocks = [];
-        if (!is_array($row->attachments)) {
-            return ['text' => $textBlocks, 'image' => $imageBlocks, 'metadata' => $metadataBlocks];
-        }
+
         foreach ($row->attachments as $ref) {
-            $mediaId = $ref['media_id'] ?? null;
-            if (!is_string($mediaId) || $mediaId === '') {
-                continue;
-            }
-            $asset = MediaAsset::query()->find($mediaId);
+            $asset = $this->resolveAttachmentAsset($ref);
             if ($asset === null) {
                 continue;
             }
             $metadataBlocks[] = $this->attachmentMetadataBlock($asset);
             $kind = (string) ($ref['kind'] ?? 'text');
             if ($kind === 'image') {
-                if (!$supportsImages) {
-                    continue;
+                $image = $this->buildImageBlock($asset, $supportsImages);
+                if ($image !== null) {
+                    $imageBlocks[] = $image;
                 }
-                $bytes = $this->loadInlineImageBytes($asset);
-                if ($bytes === null) {
-                    continue;
-                }
-                $imageBlocks[] = [
-                    'type'      => 'image',
-                    'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
-                    'base64'    => base64_encode($bytes),
-                ];
                 continue;
             }
-            $extracted = $asset->markdown_content !== null && $asset->markdown_content !== ''
-                ? $asset->markdown_content
-                : null;
-            $displayName = $asset->filename ?? $asset->id;
-            $body = $extracted ?? '[no extractable text]';
-            $textBlocks[] = [
-                'type' => 'text',
-                'text' => "# {$displayName} (extracted text)\n\n" . $body,
-            ];
+            $textBlocks[] = $this->buildTextBlock($asset);
         }
+
         return ['text' => $textBlocks, 'image' => $imageBlocks, 'metadata' => $metadataBlocks];
     }
 
     /**
+     * @param array<string, mixed> $ref
+     */
+    private function resolveAttachmentAsset(array $ref): ?MediaAsset
+    {
+        $mediaId = $ref['media_id'] ?? null;
+        if (!is_string($mediaId) || $mediaId === '') {
+            return null;
+        }
+        return MediaAsset::query()->find($mediaId);
+    }
+
+    /**
+     * Returns null when the image isn't forwarded (non-vision driver or
+     * oversized payload) so the caller can drop it without branching.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function buildImageBlock(MediaAsset $asset, bool $supportsImages): ?array
+    {
+        if (!$supportsImages) {
+            return null;
+        }
+        $bytes = $this->loadInlineImageBytes($asset);
+        if ($bytes === null) {
+            return null;
+        }
+        return [
+            'type'      => 'image',
+            'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
+            'base64'    => base64_encode($bytes),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildTextBlock(MediaAsset $asset): array
+    {
+        $extracted = $asset->markdown_content !== null && $asset->markdown_content !== ''
+            ? $asset->markdown_content
+            : null;
+        $displayName = $asset->filename ?? $asset->id;
+        $body = $extracted ?? '[no extractable text]';
+        return [
+            'type' => 'text',
+            'text' => "# {$displayName} (extracted text)\n\n" . $body,
+        ];
+    }
+
+    /**
      * Assembles the `content` array. Metadata blocks (one per attachment)
-     * lead, followed by either the composed prompt + extracted text or
-     * the image blocks. Trivial case — a single text attachment with no
-     * prompt — passes the metadata + body blocks through unchanged (no
-     * `---` rewrite).
+     * lead. The composed prompt + extracted text occupies a single
+     * leading text block when a prompt is present (or when the
+     * attachment layout is wider than a single text body); image
+     * blocks follow.
      *
      * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>} $blocks
      * @return list<array<string, mixed>>
      */
     private function buildAttachmentContent(array $blocks, string $prompt): array
     {
-        // Trivial: single text attachment with no prompt — return metadata + body as-is.
-        if ($blocks['image'] === [] && $prompt === ''
-            && count($blocks['text']) === 1 && count($blocks['metadata']) === 1) {
-            return [$blocks['metadata'][0], $blocks['text'][0]];
-        }
-
-        // Image-only with no prompt — metadata blocks lead, then image blocks.
-        if ($blocks['image'] !== [] && $blocks['text'] === [] && $prompt === '') {
+        // No prompt, no body text — metadata blocks possibly followed by images.
+        // Covers both "metadata-only" (oversized image on non-vision driver)
+        // and "image-only with no prompt" in one branch.
+        if ($prompt === '' && $blocks['text'] === []) {
             return array_merge($blocks['metadata'], $blocks['image']);
         }
 
-        // Only metadata, nothing else (e.g. oversized image attachment on
-        // a non-vision driver) — emit the metadata blocks on their own.
-        // Avoids producing a trailing empty composed text block.
-        if ($blocks['image'] === [] && $blocks['text'] === [] && $prompt === '') {
-            return $blocks['metadata'];
+        // Trivial: single text body + single metadata + no prompt — pass
+        // them through unchanged (no `---` rewrite).
+        if ($prompt === '' && count($blocks['text']) === 1 && count($blocks['metadata']) === 1) {
+            return [$blocks['metadata'][0], $blocks['text'][0]];
         }
 
-        // Otherwise: metadata blocks first, then a leading composed text block, then image blocks.
+        // General case: metadata + composed text + images.
         return array_merge(
             $blocks['metadata'],
             [['type' => 'text', 'text' => $this->composeTextContent($prompt, $blocks['text'])]],
