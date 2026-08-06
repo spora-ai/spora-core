@@ -78,12 +78,13 @@ final class SubAgentService implements SubAgentServiceInterface
                 parentTaskId: $parent->id,
             );
         } catch (Throwable $e) {
-            $child = Task::where('parent_task_id', $parent->id)
+            $recovered = Task::where('parent_task_id', $parent->id)
                 ->orderByDesc('id')
                 ->first();
-            if ($child === null) {
+            if ($recovered === null) {
                 throw $e;
             }
+            $child = $recovered;
         }
 
         $this->recordSpawnedChild($parent, $child->id);
@@ -102,7 +103,6 @@ final class SubAgentService implements SubAgentServiceInterface
         // Increment AFTER the post-tick re-check so any mid-batch check
         // sees expected from the PREVIOUS spawn, not this one.
         $this->incrementExpectedCount($parent->id);
-
         $this->publishParentState($parent->id, $userId);
 
         return $child;
@@ -155,27 +155,34 @@ final class SubAgentService implements SubAgentServiceInterface
     private function loadReadyParent(int $childTaskId): ?array
     {
         $child = Task::find($childTaskId);
-        if ($child === null || $child->parent_task_id === null) {
-            return null;
-        }
-
-        $parent = Task::find($child->parent_task_id);
+        $parent = $child !== null && $child->parent_task_id !== null
+            ? Task::find($child->parent_task_id)
+            : null;
         if ($parent === null || $parent->status !== 'AWAITING_SUB_AGENTS') {
             return null;
         }
 
-        $expectedCount = (int) ($parent->data['sub_agent_expected_count'] ?? 0);
-        $siblingIds = $expectedCount > 0 ? $this->extractSpawnedChildIds($parent) : [];
-        if (
-            $expectedCount <= 0
-            || count($siblingIds) !== $expectedCount
-            || !in_array($child->status, ['COMPLETED', 'FAILED'], true)
-            || !$this->allSiblingsTerminal($siblingIds)
-        ) {
+        $siblingIds = $this->extractSpawnedChildIds($parent);
+        if (!$this->isBatchReadyToResume($parent, $siblingIds, $child)) {
             return null;
         }
 
         return ['parent' => $parent, 'siblingIds' => $siblingIds];
+    }
+
+    /**
+     * Multi-child gate: true only when the spawned-id count matches
+     * `sub_agent_expected_count`, the child just completed is terminal, and
+     * every sibling has reached a terminal state.
+     */
+    private function isBatchReadyToResume(Task $parent, array $siblingIds, Task $child): bool
+    {
+        $expectedCount = (int) ($parent->data['sub_agent_expected_count'] ?? 0);
+
+        return $expectedCount > 0
+            && count($siblingIds) === $expectedCount
+            && in_array($child->status, ['COMPLETED', 'FAILED'], true)
+            && $this->allSiblingsTerminal($siblingIds);
     }
 
     /**
