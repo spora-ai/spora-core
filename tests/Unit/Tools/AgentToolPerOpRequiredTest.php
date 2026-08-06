@@ -17,22 +17,17 @@ use Spora\Tools\Schema\ToolParameterSchemaBuilder;
  * reads it, narrows `required[]` to ops the agent can actually invoke, and
  * strips it before the schema reaches the LLM.
  */
-it('declares `agent` as required for update_agent + write_agent_configuration', function (): void {
-    // Both the canonical `update_agent` and its deprecated alias
-    // `write_agent_configuration` carry the `agent` object — the
-    // alias stays in required[] until the soft-redirect is hard-removed.
+it('declares `agent` as required for update_agent', function (): void {
+    // `update_agent` is the only operation that carries the `agent`
+    // patch object.
     $schema = ToolParameterSchemaBuilder::build(AgentTool::class);
 
     expect($schema['__required_when']['agent'] ?? null)
-        ->toBe(['update_agent', 'write_agent_configuration']);
+        ->toBe(['update_agent']);
 
     // update_agent alone → `agent` stays required.
     $updateOnly = OperationSchemaFilter::filter($schema, ['update_agent'], 'action');
     expect($updateOnly['required'])->toContain('agent');
-
-    // write_agent_configuration alone → `agent` stays required too.
-    $writeOnly = OperationSchemaFilter::filter($schema, ['write_agent_configuration'], 'action');
-    expect($writeOnly['required'])->toContain('agent');
 
     // Agent allowed only read_agent → `agent` is dropped.
     $readOnly = OperationSchemaFilter::filter($schema, ['read_agent'], 'action');
@@ -76,9 +71,6 @@ it('declares `payload` as required only for create_agent', function (): void {
 
     $updateAgent = OperationSchemaFilter::filter($schema, ['update_agent'], 'action');
     expect($updateAgent['required'])->not->toContain('payload');
-
-    $writeConfig = OperationSchemaFilter::filter($schema, ['write_agent_configuration'], 'action');
-    expect($writeConfig['required'])->not->toContain('payload');
 });
 
 it('strips the __required_when side channel after narrowing', function (): void {

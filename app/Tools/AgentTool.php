@@ -25,11 +25,10 @@ use Spora\Tools\ValueObjects\ToolResult;
  * new agents on behalf of the current user.
  *
  * Operations carrying an `agent_id` (`read_agent`, `configure_tools`,
- * `update_agent` and its deprecated alias `write_agent_configuration`)
- * accept either the calling agent or any user-owned agent by primary
- * key. Ownership is always scoped to the authenticated user — cross-
- * user reads are refused, never silently substituted. The LLM-facing
- * agent-creation flow is the two-phase create → configure_tools
+ * `update_agent`) accept either the calling agent or any user-owned
+ * agent by primary key. Ownership is always scoped to the authenticated
+ * user — cross-user reads are refused, never silently substituted. The
+ * LLM-facing agent-creation flow is the two-phase create → configure_tools
  * pattern documented in skills/agent-creation/SKILL.md.
  */
 #[Tool(
@@ -52,17 +51,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'to confirm the change took effect. For full allowlist and common pitfalls, read the '
                . 'agent-creation skill ' . self::AGENT_CREATION_SKILL_HINT . '. '
                . 'Pass `agent_id` (numeric pk returned by `create_agent` / `list_agents`) to target a '
-               . 'specific agent; omit to patch the calling agent. The legacy `write_agent_configuration` '
-               . 'name still works as a soft-redirect.',
-    enabledByDefault: false,
-    requiresApprovalByDefault: true,
-)]
-#[ToolOperation(
-    name: 'write_agent_configuration',
-    description: 'DEPRECATED — use `update_agent`. Update editable fields on this agent. Alias kept '
-               . 'for back-compat with prompts that learned the old name; the `update_agent` '
-               . 'description is the canonical one. Hard-remove in a later release. See the '
-               . 'agent-creation skill ' . self::AGENT_CREATION_SKILL_HINT . '.',
+               . 'specific agent; omit to patch the calling agent.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
@@ -164,14 +153,14 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'agent',
     type: 'object',
-    description: 'ONLY for `update_agent` (and its deprecated alias `write_agent_configuration`): '
-              . 'a partial agent with the fields to update. Allowed keys: name, description, '
-              . 'system_prompt, max_steps, allow_followup, retry_after_minutes, max_retries, '
-              . 'is_pinned, is_archived, is_favorite. `notes` is intentionally not accepted here '
-              . '— use write_notes. Ignored by every other operation; omit this key entirely '
-              . 'when calling read_notes, write_notes, write_notes_overwrite, get_available_tools, '
+    description: 'ONLY for `update_agent`: a partial agent with the fields to update. '
+              . 'Allowed keys: name, description, system_prompt, max_steps, '
+              . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived, '
+              . 'is_favorite. `notes` is intentionally not accepted here — use write_notes. '
+              . 'Ignored by every other operation; omit this key entirely when calling '
+              . 'read_notes, write_notes, write_notes_overwrite, get_available_tools, '
               . 'configure_tools, read_agent, list_agents, or create_agent.',
-    required: ['update_agent', 'write_agent_configuration'],
+    required: ['update_agent'],
 )]
 #[ToolParameter(
     name: 'content',
@@ -277,9 +266,6 @@ final class AgentTool extends AbstractTool
         if ($operation === 'read_agent_configuration') {
             return $this->redirectReadAgentConfiguration($agentId, $userId);
         }
-        if ($operation === 'write_agent_configuration') {
-            return $this->redirectWriteAgentConfiguration($agentId, $userId, $arguments);
-        }
 
         return match ($operation) {
             'update_agent'              => $this->writeConfiguration($agentId, $userId, $arguments),
@@ -307,7 +293,6 @@ final class AgentTool extends AbstractTool
                     ? 'agent_id: ' . (int) $arguments['agent_id']
                     : 'calling agent',
             ),
-            'write_agent_configuration' => 'Update editable fields on this agent (deprecated — use update_agent).',
             'read_notes'                => 'Read this agent\'s markdown notes.',
             'write_notes'               => sprintf(
                 'Write notes on this agent (mode: %s).',
@@ -569,16 +554,5 @@ final class AgentTool extends AbstractTool
             . $result->content,
             $result->data,
         );
-    }
-
-    private function redirectWriteAgentConfiguration(int $callingAgentId, ?int $userId, array $arguments): ToolResult
-    {
-        $result = $this->writeConfiguration($callingAgentId, $userId, $arguments);
-        if (!$result->success) {
-            return $result;
-        }
-        $content = (string) $result->content;
-        $note    = "_(deprecated: write_agent_configuration — use `update_agent`)_\n\n";
-        return ToolResult::ok($note . $content, $result->data);
     }
 }
