@@ -36,9 +36,10 @@ it('keeps `asset_id` required when any per-asset op is allowed', function (): vo
 it('drops `asset_id` from required[] when only `search` is allowed', function (): void {
     $schema = ToolParameterSchemaBuilder::build(MediaTool::class);
 
+    // Single-op: discriminator is stripped from required[] (back-compat).
     $searchOnly = OperationSchemaFilter::filter($schema, ['search'], 'action');
     expect($searchOnly['required'])->not->toContain('asset_id')
-        ->and($searchOnly['required'])->toContain('action');
+        ->and($searchOnly['required'])->not->toContain('action');
 });
 
 it('drops `asset_id` from required[] when the agent has no ops allowed', function (): void {

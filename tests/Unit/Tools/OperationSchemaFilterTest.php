@@ -89,8 +89,6 @@ it('coerces stdClass properties to a typed array for filtering and back to stdCl
 });
 
 it('narrows required[] to properties whose per-op binding intersects the allowed set', function (): void {
-    // Schema built by the builder carries __required_when as a top-level
-    // side channel; the filter reads it, narrows required[], and strips it.
     $schema = [
         'type'             => 'object',
         'properties'       => [
@@ -106,10 +104,12 @@ it('narrows required[] to properties whose per-op binding intersects the allowed
         ],
     ];
 
+    // Single-op: discriminator is stripped from required[] (back-compat).
     expect(OperationSchemaFilter::filter($schema, ['now'], 'action')['required'])
-        ->toBe(['action', 'name']);
+        ->toBe(['name']);
     expect(OperationSchemaFilter::filter($schema, ['format'], 'action')['required'])
-        ->toBe(['action', 'epoch', 'timezone', 'name']);
+        ->toBe(['epoch', 'timezone', 'name']);
+    // Multi-op: discriminator stays in required[].
     expect(OperationSchemaFilter::filter($schema, ['now', 'format'], 'action')['required'])
         ->toBe(['action', 'epoch', 'timezone', 'name']);
 });

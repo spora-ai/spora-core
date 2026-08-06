@@ -92,12 +92,12 @@ it('strips the __required_when side channel after narrowing', function (): void 
 it('keeps `action` and `mode` as globally required or enum-restricted regardless of op subset', function (): void {
     $schema = ToolParameterSchemaBuilder::build(AgentTool::class);
 
-    // `action` is the synthesized discriminator — always required.
-    // Enum covers the live operations; `read_agent_configuration` was
-    // removed when it became a soft-redirect to `read_agent(self)`.
+    // Single-op: discriminator is stripped from required[] (back-compat).
+    // Enum still covers the live ops; read_agent_configuration was removed
+    // when it became a soft-redirect to read_agent(self).
     foreach (['write_notes', 'create_agent', 'read_agent', 'configure_tools'] as $op) {
         $filtered = OperationSchemaFilter::filter($schema, [$op], 'action');
-        expect($filtered['required'])->toContain('action')
+        expect($filtered['required'])->not->toContain('action')
             ->and($filtered['properties']['action']['enum'])->toContain($op);
     }
 

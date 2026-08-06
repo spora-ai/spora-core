@@ -270,3 +270,53 @@ describe('HandoverTool::getParametersSchema', function (): void {
             ->and($schema['properties']['prompt'])->toBeArray();
     });
 });
+
+describe('HandoverTool back-compat: single-op agents may omit `op`', function (): void {
+
+    test('OperationSchemaFilter::filter strips `op` from required[] when only handover is allowed', function (): void {
+        [$tool] = makeHandoverTool();
+        $schema = $tool->getParametersSchema();
+
+        $filtered = Spora\Tools\Schema\OperationSchemaFilter::filter($schema, ['handover'], 'op');
+
+        expect($filtered['required'])->not->toContain('op')
+            ->and($filtered['properties']['op']['enum'])->toBe(['handover']);
+    });
+
+    test('OperationSchemaFilter::filter keeps `op` in required[] when both ops are allowed', function (): void {
+        [$tool] = makeHandoverTool();
+        $schema = $tool->getParametersSchema();
+
+        $filtered = Spora\Tools\Schema\OperationSchemaFilter::filter($schema, ['handover', 'sub_agent'], 'op');
+
+        expect($filtered['required'])->toContain('op');
+    });
+
+    test('SchemaValidator accepts a handover call without `op` when the op is unambiguous', function (): void {
+        [$tool] = makeHandoverTool();
+        $schema = $tool->getParametersSchema();
+
+        // Mirrors the runtime call site: SchemaValidator::validate($args, $schema, $operationName).
+        // HasOperations::getOperationName() resolves the missing op to the first declared op.
+        Spora\Agents\SchemaValidator::validate(
+            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'prompt' => 'x'],
+            $schema,
+            'handover',
+        );
+
+        expect(true)->toBeTrue(); // no exception was thrown
+    });
+
+    test('SchemaValidator rejects a sub_agent call with handover params', function (): void {
+        [$tool] = makeHandoverTool();
+        $schema = $tool->getParametersSchema();
+
+        // sub_agent requires `agent_id`; supplying `target_agent_id` instead is a
+        // wrong-param-for-op case the validator must catch.
+        expect(fn() => Spora\Agents\SchemaValidator::validate(
+            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'prompt' => 'x'],
+            $schema,
+            'sub_agent',
+        ))->toThrow(InvalidArgumentException::class, "Required argument 'agent_id'");
+    });
+});
