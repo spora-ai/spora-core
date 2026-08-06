@@ -21,6 +21,7 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -221,8 +222,13 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container->shouldReceive('get')->with(LLMConfigService::class)->once()->andReturn($realConfigService);
         $container->allows('get')->with(ToolConfigService::class)->andReturn(Mockery::mock(ToolConfigService::class));
         $container->allows('get')->with(MercurePublisherInterface::class)->andReturn(Mockery::mock(MercurePublisherInterface::class));
-        $container->allows('get')->with(LoggerInterface::class)->andReturn(Mockery::mock(LoggerInterface::class));
+        $container->allows('get')->with(LoggerInterface::class)->andReturnUsing(static function (): LoggerInterface {
+            $logger = Mockery::mock(LoggerInterface::class);
+            $logger->shouldIgnoreMissing();
+            return $logger;
+        });
         $container->allows('get')->with(AgentServiceInterface::class)->andReturnNull();
+        $container->allows('get')->with(SubAgentServiceInterface::class)->andReturn(Mockery::mock(SubAgentServiceInterface::class));
 
         $mercure = Mockery::mock(MercurePublisherInterface::class);
         $mercure->allows('publishUpdate')->andReturnNull();
@@ -239,6 +245,84 @@ describe('TaskRunCommand — task claiming', function (): void {
 
         $task->refresh();
         expect($task->status)->toBe('COMPLETED');
+    });
+
+    it('requests SubAgentServiceInterface from the container so the worker-mode resume hook fires', function (): void {
+        // Regression: TaskRunCommand::buildOrchestrator() used to construct
+        // the per-task Orchestrator without injecting SubAgentService, so
+        // TickPhaseRunner::maybeResumeParentForChild short-circuited on
+        // `$this->subAgent === null` and a sub-agent child completing in
+        // worker mode (worker:run) never woke up its AWAITING_SUB_AGENTS
+        // parent.
+        $agent = Agent::create([
+            'user_id'   => $this->userId,
+            'name'      => 'TestAgentSubAgent',
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
+
+        $task = Task::create([
+            'agent_id'    => $agent->id,
+            'user_id'     => $this->userId,
+            'status'      => 'QUEUED',
+            'user_prompt' => 'Hello',
+            'max_steps'   => 10,
+            'step_count'  => 0,
+        ]);
+
+        $db = new Database(
+            ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
+            new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
+        );
+        $db->bootDatabaseConnectionOnly();
+
+        $textDriver = makeTextResponseDriver('Done');
+        $factory = Mockery::mock(DriverFactory::class);
+        $factory->allows('makeFromAgent')->andReturn($textDriver);
+
+        $container = Mockery::mock(ContainerInterface::class);
+        $container->allows('get')->with('config')->andReturn([
+            'db_driver' => 'sqlite',
+            'db_path' => SQLITE_MEMORY,
+        ]);
+        $container->allows('get')->with(Database::class)->andReturn($db);
+        $container->allows('get')->with(DriverFactory::class)->andReturn($factory);
+        $container->allows('get')->with('tool_instances')->andReturn([]);
+        $notificationMock = Mockery::mock(NotificationService::class);
+        $notificationMock->allows('notifyTaskCompleted')->andReturnNull();
+        $container->allows('get')->with(NotificationService::class)->andReturn($notificationMock);
+
+        $mockSecurity = Mockery::mock(Spora\Core\SecurityManagerInterface::class);
+        $realConfigService = new LLMConfigService($mockSecurity, []);
+        $container->allows('get')->with(LLMConfigService::class)->andReturn($realConfigService);
+        $container->allows('get')->with(ToolConfigService::class)->andReturn(Mockery::mock(ToolConfigService::class));
+        $container->allows('get')->with(MercurePublisherInterface::class)->andReturn(Mockery::mock(MercurePublisherInterface::class));
+        $container->allows('get')->with(LoggerInterface::class)->andReturnUsing(static function (): LoggerInterface {
+            $logger = Mockery::mock(LoggerInterface::class);
+            $logger->shouldIgnoreMissing();
+            return $logger;
+        });
+        $container->allows('get')->with(AgentServiceInterface::class)->andReturnNull();
+
+        // The test asserts buildOrchestrator actually requests SubAgentService
+        // — the fix is precisely this container call. `once()` makes the
+        // mock fail if TaskRunCommand stops asking for it.
+        $mockSubAgent = Mockery::mock(SubAgentServiceInterface::class);
+        $container->shouldReceive('get')->with(SubAgentServiceInterface::class)->once()->andReturn($mockSubAgent);
+
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publishUpdate')->andReturnNull();
+
+        $command = new TaskRunCommand($db, $container, $mercure);
+        $command->setName('task:run');
+        $tester = new CommandTester($command);
+
+        $tester->execute(['taskId' => $task->id]);
+
+        if ($tester->getStatusCode() !== 0) {
+            throw new RuntimeException($tester->getDisplay());
+        }
+        expect($tester->getStatusCode())->toBe(0);
     });
 
     it('returns null when the task is not QUEUED', function (): void {

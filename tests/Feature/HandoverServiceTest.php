@@ -97,6 +97,7 @@ describe('HandoverService::handover', function (): void {
         expect($source->final_response)->toBe('Handed off to Target Agent.');
         expect($source->data['handover']['target_task_id'])->toBe(12345);
         expect($source->data['handover']['target_agent_id'])->toBe($targetAgentId);
+        expect($source->data['handover']['target_agent_name'])->toBe('Target Agent');
     });
 
     it('throws when the source task is not owned by the user', function (): void {

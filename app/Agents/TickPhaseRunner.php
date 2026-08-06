@@ -58,6 +58,20 @@ final class TickPhaseRunner
         // before the LLM round-trip so the next assistant message sees the results.
         $this->executeApprovedPendingToolsForTask($task);
 
+        // The tool above may have flipped the task out of RUNNING — the
+        // `sub_agent` op suspends the parent (`status = AWAITING_SUB_AGENTS`)
+        // before the child tick returns, and other ops can mark the task
+        // COMPLETED or FAILED inline. The next batch-boundary hook (sync:
+        // ApprovedBatchExecutor, worker: the same code path here) or the
+        // per-child completion hook will resume the parent on a later tick
+        // — this turn must NOT call the LLM, or the parent would advance
+        // with a stale context and could complete without the child's
+        // result ever landing in history.
+        $currentStatus = Task::where('id', $taskId)->value('status');
+        if ($currentStatus !== 'RUNNING') {
+            return;
+        }
+
         try {
             $context = $this->prepareTickContext($task);
         } catch (RuntimeException $e) {
@@ -458,6 +472,13 @@ final class TickPhaseRunner
 
         if ($pendingApproval === []) {
             $this->publishIntermediateState($task);
+            // Sync-mode auto-approve batch boundary: every tool in this turn ran
+            // inline (no ApprovedBatchExecutor involved), so the resume hook in
+            // ApprovedBatchExecutor::triggerBatchBoundaryResume never fires for
+            // this path. Mirror it here so any spawned sub_agents get a chance
+            // to wake their parent up at the end of the turn. The worker-mode
+            // equivalent lives in executeApprovedPendingToolsForTask() above.
+            $this->maybeResumeParentFromBatchBoundary($task->id);
             $this->orchestrator->tick($task->id);
         } else {
             $state = new AgentState(
