@@ -249,11 +249,10 @@ describe('MailTemplateSyncService', function (): void {
         }
     });
 
-    it('runs idempotently: two passes against the same YAML produce the same row count', function (): void {
+    it('runs idempotently: two passes against the same YAML produce STATUS_UNCHANGED for every template', function (): void {
         // The framework ships 5 default templates that {@see Paths::emailTemplatesPaths()}
-        // also returns, so the loader will pick them up alongside any project overrides.
-        // Use those framework names so the project overrides win and the total
-        // template count is the 5 we expect.
+        // also returns, so the loader picks them up alongside any project overrides.
+        // Use those framework names so the project overrides win.
         $dir = sys_get_temp_dir() . '/spora-sync-idempotent-' . uniqid('', true);
         writeTemplate($dir, 'welcome.yaml', 'welcome', 'Welcome!', 'Hello body.');
         writeTemplate($dir, 'email_verification.yaml', 'email_verification', 'Verify', 'Verify body.');
@@ -266,11 +265,10 @@ describe('MailTemplateSyncService', function (): void {
             $first  = $service->reconcileDefaults(force: false);
             $second = $service->reconcileDefaults(force: false);
 
-            expect($first)->toHaveCount(5);
-            expect($second)->toHaveCount(5);
-            expect(MailTemplate::count())->toBe(5);
-
-            // Second pass: every template is unchanged.
+            // Idempotency = same template set on both passes, every entry UNCHANGED.
+            // We deliberately do NOT assert a hard row count: framework templates
+            // can grow over time and this test should stay correct.
+            expect(array_keys($second))->toEqual(array_keys($first));
             foreach ($second as $name => $status) {
                 expect($status)->toBe(MailTemplateSyncService::STATUS_UNCHANGED);
             }

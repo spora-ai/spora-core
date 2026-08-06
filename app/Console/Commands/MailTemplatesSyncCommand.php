@@ -95,7 +95,8 @@ final class MailTemplatesSyncCommand extends Command
             $row  = MailTemplate::where('name', $name)->first();
             $status = $this->reconcile($io, $template, $row, $check, $force);
             $rows[] = [$name, $status];
-            if ($status === 'drift' || $status === 'skipped') {
+            if ($status === MailTemplateSyncService::STATUS_DRIFT
+                || $status === MailTemplateSyncService::STATUS_SKIPPED) {
                 $drift++;
             }
         }
@@ -126,21 +127,36 @@ final class MailTemplatesSyncCommand extends Command
         $name = (string) $template['name'];
 
         if ($row === null) {
-            if ($check) {
-                $io->writeln("  <comment>[new]</comment>     {$name}");
-                return 'drift';
-            }
-            $this->sync->createMissing($template);
-            $io->writeln("  <info>[created]</info> {$name}");
-            return 'created';
+            return $this->handleNewTemplate($io, $name, $template, $check);
         }
 
         $diff = $this->sync->diffDefaults($template, $row);
         if ($diff === []) {
-            return 'unchanged';
+            return MailTemplateSyncService::STATUS_UNCHANGED;
         }
 
         return $this->applyDiff($io, $name, $diff, $row, $check, $force);
+    }
+
+    /**
+     * @param array{name: string, subject: string, body: string|null, body_html: string|null} $template
+     */
+    private function handleNewTemplate(
+        SymfonyStyle $io,
+        string $name,
+        array $template,
+        bool $check,
+    ): string {
+        if ($check) {
+            $io->writeln("  <comment>[new]</comment>     {$name}");
+
+            return MailTemplateSyncService::STATUS_DRIFT;
+        }
+
+        $this->sync->createMissing($template);
+        $io->writeln("  <info>[created]</info> {$name}");
+
+        return MailTemplateSyncService::STATUS_CREATED;
     }
 
     /**
@@ -156,22 +172,23 @@ final class MailTemplatesSyncCommand extends Command
                 $io->writeln(sprintf('             %s: %s', $field, $wantA));
                 $io->writeln(sprintf('             %s: %s → %s', str_pad('', strlen($field)), $have, $wantA));
             }
-            return 'drift';
+
+            return MailTemplateSyncService::STATUS_DRIFT;
         }
 
         if (!$force && !$io->confirm("Overwrite '{$name}'?", false)) {
             $io->writeln("  <comment>[skipped]</comment> {$name}");
-            return 'skipped';
+
+            return MailTemplateSyncService::STATUS_SKIPPED;
         }
 
         $this->sync->updateTemplate((int) $row->id, $diff);
-        $io->writeln("  <info>[{$this->labelFor($force)}]</info> {$name}");
-        return $force ? 'forced' : 'applied';
-    }
+        $status = $force
+            ? MailTemplateSyncService::STATUS_FORCED
+            : MailTemplateSyncService::STATUS_APPLIED;
+        $io->writeln("  <info>[{$status}]</info> {$name}");
 
-    private function labelFor(bool $force): string
-    {
-        return $force ? 'forced' : 'applied';
+        return $status;
     }
 
     private function abbreviate(?string $value): string
