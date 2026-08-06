@@ -59,7 +59,9 @@ final class AgentToolOperationsResolver
 
                 $operations[] = [
                     'tool_class'                   => $tool->tool_class,
-                    'tool_name'                    => $tool->tool_name,
+                    // Live attribute, not the persisted snapshot — a plugin rename
+                    // would otherwise leave the API reporting the pre-rename name.
+                    'tool_name'                    => $this->instanceResolver->resolveToolName($tool->tool_class),
                     'operation'                    => $op->name,
                     'enabled'                      => $this->overrideResolver->extractOverrideFlag($row, 'enabled'),
                     'default_requires_approval'    => $this->overrideResolver->extractOverrideFlag($row, 'default_requires_approval'),

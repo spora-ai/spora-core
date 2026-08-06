@@ -7,6 +7,7 @@ namespace Tests\Unit\Services\Agents;
 use Psr\Log\NullLogger;
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
+use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Services\Agents\AgentToolInstanceResolver;
 use Spora\Services\Agents\AgentToolOperationsResolver;
@@ -16,6 +17,7 @@ use Spora\Services\AgentToolSettingsService;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\CalculatorTool;
+use Tests\Fixtures\StubOutputTool;
 
 defined('AGENT_COLLABORATORS_TEST_PASSWORD') || define('AGENT_COLLABORATORS_TEST_PASSWORD', 'Password1!');
 
@@ -184,5 +186,42 @@ describe('AgentToolOverrideResolver::extractOverrideFlag', function (): void {
             'operation'  => 'calculate',
         ]);
         expect($fresh->extractOverrideFlag($nullRow, 'enabled'))->toBeNull();
+    });
+});
+
+describe('AgentToolOperationsResolver::getToolsOperations', function (): void {
+
+    it('returns the live #[Tool(name: …)] value, not the persisted agent_tools.tool_name snapshot', function (): void {
+        // Simulate a tool that was renamed after the agent was created: the
+        // `agent_tools.tool_name` row still carries the pre-rename value
+        // (`stub_output_legacy`), but the tool class' attribute now reads
+        // `stub_output`. The operations API must surface the current name
+        // so a plugin rename doesn't require a manual DB migration.
+        $userId = bootAuthLayer()->register('op-rename@example.com', AGENT_COLLABORATORS_TEST_PASSWORD, 'Op Rename');
+        $agent  = Agent::create([
+            'user_id'      => $userId,
+            'name'         => 'Rename Agent',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 10,
+            'is_active'    => true,
+        ]);
+        AgentTool::create([
+            'agent_id'   => $agent->id,
+            'tool_class' => StubOutputTool::class,
+            'tool_name'  => 'stub_output_legacy', // intentionally stale
+        ]);
+
+        $instanceResolver   = new AgentToolInstanceResolver();
+        $overrideResolver   = new AgentToolOverrideResolver(
+            new ToolConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new NullLogger(), []),
+            new LLMConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), []),
+            $instanceResolver,
+        );
+        $operationsResolver = new AgentToolOperationsResolver($instanceResolver, $overrideResolver);
+
+        $rows = $operationsResolver->getToolsOperations($agent->id, $userId);
+        expect($rows)->not->toBeNull();
+        expect(array_column($rows, 'tool_name'))->toBe(['stub_output']);
     });
 });
