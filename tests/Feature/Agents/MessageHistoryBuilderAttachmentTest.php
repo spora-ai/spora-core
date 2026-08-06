@@ -76,7 +76,7 @@ function buildAttachmentService(): \Spora\Services\MediaArchive\MediaArchiveServ
     return MediaArchiveTestSupport::buildService(new AutoAssetStore($database, $local, 1_048_576));
 }
 
-test('attachment with text asset expands to a text block from markdown_content', function (): void {
+test('attachment with text asset expands to a metadata prefix + text block from markdown_content', function (): void {
     $agentId = seedAttachmentAgent();
     $task = makeAttachmentTask($agentId);
     $service = buildAttachmentService();
@@ -99,11 +99,18 @@ test('attachment with text asset expands to a text block from markdown_content',
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
     expect($messages[0]['content'])->toBeArray();
+    expect($messages[0]['content'])->toHaveCount(2);
+    // Index 0: identity prefix carrying the asset_id the LLM can reference back.
     expect($messages[0]['content'][0]['type'])->toBe('text');
-    expect($messages[0]['content'][0]['text'])->toContain('invoice body');
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
+    expect($messages[0]['content'][0]['text'])->toContain($asset->id);
+    expect($messages[0]['content'][0]['text'])->toContain('invoice.txt');
+    // Index 1: existing extracted-text block.
+    expect($messages[0]['content'][1]['type'])->toBe('text');
+    expect($messages[0]['content'][1]['text'])->toContain('invoice body');
 });
 
-test('attachment with image asset expands to an image block when LLM supports images', function (): void {
+test('attachment with image asset expands to a metadata prefix + image block when LLM supports images', function (): void {
     $agentId = seedAttachmentAgent();
     $task = makeAttachmentTask($agentId);
     $service = buildAttachmentService();
@@ -136,13 +143,17 @@ test('attachment with image asset expands to an image block when LLM supports im
     $messages = (new MessageHistoryBuilder($driver))->build($task->id);
     expect($messages)->toHaveCount(1);
     expect($messages[0]['content'])->toBeArray();
-    $block = $messages[0]['content'][0];
-    expect($block['type'])->toBe('image');
-    expect($block['mediaType'])->toBe('image/png');
-    expect($block['base64'])->not->toBe('');
+    // Index 0: identity prefix. Index 1: image block.
+    expect($messages[0]['content'][0]['type'])->toBe('text');
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
+    expect($messages[0]['content'][0]['text'])->toContain($asset->id);
+    $image = collect($messages[0]['content'])->firstWhere('type', 'image');
+    expect($image)->not->toBeNull();
+    expect($image['mediaType'])->toBe('image/png');
+    expect($image['base64'])->not->toBe('');
 });
 
-test('attachment with image is dropped when the LLM does not support images', function (): void {
+test('attachment with image is dropped but metadata prefix still surfaces on non-vision driver', function (): void {
     $agentId = seedAttachmentAgent();
     $task = makeAttachmentTask($agentId);
     $service = buildAttachmentService();
@@ -173,10 +184,16 @@ test('attachment with image is dropped when the LLM does not support images', fu
         timeout: 60,
     );
     $messages = (new MessageHistoryBuilder($driver))->build($task->id);
-    // The block list is empty (image was dropped), so the message falls
-    // back to the row's content.
+    // Image was dropped (no vision support) but the metadata prefix
+    // still surfaces so the LLM can call media:get_media(asset_id=...)
+    // to learn about the asset.
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
+    expect($messages[0]['content'])->toBeArray();
+    expect($messages[0]['content'])->toHaveCount(1);
+    expect($messages[0]['content'][0]['type'])->toBe('text');
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
+    expect($messages[0]['content'][0]['text'])->toContain($asset->id);
 });
 
 test('attachment row referencing a missing asset skips the block gracefully', function (): void {
@@ -258,14 +275,21 @@ test('attachment + following user row merge into one user message', function ():
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
     expect($messages[0]['content'])->toBeArray();
-    $text = $messages[0]['content'][0]['text'];
+    // Layout: [metadata_prefix, composedPromptBlock].
+    expect($messages[0]['content'])->toHaveCount(2);
+    expect($messages[0]['content'][0]['type'])->toBe('text');
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
+    expect($messages[0]['content'][0]['text'])->toContain($asset->id);
+    $text = $messages[0]['content'][1]['text'];
     expect($text)->toContain('Summarize this paper');
     expect($text)->toContain('---');
     expect($text)->toContain('# paper.txt (extracted text)');
     expect($text)->toContain('paper body');
+    // Metadata lives in the sibling prefix block, not the composed body.
+    expect($text)->not->toContain('[Attached asset_id=');
 });
 
-test('attachment + image + following user row merges text and image blocks', function (): void {
+test('attachment + image + following user row merges text, image blocks, and per-attachment metadata prefixes', function (): void {
     $agentId = seedAttachmentAgent();
     $task = makeAttachmentTask($agentId);
     $service = buildAttachmentService();
@@ -316,17 +340,30 @@ test('attachment + image + following user row merges text and image blocks', fun
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
     expect($messages[0]['content'])->toBeArray();
-    $first = $messages[0]['content'][0];
-    expect($first['type'])->toBe('text');
-    expect($first['text'])->toContain('Compare these');
-    expect($first['text'])->toContain('notes body');
-    // Image block follows the text block.
-    $image = collect($messages[0]['content'])->firstWhere('type', 'image');
+    // Layout: [metadata_text, metadata_image, composedPromptBlock, imageBlock].
+    // Metadata blocks lead, one per attachment, with asset_ids the LLM can reference.
+    $blocks = $messages[0]['content'];
+    expect($blocks[0]['type'])->toBe('text');
+    expect($blocks[0]['text'])->toContain('[Attached asset_id=');
+    expect($blocks[0]['text'])->toContain($textAsset->id);
+    expect($blocks[1]['type'])->toBe('text');
+    expect($blocks[1]['text'])->toContain('[Attached asset_id=');
+    expect($blocks[1]['text'])->toContain($imageAsset->id);
+    // Composed prompt block carries the operator prompt + extracted text body.
+    $composed = $blocks[2];
+    expect($composed['type'])->toBe('text');
+    expect($composed['text'])->toContain('Compare these');
+    expect($composed['text'])->toContain('notes body');
+    // The metadata text must NOT leak into the composed body — it lives
+    // only as a sibling prefix block.
+    expect($composed['text'])->not->toContain('[Attached asset_id=');
+    // Image block follows the composed text.
+    $image = collect($blocks)->firstWhere('type', 'image');
     expect($image)->not->toBeNull();
     expect($image['mediaType'])->toBe('image/png');
 });
 
-test('attachment with image is dropped when driver image capability is forced off', function (): void {
+test('attachment with image is dropped but metadata prefix still surfaces when driver image capability is forced off', function (): void {
     $agentId = seedAttachmentAgent();
     $task = makeAttachmentTask($agentId);
     $service = buildAttachmentService();
@@ -367,11 +404,20 @@ test('attachment with image is dropped when driver image capability is forced of
     $messages = (new MessageHistoryBuilder($driver))->build($task->id);
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
-    // Image was dropped (no image block in content); the prompt survives.
+    // Image was dropped but metadata prefix still surfaces, prompt
+    // survives in the composed body block.
     $content = $messages[0]['content'];
     if (is_array($content)) {
         $types = array_map(static fn(array $b): string => (string) ($b['type'] ?? ''), $content);
         expect($types)->not->toContain('image');
+        $metadata = $content[0];
+        expect($metadata['type'])->toBe('text');
+        expect($metadata['text'])->toContain('[Attached asset_id=');
+        expect($metadata['text'])->toContain($imageAsset->id);
+        $composed = $content[1];
+        expect($composed['type'])->toBe('text');
+        expect($composed['text'])->toContain('Describe this');
+        expect($composed['text'])->not->toContain('[Attached asset_id=');
     } else {
         expect($content)->toContain('Describe this');
     }
@@ -409,16 +455,25 @@ test('user row first, attachment row second (production order) merges into one u
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
     expect($messages[0]['content'])->toBeArray();
-    $text = $messages[0]['content'][0]['text'];
+    // Layout: [metadata_prefix, composedPromptBlock]. Metadata is a
+    // sibling block; the composed body still carries the prompt + extracted text.
+    $blocks = $messages[0]['content'];
+    expect($blocks[0]['type'])->toBe('text');
+    expect($blocks[0]['text'])->toContain('[Attached asset_id=');
+    expect($blocks[0]['text'])->toContain($asset->id);
+    $text = $blocks[1]['text'];
     expect($text)->toContain('Summarize this paper');
     expect($text)->toContain('---');
     expect($text)->toContain('# paper.txt (extracted text)');
     expect($text)->toContain('paper body');
+    // Metadata text must not leak into the composed body — it lives in
+    // the sibling prefix block only.
+    expect($text)->not->toContain('[Attached asset_id=');
     // Dedup invariant: each filename header appears exactly once.
     expect(substr_count($text, '# paper.txt (extracted text)'))->toBe(1);
 });
 
-test('user row first, image attachment second (production order) merges prompt with image block on vision driver', function (): void {
+test('user row first, image attachment second (production order) merges prompt with metadata prefix and image block on vision driver', function (): void {
     $agentId = seedAttachmentAgent();
     $task = makeAttachmentTask($agentId);
     $service = buildAttachmentService();
@@ -461,15 +516,20 @@ test('user row first, image attachment second (production order) merges prompt w
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
     expect($messages[0]['content'])->toBeArray();
-    // First block must be the prompt text, image block(s) follow.
-    expect($messages[0]['content'][0]['type'])->toBe('text');
-    expect($messages[0]['content'][0]['text'])->toContain('Describe this');
-    $image = collect($messages[0]['content'])->firstWhere('type', 'image');
+    // Layout: [metadata_prefix, composedPromptBlock, imageBlock].
+    $blocks = $messages[0]['content'];
+    expect($blocks[0]['type'])->toBe('text');
+    expect($blocks[0]['text'])->toContain('[Attached asset_id=');
+    expect($blocks[0]['text'])->toContain($imageAsset->id);
+    expect($blocks[1]['type'])->toBe('text');
+    expect($blocks[1]['text'])->toContain('Describe this');
+    expect($blocks[1]['text'])->not->toContain('[Attached asset_id=');
+    $image = collect($blocks)->firstWhere('type', 'image');
     expect($image)->not->toBeNull();
     expect($image['mediaType'])->toBe('image/png');
 });
 
-test('user row first, image attachment second (production order) drops the image when vision forced off', function (): void {
+test('user row first, image attachment second (production order) drops the image but keeps metadata prefix when vision forced off', function (): void {
     $agentId = seedAttachmentAgent();
     $task = makeAttachmentTask($agentId);
     $service = buildAttachmentService();
@@ -515,6 +575,13 @@ test('user row first, image attachment second (production order) drops the image
     if (is_array($content)) {
         $types = array_map(static fn(array $b): string => (string) ($b['type'] ?? ''), $content);
         expect($types)->not->toContain('image');
+        // Metadata prefix survives the drop so the LLM can still call
+        // media:get_media(asset_id=...) to learn about the asset.
+        expect($content[0]['type'])->toBe('text');
+        expect($content[0]['text'])->toContain('[Attached asset_id=');
+        expect($content[0]['text'])->toContain($imageAsset->id);
+        expect($content[1]['type'])->toBe('text');
+        expect($content[1]['text'])->toContain('Describe this');
     } else {
         expect($content)->toContain('Describe this');
     }
