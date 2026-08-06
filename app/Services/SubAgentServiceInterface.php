@@ -28,9 +28,14 @@ interface SubAgentServiceInterface
      * parent as waiting for the child, and publish the Mercure state change
      * so the frontend picks up the new status and child id(s) live.
      *
+     * The child id is persisted on the parent tool-call row under
+     * `result_data.spawned_sub_task_ids` as a single-element array — the
+     * same shape the LLM-facing schema advertises for multi-child
+     * batches, so the frontend never has to special-case N=1.
+     *
      * @return Task The newly created child task.
      */
-    public function spawn(int $parentTaskId, int $targetAgentId, string $prompt, int $userId, ?string $toolCallId = null): Task;
+    public function spawn(int $parentTaskId, int $targetAgentId, string $prompt, int $userId): Task;
 
     /**
      * Hook called by `TickPhaseRunner` whenever a child task transitions

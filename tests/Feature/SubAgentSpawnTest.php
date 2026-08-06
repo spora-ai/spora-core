@@ -236,13 +236,14 @@ describe('SubAgentService::spawn', function (): void {
         expect($child->status)->toBe('COMPLETED');
 
         // The tool_call row carries the mapping that ties the child back
-        // to the originating tool call.
+        // to the originating tool call. The field is always a plural
+        // array so the frontend schema matches the multi-child shape.
         $toolCall = ToolCallModel::where('task_id', $parent->id)
             ->where('operation', 'sub_agent')
             ->first();
         expect($toolCall)->not->toBeNull();
         expect($toolCall->result_data['op'])->toBe('sub_agent');
-        expect($toolCall->result_data['spawned_sub_task_id'])->toBe($child->id);
+        expect($toolCall->result_data['spawned_sub_task_ids'])->toBe([$child->id]);
         expect($toolCall->result_data['target_agent_id'])->toBe($childAgentId);
 
         // The parent has resumed with the child output as a 'tool' row

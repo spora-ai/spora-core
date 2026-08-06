@@ -173,14 +173,17 @@ final class HandoverTool extends AbstractTool
         return new ToolResult(
             success: true,
             // The frontend renders this as markdown, so the link opens the
-            // child chat in a new tab. `spawned_sub_task_id` is read back
+            // child chat in a new tab. `spawned_sub_task_ids` is read back
             // in SubAgentService to correlate the eventual child outcome
-            // with the originating tool call.
+            // with the originating tool call. The plural array shape keeps
+            // the schema identical whether the batch contains one or many
+            // sub_agent ops, so the frontend does not need a special case
+            // for the single-child case.
             content: "Sub-agent task #{$child->id} starts on agent #{$targetAgentId}. [Task #{$child->id}](/tasks/{$child->id}).",
             data: [
-                'op'                  => 'sub_agent',
-                'spawned_sub_task_id' => $child->id,
-                'target_agent_id'     => $targetAgentId,
+                'op'                   => 'sub_agent',
+                'spawned_sub_task_ids' => [$child->id],
+                'target_agent_id'      => $targetAgentId,
             ],
         );
     }

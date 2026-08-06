@@ -167,7 +167,7 @@ describe('HandoverTool::execute (sub_agent op)', function (): void {
 
         expect($result->success)->toBeTrue()
             ->and($result->data['op'])->toBe('sub_agent')
-            ->and($result->data['spawned_sub_task_id'])->toBe(HANDOVER_SUB_CHILD_ID)
+            ->and($result->data['spawned_sub_task_ids'])->toBe([HANDOVER_SUB_CHILD_ID])
             ->and($result->data['target_agent_id'])->toBe(HANDOVER_TARGET_AGENT)
             ->and($result->content)->toContain('Sub-agent task #' . HANDOVER_SUB_CHILD_ID);
     });

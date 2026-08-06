@@ -24,10 +24,12 @@ use Spora\Services\Text\Utf8Sanitizer;
  * must own both the parent task and the target agent. Cross-user
  * delegation is out of scope.
  *
- * The tool_call_id ↔ child_id mapping is kept on the persisted
- * `tool_calls` row (`result_data.spawned_sub_task_id`) by the tool
- * itself, so the resume path reads it back as a single SELECT — no
- * extra plumbing through the orchestrator.
+ * The tool_call_id ↔ child_ids mapping is kept on the persisted
+ * `tool_calls` row (`result_data.spawned_sub_task_ids`, an array) by
+ * the tool itself, so the resume path reads it back as a single
+ * SELECT — no extra plumbing through the orchestrator. The array
+ * shape (always plural) keeps the schema uniform across single-child
+ * and multi-child batches.
  */
 final class SubAgentService implements SubAgentServiceInterface
 {
@@ -45,7 +47,7 @@ final class SubAgentService implements SubAgentServiceInterface
         private readonly WorkerMode $workerMode = WorkerMode::Sync,
     ) {}
 
-    public function spawn(int $parentTaskId, int $targetAgentId, string $prompt, int $userId, ?string $toolCallId = null): Task
+    public function spawn(int $parentTaskId, int $targetAgentId, string $prompt, int $userId): Task
     {
         $parent = Task::where('id', $parentTaskId)
             ->where('user_id', $userId)
@@ -243,16 +245,27 @@ final class SubAgentService implements SubAgentServiceInterface
 
     /**
      * The parent task's tool_calls row for the `sub_agent` op that
-     * spawned this child carries the mapping in `result_data.spawned_sub_task_id`.
-     * Restore the provider_call_id so the next LLM round-trip sees the
-     * tool result correlated with the originating tool call.
+     * spawned this child carries the mapping in
+     * `result_data.spawned_sub_task_ids` (an array — even when a single
+     * child is spawned, the field is a one-element list). Restore the
+     * provider_call_id so the next LLM round-trip sees the tool result
+     * correlated with the originating tool call.
+     *
+     * SQLite 3.38+ supports `EXISTS (SELECT 1 FROM json_each(...))`,
+     * which is what spora-core's test suite uses. MySQL's
+     * `JSON_CONTAINS` is the equivalent on the production path; both
+     * are wired up in {@see \Spora\Tools\Schema\OperationSchemaFilter}
+     * for the same reason (JSON-shape agnosticism).
      */
     private function findToolCallIdForChild(int $parentTaskId, int $childId): ?string
     {
         $row = ToolCallModel::where('task_id', $parentTaskId)
             ->where('tool_name', 'handover')
             ->where('operation', 'sub_agent')
-            ->whereRaw("json_extract(result_data, '$.spawned_sub_task_id') = ?", [$childId])
+            ->whereRaw(
+                "EXISTS (SELECT 1 FROM json_each(result_data, '$.spawned_sub_task_ids') WHERE value = ?)",
+                [$childId],
+            )
             ->first();
 
         return $row?->provider_call_id;
