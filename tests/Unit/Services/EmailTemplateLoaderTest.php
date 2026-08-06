@@ -59,11 +59,11 @@ describe('EmailTemplateLoader', function (): void {
             expect($template)->toBeNull();
         });
 
-        it('returns template with null body_html when not set', function (): void {
+        it('omits body_html from the returned array when the template YAML does not declare it', function (): void {
             $loader = makeLoader();
             $template = $loader->get('welcome');
 
-            expect($template['body_html'])->toBeNull();
+            expect($template)->not->toHaveKey('body_html');
         });
     });
 

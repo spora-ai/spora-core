@@ -2,9 +2,6 @@
 
 declare(strict_types=1);
 
-use FilesystemIterator;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;

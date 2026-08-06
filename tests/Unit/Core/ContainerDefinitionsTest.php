@@ -484,7 +484,6 @@ it('SseController factory prefers mercure_publish_url over mercure_url when both
     $reflection = new ReflectionClass($controller);
 
     $hubUrlProp = $reflection->getProperty('hubUrl');
-    $hubUrlProp->setAccessible(true);
     expect($hubUrlProp->getValue($controller))->toBe('http://spora:80/.well-known/mercure');
 });
 
@@ -1200,7 +1199,6 @@ describe('AgentController wiring', function (): void {
 
         $ref = new ReflectionClass($controller);
         $prop = $ref->getProperty('pictureService');
-        $prop->setAccessible(true);
         $service = $prop->getValue($controller);
 
         expect($service)->toBeInstanceOf(Spora\Services\AgentPictures\AgentPictureService::class);
