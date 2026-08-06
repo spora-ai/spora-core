@@ -88,6 +88,7 @@ final class ApprovedBatchExecutor
             // Any PENDING_APPROVAL rows left in the DB here are dangling (in DB but not
             // in saved state) — a state/DB-drift case, distinct from partial approval.
             $this->cleanupStrandedApprovals($task, $taskId);
+            $this->triggerBatchBoundaryResume($taskId);
             $this->completeResume($taskId);
         } catch (Throwable $e) {
             $this->markResumeFailed($taskId, $e);
@@ -343,6 +344,38 @@ final class ApprovedBatchExecutor
 
         $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
         Task::where('id', $taskId)->update(['status' => $taskStatus]);
+    }
+
+    /**
+     * Sync-mode batch boundary: every approved tool in the batch has run
+     * inline, so if any of them spawned a sub-agent the children have all
+     * ticked to completion. Check whether the parent is now ready to wake
+     * up; {@see SubAgentService::maybeResumeParentForParent()} is a no-op when no
+     * sub-agent calls were approved, so calling it unconditionally is safe.
+     *
+     * Worker mode skips this hook — the sub-agent spawns happen later, on
+     * the daemon's tick, and the worker's equivalent boundary lives in
+     * {@see TickPhaseRunner::executeApprovedPendingToolsForTask()}.
+     */
+    private function triggerBatchBoundaryResume(int $taskId): void
+    {
+        if ($this->workerMode !== WorkerMode::Sync) {
+            return;
+        }
+
+        $subAgent = $this->orchestrator->subAgent ?? null;
+        if ($subAgent === null) {
+            return;
+        }
+
+        try {
+            $subAgent->maybeResumeParentForParent($taskId);
+        } catch (Throwable $e) {
+            $this->logger?->warning('SubAgentService::maybeResumeParentForParent failed at batch boundary', [
+                'task_id'   => $taskId,
+                'exception' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function markResumeFailed(int $taskId, Throwable $e): void

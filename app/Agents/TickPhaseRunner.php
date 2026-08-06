@@ -114,6 +114,34 @@ final class TickPhaseRunner
 
             $this->executeOneApprovedPendingTool($task, $providerCallId, $toolName, $approvedArgs, $operationName);
         }
+
+        // Worker-mode batch boundary: every approved tool persisted with
+        // `executed_at IS NULL` has now been executed inline by the daemon's
+        // tick, so any sub_agent children have all ticked to completion.
+        // Mirror the sync-mode boundary in ApprovedBatchExecutor — single
+        // resume fire for the whole batch, never per-child.
+        $this->maybeResumeParentFromBatchBoundary($task->id);
+    }
+
+    /**
+     * Worker-mode batch boundary hook. Wraps the SubAgentService call so
+     * missing-DI scenarios (no SubAgentService wired) degrade silently,
+     * matching the pattern of {@see maybeResumeParentForChild()}.
+     */
+    private function maybeResumeParentFromBatchBoundary(int $parentTaskId): void
+    {
+        if ($this->subAgent === null) {
+            return;
+        }
+
+        try {
+            $this->subAgent->maybeResumeParentForParent($parentTaskId);
+        } catch (Throwable $e) {
+            $this->logger?->warning('SubAgentService::maybeResumeParentForParent failed at worker batch boundary', [
+                'task_id'   => $parentTaskId,
+                'exception' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

@@ -44,4 +44,14 @@ interface SubAgentServiceInterface
      * child's output appended as a `role:'tool'` history row.
      */
     public function maybeResumeParent(int $childTaskId): void;
+
+    /**
+     * Batch-boundary hook fired from `ApprovedBatchExecutor` (sync mode)
+     * and `TickPhaseRunner` (worker mode) once every approved tool in a
+     * batch has been processed. Resumes the parent iff the live child
+     * count equals the parent's `sub_agent_expected_count` (so a
+     * mid-batch check always sees `expected > terminal` and refuses to
+     * resume). Idempotent.
+     */
+    public function maybeResumeParentForParent(int $parentTaskId): void;
 }

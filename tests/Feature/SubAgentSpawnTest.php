@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use LogicException;
 use Mockery;
+use RuntimeException;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
@@ -317,5 +318,155 @@ describe('SubAgentService::spawn', function (): void {
             ->first();
         expect($toolCall)->not->toBeNull();
         expect($toolCall->result_content)->toContain('not in the allowed_target_agents list');
+    });
+
+    it('resumes the parent with a failure tool result when the child FAILEDs', function (): void {
+        $seed = subAgentSeedAgents();
+        $parentAgentId = $seed['parentAgentId'];
+        $childAgentId = $seed['childAgentId'];
+
+        AgentTool::insert([
+            'agent_id'   => $parentAgentId,
+            'tool_class' => HandoverTool::class,
+            'tool_name'  => 'handover',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        // The driver scripts the parent's first response (the sub_agent tool
+        // call) and then explodes on every subsequent call. The parent's
+        // first tick — the only one we want to land a tool call — succeeds;
+        // the child's tick throws and lands the child in FAILED status.
+        $explodingDriver = new class implements \Spora\Drivers\LLMDriverInterface {
+            public int $callCount = 0;
+
+            public function complete(\Spora\Drivers\ValueObjects\LLMRequest $request): LLMResponse
+            {
+                $this->callCount++;
+                if ($this->callCount === 1) {
+                    return new LLMResponse(
+                        content: null,
+                        toolCalls: [new DriverToolCall(
+                            SUB_AGENT_PARENT_PROVIDER_CALL_ID,
+                            'handover',
+                            [
+                                'op'       => 'sub_agent',
+                                'agent_id' => $GLOBALS['__sub_agent_child_id'],
+                                'prompt'   => SUB_AGENT_PROMPT,
+                            ],
+                        )],
+                        inputTokens: 10,
+                        outputTokens: 5,
+                        completionId: 'cmp_parent_1',
+                    );
+                }
+                throw new RuntimeException('child driver exploded');
+            }
+            public function getProviderName(): string
+            {
+                return 'mock-failing';
+            }
+            public function getModelName(): string
+            {
+                return 'mock-model';
+            }
+            public function supportsImageInput(): bool
+            {
+                return false;
+            }
+        };
+
+        $GLOBALS['__sub_agent_child_id'] = $childAgentId;
+
+        $driverFactory = Mockery::mock(DriverFactory::class);
+        $driverFactory->allows('makeFromAgent')->andReturn($explodingDriver);
+
+        $handoverService = new HandoverService(static fn(): OrchestratorInterface => throw new LogicException('handover op should not be called'));
+
+        $allowlist = [$childAgentId];
+
+        $toolConfig = Mockery::mock(ToolConfigServiceInterface::class);
+        $toolConfig->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => $allowlist]);
+
+        $probeOuter = new Orchestrator(
+            $driverFactory,
+            new OrchestratorConfig(
+                toolInstances: [new StubInputTool()],
+                agentService: new AgentService(),
+            ),
+        );
+
+        $realSubAgent = new SubAgentService(
+            static fn(): OrchestratorInterface => $probeOuter,
+            null,
+            WorkerMode::Sync,
+        );
+
+        $handoverTool = new HandoverTool($handoverService, $realSubAgent, $toolConfig);
+
+        $outer = new Orchestrator(
+            $driverFactory,
+            new OrchestratorConfig(
+                toolInstances: [new StubInputTool(), $handoverTool],
+                agentService: new AgentService(),
+                subAgent: $realSubAgent,
+            ),
+        );
+
+        $finalSubAgent = new SubAgentService(
+            static fn(): OrchestratorInterface => $outer,
+            null,
+            WorkerMode::Sync,
+        );
+        $outer = new Orchestrator(
+            $driverFactory,
+            new OrchestratorConfig(
+                toolInstances: [new StubInputTool(), $handoverTool],
+                agentService: new AgentService(),
+                subAgent: $finalSubAgent,
+            ),
+        );
+
+        $parent = $outer->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        $parent->refresh();
+        expect($parent->status)->toBe('PENDING_APPROVAL');
+
+        // The parent's next LLM call ALSO explodes (the driver fails every
+        // call after the first), so resume() will throw after the sub-agent
+        // resume has already landed the failure tool row in history. Catch
+        // so we can inspect the partial-success state.
+        try {
+            $outer->resume($parent->id, [[
+                'provider_call_id' => SUB_AGENT_PARENT_PROVIDER_CALL_ID,
+                'decision' => 'approve',
+                'arguments' => [
+                    'op'       => 'sub_agent',
+                    'agent_id' => $childAgentId,
+                    'prompt'   => SUB_AGENT_PROMPT,
+                ],
+            ]]);
+        } catch (RuntimeException $e) {
+            // expected — the parent's subsequent LLM call also throws.
+        }
+
+        $child = Task::where('parent_task_id', $parent->id)->first();
+        expect($child)->not->toBeNull();
+        expect($child->status)->toBe('FAILED');
+        expect($child->failure_reason)->toContain('child driver exploded');
+
+        // The parent still resumes — failure is just another terminal state.
+        // The parent's next LLM call also fails (the driver explodes on every
+        // call after the first), so the parent ends up FAILED — but the
+        // resume itself happened and the failure tool row landed in history
+        // before the parent died.
+        $toolRow = TaskHistory::where('task_id', $parent->id)
+            ->where('role', 'tool')
+            ->where('tool_call_id', SUB_AGENT_PARENT_PROVIDER_CALL_ID)
+            ->orderByDesc('id')
+            ->first();
+        expect($toolRow)->not->toBeNull();
+        expect($toolRow->content)->toContain('Sub-agent task #' . $child->id . ' failed');
+        expect($toolRow->content)->toContain('child driver exploded');
     });
 });
