@@ -7,7 +7,6 @@ namespace Spora\Services;
 use Closure;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
-use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Agents\ValueObjects\WorkerMode;
@@ -22,36 +21,25 @@ use Throwable;
  * resumes the parent once every child reaches a terminal state.
  *
  * Authorization mirrors {@see HandoverService::handover()}: the caller
- * must own both the parent task and the target agent. Cross-user
- * delegation is out of scope.
+ * must own both the parent task and the target agent.
  *
- * The tool_call_id ↔ child_ids mapping is kept on the persisted
- * `tool_calls` row (`result_data.spawned_sub_task_ids`, an array) by
- * the tool itself, so the resume path reads it back as a single
- * SELECT — no extra plumbing through the orchestrator. The array
- * shape (always plural) keeps the schema uniform across single-child
- * and multi-child batches.
- *
- * Multi-child batch invariant (e.g. a single LLM turn that emits
- * `[sub_agent, calculator, sub_agent]`): the parent is paused while
- * each child runs, and resumes ONCE at the batch boundary, not after
- * every child. The mechanism is the `sub_agent_expected_count`
- * counter — every spawn increments it AFTER the child tick, so any
- * check that fires mid-batch sees `expected < terminal` and refuses
- * to resume. The actual resume fires from the batch-boundary hook
- * (ApprovedBatchExecutor in sync mode, TickPhaseRunner in worker
- * mode); see {@see \Spora\Agents\ApprovedBatchExecutor::execute()}
- * and {@see \Spora\Agents\TickPhaseRunner::executeApprovedPendingToolsForTask()}.
+ * Multi-child batch invariant (e.g. `[sub_agent, calculator, sub_agent]`):
+ * the parent resumes ONCE at the batch boundary, not after every child.
+ * Each spawn increments `data.sub_agent_expected_count` after the child
+ * tick; the resume gate compares the count against the spawned ids and
+ * only fires when both match — mid-batch hits see expected < terminal
+ * and refuse to resume. The actual resume is driven by the batch-boundary
+ * hooks in {@see \Spora\Agents\ApprovedBatchExecutor::execute()} (sync)
+ * and {@see \Spora\Agents\TickPhaseRunner::executeApprovedPendingToolsForTask()}
+ * (worker), which call {@see maybeResumeParentForParent()}.
  */
 final class SubAgentService implements SubAgentServiceInterface
 {
     /**
      * @param Closure(): OrchestratorInterface $orchestratorFactory
      *   Lazy factory — the Orchestrator's constructor takes the tool
-     *   instance list (which includes `HandoverTool`), so direct
-     *   injection creates a circular dependency. The closure defers
-     *   resolution to the moment `spawn()` is called, mirroring the
-     *   pattern used by {@see HandoverService}.
+     *   instance list (which includes `HandoverTool`), so direct injection
+     *   creates a circular dependency. Mirrors the pattern in {@see HandoverService}.
      */
     public function __construct(
         private readonly Closure $orchestratorFactory,
@@ -75,22 +63,17 @@ final class SubAgentService implements SubAgentServiceInterface
             throw new InvalidArgumentException('Target agent not found.');
         }
 
-        // Flip the parent to AWAITING_SUB_AGENTS BEFORE the child tick
-        // runs. In Sync mode Orchestrator::start() ticks the child inline,
-        // so the child may complete before we get a chance to update the
-        // parent — and the parent's status is what gates
-        // `maybeResumeParent` on the child's completion.
+        // Flip to AWAITING_SUB_AGENTS before the child tick — in Sync mode
+        // the child ticks inline and may complete before we return, and the
+        // parent's status is what gates the resume path on child completion.
         $this->markParentAwaitingSubAgents($parent);
 
-        // Sync mode: the child ticks inline. If the child's LLM driver
-        // throws, TickPhaseRunner::handleTickFailure already marked the
-        // child task as FAILED before the exception propagated up — so we
-        // catch it here, look up the child by parent_task_id (the only child
-        // we just created), and return the FAILED row instead of letting
-        // the resume path abort. Letting the throw bubble would mark the
-        // PARENT task FAILED via ApprovedBatchExecutor::markResumeFailed,
-        // which is wrong: the parent should still wake up with a failure
-        // tool result so the LLM can choose how to react.
+        // Catch driver failures from the child tick: TickPhaseRunner marks
+        // the child FAILED before the exception propagates, so the row exists
+        // and we can return it. Letting the throw bubble would mark the
+        // PARENT FAILED via ApprovedBatchExecutor::markResumeFailed, which
+        // is wrong — the parent should resume with a failure tool result so
+        // the LLM can react.
         try {
             $child = ($this->orchestratorFactory)()->start(
                 agentId: $targetAgent->id,
@@ -109,28 +92,19 @@ final class SubAgentService implements SubAgentServiceInterface
 
         $this->recordSpawnedChild($parent, $child->id);
 
-        // Sync mode: the child has already ticked (and may have completed)
-        // by the time we get here. The TickPhaseRunner hook fired inside the
-        // child's tick, but at that moment the parent had no spawned ids
-        // recorded yet, so loadReadyParent returned early. Re-check now
-        // that the registration is committed — with the multi-child
-        // invariant below, this is a no-op for batches (expected_count is
-        // still 0, terminal_count is 1, no resume), and the actual resume
-        // fires from the batch-boundary hook.
+        // The TickPhaseRunner hook already fired inside the child's tick,
+        // but at that moment the parent had no spawned ids recorded and
+        // loadReadyParent returned null. Re-check now that the registration
+        // is committed. For multi-child batches the post-tick check is a
+        // no-op (expected_count is still 0) — the actual resume fires from
+        // the batch-boundary hook after all spawns have incremented.
         $child->refresh();
         if (in_array($child->status, ['COMPLETED', 'FAILED'], true)) {
             $this->maybeResumeParent($child->id);
         }
 
-        // Increment expected_count AFTER the post-tick re-check so any
-        // mid-batch check (TickPhaseRunner hook, post-tick re-check) sees
-        // expected from the PREVIOUS spawn, not this one. In a single-child
-        // batch expected reaches terminal on the next child-completion hook;
-        // in a multi-child batch expected reaches terminal only after the
-        // last spawn in the batch has been recorded AND its child tick has
-        // completed, at which point the batch-boundary hook in
-        // ApprovedBatchExecutor (sync) or TickPhaseRunner (worker) fires
-        // the resume exactly once.
+        // Increment AFTER the post-tick re-check so any mid-batch check
+        // sees expected from the PREVIOUS spawn, not this one.
         $this->incrementExpectedCount($parent->id);
 
         $this->publishParentState($parent->id, $userId);
@@ -149,15 +123,10 @@ final class SubAgentService implements SubAgentServiceInterface
     }
 
     /**
-     * Batch-boundary hook for ApprovedBatchExecutor (sync mode) and
-     * TickPhaseRunner (worker mode). Operates on a parent task id and
-     * resolves the resume iff the parent's `sub_agent_expected_count`
-     * equals the number of terminal children it has spawned — the
-     * same gate {@see loadReadyParent()} enforces from the child side.
-     *
-     * Idempotent: a parent that isn't waiting for sub-agents (no
-     * `AWAITING_SUB_AGENTS` status, or `sub_agent_expected_count=0`)
-     * is a no-op.
+     * Batch-boundary hook — fires from ApprovedBatchExecutor (sync) and
+     * TickPhaseRunner (worker) after every approved tool in a batch has
+     * run. Resumes the parent iff the spawned-id count matches
+     * `sub_agent_expected_count` and every sibling is terminal.
      */
     public function maybeResumeParentForParent(int $parentTaskId): void
     {
@@ -183,26 +152,10 @@ final class SubAgentService implements SubAgentServiceInterface
     }
 
     /**
-     * Walk the parent + sibling state for a child task and return the
-     * resolved parent + sibling ids when every precondition holds.
-     *
-     * Returns null when any precondition fails:
-     *   - child is missing or has no parent
-     *   - child is not in a terminal state (COMPLETED / FAILED)
-     *   - parent is missing or no longer in AWAITING_SUB_AGENTS
-     *   - the parent has no `sub_agent_expected_count` recorded (no spawns yet)
-     *   - the number of terminal siblings doesn't match the expected count
-     *     (mid-batch — more spawns in this batch are still in flight or not
-     *     yet recorded)
-     *
-     * The shape is a tagged array (intentionally not a class — the
-     * caller only needs two fields and a class would be premature).
-     *
-     * The `sub_agent_expected_count` gate is the multi-child invariant:
-     * a batch `[sub_agent, calculator, sub_agent]` records 1 after the
-     * first spawn (terminal=1) and 2 after the second (terminal=2). Only
-     * the second hit fires the resume — the first one sees expected < terminal
-     * and returns null.
+     * Resolves the parent + sibling ids when every precondition holds; null
+     * otherwise. Preconditions: child is terminal, parent is awaiting
+     * sub-agents, and the spawned-id count matches `sub_agent_expected_count`
+     * (the multi-child gate — mid-batch hits always return null).
      *
      * @return array{parent: Task, siblingIds: list<int>}|null
      */
@@ -269,13 +222,9 @@ final class SubAgentService implements SubAgentServiceInterface
     }
 
     /**
-     * Bump the parent's `sub_agent_expected_count` so the resume gate sees
-     * one more expected child than it did before this spawn returned.
-     *
      * Read-modify-write (not a raw `+1` SQL update) so the increment and
-     * the in-memory `$data['spawned_sub_task_ids']` stay in lockstep if
-     * any concurrent writer touched the row between {@see recordSpawnedChild()}
-     * and this call.
+     * `data.spawned_sub_task_ids` stay in lockstep if a concurrent writer
+     * touched the row between {@see recordSpawnedChild()} and this call.
      */
     private function incrementExpectedCount(int $parentId): void
     {
@@ -293,10 +242,10 @@ final class SubAgentService implements SubAgentServiceInterface
     }
 
     /**
-     * Idempotently flip the parent to AWAITING_SUB_AGENTS and seed
-     * `data.spawned_sub_task_ids` so the resume path can walk the live
-     * set of children. Called BEFORE the child tick so the child
-     * completion's `maybeResumeParent` hook sees the right parent state.
+     * Idempotent: AWAITING_SUB_AGENTS already set is a no-op aside from
+     * seeding `data.spawned_sub_task_ids = []`. Called BEFORE the child
+     * tick so the child's `maybeResumeParent` hook sees the parent in the
+     * right state.
      */
     private function markParentAwaitingSubAgents(Task $parent): void
     {
@@ -312,10 +261,10 @@ final class SubAgentService implements SubAgentServiceInterface
     }
 
     /**
-     * Flip the parent back to RUNNING/QUEUED, append `role:'tool'` rows
-     * for each completed child, clear the spawned-child book-keeping
-     * in `data`, and kick the next tick (or let the daemon pick it up
-     * in Worker mode).
+     * Appends each child's output as a `role:'tool'` history row
+     * correlated with the originating tool_call_id, clears the spawned
+     * book-keeping, flips the parent to RUNNING (Sync) or QUEUED (Worker),
+     * and kicks the next tick.
      *
      * @param list<int> $childIds
      */
@@ -361,18 +310,13 @@ final class SubAgentService implements SubAgentServiceInterface
     }
 
     /**
-     * The parent task's tool_calls row for the `sub_agent` op that
-     * spawned this child carries the mapping in
-     * `result_data.spawned_sub_task_ids` (an array — even when a single
-     * child is spawned, the field is a one-element list). Restore the
-     * provider_call_id so the next LLM round-trip sees the tool result
-     * correlated with the originating tool call.
+     * Look up the `tool_calls` row that spawned this child and return
+     * its `provider_call_id` so the next LLM round-trip sees the tool
+     * result correlated with the originating call.
      *
-     * SQLite 3.38+ supports `EXISTS (SELECT 1 FROM json_each(...))`,
-     * which is what spora-core's test suite uses. MySQL's
-     * `JSON_CONTAINS` is the equivalent on the production path; both
-     * are wired up in {@see \Spora\Tools\Schema\OperationSchemaFilter}
-     * for the same reason (JSON-shape agnosticism).
+     * SQLite 3.38+ supports `json_each` (test suite); MySQL production
+     * uses `JSON_CONTAINS`. The OperationSchemaFilter follows the same
+     * JSON-shape agnostic pattern.
      */
     private function findToolCallIdForChild(int $parentTaskId, int $childId): ?string
     {
