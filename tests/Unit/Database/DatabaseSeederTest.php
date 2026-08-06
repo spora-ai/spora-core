@@ -8,15 +8,20 @@ use Spora\Core\DatabaseSeeder;
 use Spora\Core\Paths;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
+use Spora\Models\MailTemplate;
 use Spora\Models\User;
 use Spora\Plugins\PluginLoader;
-use Spora\Services\EmailTemplateLoader;
+use Spora\Services\Mail\MailTemplateRenderer;
+use Spora\Services\Mail\MailTemplateSyncService;
+use Spora\Services\MailTemplateService;
 use Spora\Services\ToolConfigService;
 
 function makeSeeder(): DatabaseSeeder
 {
-    $authService = bootAuthLayer();
-    $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
+    $authService    = bootAuthLayer();
+    $templateLoader = new Spora\Services\EmailTemplateLoader(new Paths(BASE_PATH));
+    $mailService    = new MailTemplateService(MailTemplateRenderer::createDefault());
+    $mailTemplateSync = new MailTemplateSyncService($templateLoader, $mailService);
 
     $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new Spora\Core\SecurityManager($key);
@@ -34,7 +39,7 @@ function makeSeeder(): DatabaseSeeder
         new Paths(BASE_PATH),
     );
 
-    return new DatabaseSeeder($authService, $templateLoader, $importer);
+    return new DatabaseSeeder($authService, $mailTemplateSync, $importer);
 }
 
 it('seeds the admin user and agent successfully', function () {
@@ -129,4 +134,49 @@ it('does not recreate a deleted admin row (security)', function () {
 
     expect(User::where('email', 'admin@spora.local')->exists())->toBeFalse()
         ->and($output)->not->toContain('Created Admin User');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('inserts mail templates from YAML that are missing from the DB', function () {
+    // Pre-condition: drop one of the system templates so the seeder has to recreate it.
+    $now = date('Y-m-d H:i:s');
+    Capsule::table('mail_templates')->insert([
+        'name'       => 'welcome',
+        'subject'    => 'Welcome to {{site_name}}',
+        'body'       => 'old welcome body',
+        'body_html'  => null,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+    // `email_change_verification` is intentionally absent.
+
+    ob_start();
+    $output = ob_get_clean();
+
+    // Make sure DB really is missing the template before seeding.
+    expect(MailTemplate::where('name', 'email_change_verification')->exists())->toBeFalse();
+
+    makeSeeder()->run();
+
+    // The seeder should have picked up the missing YAML.
+    expect(MailTemplate::where('name', 'email_change_verification')->exists())->toBeTrue();
+    expect(MailTemplate::where('name', 'email_change_verification')->value('subject'))
+        ->toContain('Confirm your new email address');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('does not overwrite operator-customised mail templates', function () {
+    $now = date('Y-m-d H:i:s');
+    Capsule::table('mail_templates')->insert([
+        'name'       => 'welcome',
+        'subject'    => 'OPERATOR-CUSTOMISED Welcome',
+        'body'       => 'OPERATOR body — must not be touched by db:seed.',
+        'body_html'  => '<p>OPERATOR body — must not be touched by db:seed.</p>',
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    makeSeeder()->run();
+
+    $row = MailTemplate::where('name', 'welcome')->first();
+    expect($row->subject)->toBe('OPERATOR-CUSTOMISED Welcome');
+    expect($row->body)->toBe('OPERATOR body — must not be touched by db:seed.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());

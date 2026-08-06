@@ -10,6 +10,9 @@ use Spora\Core\Database;
 use Spora\Core\Paths;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\EmailTemplateLoader;
+use Spora\Services\Mail\MailTemplateRenderer;
+use Spora\Services\Mail\MailTemplateSyncService;
+use Spora\Services\MailTemplateService;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -23,7 +26,9 @@ function makeSeedTester(?Closure $authFactoryOverride = null): CommandTester
     $db->bootDatabaseConnectionOnly(); // no-op: already booted
 
     $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
-    $authFactory = $authFactoryOverride ?? static fn(): AuthService => bootAuthLayer();
+    $mailService    = new MailTemplateService(MailTemplateRenderer::createDefault());
+    $mailSync       = new MailTemplateSyncService($templateLoader, $mailService);
+    $authFactory    = $authFactoryOverride ?? static fn(): AuthService => bootAuthLayer();
 
     $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new Spora\Core\SecurityManager($key);
@@ -41,7 +46,7 @@ function makeSeedTester(?Closure $authFactoryOverride = null): CommandTester
         new Paths(BASE_PATH),
     );
 
-    $command = new SeedCommand($db, $authFactory, $templateLoader, $importer, new Paths(BASE_PATH));
+    $command = new SeedCommand($db, $authFactory, $mailSync, $importer, new Paths(BASE_PATH));
     $command->setName('db:seed');
 
     return new CommandTester($command);
@@ -98,6 +103,8 @@ it('reports failure and exits with FAILURE when the factory throws', function ()
     $db->bootDatabaseConnectionOnly();
 
     $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
+    $mailService    = new MailTemplateService(MailTemplateRenderer::createDefault());
+    $mailSync       = new MailTemplateSyncService($templateLoader, $mailService);
     $authFactory = static function (): AuthService {
         throw new RuntimeException('factory exploded');
     };
@@ -112,7 +119,7 @@ it('reports failure and exits with FAILURE when the factory throws', function ()
         new Paths(BASE_PATH),
     );
 
-    $command = new SeedCommand($db, $authFactory, $templateLoader, $importer, new Paths(BASE_PATH));
+    $command = new SeedCommand($db, $authFactory, $mailSync, $importer, new Paths(BASE_PATH));
     $command->setName('db:seed');
     $tester = new CommandTester($command);
 

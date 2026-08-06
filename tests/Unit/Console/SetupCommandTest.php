@@ -10,6 +10,9 @@ use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Core\Paths;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\EmailTemplateLoader;
+use Spora\Services\Mail\MailTemplateRenderer;
+use Spora\Services\Mail\MailTemplateSyncService;
+use Spora\Services\MailTemplateService;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -24,6 +27,8 @@ function makeSetupTester(): CommandTester
 
     $authService    = bootAuthLayer();
     $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
+    $mailService    = new MailTemplateService(MailTemplateRenderer::createDefault());
+    $mailSync       = new MailTemplateSyncService($templateLoader, $mailService);
 
     $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new Spora\Core\SecurityManager($key);
@@ -45,7 +50,7 @@ function makeSetupTester(): CommandTester
         $db,
         new DatabaseSchemaInstaller(null, null),
         $authService,
-        $templateLoader,
+        $mailSync,
         $importer,
     );
     $command->setName('spora:setup');
