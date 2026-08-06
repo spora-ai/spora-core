@@ -123,7 +123,7 @@ test('attachment row + user prompt produce a single user message with extracted 
     foreach ($messages as $msg) {
         expect($msg['role'])->not->toBe('attachment');
     }
-    $text = $messages[0]['content'][0]['text'];
+    $text = $messages[0]['content'][1]['text'];
     expect($text)->toContain('Summarize this paper');
     expect($text)->toContain('---');
     expect($text)->toContain('# paper.txt (extracted text)');
@@ -177,11 +177,16 @@ test('attachment + prompt does not duplicate extracted text across blocks', func
 
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
-    expect($messages[0]['content'])->toHaveCount(1);
+    // Layout: [metadata_prefix, composedPromptBlock]. Metadata is a sibling
+    // block; the composed body carries the prompt + extracted text.
+    expect($messages[0]['content'])->toHaveCount(2);
     expect($messages[0]['content'][0]['type'])->toBe('text');
-    $text = $messages[0]['content'][0]['text'];
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
+    expect($messages[0]['content'][1]['type'])->toBe('text');
+    $text = $messages[0]['content'][1]['text'];
+    expect($text)->not->toContain('[Attached asset_id=');
 
-    // The marker phrase must appear exactly once across the entire message —
+    // The marker phrase must appear exactly once across the composed block —
     // not twice (once in the combined block, once in the duplicate).
     expect(substr_count($text, '# paper.txt (extracted text)'))->toBe(1);
     expect(substr_count($text, 'Lorem ipsum dolor sit amet'))->toBe(1);
@@ -240,8 +245,15 @@ test('multiple text attachments + prompt produces a single combined block', func
     $messages = (new MessageHistoryBuilder())->build($task->id);
 
     expect($messages)->toHaveCount(1);
-    expect($messages[0]['content'])->toHaveCount(1);
-    $text = $messages[0]['content'][0]['text'];
+    // Layout: [metadata_a, metadata_b, composedPromptBlock].
+    expect($messages[0]['content'])->toHaveCount(3);
+    expect($messages[0]['content'][0]['type'])->toBe('text');
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
+    expect($messages[0]['content'][0]['text'])->toContain($assetA->id);
+    expect($messages[0]['content'][1]['type'])->toBe('text');
+    expect($messages[0]['content'][1]['text'])->toContain('[Attached asset_id=');
+    expect($messages[0]['content'][1]['text'])->toContain($assetB->id);
+    $text = $messages[0]['content'][2]['text'];
     expect($text)->toContain('Compare these notes');
     expect($text)->toContain('---');
     expect($text)->toContain('# alpha.txt (extracted text)');
@@ -381,12 +393,16 @@ test('PDF upload: parser returns text → markdown_content populated → LLM get
     $messages = (new MessageHistoryBuilder())->build($task->id);
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
-    expect($messages[0]['content'])->toHaveCount(1);
-    $text = $messages[0]['content'][0]['text'];
+    // Layout: [metadata_prefix, composedPromptBlock].
+    expect($messages[0]['content'])->toHaveCount(2);
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
+    expect($messages[0]['content'][0]['text'])->toContain($asset->id);
+    $text = $messages[0]['content'][1]['text'];
     expect($text)->toContain('Summarize chapter 1');
     expect($text)->toContain('# novel.pdf (extracted text)');
     expect($text)->toContain('Chapter 1');
     expect($text)->toContain('best of times');
+    expect($text)->not->toContain('[Attached asset_id=');
 });
 
 test('PDF upload: parser returns empty string → LLM gets [no extractable text] placeholder', function (): void {
@@ -428,11 +444,15 @@ test('PDF upload: parser returns empty string → LLM gets [no extractable text]
 
     $messages = (new MessageHistoryBuilder())->build($task->id);
     expect($messages)->toHaveCount(1);
+    // Layout: [metadata_prefix, composedPromptBlock].
+    expect($messages[0]['content'])->toHaveCount(2);
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
     // The placeholder is the ONLY thing the LLM has to work with — no real
     // file content reaches the prompt.
-    $text = $messages[0]['content'][0]['text'];
+    $text = $messages[0]['content'][1]['text'];
     expect($text)->toContain('[no extractable text]');
     expect($text)->not->toContain('scanned pages with no OCR');
+    expect($text)->not->toContain('[Attached asset_id=');
 });
 
 test('PDF upload: parser throws → conversion swallowed → LLM gets [no extractable text] placeholder', function (): void {
@@ -472,9 +492,13 @@ test('PDF upload: parser throws → conversion swallowed → LLM gets [no extrac
 
     $messages = (new MessageHistoryBuilder())->build($task->id);
     expect($messages)->toHaveCount(1);
-    $text = $messages[0]['content'][0]['text'];
+    // Layout: [metadata_prefix, composedPromptBlock].
+    expect($messages[0]['content'])->toHaveCount(2);
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
+    $text = $messages[0]['content'][1]['text'];
     expect($text)->toContain('[no extractable text]');
     expect($text)->not->toContain('corrupt garbage');
+    expect($text)->not->toContain('[Attached asset_id=');
 });
 
 test('production row order: user row first, attachment row second collapses to one user message', function (): void {
@@ -515,12 +539,18 @@ test('production row order: user row first, attachment row second collapses to o
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
     expect($messages[0]['content'])->toBeArray();
-    $text = $messages[0]['content'][0]['text'];
+    // Layout: [metadata_prefix, composedPromptBlock]. Metadata is a sibling
+    // block; the composed body carries the prompt + extracted text.
+    expect($messages[0]['content'][0]['type'])->toBe('text');
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
+    expect($messages[0]['content'][0]['text'])->toContain($asset->id);
+    $text = $messages[0]['content'][1]['text'];
     expect($text)->toContain('Summarize this paper');
     expect($text)->toContain('---');
     expect($text)->toContain('# paper.txt (extracted text)');
     expect($text)->toContain('Lorem ipsum dolor sit amet');
     expect($text)->not->toContain('[no extractable text]');
+    expect($text)->not->toContain('[Attached asset_id=');
     expect(substr_count($text, '# paper.txt (extracted text)'))->toBe(1);
 });
 
@@ -577,7 +607,13 @@ test('multiple text attachments in production row order: one user message with d
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
     expect($messages[0]['content'])->toBeArray();
-    $text = $messages[0]['content'][0]['text'];
+    // Layout: [metadata_a, metadata_b, composedPromptBlock].
+    expect($messages[0]['content'])->toHaveCount(3);
+    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
+    expect($messages[0]['content'][0]['text'])->toContain($assetA->id);
+    expect($messages[0]['content'][1]['text'])->toContain('[Attached asset_id=');
+    expect($messages[0]['content'][1]['text'])->toContain($assetB->id);
+    $text = $messages[0]['content'][2]['text'];
     expect($text)->toContain('Compare these notes');
     expect($text)->toContain('---');
     expect(substr_count($text, '# alpha.txt (extracted text)'))->toBe(1);
@@ -585,4 +621,5 @@ test('multiple text attachments in production row order: one user message with d
     expect($text)->toContain('Alpha section content.');
     expect($text)->toContain('Beta section content.');
     expect($text)->not->toContain('[no extractable text]');
+    expect($text)->not->toContain('[Attached asset_id=');
 });

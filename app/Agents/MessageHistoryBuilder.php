@@ -276,11 +276,11 @@ final class MessageHistoryBuilder
 
     /**
      * Expand an `attachment` row into a `user` message whose `content` is
-     * either a list of ContentBlock dicts (text + image blocks) or a plain
-     * string when no blocks can be produced. Image blocks require the
-     * driver to support image input; the controller is expected to have
-     * rejected vision-incompatible requests with `400 MEDIA_CAPABILITY_MISMATCH`
-     * before we get here.
+     * either a list of ContentBlock dicts (metadata, text, and image blocks)
+     * or a plain string when no blocks can be produced. Metadata blocks expose
+     * the asset identity; image blocks require the driver to support image
+     * input. The controller is expected to have rejected vision-incompatible
+     * requests with `400 MEDIA_CAPABILITY_MISMATCH` before we get here.
      */
     private function attachmentMessage(TaskHistory $row): array
     {
@@ -367,8 +367,8 @@ final class AttachmentRowRenderer
 
     /**
      * Null when no resolvable blocks exist (legacy rows, all-refs-missing,
-     * or image-only attachments on a non-vision driver). Callers fall
-     * back to {@see fallbackText()} in that case.
+     * or attachments whose assets cannot be resolved). Callers fall back
+     * to {@see fallbackText()} in that case.
      *
      * @return list<array<string, mixed>>|null
      */
@@ -377,7 +377,7 @@ final class AttachmentRowRenderer
         $blocks = $this->collectAttachmentBlocks($row);
         $prompt = is_string($row->content) ? trim($row->content) : '';
 
-        if ($blocks['text'] === [] && $blocks['image'] === []) {
+        if ($blocks['text'] === [] && $blocks['image'] === [] && $blocks['metadata'] === []) {
             return null;
         }
 
@@ -399,64 +399,121 @@ final class AttachmentRowRenderer
     /**
      * Image blocks for non-vision drivers are dropped here — defense in
      * depth alongside the controller's `MEDIA_CAPABILITY_MISMATCH`
-     * pre-flight.
+     * pre-flight. Metadata blocks (asset_id + filename + local URL) are
+     * collected separately so they stay siblings of the content block
+     * they refer to and never get composed into the prompt body.
      *
-     * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>}
+     * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>}
      */
     private function collectAttachmentBlocks(TaskHistory $row): array
     {
-        $supportsImages = $this->driver !== null && $this->driver->supportsImageInput();
-        $textBlocks = [];
-        $imageBlocks = [];
         if (!is_array($row->attachments)) {
-            return ['text' => $textBlocks, 'image' => $imageBlocks];
+            return ['text' => [], 'image' => [], 'metadata' => []];
         }
+
+        $supportsImages = $this->driver !== null && $this->driver->supportsImageInput();
+        $textBlocks     = [];
+        $imageBlocks    = [];
+        $metadataBlocks = [];
+
         foreach ($row->attachments as $ref) {
-            $mediaId = $ref['media_id'] ?? null;
-            if (!is_string($mediaId) || $mediaId === '') {
-                continue;
-            }
-            $asset = MediaAsset::query()->find($mediaId);
+            $asset = $this->resolveAttachmentAsset($ref);
             if ($asset === null) {
                 continue;
             }
+            $metadataBlocks[] = $this->attachmentMetadataBlock($asset);
             $kind = (string) ($ref['kind'] ?? 'text');
             if ($kind === 'image') {
-                $block = $this->imageAttachmentBlock($asset, $supportsImages);
-                if ($block !== null) {
-                    $imageBlocks[] = $block;
+                $image = $this->buildImageBlock($asset, $supportsImages);
+                if ($image !== null) {
+                    $imageBlocks[] = $image;
                 }
                 continue;
             }
-            $textBlocks[] = $this->textAttachmentBlock($asset);
+            $textBlocks[] = $this->buildTextBlock($asset);
         }
-        return ['text' => $textBlocks, 'image' => $imageBlocks];
+
+        return ['text' => $textBlocks, 'image' => $imageBlocks, 'metadata' => $metadataBlocks];
     }
 
     /**
-     * Assembles the `content` array. The operator prompt leads, followed
-     * by `---` and the filename header + extracted markdown. Image blocks
-     * (when present) follow the leading text block. Trivial case — a
-     * single text attachment with no prompt — passes the original block
-     * through unchanged (no `---` rewrite).
+     * @param array<string, mixed> $ref
+     */
+    private function resolveAttachmentAsset(array $ref): ?MediaAsset
+    {
+        $mediaId = $ref['media_id'] ?? null;
+        if (!is_string($mediaId) || $mediaId === '') {
+            return null;
+        }
+        return MediaAsset::query()->find($mediaId);
+    }
+
+    /**
+     * Returns null when the image isn't forwarded (non-vision driver or
+     * oversized payload) so the caller can drop it without branching.
      *
-     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>} $blocks
+     * @return array<string, mixed>|null
+     */
+    private function buildImageBlock(MediaAsset $asset, bool $supportsImages): ?array
+    {
+        if (!$supportsImages) {
+            return null;
+        }
+        $bytes = $this->loadInlineImageBytes($asset);
+        if ($bytes === null) {
+            return null;
+        }
+        return [
+            'type'      => 'image',
+            'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
+            'base64'    => base64_encode($bytes),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildTextBlock(MediaAsset $asset): array
+    {
+        $extracted = $asset->markdown_content !== null && $asset->markdown_content !== ''
+            ? $asset->markdown_content
+            : null;
+        $displayName = $asset->filename ?? $asset->id;
+        $body = $extracted ?? '[no extractable text]';
+        return [
+            'type' => 'text',
+            'text' => "# {$displayName} (extracted text)\n\n" . $body,
+        ];
+    }
+
+    /**
+     * Assembles the `content` array. Metadata blocks (one per attachment)
+     * lead. The composed prompt + extracted text occupies a single
+     * leading text block when a prompt is present (or when the
+     * attachment layout is wider than a single text body); image
+     * blocks follow.
+     *
+     * @param array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>} $blocks
      * @return list<array<string, mixed>>
      */
     private function buildAttachmentContent(array $blocks, string $prompt): array
     {
-        // Trivial: single text attachment with no prompt — return the original block.
-        if ($blocks['image'] === [] && $prompt === '' && count($blocks['text']) === 1) {
-            return $blocks['text'];
+        // No prompt, no body text — metadata blocks possibly followed by images.
+        // Covers both "metadata-only" (oversized image on non-vision driver)
+        // and "image-only with no prompt" in one branch.
+        if ($prompt === '' && $blocks['text'] === []) {
+            return array_merge($blocks['metadata'], $blocks['image']);
         }
 
-        // Image-only with no prompt — return the image blocks as-is.
-        if ($blocks['image'] !== [] && $prompt === '') {
-            return $blocks['image'];
+        // Trivial: single text body + single metadata + no prompt — pass
+        // them through unchanged (no `---` rewrite).
+        if ($prompt === '' && count($blocks['text']) === 1 && count($blocks['metadata']) === 1) {
+            return [$blocks['metadata'][0], $blocks['text'][0]];
         }
 
-        // Otherwise: a leading text block (composed) followed by any image blocks.
+        // General case: metadata + composed text + images.
         return array_merge(
+            $blocks['metadata'],
             [['type' => 'text', 'text' => $this->composeTextContent($prompt, $blocks['text'])]],
             $blocks['image'],
         );
@@ -483,22 +540,41 @@ final class AttachmentRowRenderer
     }
 
     /**
-     * @return array<string, mixed>|null
+     * Identity prefix emitted alongside every attachment block (image and
+     * text). Carries the asset_id + filename + mime + size + local URL
+     * so the LLM can pass the asset_id or local URL to any tool that
+     * accepts Media Archive references (e.g. `minimax:video` with the
+     * plugin's resolver hook, or `media:get_media`). Kept compact —
+     * ~60 tokens per attachment.
+     *
+     * @return array<string, mixed>
      */
-    private function imageAttachmentBlock(MediaAsset $asset, bool $supportsImages): ?array
+    private function attachmentMetadataBlock(MediaAsset $asset): array
     {
-        if (!$supportsImages) {
-            return null;
-        }
-        $bytes = $this->loadInlineImageBytes($asset);
-        if ($bytes === null) {
-            return null;
-        }
+        $sizeLabel = $asset->byte_size !== null
+            ? ' (' . self::humanByteSize((int) $asset->byte_size) . ')'
+            : '';
+
         return [
-            'type'      => 'image',
-            'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
-            'base64'    => base64_encode($bytes),
+            'type' => 'text',
+            'text' => sprintf(
+                '[Attached asset_id=%s (filename: %s, type: %s%s) — local URL: %s]',
+                $asset->id,
+                $asset->filename ?? '(unnamed)',
+                $asset->mime_type ?? 'application/octet-stream',
+                $sizeLabel,
+                $asset->publicUrl(),
+            ),
         ];
+    }
+
+    private static function humanByteSize(int $bytes): string
+    {
+        return match (true) {
+            $bytes >= 1_048_576 => number_format($bytes / 1_048_576, 1) . ' MB',
+            $bytes >= 1_024     => number_format($bytes / 1_024, 1) . ' KB',
+            default             => $bytes . ' B',
+        };
     }
 
     /**
@@ -515,22 +591,6 @@ final class AttachmentRowRenderer
         }
 
         return $bytes;
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function textAttachmentBlock(MediaAsset $asset): array
-    {
-        $extracted = $asset->markdown_content !== null && $asset->markdown_content !== ''
-            ? $asset->markdown_content
-            : null;
-        $displayName = $asset->filename ?? $asset->id;
-        $body = $extracted ?? '[no extractable text]';
-        return [
-            'type' => 'text',
-            'text' => "# {$displayName} (extracted text)\n\n" . $body,
-        ];
     }
 
     private function loadAssetBytes(MediaAsset $asset): ?string

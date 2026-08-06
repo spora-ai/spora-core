@@ -11,7 +11,7 @@ use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Core\DatabaseSeeder;
 use Spora\Models\Agent;
 use Spora\Models\User;
-use Spora\Services\EmailTemplateLoader;
+use Spora\Services\Mail\MailTemplateSyncService;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -28,7 +28,7 @@ final class SetupCommand extends Command
         private readonly Database $database,
         private readonly DatabaseSchemaInstaller $installer,
         private readonly AuthService $authService,
-        private readonly EmailTemplateLoader $templateLoader,
+        private readonly MailTemplateSyncService $mailTemplateSync,
         private readonly AgentTemplateImporter $templateImporter,
     ) {
         parent::__construct();
@@ -51,7 +51,7 @@ final class SetupCommand extends Command
 
             if ($userCount === 0 && $agentCount === 0) {
                 $output->writeln('<info>Fresh installation — running seeder...</info>');
-                (new DatabaseSeeder($this->authService, $this->templateLoader, $this->templateImporter))->run();
+                (new DatabaseSeeder($this->authService, $this->mailTemplateSync, $this->templateImporter))->run();
             } else {
                 $output->writeln('<info>Existing installation detected. Skipping seeding.</info>');
                 $output->writeln('<comment>Run `php bin/spora db:repair-admin` if the seeded admin needs promoting (verified=1, Role::ADMIN).</comment>');

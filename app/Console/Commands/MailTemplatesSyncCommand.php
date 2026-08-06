@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace Spora\Console\Commands;
 
-use Spora\Core\Database;
 use Spora\Models\MailTemplate;
 use Spora\Services\EmailTemplateLoader;
-use Spora\Services\MailTemplateServiceInterface;
+use Spora\Services\Mail\MailTemplateSyncService;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -23,6 +22,9 @@ use Throwable;
  *   bin/spora mail:templates:sync          # interactive: prompts per divergent row
  *   bin/spora mail:templates:sync --check  # CI drift guard: exit 1 on any difference
  *   bin/spora mail:templates:sync --force  # overwrite divergent rows without prompting
+ *
+ * DB-level work (insert / update / diff) lives in {@see MailTemplateSyncService}
+ * so {@see \Spora\Core\DatabaseSeeder} can reuse the same code path.
  */
 #[AsCommand(
     name: 'mail:templates:sync',
@@ -31,9 +33,8 @@ use Throwable;
 final class MailTemplatesSyncCommand extends Command
 {
     public function __construct(
-        private readonly Database $database,
-        private readonly EmailTemplateLoader $templateLoader,
-        private readonly MailTemplateServiceInterface $mailTemplateService,
+        private readonly MailTemplateSyncService $sync,
+        private readonly EmailTemplateLoader $loader,
     ) {
         parent::__construct();
     }
@@ -61,9 +62,12 @@ final class MailTemplatesSyncCommand extends Command
         $check = (bool) $input->getOption('check');
         $force = (bool) $input->getOption('force');
 
+        if ($check && $force) {
+            $io->warning('--check ignores --force; running in check mode.');
+        }
+
         try {
-            $this->database->bootDatabaseConnectionOnly();
-            $defaults = $this->templateLoader->getAll();
+            $defaults = $this->loader->getAll();
         } catch (Throwable $e) {
             $io->error('Setup failed: ' . $e->getMessage());
             return Command::FAILURE;
@@ -87,16 +91,18 @@ final class MailTemplatesSyncCommand extends Command
         $exit  = Command::SUCCESS;
 
         foreach ($defaults as $template) {
-            $name   = (string) $template['name'];
-            $row    = MailTemplate::where('name', $name)->first();
+            $name = (string) $template['name'];
+            $row  = MailTemplate::where('name', $name)->first();
             $status = $this->reconcile($io, $template, $row, $check, $force);
             $rows[] = [$name, $status];
-            if ($status === 'drift' || $status === 'skipped') {
+            if ($status === MailTemplateSyncService::STATUS_DRIFT
+                || $status === MailTemplateSyncService::STATUS_SKIPPED) {
                 $drift++;
             }
         }
 
-        $this->printSummary($io, $rows);
+        $io->section('Mail template sync summary');
+        $io->table(['Template', 'Status'], $rows);
 
         if ($check && $drift > 0) {
             $io->error(sprintf('%d template(s) drifted from YAML defaults.', $drift));
@@ -121,12 +127,12 @@ final class MailTemplatesSyncCommand extends Command
         $name = (string) $template['name'];
 
         if ($row === null) {
-            return $this->createMissing($io, $template, $name, $check);
+            return $this->handleNewTemplate($io, $name, $template, $check);
         }
 
-        $diff = $this->diff($template, $row);
+        $diff = $this->sync->diffDefaults($template, $row);
         if ($diff === []) {
-            return 'unchanged';
+            return MailTemplateSyncService::STATUS_UNCHANGED;
         }
 
         return $this->applyDiff($io, $name, $diff, $row, $check, $force);
@@ -135,16 +141,22 @@ final class MailTemplatesSyncCommand extends Command
     /**
      * @param array{name: string, subject: string, body: string|null, body_html: string|null} $template
      */
-    private function createMissing(SymfonyStyle $io, array $template, string $name, bool $check): string
-    {
+    private function handleNewTemplate(
+        SymfonyStyle $io,
+        string $name,
+        array $template,
+        bool $check,
+    ): string {
         if ($check) {
             $io->writeln("  <comment>[new]</comment>     {$name}");
-            return 'drift';
+
+            return MailTemplateSyncService::STATUS_DRIFT;
         }
 
-        $this->mailTemplateService->createTemplate($template);
+        $this->sync->createMissing($template);
         $io->writeln("  <info>[created]</info> {$name}");
-        return 'applied';
+
+        return MailTemplateSyncService::STATUS_CREATED;
     }
 
     /**
@@ -160,49 +172,23 @@ final class MailTemplatesSyncCommand extends Command
                 $io->writeln(sprintf('             %s: %s', $field, $wantA));
                 $io->writeln(sprintf('             %s: %s → %s', str_pad('', strlen($field)), $have, $wantA));
             }
-            return 'drift';
+
+            return MailTemplateSyncService::STATUS_DRIFT;
         }
 
         if (!$force && !$io->confirm("Overwrite '{$name}'?", false)) {
             $io->writeln("  <comment>[skipped]</comment> {$name}");
-            return 'skipped';
+
+            return MailTemplateSyncService::STATUS_SKIPPED;
         }
 
-        $this->mailTemplateService->updateTemplate((int) $row->id, $diff);
-        $io->writeln("  <info>[{$this->labelFor($force)}]</info> {$name}");
-        return $force ? 'forced' : 'applied';
-    }
+        $this->sync->updateTemplate((int) $row->id, $diff);
+        $status = $force
+            ? MailTemplateSyncService::STATUS_FORCED
+            : MailTemplateSyncService::STATUS_APPLIED;
+        $io->writeln("  <info>[{$status}]</info> {$name}");
 
-    /**
-     * @param array{name: string, subject: string, body: string|null, body_html: string|null} $template
-     *
-     * @return array<string, string|null>
-     */
-    private function diff(array $template, MailTemplate $row): array
-    {
-        $diff = [];
-        foreach (['subject', 'body', 'body_html'] as $field) {
-            $want = $template[$field] ?? null;
-            $have = $row->{$field};
-            if ($want !== $have) {
-                $diff[$field] = $want;
-            }
-        }
-        return $diff;
-    }
-
-    private function labelFor(bool $force): string
-    {
-        return $force ? 'forced' : 'applied';
-    }
-
-    /**
-     * @param list<array{0: string, 1: string}> $rows
-     */
-    private function printSummary(SymfonyStyle $io, array $rows): void
-    {
-        $io->section('Mail template sync summary');
-        $io->table(['Template', 'Status'], $rows);
+        return $status;
     }
 
     private function abbreviate(?string $value): string

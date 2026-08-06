@@ -103,6 +103,7 @@ use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\Mail\MailTemplateRenderer;
+use Spora\Services\Mail\MailTemplateSyncService;
 use Spora\Services\MailTemplateService;
 use Spora\Services\MailTemplateServiceInterface;
 use Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter;
@@ -1391,6 +1392,12 @@ final class ContainerDefinitions
             MailTemplateServiceInterface::class => static function (ContainerInterface $c): MailTemplateServiceInterface {
                 return new MailTemplateService($c->get(MailTemplateRenderer::class));
             },
+            MailTemplateSyncService::class => static function (ContainerInterface $c): MailTemplateSyncService {
+                return new MailTemplateSyncService(
+                    $c->get(EmailTemplateLoader::class),
+                    $c->get(MailTemplateServiceInterface::class),
+                );
+            },
             PromptTemplateServiceInterface::class => static fn(): PromptTemplateServiceInterface => new PromptTemplateService(),
             EmailTemplateLoader::class => static function (ContainerInterface $c): EmailTemplateLoader {
                 return new EmailTemplateLoader($c->get(Paths::class));
@@ -1413,7 +1420,7 @@ final class ContainerDefinitions
                     $c->get(Database::class),
                     $c->get(DatabaseSchemaInstaller::class),
                     $c->get(AuthService::class),
-                    $c->get(EmailTemplateLoader::class),
+                    $c->get(MailTemplateSyncService::class),
                     $c->get(AgentTemplateImporter::class),
                 );
             },
@@ -1422,7 +1429,7 @@ final class ContainerDefinitions
                 return new SeedCommand(
                     $c->get(Database::class),
                     static fn(): AuthService => $c->get(AuthService::class),
-                    $c->get(EmailTemplateLoader::class),
+                    $c->get(MailTemplateSyncService::class),
                     $c->get(AgentTemplateImporter::class),
                     $c->get(Paths::class),
                 );
@@ -1434,9 +1441,8 @@ final class ContainerDefinitions
 
             MailTemplatesSyncCommand::class => static function (ContainerInterface $c): MailTemplatesSyncCommand {
                 return new MailTemplatesSyncCommand(
-                    $c->get(Database::class),
+                    $c->get(MailTemplateSyncService::class),
                     $c->get(EmailTemplateLoader::class),
-                    $c->get(MailTemplateServiceInterface::class),
                 );
             },
 
