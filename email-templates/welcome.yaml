@@ -5,7 +5,11 @@ body: |
 
   welcome aboard! Your {{site_name}} account is ready at **{{email}}**.
 
-  You can now create AI agents, schedule runs, and explore the tools. If
-  you have any questions, the documentation and community are a click away.
+  Open your dashboard to get started:
+
+  [{{dashboard_url}}]({{dashboard_url}})
+
+  If you have any questions, the documentation and community are a
+  click away.
 
   — The {{site_name}} team

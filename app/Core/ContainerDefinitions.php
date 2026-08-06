@@ -110,6 +110,7 @@ use Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
+use Spora\Services\MediaArchive\MediaAssetReader;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaConverterRegistry;
@@ -565,6 +566,13 @@ final class ContainerDefinitions
                     $c->get(MetadataExtractor::class),
                     $c->get(MediaConverterRegistry::class),
                     $c->get(MediaIngestDecoder::class),
+                );
+            },
+
+            MediaAssetReader::class => static function (ContainerInterface $c): MediaAssetReader {
+                return new MediaAssetReader(
+                    $c->get(DatabaseAssetStore::class),
+                    $c->get(LocalAssetStore::class),
                 );
             },
 

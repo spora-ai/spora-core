@@ -306,8 +306,10 @@ final class TaskController
     /**
      * POST /api/v1/tasks/{taskId}/retry
      *
-     * Creates a new task with the same agent_id and user_prompt as the failed task.
-     * The new task is a fresh attempt — no parent_task_id link.
+     * Re-runs the failed task in place: same task_id and URL, full conversation
+     * history preserved as LLM context (the model sees the prior failed turn
+     * and can retry or take an alternative path on transient errors). The
+     * task's status, step_count, and error fields are reset; max_steps is kept.
      */
     public function retry(Request $request): JsonResponse
     {
@@ -322,7 +324,7 @@ final class TaskController
 
         return new JsonResponse(
             ['data' => ['task' => $task]],
-            Response::HTTP_CREATED,
+            Response::HTTP_OK,
         );
     }
 

@@ -6,6 +6,7 @@ namespace Spora\Services;
 
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
+use Spora\Core\RequestOrigin;
 use Spora\Mailer\LogTransport;
 use Spora\Models\MailTemplate;
 use Spora\Models\User;
@@ -187,10 +188,26 @@ final class SystemMailer implements MailerInterface
         $userName = $user !== null ? ($user->name ?? $email) : $email;
 
         return $this->sendTemplatedEmail('welcome', [
-            'user_name' => $userName,
-            'email'     => $email,
-            'site_name' => $this->getMailConfig()['mail_from_name'] ?? 'Spora',
+            'user_name'     => $userName,
+            'email'         => $email,
+            'site_name'     => $this->getMailConfig()['mail_from_name'] ?? 'Spora',
+            'dashboard_url' => $this->buildDashboardUrl(),
         ], [$email]);
+    }
+
+    /**
+     * Resolve the welcome-email dashboard CTA URL from `config.app_url` and
+     * `config.app_prefix`. `RequestOrigin::normalizePrefix()` keeps the prefix
+     * canonical (`/spora`, never `spora/` or `/`), so a single trailing slash
+     * on the suffix is enough to cover both the prefixed and host-root cases
+     * without producing `//` or a missing-slash collision.
+     */
+    private function buildDashboardUrl(): string
+    {
+        $baseUrl = rtrim((string) ($this->config['app_url'] ?? ''), '/');
+        $prefix  = RequestOrigin::normalizePrefix((string) ($this->config['app_prefix'] ?? ''));
+
+        return $baseUrl . $prefix . '/dashboard';
     }
 
     /**

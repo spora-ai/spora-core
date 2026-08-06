@@ -52,6 +52,7 @@ final class Task extends Model
         'parent_task_id',
         'retry_of_task_id',
         'retry_count',
+        'retry_after',
         'data',
     ];
 
@@ -61,6 +62,7 @@ final class Task extends Model
         'max_steps'        => 'integer',
         'retry_count'      => 'integer',
         'retry_of_task_id' => 'integer',
+        'retry_after'      => 'datetime',
         'data'             => 'array',
     ];
 

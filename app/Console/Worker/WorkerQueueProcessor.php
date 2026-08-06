@@ -198,23 +198,25 @@ final class WorkerQueueProcessor
     }
 
     /**
-     * Process retry tasks whose retry_after <= now.
+     * Process in-place retries whose `retry_after` has elapsed.
      *
-     * All retry tasks link to the ROOT original task (not the immediate parent),
-     * enabling single-query cancellation: WHERE retry_of_task_id = root AND retry_count >= N.
+     * The retry chain is now a single failed task whose `retry_of_task_id`
+     * points to itself; the worker hands it back to Orchestrator::retry()
+     * which resets error fields, re-ticks, and (on success) flips status to
+     * COMPLETED. Cancelling the chain is done via cancelRetryChain, which
+     * clears `retry_after` so this query stops matching.
      */
     public function processRetryQueue(): void
     {
         $now = date(self::DB_DATETIME_FORMAT);
 
         $retryTasks = Capsule::connection()->select("
-            SELECT t.id, t.retry_of_task_id, t.retry_count, o.status AS original_status, o.agent_id
-            FROM tasks t
-            JOIN tasks o ON o.id = t.retry_of_task_id
-            WHERE t.status = 'QUEUED'
-              AND t.retry_after IS NOT NULL
-              AND t.retry_after <= ?
-              AND o.status != 'CANCELLED'
+            SELECT id, retry_count, agent_id
+            FROM tasks
+            WHERE status = 'FAILED'
+              AND retry_after IS NOT NULL
+              AND retry_after <= ?
+              AND retry_of_task_id IS NOT NULL
         ", [$now]);
 
         if ($retryTasks === []) {
@@ -223,25 +225,21 @@ final class WorkerQueueProcessor
 
         $taskIds = array_column($retryTasks, 'id');
 
-        Capsule::table('tasks')
-            ->whereIn('id', $taskIds)
-            ->update(['status' => 'RUNNING']);
-
         $allRetryTasks = Task::findMany($taskIds);
         $agentMaxRetries = $this->resolveAgentMaxRetries($retryTasks);
 
         foreach ($allRetryTasks as $retryTask) {
-            $this->mercure->publish($retryTask->id, $retryTask->user_id, [
-                'task_id' => $retryTask->id,
-                'status'  => 'RUNNING',
-            ]);
-
             $retryCount = (int) $retryTask->retry_count;
             $maxRetries = $agentMaxRetries[$retryTask->agent_id] ?? 0;
 
             $this->notificationService->notifyTaskRetrying($retryTask, $retryCount, $maxRetries);
 
-            $this->orchestrator->tick((int) $retryTask->id);
+            $this->orchestrator->retry((int) $retryTask->id);
+
+            $this->mercure->publish($retryTask->id, $retryTask->user_id, [
+                'task_id' => $retryTask->id,
+                'status'  => 'RUNNING',
+            ]);
         }
     }
 

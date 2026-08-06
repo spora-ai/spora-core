@@ -1047,7 +1047,7 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
         invokeProcessRetryQueue(makeProcessor($orchestrator));
     });
 
-    it('skips retries whose original task is CANCELLED', function (): void {
+    it('skips retries that have not elapsed', function (): void {
         Database::resetBootState();
         $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
         $db->boot();
@@ -1059,36 +1059,32 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
             'max_steps' => 5, 'is_active' => true,
         ]);
 
-        $original = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'CANCELLED',
-            'user_prompt' => 'orig', 'max_steps' => 5,
-        ]);
-        $retry = Task::create([
+        // FAILED task whose retry_after is in the future — worker must skip.
+        $failed = Task::create([
             'user_id'        => $userId,
             'agent_id'       => $agent->id,
-            'status'         => 'QUEUED',
-            'user_prompt'    => 'retry-1',
+            'status'         => 'FAILED',
+            'user_prompt'    => 'orig',
             'max_steps'      => 5,
-            'retry_of_task_id' => $original->id,
             'retry_count'    => 1,
         ]);
-        // retry_after is a TIMESTAMP column; set it via raw SQL to avoid Eloquent's
-        // date-cast pitfalls in tests.
+        $failed->retry_of_task_id = $failed->id;
+        $failed->save();
         Capsule::table('tasks')
-            ->where('id', $retry->id)
-            ->update(['retry_after' => '2020-01-01 00:00:00']);
+            ->where('id', $failed->id)
+            ->update(['retry_after' => '2099-01-01 00:00:00']);
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->shouldNotReceive('retry');
         $orchestrator->shouldNotReceive('tick');
 
         invokeProcessRetryQueue(makeProcessor($orchestrator));
 
-        // Retry stays QUEUED — orchestrator.tick must not have been called
-        $retry->refresh();
-        expect($retry->status)->toBe('QUEUED');
+        $failed->refresh();
+        expect($failed->status)->toBe('FAILED');
     });
 
-    it('processes a due retry and ticks the orchestrator for it', function (): void {
+    it('processes a due retry by calling orchestrator->retry()', function (): void {
         Database::resetBootState();
         $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
         $db->boot();
@@ -1099,34 +1095,30 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
             'user_id' => $userId, 'name' => 'RetryOk2Agent',
             'max_steps' => 5, 'max_retries' => 3, 'is_active' => true,
         ]);
-        $original = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
-            'user_prompt' => 'orig', 'max_steps' => 5,
-        ]);
-        $retry = Task::create([
+        // In-place retry: the failed task itself is the retry target. It has
+        // retry_of_task_id pointing to itself and retry_after in the past.
+        $failed = Task::create([
             'user_id'        => $userId,
             'agent_id'       => $agent->id,
-            'status'         => 'QUEUED',
-            'user_prompt'    => 'retry-1',
+            'status'         => 'FAILED',
+            'user_prompt'    => 'orig',
             'max_steps'      => 5,
-            'retry_of_task_id' => $original->id,
             'retry_count'    => 1,
         ]);
+        $failed->retry_of_task_id = $failed->id;
+        $failed->save();
         Capsule::table('tasks')
-            ->where('id', $retry->id)
+            ->where('id', $failed->id)
             ->update(['retry_after' => '2020-01-01 00:00:00']);
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        $orchestrator->shouldReceive('tick')->once()->with($retry->id);
+        $orchestrator->shouldReceive('retry')->once()->andReturnUsing(fn(int $taskId) => Task::find($taskId));
+        $orchestrator->shouldNotReceive('tick');
 
         $notification = Mockery::mock(NotificationService::class);
-        $notification->allows('notifyTaskRetrying')->andReturnNull();
+        $notification->shouldIgnoreMissing();
 
         invokeProcessRetryQueue(makeProcessor($orchestrator, $notification));
-
-        // Retry moved from QUEUED to RUNNING
-        $retry->refresh();
-        expect($retry->status)->toBe('RUNNING');
     });
 });
 

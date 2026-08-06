@@ -30,7 +30,6 @@ final class RetryScheduler
     ];
 
     public function __construct(
-        private readonly Orchestrator $orchestrator,
         private readonly ?LoggerInterface $logger = null,
         private readonly ?NotificationService $notificationService = null,
     ) {}
@@ -52,7 +51,7 @@ final class RetryScheduler
         $rootTaskId = $failedTask->retry_of_task_id ?? $failedTask->id;
         $retryCount = (int) ($failedTask->retry_count ?? 0) + 1;
 
-        $this->dispatchRetryTask($agent, $failedTask, $rootTaskId, $retryCount, $retryAfterMinutes, $maxRetries);
+        $this->dispatchRetryTask($failedTask, $rootTaskId, $retryCount, $retryAfterMinutes, $maxRetries);
     }
 
     private function resolveRetryAgent(Task $failedTask): ?Agent
@@ -74,7 +73,6 @@ final class RetryScheduler
     }
 
     private function dispatchRetryTask(
-        Agent $agent,
         Task $failedTask,
         int $rootTaskId,
         int $retryCount,
@@ -82,28 +80,25 @@ final class RetryScheduler
         int $maxRetries,
     ): void {
         try {
-            // Create the retry task directly in QUEUED state instead of routing
-            // through Orchestrator::start(), which would tick the LLM immediately
-            // in Sync mode and defeat the whole point of retry_after scheduling.
-            $retryTask = Task::create([
-                'agent_id'         => $agent->id,
-                'user_id'          => $agent->user_id,
-                'status'           => 'QUEUED',
-                'user_prompt'      => $failedTask->user_prompt,
-                'step_count'       => 0,
-                'max_steps'        => $failedTask->max_steps,
-                'retry_of_task_id' => $rootTaskId,
-                'retry_count'      => $retryCount,
-                'retry_after'      => date(Orchestrator::DB_TIMESTAMP_FORMAT, time() + $retryAfterMinutes * 60),
-            ]);
-
-            $this->orchestrator->appendHistory($retryTask->id, 'user', $failedTask->user_prompt);
+            // Schedule the retry IN PLACE on the failed task itself rather than
+            // spawning a separate QUEUED row. The task keeps its full history
+            // (the LLM re-sees the prior failed turn when it ticks), its URL
+            // doesn't change, and the worker's main QUEUED loop correctly
+            // skips it because `retry_of_task_id IS NULL` is part of its claim
+            // predicate. WorkerQueueProcessor::processRetryQueue() picks the
+            // task up once `retry_after` elapses and calls Orchestrator::retry()
+            // to reset error fields and start the loop again.
+            $retryAfter = date(Orchestrator::DB_TIMESTAMP_FORMAT, time() + $retryAfterMinutes * 60);
 
             $failedTask->update([
-                'retry_after' => $retryTask->retry_after,
+                'retry_count'      => $retryCount,
+                'retry_of_task_id' => $rootTaskId,
+                'retry_after'      => $retryAfter,
             ]);
 
-            $this->notificationService?->notifyRetryQueued($retryTask, $retryCount, $maxRetries);
+            $failedTask->refresh();
+
+            $this->notificationService?->notifyRetryQueued($failedTask, $retryCount, $maxRetries);
         } catch (Throwable $e) {
             $this->logger?->warning('Failed to schedule auto-retry', [
                 'task_id'          => $failedTask->id,

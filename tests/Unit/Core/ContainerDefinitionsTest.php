@@ -484,7 +484,6 @@ it('SseController factory prefers mercure_publish_url over mercure_url when both
     $reflection = new ReflectionClass($controller);
 
     $hubUrlProp = $reflection->getProperty('hubUrl');
-    $hubUrlProp->setAccessible(true);
     expect($hubUrlProp->getValue($controller))->toBe('http://spora:80/.well-known/mercure');
 });
 
@@ -1200,9 +1199,28 @@ describe('AgentController wiring', function (): void {
 
         $ref = new ReflectionClass($controller);
         $prop = $ref->getProperty('pictureService');
-        $prop->setAccessible(true);
         $service = $prop->getValue($controller);
 
         expect($service)->toBeInstanceOf(Spora\Services\AgentPictures\AgentPictureService::class);
+    });
+});
+
+describe('MediaAssetReader DI wiring', function (): void {
+    /**
+     * Plugins resolve MediaArchive sub-services via `\DI\get(ClassName::class)`
+     * in their `register()` hook. If MediaAssetReader is missing from the
+     * container's `coreServiceDefinitions()`, the plugin's container-builder
+     * factory throws at boot — failing closed is fine, but a regression that
+     * silently downgrades the resolver to null would let the plugin ship
+     * base64-related port-endpoint bugs to prod. This test catches the
+     * "missing factory" path early.
+     */
+    it('resolves MediaAssetReader from the DI container', function (): void {
+        $kernel = new Kernel();
+        $c = $kernel->getContainer();
+
+        $reader = $c->get(Spora\Services\MediaArchive\MediaAssetReader::class);
+
+        expect($reader)->toBeInstanceOf(Spora\Services\MediaArchive\MediaAssetReader::class);
     });
 });

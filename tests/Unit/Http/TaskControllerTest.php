@@ -272,7 +272,7 @@ describe('TaskController::destroy', function (): void {
 });
 
 describe('TaskController::retry', function (): void {
-    test('returns 201 on successful retry', function (): void {
+    test('returns 200 on successful retry', function (): void {
         [$controller, $authService] = makeTaskController();
         bootAuth($authService);
 
@@ -280,7 +280,7 @@ describe('TaskController::retry', function (): void {
         $request->attributes->set('taskId', 1);
         $response = $controller->retry($request);
 
-        expect($response->getStatusCode())->toBe(Response::HTTP_CREATED);
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
     });
 
     test('returns 404 for unknown id', function (): void {
