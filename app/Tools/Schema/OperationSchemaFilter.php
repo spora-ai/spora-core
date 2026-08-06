@@ -27,11 +27,10 @@ use stdClass;
  * side-channel (`__required_when`, keyed by property name) that this filter
  * reads and strips before the schema is serialised to the LLM.
  *
- * The discriminator is dropped from `required[]` when the agent is allowed
- * only one op — the orchestrator routes the call via `HasOperations::getOperationName()`
- * regardless of whether the LLM emits the discriminator, so requiring it
- * would break calls written by hand in single-op mode or cached from
- * pre-multi-op schemas.
+ * The discriminator is dropped from `required[]` for single-op agents
+ * because the orchestrator routes the call via `HasOperations::getOperationName()`
+ * regardless of whether the LLM emits the discriminator — requiring it
+ * would break cached pre-multi-op schemas and calls written by hand.
  */
 final class OperationSchemaFilter
 {
