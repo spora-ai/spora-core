@@ -54,4 +54,10 @@ interface OrchestratorInterface
      * @return Task
      */
     public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = []): Task;
+
+    /**
+     * Re-run a failed task in place. Same task_id, full history preserved
+     * as LLM context; resets status, step_count, and error fields.
+     */
+    public function retry(int $taskId): Task;
 }

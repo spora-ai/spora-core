@@ -784,7 +784,7 @@ describe('TaskService — retryTask', function (): void {
         $service->retryTask($task->id, $userId);
     })->throws(InvalidArgumentException::class, 'Only failed tasks can be retried');
 
-    it('creates a new task via orchestrator and publishes it', function (): void {
+    it('re-runs the failed task in place via orchestrator and publishes it', function (): void {
         $authService = bootAuthLayer();
         $userId = $authService->register('retryok@example.com', 'Password1!', 'RetOk');
         simulateLoggedInSession($userId, 'retryok@example.com');
@@ -804,18 +804,20 @@ describe('TaskService — retryTask', function (): void {
         $mercure      = Mockery::mock(MercurePublisherInterface::class);
         $mercure->shouldReceive('publish')->once()->andReturn(true);
 
-        $orchestrator->shouldReceive('start')
+        // Orchestrator::retry() resets the failed task in place and returns
+        // the same task. The mock simulates the reset without actually running
+        // the LLM.
+        $orchestrator->shouldReceive('retry')
             ->once()
-            ->with($agent->id, 'please try again', 8, null, null, [])
-            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, ?int $runId, array $mediaIds) use ($userId): Task {
-                return Task::create([
-                    'user_id'     => $userId,
-                    'agent_id'    => $agentId,
-                    'status'      => 'RUNNING',
-                    'user_prompt' => $prompt,
-                    'max_steps'   => $maxSteps,
-                    'step_count'  => 0,
-                ]);
+            ->with($original->id)
+            ->andReturnUsing(function (int $taskId) use ($original): Task {
+                $original->status = 'RUNNING';
+                $original->step_count = 0;
+                $original->error_code = null;
+                $original->failure_reason = null;
+                $original->retry_after = null;
+                $original->save();
+                return $original->fresh();
             });
 
         $service = new TaskService($orchestrator, $mercure);
@@ -823,7 +825,7 @@ describe('TaskService — retryTask', function (): void {
 
         expect($result['user_prompt'])->toBe('please try again');
         expect($result['status'])->toBe('RUNNING');
-        expect($result['id'])->not->toBe($original->id);
+        expect($result['id'])->toBe($original->id);
     });
 });
 
@@ -1027,7 +1029,7 @@ describe('TaskService — cancelRetryChain', function (): void {
         $service->cancelRetryChain($task->id, $userId);
     })->throws(InvalidArgumentException::class, 'not part of a retry chain');
 
-    it('cancels the retry task and all sibling retries at the same level or later', function (): void {
+    it('clears retry_after on the failed task in the chain so the worker stops re-ticking it', function (): void {
         $authService = bootAuthLayer();
         $userId = $authService->register('cancelok@example.com', 'Password1!', 'CancelOk');
         simulateLoggedInSession($userId, 'cancelok@example.com');
@@ -1035,37 +1037,33 @@ describe('TaskService — cancelRetryChain', function (): void {
         $agent = Agent::create([
             'user_id' => $userId, 'name' => 'CancelOkAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
-        $root = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
-            'user_prompt' => 'orig', 'max_steps' => 5,
+        // In-place retry: the failed task itself is the chain head. The
+        // chain "member" is the same row, with retry_of_task_id pointing to
+        // itself and retry_after set in the future.
+        $failed = Task::create([
+            'user_id'     => $userId,
+            'agent_id'    => $agent->id,
+            'status'      => 'FAILED',
+            'user_prompt' => 'orig',
+            'max_steps'   => 5,
+            'retry_count' => 1,
         ]);
-        $retry1 = Task::create([
-            'user_id'        => $userId,
-            'agent_id'       => $agent->id,
-            'status'         => 'QUEUED',
-            'user_prompt'    => 'r1',
-            'max_steps'      => 5,
-            'retry_of_task_id' => $root->id,
-            'retry_count'    => 1,
-        ]);
-        $retry2 = Task::create([
-            'user_id'        => $userId,
-            'agent_id'       => $agent->id,
-            'status'         => 'QUEUED',
-            'user_prompt'    => 'r2',
-            'max_steps'      => 5,
-            'retry_of_task_id' => $root->id,
-            'retry_count'    => 2,
-        ]);
+        $failed->retry_of_task_id = $failed->id;
+        $failed->save();
+        Illuminate\Database\Capsule\Manager::table('tasks')
+            ->where('id', $failed->id)
+            ->update(['retry_after' => date('Y-m-d H:i:s', time() + 600)]);
 
         $service = makeTaskService();
-        expect($service->cancelRetryChain($retry1->id, $userId))->toBeTrue();
+        expect($service->cancelRetryChain($failed->id, $userId))->toBeTrue();
 
-        $retry1->refresh();
-        $retry2->refresh();
-        expect($retry1->status)->toBe('CANCELLED');
-        expect($retry2->status)->toBe('CANCELLED');
-        // The original root is not part of the cancelled chain
-        expect($root->fresh()->status)->toBe('FAILED');
+        $failed->refresh();
+        // Status stays FAILED so the user can still see the failure.
+        expect($failed->status)->toBe('FAILED');
+        // retry_after and retry_of_task_id are cleared so the worker no
+        // longer picks the task up for auto-retry.
+        expect($failed->retry_after)->toBeNull();
+        expect($failed->retry_of_task_id)->toBeNull();
+        expect((int) $failed->retry_count)->toBe(0);
     });
 });

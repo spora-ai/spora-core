@@ -178,10 +178,10 @@ final class TaskService implements TaskServiceInterface
             throw new InvalidArgumentException('Only failed tasks can be retried.');
         }
 
-        $newTask = $this->orchestrator->start($task->agent_id, $task->user_prompt, $task->max_steps, null, null, []);
+        $retried = $this->orchestrator->retry($task->id);
 
-        $resource = $this->taskResource($newTask);
-        $this->mercure->publish($newTask->id, $newTask->user_id, $resource);
+        $resource = $this->taskResource($retried);
+        $this->mercure->publish($retried->id, $retried->user_id, $resource);
 
         return $resource;
     }
@@ -251,11 +251,20 @@ final class TaskService implements TaskServiceInterface
             throw new InvalidArgumentException('This task is not part of a retry chain.');
         }
 
+        // In-place retry means the "chain" is the failed task itself. Clearing
+        // `retry_after` is enough to stop the worker from re-ticking it; the
+        // task stays FAILED so the user can still see the failure or click
+        // Retry Now manually.
         Capsule::table('tasks')
             ->where('user_id', $userId)
             ->where('retry_of_task_id', $task->retry_of_task_id)
             ->where('retry_count', '>=', $task->retry_count)
-            ->update(['status' => 'CANCELLED']);
+            ->where('status', 'FAILED')
+            ->update([
+                'retry_after'      => null,
+                'retry_of_task_id' => null,
+                'retry_count'      => 0,
+            ]);
 
         return true;
     }
