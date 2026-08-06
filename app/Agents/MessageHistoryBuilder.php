@@ -276,11 +276,11 @@ final class MessageHistoryBuilder
 
     /**
      * Expand an `attachment` row into a `user` message whose `content` is
-     * either a list of ContentBlock dicts (text + image blocks) or a plain
-     * string when no blocks can be produced. Image blocks require the
-     * driver to support image input; the controller is expected to have
-     * rejected vision-incompatible requests with `400 MEDIA_CAPABILITY_MISMATCH`
-     * before we get here.
+     * either a list of ContentBlock dicts (metadata, text, and image blocks)
+     * or a plain string when no blocks can be produced. Metadata blocks expose
+     * the asset identity; image blocks require the driver to support image
+     * input. The controller is expected to have rejected vision-incompatible
+     * requests with `400 MEDIA_CAPABILITY_MISMATCH` before we get here.
      */
     private function attachmentMessage(TaskHistory $row): array
     {
@@ -367,8 +367,8 @@ final class AttachmentRowRenderer
 
     /**
      * Null when no resolvable blocks exist (legacy rows, all-refs-missing,
-     * or image-only attachments on a non-vision driver). Callers fall
-     * back to {@see fallbackText()} in that case.
+     * or attachments whose assets cannot be resolved). Callers fall back
+     * to {@see fallbackText()} in that case.
      *
      * @return list<array<string, mixed>>|null
      */
