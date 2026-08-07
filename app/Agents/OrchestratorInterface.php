@@ -57,7 +57,6 @@ interface OrchestratorInterface
     public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = []): Task;
 
     /**
-    /**
      * Append a `task_history` row. Used by extracted services (e.g.
      * SubAgentService) that pre-existed the interface but need to write
      * back into the orchestrator's history stream.
