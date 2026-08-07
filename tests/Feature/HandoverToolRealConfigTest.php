@@ -68,7 +68,9 @@ it('decodes a JSON-string multi-select setting on read and accepts a target in t
     $newTask->id = 999;
     $handoverService->allows('handover')->andReturn($newTask);
 
-    $tool = new HandoverTool($handoverService, $configService);
+    $subAgentService = Mockery::mock(Spora\Services\SubAgentServiceInterface::class);
+
+    $tool = new HandoverTool($handoverService, $subAgentService, $configService);
 
     $source = Task::create([
         'user_id'     => $userId,
@@ -127,7 +129,11 @@ it('still rejects a target NOT in the allowlist when the value is stored as a JS
 
     $handoverService = Mockery::mock(HandoverServiceInterface::class);
     $handoverService->shouldNotReceive('handover');
-    $tool = new HandoverTool($handoverService, $configService);
+
+    $subAgentService = Mockery::mock(Spora\Services\SubAgentServiceInterface::class);
+    $subAgentService->shouldNotReceive('spawn');
+
+    $tool = new HandoverTool($handoverService, $subAgentService, $configService);
 
     $source = Task::create([
         'user_id'     => $userId,

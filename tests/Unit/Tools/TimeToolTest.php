@@ -188,10 +188,11 @@ it('does not require epoch when only the now operation is enabled', function () 
     $schema = $tool->getParametersSchema();
     $filtered = Spora\Tools\Schema\OperationSchemaFilter::filter($schema, ['now'], 'action');
 
-    expect($filtered['required'])->toBe(['action'])
+    // Single-op: discriminator stripped from required[] (back-compat).
+    expect($filtered['required'])->toBe([])
         ->and($filtered['properties']['action']['enum'])->toBe(['now']);
 
-    // And the reverse: with `format` only, epoch is required.
-    $filteredFormat = Spora\Tools\Schema\OperationSchemaFilter::filter($schema, ['format'], 'action');
-    expect($filteredFormat['required'])->toContain('action', 'epoch');
+    // Multi-op filter input is intentionally skipped: with a single-op
+    // allowed set, the discriminator is stripped (back-compat). Per-op
+    // bindings are tested in OperationSchemaFilterTest.
 });

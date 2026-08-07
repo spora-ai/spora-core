@@ -144,7 +144,10 @@ function handoverE2eBuildOrchestrator(
     $toolConfig->allows('getEffectiveSettings')
         ->andReturn(['allowed_target_agents' => $allowlist]);
 
-    $handoverTool = new HandoverTool($handoverService, $toolConfig);
+    $subAgentService = Mockery::mock(\Spora\Services\SubAgentServiceInterface::class);
+    $subAgentService->shouldNotReceive('spawn');
+
+    $handoverTool = new HandoverTool($handoverService, $subAgentService, $toolConfig);
 
     $outer = new Orchestrator(
         $driverFactory,
@@ -184,6 +187,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
                         HANDOVER_E2E_PROVIDER_CALL_ID,
                         'handover',
                         [
+                            'op' => 'handover',
                             'target_agent_id' => $targetAgentId,
                             'prompt' => HANDOVER_E2E_SUMMARY,
                         ],
@@ -221,6 +225,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
             'provider_call_id' => HANDOVER_E2E_PROVIDER_CALL_ID,
             'decision' => 'approve',
             'arguments' => [
+                'op' => 'handover',
                 'target_agent_id' => $targetAgentId,
                 'prompt' => HANDOVER_E2E_SUMMARY,
             ],
@@ -287,6 +292,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
                         HANDOVER_E2E_PROVIDER_CALL_ID,
                         'handover',
                         [
+                            'op' => 'handover',
                             'target_agent_id' => $targetAgentId, // NOT in allowlist (it's empty)
                             'prompt' => HANDOVER_E2E_SUMMARY,
                         ],
@@ -309,6 +315,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
             'provider_call_id' => HANDOVER_E2E_PROVIDER_CALL_ID,
             'decision' => 'approve',
             'arguments' => [
+                'op' => 'handover',
                 'target_agent_id' => $targetAgentId,
                 'prompt' => HANDOVER_E2E_SUMMARY,
             ],
@@ -347,6 +354,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
                         HANDOVER_E2E_PROVIDER_CALL_ID,
                         'handover',
                         [
+                            'op' => 'handover',
                             'target_agent_id' => $targetAgentId,
                             'prompt' => HANDOVER_E2E_SUMMARY,
                         ],
@@ -365,6 +373,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
             'provider_call_id' => HANDOVER_E2E_PROVIDER_CALL_ID,
             'decision' => 'approve',
             'arguments' => [
+                'op' => 'handover',
                 'target_agent_id' => $targetAgentId,
                 'prompt' => HANDOVER_E2E_SUMMARY,
             ],

@@ -20,6 +20,7 @@ use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\ScrubDataUrls;
+use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
 use Throwable;
@@ -44,6 +45,7 @@ final class TickPhaseRunner
         private readonly ?NotificationService $notificationService = null,
         private readonly ?MercurePublisherInterface $mercure = null,
         private readonly ?ToolCallSerializer $toolCallSerializer = null,
+        private readonly ?SubAgentServiceInterface $subAgent = null,
     ) {}
     public function runTick(int $taskId): void
     {
@@ -55,6 +57,20 @@ final class TickPhaseRunner
         // Worker-mode pickup: run approved tools persisted with `executed_at IS NULL`
         // before the LLM round-trip so the next assistant message sees the results.
         $this->executeApprovedPendingToolsForTask($task);
+
+        // The tool above may have flipped the task out of RUNNING — the
+        // `sub_agent` op suspends the parent (`status = AWAITING_SUB_AGENTS`)
+        // before the child tick returns, and other ops can mark the task
+        // COMPLETED or FAILED inline. The next batch-boundary hook (sync:
+        // ApprovedBatchExecutor, worker: the same code path here) or the
+        // per-child completion hook will resume the parent on a later tick
+        // — this turn must NOT call the LLM, or the parent would advance
+        // with a stale context and could complete without the child's
+        // result ever landing in history.
+        $currentStatus = Task::where('id', $taskId)->value('status');
+        if ($currentStatus !== 'RUNNING') {
+            return;
+        }
 
         try {
             $context = $this->prepareTickContext($task);
@@ -111,6 +127,30 @@ final class TickPhaseRunner
             $operationName = $operationMap[$providerCallId] ?? null;
 
             $this->executeOneApprovedPendingTool($task, $providerCallId, $toolName, $approvedArgs, $operationName);
+        }
+
+        // Worker-mode batch boundary — mirror the sync-mode boundary in
+        // ApprovedBatchExecutor so the resume fires once per batch, never per-child.
+        $this->maybeResumeParentFromBatchBoundary($task->id);
+    }
+
+    /**
+     * Worker-mode batch boundary hook. Tolerates missing DI (no SubAgentService
+     * wired) by no-op'ing, matching {@see maybeResumeParentForChild()}'s pattern.
+     */
+    private function maybeResumeParentFromBatchBoundary(int $parentTaskId): void
+    {
+        if ($this->subAgent === null) {
+            return;
+        }
+
+        try {
+            $this->subAgent->maybeResumeParentForParent($parentTaskId);
+        } catch (Throwable $e) {
+            $this->logger?->warning('SubAgentService::maybeResumeParentForParent failed at worker batch boundary', [
+                'task_id'   => $parentTaskId,
+                'exception' => $e->getMessage(),
+            ]);
         }
     }
 
@@ -327,6 +367,11 @@ final class TickPhaseRunner
         if (!isset($task->data['run_id'])) {
             $this->notificationService?->notifyTaskCompleted($task);
         }
+
+        // If this task was a child of a parent waiting for sub-agents,
+        // check whether the parent is ready to resume now that every
+        // sibling has also terminated.
+        $this->maybeResumeParentForChild($task->id);
     }
 
     /**
@@ -366,6 +411,11 @@ final class TickPhaseRunner
                 if ($failedTask !== null) {
                     $this->notifyFailedAndScheduleRetry($failedTask, $errorCode);
                 }
+
+                // A child task that failed still counts as "terminal" for the
+                // parent's wait — the parent will resume with the failure
+                // message as the tool result.
+                $this->maybeResumeParentForChild($taskId);
             }
         } catch (Throwable) {
             // Ignore failure — DB itself may be unavailable.
@@ -422,6 +472,13 @@ final class TickPhaseRunner
 
         if ($pendingApproval === []) {
             $this->publishIntermediateState($task);
+            // Sync-mode auto-approve batch boundary: every tool in this turn ran
+            // inline (no ApprovedBatchExecutor involved), so the resume hook in
+            // ApprovedBatchExecutor::triggerBatchBoundaryResume never fires for
+            // this path. Mirror it here so any spawned sub_agents get a chance
+            // to wake their parent up at the end of the turn. The worker-mode
+            // equivalent lives in executeApprovedPendingToolsForTask() above.
+            $this->maybeResumeParentFromBatchBoundary($task->id);
             $this->orchestrator->tick($task->id);
         } else {
             $state = new AgentState(
@@ -476,5 +533,26 @@ final class TickPhaseRunner
         ];
 
         $this->mercure->publish($task->id, $task->user_id, $taskData);
+    }
+
+    /**
+     * Wrap the SubAgentService hook so existing call sites stay one-line.
+     * Skips silently when DI wasn't wired (e.g. lightweight test harnesses
+     * that don't construct SubAgentService).
+     */
+    private function maybeResumeParentForChild(int $childTaskId): void
+    {
+        if ($this->subAgent === null) {
+            return;
+        }
+
+        try {
+            $this->subAgent->maybeResumeParent($childTaskId);
+        } catch (Throwable $e) {
+            $this->logger?->warning('SubAgentService::maybeResumeParent failed', [
+                'task_id'   => $childTaskId,
+                'exception' => $e->getMessage(),
+            ]);
+        }
     }
 }

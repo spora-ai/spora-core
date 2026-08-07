@@ -56,7 +56,11 @@ it('does not modify the agent_tool_overrides row when the HandoverTool is invoke
     $newTask = new Task();
     $newTask->id = 8888;
     $handoverService->allows('handover')->andReturn($newTask);
-    $tool = new HandoverTool($handoverService, $configService);
+
+    $subAgentService = Mockery::mock(Spora\Services\SubAgentServiceInterface::class);
+    $subAgentService->shouldNotReceive('spawn');
+
+    $tool = new HandoverTool($handoverService, $subAgentService, $configService);
 
     $source = Task::create([
         'user_id'     => $userId,
@@ -118,7 +122,11 @@ it('does not wipe the allowlist when the handover is rejected (target not in all
 
     $handoverService = Mockery::mock(HandoverServiceInterface::class);
     $handoverService->shouldNotReceive('handover');
-    $tool = new HandoverTool($handoverService, $configService);
+
+    $subAgentService = Mockery::mock(Spora\Services\SubAgentServiceInterface::class);
+    $subAgentService->shouldNotReceive('spawn');
+
+    $tool = new HandoverTool($handoverService, $subAgentService, $configService);
 
     $source = Task::create([
         'user_id'     => $userId,

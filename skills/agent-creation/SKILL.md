@@ -139,7 +139,7 @@ AgentTool itself ships with **inconsistent defaults by design**. Verbatim from `
 | --- | --- | --- |
 | `read_notes`, `write_notes`, `list_agents` | `true` | `false` |
 | `read_agent`, `get_available_tools` | `false` | `false` |
-| `update_agent` (and deprecated `write_agent_configuration`), `create_agent`, `configure_tools`, `write_notes_overwrite` | `false` | `true` |
+| `update_agent`, `create_agent`, `configure_tools`, `write_notes_overwrite` | `false` | `true` |
 
 In plain terms: a freshly-enabled sub-agent **can read its own notes, append notes, and list its sibling agents**, but it cannot create / edit / configure any agent (including itself) without an operator tap. That's the safe default for a research or worker agent.
 
@@ -234,7 +234,7 @@ The LLM-facing `create_agent` accepts only a slim subset of the agent-template s
 | --- | --- | --- | --- |
 | `name` | yes | string (1..200 chars) | Top-level agent name. NOT inside any wrapper. |
 | `description` | no | string (≤2000 chars) | One-line description shown on the agent card. |
-| `system_prompt` | no | string | The agent's persona. Edit later via `write_agent_configuration`. |
+| `system_prompt` | no | string | The agent's persona. Edit later via `update_agent`. |
 | `max_steps` | no | int (1..100, default 10) | Max LLM tool-call steps per task. |
 | `allow_followup` | no | bool, default true | Whether followup tasks are allowed. |
 | `retry_after_minutes` | no | int, default 0 | Cooldown between auto-retries. |
@@ -295,15 +295,14 @@ The slim `create_agent` + `configure_tools(agent_id?)` flow fixes these directly
 | `allow_followup must be a boolean` | Sent the string `"true"` | Send `allow_followup: true` (real bool, not string) |
 | `\`template_id\` is no longer an identifier` | Sent `template_id: "weather-agent"` to `read_agent`, `configure_tools`, `update_agent`, or `list_agents` | Use the numeric `agent_id` you got from `create_agent` (or `list_agents`) |
 | `\`agent_id\` must be a positive integer` | Sent zero, a string, or omitted entirely + couldn't fall back | Use a numeric `agent_id`; if omitted is intended, the agent must exist as the calling agent |
-| `configure_tools: operations[0][item]` | Sent inner arrays wrapped as `{item: […]}` (an OpenAI-tools serialization quirk) | Send the array literally: `[{name: "now", enabled: true}]` — the tool auto-unwraps the `{item: …}` quirk defensively, but plain arrays are preferred |
+| `configure_tools: operations[0][item]` | Sent inner arrays wrapped as `{item: [...]}` (an OpenAI-tools serialization quirk) | Send the array literally: `[{name: "now", enabled: true}]` — the tool auto-unwraps the `{item: …}` quirk defensively, but plain arrays are preferred |
 | `configure_tools: tool entry #N must be an object` | Sent the tool entry as a string or array | Wrap each entry in `{...}` |
-| `_deprecation note_` on `update_agent` response | Sent `write_agent_configuration` (the legacy alias) | Use `update_agent` — both reach the same handler; the deprecation prefix just signals the call's audit-log entry |
 
 After three identical validation errors, **stop and ask the operator** — re-reading this skill won't help if the schema is genuinely unknown to you.
 
 ## `update_agent` workflow (in-place edits to **any** agent)
 
-Use this for editing any agent you own, not for creating a new one. The canonical name is **`update_agent`**. The legacy `write_agent_configuration` name still works as a soft-redirect (deprecated — both names hit the same handler; the response gets a `_(deprecated: write_agent_configuration — use update_agent)_` prefix on the legacy name).
+Use this for editing any agent you own, not for creating a new one.
 
 Accepts an `agent_id` (numeric pk) and a partial `agent` object. Omitting `agent_id` patches the calling agent (back-compat path). The result is the canonical manifest (Markdown + `result_data`).
 

@@ -66,8 +66,9 @@ final class HandoverService implements HandoverServiceInterface
             'final_response' => "Handed off to {$targetAgent->name}.",
             'data'           => array_merge($source->data ?? [], [
                 'handover' => [
-                    'target_task_id'  => $newTask->id,
-                    'target_agent_id' => $targetAgent->id,
+                    'target_task_id'   => $newTask->id,
+                    'target_agent_id'  => $targetAgent->id,
+                    'target_agent_name' => $targetAgent->name,
                 ],
             ]),
         ]);

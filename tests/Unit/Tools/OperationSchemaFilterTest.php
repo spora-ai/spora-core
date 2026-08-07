@@ -89,8 +89,6 @@ it('coerces stdClass properties to a typed array for filtering and back to stdCl
 });
 
 it('narrows required[] to properties whose per-op binding intersects the allowed set', function (): void {
-    // Schema built by the builder carries __required_when as a top-level
-    // side channel; the filter reads it, narrows required[], and strips it.
     $schema = [
         'type'             => 'object',
         'properties'       => [
@@ -106,10 +104,12 @@ it('narrows required[] to properties whose per-op binding intersects the allowed
         ],
     ];
 
+    // Single-op: discriminator is stripped from required[] (back-compat).
     expect(OperationSchemaFilter::filter($schema, ['now'], 'action')['required'])
-        ->toBe(['action', 'name']);
+        ->toBe(['name']);
     expect(OperationSchemaFilter::filter($schema, ['format'], 'action')['required'])
-        ->toBe(['action', 'epoch', 'timezone', 'name']);
+        ->toBe(['epoch', 'timezone', 'name']);
+    // Multi-op: discriminator stays in required[].
     expect(OperationSchemaFilter::filter($schema, ['now', 'format'], 'action')['required'])
         ->toBe(['action', 'epoch', 'timezone', 'name']);
 });
@@ -132,21 +132,21 @@ it('strips the __required_when side channel before the schema reaches the LLM', 
 
 it('drops per-op-bound properties from the LLM-facing schema when no allowed op intersects', function (): void {
     // Mirrors the AgentTool real case: agent calls read_notes, but the
-    // schema also declares `agent` (write_agent_configuration only),
+    // schema also declares `agent` (update_agent only),
     // `content` (write_notes / write_notes_overwrite only), and a shared
     // `mode`. Without the property drop, the LLM sees the three params in
     // its tool definition and emits defensive empty stubs on every call.
     $schema = [
         'type' => 'object',
         'properties' => [
-            'action'  => ['type' => 'string', 'enum' => ['read_notes', 'write_notes', 'write_agent_configuration']],
+            'action'  => ['type' => 'string', 'enum' => ['read_notes', 'write_notes', 'update_agent']],
             'agent'   => ['type' => 'object'],
             'content' => ['type' => 'string'],
             'mode'    => ['type' => 'string'],
         ],
         'required' => ['action'],
         ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY => [
-            'agent'   => ['write_agent_configuration'],
+            'agent'   => ['update_agent'],
             'content' => ['write_notes'],
         ],
     ];
@@ -162,14 +162,14 @@ it('keeps per-op-bound properties when an allowed op intersects', function (): v
     $schema = [
         'type' => 'object',
         'properties' => [
-            'action' => ['type' => 'string', 'enum' => ['write_agent_configuration']],
+            'action' => ['type' => 'string', 'enum' => ['update_agent']],
             'agent'  => ['type' => 'object'],
         ],
         'required' => ['action'],
-        ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY => ['agent' => ['write_agent_configuration']],
+        ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY => ['agent' => ['update_agent']],
     ];
 
-    $filtered = OperationSchemaFilter::filter($schema, ['write_agent_configuration'], 'action');
+    $filtered = OperationSchemaFilter::filter($schema, ['update_agent'], 'action');
 
     expect($filtered['properties'])->toHaveKey('agent');
 });

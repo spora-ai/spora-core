@@ -197,7 +197,7 @@ settings UI or by seeding the agent template. The `AgentTool`
 `read_notes` (returns current notes) and `write_notes` (defaults to
 `mode: append`, also accepts `prepend`). Inside `AgentTool` itself,
 `write_notes` is the only path that mutates `notes` from the LLM side;
-`write_agent_configuration` strips `notes` from its patch and refuses the
+`update_agent` strips `notes` from its patch and refuses the
 call if nothing else remains, so an LLM cannot use config-write to smuggle
 a notes mutation. Wholesale replacement is a separate
 `write_notes_overwrite` operation, disabled by default and per-call

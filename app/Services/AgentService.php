@@ -27,8 +27,8 @@ final class AgentService implements AgentServiceInterface
      * Editable agent columns the service will write through updateAgent()
      * and updateAgentByAgentId(). Keep in sync with AgentController::$allowed
      * (minus internal-only fields like user_id / llm_driver_config_id) so
-     * the operator-facing PATCH and the in-tool write_agent_configuration
-     * stay on the same allowlist.
+     * the operator-facing PATCH and the in-tool update_agent stay on the
+     * same allowlist.
      *
      * @var list<string>
      */

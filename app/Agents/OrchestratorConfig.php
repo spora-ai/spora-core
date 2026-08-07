@@ -11,6 +11,7 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigService;
 
@@ -36,6 +37,7 @@ final class OrchestratorConfig
         // resolves the calling user's id from the calling agent's row
         // — tools never receive a session-derived userId.
         public readonly ?AgentServiceInterface $agentService = null,
+        public readonly ?SubAgentServiceInterface $subAgent = null,
         public readonly WorkerMode $workerMode = WorkerMode::Sync,
     ) {}
 }

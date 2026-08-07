@@ -16,6 +16,7 @@ use Spora\Models\Task;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -134,6 +135,14 @@ final class TaskRunCommand extends Command
                 mercure: $this->mercure,
                 toolConfigService: $this->container->get(\Spora\Services\ToolConfigService::class),
                 agentService: $this->container->get(\Spora\Services\AgentServiceInterface::class),
+                // Wire SubAgentService so the worker-mode batch-boundary hook
+                // (executeApprovedPendingToolsForTask → maybeResumeParentFromBatchBoundary)
+                // and the per-child hook (completeResponse → maybeResumeParentForChild)
+                // can wake up a parent in AWAITING_SUB_AGENTS once every spawned
+                // sub-agent has reached a terminal state. Without this wiring
+                // both hooks short-circuit on the null guard and the parent
+                // stays AWAITING_SUB_AGENTS forever.
+                subAgent: $this->container->get(SubAgentServiceInterface::class),
             ),
         );
     }

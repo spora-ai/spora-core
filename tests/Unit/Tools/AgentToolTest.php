@@ -197,90 +197,6 @@ describe('AgentTool::execute — read_agent_configuration (deprecated, soft-redi
     });
 });
 
-describe('AgentTool::execute — write_agent_configuration', function (): void {
-    test('forwards patch through AgentServiceInterface::updateAgentByAgentId and returns the canonical manifest', function (): void {
-        [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
-        /** @var AgentServiceInterface&MockInterface $service */
-        $service->shouldReceive('updateAgentByAgentId')
-            ->once()
-            ->andReturn(stubManifestAgent(7, 'Alpha'));
-        // AgentManifest needs both per-agent status and per-op state to
-        // render the manifest — emit empty lists so tests that don't care
-        // about tools just see `tools: []`.
-        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
-        $toolSettings->allows('getToolsOperations')->andReturn([]);
-
-        $result = $tool->execute(
-            ['action' => 'write_agent_configuration', 'agent' => ['description' => 'updated']],
-            7,
-        );
-
-        expect($result->success)->toBeTrue();
-        /** @var array<string, mixed> $data */
-        $data = $result->data;
-        // Now returns the canonical manifest shape, not the legacy
-        // AgentResource shape.
-        expect($data['agent_id'])->toBe(7)
-            ->and($data['name'])->toBe('Alpha')
-            ->and($data['tools'])->toBe([])
-            ->and($data['missing_required'])->toBe([]);
-    });
-
-    test('silently drops `notes` from the patch (notes are write_notes-only)', function (): void {
-        [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
-        /** @var AgentServiceInterface&MockInterface $service */
-        // `description` survives the strip so the service still gets called.
-        $service->shouldReceive('updateAgentByAgentId')
-            ->once()
-            ->with(7, ['description' => 'x'])
-            ->andReturn(stubManifestAgent(7, 'Alpha'));
-        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
-        $toolSettings->allows('getToolsOperations')->andReturn([]);
-
-        $result = $tool->execute(
-            [
-                'action' => 'write_agent_configuration',
-                'agent'  => ['description' => 'x', 'notes' => 'sneaky'],
-            ],
-            7,
-        );
-
-        expect($result->success)->toBeTrue();
-    });
-
-    test('returns failure when the only field in the patch is notes', function (): void {
-        // If the LLM only sends notes, the strip leaves the patch empty
-        // and we surface a clear failure rather than silently reporting
-        // success with no DB write. Operators can use write_notes for that.
-        [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
-        /** @var AgentServiceInterface&MockInterface $service */
-        $service->shouldNotReceive('updateAgentByAgentId');
-
-        $result = $tool->execute(
-            [
-                'action' => 'write_agent_configuration',
-                'agent'  => ['notes' => 'sneaky'],
-            ],
-            7,
-        );
-
-        expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('Use write_notes to mutate notes');
-    });
-
-    test('returns failure when the agent object is missing', function (): void {
-        [$tool] = makeAgentTool();
-
-        $result = $tool->execute(['action' => 'write_agent_configuration'], 7);
-
-        expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('agent object is required');
-    });
-});
-
 describe('AgentTool::execute — write_notes', function (): void {
     test('rejects missing content', function (): void {
         // Agent existence is checked first, so the LLM sees "Agent not
@@ -504,56 +420,6 @@ describe('AgentTool::execute — read_notes', function (): void {
     });
 });
 
-describe('AgentTool::execute — write_agent_configuration — happy path', function (): void {
-    test('forwards patch and returns the manifest', function (): void {
-        [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
-        /** @var AgentServiceInterface&MockInterface $service */
-        $agent           = new Agent();
-        $agent->id       = 7;
-        $agent->user_id  = 99;
-        $agent->name     = 'Alpha';
-        $agent->notes    = null;
-        $service->allows('getAgentByAgentId')->andReturn($agent);
-        $service->shouldReceive('updateAgentByAgentId')
-            ->once()
-            ->andReturn(stubManifestAgent(7, 'Renamed'));
-        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
-        $toolSettings->allows('getToolsOperations')->andReturn([]);
-
-        $result = $tool->execute(
-            ['action' => 'write_agent_configuration', 'agent' => ['name' => 'Renamed']],
-            7,
-            99,
-        );
-
-        expect($result->success)->toBeTrue();
-        /** @var array<string, mixed> $data */
-        $data = $result->data;
-        // Manifest shape carries agent_id (not id) and the tool block.
-        expect($data['agent_id'])->toBe(7)
-            ->and($data['name'])->toBe('Renamed')
-            ->and($data['tools'])->toBe([]);
-    });
-
-    test('returns failure when the agent disappears mid-write', function (): void {
-        [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
-        /** @var AgentServiceInterface&MockInterface $service */
-        // updateAgentByAgentId returns null when the agent no longer exists,
-        // which the tool surfaces as the standard AGENT_NOT_FOUND failure.
-        $service->allows('updateAgentByAgentId')->andReturn(null);
-
-        $result = $tool->execute(
-            ['action' => 'write_agent_configuration', 'agent' => ['name' => 'x']],
-            7,
-        );
-
-        expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('Agent not found.');
-    });
-});
-
 describe('AgentTool::execute — get_available_tools', function (): void {
     test('enriches per-agent status with presenter metadata and returns a versioned JSON payload as content', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
@@ -706,8 +572,8 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         // `getToolsOperations` is easy to drive from a mock. The
         // presenter enumerates operations in declaration order, so we
         // pin `read_agent` (enabled, no approval) and
-        // `write_agent_configuration` (disabled, requires approval) as
-        // the two anchors for the assertion.
+        // `update_agent` (disabled, requires approval) as the two
+        // anchors for the assertion.
         [$tool, $service, $toolSettings] = makeAgentTool();
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
         /** @var AgentServiceInterface&MockInterface $service */
@@ -734,7 +600,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
             ],
             [
                 'tool_class'                  => AgentTool::class,
-                'operation'                   => 'write_agent_configuration',
+                'operation'                   => 'update_agent',
                 'effective_enabled'           => false,
                 'effective_requires_approval' => true,
             ],
@@ -745,14 +611,14 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
         $opsByName = [];
         foreach ($payload['tools'][0]['operations'] as $op) {
-            if (in_array($op['name'], ['read_agent', 'write_agent_configuration'], true)) {
+            if (in_array($op['name'], ['read_agent', 'update_agent'], true)) {
                 $opsByName[$op['name']] = $op;
             }
         }
         expect($opsByName['read_agent']['enabled'])->toBeTrue()
             ->and($opsByName['read_agent']['requires_approval'])->toBeFalse();
-        expect($opsByName['write_agent_configuration']['enabled'])->toBeFalse()
-            ->and($opsByName['write_agent_configuration']['requires_approval'])->toBeTrue();
+        expect($opsByName['update_agent']['enabled'])->toBeFalse()
+            ->and($opsByName['update_agent']['requires_approval'])->toBeTrue();
     });
 
     test('falls back to operation defaults when no per-agent override exists', function (): void {
@@ -792,9 +658,9 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         // until the first time the operator enabled it).
         expect($opsByName['read_agent']['enabled'])->toBeFalse()
             ->and($opsByName['read_agent']['requires_approval'])->toBeFalse();
-        // write_agent_configuration: enabledByDefault=false, requiresApprovalByDefault=true
-        expect($opsByName['write_agent_configuration']['enabled'])->toBeFalse()
-            ->and($opsByName['write_agent_configuration']['requires_approval'])->toBeTrue();
+        // update_agent: enabledByDefault=false, requiresApprovalByDefault=true
+        expect($opsByName['update_agent']['enabled'])->toBeFalse()
+            ->and($opsByName['update_agent']['requires_approval'])->toBeTrue();
     });
 
     test('returns failure when the agent does not exist', function (): void {
@@ -1527,9 +1393,9 @@ describe('AgentTool::execute — configure_tools (agent_id scoped)', function ()
 
         $result = $tool->execute(
             [
-                'action'   => 'configure_tools',
+                'action'   => 'update_agent',
                 'agent_id' => $otherAgent,
-                'tools'    => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true, 'operations' => []]],
+                'agent'    => ['name' => 'Hacked'],
             ],
             7,
             $otherId,
@@ -1600,12 +1466,12 @@ test('AgentTool operation descriptions mention the agent-creation skill on relev
         $byName[$op->name] = $op->description;
     }
 
-    expect($byName)->toHaveKey('write_agent_configuration')
+    expect($byName)->toHaveKey('update_agent')
         ->and($byName)->toHaveKey('create_agent')
         ->and($byName)->toHaveKey('configure_tools')
         ->and($byName)->toHaveKey('read_agent')
         ->and($byName)->toHaveKey('get_available_tools')
-        ->and($byName['write_agent_configuration'])->toContain('agent-creation')
+        ->and($byName['update_agent'])->toContain('agent-creation')
         ->and($byName['create_agent'])->toContain('agent-creation')
         ->and($byName['configure_tools'])->toContain('agent-creation')
         ->and($byName['read_agent'])->toContain('agent-creation')
@@ -1625,19 +1491,19 @@ test('AgentTool schema narrows action-required params per operation', function (
         ->and($createOnly['required'])->not->toContain('agent')
         ->and($createOnly)->not->toHaveKey('__required_when');
 
-    // write_agent_configuration only → agent is required, payload is not.
-    $writeOnly = OperationSchemaFilter::filter($schema, ['write_agent_configuration'], 'action');
-    expect($writeOnly['required'])->toContain('agent')
-        ->and($writeOnly['required'])->not->toContain('payload');
+    // update_agent only → agent is required, payload is not.
+    $updateOnly = OperationSchemaFilter::filter($schema, ['update_agent'], 'action');
+    expect($updateOnly['required'])->toContain('agent')
+        ->and($updateOnly['required'])->not->toContain('payload');
 });
 
-test('write_agent_configuration silently drops unknown keys (confirmed via read_agent_configuration)', function (): void {
+test('update_agent silently drops unknown keys (confirmed via read_agent_configuration)', function (): void {
     // Two-part pin: (1) the AgentTool layer forwards `notes` stripping
     // (`unset($patch['notes'])` in writeConfiguration), and (2) the
-    // resulting read_agent_configuration response is the canonical
+    // resulting read_agent response is the canonical
     // EDITABLE_AGENT_FIELDS allowlist — unknown keys never surface back.
     // Covers the "notes vs. config" gotcha called out in the
-    // agent-creation skill's `write_agent_configuration` workflow section.
+    // agent-creation skill's `update_agent` workflow section.
     [$tool, $service, $toolSettings] = makeAgentTool();
     /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
     /** @var AgentServiceInterface&MockInterface $service */
@@ -1676,7 +1542,7 @@ test('write_agent_configuration silently drops unknown keys (confirmed via read_
 
     $writeResult = $tool->execute(
         [
-            'action' => 'write_agent_configuration',
+            'action' => 'update_agent',
             'agent'  => [
                 'name'         => 'New Name',
                 'system_prompt' => 'updated',
@@ -1970,11 +1836,11 @@ describe('AgentTool::execute — create_agent {item: [...]} unwrap', function ()
     });
 });
 
-describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', function (): void {
-    // Issue B in the PR #170 review: write_agent_configuration used to
-    // silently ignore agent_id and patch the calling agent. After this
-    // commit, supplying agent_id routes the patch to that agent (with
-    // the same user-scoping as read_agent / configure_tools).
+describe('AgentTool::execute — update_agent (agent_id scoped)', function (): void {
+    // Issue B in the PR #170 review: update_agent routes agent_id to
+    // the target agent (with the same user-scoping as read_agent /
+    // configure_tools). Omitting agent_id falls through to the calling
+    // agent.
 
     test('agent_id routes the patch to the targeted agent (not the caller)', function (): void {
         $auth    = bootAuthLayer();
@@ -2008,7 +1874,7 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
 
         $result = $tool->execute(
             [
-                'action'   => 'write_agent_configuration',
+                'action'   => 'update_agent',
                 'agent_id' => $targetId,
                 'agent'    => ['name' => 'Renamed'],
             ],
@@ -2024,11 +1890,10 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
     });
 
     test('omitted agent_id still falls through to the calling agent (back-compat)', function (): void {
-        // Back-compat with the pre-PR-#170 behaviour where omitting
-        // agent_id meant "patch the executor's caller" — kept as the
-        // soft-redirect default so existing prompts keep working.
-        // The resolve helper short-circuits on missing key, so no DB
-        // lookup is required here.
+        // Omitting agent_id means "patch the executor's caller" — kept
+        // as the default so existing prompts keep working. The resolve
+        // helper short-circuits on missing key, so no DB lookup is
+        // required here.
         [$tool, $service, $toolSettings] = makeAgentTool();
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
         /** @var AgentServiceInterface&MockInterface $service */
@@ -2041,7 +1906,7 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
 
         $result = $tool->execute(
             [
-                'action' => 'write_agent_configuration',
+                'action' => 'update_agent',
                 'agent'  => ['description' => 'patched'],
             ],
             7,
@@ -2178,7 +2043,7 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
 
         $result = $tool->execute(
             [
-                'action'   => 'write_agent_configuration',
+                'action'   => 'update_agent',
                 'agent_id' => $otherAgent,
                 'agent'    => ['name' => 'Hacked'],
             ],
@@ -2191,12 +2056,11 @@ describe('AgentTool::execute — write_agent_configuration (agent_id scoped)', f
     });
 });
 
-describe('AgentTool::execute — update_agent (canonical, with write_agent_configuration soft-redirect)', function (): void {
-    // The soft-redirect keeps every prompt that learned the old
-    // name mutating the same row; structured-data shape is
-    // unchanged. The deprecation note is prepended to content only.
+describe('AgentTool::execute — update_agent (canonical)', function (): void {
+    // `update_agent` is the only config-write operation on the
+    // `agent` tool.
 
-    test('canonical update_agent path: patches the targeted agent and returns the manifest', function (): void {
+    test('patches the targeted agent and returns the manifest', function (): void {
         [$tool, $service, $toolSettings] = makeAgentTool();
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
         /** @var AgentServiceInterface&MockInterface $service */
@@ -2217,60 +2081,7 @@ describe('AgentTool::execute — update_agent (canonical, with write_agent_confi
             ->and($result->data['name'])->toBe('Alpha');
     });
 
-    test('legacy write_agent_configuration name soft-redirects to update_agent', function (): void {
-        [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
-        /** @var AgentServiceInterface&MockInterface $service */
-        $service->shouldReceive('updateAgentByAgentId')
-            ->once()
-            ->with(7, ['description' => 'updated'])
-            ->andReturn(stubManifestAgent(7, 'Alpha'));
-        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
-        $toolSettings->allows('getToolsOperations')->andReturn([]);
-
-        $result = $tool->execute(
-            ['action' => 'write_agent_configuration', 'agent' => ['description' => 'updated']],
-            7,
-        );
-
-        expect($result->success)->toBeTrue()
-            ->and($result->content)->toContain('deprecated: write_agent_configuration')
-            ->and($result->content)->toContain('update_agent')
-            ->and($result->data['name'])->toBe('Alpha');
-    });
-
-    test('legacy write_agent_configuration soft-redirect propagates the underlying success', function (): void {
-        // Smoke check that the redirect doesn't accidentally swallow
-        // the manifest payload — assert the data and the
-        // deprecation-prefix both land on the success path.
-        [$tool, $service, $toolSettings] = makeAgentTool();
-        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
-        /** @var AgentServiceInterface&MockInterface $service */
-        $service->shouldReceive('updateAgentByAgentId')
-            ->once()
-            ->with(7, ['description' => 'x'])
-            ->andReturn(stubManifestAgent(7, 'Alpha'));
-        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
-        $toolSettings->allows('getToolsOperations')->andReturn([]);
-
-        $result = $tool->execute(
-            [
-                'action' => 'write_agent_configuration',
-                'agent'  => ['description' => 'x', 'notes' => 'sneaky'],
-            ],
-            7,
-        );
-
-        expect($result->success)->toBeTrue()
-            ->and($result->content)->toContain('deprecated')
-            ->and($result->data['name'])->toBe('Alpha');
-    });
-
-    test('legacy write_agent_configuration treats agent_id the same as update_agent', function (): void {
-        // Cross-user soft-redirect path: write_agent_configuration
-        // (deprecated) -> update_agent (canonical) -> resolver ->
-        // user-scope "not found". The deprecation note is only
-        // prepended on success, so the failure comes through clean.
+    test('cross-user agent_id returns "not found or not owned"', function (): void {
         $auth    = bootAuthLayer();
         $ownerId = bootAuth($auth, 'red-owner@example.com');
         $otherId = bootAuth($auth, 'red-other@example.com');
@@ -2288,7 +2099,7 @@ describe('AgentTool::execute — update_agent (canonical, with write_agent_confi
 
         $result = $tool->execute(
             [
-                'action'   => 'write_agent_configuration',
+                'action'   => 'update_agent',
                 'agent_id' => $otherAgent,
                 'agent'    => ['name' => 'Hacked'],
             ],
@@ -2297,7 +2108,6 @@ describe('AgentTool::execute — update_agent (canonical, with write_agent_confi
         );
 
         expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('not found or not owned')
-            ->and($result->content)->not->toContain('deprecated'); // failure path skips the prefix
+            ->and($result->content)->toContain('not found or not owned');
     });
 });

@@ -25,19 +25,12 @@ use stdClass;
  * defensive empty stubs (`agent: []`, `content: ""`, `payload: []`) on every
  * call. The builder stashes this per-op binding in a single schema-level
  * side-channel (`__required_when`, keyed by property name) that this filter
- * reads and strips before the schema is serialised to the LLM. The filter
- * passes the side-channel through unchanged when no per-op parameters are
- * present, so the cost of the strip is one key unset.
+ * reads and strips before the schema is serialised to the LLM.
  *
- * Extracted from Orchestrator::filterSchemaForOperations so the logic is
- * testable in isolation. The Orchestrator passes the live discriminator key
- * — read from the tool's `#[ToolOperation]` declarations — so tools that use
- * a non-default key (e.g. WorldNewsApiTool uses 'operation') are filtered
- * correctly.
- *
- * `filterForOperation()` is the runtime counterpart used by `SchemaValidator`
- * to apply the same per-op narrowing against the single op currently being
- * executed. Both entry points read the same `__required_when` side channel.
+ * The discriminator is dropped from `required[]` for single-op agents
+ * because the orchestrator routes the call via `HasOperations::getOperationName()`
+ * regardless of whether the LLM emits the discriminator — requiring it
+ * would break cached pre-multi-op schemas and calls written by hand.
  */
 final class OperationSchemaFilter
 {
@@ -72,6 +65,17 @@ final class OperationSchemaFilter
             );
         } else {
             $required = $schema['required'] ?? [];
+        }
+
+        // Strip the discriminator from required[] when the agent has only one
+        // allowed op — the orchestrator routes via HasOperations::getOperationName
+        // regardless of whether the LLM emits the discriminator, so requiring it
+        // would break cached/calls-written-by-hand in single-op mode.
+        if (count($allowedOps) === 1) {
+            $required = array_values(array_filter(
+                $required,
+                static fn(string $name) => $name !== $discriminatorKey,
+            ));
         }
 
         $schema['type']       = $schema['type'] ?? 'object';
@@ -123,7 +127,7 @@ final class OperationSchemaFilter
     {
         $requiredWhen = $schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY] ?? [];
         if ($requiredWhen === []) {
-            return $schema;
+            return self::stripDiscriminatorFromRequired($schema);
         }
 
         $properties = self::normaliseProperties($schema['properties'] ?? []);
@@ -131,7 +135,7 @@ final class OperationSchemaFilter
         if ($required === []) {
             $schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY] = $requiredWhen;
             $schema['properties'] = $properties === [] ? new stdClass() : $properties;
-            return $schema;
+            return self::stripDiscriminatorFromRequired($schema);
         }
 
         $matchesOp = static fn(string $name) => self::bindingIntersectsOp($requiredWhen[$name] ?? null, $operationName);
@@ -147,6 +151,67 @@ final class OperationSchemaFilter
         $schema['properties'] = $filtered === [] ? new stdClass() : $filtered;
         $schema['required']   = array_values(array_filter($required, $matchesOp));
         unset($schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY]);
+
+        return self::stripDiscriminatorFromRequired($schema);
+    }
+
+    /**
+     * Strip the discriminator key from `required[]` when the runtime is
+     * executing a known single op — the orchestrator already routed the call
+     * via `HasOperations::getOperationName()`, so requiring the LLM to also
+     * send the discriminator is unnecessary and breaks calls written by hand
+     * or cached from pre-multi-op schemas.
+     *
+     * Detection is "the property whose `enum` contains the active op name"
+     * — robust against non-discriminator enums on regular `#[ToolParameter]`
+     * properties because those enums list user-facing values, not op names.
+     *
+     * @param  array{
+     *   type?: string,
+     *   properties?: array<string, mixed>|stdClass,
+     *   required?: list<string>,
+     *   __required_when?: array<string, list<string>>,
+     * } $schema
+     * @return array{
+     *   type?: string,
+     *   properties?: array<string, mixed>|stdClass,
+     *   required?: list<string>,
+     *   __required_when?: array<string, list<string>>,
+     * }
+     */
+    private static function stripDiscriminatorFromRequired(array $schema): array
+    {
+        $required   = $schema['required'] ?? [];
+        $properties = self::normaliseProperties($schema['properties'] ?? []);
+
+        // The active op is identified by the runtime caller (filterForOperation),
+        // but the discriminator key is opaque here. We rely on the convention
+        // that the discriminator's `enum` lists the operation names and that
+        // regular parameter enums list user values (modes, formats, etc.) —
+        // those never appear in `__required_when`'s keys (which the caller
+        // knows is per-op). Without the discriminator key in $required we
+        // can short-circuit the strip entirely.
+        $discriminatorKey = null;
+        foreach ($properties as $key => $prop) {
+            if (!is_array($prop) || !isset($prop['enum']) || !is_array($prop['enum'])) {
+                continue;
+            }
+            // The first enum-keyed property is conventionally the discriminator.
+            // If a future tool has multiple enum properties the builder would
+            // need an explicit discriminator marker; until then this is the
+            // cheapest reliable detection.
+            $discriminatorKey = (string) $key;
+            break;
+        }
+
+        if ($discriminatorKey === null || !in_array($discriminatorKey, $required, true)) {
+            return $schema;
+        }
+
+        $schema['required'] = array_values(array_filter(
+            $required,
+            static fn(string $name) => $name !== $discriminatorKey,
+        ));
 
         return $schema;
     }
