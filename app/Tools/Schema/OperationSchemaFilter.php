@@ -127,7 +127,7 @@ final class OperationSchemaFilter
     {
         $requiredWhen = $schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY] ?? [];
         if ($requiredWhen === []) {
-            return self::stripDiscriminatorFromRequired($schema);
+            return self::stripDiscriminatorFromRequired($schema, $operationName);
         }
 
         $properties = self::normaliseProperties($schema['properties'] ?? []);
@@ -135,7 +135,7 @@ final class OperationSchemaFilter
         if ($required === []) {
             $schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY] = $requiredWhen;
             $schema['properties'] = $properties === [] ? new stdClass() : $properties;
-            return self::stripDiscriminatorFromRequired($schema);
+            return self::stripDiscriminatorFromRequired($schema, $operationName);
         }
 
         $matchesOp = static fn(string $name) => self::bindingIntersectsOp($requiredWhen[$name] ?? null, $operationName);
@@ -152,7 +152,7 @@ final class OperationSchemaFilter
         $schema['required']   = array_values(array_filter($required, $matchesOp));
         unset($schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY]);
 
-        return self::stripDiscriminatorFromRequired($schema);
+        return self::stripDiscriminatorFromRequired($schema, $operationName);
     }
 
     /**
@@ -162,9 +162,13 @@ final class OperationSchemaFilter
      * send the discriminator is unnecessary and breaks calls written by hand
      * or cached from pre-multi-op schemas.
      *
-     * Detection is "the property whose `enum` contains the active op name"
-     * — robust against non-discriminator enums on regular `#[ToolParameter]`
-     * properties because those enums list user-facing values, not op names.
+     * When the active op name is passed, the discriminator is identified as
+     * the property whose `enum` contains it — robust against non-discriminator
+     * enums on regular `#[ToolParameter]` properties because those enums
+     * list user-facing values (formats, modes, etc.), not op names. This
+     * wins over a "first enum-keyed property" heuristic for schemas with
+     * multiple enum properties (e.g. a future tool that adds a per-param
+     * enum alongside the action enum).
      *
      * @param  array{
      *   type?: string,
@@ -179,29 +183,32 @@ final class OperationSchemaFilter
      *   __required_when?: array<string, list<string>>,
      * }
      */
-    private static function stripDiscriminatorFromRequired(array $schema): array
+    private static function stripDiscriminatorFromRequired(array $schema, ?string $operationName = null): array
     {
         $required   = $schema['required'] ?? [];
         $properties = self::normaliseProperties($schema['properties'] ?? []);
 
-        // The active op is identified by the runtime caller (filterForOperation),
-        // but the discriminator key is opaque here. We rely on the convention
-        // that the discriminator's `enum` lists the operation names and that
-        // regular parameter enums list user values (modes, formats, etc.) —
-        // those never appear in `__required_when`'s keys (which the caller
-        // knows is per-op). Without the discriminator key in $required we
-        // can short-circuit the strip entirely.
         $discriminatorKey = null;
-        foreach ($properties as $key => $prop) {
-            if (!is_array($prop) || !isset($prop['enum']) || !is_array($prop['enum'])) {
-                continue;
+        if ($operationName !== null) {
+            foreach ($properties as $key => $prop) {
+                if (!is_array($prop) || !isset($prop['enum']) || !is_array($prop['enum'])) {
+                    continue;
+                }
+                if (in_array($operationName, $prop['enum'], true)) {
+                    $discriminatorKey = (string) $key;
+                    break;
+                }
             }
-            // The first enum-keyed property is conventionally the discriminator.
-            // If a future tool has multiple enum properties the builder would
-            // need an explicit discriminator marker; until then this is the
-            // cheapest reliable detection.
-            $discriminatorKey = (string) $key;
-            break;
+        }
+
+        if ($discriminatorKey === null) {
+            foreach ($properties as $key => $prop) {
+                if (!is_array($prop) || !isset($prop['enum']) || !is_array($prop['enum'])) {
+                    continue;
+                }
+                $discriminatorKey = (string) $key;
+                break;
+            }
         }
 
         if ($discriminatorKey === null || !in_array($discriminatorKey, $required, true)) {
