@@ -185,31 +185,11 @@ final class OperationSchemaFilter
      */
     private static function stripDiscriminatorFromRequired(array $schema, ?string $operationName = null): array
     {
-        $required   = $schema['required'] ?? [];
-        $properties = self::normaliseProperties($schema['properties'] ?? []);
-
-        $discriminatorKey = null;
-        if ($operationName !== null) {
-            foreach ($properties as $key => $prop) {
-                if (!is_array($prop) || !isset($prop['enum']) || !is_array($prop['enum'])) {
-                    continue;
-                }
-                if (in_array($operationName, $prop['enum'], true)) {
-                    $discriminatorKey = (string) $key;
-                    break;
-                }
-            }
-        }
-
-        if ($discriminatorKey === null) {
-            foreach ($properties as $key => $prop) {
-                if (!is_array($prop) || !isset($prop['enum']) || !is_array($prop['enum'])) {
-                    continue;
-                }
-                $discriminatorKey = (string) $key;
-                break;
-            }
-        }
+        $required           = $schema['required'] ?? [];
+        $discriminatorKey   = self::resolveDiscriminatorKey(
+            self::normaliseProperties($schema['properties'] ?? []),
+            $operationName,
+        );
 
         if ($discriminatorKey === null || !in_array($discriminatorKey, $required, true)) {
             return $schema;
@@ -221,6 +201,63 @@ final class OperationSchemaFilter
         ));
 
         return $schema;
+    }
+
+    /**
+     * Picks the property that acts as the action discriminator.
+     *
+     * When the runtime op is known, prefer the enum property whose values
+     * include it — robust against non-discriminator enums on regular
+     * `#[ToolParameter]` properties because those enums list user-facing
+     * values (formats, modes, etc.), not op names. Falls back to the first
+     * enum-keyed property when the op name isn't in any enum, so multi-op
+     * schemas without a per-op-naming enum still resolve a discriminator.
+     *
+     * @param  array<string, mixed> $properties
+     */
+    private static function resolveDiscriminatorKey(array $properties, ?string $operationName): ?string
+    {
+        if ($operationName !== null) {
+            $match = self::findEnumPropertyContaining($properties, $operationName);
+            if ($match !== null) {
+                return $match;
+            }
+        }
+        return self::findFirstEnumProperty($properties);
+    }
+
+    /**
+     * @param  array<string, mixed> $properties
+     */
+    private static function findEnumPropertyContaining(array $properties, string $value): ?string
+    {
+        foreach ($properties as $key => $prop) {
+            if (self::isEnumProperty($prop) && in_array($value, $prop['enum'], true)) {
+                return (string) $key;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed> $properties
+     */
+    private static function findFirstEnumProperty(array $properties): ?string
+    {
+        foreach ($properties as $key => $prop) {
+            if (self::isEnumProperty($prop)) {
+                return (string) $key;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param  mixed $prop
+     */
+    private static function isEnumProperty(mixed $prop): bool
+    {
+        return is_array($prop) && isset($prop['enum']) && is_array($prop['enum']);
     }
 
     /**
