@@ -641,16 +641,14 @@ describe('SubAgentService::spawn', function (): void {
         expect($children[1]->user_prompt)->toBe('second child task');
         expect($children[1]->status)->toBe('COMPLETED');
 
-        // Both `sub_agent` tool calls land their tool result rows in the
-        // parent's history, correlated with the originating tool_call_id.
-        // Each sub_agent tool call writes two 'role: tool' rows — the
-        // immediate result from HandoverTool.executeSubAgent and the
-        // resume result from SubAgentService.resumeParent. The resume
-        // rows are the latest two for the originating tool_call_id.
+        // Each `sub_agent` tool call must produce exactly one `role:'tool'`
+        // history row correlated with the originating tool_call_id. The
+        // immediate result from HandoverTool.executeSubAgent is overwritten
+        // in place by SubAgentService.resumeParent with the eventual child
+        // output — the LLM only ever sees the resume content.
         $toolRows = TaskHistory::where('task_id', $parent->id)
             ->where('role', 'tool')
             ->whereIn('tool_call_id', ['pc_sub_agent_1', 'pc_sub_agent_2'])
-            ->where('content', 'LIKE', '%Sub-agent task #% completed:%')
             ->orderBy('id')
             ->get();
         expect($toolRows->count())->toBe(2);
@@ -972,5 +970,360 @@ describe('SubAgentService::spawn', function (): void {
         expect($parent->status)->toBe('AWAITING_SUB_AGENTS');
         expect($parent->step_count)->toBe(3);
         expect(Task::where('parent_task_id', $parent->id)->exists())->toBeTrue();
+    });
+
+    it('writes exactly one role=tool row per provider_call_id in the approval-required sync flow', function (): void {
+        // Regression for the pre-fix double-write: the immediate sub_agent
+        // result from HandoverTool.executeSubAgent lands a role=tool row in
+        // task_history, and SubAgentService::resumeParent then APPENDED
+        // another row with the same provider_call_id. The serialized LLM
+        // message list handed to the next provider call therefore had two
+        // tool results with the same tool_call_id, which OpenAI-compatible
+        // APIs reject. The fix replaces the immediate row in place.
+        $seed = subAgentSeedAgents();
+        $userId = $seed['userId'];
+        $parentAgentId = $seed['parentAgentId'];
+        $childAgentId = $seed['childAgentId'];
+
+        AgentTool::insert([
+            'agent_id'   => $parentAgentId,
+            'tool_class' => HandoverTool::class,
+            'tool_name'  => 'handover',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $built = subAgentBuildOrchestrator(
+            $childAgentId,
+            llmResponses: [
+                new LLMResponse(
+                    content: null,
+                    toolCalls: [new DriverToolCall(
+                        SUB_AGENT_PARENT_PROVIDER_CALL_ID,
+                        'handover',
+                        [
+                            'op'       => 'sub_agent',
+                            'agent_id' => $childAgentId,
+                            'prompt'   => SUB_AGENT_PROMPT,
+                        ],
+                    )],
+                    inputTokens: 10,
+                    outputTokens: 5,
+                    completionId: 'cmp_parent_1',
+                ),
+                new LLMResponse('All done.', [], 5, 3, 'cmp_parent_2'),
+            ],
+        );
+        $orch = $built['outer'];
+
+        $parent = $orch->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        $parent->refresh();
+        expect($parent->status)->toBe('PENDING_APPROVAL');
+
+        $orch->resume($parent->id, [[
+            'provider_call_id' => SUB_AGENT_PARENT_PROVIDER_CALL_ID,
+            'decision'         => 'approve',
+            'arguments'        => [
+                'op'       => 'sub_agent',
+                'agent_id' => $childAgentId,
+                'prompt'   => SUB_AGENT_PROMPT,
+            ],
+        ]]);
+
+        $child = Task::where('parent_task_id', $parent->id)->first();
+        expect($child)->not->toBeNull();
+
+        $rolesByCallId = TaskHistory::where('task_id', $parent->id)
+            ->where('role', 'tool')
+            ->where('tool_call_id', SUB_AGENT_PARENT_PROVIDER_CALL_ID)
+            ->get(['role', 'content']);
+        expect($rolesByCallId->count())->toBe(1);
+        expect($rolesByCallId[0]->content)->toContain('Sub-agent task #' . $child->id . ' completed');
+
+        // The serialized LLM message list must carry exactly one
+        // role:tool message per provider_call_id — this is what the
+        // provider validates on the next round-trip.
+        $messages = $orch->buildMessages($parent->id);
+        $toolMessages = array_values(array_filter(
+            $messages,
+            static fn(array $m): bool => ($m['role'] ?? null) === 'tool',
+        ));
+        expect($toolMessages)->toHaveCount(1);
+        expect($toolMessages[0]['tool_call_id'])->toBe(SUB_AGENT_PARENT_PROVIDER_CALL_ID);
+        expect($toolMessages[0]['content'])->toContain('Sub-agent task #' . $child->id . ' completed');
+    });
+
+    it('writes exactly one role=tool row per provider_call_id in the auto-approved sync flow', function (): void {
+        // Same regression as the approval-required path, exercised on the
+        // auto-approve branch where executeAndRecordResult is the writer
+        // of the immediate row. The provider_call_id is the same in both
+        // branches, so the resume must replace not append regardless.
+        $seed = subAgentSeedAgents();
+        $userId = $seed['userId'];
+        $parentAgentId = $seed['parentAgentId'];
+        $childAgentId = $seed['childAgentId'];
+
+        AgentTool::insert([
+            'agent_id'   => $parentAgentId,
+            'tool_class' => HandoverTool::class,
+            'tool_name'  => 'handover',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        AgentToolOperationOverride::create([
+            'agent_id'                  => $parentAgentId,
+            'tool_class'                => HandoverTool::class,
+            'operation'                 => 'sub_agent',
+            'enabled'                   => 1,
+            'default_requires_approval' => 0,
+        ]);
+
+        $built = subAgentBuildOrchestrator(
+            $childAgentId,
+            llmResponses: [
+                new LLMResponse(
+                    content: null,
+                    toolCalls: [new DriverToolCall(
+                        SUB_AGENT_PARENT_PROVIDER_CALL_ID,
+                        'handover',
+                        [
+                            'op'       => 'sub_agent',
+                            'agent_id' => $childAgentId,
+                            'prompt'   => SUB_AGENT_PROMPT,
+                        ],
+                    )],
+                    inputTokens: 10,
+                    outputTokens: 5,
+                    completionId: 'cmp_parent_1',
+                ),
+                new LLMResponse('All done.', [], 5, 3, 'cmp_parent_2'),
+            ],
+        );
+        $orch = $built['outer'];
+
+        $parent = $orch->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        $parent->refresh();
+
+        expect($parent->status)->toBe('COMPLETED');
+
+        $child = Task::where('parent_task_id', $parent->id)->first();
+        expect($child->status)->toBe('COMPLETED');
+
+        $toolRows = TaskHistory::where('task_id', $parent->id)
+            ->where('role', 'tool')
+            ->where('tool_call_id', SUB_AGENT_PARENT_PROVIDER_CALL_ID)
+            ->get();
+        expect($toolRows->count())->toBe(1);
+        expect($toolRows[0]->content)->toContain('Sub-agent task #' . $child->id . ' completed');
+
+        $messages = $orch->buildMessages($parent->id);
+        $toolMessages = array_values(array_filter(
+            $messages,
+            static fn(array $m): bool => ($m['role'] ?? null) === 'tool',
+        ));
+        expect($toolMessages)->toHaveCount(1);
+        expect($toolMessages[0]['tool_call_id'])->toBe(SUB_AGENT_PARENT_PROVIDER_CALL_ID);
+    });
+
+    it('writes exactly one role=tool row per provider_call_id across a multi-child batch', function (): void {
+        // Regression for the multi-batch path: each sub_agent call writes
+        // its own correlated row, and the batch boundary is the only
+        // resume point. Every provider_call_id must end up with exactly
+        // one row in the serialized LLM message list.
+        $seed = subAgentSeedAgents();
+        $userId = $seed['userId'];
+        $parentAgentId = $seed['parentAgentId'];
+        $childAgentId = $seed['childAgentId'];
+
+        AgentTool::insert([
+            'agent_id'   => $parentAgentId,
+            'tool_class' => HandoverTool::class,
+            'tool_name'  => 'handover',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $built = subAgentBuildOrchestrator(
+            $childAgentId,
+            llmResponses: [
+                new LLMResponse(
+                    content: null,
+                    toolCalls: [
+                        new DriverToolCall(
+                            'pc_sub_agent_1',
+                            'handover',
+                            ['op' => 'sub_agent', 'agent_id' => $childAgentId, 'prompt' => 'first child task'],
+                        ),
+                        new DriverToolCall(
+                            'pc_sub_agent_2',
+                            'handover',
+                            ['op' => 'sub_agent', 'agent_id' => $childAgentId, 'prompt' => 'second child task'],
+                        ),
+                    ],
+                    inputTokens: 10,
+                    outputTokens: 5,
+                    completionId: 'cmp_parent_1',
+                ),
+                new LLMResponse('first child finished', [], 5, 3, 'cmp_child_1'),
+                new LLMResponse('second child finished', [], 5, 3, 'cmp_child_2'),
+                new LLMResponse('All wrapped up.', [], 5, 3, 'cmp_parent_2'),
+            ],
+        );
+        $orch = $built['outer'];
+
+        $parent = $orch->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        $parent->refresh();
+        expect($parent->status)->toBe('PENDING_APPROVAL');
+
+        $orch->resume($parent->id, [
+            [
+                'provider_call_id' => 'pc_sub_agent_1',
+                'decision'         => 'approve',
+                'arguments'        => [
+                    'op' => 'sub_agent', 'agent_id' => $childAgentId, 'prompt' => 'first child task',
+                ],
+            ],
+            [
+                'provider_call_id' => 'pc_sub_agent_2',
+                'decision'         => 'approve',
+                'arguments'        => [
+                    'op' => 'sub_agent', 'agent_id' => $childAgentId, 'prompt' => 'second child task',
+                ],
+            ],
+        ]);
+
+        // Raw row count per provider_call_id: one each.
+        $countByCallId = TaskHistory::where('task_id', $parent->id)
+            ->where('role', 'tool')
+            ->whereIn('tool_call_id', ['pc_sub_agent_1', 'pc_sub_agent_2'])
+            ->selectRaw('tool_call_id, COUNT(*) as cnt')
+            ->groupBy('tool_call_id')
+            ->pluck('cnt', 'tool_call_id');
+        expect($countByCallId->all())->toBe([
+            'pc_sub_agent_1' => 1,
+            'pc_sub_agent_2' => 1,
+        ]);
+
+        // The serialized LLM message list mirrors the row count.
+        $messages = $orch->buildMessages($parent->id);
+        $toolMessages = array_values(array_filter(
+            $messages,
+            static fn(array $m): bool => ($m['role'] ?? null) === 'tool',
+        ));
+        expect($toolMessages)->toHaveCount(2);
+        $byCallId = [];
+        foreach ($toolMessages as $m) {
+            $byCallId[$m['tool_call_id']] = $m;
+        }
+        expect($byCallId['pc_sub_agent_1']['content'])->toContain('first child finished');
+        expect($byCallId['pc_sub_agent_2']['content'])->toContain('second child finished');
+    });
+
+    it('does not double-write role=tool rows when the immediate write already produced the final child output', function (): void {
+        // Edge case: if the immediate result row's content already matches
+        // the eventual child output (impossible in production because the
+        // tool runs synchronously before the child ticks, but a corrupt
+        // / replayed state could land us here), the resume must still
+        // replace-not-append. The test seeds the immediate row by hand
+        // and calls the resume helper directly.
+        $seed = subAgentSeedAgents();
+        $userId = $seed['userId'];
+        $parentAgentId = $seed['parentAgentId'];
+        $childAgentId = $seed['childAgentId'];
+
+        $parent = Task::create([
+            'agent_id'    => $parentAgentId,
+            'user_id'     => $userId,
+            'status'      => 'AWAITING_SUB_AGENTS',
+            'user_prompt' => SUB_AGENT_PARENT_PROMPT,
+            'data'        => json_encode([
+                'spawned_sub_task_ids'     => [],
+                'sub_agent_expected_count' => 0,
+            ], JSON_THROW_ON_ERROR),
+            'max_steps'  => 10,
+            'step_count' => 1,
+        ]);
+
+        $child = Task::create([
+            'agent_id'       => $childAgentId,
+            'user_id'        => $userId,
+            'status'         => 'COMPLETED',
+            'user_prompt'    => SUB_AGENT_PROMPT,
+            'final_response' => 'final answer',
+            'max_steps'      => 5,
+            'step_count'     => 1,
+            'parent_task_id' => $parent->id,
+        ]);
+
+        Capsule::connection()->table('tasks')
+            ->where('id', $parent->id)
+            ->update([
+                'data' => json_encode([
+                    'spawned_sub_task_ids'     => [$child->id],
+                    'sub_agent_expected_count' => 1,
+                ], JSON_THROW_ON_ERROR),
+            ]);
+
+        ToolCallModel::create([
+            'task_id'          => $parent->id,
+            'agent_id'         => $parentAgentId,
+            'provider_call_id' => 'pc_dup',
+            'tool_name'        => 'handover',
+            'tool_class'       => HandoverTool::class,
+            'tool_type'        => 'output',
+            'operation'        => 'sub_agent',
+            'status'           => 'APPROVED',
+            'proposed_arguments' => [
+                'op' => 'sub_agent', 'agent_id' => $childAgentId, 'prompt' => SUB_AGENT_PROMPT,
+            ],
+            'result_data' => [
+                'op' => 'sub_agent', 'spawned_sub_task_ids' => [$child->id],
+            ],
+            'result_content' => 'Sub-agent task #' . $child->id . ' starts on agent #' . $childAgentId . '.',
+            'executed_at'    => date('Y-m-d H:i:s'),
+        ]);
+
+        // Seed the immediate tool row that HandoverTool.executeSubAgent
+        // would have written.
+        $orch = new Orchestrator(
+            Mockery::mock(DriverFactory::class),
+            new OrchestratorConfig(toolInstances: [new StubInputTool()]),
+        );
+        $orch->appendHistory(
+            taskId: $parent->id,
+            role: 'tool',
+            content: 'Sub-agent task #' . $child->id . ' starts on agent #' . $childAgentId . '.',
+            context: new \Spora\Agents\ValueObjects\HistoryMessageContext(
+                toolCallId: 'pc_dup',
+                toolName: 'handover',
+            ),
+        );
+
+        $toolRows = TaskHistory::where('task_id', $parent->id)
+            ->where('role', 'tool')
+            ->where('tool_call_id', 'pc_dup')
+            ->get();
+        expect($toolRows->count())->toBe(1);
+
+        // Drive the resume — the per-child hook must replace not append.
+        // WorkerMode::Worker so the resume skips the post-tick LLM call;
+        // the orchestrator proxy exists only so the optional appendHistory
+        // fallback path has a callable factory.
+        $subAgent = new SubAgentService(
+            static fn(): OrchestratorInterface => $orch,
+            null,
+            WorkerMode::Worker,
+        );
+        $subAgent->maybeResumeParent($child->id);
+
+        $toolRows = TaskHistory::where('task_id', $parent->id)
+            ->where('role', 'tool')
+            ->where('tool_call_id', 'pc_dup')
+            ->orderBy('id')
+            ->get();
+        expect($toolRows->count())->toBe(1);
+        expect($toolRows[0]->content)->toContain('Sub-agent task #' . $child->id . ' completed');
+        expect($toolRows[0]->content)->toContain('final answer');
     });
 });
