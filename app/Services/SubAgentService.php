@@ -12,6 +12,7 @@ use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Models\Agent;
 use Spora\Models\Task;
+use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\Text\Utf8Sanitizer;
 use Throwable;
@@ -236,14 +237,26 @@ final class SubAgentService implements SubAgentServiceInterface
     }
 
     /**
-     * Idempotent: AWAITING_SUB_AGENTS already set is a no-op aside from
-     * seeding `data.spawned_sub_task_ids = []`. Called BEFORE the child
-     * tick so the child's `maybeResumeParent` hook sees the parent in the
-     * right state.
+     * Seeds `data.spawned_sub_task_ids = []` and flips the parent to
+     * `AWAITING_SUB_AGENTS`. Called BEFORE the child tick so the child's
+     * `maybeResumeParent` hook sees the parent in the right state.
+     *
+     * Short-circuits when the parent is already awaiting sub-agents with a
+     * seeded `spawned_sub_task_ids` array — multi-child batches keep the
+     * parent in this state across spawns, so a second `spawn()` would
+     * otherwise rewrite the same row.
      */
     private function markParentAwaitingSubAgents(Task $parent): void
     {
         $data = $parent->data ?? [];
+        $alreadySeeded = ($parent->status === 'AWAITING_SUB_AGENTS')
+            && array_key_exists('spawned_sub_task_ids', $data)
+            && is_array($data['spawned_sub_task_ids']);
+
+        if ($alreadySeeded) {
+            return;
+        }
+
         $data['spawned_sub_task_ids'] = $data['spawned_sub_task_ids'] ?? [];
 
         Capsule::table('tasks')
@@ -255,10 +268,16 @@ final class SubAgentService implements SubAgentServiceInterface
     }
 
     /**
-     * Appends each child's output as a `role:'tool'` history row
-     * correlated with the originating tool_call_id, clears the spawned
+     * Replaces the immediate `role:'tool'` history row from the originating
+     * `sub_agent` call with the eventual child output, clears the spawned
      * book-keeping, flips the parent to RUNNING (Sync) or QUEUED (Worker),
      * and kicks the next tick.
+     *
+     * The immediate row was written by {@see ToolCallExecutor::executeAndRecordResult()}
+     * (auto-approved/sync) or {@see ApprovedBatchExecutor::recordResumeExecutionResult()}
+     * (approval-required/sync) or by the worker-mode equivalent. Replacing
+     * keeps exactly one `role:'tool'` row per `provider_call_id` so the
+     * next LLM round-trip sees a single correlated result.
      *
      * @param list<int> $childIds
      */
@@ -272,14 +291,12 @@ final class SubAgentService implements SubAgentServiceInterface
                 continue;
             }
 
-            $orchestrator->appendHistory(
-                taskId: $parent->id,
-                role: 'tool',
+            $toolCallId = $this->findToolCallIdForChild($parent->id, $childId);
+            $this->replaceOrAppendToolHistory(
+                orchestrator: $orchestrator,
+                parentTaskId: $parent->id,
+                toolCallId: $toolCallId,
                 content: $this->childContent($child),
-                context: new HistoryMessageContext(
-                    toolCallId: $this->findToolCallIdForChild($parent->id, $childId),
-                    toolName: 'handover',
-                ),
             );
         }
 
@@ -308,22 +325,66 @@ final class SubAgentService implements SubAgentServiceInterface
      * its `provider_call_id` so the next LLM round-trip sees the tool
      * result correlated with the originating call.
      *
-     * SQLite 3.38+ supports `json_each` (test suite); MySQL production
-     * uses `JSON_CONTAINS`. The OperationSchemaFilter follows the same
-     * JSON-shape agnostic pattern.
+     * Decoded in PHP rather than via SQL JSON functions so the rows
+     * scope stays portable across SQLite and MySQL/MariaDB. The
+     * `result_data` cast on the model decodes the JSON column on
+     * read. The result set is bounded by the task's handover tool
+     * calls — at most one row per tool call in the originating
+     * turn — so the linear scan is cheap.
      */
     private function findToolCallIdForChild(int $parentTaskId, int $childId): ?string
     {
-        $row = ToolCallModel::where('task_id', $parentTaskId)
+        $rows = ToolCallModel::where('task_id', $parentTaskId)
             ->where('tool_name', 'handover')
             ->where('operation', 'sub_agent')
-            ->whereRaw(
-                "EXISTS (SELECT 1 FROM json_each(result_data, '$.spawned_sub_task_ids') WHERE value = ?)",
-                [$childId],
-            )
+            ->get();
+
+        foreach ($rows as $row) {
+            $spawned = $row->result_data['spawned_sub_task_ids'] ?? null;
+            if (is_array($spawned) && in_array($childId, $spawned, true)) {
+                return $row->provider_call_id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Replace the existing `role:'tool'` history row correlated with
+     * `$toolCallId` so the eventual child output supersedes the
+     * immediate result written at tool-call time. Falls back to
+     * appending a new row when no correlated row exists (orphan edge
+     * case — defensive, the immediate write path normally precedes us).
+     */
+    private function replaceOrAppendToolHistory(
+        OrchestratorInterface $orchestrator,
+        int $parentTaskId,
+        ?string $toolCallId,
+        string $content,
+    ): void {
+        $existing = TaskHistory::where('task_id', $parentTaskId)
+            ->where('role', 'tool')
+            ->where('tool_call_id', $toolCallId)
+            ->orderByDesc('sequence')
             ->first();
 
-        return $row?->provider_call_id;
+        if ($existing !== null) {
+            $existing->update([
+                'content'   => $content,
+                'tool_name' => 'handover',
+            ]);
+            return;
+        }
+
+        $orchestrator->appendHistory(
+            taskId: $parentTaskId,
+            role: 'tool',
+            content: $content,
+            context: new HistoryMessageContext(
+                toolCallId: $toolCallId,
+                toolName: 'handover',
+            ),
+        );
     }
 
     private function childContent(Task $child): string
