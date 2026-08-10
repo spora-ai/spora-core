@@ -48,22 +48,22 @@ final class LlmConfigValidator
      */
     public function validateStoreBody(array $body): ?JsonResponse
     {
-        $nameError = $this->validateStoreName($body);
-        if ($nameError !== null) {
-            return $nameError;
+        // Each helper returns the first failure (or null). Collect in one
+        // pass so the orchestrator stays under the S1142 return-count cap.
+        foreach (
+            [
+                $this->validateStoreName($body),
+                $this->validateStoreDriverClass($body),
+                $this->validateLimits($body),
+                $this->validateStoreSettings($body),
+            ] as $error
+        ) {
+            if ($error !== null) {
+                return $error;
+            }
         }
 
-        $driverError = $this->validateStoreDriverClass($body);
-        if ($driverError !== null) {
-            return $driverError;
-        }
-
-        $limitsError = $this->validateLimits($body);
-        if ($limitsError !== null) {
-            return $limitsError;
-        }
-
-        return $this->validateStoreSettings($body);
+        return null;
     }
 
     /**
