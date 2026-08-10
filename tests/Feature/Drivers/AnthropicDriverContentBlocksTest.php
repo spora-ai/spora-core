@@ -29,7 +29,6 @@ function makeAnthropicRequestBuilder(string $model): AnthropicRequestBuilder
         apiKey: 'test',
         model: $model,
         enablePromptCaching: false,
-        temperature: 0.7,
         thinkingBudget: null,
     );
 }

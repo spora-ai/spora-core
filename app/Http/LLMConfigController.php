@@ -120,6 +120,11 @@ final class LLMConfigController
             return $body;
         }
 
+        $validationError = $this->validator->validateUpdateBody($body);
+        if ($validationError !== null) {
+            return $validationError;
+        }
+
         return $this->updateConfiguration($id, $body);
     }
 

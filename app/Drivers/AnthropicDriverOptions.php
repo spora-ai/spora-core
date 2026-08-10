@@ -6,11 +6,15 @@ namespace Spora\Drivers;
 
 /**
  * Anthropic-specific request behavior kept out of the driver constructor.
+ *
+ * Temperature is no longer a constructor argument — it flows through the
+ * shared {@see ValueObjects\LLMRequest::temperature} field
+ * like the OpenAI driver does, so Anthropic and OpenAI share a single
+ * source of truth via {@see \Spora\Agents\LlmConfigResolver}.
  */
 final class AnthropicDriverOptions
 {
     public function __construct(
-        public readonly ?float $temperature = null,
         public readonly ?int $thinkingBudget = null,
         public readonly ?bool $supportsImageInput = null,
 

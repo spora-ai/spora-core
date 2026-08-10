@@ -29,7 +29,7 @@ final class LlmConfigResolver
     {
         $defaults = [
             'context_window' => 128000,
-            'max_tokens_output' => 4096,
+            'max_tokens_output' => 16384,
             'temperature' => 0.7,
         ];
 
