@@ -117,3 +117,27 @@ test('inherited `supports_image_input` is exposed as a toggle field', function (
         ->and($toggle['label'])->toBe('Allow images')
         ->and($toggle['default'])->toBeFalse();
 });
+
+test('OpenAI driver schema omits `max_tokens_output` and `context_window` (dead keys live on the LLM config columns)', function (): void {
+    $inspector = new LLMConfigSchemaInspector([OpenAICompatibleDriver::class]);
+
+    $keys = array_column(
+        $inspector->getSchemaForDriver(OpenAICompatibleDriver::class),
+        'key',
+    );
+
+    expect($keys)->not->toContain('max_tokens_output')
+        ->and($keys)->not->toContain('context_window');
+});
+
+test('Anthropic driver schema omits `max_tokens_output` and `context_window` (dead keys live on the LLM config columns)', function (): void {
+    $inspector = new LLMConfigSchemaInspector([AnthropicCompatibleDriver::class]);
+
+    $keys = array_column(
+        $inspector->getSchemaForDriver(AnthropicCompatibleDriver::class),
+        'key',
+    );
+
+    expect($keys)->not->toContain('max_tokens_output')
+        ->and($keys)->not->toContain('context_window');
+});
