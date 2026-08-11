@@ -23,7 +23,6 @@ final class AnthropicRequestBuilder
         private readonly string $apiKey,
         private readonly string $model,
         private readonly bool $enablePromptCaching,
-        private readonly ?float $temperature,
         private readonly ?int $thinkingBudget,
     ) {}
 
@@ -78,9 +77,7 @@ final class AnthropicRequestBuilder
             $body['tools'] = $tools;
         }
 
-        if ($this->temperature !== null) {
-            $body['temperature'] = $this->temperature;
-        }
+        $body['temperature'] = $request->temperature;
 
         if ($this->thinkingBudget !== null) {
             $body['thinking'] = [

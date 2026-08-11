@@ -292,12 +292,19 @@ test('temperature and thinking_budget are forwarded to the request body when set
         baseUrl: 'https://api.anthropic.com/v1/messages',
         httpClient: $client,
         options: new AnthropicDriverOptions(
-            temperature: 0.3,
             thinkingBudget: 2048,
         ),
     );
 
-    $driver->complete(makeAnthropicRequest());
+    // Temperature now flows from LLMRequest (single source of truth), shared with the OpenAI driver.
+    $request = makeAnthropicRequest();
+    $requestWithTemp = new LLMRequest(
+        systemPrompt: $request->systemPrompt,
+        messages: $request->messages,
+        tools: $request->tools,
+        temperature: 0.3,
+    );
+    $driver->complete($requestWithTemp);
 
     expect($capturedBody)->toHaveKey('temperature');
     expect($capturedBody['temperature'])->toBe(0.3);

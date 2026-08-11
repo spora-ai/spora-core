@@ -26,6 +26,15 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class LlmConfigValidator
 {
+    /**
+     * Upper bound on `context_window` and `max_tokens_output`. Covers every
+     * known provider ceiling with headroom (Anthropic 200k, OpenAI o-series
+     * 100k). Above this, we reject with a generic 422 — the cap is internal
+     * operator hygiene, not something the UI should advertise.
+     */
+    private const MAX_CONTEXT_WINDOW = 1_000_000;
+    private const MAX_OUTPUT_TOKENS = 1_000_000;
+
     public function __construct(
         private readonly LLMConfigServiceInterface $service,
     ) {}
@@ -39,17 +48,93 @@ final class LlmConfigValidator
      */
     public function validateStoreBody(array $body): ?JsonResponse
     {
-        $nameError = $this->validateStoreName($body);
+        // Each helper returns the first failure (or null). Collect in one
+        // pass so the orchestrator stays under the S1142 return-count cap.
+        foreach (
+            [
+                $this->validateStoreName($body),
+                $this->validateStoreDriverClass($body),
+                $this->validateLimits($body),
+                $this->validateStoreSettings($body),
+            ] as $error
+        ) {
+            if ($error !== null) {
+                return $error;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Body validation for `PUT /llm-configs/{id}`. Closes the gap where the
+     * update endpoint skipped body validation entirely — only name and
+     * settings were checked. Now also enforces the limit bounds so a
+     * request like `{"max_tokens_output": 9999999}` is rejected with a 422.
+     */
+    public function validateUpdateBody(array $body): ?JsonResponse
+    {
+        $nameError = $this->validateUpdateName($body);
         if ($nameError !== null) {
             return $nameError;
         }
 
-        $driverError = $this->validateStoreDriverClass($body);
-        if ($driverError !== null) {
-            return $driverError;
+        $limitsError = $this->validateLimits($body);
+        if ($limitsError !== null) {
+            return $limitsError;
         }
 
-        return $this->validateStoreSettings($body);
+        return null;
+    }
+
+    /**
+     * Validate `context_window` and `max_tokens_output` if present.
+     * Absent keys are treated as "leave unchanged" / "use default" so a
+     * partial update payload can update one field without resetting the
+     * other. A present-but-invalid value is rejected with a generic 422.
+     *
+     * @param array<string, mixed> $body
+     */
+    public function validateLimits(array $body): ?JsonResponse
+    {
+        foreach (['context_window', 'max_tokens_output'] as $key) {
+            if (!array_key_exists($key, $body)) {
+                continue;
+            }
+            $value = $body[$key];
+            $max = $key === 'context_window' ? self::MAX_CONTEXT_WINDOW : self::MAX_OUTPUT_TOKENS;
+            if (!$this->isValidPositiveInteger($value, $max)) {
+                return $this->error(
+                    'VALIDATION_ERROR',
+                    "Value must be a positive integer up to {$max}.",
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                );
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Strict positive-integer check. Rejects strings with trailing junk
+     * (`"200000abc"`), floats (`1.5`), and any non-positive value. The
+     * `$max` cap exists to bound the wire `max_tokens` request and keep
+     * accidental DoS amplification in check.
+     *
+     * @param mixed $value
+     */
+    private function isValidPositiveInteger(mixed $value, int $max): bool
+    {
+        if (!is_numeric($value)) {
+            return false;
+        }
+        // String round-trip rejects "200000abc" — `(int) "200000abc"` would
+        // silently truncate to 200000 otherwise.
+        if ((string) (int) $value !== (string) $value) {
+            return false;
+        }
+        $intValue = (int) $value;
+        return $intValue > 0 && $intValue <= $max;
     }
 
     /**
