@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Unit\Extension;
 
 use Closure;
+use Composer\InstalledVersions;
 use Psr\Log\NullLogger;
+use ReflectionClass;
 use Spora\Core\Extension\Exceptions\PluginInstallFailedException;
 use Spora\Core\Extension\PluginInstallRequest;
 use Spora\Core\Extension\PluginInstallResult;
@@ -163,10 +165,10 @@ test('update() without a package argument updates every installed plugin', funct
     ]);
 });
 
-test('list() scans the plugins directory for plugin.json manifests and reports name+version from sibling composer.json', function (): void {
+test('list() scans the plugins directory for plugin.json manifests and reports name from sibling composer.json (version is null when the package is not in InstalledVersions)', function (): void {
     PluginFixtures::withTree([
-        'tavily'    => ['name' => 'spora-ai/spora-plugin-tavily',           'version' => '0.1.0'],
-        'semantics' => ['name' => 'spora-ai/spora-plugin-semantic-scholar', 'version' => '0.2.3'],
+        'tavily'    => ['name' => 'spora-ai/spora-plugin-tavily'],
+        'semantics' => ['name' => 'spora-ai/spora-plugin-semantic-scholar'],
     ], function (string $base): void {
         $factory = new FakeProcessFactory();
         $manager = makeManager($factory, basePath: $base);
@@ -175,8 +177,8 @@ test('list() scans the plugins directory for plugin.json manifests and reports n
 
         expect($factory->calls)->toBe([]);
         expect($entries)->toBe([
-            ['name' => 'spora-ai/spora-plugin-semantic-scholar', 'version' => '0.2.3', 'path' => $base . '/plugins/semantics'],
-            ['name' => 'spora-ai/spora-plugin-tavily',           'version' => '0.1.0', 'path' => $base . '/plugins/tavily'],
+            ['name' => 'spora-ai/spora-plugin-semantic-scholar', 'version' => null, 'path' => $base . '/plugins/semantics'],
+            ['name' => 'spora-ai/spora-plugin-tavily',           'version' => null, 'path' => $base . '/plugins/tavily'],
         ]);
     }, tag: 'spora-list-test');
 });
@@ -185,7 +187,7 @@ test('list() ignores directories under plugins/ that do not ship a plugin.json',
     // buildTree() can't express the "directory without plugin.json" shape,
     // so the scratch dir is added inline and cleaned up after.
     $base = PluginFixtures::buildTree([
-        'tavily' => ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0'],
+        'tavily' => ['name' => 'spora-ai/spora-plugin-tavily'],
     ], tag: 'spora-list-scratch');
     mkdir($base . '/plugins/_scratch', 0o755, true);
 
@@ -194,7 +196,7 @@ test('list() ignores directories under plugins/ that do not ship a plugin.json',
         $manager = makeManager($factory, basePath: $base);
 
         expect($manager->list())->toBe([
-            ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0', 'path' => $base . '/plugins/tavily'],
+            ['name' => 'spora-ai/spora-plugin-tavily', 'version' => null, 'path' => $base . '/plugins/tavily'],
         ]);
     } finally {
         @rmdir($base . '/plugins/_scratch');
@@ -244,6 +246,78 @@ test('list() surfaces plugins with missing or malformed composer.json (tolerant 
         @unlink($base . '/plugins/tavily/plugin.json');
         @rmdir($base . '/plugins/tavily');
         PluginFixtures::removeTree($base);
+    }
+});
+
+test('list() sources the version from Composer\InstalledVersions, not composer.json#version', function (): void {
+    // reload() swaps the installed.php payload at runtime, letting us fake
+    // an installed package without a real `composer require`. Snapshot the
+    // real payload and restore it in `finally` to keep sibling tests
+    // unaffected.
+    $installedPath = dirname((new ReflectionClass(InstalledVersions::class))->getFileName()) . '/installed.php';
+    $original      = require $installedPath;
+    try {
+        $modified = $original;
+        $modified['versions']['spora-ai/spora-plugin-tavily'] = [
+            'pretty_version'  => '0.1.2',
+            'version'         => '0.1.2.0',
+            'reference'       => 'abc123',
+            'type'            => 'spora-plugin',
+            'install_path'    => '/srv/spora/plugins/tavily',
+            'aliases'         => [],
+            'dev_requirement' => false,
+        ];
+        InstalledVersions::reload($modified);
+
+        PluginFixtures::withTree([
+            'tavily' => ['name' => 'spora-ai/spora-plugin-tavily'],
+        ], function (string $base): void {
+            $factory = new FakeProcessFactory();
+            $manager = makeManager($factory, basePath: $base);
+
+            expect($manager->list())->toBe([
+                ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.2', 'path' => $base . '/plugins/tavily'],
+            ]);
+        }, tag: 'spora-list-installed-versions');
+    } finally {
+        InstalledVersions::reload($original);
+    }
+});
+
+test('list() ignores composer.json#version even when the plugin package is in InstalledVersions', function (): void {
+    // The git tag wins — a stale composer.json#version (hand-edited bump,
+    // missed tag) must not leak through. InstalledVersions 0.1.2 beats
+    // composer.json 9.9.9.
+    $installedPath = dirname((new ReflectionClass(InstalledVersions::class))->getFileName()) . '/installed.php';
+    $original      = require $installedPath;
+    try {
+        $modified = $original;
+        $modified['versions']['spora-ai/spora-plugin-tavily'] = [
+            'pretty_version'  => '0.1.2',
+            'version'         => '0.1.2.0',
+            'reference'       => 'abc123',
+            'type'            => 'spora-plugin',
+            'install_path'    => '/srv/spora/plugins/tavily',
+            'aliases'         => [],
+            'dev_requirement' => false,
+        ];
+        InstalledVersions::reload($modified);
+
+        PluginFixtures::withTree([
+            'tavily' => [
+                'name'    => 'spora-ai/spora-plugin-tavily',
+                'version' => '9.9.9', // deliberately wrong — must be ignored
+            ],
+        ], function (string $base): void {
+            $factory = new FakeProcessFactory();
+            $manager = makeManager($factory, basePath: $base);
+
+            expect($manager->list())->toBe([
+                ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.2', 'path' => $base . '/plugins/tavily'],
+            ]);
+        }, tag: 'spora-list-installed-versions-wins');
+    } finally {
+        InstalledVersions::reload($original);
     }
 });
 
