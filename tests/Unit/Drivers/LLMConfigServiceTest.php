@@ -181,7 +181,7 @@ test('encodeSettings + decodeSettings is a lossless round-trip', function (): vo
         'api_key' => 'sk-round-trip-test',
         'base_url' => 'https://example.com/v1',
         'model' => 'gpt-4o-mini',
-        'max_tokens' => 2048,
+        'timeout' => '120',
     ];
 
     $encoded = $service->encodeSettings(OpenAICompatibleDriver::class, $original);

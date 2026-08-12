@@ -224,7 +224,7 @@ final class LlmConfigValidator
      */
     public function resolveAccessibleConfig(int $id, ?int $userId, bool $isAdmin): LLMDriverConfiguration|JsonResponse
     {
-        $config = $this->service->getConfiguration($id, $userId);
+        $config = $this->service->getConfiguration($id, $userId ?? 0, $isAdmin);
         if ($config !== null) {
             return $config;
         }
