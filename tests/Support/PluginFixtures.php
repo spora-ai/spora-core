@@ -11,7 +11,10 @@ namespace Tests\Support;
 final class PluginFixtures
 {
     /**
-     * @param  array<string, array<string, mixed>>  $plugins  slug => composer.json body
+     * @param  array<string, array<string, mixed>>  $plugins  slug => composer.json body.
+     *                                                         Only `name` is read by PluginManager — `version` is intentionally omitted
+     *                                                         since the runtime resolves it from the git tag via Composer\InstalledVersions,
+     *                                                         and the fixture package isn't actually installed.
      */
     public static function buildTree(array $plugins, string $tag = 'spora-plugins'): string
     {

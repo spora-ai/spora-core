@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Core\Extension;
 
 use Closure;
+use Composer\InstalledVersions;
 use Psr\Log\LoggerInterface;
 use Spora\Core\Extension\Exceptions\PluginInstallFailedException;
 use Spora\Core\Paths;
@@ -186,17 +187,31 @@ final class PluginManager
             ? json_decode($raw, true)
             : null;
 
-        $name    = '';
-        $version = null;
+        $name = '';
         if (is_array($decoded)) {
-            $name    = (string) ($decoded['name'] ?? '');
-            $version = isset($decoded['version']) && is_string($decoded['version']) && $decoded['version'] !== ''
-                ? $decoded['version']
-                : null;
+            $name = (string) ($decoded['name'] ?? '');
+        }
+        $resolvedName = $name !== '' ? $name : $slug;
+
+        // `composer.json#version` is intentionally not read — manual bumps drift
+        // from the git tag, and the tag is what operators see on Packagist.
+        // InstalledVersions surfaces the tag Composer recorded at install time.
+        $version = null;
+        if (class_exists(InstalledVersions::class)
+            && $resolvedName !== ''
+            && InstalledVersions::isInstalled($resolvedName)
+        ) {
+            $rawVersion = InstalledVersions::getPrettyVersion($resolvedName);
+            if (is_string($rawVersion)
+                && $rawVersion !== ''
+                && $rawVersion !== 'No version set (parsed as 1.0.0)'
+            ) {
+                $version = ltrim($rawVersion, 'v');
+            }
         }
 
         return [
-            'name'    => $name !== '' ? $name : $slug,
+            'name'    => $resolvedName,
             'version' => $version,
             'path'    => $pluginDir,
         ];

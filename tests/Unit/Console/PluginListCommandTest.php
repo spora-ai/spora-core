@@ -30,40 +30,32 @@ it('prints an empty-state message when no plugins are installed', function (): v
 });
 
 it('renders a table with one row per installed plugin', function (): void {
+    // Fixture packages aren't installed via Composer, so the version column
+    // is null for every row — the CLI surfaces that as `(unknown)`. The
+    // "InstalledVersions supplies the version" path is covered by the
+    // dedicated regression test in PluginManagerTest.
     PluginFixtures::withTree([
-        'tavily'    => ['name' => 'spora-ai/spora-plugin-tavily',           'version' => '0.1.0'],
-        'semantics' => ['name' => 'spora-ai/spora-plugin-semantic-scholar', 'version' => '0.2.0'],
-        'minimax'   => ['name' => 'spora-ai/spora-plugin-minimax',          'version' => '0.5.0'],
+        'tavily'    => ['name' => 'spora-ai/spora-plugin-tavily'],
+        'semantics' => ['name' => 'spora-ai/spora-plugin-semantic-scholar'],
+        'minimax'   => ['name' => 'spora-ai/spora-plugin-minimax'],
     ], function (string $base): void {
         $tester = makePluginListTester($base);
         $tester->execute([]);
 
         expect($tester->getStatusCode())->toBe(Command::SUCCESS);
-        expect($tester->getDisplay())
+        $display = $tester->getDisplay();
+        expect($display)
             ->toContain('spora-ai/spora-plugin-tavily')
-            ->toContain('0.1.0')
             ->toContain('spora-ai/spora-plugin-semantic-scholar')
-            ->toContain('0.2.0')
-            ->toContain('spora-ai/spora-plugin-minimax')
-            ->toContain('0.5.0');
-    });
-});
-
-it('renders (unknown) for plugins whose composer.json has no version', function (): void {
-    PluginFixtures::withTree([
-        'tavily' => ['name' => 'spora-ai/spora-plugin-tavily'],
-    ], function (string $base): void {
-        $tester = makePluginListTester($base);
-        $tester->execute([]);
-
-        expect($tester->getStatusCode())->toBe(Command::SUCCESS);
-        expect($tester->getDisplay())->toContain('(unknown)');
+            ->toContain('spora-ai/spora-plugin-minimax');
+        // Three plugins × one (unknown) cell each.
+        expect(substr_count($display, '(unknown)'))->toBe(3);
     });
 });
 
 it('survives macOS /tmp symlink resolution (path column matches what list() returns)', function (): void {
     PluginFixtures::withTree([
-        'tavily' => ['name' => 'spora-ai/spora-plugin-tavily', 'version' => '0.1.0'],
+        'tavily' => ['name' => 'spora-ai/spora-plugin-tavily'],
     ], function (string $base): void {
         $tester = makePluginListTester($base);
         $tester->execute([]);
