@@ -414,6 +414,48 @@ test('show() returns 404 when fetching another user\'s config', function (): voi
     LLMDriverConfiguration::where('id', $configA->id)->delete();
 });
 
+test('show() returns a global config to a non-admin user (regression: was 404 because getConfiguration filtered by user_id)', function (): void {
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
+    bootAuth($authService, EMAIL_USER_A);
+
+    // A global config — owner is null, not the requester
+    $globalConfig = createTestConfig('Show Global', OpenAICompatibleDriver::class, ['api_key' => 'sk-global'], false, null, $llmConfigService);
+    $globalConfig->is_global = true;
+    $globalConfig->save();
+
+    $request = new Symfony\Component\HttpFoundation\Request();
+    $request->attributes->set('id', $globalConfig->id);
+    $response = callController($controller, 'show', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['config']['id'])->toBe($globalConfig->id)
+        ->and($body['data']['config']['is_global'])->toBeTrue();
+
+    LLMDriverConfiguration::where('id', $globalConfig->id)->delete();
+});
+
+test('show() lets an admin fetch any user\'s personal config (regression: was 404 because admin was filtered by user_id)', function (): void {
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
+    $ownerId = bootAuth($authService, EMAIL_USER_A);
+
+    $configA = createTestConfig('Show Admin Reach', OpenAICompatibleDriver::class, ['api_key' => 'sk-admin-reach'], false, $ownerId, $llmConfigService);
+
+    // Re-login as a different user and promote to admin
+    $adminId = bootAuth($authService, 'admin@example.com');
+    makeAdmin($authService, $adminId);
+
+    $request = new Symfony\Component\HttpFoundation\Request();
+    $request->attributes->set('id', $configA->id);
+    $response = callController($controller, 'show', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['config']['id'])->toBe($configA->id);
+
+    LLMDriverConfiguration::where('id', $configA->id)->delete();
+});
+
 test('update() returns 404 when updating another user\'s config', function (): void {
     [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
     $userA = bootAuth($authService, EMAIL_USER_A);

@@ -137,9 +137,18 @@ final class LLMConfigService implements LLMConfigServiceInterface
             ->all();
     }
 
-    public function getConfiguration(int $configId, int $userId): ?LLMDriverConfiguration
+    public function getConfiguration(int $configId, int $userId, bool $isAdmin = false): ?LLMDriverConfiguration
     {
-        return LLMDriverConfiguration::where('id', $configId)->where('user_id', $userId)->first();
+        $query = LLMDriverConfiguration::where('id', $configId);
+        if (!$isAdmin) {
+            // A non-admin can see their own configs plus every global config;
+            // personal configs belonging to other users are hidden (returns
+            // null so the caller emits 404 and avoids enumeration).
+            $query->where(static function ($q) use ($userId): void {
+                $q->where('user_id', $userId)->orWhere('is_global', true);
+            });
+        }
+        return $query->first();
     }
 
     public function findConfiguration(int $configId): ?LLMDriverConfiguration

@@ -83,8 +83,9 @@ final class LLMConfigController
     public function show(int $id): JsonResponse
     {
         $userId = $this->authService->currentUserId();
+        $isAdmin = $this->authService->isAdmin();
 
-        $config = $this->llmConfigService->getConfiguration($id, $userId);
+        $config = $this->llmConfigService->getConfiguration($id, $userId, $isAdmin);
         if ($config === null) {
             return $this->validator->notFound();
         }

@@ -20,7 +20,7 @@ interface LLMConfigServiceInterface
 
     public function getGlobalConfigurations(): array;
 
-    public function getConfiguration(int $configId, int $userId): ?LLMDriverConfiguration;
+    public function getConfiguration(int $configId, int $userId, bool $isAdmin = false): ?LLMDriverConfiguration;
 
     public function createConfiguration(int $userId, array $data, bool $isAdmin): ?LLMDriverConfiguration;
 

@@ -82,15 +82,28 @@ final class LLMConfigPersistence
      * Encode settings: encrypt password fields per-field, store others as plain JSON.
      * Returns an array ready for json_encode — NOT an encrypted blob.
      *
+     * Keys that are not declared by the driver's `#[ToolSetting]` schema are
+     * dropped before encryption. The schema (including inherited attributes)
+     * is the single source of truth for what is allowed in the settings blob,
+     * so stale keys from a removed ToolSetting (e.g. the dead
+     * `context_window` / `max_tokens_output` from PR #203) are pruned on
+     * every save rather than riding along forever.
+     *
      * @param array<string, mixed> $settings
      * @return array<string, mixed>
      */
     public function encodeSettings(string $driverClass, array $settings): array
     {
+        $allowed = array_flip(array_column(
+            $this->schemaInspector->getSchemaForDriver($driverClass),
+            'key',
+        ));
+        $pruned = array_intersect_key($settings, $allowed);
+
         $passwordKeys = $this->schemaInspector->getPasswordKeysFor($driverClass);
         $encoded = [];
 
-        foreach ($settings as $key => $value) {
+        foreach ($pruned as $key => $value) {
             if (in_array($key, $passwordKeys, true) && $value !== null && $value !== '') {
                 $encrypted = $this->security->encrypt((string) $value);
                 $encoded[$key] = $encrypted->toStorageString();
