@@ -250,12 +250,10 @@ test('list() surfaces plugins with missing or malformed composer.json (tolerant 
 });
 
 test('list() sources the version from Composer\InstalledVersions, not composer.json#version', function (): void {
-    // Composer exposes a reload() seam to swap the installed.php payload at
-    // runtime — that's how we make a fake package "appear installed" without
-    // a real `composer require`. We snapshot the real payload from
-    // vendor/composer/installed.php (the same data getInstalled() would
-    // have loaded on first call) and restore it in `finally` so sibling
-    // tests in this worker see the unmodified state.
+    // reload() swaps the installed.php payload at runtime, letting us fake
+    // an installed package without a real `composer require`. Snapshot the
+    // real payload and restore it in `finally` to keep sibling tests
+    // unaffected.
     $installedPath = dirname((new ReflectionClass(InstalledVersions::class))->getFileName()) . '/installed.php';
     $original      = require $installedPath;
     try {
@@ -287,10 +285,9 @@ test('list() sources the version from Composer\InstalledVersions, not composer.j
 });
 
 test('list() ignores composer.json#version even when the plugin package is in InstalledVersions', function (): void {
-    // The git tag is the source of truth — a stale composer.json#version
-    // (e.g. a hand-edited bump that didn't make it into a release) must
-    // not leak through. InstalledVersions says 0.1.2, composer.json says
-    // 9.9.9 — list() reports 0.1.2.
+    // The git tag wins — a stale composer.json#version (hand-edited bump,
+    // missed tag) must not leak through. InstalledVersions 0.1.2 beats
+    // composer.json 9.9.9.
     $installedPath = dirname((new ReflectionClass(InstalledVersions::class))->getFileName()) . '/installed.php';
     $original      = require $installedPath;
     try {

@@ -30,10 +30,9 @@ it('prints an empty-state message when no plugins are installed', function (): v
 });
 
 it('renders a table with one row per installed plugin', function (): void {
-    // Fixture packages aren't installed via Composer, so the version column
-    // is null for every row — the CLI surfaces that as `(unknown)`. The
-    // "InstalledVersions supplies the version" path is covered by the
-    // dedicated regression test in PluginManagerTest.
+    // Fixture packages aren't installed via Composer — version is null for
+    // every row, surfaced as `(unknown)`. The InstalledVersions path itself
+    // is covered by the dedicated regression in PluginManagerTest.
     PluginFixtures::withTree([
         'tavily'    => ['name' => 'spora-ai/spora-plugin-tavily'],
         'semantics' => ['name' => 'spora-ai/spora-plugin-semantic-scholar'],

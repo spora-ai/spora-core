@@ -194,8 +194,7 @@ final class PluginManager
         $resolvedName = $name !== '' ? $name : $slug;
 
         // `composer.json#version` is intentionally not read — manual bumps drift
-        // from the git tag, and the tag is what operators see on Packagist.
-        // InstalledVersions surfaces the tag Composer recorded at install time.
+        // from the git tag, which is the operator-facing source of truth.
         $version = null;
         if (class_exists(InstalledVersions::class)
             && $resolvedName !== ''
