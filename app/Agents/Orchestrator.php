@@ -269,18 +269,49 @@ final class Orchestrator implements OrchestratorInterface
         // Empty array → JSON null so the column is rewritten (clearing
         // any leftover keys) instead of silently leaving the old payload
         // in place.
-        Capsule::table('tasks')
-            ->where('id', $task->id)
-            ->update([
-                'status'      => $targetStatus,
-                'step_count'  => 0,
-                'user_prompt' => Utf8Sanitizer::scrubString($newPrompt),
-                'max_steps'   => $additionalSteps !== null ? $additionalSteps : $task->max_steps,
-                'data'        => $data === [] ? null : json_encode($data, JSON_THROW_ON_ERROR),
-                'updated_at'  => gmdate(self::DB_TIMESTAMP_FORMAT),
-            ]);
+        $this->writeTaskStatus($task, $targetStatus, $data, [
+            'step_count'  => 0,
+            'user_prompt' => Utf8Sanitizer::scrubString($newPrompt),
+            'max_steps'   => $additionalSteps !== null ? $additionalSteps : $task->max_steps,
+        ]);
 
         return Task::find($task->id);
+    }
+
+    /**
+     * Persist a task's new status + updated-at stamp + data column in one
+     * place. Used by both {@see applyContinueTransition()} (which adds
+     * prompt / max_steps / step_count on top) and {@see abortTransition()}
+     * (status-only flip with aborted_at). Centralising the row layout
+     * keeps the SQL UPDATE site small enough that a future column
+     * doesn't double-edit half a dozen call sites.
+     *
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $extraColumns
+     */
+    private function writeTaskStatus(Task $task, string $targetStatus, array $data, array $extraColumns = []): void
+    {
+        $row = array_merge(
+            [
+                'status'     => $targetStatus,
+                'data'       => $data === [] ? null : json_encode($data, JSON_THROW_ON_ERROR),
+                'updated_at' => gmdate(self::DB_TIMESTAMP_FORMAT),
+            ],
+            $extraColumns,
+        );
+        Capsule::table('tasks')->where('id', $task->id)->update($row);
+    }
+
+    /**
+     * Stamp `data.aborted_at` + flip status to ABORTED in a single UPDATE
+     * so the {@see abort()} path doesn't duplicate the row-update SQL.
+     * Caller is responsible for the lockForUpdate transaction.
+     */
+    private function abortTransition(Task $task): void
+    {
+        $data = is_array($task->data) ? $task->data : [];
+        $data['aborted_at'] = gmdate(self::DB_TIMESTAMP_FORMAT);
+        $this->writeTaskStatus($task, 'ABORTED', $data);
     }
 
     /**
@@ -413,16 +444,7 @@ final class Orchestrator implements OrchestratorInterface
                 );
             }
 
-            $data = is_array($task->data) ? $task->data : [];
-            $data['aborted_at'] = gmdate(self::DB_TIMESTAMP_FORMAT);
-
-            Capsule::table('tasks')
-                ->where('id', $task->id)
-                ->update([
-                    'status'     => 'ABORTED',
-                    'data'       => json_encode($data, JSON_THROW_ON_ERROR),
-                    'updated_at' => gmdate(self::DB_TIMESTAMP_FORMAT),
-                ]);
+            $this->abortTransition($task);
         });
 
         $this->logger?->info('Task aborted', [
