@@ -329,6 +329,29 @@ final class Orchestrator implements OrchestratorInterface
     ): void {
         $context ??= new HistoryMessageContext();
 
+        $row = $this->buildHistoryRow($taskId, $role, $content, $context);
+
+        $nextSeq = TaskHistory::where('task_id', $taskId)->max('sequence') ?? -1;
+        $row['sequence'] = $nextSeq + 1;
+        $history = TaskHistory::create($row);
+
+        $this->insertUsageRowIfPresent($history->id, $context->usage);
+    }
+
+    /**
+     * Shape the TaskHistory row from the canonical context fields.
+     * Optionally writes content_blocks / attachments depending on
+     * context payload — those columns are only set when the LLM turn
+     * provided them, so leaving them absent must not collide with the
+     * default JSON nulls in the schema.
+     */
+    private function buildHistoryRow(
+        int                    $taskId,
+        string                 $role,
+        ?string                $content,
+        ?HistoryMessageContext $context,
+    ): array {
+        $context ??= new HistoryMessageContext();
         $row = [
             'task_id' => $taskId,
             'role' => $role,
@@ -351,29 +374,38 @@ final class Orchestrator implements OrchestratorInterface
             $row['attachments'] = $context->attachments;
         }
 
-        $nextSeq = TaskHistory::where('task_id', $taskId)->max('sequence') ?? -1;
-        $row['sequence'] = $nextSeq + 1;
-        $history = TaskHistory::create($row);
+        return $row;
+    }
 
-        if ($context->usage !== null) {
-            Capsule::table('usage')->insert([
-                'task_history_id' => $history->id,
-                'input_tokens' => $context->usage->inputTokens,
-                'output_tokens' => $context->usage->outputTokens,
-                'reasoning_tokens' => $context->usage->reasoningTokens,
-                'cached_tokens' => $context->usage->cachedTokens,
-                'cache_creation_tokens' => $context->usage->cacheCreationTokens,
-                'cache_read_tokens' => $context->usage->cacheReadTokens,
-                'provider' => $context->usage->provider,
-                'raw_usage' => $context->usage->rawUsage === null
-                    ? null
-                    : json_encode($context->usage->rawUsage, JSON_THROW_ON_ERROR),
-                'driver_meta_info' => $context->usage->driverMetaInfo === null
-                    ? null
-                    : json_encode($context->usage->driverMetaInfo, JSON_THROW_ON_ERROR),
-                'created_at' => date(self::DB_TIMESTAMP_FORMAT),
-            ]);
+    /**
+     * Insert a usage row paired with a freshly-written history row, when
+     * the LLM turn reported token / cost telemetry. No-op when the
+     * context didn't include usage; cheaper than forwarding the work
+     * back to the caller.
+     */
+    private function insertUsageRowIfPresent(int $historyId, ?\Spora\Drivers\ValueObjects\Usage $usage): void
+    {
+        if ($usage === null) {
+            return;
         }
+
+        Capsule::table('usage')->insert([
+            'task_history_id' => $historyId,
+            'input_tokens' => $usage->inputTokens,
+            'output_tokens' => $usage->outputTokens,
+            'reasoning_tokens' => $usage->reasoningTokens,
+            'cached_tokens' => $usage->cachedTokens,
+            'cache_creation_tokens' => $usage->cacheCreationTokens,
+            'cache_read_tokens' => $usage->cacheReadTokens,
+            'provider' => $usage->provider,
+            'raw_usage' => $usage->rawUsage === null
+                ? null
+                : json_encode($usage->rawUsage, JSON_THROW_ON_ERROR),
+            'driver_meta_info' => $usage->driverMetaInfo === null
+                ? null
+                : json_encode($usage->driverMetaInfo, JSON_THROW_ON_ERROR),
+            'created_at' => date(self::DB_TIMESTAMP_FORMAT),
+        ]);
     }
 
     /**
@@ -771,53 +803,15 @@ final class Orchestrator implements OrchestratorInterface
         ?HistoryMessageContext    $context = null,
     ): void {
         $context ??= new HistoryMessageContext();
+        $row = $this->buildHistoryRow($taskId, $role, $content, $context);
+        $usage = $context->usage;
 
-        $row = [
-            'task_id' => $taskId,
-            'role' => $role,
-            'content' => $content,
-            'tool_call_id' => $context->toolCallId,
-            'tool_name' => $context->toolName,
-            'tool_call_payload' => $context->toolCallPayload,
-            'input_tokens' => $context->inputTokens,
-            'output_tokens' => $context->outputTokens,
-        ];
-
-        if ($context->contentBlocks !== []) {
-            $row['content_blocks'] = array_map(
-                static fn(\Spora\Drivers\ValueObjects\ContentBlock $block): array => $block->toArray(),
-                $context->contentBlocks,
-            );
-        }
-
-        if ($context->attachments !== null) {
-            $row['attachments'] = $context->attachments;
-        }
-
-        Capsule::connection()->transaction(function () use ($taskId, $row, $context): void {
+        Capsule::connection()->transaction(function () use ($taskId, $row, $usage): void {
             $nextSeq = TaskHistory::where('task_id', $taskId)->lockForUpdate()->max('sequence') ?? -1;
             $row['sequence'] = $nextSeq + 1;
             $history = TaskHistory::create($row);
 
-            if ($context->usage !== null) {
-                Capsule::table('usage')->insert([
-                    'task_history_id' => $history->id,
-                    'input_tokens' => $context->usage->inputTokens,
-                    'output_tokens' => $context->usage->outputTokens,
-                    'reasoning_tokens' => $context->usage->reasoningTokens,
-                    'cached_tokens' => $context->usage->cachedTokens,
-                    'cache_creation_tokens' => $context->usage->cacheCreationTokens,
-                    'cache_read_tokens' => $context->usage->cacheReadTokens,
-                    'provider' => $context->usage->provider,
-                    'raw_usage' => $context->usage->rawUsage === null
-                        ? null
-                        : json_encode($context->usage->rawUsage, JSON_THROW_ON_ERROR),
-                    'driver_meta_info' => $context->usage->driverMetaInfo === null
-                        ? null
-                        : json_encode($context->usage->driverMetaInfo, JSON_THROW_ON_ERROR),
-                    'created_at' => date(self::DB_TIMESTAMP_FORMAT),
-                ]);
-            }
+            $this->insertUsageRowIfPresent($history->id, $usage);
         });
     }
 }
