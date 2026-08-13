@@ -840,22 +840,22 @@ describe('TaskService — continueTask', function (): void {
         $service->continueTask(9999, $userId, 'keep going');
     })->throws(InvalidArgumentException::class, 'Task not found');
 
-    it('throws when the task is in a non-terminal status', function (): void {
+    it('throws when the task is in a non-resumable status (PENDING_APPROVAL)', function (): void {
         $authService = bootAuthLayer();
-        $userId = $authService->register('contrun@example.com', 'Password1!', 'ContRun');
-        simulateLoggedInSession($userId, 'contrun@example.com');
+        $userId = $authService->register('contpa@example.com', 'Password1!', 'ContPa');
+        simulateLoggedInSession($userId, 'contpa@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'ContRunAgent', 'max_steps' => 5, 'is_active' => true,
+            'user_id' => $userId, 'name' => 'ContPaAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING',
+            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
         $service = makeTaskService();
         $service->continueTask($task->id, $userId, 'next');
-    })->throws(InvalidArgumentException::class, 'Can only continue completed or failed tasks');
+    })->throws(InvalidArgumentException::class, 'Can only continue completed, failed, aborted, or running tasks');
 
     it('throws when additional_steps is out of bounds', function (): void {
         $authService = bootAuthLayer();

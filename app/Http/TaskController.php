@@ -331,8 +331,11 @@ final class TaskController
     /**
      * POST /api/v1/tasks/{taskId}/continue
      *
-     * Continues a completed or failed task with a new prompt.
-     * Appends the new prompt to the existing task's history and resumes execution.
+     * Continues a completed, failed, aborted, or running task with a new
+     * prompt. Running sources auto-abort; aborted sources resume; the
+     * other two follow the existing continue flow. Appends the new prompt
+     * (and, on the RUNNING branch, an abort-marker system row) to the
+     * existing task's history.
      */
     public function continue(Request $request): JsonResponse
     {
@@ -342,6 +345,62 @@ final class TaskController
         $body = json_decode($request->getContent(), true) ?? [];
 
         return $this->continuationDispatcher->handleContinue($taskId, $userId, $body);
+    }
+
+    /**
+     * POST /api/v1/tasks/{taskId}/abort
+     *
+     * Halts the running agent loop after the latest tool call has
+     * returned. Accepted source states: `RUNNING`, `AWAITING_SUB_AGENTS`.
+     * The task is then in the quiescent `ABORTED` status and the user
+     * can send a new instruction via POST /continue to resume.
+     *
+     * Responses:
+     *   - 200: task was `RUNNING` (or `AWAITING_SUB_AGENTS`) and is now
+     *          `ABORTED`. Body is the full task resource with the new
+     *          `status` and `data.aborted_at` field.
+     *   - 409: task is in a state that doesn't allow aborting (terminal
+     *          or already-paused via approve/reject).
+     *   - 404: task not found / not owned.
+     */
+    #[OA\Post(
+        path: '/api/v1/tasks/{taskId}/abort',
+        tags: ['Tasks'],
+        summary: 'Abort Task',
+        parameters: [
+            new OA\Parameter(
+                name: 'taskId',
+                in: 'path',
+                required: true,
+                schema: new OA\Schema(type: 'string'),
+            ),
+        ],
+        responses: [
+            new OA\Response(
+                response: 200,
+                description: 'JSON envelope: `{data: {task: ...}}` with status `ABORTED`.',
+            ),
+            new OA\Response(
+                response: 409,
+                description: 'INVALID_STATE — task is terminal or already-paused.',
+            ),
+            new OA\Response(
+                response: 404,
+                description: 'NOT_FOUND — task is not owned by the calling user.',
+            ),
+        ],
+    )]
+    public function abort(Request $request): JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        $taskId = (int) $request->attributes->get('taskId', 0);
+
+        try {
+            $task = $this->taskService->abortTask($taskId, $userId);
+            return new JsonResponse(['data' => ['task' => $task]]);
+        } catch (InvalidArgumentException $e) {
+            return $this->errorForException($e);
+        }
     }
 
     /**

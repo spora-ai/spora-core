@@ -223,13 +223,71 @@ interface TaskServiceInterface
      *     retry_count?: int,
      *     max_retries?: int,
      *     retry_after_minutes?: int,
-     *     retry_after?: string
+     *     retry_after?: string,
+     *     aborted_at?: string|null
      * }
      */
     /**
      * @param list<string> $mediaIds
      */
     public function continueTask(int $taskId, int $userId, string $prompt, ?int $additionalSteps = null, array $mediaIds = []): array;
+
+    /**
+     * Abort the running agent loop for the given task. The user-ownership
+     * check is enforced here; the state-machine invariant is enforced in
+     * {@see \Spora\Agents\Orchestrator::abort()} (RUNNING and
+     * AWAITING_SUB_AGENTS sources only).
+     *
+     * @return array{
+     *     id: int,
+     *     agent_id: int,
+     *     status: string,
+     *     user_prompt: string,
+     *     final_response: string|null,
+     *     step_count: int,
+     *     max_steps: int,
+     *     created_at: string|null,
+     *     updated_at: string|null,
+     *     parent_task_id?: int,
+     *     error_code?: string,
+     *     error_message?: string,
+     *     retry_of_task_id?: int,
+     *     retry_count?: int,
+     *     max_retries?: int,
+     *     retry_after_minutes?: int,
+     *     retry_after?: string,
+     *     aborted_at?: string|null
+     * }
+     */
+    public function abortTask(int $taskId, int $userId): array;
+
+    /**
+     * Abort a sub-agent child task and cascade the abort up the parent
+     * chain (every ancestor in AWAITING_SUB_AGENTS gets flipped to
+     * ABORTED). Ownership is enforced against the child only.
+     *
+     * @return array{
+     *     id: int,
+     *     agent_id: int,
+     *     status: string,
+     *     user_prompt: string,
+     *     final_response: string|null,
+     *     step_count: int,
+     *     max_steps: int,
+     *     created_at: string|null,
+     *     updated_at: string|null,
+     *     parent_task_id?: int,
+     *     error_code?: string,
+     *     error_message?: string,
+     *     retry_of_task_id?: int,
+     *     retry_count?: int,
+     *     max_retries?: int,
+     *     retry_after_minutes?: int,
+     *     retry_after?: string,
+     *     aborted_at?: string|null
+     * }
+     */
+    public function abortSubAgentAndCascade(int $childTaskId, int $userId): array;
 
     public function deleteTask(int $taskId, int $userId): bool;
 

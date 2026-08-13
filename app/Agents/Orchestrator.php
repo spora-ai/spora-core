@@ -144,35 +144,200 @@ final class Orchestrator implements OrchestratorInterface
         return $task->fresh();
     }
 
+    /**
+     * Resumes a task from a non-terminal state. Accepted source states:
+     *
+     *   - `RUNNING`           — auto-abort: flip to `ABORTED`, persist
+     *                            the wall-clock stamp, append an abort-marker
+     *                            system row, append the user's prompt, and
+     *                            return WITHOUT calling `tick()`. The next
+     *                            resume (with a fresh prompt) is what
+     *                            actually drives the LLM. Done atomically
+     *                            inside a `lockForUpdate` transaction so a
+     *                            racing tick cannot observe a half-applied
+     *                            state.
+     *   - `ABORTED`           — drop `data.aborted_at`, flip to
+     *                            `RUNNING`/`QUEUED`, append the user's
+     *                            prompt, then either tick (Sync) or queue
+     *                            (Worker).
+     *   - `COMPLETED`/`FAILED` — append the user's prompt, flip to
+     *                            `RUNNING`/`QUEUED`, tick or queue.
+     *
+     * Throws {@see InvalidTaskTransitionException} for any other source
+     * state. The marker row carries `role=system`, `content=JSON`, and
+     * `tool_call_payload.kind=abort_marker` so the frontend can render
+     * a faint divider at the marker position in the chat timeline.
+     */
     public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = []): Task
     {
-        $task = Task::findOrFail($taskId);
+        $sourceStatus = null;
+        $shouldTick = false;
+        $taskRef = null;
 
-        if (!in_array($task->status, ['COMPLETED', 'FAILED'], true)) {
-            throw new InvalidTaskTransitionException('Can only continue completed or failed tasks.');
+        Capsule::connection()->transaction(function () use ($taskId, $newPrompt, $additionalSteps, $mediaIds, &$sourceStatus, &$shouldTick, &$taskRef): void {
+            $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
+            $sourceStatus = $task->status;
+
+            if (!in_array($task->status, ['COMPLETED', 'FAILED', 'ABORTED', 'RUNNING'], true)) {
+                throw new InvalidTaskTransitionException('Can only continue completed, failed, aborted, or running tasks.');
+            }
+
+            if ($task->status === 'RUNNING') {
+                $this->appendHistoryWithinTransaction(
+                    taskId: $task->id,
+                    role: 'system',
+                    content: json_encode(
+                        ['kind' => 'abort_marker', 'at' => gmdate(Orchestrator::ISO8601_UTC_FORMAT)],
+                        JSON_THROW_ON_ERROR,
+                    ),
+                );
+                $this->appendHistoryWithinTransaction(
+                    taskId: $task->id,
+                    role: 'user',
+                    content: Utf8Sanitizer::scrubString($newPrompt),
+                );
+
+                if ($mediaIds !== []) {
+                    $this->appendAttachmentRow($task->id, $mediaIds);
+                }
+
+                $taskRef = $this->applyContinueTransition($task, $newPrompt, $additionalSteps, targetStatus: 'ABORTED', clearAbortedAt: false);
+                return;
+            }
+
+            $this->appendHistoryWithinTransaction(
+                taskId: $task->id,
+                role: 'user',
+                content: Utf8Sanitizer::scrubString($newPrompt),
+            );
+
+            if ($mediaIds !== []) {
+                $this->appendAttachmentRow($task->id, $mediaIds);
+            }
+
+            $taskRef = $this->applyContinueTransition(
+                $task,
+                $newPrompt,
+                $additionalSteps,
+                targetStatus: $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED',
+                clearAbortedAt: $task->status === 'ABORTED',
+            );
+
+            $shouldTick = $this->workerMode === WorkerMode::Sync;
+        });
+
+        if ($sourceStatus === 'RUNNING') {
+            $this->logger?->info('Task auto-aborted via continue', [
+                'task_id' => $taskId,
+                'from'    => 'RUNNING',
+                'to'      => 'ABORTED',
+                'user_id' => $taskRef?->user_id,
+            ]);
         }
 
-        $this->appendHistory($task->id, 'user', $newPrompt);
-
-        if ($mediaIds !== []) {
-            $this->appendAttachmentRow($task->id, $mediaIds);
+        if ($shouldTick && $taskRef !== null) {
+            $this->tick($taskRef->id);
         }
 
-        $task->status = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
-        $task->step_count = 0;
-        $task->user_prompt = Utf8Sanitizer::scrubString($newPrompt);
+        return $taskRef !== null ? $taskRef->fresh() : Task::findOrFail($taskId);
+    }
 
-        if ($additionalSteps !== null) {
-            $task->max_steps = $additionalSteps;
+    /**
+     * Persists the new status / step_count / user_prompt / optional
+     * `max_steps` and `data` cleanup. Both branches of the relaxed
+     * continue() share this so the field-update surface lives in one
+     * place. Must be called from inside the outer transaction in
+     * {@see continue()}.
+     */
+    private function applyContinueTransition(
+        Task $task,
+        string $newPrompt,
+        ?int $additionalSteps,
+        string $targetStatus,
+        bool $clearAbortedAt,
+    ): Task {
+        $data = is_array($task->data) ? $task->data : [];
+
+        if ($targetStatus === 'ABORTED') {
+            $data['aborted_at'] = gmdate(Orchestrator::DB_TIMESTAMP_FORMAT);
+        } elseif ($clearAbortedAt) {
+            unset($data['aborted_at']);
         }
 
-        $task->save();
+        Capsule::table('tasks')
+            ->where('id', $task->id)
+            ->update([
+                'status'         => $targetStatus,
+                'step_count'     => 0,
+                'user_prompt'    => Utf8Sanitizer::scrubString($newPrompt),
+                'max_steps'      => $additionalSteps !== null ? $additionalSteps : $task->max_steps,
+                'data'           => $data === [] ? null : json_encode($data, JSON_THROW_ON_ERROR),
+                'updated_at'     => gmdate(Orchestrator::DB_TIMESTAMP_FORMAT),
+            ]);
 
-        if ($this->workerMode === WorkerMode::Sync) {
-            $this->tick($task->id);
+        return Task::find($task->id);
+    }
+
+    /**
+     * Same persist logic as {@see appendHistory()} but invoked from
+     * inside an open transaction so callers can compose history inserts
+     * with status updates atomically. Used by {@see continue()} for the
+     * RUNNING → ABORTED auto-abort path, where the marker row and the
+     * status flip must commit together.
+     */
+    private function appendHistoryWithinTransaction(
+        int                    $taskId,
+        string                 $role,
+        ?string                $content,
+        ?HistoryMessageContext $context = null,
+    ): void {
+        $context ??= new HistoryMessageContext();
+
+        $row = [
+            'task_id' => $taskId,
+            'role' => $role,
+            'content' => $content,
+            'tool_call_id' => $context->toolCallId,
+            'tool_name' => $context->toolName,
+            'tool_call_payload' => $context->toolCallPayload,
+            'input_tokens' => $context->inputTokens,
+            'output_tokens' => $context->outputTokens,
+        ];
+
+        if ($context->contentBlocks !== []) {
+            $row['content_blocks'] = array_map(
+                static fn(\Spora\Drivers\ValueObjects\ContentBlock $block): array => $block->toArray(),
+                $context->contentBlocks,
+            );
         }
 
-        return $task->fresh();
+        if ($context->attachments !== null) {
+            $row['attachments'] = $context->attachments;
+        }
+
+        $nextSeq = TaskHistory::where('task_id', $taskId)->max('sequence') ?? -1;
+        $row['sequence'] = $nextSeq + 1;
+        $history = TaskHistory::create($row);
+
+        if ($context->usage !== null) {
+            Capsule::table('usage')->insert([
+                'task_history_id' => $history->id,
+                'input_tokens' => $context->usage->inputTokens,
+                'output_tokens' => $context->usage->outputTokens,
+                'reasoning_tokens' => $context->usage->reasoningTokens,
+                'cached_tokens' => $context->usage->cachedTokens,
+                'cache_creation_tokens' => $context->usage->cacheCreationTokens,
+                'cache_read_tokens' => $context->usage->cacheReadTokens,
+                'provider' => $context->usage->provider,
+                'raw_usage' => $context->usage->rawUsage === null
+                    ? null
+                    : json_encode($context->usage->rawUsage, JSON_THROW_ON_ERROR),
+                'driver_meta_info' => $context->usage->driverMetaInfo === null
+                    ? null
+                    : json_encode($context->usage->driverMetaInfo, JSON_THROW_ON_ERROR),
+                'created_at' => date(self::DB_TIMESTAMP_FORMAT),
+            ]);
+        }
     }
 
     /**
@@ -213,6 +378,56 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         return $task->fresh();
+    }
+
+    /**
+     * Halts the running agent loop. Acquires a `lockForUpdate` row lock so
+     * a racing tick cannot observe a half-applied status flip. Persists
+     * the UTC `data.aborted_at` stamp and emits a structured log entry
+     * (task_id, user_id, source_status, target_status, source). Idempotent
+     * — calling on an already-`ABORTED` task returns the current row
+     * without writing. Throws `InvalidTaskTransitionException` for source
+     * states that aren't `RUNNING` or `AWAITING_SUB_AGENTS`.
+     */
+    public function abort(int $taskId): Task
+    {
+        $policy = new TaskLifecyclePolicy();
+        $source = null;
+
+        Capsule::connection()->transaction(function () use ($taskId, $policy, &$source): void {
+            $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
+            $source = $task->status;
+
+            if ($task->status === 'ABORTED') {
+                return;
+            }
+
+            if (!$policy->canAbortFrom($task->status)) {
+                throw new InvalidTaskTransitionException(
+                    "Cannot abort a task in status {$task->status}.",
+                );
+            }
+
+            $data = is_array($task->data) ? $task->data : [];
+            $data['aborted_at'] = gmdate(self::DB_TIMESTAMP_FORMAT);
+
+            Capsule::table('tasks')
+                ->where('id', $task->id)
+                ->update([
+                    'status'     => 'ABORTED',
+                    'data'       => json_encode($data, JSON_THROW_ON_ERROR),
+                    'updated_at' => gmdate(self::DB_TIMESTAMP_FORMAT),
+                ]);
+        });
+
+        $this->logger?->info('Task aborted', [
+            'task_id' => $taskId,
+            'from'    => $source,
+            'to'      => 'ABORTED',
+            'source'  => 'user_abort',
+        ]);
+
+        return Task::findOrFail($taskId);
     }
 
     /**

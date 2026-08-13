@@ -1012,14 +1012,27 @@ it('continue returns 422 when additional_steps is out of range', function (): vo
     }
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-it('continue returns 409 when task is not completed or failed', function (): void {
+it('continue returns 200 with auto-abort when task is RUNNING', function (): void {
+    $abortedResource = [
+        'id'             => 1,
+        'agent_id'       => 1,
+        'status'         => 'ABORTED',
+        'user_prompt'    => 'reset prompt',
+        'final_response' => null,
+        'step_count'     => 0,
+        'max_steps'      => 10,
+        'created_at'     => null,
+        'updated_at'     => '2026-08-08T12:00:00+00:00',
+        'aborted_at'     => '2026-08-08T12:00:00+00:00',
+    ];
+
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('getTask')
         ->andReturn(['id' => 1, 'agent_id' => 1, 'status' => 'RUNNING', 'user_prompt' => 'p', 'final_response' => null, 'step_count' => 5, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null]);
     $taskService->expects('continueTask')
         ->once()
-        ->with(1, 1, 'test', null, [])
-        ->andThrow(new InvalidArgumentException('Can only continue completed or failed tasks.'));
+        ->with(1, 1, 'reset prompt', null, [])
+        ->andReturn($abortedResource);
 
     [$controller, $authService] = makeTaskController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
@@ -1028,6 +1041,78 @@ it('continue returns 409 when task is not completed or failed', function (): voi
         'agent_id'    => $agent->id,
         'user_id'     => $userId,
         'status'      => 'RUNNING',
+        'user_prompt' => 'original',
+        'step_count'  => 5,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/continue", ['prompt' => 'reset prompt']);
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->continue($req);
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['task']['status'])->toBe('ABORTED');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('continue returns 200 when resuming from ABORTED', function (): void {
+    $resumedResource = [
+        'id'             => 1,
+        'agent_id'       => 1,
+        'status'         => 'RUNNING',
+        'user_prompt'    => 'resume prompt',
+        'final_response' => null,
+        'step_count'     => 0,
+        'max_steps'      => 10,
+        'created_at'     => null,
+        'updated_at'     => '2026-08-08T12:05:00+00:00',
+    ];
+
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTask')
+        ->andReturn(['id' => 1, 'agent_id' => 1, 'status' => 'ABORTED', 'user_prompt' => 'p', 'final_response' => null, 'step_count' => 5, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null]);
+    $taskService->expects('continueTask')
+        ->once()
+        ->with(1, 1, 'resume prompt', null, [])
+        ->andReturn($resumedResource);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'ABORTED',
+        'user_prompt' => 'original',
+        'step_count'  => 5,
+        'max_steps'   => 10,
+    ]);
+
+    $req = jsonRequest('POST', "/api/v1/tasks/{$task->id}/continue", ['prompt' => 'resume prompt']);
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->continue($req);
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['task']['status'])->toBe('RUNNING');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('continue returns 409 when task is in a non-resumable state (PENDING_APPROVAL)', function (): void {
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTask')
+        ->andReturn(['id' => 1, 'agent_id' => 1, 'status' => 'PENDING_APPROVAL', 'user_prompt' => 'p', 'final_response' => null, 'step_count' => 5, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null]);
+    $taskService->expects('continueTask')
+        ->once()
+        ->with(1, 1, 'test', null, [])
+        ->andThrow(new InvalidArgumentException('Can only continue completed, failed, aborted, or running tasks.'));
+
+    [$controller, $authService] = makeTaskController($taskService);
+    [$userId, $agent] = seedUserAndAgent($authService);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'PENDING_APPROVAL',
         'user_prompt' => 'original',
         'step_count'  => 5,
         'max_steps'   => 10,

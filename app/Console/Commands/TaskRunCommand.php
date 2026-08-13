@@ -29,9 +29,25 @@ use Throwable;
  * Each invocation is a fresh PHP interpreter — no shared static state.
  *
  * Usage: php bin/spora task:run {taskId}
+ *
+ * Exit codes:
+ *   - 0 (`Command::SUCCESS`)        : task reached `COMPLETED`.
+ *   - 1 (`Command::FAILURE`)        : driver / orchestrator exception,
+ *                                     task forced to `FAILED`, or the
+ *                                     task did not reach `COMPLETED` (e.g.
+ *                                     left in `PENDING_APPROVAL`).
+ *   - 2 (`TASK_RUN_COMMAND_ABORTED_EXIT`) : task reached `ABORTED`
+ *                                     because the user clicked the abort
+ *                                     affordance while the worker was
+ *                                     mid-tick. Distinct from FAILURE —
+ *                                     ABORTED is quiescent (resumable),
+ *                                     FAILED is terminal.
  */
 final class TaskRunCommand extends Command
 {
+    /** Worker exit code when the task ended in `ABORTED`. */
+    public const TASK_RUN_COMMAND_ABORTED_EXIT = 2;
+
     public function __construct(
         private readonly Database               $database,
         private readonly ContainerInterface     $container,
@@ -95,6 +111,9 @@ final class TaskRunCommand extends Command
             while (in_array($task->status, ['RUNNING', 'PENDING_APPROVAL'], true)) {
                 $orchestrator->tick($task->id);
                 $task->refresh();
+                if ($task->status === 'ABORTED') {
+                    break;
+                }
             }
         } catch (Throwable $e) {
             $task->refresh();
@@ -118,6 +137,10 @@ final class TaskRunCommand extends Command
             $task->id,
             $finalStatus,
         ));
+
+        if ($finalStatus === 'ABORTED') {
+            return self::TASK_RUN_COMMAND_ABORTED_EXIT;
+        }
 
         return $finalStatus === 'COMPLETED' ? Command::SUCCESS : Command::FAILURE;
     }

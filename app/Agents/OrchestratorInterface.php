@@ -74,4 +74,21 @@ interface OrchestratorInterface
      */
     public function retry(int $taskId): Task;
 
+    /**
+     * Abort the running agent loop for `$taskId`. Flips status to
+     * `ABORTED`, persists `data.aborted_at`, and records the new state in
+     * the task's history by leaving the most recent tool/assistant row
+     * intact (the next resume appends a fresh marker + user prompt on top
+     * via {@see continue()}). Idempotent — calling twice on the same
+     * task is a no-op that returns the current row.
+     *
+     * Throws {@see Exceptions\InvalidTaskTransitionException}
+     * when the task is in a state that doesn't allow aborting (terminal,
+     * or already in a paused state with its own affordances).
+     *
+     * The caller is responsible for the user-ownership check; the
+     * orchestrator only enforces the state-machine invariant.
+     */
+    public function abort(int $taskId): Task;
+
 }

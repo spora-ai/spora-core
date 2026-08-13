@@ -471,6 +471,20 @@ final class TickPhaseRunner
         }
 
         if ($pendingApproval === []) {
+            // Abort-bail: a user abort could have landed between this tick's
+            // claim and the completion of the tool batch. We accept the user's
+            // request up to this tool boundary — once the latest tool
+            // returned, we re-read the status before either kicking the next
+            // tick or handing the loop off to the parent-resume hook. If the
+            // row is `ABORTED`, no further LLM traffic happens this tick.
+            $latestStatus = Task::where('id', $task->id)->value('status');
+            if ($latestStatus === 'ABORTED') {
+                $this->logger?->info('Tick bailed — task was aborted after tool batch', [
+                    'task_id' => $task->id,
+                ]);
+                return;
+            }
+
             $this->publishIntermediateState($task);
             // Sync-mode auto-approve batch boundary: every tool in this turn ran
             // inline (no ApprovedBatchExecutor involved), so the resume hook in
@@ -479,6 +493,15 @@ final class TickPhaseRunner
             // to wake their parent up at the end of the turn. The worker-mode
             // equivalent lives in executeApprovedPendingToolsForTask() above.
             $this->maybeResumeParentFromBatchBoundary($task->id);
+
+            // Re-check after the batch-boundary hook — a parent that flipped
+            // to ABORTED through {@see TaskService::abortTask} aborting
+            // through the cascade must not start another LLM turn.
+            $latestStatus = Task::where('id', $task->id)->value('status');
+            if ($latestStatus === 'ABORTED') {
+                return;
+            }
+
             $this->orchestrator->tick($task->id);
         } else {
             $state = new AgentState(

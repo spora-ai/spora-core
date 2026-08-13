@@ -1689,7 +1689,7 @@ it('buildToolDefinitions only queries operation overrides for enabled tool class
 // continue() — error cases and additionalSteps
 // ---------------------------------------------------------------------------
 
-it('continue() throws RuntimeException when task status is not COMPLETED or FAILED', function (): void {
+it('continue() throws InvalidTaskTransitionException when source status is not in the accepted list', function (): void {
     [$agentId] = seedAgent();
 
     $llm  = mockLlm(new LLMResponse('Done.', [], 5, 3, 'cmp_1'));
@@ -1698,14 +1698,14 @@ it('continue() throws RuntimeException when task status is not COMPLETED or FAIL
     $task = Task::create([
         'agent_id'    => $agentId,
         'user_id'     => Agent::find($agentId)->user_id,
-        'status'      => 'RUNNING',
-        'user_prompt' => 'still running',
+        'status'      => 'PENDING_APPROVAL',
+        'user_prompt' => 'awaiting approval',
         'step_count'  => 0,
         'max_steps'   => 10,
     ]);
 
     expect(fn() => $orch->continue($task->id, 'new prompt'))
-        ->toThrow(RuntimeException::class, 'Can only continue completed or failed tasks.');
+        ->toThrow(InvalidTaskTransitionException::class, 'Can only continue completed, failed, aborted, or running tasks.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('continue() overrides max_steps when additionalSteps is supplied', function (): void {

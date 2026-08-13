@@ -7,6 +7,7 @@ namespace Spora\Services;
 use Carbon\Carbon;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
+use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Agent;
 use Spora\Models\Task;
@@ -199,20 +200,125 @@ final class TaskService implements TaskServiceInterface
             throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
 
-        if (!in_array($task->status, ['COMPLETED', 'FAILED'], true)) {
-            throw new InvalidArgumentException('Can only continue completed or failed tasks.');
+        if (!in_array($task->status, ['COMPLETED', 'FAILED', 'ABORTED', 'RUNNING'], true)) {
+            throw new InvalidArgumentException(
+                'Can only continue completed, failed, aborted, or running tasks.',
+            );
         }
 
         if ($additionalSteps !== null && ($additionalSteps < 1 || $additionalSteps > 100)) {
             throw new InvalidArgumentException('additional_steps must be an integer between 1 and 100.');
         }
 
-        $continuedTask = $this->orchestrator->continue($task->id, $prompt, $additionalSteps, $mediaIds);
+        try {
+            $continuedTask = $this->orchestrator->continue($task->id, $prompt, $additionalSteps, $mediaIds);
+        } catch (InvalidTaskTransitionException $e) {
+            throw new InvalidArgumentException($e->getMessage(), 0, $e);
+        }
 
         $resource = $this->taskResource($continuedTask);
         $this->mercure->publish($continuedTask->id, $continuedTask->user_id, $resource);
 
         return $resource;
+    }
+
+    /**
+     * Aborts the running agent loop for `$taskId`. Validates the
+     * user-ownership, delegates the state transition to
+     * {@see Orchestrator::abort()}, and publishes the new state to
+     * Mercure.
+     *
+     * Throws {@see InvalidArgumentException} with `"Task not found."`
+     * when the task is missing or not owned by the calling user.
+     */
+    public function abortTask(int $taskId, int $userId): array
+    {
+        $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
+        if ($task === null) {
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
+        }
+
+        try {
+            $aborted = $this->orchestrator->abort($task->id);
+        } catch (InvalidTaskTransitionException $e) {
+            throw new InvalidArgumentException($e->getMessage(), 0, $e);
+        }
+
+        $resource = $this->taskResource($aborted);
+        $this->mercure->publish($aborted->id, $aborted->user_id, $resource);
+
+        return $resource;
+    }
+
+    /**
+     * Aborts a sub-agent child task and cascades the abort up the parent
+     * chain. The caller (typically the SubAgentStopWaiting affordance
+     * on a tool-call widget) only needs to own the child — ancestors
+     * are system-aborted and informed via Mercure.
+     *
+     * Implementation lives in {@see cascadeAbortToAncestors()} so the
+     * sub-agent helper can call just the cascade portion without
+     * running this entry point.
+     */
+    public function abortSubAgentAndCascade(int $childTaskId, int $userId): array
+    {
+        $child = Task::where('id', $childTaskId)->where('user_id', $userId)->first();
+        if ($child === null) {
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
+        }
+
+        try {
+            $abortedChild = $this->orchestrator->abort($child->id);
+        } catch (InvalidTaskTransitionException $e) {
+            throw new InvalidArgumentException($e->getMessage(), 0, $e);
+        }
+
+        $this->cascadeAbortToAncestors((int) $child->parent_task_id);
+
+        $fresh = $abortedChild->fresh();
+        $resource = $this->taskResource($fresh);
+        $this->mercure->publish($fresh->id, $fresh->user_id, $resource);
+
+        return $resource;
+    }
+
+    /**
+     * Walks up the `parent_task_id` chain from `$parentTaskId` (nullable
+     * when aborting a root task) and aborts every ancestor that is still
+     * in `AWAITING_SUB_AGENTS`. Idempotent: ancestors that are already
+     * `ABORTED` or any other state are left untouched. Publishes once at
+     * the end (or not at all) for the cascaded parents — one Mercure
+     * event per affected ancestor keeps the live stream useful.
+     */
+    private function cascadeAbortToAncestors(?int $parentTaskId): void
+    {
+        $cursor = $parentTaskId;
+        $cascadeTargets = [];
+
+        while ($cursor !== null) {
+            $row = Task::find($cursor);
+            if ($row === null) {
+                break;
+            }
+
+            if ($row->status === 'AWAITING_SUB_AGENTS') {
+                $cascadeTargets[] = $row;
+            }
+
+            $cursor = $row->parent_task_id !== null ? (int) $row->parent_task_id : null;
+        }
+
+        foreach ($cascadeTargets as $target) {
+            try {
+                $aborted = $this->orchestrator->abort((int) $target->id);
+                $resource = $this->taskResource($aborted);
+                $this->mercure->publish($aborted->id, (int) $aborted->user_id, $resource);
+            } catch (InvalidTaskTransitionException $e) {
+                // Ancestor transitioned between the cascade scan and the
+                // per-row abort — treat as a no-op for the cascading call.
+                continue;
+            }
+        }
     }
 
     /**
@@ -350,6 +456,15 @@ final class TaskService implements TaskServiceInterface
 
         if ($task->retry_after !== null) {
             $resource['retry_after'] = $task->retry_after->toIso8601String();
+        }
+
+        $abortedAt = is_array($task->data) ? ($task->data['aborted_at'] ?? null) : null;
+        if ($abortedAt !== null) {
+            try {
+                $resource['aborted_at'] = Carbon::parse($abortedAt)->utc()->toIso8601String();
+            } catch (Throwable) {
+                $resource['aborted_at'] = null;
+            }
         }
 
         return $resource;

@@ -132,6 +132,7 @@ final class RouteDefinitions
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/reject', [TaskController::class, 'reject'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/retry', [TaskController::class, 'retry'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/continue', [TaskController::class, 'continue'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/tasks/{taskId}/abort', [TaskController::class, 'abort'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/tasks/{taskId}/retry-chain', [TaskController::class, 'cancelRetryChain'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/tasks/{taskId}', [TaskController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
