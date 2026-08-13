@@ -178,8 +178,10 @@ final class Orchestrator implements OrchestratorInterface
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
             $sourceStatus = $task->status;
 
-            if (!in_array($task->status, ['COMPLETED', 'FAILED', 'ABORTED', 'RUNNING'], true)) {
-                throw new InvalidTaskTransitionException('Can only continue completed, failed, aborted, or running tasks.');
+            if (!(new TaskLifecyclePolicy())->canContinueFrom($task->status)) {
+                throw new InvalidTaskTransitionException(
+                    (new TaskLifecyclePolicy())->incomingSourceErrorMessage($task->status),
+                );
             }
 
             if ($task->status === 'RUNNING') {
@@ -259,20 +261,23 @@ final class Orchestrator implements OrchestratorInterface
         $data = is_array($task->data) ? $task->data : [];
 
         if ($targetStatus === 'ABORTED') {
-            $data['aborted_at'] = gmdate(Orchestrator::DB_TIMESTAMP_FORMAT);
+            $data['aborted_at'] = gmdate(self::DB_TIMESTAMP_FORMAT);
         } elseif ($clearAbortedAt) {
             unset($data['aborted_at']);
         }
 
+        // Empty array → JSON null so the column is rewritten (clearing
+        // any leftover keys) instead of silently leaving the old payload
+        // in place.
         Capsule::table('tasks')
             ->where('id', $task->id)
             ->update([
-                'status'         => $targetStatus,
-                'step_count'     => 0,
-                'user_prompt'    => Utf8Sanitizer::scrubString($newPrompt),
-                'max_steps'      => $additionalSteps !== null ? $additionalSteps : $task->max_steps,
-                'data'           => $data === [] ? null : json_encode($data, JSON_THROW_ON_ERROR),
-                'updated_at'     => gmdate(Orchestrator::DB_TIMESTAMP_FORMAT),
+                'status'      => $targetStatus,
+                'step_count'  => 0,
+                'user_prompt' => Utf8Sanitizer::scrubString($newPrompt),
+                'max_steps'   => $additionalSteps !== null ? $additionalSteps : $task->max_steps,
+                'data'        => $data === [] ? null : json_encode($data, JSON_THROW_ON_ERROR),
+                'updated_at'  => gmdate(self::DB_TIMESTAMP_FORMAT),
             ]);
 
         return Task::find($task->id);

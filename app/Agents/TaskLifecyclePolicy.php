@@ -68,4 +68,15 @@ final class TaskLifecyclePolicy
     {
         return in_array($status, ['COMPLETED', 'FAILED', 'ABORTED', 'RUNNING'], true);
     }
+
+    /**
+     * Canonical error message for callers that already know the source
+     * status but want to keep the policy decision in one place. {@see
+     * Orchestrator::continue()} uses this so the wording stays aligned with
+     * {@see canContinueFrom()} when the accepted-source list changes.
+     */
+    public function incomingSourceErrorMessage(string $status): string
+    {
+        return 'Can only continue completed, failed, aborted, or running tasks.';
+    }
 }
