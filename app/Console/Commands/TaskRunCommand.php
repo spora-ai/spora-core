@@ -138,11 +138,11 @@ final class TaskRunCommand extends Command
             $finalStatus,
         ));
 
-        if ($finalStatus === 'ABORTED') {
-            return self::TASK_RUN_COMMAND_ABORTED_EXIT;
-        }
-
-        return $finalStatus === 'COMPLETED' ? Command::SUCCESS : Command::FAILURE;
+        return match ($finalStatus) {
+            'COMPLETED' => Command::SUCCESS,
+            'ABORTED'   => self::TASK_RUN_COMMAND_ABORTED_EXIT,
+            default     => Command::FAILURE,
+        };
     }
 
     private function buildOrchestrator(): OrchestratorInterface
