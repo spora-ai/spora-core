@@ -75,7 +75,7 @@ final class TaskLifecyclePolicy
      * Orchestrator::continue()} uses this so the wording stays aligned with
      * {@see canContinueFrom()} when the accepted-source list changes.
      */
-    public function incomingSourceErrorMessage(string $status): string
+    public function incomingSourceErrorMessage(): string
     {
         return 'Can only continue completed, failed, aborted, or running tasks.';
     }

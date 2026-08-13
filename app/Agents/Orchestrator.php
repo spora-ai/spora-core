@@ -54,6 +54,7 @@ final class Orchestrator implements OrchestratorInterface
     public readonly ToolCallExecutor $toolCallExecutor;
     public readonly AgentDecisionProcessor $agentDecisionProcessor;
     public readonly AgentStateResolver $agentStateResolver;
+    public readonly TaskStatusWriter $statusWriter;
     public readonly WorkerMode $workerMode;
 
     /** @var list<object> */
@@ -110,6 +111,7 @@ final class Orchestrator implements OrchestratorInterface
         $this->toolCallExecutor      = new ToolCallExecutor($this);
         $this->agentDecisionProcessor = new AgentDecisionProcessor($this);
         $this->agentStateResolver     = new AgentStateResolver($this, $config->workerMode);
+        $this->statusWriter           = new TaskStatusWriter();
     }
 
     // Public API
@@ -180,7 +182,7 @@ final class Orchestrator implements OrchestratorInterface
 
             if (!(new TaskLifecyclePolicy())->canContinueFrom($task->status)) {
                 throw new InvalidTaskTransitionException(
-                    (new TaskLifecyclePolicy())->incomingSourceErrorMessage($task->status),
+                    (new TaskLifecyclePolicy())->incomingSourceErrorMessage(),
                 );
             }
 
@@ -203,7 +205,7 @@ final class Orchestrator implements OrchestratorInterface
                     $this->appendAttachmentRow($task->id, $mediaIds);
                 }
 
-                $taskRef = $this->applyContinueTransition($task, $newPrompt, $additionalSteps, targetStatus: 'ABORTED', clearAbortedAt: false);
+                $taskRef = $this->statusWriter->applyContinueTransition($task, $newPrompt, $additionalSteps, targetStatus: 'ABORTED', clearAbortedAt: false);
                 return;
             }
 
@@ -217,7 +219,7 @@ final class Orchestrator implements OrchestratorInterface
                 $this->appendAttachmentRow($task->id, $mediaIds);
             }
 
-            $taskRef = $this->applyContinueTransition(
+            $taskRef = $this->statusWriter->applyContinueTransition(
                 $task,
                 $newPrompt,
                 $additionalSteps,
@@ -245,76 +247,6 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Persists the new status / step_count / user_prompt / optional
-     * `max_steps` and `data` cleanup. Both branches of the relaxed
-     * continue() share this so the field-update surface lives in one
-     * place. Must be called from inside the outer transaction in
-     * {@see continue()}.
-     */
-    private function applyContinueTransition(
-        Task $task,
-        string $newPrompt,
-        ?int $additionalSteps,
-        string $targetStatus,
-        bool $clearAbortedAt,
-    ): Task {
-        $data = is_array($task->data) ? $task->data : [];
-
-        if ($targetStatus === 'ABORTED') {
-            $data['aborted_at'] = gmdate(self::DB_TIMESTAMP_FORMAT);
-        } elseif ($clearAbortedAt) {
-            unset($data['aborted_at']);
-        }
-
-        // Empty array → JSON null so the column is rewritten (clearing
-        // any leftover keys) instead of silently leaving the old payload
-        // in place.
-        $this->writeTaskStatus($task, $targetStatus, $data, [
-            'step_count'  => 0,
-            'user_prompt' => Utf8Sanitizer::scrubString($newPrompt),
-            'max_steps'   => $additionalSteps !== null ? $additionalSteps : $task->max_steps,
-        ]);
-
-        return Task::find($task->id);
-    }
-
-    /**
-     * Persist a task's new status + updated-at stamp + data column in one
-     * place. Used by both {@see applyContinueTransition()} (which adds
-     * prompt / max_steps / step_count on top) and {@see abortTransition()}
-     * (status-only flip with aborted_at). Centralising the row layout
-     * keeps the SQL UPDATE site small enough that a future column
-     * doesn't double-edit half a dozen call sites.
-     *
-     * @param array<string, mixed> $data
-     * @param array<string, mixed> $extraColumns
-     */
-    private function writeTaskStatus(Task $task, string $targetStatus, array $data, array $extraColumns = []): void
-    {
-        $row = array_merge(
-            [
-                'status'     => $targetStatus,
-                'data'       => $data === [] ? null : json_encode($data, JSON_THROW_ON_ERROR),
-                'updated_at' => gmdate(self::DB_TIMESTAMP_FORMAT),
-            ],
-            $extraColumns,
-        );
-        Capsule::table('tasks')->where('id', $task->id)->update($row);
-    }
-
-    /**
-     * Stamp `data.aborted_at` + flip status to ABORTED in a single UPDATE
-     * so the {@see abort()} path doesn't duplicate the row-update SQL.
-     * Caller is responsible for the lockForUpdate transaction.
-     */
-    private function abortTransition(Task $task): void
-    {
-        $data = is_array($task->data) ? $task->data : [];
-        $data['aborted_at'] = gmdate(self::DB_TIMESTAMP_FORMAT);
-        $this->writeTaskStatus($task, 'ABORTED', $data);
-    }
-
-    /**
      * Same persist logic as {@see appendHistory()} but invoked from
      * inside an open transaction so callers can compose history inserts
      * with status updates atomically. Used by {@see continue()} for the
@@ -329,83 +261,13 @@ final class Orchestrator implements OrchestratorInterface
     ): void {
         $context ??= new HistoryMessageContext();
 
-        $row = $this->buildHistoryRow($taskId, $role, $content, $context);
+        $row = HistoryRowWriter::buildRow($taskId, $role, $content, $context);
 
         $nextSeq = TaskHistory::where('task_id', $taskId)->max('sequence') ?? -1;
         $row['sequence'] = $nextSeq + 1;
         $history = TaskHistory::create($row);
 
-        $this->insertUsageRowIfPresent($history->id, $context->usage);
-    }
-
-    /**
-     * Shape the TaskHistory row from the canonical context fields.
-     * Optionally writes content_blocks / attachments depending on
-     * context payload — those columns are only set when the LLM turn
-     * provided them, so leaving them absent must not collide with the
-     * default JSON nulls in the schema.
-     */
-    private function buildHistoryRow(
-        int                    $taskId,
-        string                 $role,
-        ?string                $content,
-        ?HistoryMessageContext $context,
-    ): array {
-        $context ??= new HistoryMessageContext();
-        $row = [
-            'task_id' => $taskId,
-            'role' => $role,
-            'content' => $content,
-            'tool_call_id' => $context->toolCallId,
-            'tool_name' => $context->toolName,
-            'tool_call_payload' => $context->toolCallPayload,
-            'input_tokens' => $context->inputTokens,
-            'output_tokens' => $context->outputTokens,
-        ];
-
-        if ($context->contentBlocks !== []) {
-            $row['content_blocks'] = array_map(
-                static fn(\Spora\Drivers\ValueObjects\ContentBlock $block): array => $block->toArray(),
-                $context->contentBlocks,
-            );
-        }
-
-        if ($context->attachments !== null) {
-            $row['attachments'] = $context->attachments;
-        }
-
-        return $row;
-    }
-
-    /**
-     * Insert a usage row paired with a freshly-written history row, when
-     * the LLM turn reported token / cost telemetry. No-op when the
-     * context didn't include usage; cheaper than forwarding the work
-     * back to the caller.
-     */
-    private function insertUsageRowIfPresent(int $historyId, ?\Spora\Drivers\ValueObjects\Usage $usage): void
-    {
-        if ($usage === null) {
-            return;
-        }
-
-        Capsule::table('usage')->insert([
-            'task_history_id' => $historyId,
-            'input_tokens' => $usage->inputTokens,
-            'output_tokens' => $usage->outputTokens,
-            'reasoning_tokens' => $usage->reasoningTokens,
-            'cached_tokens' => $usage->cachedTokens,
-            'cache_creation_tokens' => $usage->cacheCreationTokens,
-            'cache_read_tokens' => $usage->cacheReadTokens,
-            'provider' => $usage->provider,
-            'raw_usage' => $usage->rawUsage === null
-                ? null
-                : json_encode($usage->rawUsage, JSON_THROW_ON_ERROR),
-            'driver_meta_info' => $usage->driverMetaInfo === null
-                ? null
-                : json_encode($usage->driverMetaInfo, JSON_THROW_ON_ERROR),
-            'created_at' => date(self::DB_TIMESTAMP_FORMAT),
-        ]);
+        HistoryRowWriter::insertUsageIfPresent($history->id, $context->usage);
     }
 
     /**
@@ -476,7 +338,7 @@ final class Orchestrator implements OrchestratorInterface
                 );
             }
 
-            $this->abortTransition($task);
+            $this->statusWriter->abortTransition($task);
         });
 
         $this->logger?->info('Task aborted', [
@@ -803,7 +665,7 @@ final class Orchestrator implements OrchestratorInterface
         ?HistoryMessageContext    $context = null,
     ): void {
         $context ??= new HistoryMessageContext();
-        $row = $this->buildHistoryRow($taskId, $role, $content, $context);
+        $row = HistoryRowWriter::buildRow($taskId, $role, $content, $context);
         $usage = $context->usage;
 
         Capsule::connection()->transaction(function () use ($taskId, $row, $usage): void {
@@ -811,7 +673,7 @@ final class Orchestrator implements OrchestratorInterface
             $row['sequence'] = $nextSeq + 1;
             $history = TaskHistory::create($row);
 
-            $this->insertUsageRowIfPresent($history->id, $usage);
+            HistoryRowWriter::insertUsageIfPresent($history->id, $usage);
         });
     }
 }
