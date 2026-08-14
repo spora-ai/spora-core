@@ -270,3 +270,128 @@ it('Orchestrator::continue rejects PENDING_APPROVAL with the new error message',
     expect(fn() => $orch->continue($taskId, 'try'))
         ->toThrow(InvalidTaskTransitionException::class, 'Can only continue completed, failed, aborted, or running tasks.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// Abort → Continue — retry-chain and failure-field reset
+// ---------------------------------------------------------------------------
+
+it('Orchestrator::continue from ABORTED clears stale retry_of_task_id so the worker claim predicate matches', function (): void {
+    // Regression: when the auto-retry chain had scheduled a retry
+    // (`retry_of_task_id IS NOT NULL`), and the operator then aborted
+    // before `retry_after` elapsed, and *then* pressed Continue, the
+    // task was left in QUEUED with `retry_of_task_id` still set. The
+    // worker's claim predicate
+    //
+    //   SELECT … FROM tasks WHERE status = 'QUEUED'
+    //     AND retry_of_task_id IS NULL
+    //
+    // would skip the row forever, and `processRetryQueue` only
+    // matches FAILED, so the QUEUED row was stranded with no worker
+    // path capable of picking it up. Apply continues now resets the
+    // retry-chain markers alongside aborted_at.
+    $config = Spora\Models\LLMDriverConfiguration::create([
+        'user_id'           => null,
+        'name'              => 'Test Global Config',
+        'driver_class'      => Spora\Drivers\OpenAICompatibleDriver::class,
+        'settings'          => json_encode(['api_key' => 'test']),
+        'is_global'         => true,
+        'is_default'        => true,
+        'context_window'    => 128000,
+        'max_tokens_output' => 4096,
+    ]);
+
+    $authService = bootAuthLayer();
+    $userId = $authService->register(
+        'abort-continue-retrychain@example.com',
+        TEST_PASSWORD,
+        'Abort Continue RetryChain',
+    );
+
+    $agent = Agent::create([
+        'user_id'              => $userId,
+        'name'                 => 'RetryChain Agent',
+        'llm_driver_config_id' => $config->id,
+        'max_steps'            => 5,
+        'is_active'            => true,
+    ]);
+
+    // Aborted task with a stale retry chain marker from a previous
+    // failure — exactly the row the worker was skipping.
+    $task = Task::create([
+        'agent_id'         => $agent->id,
+        'user_id'          => $userId,
+        'status'           => 'ABORTED',
+        'user_prompt'      => 'orig',
+        'step_count'       => 0,
+        'max_steps'        => 5,
+        'retry_of_task_id' => $agent->id, // any non-null marker from prior retry
+        'retry_after'      => '2099-01-01 00:00:00',
+        'error_code'       => 'RATE_LIMIT',
+        'error_message'    => 'slow upstream',
+        'failure_reason'   => '429 too many',
+        'data'             => ['aborted_at' => '2026-08-08 12:00:00'],
+    ]);
+
+    $orch = makeAbortOrchestrator();
+    $orch->continue($task->id, 'pick this up');
+
+    $fresh = Task::find($task->id);
+    // The worker can now match the row.
+    expect($fresh->status)->toBe('COMPLETED')
+        ->and($fresh->retry_of_task_id)->toBeNull()
+        ->and($fresh->retry_after)->toBeNull()
+        ->and($fresh->error_code)->toBeNull()
+        ->and($fresh->error_message)->toBeNull()
+        ->and($fresh->failure_reason)->toBeNull()
+        ->and($fresh->data['aborted_at'] ?? null)->toBeNull();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('Orchestrator::continue from COMPLETED also clears stale retry markers', function (): void {
+    // The retry-chain reset applies to both branches of continue() —
+    // if the user continues a COMPLETED task whose auto-retry still
+    // has a marker, the worker should still be able to claim the row.
+    $config = Spora\Models\LLMDriverConfiguration::create([
+        'user_id'           => null,
+        'name'              => 'Test Global Config',
+        'driver_class'      => Spora\Drivers\OpenAICompatibleDriver::class,
+        'settings'          => json_encode(['api_key' => 'test']),
+        'is_global'         => true,
+        'is_default'        => true,
+        'context_window'    => 128000,
+        'max_tokens_output' => 4096,
+    ]);
+
+    $authService = bootAuthLayer();
+    $userId = $authService->register(
+        'cont-completed-retrychain@example.com',
+        TEST_PASSWORD,
+        'Continue Completed RetryChain',
+    );
+
+    $agent = Agent::create([
+        'user_id'              => $userId,
+        'name'                 => 'Completed RetryChain Agent',
+        'llm_driver_config_id' => $config->id,
+        'max_steps'            => 5,
+        'is_active'            => true,
+    ]);
+
+    $task = Task::create([
+        'agent_id'         => $agent->id,
+        'user_id'          => $userId,
+        'status'           => 'COMPLETED',
+        'user_prompt'      => 'old',
+        'final_response'   => 'done',
+        'step_count'       => 1,
+        'max_steps'        => 5,
+        'retry_of_task_id' => $agent->id,
+        'retry_after'      => '2099-01-01 00:00:00',
+    ]);
+
+    $orch = makeAbortOrchestrator();
+    $orch->continue($task->id, 'one more turn');
+
+    $fresh = Task::find($task->id);
+    expect($fresh->retry_of_task_id)->toBeNull()
+        ->and($fresh->retry_after)->toBeNull();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());

@@ -31,6 +31,15 @@ final class TaskStatusWriter
      * of `Orchestrator::continue()` — the RUNNING → ABORTED auto-abort
      * and the ABORTED → RUNNING resume.
      *
+     * Continuing from a previously-failed task clears the retry chain
+     * markers (`retry_of_task_id`, `retry_after`) and the failure
+     * columns — same contract as {@see Orchestrator::retry()} so a
+     * continue-press after a failure doesn't get stranded in
+     * QUEUED by the worker's `retry_of_task_id IS NULL` claim
+     * predicate. The previous status (`RUNNING`, `ABORTED`,
+     * `COMPLETED`, `FAILED`) is otherwise preserved through the
+     * transition.
+     *
      * @param bool $clearAbortedAt true on ABORTED → RUNNING so the
      *                             column is wiped before the next loop
      */
@@ -49,13 +58,24 @@ final class TaskStatusWriter
             unset($data['aborted_at']);
         }
 
+        // Drop the auto-retry chain markers and the failure columns —
+        // mirrors Orchestrator::retry() so an aborted → continued task
+        // is claimable by the main worker loop (`retry_of_task_id IS
+        // NULL` predicate) and stops presenting as failed on the
+        // dashboard. retry_count is preserved so the throttle still
+        // remembers how many attempts have been used.
         // Empty array → JSON null so the column is rewritten (clearing
         // any leftover keys) instead of silently leaving the old payload
         // in place.
         $this->writeTransition($task, $targetStatus, $data, [
-            'step_count'  => 0,
-            'user_prompt' => Utf8Sanitizer::scrubString($newPrompt),
-            'max_steps'   => $additionalSteps !== null ? $additionalSteps : $task->max_steps,
+            'step_count'       => 0,
+            'user_prompt'      => Utf8Sanitizer::scrubString($newPrompt),
+            'max_steps'        => $additionalSteps !== null ? $additionalSteps : $task->max_steps,
+            'retry_of_task_id' => null,
+            'retry_after'      => null,
+            'error_code'       => null,
+            'error_message'    => null,
+            'failure_reason'   => null,
         ]);
 
         return Task::find($task->id);
