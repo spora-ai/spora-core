@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
@@ -1578,6 +1579,83 @@ it('publishes intermediate state when tools require approval', function (): void
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
+// Abort-bail — must publish tool output before returning
+// ---------------------------------------------------------------------------
+
+it('publishes the final tool batch even when status flips to ABORTED post-batch', function (): void {
+    // Regression: when a user abort lands while a tool is executing, the
+    // worker accepts the in-flight tool completion (so the result lands
+    // in the DB) but then bails before kicking the next tick. Without an
+    // explicit publish here, the chat would only see the ABORTED banner
+    // and have to reload the page to see the just-completed tool output.
+    //
+    // We drive this through reflection on the private handleToolCalls()
+    // because the public tick() entry point bails at
+    // lockRunningTaskForTick() the moment status flips to ABORTED, which
+    // never exercises the post-batch publish-then-check ordering this
+    // regression guards against. The reflection path lets us pin the
+    // invariant directly.
+    [$agentId] = seedAgent();
+
+    $publishCount = 0;
+    $capturedStatuses = [];
+    $mockMercure = Mockery::mock(MercurePublisherInterface::class);
+    $mockMercure->allows('publish')
+        ->andReturnUsing(static function (int $taskId, int $userId, array $data) use (&$publishCount, &$capturedStatuses): bool {
+            $publishCount++;
+            $capturedStatuses[] = $data['status'] ?? null;
+
+            return true;
+        });
+
+    $tools = [new StubInputTool()];
+    enableToolsForAgent($agentId, $tools);
+
+    $orch = new Orchestrator(
+        mockDriverFactory(Mockery::mock(LLMDriverInterface::class)),
+        new OrchestratorConfig(
+            toolInstances: $tools,
+            mercure: $mockMercure,
+        ),
+    );
+
+    // Pull a RUNNING task out of the DB and flip its status to ABORTED
+    // so the post-batch bail will fire on its first read.
+    $task = Task::create([
+        'user_id'     => Agent::find($agentId)->user_id,
+        'agent_id'    => $agentId,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'abort race test',
+        'max_steps'   => 10,
+    ]);
+    Capsule::table('tasks')->where('id', $task->id)->update(['status' => 'ABORTED']);
+
+    // Invoke the private handleToolCalls() with a single tool call so
+    // the post-batch branch runs. The tool completes cleanly, the
+    // publish-then-bail ordering kicks in, and we observe the publish.
+    $agent = Agent::find($agentId);
+    $handleToolCalls = new ReflectionMethod(Spora\Agents\TickPhaseRunner::class, 'handleToolCalls');
+    $handleToolCalls->setAccessible(true);
+
+    $runnerProp = new ReflectionProperty($orch, 'tickPhaseRunner');
+    /** @var Spora\Agents\TickPhaseRunner $runner */
+    $runner = $runnerProp->getValue($orch);
+
+    $handleToolCalls->invoke($runner, $task, $agent, [new DriverToolCall('call_1', 'stub_input', [])], [StubInputTool::class]);
+
+    // The publish-then-bail ordering must produce ONE Mercure publish
+    // even on the abort path. Without the fix this would be 0 — the
+    // bail happens BEFORE the publish, leaving the chat to discover
+    // the just-completed tool only on reload. The status reflected in
+    // the payload comes from the in-memory Task, which still reads
+    // RUNNING here (the DB row is ABORTED but the Eloquent model in
+    // memory hasn't been reloaded); Mercure consumers reconcile the
+    // truth from the row either way.
+    expect($publishCount)->toBe(1)
+        ->and($capturedStatuses[0] ?? null)->toBeIn(['RUNNING', 'ABORTED']);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
 // NO_LLM_CONFIGURATION error handling — task state persistence
 // ---------------------------------------------------------------------------
 
@@ -1658,8 +1736,8 @@ it('buildToolDefinitions only queries operation overrides for enabled tool class
     [$agentId, $userId] = seedAgent();
 
     // Enable query log to verify the whereIn clause is used
-    Illuminate\Database\Capsule\Manager::connection()->enableQueryLog();
-    Illuminate\Database\Capsule\Manager::connection()->flushQueryLog();
+    Capsule::connection()->enableQueryLog();
+    Capsule::connection()->flushQueryLog();
 
     $orch = makeOrchestrator(
         Mockery::mock(DriverFactory::class),
@@ -1672,8 +1750,8 @@ it('buildToolDefinitions only queries operation overrides for enabled tool class
     // Call it with only StubInputTool enabled
     $method->invoke($orch, [StubInputTool::class], $agentId, $userId);
 
-    $logs = Illuminate\Database\Capsule\Manager::connection()->getQueryLog();
-    Illuminate\Database\Capsule\Manager::connection()->disableQueryLog();
+    $logs = Capsule::connection()->getQueryLog();
+    Capsule::connection()->disableQueryLog();
 
     // Find the override query in the log
     $overrideQueryLog = array_filter($logs, fn($log) => str_contains($log['query'], 'agent_tool_operation_overrides'));

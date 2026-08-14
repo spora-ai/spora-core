@@ -477,7 +477,14 @@ final class TickPhaseRunner
             // returned, we re-read the status before either kicking the next
             // tick or handing the loop off to the parent-resume hook. If the
             // row is `ABORTED`, no further LLM traffic happens this tick.
+            //
+            // Publish the just-completed tool output BEFORE the bail: the
+            // chat relies on Mercure for live tool output. If we published
+            // only on the next tick (which never arrives for an aborted
+            // task), the user would have to reload the page to see the
+            // tool result that landed the same instant they clicked Abort.
             $latestStatus = Task::where('id', $task->id)->value('status');
+            $this->publishIntermediateState($task);
             if ($latestStatus === 'ABORTED') {
                 $this->logger?->info('Tick bailed — task was aborted after tool batch', [
                     'task_id' => $task->id,
@@ -485,7 +492,6 @@ final class TickPhaseRunner
                 return;
             }
 
-            $this->publishIntermediateState($task);
             // Sync-mode auto-approve batch boundary: every tool in this turn ran
             // inline (no ApprovedBatchExecutor involved), so the resume hook in
             // ApprovedBatchExecutor::triggerBatchBoundaryResume never fires for
