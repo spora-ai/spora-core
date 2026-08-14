@@ -228,11 +228,7 @@ final class ScheduledRunController
             }
         }
 
-        if ($isRecurring) {
-            return $this->validateCronExpression($body['cron_expression']);
-        }
-
-        return null;
+        return $isRecurring ? $this->validateCronExpression($body['cron_expression']) : null;
     }
 
     private function validateTimezone(mixed $timezone): ?JsonResponse
@@ -240,30 +236,30 @@ final class ScheduledRunController
         if ($timezone === null) {
             return null; // omitted → defaults to 'UTC' in the service
         }
-        if (!is_string($timezone)) {
-            return $this->error(
+
+        return match (true) {
+            !is_string($timezone) => $this->error(
                 'VALIDATION_ERROR',
                 'timezone must be a string (IANA identifier, e.g. "Europe/Berlin").',
                 Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        }
-        if (strlen($timezone) > 50) {
-            return $this->error(
+            ),
+            strlen($timezone) > 50 => $this->error(
                 'VALIDATION_ERROR',
                 'timezone must not exceed 50 characters.',
                 Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        }
-        try {
-            new DateTimeZone($timezone);
-        } catch (Throwable) {
-            return $this->error(
+            ),
+            $this->isValidTimezoneId($timezone) => null,
+            default => $this->error(
                 'VALIDATION_ERROR',
                 'timezone must be a valid IANA identifier (e.g. "UTC", "Europe/Berlin").',
                 Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
-        }
-        return null;
+            ),
+        };
+    }
+
+    private function isValidTimezoneId(string $timezone): bool
+    {
+        return in_array($timezone, timezone_identifiers_list(), true);
     }
 
     private function resolveTimezone(mixed $timezone): string

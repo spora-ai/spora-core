@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Cron\CronExpression;
+use DateInvalidTimeZoneException;
 use DateTimeImmutable;
 use DateTimeZone;
 use Illuminate\Database\Capsule\Manager as Capsule;
@@ -57,7 +58,12 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
         $isRecurring = !empty($data['cron_expression']);
         $timezone   = $data['timezone'] ?? 'UTC';
-        $this->assertValidTimezone($timezone);
+        // Defensive: the controller already validates, but non-HTTP callers (CLI, plugins,
+        // seeders) bypass it. Use timezone_identifiers_list() rather than new DateTimeZone()
+        // to avoid a useless-instantiation lint warning.
+        if (!in_array($timezone, timezone_identifiers_list(), true)) {
+            throw new DateInvalidTimeZoneException(sprintf('Invalid IANA timezone: %s', $timezone));
+        }
         $nextRunAt = $isRecurring
             ? $this->computeNextRunAt($data['cron_expression'], $timezone)
             : $this->computeOneShotNextRunAt($data['run_at'] ?? null, $timezone);
@@ -437,13 +443,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         } catch (Throwable) {
             return false;
         }
-    }
-
-    private function assertValidTimezone(string $timezone): void
-    {
-        // Guards the contract that the controller enforces: an invalid IANA id must
-        // fail loudly here instead of silently storing a bogus string in scheduled_runs.
-        new DateTimeZone($timezone);
     }
 
     /**
