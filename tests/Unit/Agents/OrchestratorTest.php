@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
@@ -1577,6 +1578,198 @@ it('publishes intermediate state when tools require approval', function (): void
     expect($publishCount)->toBe(1);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
+it('publishes the final tool batch even when status flips to ABORTED post-batch', function (): void {
+    // Regression: when a user abort lands while a tool is executing, the
+    // worker accepts the in-flight tool completion (so the result lands
+    // in the DB) but then bails before kicking the next tick. Without an
+    // explicit publish here, the chat would only see the ABORTED banner
+    // and have to reload the page to see the just-completed tool output.
+    //
+    // We drive this through reflection on the private handleToolCalls()
+    // because the public tick() entry point bails at
+    // lockRunningTaskForTick() the moment status flips to ABORTED, which
+    // never exercises the post-batch publish-then-check ordering this
+    // regression guards against. The reflection path lets us pin the
+    // invariant directly.
+    [$agentId] = seedAgent();
+
+    $publishCount = 0;
+    $capturedStatuses = [];
+    $mockMercure = Mockery::mock(MercurePublisherInterface::class);
+    $mockMercure->allows('publish')
+        ->andReturnUsing(static function (int $taskId, int $userId, array $data) use (&$publishCount, &$capturedStatuses): bool {
+            $publishCount++;
+            $capturedStatuses[] = $data['status'] ?? null;
+
+            return true;
+        });
+
+    $tools = [new StubInputTool()];
+    enableToolsForAgent($agentId, $tools);
+
+    $orch = new Orchestrator(
+        mockDriverFactory(Mockery::mock(LLMDriverInterface::class)),
+        new OrchestratorConfig(
+            toolInstances: $tools,
+            mercure: $mockMercure,
+        ),
+    );
+
+    // Pull a RUNNING task out of the DB and flip its status to ABORTED
+    // so the post-batch bail will fire on its first read.
+    $task = Task::create([
+        'user_id'     => Agent::find($agentId)->user_id,
+        'agent_id'    => $agentId,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'abort race test',
+        'max_steps'   => 10,
+    ]);
+    Capsule::table('tasks')->where('id', $task->id)->update(['status' => 'ABORTED']);
+
+    // Invoke the private handleToolCalls() with a single tool call so
+    // the post-batch branch runs. The tool completes cleanly, the
+    // publish-then-bail ordering kicks in, and we observe the publish.
+    $agent = Agent::find($agentId);
+    $handleToolCalls = new ReflectionMethod(Spora\Agents\TickPhaseRunner::class, 'handleToolCalls');
+    $handleToolCalls->setAccessible(true);
+
+    $runnerProp = new ReflectionProperty($orch, 'tickPhaseRunner');
+    /** @var Spora\Agents\TickPhaseRunner $runner */
+    $runner = $runnerProp->getValue($orch);
+
+    $handleToolCalls->invoke($runner, $task, $agent, [new DriverToolCall('call_1', 'stub_input', [])], [StubInputTool::class]);
+
+    // The publish-then-bail ordering must produce ONE Mercure publish
+    // even on the abort path. Without the fix this would be 0 — the
+    // bail happens BEFORE the publish, leaving the chat to discover
+    // the just-completed tool only on reload. The publish payload
+    // reflects the freshly-fetched row (status=ABORTED here), so
+    // Mercure consumers see the truth without a separate reconcile
+    // step.
+    expect($publishCount)->toBe(1)
+        ->and($capturedStatuses[0] ?? null)->toBe('ABORTED');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('TickPhaseRunner.runTick discards the LLM response when status flips to ABORTED while waiting', function (): void {
+    // Regression: the agent loop is mid-LLM-call when the user clicks
+    // Abort. The LLM request had already been dispatched, so the response
+    // arrives ~seconds later. Without a status re-check between
+    // dispatchLlmRequest() returning and handleTickLlmResponse() being
+    // called, the loop would treat the response as authoritative and
+    // call completeTaskWithResponse() — flipping status back to
+    // COMPLETED and discarding the abort.
+    //
+    // The user's report on spora/tasks/37 had this exact signature:
+    // abort lands while read_url is in flight, the recursive tick
+    // fires LLM #2, the abort hits during LLM #2's HTTP request, and
+    // the response drives the task to COMPLETED against the user's
+    // intent. The fix adds a post-LLM status re-check inside runTick().
+    [$agentId] = seedAgent();
+
+    $capturedStatuses = [];
+    $mockMercure = Mockery::mock(MercurePublisherInterface::class);
+    $mockMercure->allows('publish')
+        ->andReturnUsing(static function (int $taskId, int $userId, array $data) use (&$capturedStatuses): bool {
+            $capturedStatuses[] = $data['status'] ?? null;
+
+            return true;
+        });
+
+    $llmCallCount = 0;
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(static function () use (&$llmCallCount) {
+        $llmCallCount++;
+
+        return new LLMResponse('Final answer — task done.', [], 5, 1, 'cmp_post_abort');
+    });
+    $mock->allows('getProviderName')->andReturn('mock');
+    $mock->allows('getModelName')->andReturn('mock-model');
+
+    $driverFactory = Mockery::mock(DriverFactory::class);
+    $driverFactory->allows('makeFromAgent')->andReturn($mock);
+
+    $llmConfig = LLMDriverConfiguration::create([
+        'user_id'        => null,
+        'name'           => 'Test Global Config',
+        'driver_class'   => Spora\Drivers\OpenAICompatibleDriver::class,
+        'settings'       => json_encode(['api_key' => 'test']),
+        'is_global'      => true,
+        'is_default'     => true,
+        'context_window' => 128000,
+    ]);
+
+    $agent = Agent::where('id', $agentId)->first();
+    $agent->llm_driver_config_id = $llmConfig->id;
+    $agent->save();
+
+    $task = Task::create([
+        'user_id'     => $agent->user_id,
+        'agent_id'    => $agent->id,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'abort race',
+        'step_count'  => 0,
+        'max_steps'   => 5,
+    ]);
+
+    // The first LLM call dispatches OK. Once the mock returns, the
+    // runTick function must observe that the task has been flipped
+    // to ABORTED in the meantime and discard the response.
+    //
+    // We simulate the post-LLM-call status flip by hoisting a
+    // post-LLM-mock callback that flips status before handleTickLlmResponse.
+    // The simplest path is to use the tickOnce orchestration: dispatch
+    // LLM once, then status=ABORTED, then verify runTick returns without
+    // calling completeTask.
+    //
+    // Override the driver factory's mock: install a side-effect that
+    // flips status AFTER the LLM responds.
+    $flipStatus = function () use ($task): void {
+        Capsule::table('tasks')->where('id', $task->id)->update([
+            'status'     => 'ABORTED',
+            'data'       => json_encode(['aborted_at' => date('Y-m-d H:i:s')], JSON_THROW_ON_ERROR),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+    };
+
+    $flipMock = Mockery::mock(LLMDriverInterface::class);
+    $flipMock->allows('complete')->andReturnUsing(static function () use ($flipStatus) {
+        // Flip to ABORTED immediately after the LLM call completes —
+        // simulates the "abort lands while waiting on the LLM provider"
+        // race we are guarding against.
+        $flipStatus();
+
+        return new LLMResponse('Should never reach the chat.', [], 5, 1, 'cmp_late');
+    });
+    $flipMock->allows('getProviderName')->andReturn('mock');
+    $flipMock->allows('getModelName')->andReturn('mock-model');
+
+    $flipDriverFactory = Mockery::mock(DriverFactory::class);
+    $flipDriverFactory->allows('makeFromAgent')->andReturn($flipMock);
+
+    $orch = new Orchestrator(
+        $flipDriverFactory,
+        new OrchestratorConfig(
+            toolInstances: [],
+            mercure: $mockMercure,
+        ),
+    );
+
+    $orch->tick($task->id);
+
+    $fresh = Task::find($task->id);
+    // The abort landed during the LLM call — the loop must NOT have
+    // flipped status back to COMPLETED on the way out.
+    expect($fresh->status)->toBe('ABORTED')
+        ->and($fresh->final_response)->toBeNull();
+
+    // No new history rows were appended: handleTickLlmResponse was
+    // bailed out before completeTaskWithResponse could write a row.
+    $newHistoryRows = TaskHistory::where('task_id', $task->id)
+        ->where('created_at', '>', date('Y-m-d H:i:s', strtotime('-1 hour')))
+        ->count();
+    expect($newHistoryRows)->toBe(0);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
 // ---------------------------------------------------------------------------
 // NO_LLM_CONFIGURATION error handling — task state persistence
 // ---------------------------------------------------------------------------
@@ -1658,8 +1851,8 @@ it('buildToolDefinitions only queries operation overrides for enabled tool class
     [$agentId, $userId] = seedAgent();
 
     // Enable query log to verify the whereIn clause is used
-    Illuminate\Database\Capsule\Manager::connection()->enableQueryLog();
-    Illuminate\Database\Capsule\Manager::connection()->flushQueryLog();
+    Capsule::connection()->enableQueryLog();
+    Capsule::connection()->flushQueryLog();
 
     $orch = makeOrchestrator(
         Mockery::mock(DriverFactory::class),
@@ -1672,8 +1865,8 @@ it('buildToolDefinitions only queries operation overrides for enabled tool class
     // Call it with only StubInputTool enabled
     $method->invoke($orch, [StubInputTool::class], $agentId, $userId);
 
-    $logs = Illuminate\Database\Capsule\Manager::connection()->getQueryLog();
-    Illuminate\Database\Capsule\Manager::connection()->disableQueryLog();
+    $logs = Capsule::connection()->getQueryLog();
+    Capsule::connection()->disableQueryLog();
 
     // Find the override query in the log
     $overrideQueryLog = array_filter($logs, fn($log) => str_contains($log['query'], 'agent_tool_operation_overrides'));
@@ -1689,7 +1882,7 @@ it('buildToolDefinitions only queries operation overrides for enabled tool class
 // continue() — error cases and additionalSteps
 // ---------------------------------------------------------------------------
 
-it('continue() throws RuntimeException when task status is not COMPLETED or FAILED', function (): void {
+it('continue() throws InvalidTaskTransitionException when source status is not in the accepted list', function (): void {
     [$agentId] = seedAgent();
 
     $llm  = mockLlm(new LLMResponse('Done.', [], 5, 3, 'cmp_1'));
@@ -1698,14 +1891,14 @@ it('continue() throws RuntimeException when task status is not COMPLETED or FAIL
     $task = Task::create([
         'agent_id'    => $agentId,
         'user_id'     => Agent::find($agentId)->user_id,
-        'status'      => 'RUNNING',
-        'user_prompt' => 'still running',
+        'status'      => 'PENDING_APPROVAL',
+        'user_prompt' => 'awaiting approval',
         'step_count'  => 0,
         'max_steps'   => 10,
     ]);
 
     expect(fn() => $orch->continue($task->id, 'new prompt'))
-        ->toThrow(RuntimeException::class, 'Can only continue completed or failed tasks.');
+        ->toThrow(InvalidTaskTransitionException::class, 'Can only continue completed, failed, aborted, or running tasks.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('continue() overrides max_steps when additionalSteps is supplied', function (): void {

@@ -47,7 +47,13 @@ interface OrchestratorInterface
     public function reject(int $taskId, string $reason): void;
 
     /**
-     * Continue a completed or failed task with a new prompt.
+     * Continue a task from one of {COMPLETED, FAILED, ABORTED, RUNNING}.
+     * The RUNNING branch auto-flips to ABORTED, appends the marker row
+     * + user prompt, and returns without ticking — the next continue
+     * (on the now-ABORTED row) drives the LLM. ABORTED sources resume
+     * and wipe `data.aborted_at`. All branches reset retry-chain markers
+     * (`retry_of_task_id`, `retry_after`, `error_code`, `error_message`,
+     * `failure_reason`) so a stale auto-retry row becomes claimable again.
      *
      * @param  int      $taskId
      * @param  string   $newPrompt
@@ -73,5 +79,22 @@ interface OrchestratorInterface
      * as LLM context; resets status, step_count, and error fields.
      */
     public function retry(int $taskId): Task;
+
+    /**
+     * Abort the running agent loop for `$taskId`. Flips status to
+     * `ABORTED`, persists `data.aborted_at`, and records the new state in
+     * the task's history by leaving the most recent tool/assistant row
+     * intact (the next resume appends a fresh marker + user prompt on top
+     * via {@see continue()}). Idempotent — calling twice on the same
+     * task is a no-op that returns the current row.
+     *
+     * Throws {@see Exceptions\InvalidTaskTransitionException}
+     * when the task is in a state that doesn't allow aborting (terminal,
+     * or already in a paused state with its own affordances).
+     *
+     * The caller is responsible for the user-ownership check; the
+     * orchestrator only enforces the state-machine invariant.
+     */
+    public function abort(int $taskId): Task;
 
 }

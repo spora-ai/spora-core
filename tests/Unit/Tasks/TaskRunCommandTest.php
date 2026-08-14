@@ -544,6 +544,20 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
     });
 });
 
+// TaskRunCommand — abort handling (TASK_RUN_COMMAND_ABORTED_EXIT = 2)
+
+describe('TaskRunCommand — abort handling', function (): void {
+
+    it('TASK_RUN_COMMAND_ABORTED_EXIT equals 2 (distinct from FAILURE)', function (): void {
+        // The ABORTED exit code is a contract — workers, process managers, and
+        // deployment scripts distinguish it from both success and failure. A
+        // regression here is a major operator-visible break.
+        expect(TaskRunCommand::TASK_RUN_COMMAND_ABORTED_EXIT)->toBe(2);
+        expect(Symfony\Component\Console\Command\Command::FAILURE)->toBe(1);
+        expect(Symfony\Component\Console\Command\Command::SUCCESS)->toBe(0);
+    });
+});
+
 // TaskRunCommand — tool config injection
 
 describe('TaskRunCommand — tool config injection', function (): void {

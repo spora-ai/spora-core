@@ -72,6 +72,18 @@ final class TickPhaseRunner
             return;
         }
 
+        $this->dispatchLlmTurn($taskId, $task);
+    }
+
+    /**
+     * Prepare the LLM request, dispatch it, and apply the response. Owns
+     * the post-LLM abort re-check (a user abort that landed during the
+     * provider round-trip) and the surrounding `increment/step_count`
+     * bookkeeping — extracted from {@see runTick()} to keep that method
+     * at ≤3 `return` statements.
+     */
+    private function dispatchLlmTurn(int $taskId, Task $task): void
+    {
         try {
             $context = $this->prepareTickContext($task);
         } catch (RuntimeException $e) {
@@ -83,10 +95,28 @@ final class TickPhaseRunner
 
         try {
             $response = $this->dispatchLlmRequest($context);
-            $this->handleTickLlmResponse($context, $response);
         } catch (Throwable $e) {
             $this->handleTickFailure($taskId, $context, $e);
+            return;
         }
+
+        // Abort-bail after the LLM round-trip: while we were waiting
+        // on the provider to respond, the user may have hit the Abort
+        // button. The status was RUNNING when we *started* the call,
+        // but it is ABORTED now — without this re-check the loop would
+        // process the LLM response as if the task were still running
+        // and call completeTaskWithResponse, flipping status back to
+        // COMPLETED and discarding the abort.
+        $currentStatus = Task::where('id', $taskId)->value('status');
+        if ($currentStatus !== 'RUNNING') {
+            $this->logger?->info('Tick bailed — task was aborted while waiting on LLM', [
+                'task_id' => $taskId,
+                'status'  => $currentStatus,
+            ]);
+            return;
+        }
+
+        $this->handleTickLlmResponse($context, $response);
     }
 
     /**
@@ -471,7 +501,32 @@ final class TickPhaseRunner
         }
 
         if ($pendingApproval === []) {
-            $this->publishIntermediateState($task);
+            // Abort-bail: a user abort could have landed between this tick's
+            // claim and the completion of the tool batch. We accept the user's
+            // request up to this tool boundary — once the latest tool
+            // returned, we re-read the status before either kicking the next
+            // tick or handing the loop off to the parent-resume hook. If the
+            // row is `ABORTED`, no further LLM traffic happens this tick.
+            //
+            // Publish the just-completed tool output BEFORE the bail: the
+            // chat relies on Mercure for live tool output. If we published
+            // only on the next tick (which never arrives for an aborted
+            // task), the user would have to reload the page to see the
+            // tool result that landed the same instant they clicked Abort.
+            //
+            // Re-read the row before publishing so the payload reflects
+            // the current DB state — passing the in-memory $task here
+            // would carry the stale RUNNING status into the Mercure
+            // event when the row had already been flipped to ABORTED.
+            $latestStatus = Task::where('id', $task->id)->value('status');
+            $this->publishIntermediateState(Task::find($task->id) ?? $task);
+            if ($latestStatus === 'ABORTED') {
+                $this->logger?->info('Tick bailed — task was aborted after tool batch', [
+                    'task_id' => $task->id,
+                ]);
+                return;
+            }
+
             // Sync-mode auto-approve batch boundary: every tool in this turn ran
             // inline (no ApprovedBatchExecutor involved), so the resume hook in
             // ApprovedBatchExecutor::triggerBatchBoundaryResume never fires for
@@ -479,6 +534,15 @@ final class TickPhaseRunner
             // to wake their parent up at the end of the turn. The worker-mode
             // equivalent lives in executeApprovedPendingToolsForTask() above.
             $this->maybeResumeParentFromBatchBoundary($task->id);
+
+            // Re-check after the batch-boundary hook — a parent that flipped
+            // to ABORTED through {@see TaskService::abortSubAgentAndCascade}
+            // must not start another LLM turn.
+            $latestStatus = Task::where('id', $task->id)->value('status');
+            if ($latestStatus === 'ABORTED') {
+                return;
+            }
+
             $this->orchestrator->tick($task->id);
         } else {
             $state = new AgentState(

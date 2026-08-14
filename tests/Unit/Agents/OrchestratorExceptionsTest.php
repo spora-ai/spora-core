@@ -110,12 +110,31 @@ function seedRunningTask(): int
 // InvalidTaskTransitionException — continue() with non-terminal task
 // ---------------------------------------------------------------------------
 
-it('continue() throws InvalidTaskTransitionException when task is not COMPLETED or FAILED', function (): void {
-    $taskId = seedRunningTask();
+it('continue() throws InvalidTaskTransitionException when task is in a rejected source state (PENDING_APPROVAL)', function (): void {
+    $authService = bootAuthLayer();
+    $userId      = $authService->register('excs@example.com', TEST_PASSWORD, 'Excs');
+
+    $agent = Agent::create([
+        'user_id'              => $userId,
+        'name'                 => 'Exception Test Agent',
+        'llm_driver_config_id' => null,
+        'max_steps'            => 5,
+        'is_active'            => true,
+    ]);
+
+    $task = Task::create([
+        'agent_id'    => $agent->id,
+        'user_id'     => $userId,
+        'status'      => 'PENDING_APPROVAL',
+        'user_prompt' => 'in approval',
+        'step_count'  => 0,
+        'max_steps'   => 5,
+    ]);
+
     $orch   = makeBareOrchestrator();
 
-    expect(fn() => $orch->continue($taskId, 'new prompt'))
-        ->toThrow(InvalidTaskTransitionException::class, 'Can only continue completed or failed tasks.');
+    expect(fn() => $orch->continue($task->id, 'new prompt'))
+        ->toThrow(InvalidTaskTransitionException::class, 'Can only continue completed, failed, aborted, or running tasks.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------

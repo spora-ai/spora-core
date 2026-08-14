@@ -37,6 +37,19 @@ use Throwable;
 final class SubAgentService implements SubAgentServiceInterface
 {
     /**
+     * Allowed `data` keys when projecting a parent's `data` JSON column
+     * into the Mercure live-stream payload. Anything else is dropped —
+     * see {@see publishParentState()} below.
+     *
+     * @var list<string>
+     */
+    private const PARENT_STATE_DATA_ALLOWLIST = [
+        'spawned_sub_task_ids',
+        'sub_agent_expected_count',
+        'run_id',
+    ];
+
+    /**
      * @param Closure(): OrchestratorInterface $orchestratorFactory
      *   Lazy factory — the Orchestrator's constructor takes the tool
      *   instance list (which includes `HandoverTool`), so direct injection
@@ -423,11 +436,19 @@ final class SubAgentService implements SubAgentServiceInterface
             return;
         }
 
+        $rawData = is_array($task->data) ? $task->data : [];
+        $projectedData = [];
+        foreach (self::PARENT_STATE_DATA_ALLOWLIST as $key) {
+            if (array_key_exists($key, $rawData)) {
+                $projectedData[$key] = $rawData[$key];
+            }
+        }
+
         $resource = [
             'id'             => $task->id,
             'status'         => $task->status,
             'step_count'     => $task->step_count,
-            'data'           => $task->data,
+            'data'           => $projectedData,
             'parent_task_id' => $task->parent_task_id,
         ];
 

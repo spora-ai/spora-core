@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.14.0-3-g3e6d805"
+        "version": "0.16.3-10-gbdfa79d"
     },
     "servers": [
         {
@@ -1415,6 +1415,68 @@
                     "Tasks"
                 ],
                 "summary": "Continue Task",
+                "parameters": [
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/tasks/{taskId}/abort": {
+            "post": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "Abort Task",
+                "parameters": [
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/tasks/{taskId}/abort-sub-agent": {
+            "post": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "AbortSubAgent Task",
                 "parameters": [
                     {
                         "name": "taskId",
