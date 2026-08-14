@@ -83,10 +83,28 @@ final class TickPhaseRunner
 
         try {
             $response = $this->dispatchLlmRequest($context);
-            $this->handleTickLlmResponse($context, $response);
         } catch (Throwable $e) {
             $this->handleTickFailure($taskId, $context, $e);
+            return;
         }
+
+        // Abort-bail after the LLM round-trip: while we were waiting
+        // on the provider to respond, the user may have hit the Abort
+        // button. The status was RUNNING when we *started* the call,
+        // but it is ABORTED now — without this re-check the loop would
+        // process the LLM response as if the task were still running
+        // and call completeTaskWithResponse, flipping status back to
+        // COMPLETED and discarding the abort.
+        $currentStatus = Task::where('id', $taskId)->value('status');
+        if ($currentStatus !== 'RUNNING') {
+            $this->logger?->info('Tick bailed — task was aborted while waiting on LLM', [
+                'task_id' => $taskId,
+                'status'  => $currentStatus,
+            ]);
+            return;
+        }
+
+        $this->handleTickLlmResponse($context, $response);
     }
 
     /**
