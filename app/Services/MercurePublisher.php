@@ -47,6 +47,13 @@ final class MercurePublisher implements MercurePublisherInterface
         try {
             $response = $this->client->request('POST', $this->hubUrl, [
                 'auth_bearer' => $this->generateJwt($userId),
+                // Hard timeouts on connect and the full request — a wedged
+                // Mercure hub must NOT block the agent loop. The previous
+                // default of no-timeout could pin a worker child on a
+                // SYN_RECEIVED for 75+ seconds and look indistinguishable
+                // from a real loop hang to the operator.
+                'timeout'     => 3.0,
+                'max_duration' => 5.0,
                 'body'        => [
                     'topic' => $topic,
                     'data'  => json_encode(['topic' => $topic, 'data' => $taskData], JSON_THROW_ON_ERROR),
@@ -87,6 +94,9 @@ final class MercurePublisher implements MercurePublisherInterface
         try {
             $response = $this->client->request('POST', $this->hubUrl, [
                 'auth_bearer' => $this->generateJwt($userId),
+                // Match the task-publish timeout — see publish() above.
+                'timeout'     => 3.0,
+                'max_duration' => 5.0,
                 'body'        => [
                     'topic' => "user/{$userId}/notifications",
                     'data'  => json_encode(['topic' => "user/{$userId}/notifications", 'data' => $data], JSON_THROW_ON_ERROR),
