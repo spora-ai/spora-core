@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use Cron\CronExpression;
 use DateTimeImmutable;
+use DateTimeZone;
 use JsonException;
 use RuntimeException;
 use Spora\Auth\AuthService;
@@ -214,8 +215,14 @@ final class ScheduledRunController
      */
     private function validateCreateSchedule(array $body, bool $isOneShot, bool $isRecurring): ?JsonResponse
     {
+        $tzError = $this->validateTimezone($body['timezone'] ?? null);
+        if ($tzError !== null) {
+            return $tzError;
+        }
+        $timezone = $this->resolveTimezone($body['timezone'] ?? null);
+
         if ($isOneShot) {
-            $dateError = $this->validateOneShotDate($body['run_at']);
+            $dateError = $this->validateOneShotDate($body['run_at'], $timezone);
             if ($dateError !== null) {
                 return $dateError;
             }
@@ -226,6 +233,42 @@ final class ScheduledRunController
         }
 
         return null;
+    }
+
+    private function validateTimezone(mixed $timezone): ?JsonResponse
+    {
+        if ($timezone === null) {
+            return null; // omitted → defaults to 'UTC' in the service
+        }
+        if (!is_string($timezone)) {
+            return $this->error(
+                'VALIDATION_ERROR',
+                'timezone must be a string (IANA identifier, e.g. "Europe/Berlin").',
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
+        if (strlen($timezone) > 50) {
+            return $this->error(
+                'VALIDATION_ERROR',
+                'timezone must not exceed 50 characters.',
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
+        try {
+            new DateTimeZone($timezone);
+        } catch (Throwable) {
+            return $this->error(
+                'VALIDATION_ERROR',
+                'timezone must be a valid IANA identifier (e.g. "UTC", "Europe/Berlin").',
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
+        return null;
+    }
+
+    private function resolveTimezone(mixed $timezone): string
+    {
+        return is_string($timezone) && $timezone !== '' ? $timezone : 'UTC';
     }
 
     private function validatePayloadShape(bool $isRecurring, bool $isOneShot, bool $hasTemplate, bool $hasRawPrompt): ?JsonResponse
@@ -250,9 +293,9 @@ final class ScheduledRunController
         };
     }
 
-    private function validateOneShotDate(mixed $runAt): ?JsonResponse
+    private function validateOneShotDate(mixed $runAt, string $timezone = 'UTC'): ?JsonResponse
     {
-        if ($this->parseDateTime((string) $runAt) === false) {
+        if ($this->parseDateTime((string) $runAt, $timezone) === false) {
             return $this->error(
                 'VALIDATION_ERROR',
                 'run_at must be a valid ISO 8601 datetime.',
@@ -278,10 +321,10 @@ final class ScheduledRunController
         return null;
     }
 
-    private function parseDateTime(string $value): DateTimeImmutable|false
+    private function parseDateTime(string $value, string $timezone = 'UTC'): DateTimeImmutable|false
     {
         try {
-            return new DateTimeImmutable($value);
+            return new DateTimeImmutable($value, new DateTimeZone($timezone));
         } catch (Throwable) {
             return false;
         }

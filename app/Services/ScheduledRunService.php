@@ -56,9 +56,11 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         }
 
         $isRecurring = !empty($data['cron_expression']);
+        $timezone   = $data['timezone'] ?? 'UTC';
+        $this->assertValidTimezone($timezone);
         $nextRunAt = $isRecurring
-            ? $this->computeNextRunAt($data['cron_expression'], $data['timezone'] ?? 'UTC')
-            : $this->computeOneShotNextRunAt($data['run_at'] ?? null);
+            ? $this->computeNextRunAt($data['cron_expression'], $timezone)
+            : $this->computeOneShotNextRunAt($data['run_at'] ?? null, $timezone);
 
         $isActive = match (true) {
             !isset($data['is_active']) => 1,
@@ -72,7 +74,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             'raw_prompt'        => isset($data['raw_prompt']) ? trim((string) $data['raw_prompt']) : null,
             'cron_expression'   => $isRecurring ? trim((string) $data['cron_expression']) : null,
             'run_at'            => !$isRecurring && isset($data['run_at'])
-                ? $this->normalizeRunAtToUtc($data['run_at'])
+                ? $this->normalizeRunAtToUtc($data['run_at'], $timezone)
                 : null,
             'timezone'          => trim((string) ($data['timezone'] ?? 'UTC')),
             'max_steps_override' => isset($data['max_steps_override']) ? (int) $data['max_steps_override'] : null,
@@ -80,8 +82,8 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             'last_run_at'       => null,
             'next_run_at'       => $nextRunAt,
             'user_id'           => $userId,
-            'created_at'        => date(self::DB_TIMESTAMP_FORMAT),
-            'updated_at'        => date(self::DB_TIMESTAMP_FORMAT),
+            'created_at'        => gmdate(self::DB_TIMESTAMP_FORMAT),
+            'updated_at'        => gmdate(self::DB_TIMESTAMP_FORMAT),
         ]);
 
         // Insert first PENDING entry into scheduled_runs_next
@@ -90,8 +92,8 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 'scheduled_run_id' => $id,
                 'due_at'           => $nextRunAt,
                 'status'           => ScheduledRunNext::STATUS_PENDING,
-                'created_at'       => date(self::DB_TIMESTAMP_FORMAT),
-                'updated_at'       => date(self::DB_TIMESTAMP_FORMAT),
+                'created_at'       => gmdate(self::DB_TIMESTAMP_FORMAT),
+                'updated_at'       => gmdate(self::DB_TIMESTAMP_FORMAT),
             ]);
         }
 
@@ -133,7 +135,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
             Capsule::table('scheduled_runs')
                 ->where('id', $run->id)
-                ->update(array_merge($updateData, ['updated_at' => date(self::DB_TIMESTAMP_FORMAT)]));
+                ->update(array_merge($updateData, ['updated_at' => gmdate(self::DB_TIMESTAMP_FORMAT)]));
             $run->refresh();
         }
 
@@ -169,17 +171,17 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         }
 
         $cron = $updateData['cron_expression'] ?? $run->cron_expression;
+        $timezone = $updateData['timezone'] ?? $run->timezone;
 
         if (array_key_exists('run_at', $updateData) && is_string($updateData['run_at'])) {
-            $updateData['run_at'] = $this->normalizeRunAtToUtc($updateData['run_at']);
+            $updateData['run_at'] = $this->normalizeRunAtToUtc($updateData['run_at'], $timezone);
         }
 
         $runAt = $updateData['run_at'] ?? $run->run_at?->toDateTimeString();
-        $timezone = $updateData['timezone'] ?? $run->timezone;
         $isRecurring = !empty($cron);
         $updateData['next_run_at'] = $isRecurring
             ? $this->computeNextRunAt($cron, $timezone)
-            : $this->computeOneShotNextRunAt($runAt);
+            : $this->computeOneShotNextRunAt($runAt, $timezone);
 
         if ($updateData['next_run_at'] !== null) {
             $this->reschedulePendingEntries($run->id, $updateData['next_run_at']);
@@ -405,13 +407,13 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         return $cron->getNextRunDate($now, 0, false, $timezone)->setTimezone(new DateTimeZone('UTC'))->format(self::DB_TIMESTAMP_FORMAT);
     }
 
-    private function computeOneShotNextRunAt(?string $runAt): ?string
+    private function computeOneShotNextRunAt(?string $runAt, string $timezone = 'UTC'): ?string
     {
         if ($runAt === null) {
             return null;
         }
 
-        $dt = $this->parseDateTime($runAt);
+        $dt = $this->parseDateTime($runAt, $timezone);
         if ($dt === false) {
             return null;
         }
@@ -419,22 +421,29 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         return $dt->setTimezone(new DateTimeZone('UTC'))->format(self::DB_TIMESTAMP_FORMAT);
     }
 
-    private function normalizeRunAtToUtc(string $runAt): string
+    private function normalizeRunAtToUtc(string $runAt, string $timezone = 'UTC'): string
     {
-        $dt = $this->parseDateTime($runAt);
+        $dt = $this->parseDateTime($runAt, $timezone);
         if ($dt === false) {
             return $runAt;
         }
         return $dt->setTimezone(new DateTimeZone('UTC'))->format(self::DB_TIMESTAMP_FORMAT);
     }
 
-    private function parseDateTime(string $value): DateTimeImmutable|false
+    private function parseDateTime(string $value, string $timezone = 'UTC'): DateTimeImmutable|false
     {
         try {
-            return new DateTimeImmutable($value);
+            return new DateTimeImmutable($value, new DateTimeZone($timezone));
         } catch (Throwable) {
             return false;
         }
+    }
+
+    private function assertValidTimezone(string $timezone): void
+    {
+        // Guards the contract that the controller enforces: an invalid IANA id must
+        // fail loudly here instead of silently storing a bogus string in scheduled_runs.
+        new DateTimeZone($timezone);
     }
 
     /**

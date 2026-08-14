@@ -687,6 +687,65 @@ describe('ScheduledRunController', function (): void {
         expect($body['error']['message'])->toContain('ISO 8601');
     });
 
+    it('store returns 422 when timezone is not a valid IANA id', function (): void {
+        // B4 — invalid IANA strings were silently accepted before and only failed later as 500.
+        [, $agentId] = registerAndGetAgentForScheduledRun();
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
+            'raw_prompt' => 'Test',
+            'run_at'     => date('c', strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
+            'timezone'   => 'Not/A_Zone',
+        ], ['id' => $agentId]);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(422);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+        expect($body['error']['message'])->toContain('timezone');
+    });
+
+    it('store returns 422 when timezone exceeds 50 characters', function (): void {
+        // B4 — DB column is varchar(50). Reject at the validator instead of failing the INSERT.
+        [, $agentId] = registerAndGetAgentForScheduledRun();
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
+            'raw_prompt' => 'Test',
+            'run_at'     => date('c', strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
+            'timezone'   => str_repeat('A', 51),
+        ], ['id' => $agentId]);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(422);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+        expect($body['error']['message'])->toContain('50 characters');
+    });
+
+    it('store anchors run_at to schedule timezone during validation', function (): void {
+        // B6 — validateOneShotDate must thread the schedule's tz so that an offset-less
+        // run_at that is valid in one tz does not silently pass or fail against another.
+        // 10:00 in Europe/Berlin (CEST, +02:00) → 08:00 UTC, which is what the row stores.
+        [, $agentId] = registerAndGetAgentForScheduledRun();
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('POST', "/api/v1/agents/{$agentId}/scheduled-runs", [
+            'raw_prompt' => 'Berlin anchored',
+            'run_at'     => '2026-04-20T10:00:00',
+            'timezone'   => SCHEDULED_TZ_EUROPE_BERLIN,
+        ], ['id' => $agentId]);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(201);
+        $body = json_decode($response->getContent(), true);
+        $runId = $body['data']['scheduled_run']['id'];
+
+        $row = Capsule::table('scheduled_runs')->where('id', $runId)->first();
+        expect($row->run_at)->toBe('2026-04-20 08:00:00');
+        expect($row->next_run_at)->toBe('2026-04-20 08:00:00');
+    });
+
     it('store returns 422 when body is empty (decodeJson returns empty array)', function (): void {
         [, $agentId] = registerAndGetAgentForScheduledRun();
 

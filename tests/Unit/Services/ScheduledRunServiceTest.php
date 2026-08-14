@@ -172,6 +172,72 @@ describe('ScheduledRunService::createRun', function (): void {
             'timezone'        => 'UTC',
         ]))->toThrow(Exception::class);
     });
+
+    it('anchors one-shot run_at to schedule tz when offset is absent', function (): void {
+        // B3 — the one-shot path now anchors offset-less run_at to the schedule tz
+        // before converting to UTC, instead of using the server-local frame.
+        // 2026-04-20T10:00:00 in Europe/Berlin (CEST, +02:00) = 08:00:00 UTC.
+        $service = makeScheduledRunService();
+        [$userId, $agentId] = createScheduledRunUserAgent();
+
+        $result = $service->createRun($agentId, $userId, [
+            'raw_prompt' => 'Berlin one-shot',
+            'run_at'     => '2026-04-20T10:00:00',
+            'timezone'   => 'Europe/Berlin',
+        ]);
+
+        $runId = $result['scheduled_run']['id'];
+        $row = Capsule::table('scheduled_runs')->where('id', $runId)->first();
+        expect($row->run_at)->toBe('2026-04-20 08:00:00');
+        expect($row->next_run_at)->toBe('2026-04-20 08:00:00');
+    });
+
+    it('throws on invalid timezone string', function (): void {
+        // B4 — controller already 422s on bad IANA ids, but the service guard makes
+        // the contract explicit so non-HTTP callers fail loudly too.
+        $service = makeScheduledRunService();
+        [$userId, $agentId] = createScheduledRunUserAgent();
+
+        expect(fn() => $service->createRun($agentId, $userId, [
+            'raw_prompt' => 'Bad tz',
+            'run_at'     => '2026-04-20T10:00:00',
+            'timezone'   => 'Not/A_Zone',
+        ]))->toThrow(DateInvalidTimeZoneException::class);
+    });
+
+    it('writes created_at and updated_at in UTC', function (): void {
+        // B7 — even if the server default tz is non-UTC, the timestamps written to
+        // scheduled_runs must be UTC so they line up with the UTC-stored due_at /
+        // next_run_at columns on the same row.
+        $originalTz = date_default_timezone_get();
+        date_default_timezone_set('America/Los_Angeles');
+        try {
+            $service = makeScheduledRunService();
+            [$userId, $agentId] = createScheduledRunUserAgent();
+
+            $expectedUtcNow = gmdate('Y-m-d H:i:s');
+            $result = $service->createRun($agentId, $userId, [
+                'raw_prompt'      => 'UTC timestamp test',
+                'cron_expression' => SCHEDULED_RUN_TEST_CRON,
+                'timezone'        => 'UTC',
+            ]);
+
+            $row = Capsule::table('scheduled_runs')->where('id', $result['scheduled_run']['id'])->first();
+
+            // Parse both sides as epoch seconds and assert they match within a 2-second tolerance
+            // (Pest wall-clock skew across the gmdate() write and the test read).
+            $rowCreatedAt = strtotime($row->created_at . ' UTC');
+            $rowUpdatedAt = strtotime($row->updated_at . ' UTC');
+            $expectedTs   = strtotime($expectedUtcNow . ' UTC');
+
+            expect($rowCreatedAt)->toBeGreaterThanOrEqual($expectedTs - 2);
+            expect($rowCreatedAt)->toBeLessThanOrEqual($expectedTs + 2);
+            expect($rowUpdatedAt)->toBeGreaterThanOrEqual($expectedTs - 2);
+            expect($rowUpdatedAt)->toBeLessThanOrEqual($expectedTs + 2);
+        } finally {
+            date_default_timezone_set($originalTz);
+        }
+    });
 });
 
 describe('ScheduledRunService::getRun', function (): void {
