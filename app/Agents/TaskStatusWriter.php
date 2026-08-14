@@ -27,9 +27,10 @@ final class TaskStatusWriter
 {
     /**
      * Apply a status flip on $task while persisting the new user_prompt,
-     * max_steps, and a step_count reset. Used by both relaxed branches
-     * of `Orchestrator::continue()` — the RUNNING → ABORTED auto-abort
-     * and the ABORTED → RUNNING resume.
+     * max_steps, and a step_count reset. Called by every branch of
+     * `Orchestrator::continue()` — the RUNNING→ABORTED auto-abort, the
+     * ABORTED→RUNNING/QUEUED resume, and the COMPLETED/FAILED→RUNNING/QUEUED
+     * follow-ups.
      *
      * Continuing from a previously-failed task clears the retry chain
      * markers (`retry_of_task_id`, `retry_after`) and the failure

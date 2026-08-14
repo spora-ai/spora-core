@@ -70,10 +70,6 @@ function seedTaskWithStatus(string $status, array $data = []): int
     return $task->id;
 }
 
-// ---------------------------------------------------------------------------
-// TaskLifecyclePolicy — static surface
-// ---------------------------------------------------------------------------
-
 it('TaskLifecyclePolicy.isTerminal recognises terminal statuses only', function (): void {
     $policy = new TaskLifecyclePolicy();
 
@@ -121,10 +117,6 @@ it('TaskLifecyclePolicy.canContinueFrom accepts the new sources only', function 
         ->and($policy->canContinueFrom('QUEUED'))->toBeFalse();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// Orchestrator::abort — happy path
-// ---------------------------------------------------------------------------
-
 it('Orchestrator::abort flips RUNNING to ABORTED and persists data.aborted_at', function (): void {
     $taskId = seedTaskWithStatus('RUNNING');
     $orch = makeAbortOrchestrator();
@@ -161,10 +153,6 @@ it('Orchestrator::abort is idempotent — calling on an ABORTED row leaves it un
     expect($aborted->status)->toBe('ABORTED');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// Orchestrator::abort — guard rails
-// ---------------------------------------------------------------------------
-
 it('Orchestrator::abort rejects PENDING_APPROVAL with InvalidTaskTransitionException', function (): void {
     $taskId = seedTaskWithStatus('PENDING_APPROVAL');
     $orch = makeAbortOrchestrator();
@@ -188,10 +176,6 @@ it('Orchestrator::abort rejects FAILED with InvalidTaskTransitionException', fun
     expect(fn() => $orch->abort($taskId))
         ->toThrow(InvalidTaskTransitionException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
-
-// ---------------------------------------------------------------------------
-// Orchestrator::continue — relaxed guard + abort-marker
-// ---------------------------------------------------------------------------
 
 it('Orchestrator::continue on RUNNING source flips to ABORTED, appends marker, no tick', function (): void {
     $taskId = seedTaskWithStatus('RUNNING');
@@ -270,10 +254,6 @@ it('Orchestrator::continue rejects PENDING_APPROVAL with the new error message',
     expect(fn() => $orch->continue($taskId, 'try'))
         ->toThrow(InvalidTaskTransitionException::class, 'Can only continue completed, failed, aborted, or running tasks.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
-
-// ---------------------------------------------------------------------------
-// Abort → Continue — retry-chain and failure-field reset
-// ---------------------------------------------------------------------------
 
 it('Orchestrator::continue from ABORTED clears stale retry_of_task_id so the worker claim predicate matches', function (): void {
     // Regression: when the auto-retry chain had scheduled a retry

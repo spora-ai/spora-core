@@ -118,6 +118,6 @@ describe('SubAgentService::publishParentState data projection', function (): voi
     it('returns silently when the parent task is missing', function () use (&$invokePublish, &$captured): void {
         // No task with id 999 exists.
         $invokePublish(999);
-        expect($captured)->toBe([]); // No publish call landed.
+        expect($captured)->toBe([]);
     });
 });

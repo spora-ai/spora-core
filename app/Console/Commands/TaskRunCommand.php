@@ -45,7 +45,6 @@ use Throwable;
  */
 final class TaskRunCommand extends Command
 {
-    /** Worker exit code when the task ended in `ABORTED`. */
     public const TASK_RUN_COMMAND_ABORTED_EXIT = 2;
 
     public function __construct(

@@ -190,7 +190,6 @@ it('abortSubAgentAndCascade aborts the child and walks the parent chain', functi
 
     expect($result['status'])->toBe('ABORTED');
 
-    // 3 aborts (child + parent + grandparent) + 3 publishes
     expect(Task::find($child->id)->status)->toBe('ABORTED')
         ->and(Task::find($parent->id)->status)->toBe('ABORTED')
         ->and(Task::find($grandparent->id)->status)->toBe('ABORTED');

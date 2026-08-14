@@ -72,6 +72,18 @@ final class TickPhaseRunner
             return;
         }
 
+        $this->dispatchLlmTurn($taskId, $task);
+    }
+
+    /**
+     * Prepare the LLM request, dispatch it, and apply the response. Owns
+     * the post-LLM abort re-check (a user abort that landed during the
+     * provider round-trip) and the surrounding `increment/step_count`
+     * bookkeeping — extracted from {@see runTick()} to keep that method
+     * at ≤3 `return` statements.
+     */
+    private function dispatchLlmTurn(int $taskId, Task $task): void
+    {
         try {
             $context = $this->prepareTickContext($task);
         } catch (RuntimeException $e) {
@@ -501,8 +513,13 @@ final class TickPhaseRunner
             // only on the next tick (which never arrives for an aborted
             // task), the user would have to reload the page to see the
             // tool result that landed the same instant they clicked Abort.
+            //
+            // Re-read the row before publishing so the payload reflects
+            // the current DB state — passing the in-memory $task here
+            // would carry the stale RUNNING status into the Mercure
+            // event when the row had already been flipped to ABORTED.
             $latestStatus = Task::where('id', $task->id)->value('status');
-            $this->publishIntermediateState($task);
+            $this->publishIntermediateState(Task::find($task->id) ?? $task);
             if ($latestStatus === 'ABORTED') {
                 $this->logger?->info('Tick bailed — task was aborted after tool batch', [
                     'task_id' => $task->id,
@@ -519,8 +536,8 @@ final class TickPhaseRunner
             $this->maybeResumeParentFromBatchBoundary($task->id);
 
             // Re-check after the batch-boundary hook — a parent that flipped
-            // to ABORTED through {@see TaskService::abortTask} aborting
-            // through the cascade must not start another LLM turn.
+            // to ABORTED through {@see TaskService::abortSubAgentAndCascade}
+            // must not start another LLM turn.
             $latestStatus = Task::where('id', $task->id)->value('status');
             if ($latestStatus === 'ABORTED') {
                 return;

@@ -166,8 +166,8 @@ final class Orchestrator implements OrchestratorInterface
      *                            `RUNNING`/`QUEUED`, tick or queue.
      *
      * Throws {@see InvalidTaskTransitionException} for any other source
-     * state. The marker row carries `role=system`, `content=JSON`, and
-     * `tool_call_payload.kind=abort_marker` so the frontend can render
+     * state. The marker row carries `role=system`, `content=JSON`
+     * `{"kind":"abort_marker","at":<UTC>}` so the frontend can render
      * a faint divider at the marker position in the chat timeline.
      */
     public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = []): Task
@@ -311,26 +311,30 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Halts the running agent loop. Acquires a `lockForUpdate` row lock so
-     * a racing tick cannot observe a half-applied status flip. Persists
-     * the UTC `data.aborted_at` stamp and emits a structured log entry
-     * (task_id, user_id, source_status, target_status, source). Idempotent
-     * — calling on an already-`ABORTED` task returns the current row
-     * without writing. Throws `InvalidTaskTransitionException` for source
-     * states that aren't `RUNNING` or `AWAITING_SUB_AGENTS`.
+     * Halts the running agent loop. Acquires `lockForUpdate` row lock;
+     * flips status to `ABORTED` and stamps `data.aborted_at`. Idempotent
+     * on already-`ABORTED` (silent, no log). Throws
+     * {@see InvalidTaskTransitionException} for source states that
+     * aren't `RUNNING` or `AWAITING_SUB_AGENTS`. Emits structured log
+     * (`task_id`, `user_id`, `from`, `to`, `source`) only when the row
+     * was actually transitioned.
      */
     public function abort(int $taskId): Task
     {
         $policy = new TaskLifecyclePolicy();
         $source = null;
+        $userId = null;
+        $didWrite = false;
 
-        Capsule::connection()->transaction(function () use ($taskId, $policy, &$source): void {
+        Capsule::connection()->transaction(function () use ($taskId, $policy, &$source, &$userId, &$didWrite): void {
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
             $source = $task->status;
 
             if ($task->status === 'ABORTED') {
                 return;
             }
+
+            $userId = (int) $task->user_id;
 
             if (!$policy->canAbortFrom($task->status)) {
                 throw new InvalidTaskTransitionException(
@@ -339,14 +343,18 @@ final class Orchestrator implements OrchestratorInterface
             }
 
             $this->statusWriter->abortTransition($task);
+            $didWrite = true;
         });
 
-        $this->logger?->info('Task aborted', [
-            'task_id' => $taskId,
-            'from'    => $source,
-            'to'      => 'ABORTED',
-            'source'  => 'user_abort',
-        ]);
+        if ($didWrite && $userId !== null) {
+            $this->logger?->info('Task aborted', [
+                'task_id' => $taskId,
+                'user_id' => $userId,
+                'from'    => $source,
+                'to'      => 'ABORTED',
+                'source'  => 'user_abort',
+            ]);
+        }
 
         return Task::findOrFail($taskId);
     }

@@ -6,6 +6,7 @@ namespace Spora\Services;
 
 use Carbon\Carbon;
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use InvalidArgumentException;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\OrchestratorInterface;
@@ -242,6 +243,8 @@ final class TaskService implements TaskServiceInterface
             $aborted = $this->orchestrator->abort($task->id);
         } catch (InvalidTaskTransitionException $e) {
             throw new InvalidArgumentException($e->getMessage(), 0, $e);
+        } catch (ModelNotFoundException $e) {
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND, 0, $e);
         }
 
         $resource = $this->taskResource($aborted);
@@ -271,6 +274,8 @@ final class TaskService implements TaskServiceInterface
             $abortedChild = $this->orchestrator->abort($child->id);
         } catch (InvalidTaskTransitionException $e) {
             throw new InvalidArgumentException($e->getMessage(), 0, $e);
+        } catch (ModelNotFoundException $e) {
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND, 0, $e);
         }
 
         $this->cascadeAbortToAncestors((int) $child->parent_task_id);
@@ -286,16 +291,25 @@ final class TaskService implements TaskServiceInterface
      * Walks up the `parent_task_id` chain from `$parentTaskId` (nullable
      * when aborting a root task) and aborts every ancestor that is still
      * in `AWAITING_SUB_AGENTS`. Idempotent: ancestors that are already
-     * `ABORTED` or any other state are left untouched. Publishes once at
-     * the end (or not at all) for the cascaded parents — one Mercure
-     * event per affected ancestor keeps the live stream useful.
+     * `ABORTED` or any other state are left untouched. Publishes once
+     * per affected ancestor inside the loop — one Mercure event per
+     * cascaded parent keeps the live stream useful. Already-ABORTED
+     * ancestors are skipped before reaching `orchestrator->abort`.
      */
     private function cascadeAbortToAncestors(?int $parentTaskId): void
     {
         $cursor = $parentTaskId;
         $cascadeTargets = [];
+        // Defence against a corrupt parent_task_id cycle (e.g. A→B→A)
+        // turning the walk into an infinite loop.
+        $visited = [];
 
         while ($cursor !== null) {
+            if (isset($visited[$cursor])) {
+                break;
+            }
+            $visited[$cursor] = true;
+
             $row = Task::find($cursor);
             if ($row === null) {
                 break;

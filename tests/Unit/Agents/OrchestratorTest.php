@@ -1578,10 +1578,6 @@ it('publishes intermediate state when tools require approval', function (): void
     expect($publishCount)->toBe(1);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// Abort-bail — must publish tool output before returning
-// ---------------------------------------------------------------------------
-
 it('publishes the final tool batch even when status flips to ABORTED post-batch', function (): void {
     // Regression: when a user abort lands while a tool is executing, the
     // worker accepts the in-flight tool completion (so the result lands
@@ -1646,18 +1642,13 @@ it('publishes the final tool batch even when status flips to ABORTED post-batch'
     // The publish-then-bail ordering must produce ONE Mercure publish
     // even on the abort path. Without the fix this would be 0 — the
     // bail happens BEFORE the publish, leaving the chat to discover
-    // the just-completed tool only on reload. The status reflected in
-    // the payload comes from the in-memory Task, which still reads
-    // RUNNING here (the DB row is ABORTED but the Eloquent model in
-    // memory hasn't been reloaded); Mercure consumers reconcile the
-    // truth from the row either way.
+    // the just-completed tool only on reload. The publish payload
+    // reflects the freshly-fetched row (status=ABORTED here), so
+    // Mercure consumers see the truth without a separate reconcile
+    // step.
     expect($publishCount)->toBe(1)
-        ->and($capturedStatuses[0] ?? null)->toBeIn(['RUNNING', 'ABORTED']);
+        ->and($capturedStatuses[0] ?? null)->toBe('ABORTED');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
-
-// ---------------------------------------------------------------------------
-// Abort-during-LLM — must discard the LLM response, not complete the task
-// ---------------------------------------------------------------------------
 
 it('TickPhaseRunner.runTick discards the LLM response when status flips to ABORTED while waiting', function (): void {
     // Regression: the agent loop is mid-LLM-call when the user clicks

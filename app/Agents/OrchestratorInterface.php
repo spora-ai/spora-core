@@ -47,7 +47,13 @@ interface OrchestratorInterface
     public function reject(int $taskId, string $reason): void;
 
     /**
-     * Continue a completed or failed task with a new prompt.
+     * Continue a task from one of {COMPLETED, FAILED, ABORTED, RUNNING}.
+     * The RUNNING branch auto-flips to ABORTED, appends the marker row
+     * + user prompt, and returns without ticking — the next continue
+     * (on the now-ABORTED row) drives the LLM. ABORTED sources resume
+     * and wipe `data.aborted_at`. All branches reset retry-chain markers
+     * (`retry_of_task_id`, `retry_after`, `error_code`, `error_message`,
+     * `failure_reason`) so a stale auto-retry row becomes claimable again.
      *
      * @param  int      $taskId
      * @param  string   $newPrompt
