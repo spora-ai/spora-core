@@ -196,7 +196,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
     private function reschedulePendingEntries(int $scheduledRunId, string $nextRunAt): void
     {
-        $now = date(self::DB_TIMESTAMP_FORMAT);
+        $now = gmdate(self::DB_TIMESTAMP_FORMAT);
         Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $scheduledRunId)
             ->whereIn('status', [ScheduledRunNext::STATUS_PENDING, ScheduledRunNext::STATUS_CLAIMED])
@@ -273,7 +273,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
         $task = $this->orchestrator->start($agent->id, $prompt, (int) $maxSteps);
 
-        $lastRunAt = date(self::DB_TIMESTAMP_FORMAT);
+        $lastRunAt = gmdate(self::DB_TIMESTAMP_FORMAT);
 
         // Mark the current PENDING entry as DONE
         Capsule::table('scheduled_runs_next')

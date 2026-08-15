@@ -74,6 +74,43 @@ function makeWorkerRunCommand(): array
 }
 
 /**
+ * Build a ScheduledRunProcessor without going through WorkerRunCommand's
+ * constructor. Used by the B1 regression test, which needs the constructor
+ * to NOT pin UTC so the gmdate() fix can actually be exercised.
+ *
+ * Must be called AFTER makeWorkerRunCommand() so the global Capsule
+ * points at the same in-memory DB the test's data inserts hit.
+ */
+function makeStandaloneScheduledRunProcessor(): ScheduledRunProcessor
+{
+    $orchestrator = Mockery::mock(OrchestratorInterface::class);
+    $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
+        return Task::create([
+            'agent_id'    => $agentId,
+            'user_id'     => 1,
+            'status'      => 'RUNNING',
+            'user_prompt' => $prompt,
+            'max_steps'   => $maxSteps,
+            'step_count'  => 0,
+        ]);
+    });
+
+    $mercure = Mockery::mock(MercurePublisherInterface::class);
+    $mercure->allows('publish')->andReturn(true);
+
+    $notificationService = Mockery::mock(NotificationService::class);
+    $notificationService->allows('notifyScheduledRunCompleted')->andReturnNull();
+    $notificationService->allows('sendEmailForScheduledRun')->andReturnNull();
+
+    return new ScheduledRunProcessor(
+        $orchestrator,
+        new NullLogger(),
+        $mercure,
+        $notificationService,
+    );
+}
+
+/**
  * Registers an agent in the same DB that makeWorkerRunCommand() boots.
  * Must be called AFTER makeWorkerRunCommand() so both share the same in-memory DB.
  */
@@ -585,12 +622,14 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
     it('claimNextScheduledRun honours UTC even when server tz is non-UTC', function (): void {
         // B1 regression — the worker must not silently skip past-due entries on hosts
-        // whose default tz is not UTC. ScheduledRunProcessor's constructor pins UTC, so
-        // the claim uses gmdate() against UTC-stored due_at columns.
+        // whose default tz is not UTC. The TZ pin lives in WorkerRunCommand::execute,
+        // NOT in the processor's constructor (that would mask this exact bug). Boot the
+        // shared in-memory DB via makeWorkerRunCommand(), then construct a standalone
+        // processor so this test exercises gmdate() directly under an LA-tz frame.
+        makeWorkerRunCommand();
         $originalTz = date_default_timezone_get();
         date_default_timezone_set('America/Los_Angeles');
         try {
-            [$command] = makeWorkerRunCommand();
             [$userId, $agentId] = registerAgentInWorkerDb();
 
             $run = ScheduledRun::create([
@@ -611,11 +650,14 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
                 'updated_at'       => gmdate(DATETIME_FORMAT),
             ]);
 
-            $processed = runProcessScheduledRuns($command);
+            $processor = makeStandaloneScheduledRunProcessor();
+            $processor->lastProcessed = 0;
+            $processor->process(new NullOutput());
 
-            // The bug: with date() in LA tz on 2025-01-01, gmdate() and date() would disagree,
-            // and the old claim would skip past-due entries. With the fix the worker claims it.
-            expect($processed)->toBe(1);
+            // If the claim used date() under LA, WORKER_TEST_PAST_DUE_AT (UTC) would
+            // lex-compare against an LA wall-clock string and skip. With gmdate() the
+            // comparison is apples-to-apples UTC and the entry is claimed.
+            expect($processor->lastProcessed)->toBe(1);
 
             $entry = Capsule::table('scheduled_runs_next')
                 ->where('scheduled_run_id', $run->id)

@@ -36,11 +36,7 @@ final class ScheduledRunProcessor
         private readonly LoggerInterface $logger,
         private readonly MercurePublisherInterface $mercure,
         private readonly NotificationService $notificationService,
-    ) {
-        // All due_at comparisons happen in UTC; the server's default tz would silently
-        // skip past-due entries on any host not running with TZ=UTC.
-        date_default_timezone_set('UTC');
-    }
+    ) {}
 
     public function process(OutputInterface $output): void
     {

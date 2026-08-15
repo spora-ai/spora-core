@@ -238,6 +238,51 @@ describe('ScheduledRunService::createRun', function (): void {
             date_default_timezone_set($originalTz);
         }
     });
+
+    it('triggerRun writes scheduled_runs and scheduled_runs_next timestamps in UTC', function (): void {
+        // B7 follow-up — the manual-trigger path (POST /api/v1/agents/{id}/scheduled-runs/{runId}/trigger)
+        // writes claimed_at, completed_at, created_at, updated_at, last_run_at. All must
+        // be UTC for parity with the claim path.
+        $originalTz = date_default_timezone_get();
+        date_default_timezone_set('America/Los_Angeles');
+        try {
+            $service = makeScheduledRunService();
+            [$userId, $agentId] = createScheduledRunUserAgent();
+
+            $created = $service->createRun($agentId, $userId, [
+                'raw_prompt'      => 'Trigger UTC test',
+                'cron_expression' => SCHEDULED_RUN_TEST_CRON,
+                'timezone'        => 'UTC',
+            ]);
+            $runId = $created['scheduled_run']['id'];
+
+            // strtotime() with no TZ suffix uses the application default (LA here);
+            // suffix ' UTC' forces UTC parsing so gmdate() and strtotime() agree.
+            $expectedTs = strtotime(gmdate('Y-m-d H:i:s') . ' UTC');
+
+            $service->triggerRun($runId, $agentId, $userId);
+
+            // Raw rows: avoid Eloquent's 'datetime' cast (see reschedule test).
+            $row = Capsule::table('scheduled_runs')->where('id', $runId)->first();
+            expect($row->last_run_at)->not->toBeNull();
+            expect(strtotime($row->last_run_at . ' UTC'))->toBeGreaterThanOrEqual($expectedTs - 2);
+            expect(strtotime($row->last_run_at . ' UTC'))->toBeLessThanOrEqual($expectedTs + 2);
+            expect(strtotime($row->updated_at . ' UTC'))->toBeGreaterThanOrEqual($expectedTs - 2);
+            expect(strtotime($row->updated_at . ' UTC'))->toBeLessThanOrEqual($expectedTs + 2);
+
+            $entry = Capsule::table('scheduled_runs_next')
+                ->where('scheduled_run_id', $runId)
+                ->where('status', ScheduledRunNext::STATUS_DONE)
+                ->first();
+            expect($entry)->not->toBeNull();
+            expect(strtotime($entry->claimed_at . ' UTC'))->toBeGreaterThanOrEqual($expectedTs - 2);
+            expect(strtotime($entry->claimed_at . ' UTC'))->toBeLessThanOrEqual($expectedTs + 2);
+            expect(strtotime($entry->completed_at . ' UTC'))->toBeGreaterThanOrEqual($expectedTs - 2);
+            expect(strtotime($entry->completed_at . ' UTC'))->toBeLessThanOrEqual($expectedTs + 2);
+        } finally {
+            date_default_timezone_set($originalTz);
+        }
+    });
 });
 
 describe('ScheduledRunService::getRun', function (): void {

@@ -88,6 +88,14 @@ final class WorkerRunCommand extends Command
     {
         $this->database->bootDatabaseConnectionOnly();
 
+        // Pin UTC before any timestamp comparison. The DB columns are UTC (due_at,
+        // next_run_at, last_run_at, completed_at, created_at, updated_at), and the
+        // claim path uses gmdate() so it's UTC regardless of this pin — but other
+        // date() calls in the worker process (WorkerQueueProcessor's retry_after
+        // math, log timestamps) read from the default tz and need to agree with
+        // the UTC-stored columns.
+        date_default_timezone_set('UTC');
+
         $isDaemon = (bool) $input->getOption('daemon');
         $isOnce = (bool) $input->getOption('once');
         $includeQueue = (bool) $input->getOption('include-queue');
