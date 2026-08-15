@@ -71,10 +71,27 @@ final class ScheduledRunProcessor
                 'exception_class' => get_class($e),
                 'message' => $e->getMessage(),
             ]);
-            Capsule::table('scheduled_runs_next')
-                ->where('id', $entry->id)
-                ->update(['status' => ScheduledRunNext::STATUS_SKIPPED]);
             $output->writeln(sprintf('<error>Scheduled run %d failed: %s</error>', $run->id, $e->getMessage()));
+
+            // Symmetric with finalizeScheduledRun(): mark SKIPPED and either queue the next
+            // PENDING (recurring) or deactivate (one-shot) — all in one transaction so the
+            // failure path cannot leave the schedule in a zombie state.
+            $completedAt = gmdate(self::DB_DATETIME_FORMAT);
+            $nextDueAt = $this->computeNextDueAt($run);
+            Capsule::connection()->transaction(function () use ($entry, $completedAt, $nextDueAt, $run): void {
+                Capsule::table('scheduled_runs_next')
+                    ->where('id', $entry->id)
+                    ->update([
+                        'status'       => ScheduledRunNext::STATUS_SKIPPED,
+                        'completed_at' => $completedAt,
+                    ]);
+                if ($nextDueAt !== null) {
+                    $this->insertRecurringEntry($run, $nextDueAt, $completedAt);
+                    $this->updateRecurringRun($run, $completedAt, $nextDueAt);
+                } else {
+                    $this->deactivateRun($run, $completedAt);
+                }
+            });
             return;
         }
 
@@ -95,7 +112,7 @@ final class ScheduledRunProcessor
      */
     private function claimNextScheduledRun(): ?array
     {
-        $now = date(self::DB_DATETIME_FORMAT);
+        $now = gmdate(self::DB_DATETIME_FORMAT);
 
         return Capsule::connection()->transaction(function () use ($now) {
             $entry = Capsule::table('scheduled_runs_next')
@@ -178,7 +195,7 @@ final class ScheduledRunProcessor
      */
     private function finalizeScheduledRun(ScheduledRun $run, object $entry, Task $task): void
     {
-        $completedAt = date(self::DB_DATETIME_FORMAT);
+        $completedAt = gmdate(self::DB_DATETIME_FORMAT);
         $nextDueAt = $this->computeNextDueAt($run);
 
         // Atomically mark DONE and insert next PENDING entry (if recurring).

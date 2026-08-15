@@ -39,7 +39,7 @@ final class WorkerRunCommand extends Command
     private mixed $lockFd = null;
 
     /** Tracks how many scheduled runs were processed in the last processScheduledRuns() call (testing hook). */
-    public int $lastScheduledProcessed = 0;
+    public int $lastScheduledProcessedCount = 0;
 
     private readonly WorkerReaper $reaper;
     private readonly WorkerQueueProcessor $queueProcessor;
@@ -75,7 +75,7 @@ final class WorkerRunCommand extends Command
     {
         $this->setDescription('Drain QUEUED tasks, process scheduled runs, or run as a persistent daemon.');
         $this->addOption('daemon', 'd', InputOption::VALUE_NONE, 'Run as a persistent daemon (default when no flag is given).');
-        $this->addOption('once', null, InputOption::VALUE_NONE, 'Run once: process all due scheduled runs (and QUEUED tasks with --include-queue), then exit. Ideal for cron-driven deployments.');
+        $this->addOption('once', null, InputOption::VALUE_NONE, 'Run once: process one due scheduled run (and QUEUED tasks with --include-queue), then exit. Recurring backlogs are drained by the next cron fire. Ideal for cron-driven deployments.');
         $this->addOption('include-queue', null, InputOption::VALUE_NONE, 'With --once: also drain the QUEUED task queue in the same run');
         $this->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Max QUEUED tasks to process per run (0 = unlimited)', '0');
         $this->addOption('sleep', 's', InputOption::VALUE_REQUIRED, 'Microseconds to sleep when the queue is empty', '500000');
@@ -87,6 +87,14 @@ final class WorkerRunCommand extends Command
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $this->database->bootDatabaseConnectionOnly();
+
+        // Pin UTC before any timestamp comparison. The DB columns are UTC (due_at,
+        // next_run_at, last_run_at, completed_at, created_at, updated_at), and the
+        // claim path uses gmdate() so it's UTC regardless of this pin — but other
+        // date() calls in the worker process (WorkerQueueProcessor's retry_after
+        // math, log timestamps) read from the default tz and need to agree with
+        // the UTC-stored columns.
+        date_default_timezone_set('UTC');
 
         $isDaemon = (bool) $input->getOption('daemon');
         $isOnce = (bool) $input->getOption('once');
@@ -310,7 +318,7 @@ final class WorkerRunCommand extends Command
 
         if ($options->isDaemon || $options->isOnce) {
             $this->scheduledRunProcessor->process($output);
-            $this->lastScheduledProcessed = $this->scheduledRunProcessor->lastProcessed;
+            $this->lastScheduledProcessedCount = $this->scheduledRunProcessor->lastProcessed;
         }
 
         $this->queueProcessor->reapChildren();

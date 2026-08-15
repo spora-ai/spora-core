@@ -74,6 +74,43 @@ function makeWorkerRunCommand(): array
 }
 
 /**
+ * Build a ScheduledRunProcessor without going through WorkerRunCommand's
+ * constructor. Used by the B1 regression test, which needs the constructor
+ * to NOT pin UTC so the gmdate() fix can actually be exercised.
+ *
+ * Must be called AFTER makeWorkerRunCommand() so the global Capsule
+ * points at the same in-memory DB the test's data inserts hit.
+ */
+function makeStandaloneScheduledRunProcessor(): ScheduledRunProcessor
+{
+    $orchestrator = Mockery::mock(OrchestratorInterface::class);
+    $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
+        return Task::create([
+            'agent_id'    => $agentId,
+            'user_id'     => 1,
+            'status'      => 'RUNNING',
+            'user_prompt' => $prompt,
+            'max_steps'   => $maxSteps,
+            'step_count'  => 0,
+        ]);
+    });
+
+    $mercure = Mockery::mock(MercurePublisherInterface::class);
+    $mercure->allows('publish')->andReturn(true);
+
+    $notificationService = Mockery::mock(NotificationService::class);
+    $notificationService->allows('notifyScheduledRunCompleted')->andReturnNull();
+    $notificationService->allows('sendEmailForScheduledRun')->andReturnNull();
+
+    return new ScheduledRunProcessor(
+        $orchestrator,
+        new NullLogger(),
+        $mercure,
+        $notificationService,
+    );
+}
+
+/**
  * Registers an agent in the same DB that makeWorkerRunCommand() boots.
  * Must be called AFTER makeWorkerRunCommand() so both share the same in-memory DB.
  */
@@ -581,6 +618,186 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             ->where('status', ScheduledRunNext::STATUS_PENDING)
             ->count();
         expect($pendingCount)->toBe(1);
+    });
+
+    it('claimNextScheduledRun honours UTC even when server tz is non-UTC', function (): void {
+        // B1 regression — the worker must not silently skip past-due entries on hosts
+        // whose default tz is not UTC. The TZ pin lives in WorkerRunCommand::execute,
+        // NOT in the processor's constructor (that would mask this exact bug). Boot the
+        // shared in-memory DB via makeWorkerRunCommand(), then construct a standalone
+        // processor so this test exercises gmdate() directly under an LA-tz frame.
+        makeWorkerRunCommand();
+        $originalTz = date_default_timezone_get();
+        date_default_timezone_set('America/Los_Angeles');
+        try {
+            [$userId, $agentId] = registerAgentInWorkerDb();
+
+            $run = ScheduledRun::create([
+                'agent_id'        => $agentId,
+                'user_id'         => $userId,
+                'raw_prompt'      => 'UTC-poll test',
+                'cron_expression' => DAILY_9AM_CRON,
+                'timezone'        => 'UTC',
+                'is_active'       => true,
+                'next_run_at'     => WORKER_TEST_PAST_DUE_AT,
+            ]);
+
+            Capsule::table('scheduled_runs_next')->insert([
+                'scheduled_run_id' => $run->id,
+                'due_at'           => WORKER_TEST_PAST_DUE_AT,
+                'status'           => ScheduledRunNext::STATUS_PENDING,
+                'created_at'       => gmdate(DATETIME_FORMAT),
+                'updated_at'       => gmdate(DATETIME_FORMAT),
+            ]);
+
+            $processor = makeStandaloneScheduledRunProcessor();
+            $processor->lastProcessed = 0;
+            $processor->process(new NullOutput());
+
+            // If the claim used date() under LA, WORKER_TEST_PAST_DUE_AT (UTC) would
+            // lex-compare against an LA wall-clock string and skip. With gmdate() the
+            // comparison is apples-to-apples UTC and the entry is claimed.
+            expect($processor->lastProcessed)->toBe(1);
+
+            $entry = Capsule::table('scheduled_runs_next')
+                ->where('scheduled_run_id', $run->id)
+                ->first();
+            expect($entry->status)->toBe(ScheduledRunNext::STATUS_DONE);
+        } finally {
+            date_default_timezone_set($originalTz);
+        }
+    });
+
+    it('process creates next PENDING entry when orchestrator throws (recurring)', function (): void {
+        // B2 regression — the catch branch must not skip finalisation: it must queue
+        // the next PENDING for recurring schedules, atomically with marking SKIPPED.
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
+
+        $throwingOrchestrator = Mockery::mock(OrchestratorInterface::class);
+        $throwingOrchestrator->allows('start')
+            ->andThrow(new RuntimeException('LLM down'));
+
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+
+        $notification = Mockery::mock(NotificationService::class);
+
+        $processor = new ScheduledRunProcessor(
+            $throwingOrchestrator,
+            new NullLogger(),
+            $mercure,
+            $notification,
+        );
+
+        [$userId, $agentId] = registerAgentInWorkerDb();
+
+        $run = ScheduledRun::create([
+            'agent_id'        => $agentId,
+            'user_id'         => $userId,
+            'raw_prompt'      => 'Recurring with throwing orchestrator',
+            'cron_expression' => DAILY_9AM_CRON,
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+            'next_run_at'     => WORKER_TEST_PAST_DUE_AT,
+        ]);
+
+        Capsule::table('scheduled_runs_next')->insert([
+            'scheduled_run_id' => $run->id,
+            'due_at'           => WORKER_TEST_PAST_DUE_AT,
+            'status'           => ScheduledRunNext::STATUS_PENDING,
+            'created_at'       => date(DATETIME_FORMAT),
+            'updated_at'       => date(DATETIME_FORMAT),
+        ]);
+
+        $processor->process(new NullOutput());
+
+        // Old entry must be SKIPPED, not stuck CLAIMED
+        $oldEntry = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $run->id)
+            ->where('due_at', WORKER_TEST_PAST_DUE_AT)
+            ->first();
+        expect($oldEntry->status)->toBe(ScheduledRunNext::STATUS_SKIPPED);
+        expect($oldEntry->completed_at)->not->toBeNull();
+
+        // A new PENDING row must exist for the next cron fire
+        $nextEntry = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $run->id)
+            ->where('status', ScheduledRunNext::STATUS_PENDING)
+            ->first();
+        expect($nextEntry)->not->toBeNull();
+        expect($nextEntry->due_at)->not->toBe(WORKER_TEST_PAST_DUE_AT);
+
+        // Recurring run must stay active and have its next_run_at advanced
+        $run->refresh();
+        expect((bool) $run->is_active)->toBeTrue();
+        expect($run->next_run_at)->not->toBeNull();
+        expect($run->next_run_at->toDateTimeString())->not->toBe(WORKER_TEST_PAST_DUE_AT);
+    });
+
+    it('process deactivates run when orchestrator throws (one-shot)', function (): void {
+        // B2 regression — one-shot failures must deactivate the run, not leave it
+        // active with no PENDING entry and no SKIPPED bookkeeping.
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
+
+        $throwingOrchestrator = Mockery::mock(OrchestratorInterface::class);
+        $throwingOrchestrator->allows('start')
+            ->andThrow(new RuntimeException('LLM down'));
+
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+
+        $notification = Mockery::mock(NotificationService::class);
+
+        $processor = new ScheduledRunProcessor(
+            $throwingOrchestrator,
+            new NullLogger(),
+            $mercure,
+            $notification,
+        );
+
+        [$userId, $agentId] = registerAgentInWorkerDb();
+
+        $run = ScheduledRun::create([
+            'agent_id'        => $agentId,
+            'user_id'         => $userId,
+            'raw_prompt'      => 'One-shot with throwing orchestrator',
+            'cron_expression' => null,
+            'run_at'          => WORKER_TEST_PAST_DUE_AT,
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+            'next_run_at'     => WORKER_TEST_PAST_DUE_AT,
+        ]);
+
+        Capsule::table('scheduled_runs_next')->insert([
+            'scheduled_run_id' => $run->id,
+            'due_at'           => WORKER_TEST_PAST_DUE_AT,
+            'status'           => ScheduledRunNext::STATUS_PENDING,
+            'created_at'       => date(DATETIME_FORMAT),
+            'updated_at'       => date(DATETIME_FORMAT),
+        ]);
+
+        $processor->process(new NullOutput());
+
+        // Old entry is SKIPPED
+        $oldEntry = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $run->id)
+            ->first();
+        expect($oldEntry->status)->toBe(ScheduledRunNext::STATUS_SKIPPED);
+
+        // No orphan PENDING row was left behind
+        $pendingCount = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $run->id)
+            ->where('status', ScheduledRunNext::STATUS_PENDING)
+            ->count();
+        expect($pendingCount)->toBe(0);
+
+        // Run is deactivated
+        $run->refresh();
+        expect((bool) $run->is_active)->toBeFalse();
     });
 });
 
