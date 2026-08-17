@@ -25,8 +25,6 @@ afterEach(function (): void {
 
 function makePreferencesService(): array
 {
-    // Boot an AuthService so helper functions like bootAuthLayer() work in
-    // any of the preference test scenarios.
     $authService = bootAuthLayer();
     $preferences = new LLMConfigPreferences();
 
@@ -40,7 +38,7 @@ function makeGlobalDefaultConfig(string $name): LLMDriverConfiguration
     $service = new Spora\Services\LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
     $config = new LLMDriverConfiguration();
-    $config->user_id = null;
+    $config->principal_id = null;
     $config->is_global = true;
     $config->name = $name;
     $config->driver_class = OpenAICompatibleDriver::class;
@@ -53,73 +51,78 @@ function makeGlobalDefaultConfig(string $name): LLMDriverConfiguration
     return $config;
 }
 
-test('setUserPreferredConfig creates a preference row for a global config', function (): void {
+test('setPrincipalPreferredConfig creates a preference row for a global config', function (): void {
     [$preferences, $authService] = makePreferencesService();
     $userId = $authService->register('pref-create@example.com', 'Password1!', 'Pref');
+    $principalId = createUserPrincipalPublic($userId);
     $config = makeGlobalDefaultConfig('Global Cfg');
 
-    $ok = $preferences->setUserPreferredConfig($userId, $config->id);
+    $ok = $preferences->setPrincipalPreferredConfig($principalId, $config->id, $userId);
 
     expect($ok)->toBeTrue();
 
-    $row = PrincipalPreference::where('principal_id', $userId)->first();
+    $row = PrincipalPreference::where('principal_id', $principalId)->first();
     expect($row)->not->toBeNull()
         ->and($row->preferred_llm_config_id)->toBe($config->id);
 });
 
-test('setUserPreferredConfig returns false when the target config does not exist', function (): void {
+test('setPrincipalPreferredConfig returns false when the target config does not exist', function (): void {
     [$preferences, $authService] = makePreferencesService();
     $userId = $authService->register('pref-missing@example.com', 'Password1!', 'Pref');
+    $principalId = createUserPrincipalPublic($userId);
 
-    expect($preferences->setUserPreferredConfig($userId, 999_999))->toBeFalse();
+    expect($preferences->setPrincipalPreferredConfig($principalId, 999_999, $userId))->toBeFalse();
 });
 
-test('setUserPreferredConfig rejects a config that belongs to another user', function (): void {
+test('setPrincipalPreferredConfig rejects a config that belongs to another user', function (): void {
     [$preferences, $authService] = makePreferencesService();
     $userA = $authService->register('pref-a@example.com', 'Password1!', 'A');
     $userB = $authService->register('pref-b@example.com', 'Password1!', 'B');
 
     $configA = new LLMDriverConfiguration();
-    $configA->user_id = $userA;
+    $configA->principal_id = createUserPrincipalPublic($userA);
     $configA->name = 'A Only';
     $configA->driver_class = OpenAICompatibleDriver::class;
     $configA->settings = json_encode([]);
     $configA->save();
 
-    expect($preferences->setUserPreferredConfig($userB, $configA->id))->toBeFalse();
+    $principalB = createUserPrincipalPublic($userB);
+    expect($preferences->setPrincipalPreferredConfig($principalB, $configA->id, $userB))->toBeFalse();
 
-    $row = PrincipalPreference::where('principal_id', $userB)->first();
+    $row = PrincipalPreference::where('principal_id', $principalB)->first();
     expect($row)->toBeNull();
 });
 
-test('unsetUserPreferredConfig deletes the row when one exists', function (): void {
+test('unsetPrincipalPreferredConfig deletes the row when one exists', function (): void {
     [$preferences, $authService] = makePreferencesService();
     $userId = $authService->register('pref-unset@example.com', 'Password1!', 'Unset');
+    $principalId = createUserPrincipalPublic($userId);
     $config = makeGlobalDefaultConfig('To Unset');
 
-    $preferences->setUserPreferredConfig($userId, $config->id);
-    $preferences->unsetUserPreferredConfig($userId);
+    $preferences->setPrincipalPreferredConfig($principalId, $config->id, $userId);
+    $preferences->unsetPrincipalPreferredConfig($principalId);
 
-    $row = PrincipalPreference::where('principal_id', $userId)->first();
+    $row = PrincipalPreference::where('principal_id', $principalId)->first();
     expect($row)->toBeNull();
 });
 
-test('unsetUserPreferredConfig is a no-op when no preference exists', function (): void {
+test('unsetPrincipalPreferredConfig is a no-op when no preference exists', function (): void {
     [$preferences, $authService] = makePreferencesService();
     $userId = $authService->register('pref-unset-empty@example.com', 'Password1!', 'Empty');
+    $principalId = createUserPrincipalPublic($userId);
 
-    // Should not throw
-    $preferences->unsetUserPreferredConfig($userId);
+    $preferences->unsetPrincipalPreferredConfig($principalId);
 
-    $row = PrincipalPreference::where('principal_id', $userId)->first();
+    $row = PrincipalPreference::where('principal_id', $principalId)->first();
     expect($row)->toBeNull();
 });
 
-test('getUserPreferredConfig returns null when no preference has been set', function (): void {
+test('getPrincipalPreferredConfig returns null when no preference has been set', function (): void {
     [$preferences, $authService] = makePreferencesService();
     $userId = $authService->register('pref-none@example.com', 'Password1!', 'None');
+    $principalId = createUserPrincipalPublic($userId);
 
-    expect($preferences->getUserPreferredConfig($userId))->toBeNull();
+    expect($preferences->getPrincipalPreferredConfig($principalId))->toBeNull();
 });
 
 test('getEffectiveConfigForAgent falls back to global default when tiers 1 and 2 are empty', function (): void {
@@ -135,10 +138,11 @@ test('getEffectiveConfigForAgent falls back to global default when tiers 1 and 2
         'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
+    $principalId = createUserPrincipalPublic($userId);
 
     $agent = new Agent();
     $agent->id = 1234;
-    $agent->user_id = $userId;
+    $agent->principal_id = $principalId;
     $agent->llm_driver_config_id = null;
 
     $result = $preferences->getEffectiveConfigForAgent($agent);
@@ -158,10 +162,11 @@ test('getEffectiveConfigForAgent returns null at every tier when nothing is conf
         'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
+    $principalId = createUserPrincipalPublic($userId);
 
     $agent = new Agent();
     $agent->id = 1235;
-    $agent->user_id = $userId;
+    $agent->principal_id = $principalId;
     $agent->llm_driver_config_id = null;
 
     expect($preferences->getEffectiveConfigForAgent($agent))->toBeNull();

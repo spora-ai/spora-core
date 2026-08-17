@@ -20,7 +20,7 @@ it('disables Eloquent timestamps (created_at managed by hook)', function (): voi
 it('allows mass assignment and creation without created_at', function (): void {
     $userId = bootAuthLayer()->register('notif@example.com', NOTIFICATION_TEST_PASSWORD, 'Notif');
 
-    $notification = ([
+    $notification = Notification::create([
         'user_id' => $userId,
         'type'    => 'TASK_COMPLETED',
         'title'   => 'Task done',
@@ -36,7 +36,7 @@ it('allows mass assignment and creation without created_at', function (): void {
 it('casts data to array and read_at to Carbon', function (): void {
     $userId = bootAuthLayer()->register('notif-cast@example.com', NOTIFICATION_TEST_PASSWORD, 'NotifCast');
 
-    $notification = ([
+    $notification = Notification::create([
         'user_id' => $userId,
         'type'    => 'TASK_FAILED',
         'title'   => 'Oops',
@@ -51,7 +51,7 @@ it('casts data to array and read_at to Carbon', function (): void {
 
 it('belongs to a user', function (): void {
     $userId = bootAuthLayer()->register('notif-rel@example.com', NOTIFICATION_TEST_PASSWORD, 'NotifRel');
-    $notification = ([
+    $notification = Notification::create([
         'user_id' => $userId,
         'type'    => 'INFO',
         'title'   => 'Hi',
