@@ -158,7 +158,7 @@ final class AgentController
 
         $requested = (int) $body['principal_id'];
         if ($requested <= 0) {
-            return $this->authService->isAdmin() ? null : null;
+            return null;
         }
 
         if ($this->authService->isAdmin()) {
