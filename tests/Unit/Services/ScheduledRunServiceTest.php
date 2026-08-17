@@ -79,7 +79,7 @@ describe('ScheduledRunService::getRunsForAgent', function (): void {
 
         ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Daily',
             'cron_expression' => SCHEDULED_RUN_TEST_CRON,
             'timezone'        => 'UTC',
@@ -104,7 +104,7 @@ describe('ScheduledRunService::getRunsForAgent', function (): void {
 
         ScheduledRun::create([
             'agent_id'   => $agentB->id,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt' => 'B only',
             'timezone'   => 'UTC',
             'is_active'  => true,
@@ -312,7 +312,7 @@ describe('ScheduledRunService::getRun', function (): void {
 
         $runB = ScheduledRun::create([
             'agent_id'   => $agentB->id,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt' => 'B',
             'timezone'   => 'UTC',
             'is_active'  => true,
@@ -337,7 +337,7 @@ describe('ScheduledRunService::updateRun', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'   => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt' => 'before',
             'timezone'   => 'UTC',
             'is_active'  => true,
@@ -358,7 +358,7 @@ describe('ScheduledRunService::updateRun', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'   => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt' => 'pause me',
             'timezone'   => 'UTC',
             'is_active'  => true,
@@ -388,7 +388,7 @@ describe('ScheduledRunService::deleteRun', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'   => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt' => 'delete me',
             'timezone'   => 'UTC',
             'is_active'  => true,
@@ -438,7 +438,7 @@ describe('ScheduledRunService::triggerRun', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'   => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt' => 'trigger me',
             'timezone'   => 'UTC',
             'is_active'  => true,
@@ -473,7 +473,7 @@ describe('ScheduledRunService::triggerRun', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'recurring trigger',
             'cron_expression' => SCHEDULED_RUN_TEST_CRON,
             'timezone'        => 'UTC',

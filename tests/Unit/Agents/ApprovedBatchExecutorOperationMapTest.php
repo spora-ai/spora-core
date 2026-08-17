@@ -26,6 +26,7 @@ use Spora\Models\ToolCall as ToolCallModel;
  */
 final class ApprovedBatchExecutorOperationMapTest extends TestCase
 {
+    use \Tests\Concerns\CreatesPrincipal;
     protected function setUp(): void
     {
         parent::setUp();

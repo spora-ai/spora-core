@@ -15,7 +15,7 @@ describe('UserLocation', function (): void {
 
     it('belongs to user', function (): void {
         $loc = UserLocation::create([
-            'principal_id' => createUserPrincipalPublic($this->userId),
+            'user_id' => $this->userId,
             'name'   => 'Home',
             'address' => '123 Main St',
         ]);
@@ -24,8 +24,8 @@ describe('UserLocation', function (): void {
     });
 
     it('can create multiple locations for same user', function (): void {
-        UserLocation::create(['principal_id' => createUserPrincipalPublic($this->userId), 'name' => 'Home', 'address' => '123 Main St']);
-        UserLocation::create(['principal_id' => createUserPrincipalPublic($this->userId), 'name' => 'Work', 'address' => '456 Office Blvd']);
+        UserLocation::create(['user_id' => $this->userId, 'name' => 'Home', 'address' => '123 Main St']);
+        UserLocation::create(['user_id' => $this->userId, 'name' => 'Work', 'address' => '456 Office Blvd']);
 
         $locations = UserLocation::where('user_id', $this->userId)->get();
         expect($locations)->toHaveCount(2);
@@ -33,7 +33,7 @@ describe('UserLocation', function (): void {
 
     it('casts is_default as boolean', function (): void {
         $loc = UserLocation::create([
-            'principal_id' => createUserPrincipalPublic($this->userId),
+            'user_id' => $this->userId,
             'name'   => 'Default',
             'address' => '123 Main St',
             'is_default' => true,
@@ -49,15 +49,15 @@ describe('UserLocation', function (): void {
     });
 
     it('user locations relationship returns all locations', function (): void {
-        UserLocation::create(['principal_id' => createUserPrincipalPublic($this->userId), 'name' => 'A', 'address' => 'A']);
-        UserLocation::create(['principal_id' => createUserPrincipalPublic($this->userId), 'name' => 'B', 'address' => 'B']);
+        UserLocation::create(['user_id' => $this->userId, 'name' => 'A', 'address' => 'A']);
+        UserLocation::create(['user_id' => $this->userId, 'name' => 'B', 'address' => 'B']);
 
         $user = User::find($this->userId);
         expect($user->locations)->toHaveCount(2);
     });
 
     it('deletes locations when user is deleted', function (): void {
-        UserLocation::create(['principal_id' => createUserPrincipalPublic($this->userId), 'name' => 'Home', 'address' => '123 Main St']);
+        UserLocation::create(['user_id' => $this->userId, 'name' => 'Home', 'address' => '123 Main St']);
 
         User::destroy($this->userId);
 
