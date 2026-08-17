@@ -396,12 +396,13 @@ test('deleteGlobalSettings is idempotent (no error if not exists)', function ():
 test('deleteUserSettings removes the row', function (): void {
     [$service, , $authService] = makeToolConfigService();
     $userId = $authService->register('delete-user@example.com', 'Password1!', 'Deleteuser');
+    $principalId = createUserPrincipalPublic($userId);
 
     $service->putUserSettings(TestTool::class, $userId, ['max_results' => '30']);
-    expect(Capsule::table('tool_user_settings')->where('user_id', $userId)->exists())->toBeTrue();
+    expect(Capsule::table('tool_user_settings')->where('principal_id', $principalId)->exists())->toBeTrue();
 
     $service->deleteUserSettings(TestTool::class, $userId);
-    expect(Capsule::table('tool_user_settings')->where('user_id', $userId)->exists())->toBeFalse();
+    expect(Capsule::table('tool_user_settings')->where('principal_id', $principalId)->exists())->toBeFalse();
 })->afterEach(fn() => Database::resetBootState());
 
 test('deleteUserSettings requires userId to target correct user', function (): void {
