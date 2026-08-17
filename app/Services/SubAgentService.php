@@ -14,8 +14,6 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
-use Spora\Services\PrincipalResolver;
-use Spora\Services\PrincipalService;
 use Spora\Services\Text\Utf8Sanitizer;
 use Throwable;
 

@@ -38,7 +38,7 @@ it('decodes settings JSON via getSettings()', function (): void {
         'name'         => 'Json',
         'driver_class' => 'Spora\Drivers\MockDriver',
         'settings'     => json_encode(['api_key' => 'sk-test', 'model' => 'gpt-4']),
-        'is_global'    => false,
+        'is_global'    => true,
     ]);
 
     expect($config->getSettings())->toBe(['api_key' => 'sk-test', 'model' => 'gpt-4']);
@@ -48,7 +48,7 @@ it('returns [] from getSettings() when settings is null', function (): void {
     $config = LLMDriverConfiguration::create([
         'name'         => 'Empty',
         'driver_class' => 'Spora\Drivers\MockDriver',
-        'is_global'    => false,
+        'is_global'    => true,
     ]);
 
     expect($config->getSettings())->toBe([]);
@@ -59,7 +59,7 @@ it('returns [] from getSettings() when settings contains invalid JSON', function
         'name'         => 'Bad',
         'driver_class' => 'Spora\Drivers\MockDriver',
         'settings'     => '{not valid json',
-        'is_global'    => false,
+        'is_global'    => true,
     ]);
 
     expect($config->getSettings())->toBe([]);
@@ -82,5 +82,5 @@ it('belongs to a principal and has many principal preferences', function (): voi
     expect($config->principal)->toBeInstanceOf(Principal::class)
         ->and((int) $config->principal->getKey())->toBe($principalId)
         ->and($config->principalPreferences)->toHaveCount(1)
-        ->and((int) $config->principalPreferences->first()->preferred_llm_config_id)->toBe($config->id);
+        ->and((int) $config->principalPreferences->first()->preferred_llm_config_id)->toBe((int) $config->id);
 });

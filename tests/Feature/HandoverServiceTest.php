@@ -64,7 +64,7 @@ describe('HandoverService::handover', function (): void {
 
         $source = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'    => $sourceAgentId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Original prompt',
@@ -110,7 +110,7 @@ describe('HandoverService::handover', function (): void {
 
         $foreignSource = Task::create([
             'principal_id' => createUserPrincipalPublic($otherUserId),
-        'user_id'     => $otherUserId,
+            'user_id'     => $otherUserId,
             'agent_id'    => $sourceAgentId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Foreign prompt',
@@ -144,7 +144,7 @@ describe('HandoverService::handover', function (): void {
 
         $source = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'    => $sourceAgentId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Original',
@@ -167,7 +167,7 @@ describe('HandoverService::handover', function (): void {
 
         $source = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'    => $sourceAgentId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Original',

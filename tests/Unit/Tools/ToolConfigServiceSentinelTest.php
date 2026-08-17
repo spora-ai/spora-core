@@ -66,7 +66,7 @@ test('putAgentOverride preserves password field when sentinel *** is sent', func
     $userId = $authService->register('sentinel-agent@example.com', 'Password1!', 'Sentinel Agent');
 
     $agent = new Agent();
-    $agent->user_id = $userId;
+    $agent->principal_id = $this->createUserPrincipal($userId);
     $agent->name = 'Sentinel Agent';
     $agent->save();
     $agentId = (int) $agent->id;

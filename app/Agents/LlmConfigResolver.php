@@ -8,6 +8,7 @@ use Spora\Agents\Exceptions\LlmConfigurationMissingException;
 use Spora\Models\Agent;
 use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
+use Throwable;
 
 /**
  * Resolves the effective LLM driver configuration for a given agent.
@@ -61,7 +62,7 @@ final class LlmConfigResolver
             return isset($settings['temperature']) && $settings['temperature'] !== ''
                 ? (float) $settings['temperature']
                 : $default;
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return $default;
         }
     }

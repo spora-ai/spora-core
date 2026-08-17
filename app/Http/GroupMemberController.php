@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use DateTimeInterface;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\Group;
@@ -67,7 +68,7 @@ final class GroupMemberController
             static fn(GroupMembership $m): array => [
                 'user_id'   => (int) $m->user_id,
                 'role'      => (string) $m->role,
-                'joined_at' => $m->joined_at?->format(\DateTimeInterface::ATOM),
+                'joined_at' => $m->joined_at?->format(DateTimeInterface::ATOM),
             ],
             $rows->all(),
         );

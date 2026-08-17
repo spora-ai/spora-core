@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Concerns;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use PDOException;
+use RuntimeException;
 
 /**
  * Test-time helpers for materialising user-principals and the agents /
@@ -44,14 +46,14 @@ trait CreatesPrincipal
                 'created_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
-        } catch (\PDOException) {
+        } catch (PDOException) {
             // Lost the race to a parallel insert. Re-read.
             $existing = Capsule::table('principals')
                 ->where('type', 'user')->where('user_id', $userId)->value('id');
             if ($existing !== null) {
                 return (int) $existing;
             }
-            throw new \RuntimeException("Failed to materialise user-principal for user {$userId}");
+            throw new RuntimeException("Failed to materialise user-principal for user {$userId}");
         }
     }
 

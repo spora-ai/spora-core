@@ -72,7 +72,7 @@ describe('LLMConfigController::show', function (): void {
         $userId = bootAuth($authService);
 
         $config = new LLMDriverConfiguration();
-        $config->user_id = $userId;
+        $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'Showable Config';
         $config->driver_class = OpenAICompatibleDriver::class;
         $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'm']));
@@ -162,7 +162,7 @@ describe('LLMConfigController::update', function (): void {
         $userId = bootAuth($authService);
 
         $config = new LLMDriverConfiguration();
-        $config->user_id = $userId;
+        $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'Old Name';
         $config->driver_class = OpenAICompatibleDriver::class;
         $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']));
@@ -191,7 +191,7 @@ describe('LLMConfigController::update', function (): void {
         $userId = bootAuth($authService);
 
         $config = new LLMDriverConfiguration();
-        $config->user_id = $userId;
+        $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'For Update Bad JSON';
         $config->driver_class = OpenAICompatibleDriver::class;
         $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']));
@@ -210,7 +210,7 @@ describe('LLMConfigController::destroy', function (): void {
         $userId = bootAuth($authService);
 
         $config = new LLMDriverConfiguration();
-        $config->user_id = $userId;
+        $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'ToDelete';
         $config->driver_class = OpenAICompatibleDriver::class;
         $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']));
@@ -240,7 +240,7 @@ describe('LLMConfigController::setDefault', function (): void {
         $authService->grantRole($userId, Role::ADMIN);
 
         $config = new LLMDriverConfiguration();
-        $config->user_id = null;
+        $config->principal_id = null;
         $config->is_global = true;
         $config->name = 'Default Global Config';
         $config->driver_class = OpenAICompatibleDriver::class;

@@ -18,7 +18,6 @@ use Spora\Models\User;
 use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\Exceptions\PromptTemplateMissingException;
 use Spora\Services\Exceptions\ScheduledRunNotFoundException;
-use Spora\Services\PrincipalResolver;
 use Throwable;
 
 /**

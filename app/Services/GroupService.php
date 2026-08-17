@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use InvalidArgumentException;
 use Spora\Models\Group;
 use Spora\Models\GroupMembership;
 use Spora\Models\Principal;
@@ -36,8 +37,7 @@ final class GroupService
 {
     public function __construct(
         private readonly PrincipalService $principalService,
-    ) {
-    }
+    ) {}
 
     /**
      * Create a new group. The creator is inserted as `role: owner` in
@@ -87,7 +87,7 @@ final class GroupService
     public function addMember(int $groupId, int $userIdToAdd, string $role, int $callerUserId): void
     {
         if (!in_array($role, [GroupMembership::ROLE_OWNER, GroupMembership::ROLE_ADMIN, GroupMembership::ROLE_MEMBER], true)) {
-            throw new \InvalidArgumentException("Unknown role: {$role}");
+            throw new InvalidArgumentException("Unknown role: {$role}");
         }
 
         Capsule::connection()->transaction(
@@ -98,13 +98,13 @@ final class GroupService
 
                 if ($role === GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_OWNER) {
                     throw new GroupMembershipRuleException(
-                        'Only group owners can add owners.'
+                        'Only group owners can add owners.',
                     );
                 }
 
                 if ($callerRole !== GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_ADMIN) {
                     throw new GroupMembershipRuleException(
-                        'Caller must be owner or admin to add a member.'
+                        'Caller must be owner or admin to add a member.',
                     );
                 }
 
@@ -114,7 +114,7 @@ final class GroupService
                     ->first();
                 if ($existing !== null) {
                     throw new GroupMembershipRuleException(
-                        "User {$userIdToAdd} is already a member of group {$groupId}."
+                        "User {$userIdToAdd} is already a member of group {$groupId}.",
                     );
                 }
 
@@ -142,7 +142,7 @@ final class GroupService
     public function changeMemberRole(int $groupId, int $memberUserId, string $newRole, int $callerUserId): void
     {
         if (!in_array($newRole, [GroupMembership::ROLE_OWNER, GroupMembership::ROLE_ADMIN, GroupMembership::ROLE_MEMBER], true)) {
-            throw new \InvalidArgumentException("Unknown role: {$newRole}");
+            throw new InvalidArgumentException("Unknown role: {$newRole}");
         }
 
         Capsule::connection()->transaction(
@@ -160,7 +160,7 @@ final class GroupService
 
                 if ($callerRole !== GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_ADMIN) {
                     throw new GroupMembershipRuleException(
-                        'Caller must be owner or admin to change roles.'
+                        'Caller must be owner or admin to change roles.',
                     );
                 }
 
@@ -170,7 +170,7 @@ final class GroupService
                     ->first();
                 if ($existing === null) {
                     throw new GroupMembershipRuleException(
-                        "User {$memberUserId} is not a member of group {$groupId}."
+                        "User {$memberUserId} is not a member of group {$groupId}.",
                     );
                 }
 
@@ -182,7 +182,7 @@ final class GroupService
                         ->count();
                     if ($ownerCount <= 1) {
                         throw new GroupMembershipRuleException(
-                            'Cannot demote the last owner of the group.'
+                            'Cannot demote the last owner of the group.',
                         );
                     }
                 }
@@ -231,17 +231,17 @@ final class GroupService
                         ->count();
                     if ($ownerCount <= 1) {
                         throw new GroupMembershipRuleException(
-                            'Cannot remove the last owner of the group.'
+                            'Cannot remove the last owner of the group.',
                         );
                     }
                     if ($callerRole !== GroupMembership::ROLE_OWNER) {
                         throw new GroupMembershipRuleException(
-                            'Only owners can remove other owners.'
+                            'Only owners can remove other owners.',
                         );
                     }
                 } elseif ($callerRole !== GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_ADMIN) {
                     throw new GroupMembershipRuleException(
-                        'Caller must be owner or admin to remove members.'
+                        'Caller must be owner or admin to remove members.',
                     );
                 }
 

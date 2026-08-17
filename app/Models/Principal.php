@@ -85,7 +85,7 @@ final class Principal extends Model
         $hasGroup = $this->group_id !== null;
         if ($hasUser === $hasGroup) {
             throw new LogicException(
-                'Principal must reference exactly one of user_id or group_id.'
+                'Principal must reference exactly one of user_id or group_id.',
             );
         }
         if ($hasUser && $this->type !== self::TYPE_USER) {

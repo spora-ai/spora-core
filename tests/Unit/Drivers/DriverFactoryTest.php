@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\NullLogger;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
@@ -33,25 +32,8 @@ function createConfigForTest(
 ): LLMDriverConfiguration {
     $service ??= makeSecureLLMConfigService();
 
-    // Global configs have no user FK
-    if (!$isGlobal) {
-        // Ensure the user exists (FK constraint on user_id). Use SELECT + INSERT to avoid
-        // the deferred-FK behavior of INSERT OR IGNORE in SQLite transactions.
-        $userExists = Capsule::table('users')->where('id', $userId)->exists();
-        if (!$userExists) {
-            Capsule::table('users')->insert([
-                'id'         => $userId,
-                'email'      => "user{$userId}@test.local",
-                'password'   => password_hash('Password1!', PASSWORD_DEFAULT),
-                'registered' => time(),
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
-            ]);
-        }
-    }
-
     $config = new LLMDriverConfiguration();
-    $config->user_id = $isGlobal ? null : $userId;
+    $config->principal_id = $isGlobal ? null : createUserPrincipalPublic($userId);
     $config->name = $name;
     $config->driver_class = $driverClass;
     $config->settings = json_encode($service->encodeSettings($driverClass, $settings));
@@ -120,6 +102,7 @@ test('makeFromAgent falls back to OpenAI driver when no config exists', function
 
     $agent = new Agent();
     $agent->id = 3;
+    $agent->principal_id = createUserPrincipalPublic(3);
     $agent->name = 'Test';
     $agent->llm_driver_config_id = null;
 

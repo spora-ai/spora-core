@@ -852,7 +852,7 @@ describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
         $task = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'status'      => 'QUEUED',
             'user_prompt' => 'Test prompt',
             'max_steps'   => 10,
@@ -917,7 +917,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
         Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'status'      => 'QUEUED',
             'user_prompt' => 'Should not run',
             'max_steps'   => 10,
@@ -981,7 +981,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
         $orphanedTask = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Orphaned',
             'max_steps'   => 10,
@@ -1282,7 +1282,7 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
         // FAILED task whose retry_after is in the future — worker must skip.
         $failed = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'       => $agent->id,
             'status'         => 'FAILED',
             'user_prompt'    => 'orig',
@@ -1320,7 +1320,7 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
         // retry_of_task_id pointing to itself and retry_after in the past.
         $failed = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'       => $agent->id,
             'status'         => 'FAILED',
             'user_prompt'    => 'orig',

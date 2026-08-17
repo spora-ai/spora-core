@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use RuntimeException;
 use Spora\Models\Agent;
 
 /**
@@ -102,7 +103,7 @@ interface AgentServiceInterface
      * of the gate.
      *
      * @throws Exceptions\UnauthorizedTransferException When the caller is not authorised
-     * @throws \RuntimeException When the agent or target principal does not exist
+     * @throws RuntimeException When the agent or target principal does not exist
      */
     public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent;
 }

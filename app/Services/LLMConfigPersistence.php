@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use RuntimeException;
 use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Core\ValueObjects\EncryptedValue;
@@ -241,7 +242,7 @@ final class LLMConfigPersistence
         // a personal config under one of their visible principals. Global
         // configs short-circuit because their principal_id is null.
         if (!$isGlobal && !in_array($principalId, $this->principalResolver->visiblePrincipalIds($callerUserId), true)) {
-            throw new \RuntimeException("Caller {$callerUserId} cannot create a config under principal {$principalId}");
+            throw new RuntimeException("Caller {$callerUserId} cannot create a config under principal {$principalId}");
         }
 
         return $config;

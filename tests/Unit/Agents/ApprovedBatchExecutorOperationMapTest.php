@@ -26,7 +26,7 @@ use Spora\Models\ToolCall as ToolCallModel;
  */
 final class ApprovedBatchExecutorOperationMapTest extends TestCase
 {
-    use \Tests\Concerns\CreatesPrincipal;
+    use Tests\Concerns\CreatesPrincipal;
     protected function setUp(): void
     {
         parent::setUp();
@@ -190,7 +190,7 @@ final class ApprovedBatchExecutorOperationMapTest extends TestCase
         $task = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'status'      => 'PENDING_APPROVAL',
             'user_prompt' => 'op map test',
             'step_count'  => 0,

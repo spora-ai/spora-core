@@ -8,8 +8,6 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Services\Exceptions\AgentNotFoundException;
-use Spora\Services\PrincipalResolver;
-use Spora\Services\PrincipalService;
 
 /**
  * Service for prompt template management.

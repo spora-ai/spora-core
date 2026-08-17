@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use DateTimeInterface;
 use Spora\Auth\AuthService;
 use Spora\Models\Principal;
 use Spora\Services\PrincipalResolver;
@@ -62,8 +63,8 @@ final class PrincipalController
                 'type'      => (string) $p->type,
                 'user_id'   => $p->user_id !== null ? (int) $p->user_id : null,
                 'group_id'  => $p->group_id !== null ? (int) $p->group_id : null,
-                'created_at' => $p->created_at->format(\DateTimeInterface::ATOM),
-                'updated_at' => $p->updated_at->format(\DateTimeInterface::ATOM),
+                'created_at' => $p->created_at->format(DateTimeInterface::ATOM),
+                'updated_at' => $p->updated_at->format(DateTimeInterface::ATOM),
             ];
         })->values()->all();
 

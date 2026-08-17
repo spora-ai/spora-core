@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use LogicException;
 
 /**
  * @property int $id
@@ -39,6 +40,9 @@ final class LLMDriverConfiguration extends Model
         return $this->belongsTo(Principal::class);
     }
 
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<PrincipalPreference, $this>
+     */
     public function principalPreferences(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(PrincipalPreference::class, 'preferred_llm_config_id');
@@ -82,16 +86,16 @@ final class LLMDriverConfiguration extends Model
      * MySQL 5.7 parses but ignores CHECK, and SQLite CHECK enforcement
      * is engine-version-dependent.
      *
-     * @throws \LogicException
+     * @throws LogicException
      */
     public function validateGlobalXor(): void
     {
         $hasPrincipal = $this->principal_id !== null;
         $isGlobal     = (bool) $this->is_global;
         if ($hasPrincipal === $isGlobal) {
-            throw new \LogicException(
+            throw new LogicException(
                 'LLMDriverConfiguration must be either principal-scoped (principal_id set, is_global=false) '
-                . 'or global (principal_id=null, is_global=true).'
+                . 'or global (principal_id=null, is_global=true).',
             );
         }
     }

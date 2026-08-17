@@ -5,11 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Core\Database;
 use Spora\Models\Agent;
-use Spora\Models\Group;
-use Spora\Models\GroupMembership;
-use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Principal;
-use Spora\Models\ToolUserSetting;
 use Spora\Models\User;
 
 beforeEach(function (): void {
@@ -109,7 +105,7 @@ test('Principal model enforces XOR: only one of user_id/group_id', function (): 
         Principal::create([
             'type' => 'user', 'user_id' => null, 'group_id' => null,
         ]);
-    } catch (\Throwable $e) {
+    } catch (Throwable $e) {
         $thrown = $e;
     }
     expect($thrown)->toBeInstanceOf(LogicException::class);
@@ -120,7 +116,7 @@ test('Principal model enforces XOR: only one of user_id/group_id', function (): 
         Principal::create([
             'type' => 'user', 'principal_id' => createUserPrincipalPublic($userId), 'group_id' => 999,
         ]);
-    } catch (\Throwable $e) {
+    } catch (Throwable $e) {
         $thrown = $e;
     }
     expect($thrown)->toBeInstanceOf(LogicException::class);

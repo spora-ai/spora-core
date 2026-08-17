@@ -174,7 +174,7 @@ describe('ScheduledRunService throws typed exceptions', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'    => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id'     => $userId,
             'template_id' => $templateId,
             'timezone'    => 'UTC',
             'is_active'   => true,

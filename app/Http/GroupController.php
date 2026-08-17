@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use DateTimeInterface;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\Group;
@@ -26,7 +27,7 @@ use Symfony\Component\HttpFoundation\Response;
  *   DELETE /api/v1/groups/{id}            — destroy (admin-only); 409 if agents still reference the group-principal
  *
  * Authorisation is principally driven by the middleware stack
- * ({@see \Spora\Http\Middleware\AdminMiddleware} gates the writes), but the
+ * ({@see Middleware\AdminMiddleware} gates the writes), but the
  * destroy path also surfaces a structured 409 with the orphan agent
  * ids so the operator can either transfer them first or delete them.
  */
@@ -236,8 +237,8 @@ final class GroupController
             'created_by_user_id'  => (int) $group->created_by_user_id,
             'principal_id'        => $principal !== null ? (int) $principal->id : null,
             'caller_role'         => $role !== null ? (string) $role : null,
-            'created_at'          => $group->created_at->format(\DateTimeInterface::ATOM),
-            'updated_at'          => $group->updated_at->format(\DateTimeInterface::ATOM),
+            'created_at'          => $group->created_at->format(DateTimeInterface::ATOM),
+            'updated_at'          => $group->updated_at->format(DateTimeInterface::ATOM),
         ];
     }
 

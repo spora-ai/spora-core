@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use PDOException;
+use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\MediaAsset;
@@ -59,8 +61,7 @@ final class AgentService implements AgentServiceInterface
         private readonly ?AgentPictureService $pictureService = null,
         private readonly ?PrincipalService $principalService = null,
         private readonly ?PrincipalResolver $principalResolver = null,
-    ) {
-    }
+    ) {}
 
 
     public function getAgentsForUser(int $userId): array
@@ -114,7 +115,7 @@ final class AgentService implements AgentServiceInterface
                             'created_at' => date(self::DATETIME_FORMAT),
                             'updated_at' => date(self::DATETIME_FORMAT),
                         ]);
-                    } catch (\PDOException) {
+                    } catch (PDOException) {
                         $existing = Capsule::table('principals')
                             ->where('type', Principal::TYPE_USER)
                             ->where('user_id', $userId)
@@ -122,8 +123,8 @@ final class AgentService implements AgentServiceInterface
                         if ($existing !== null) {
                             $principalId = (int) $existing;
                         } else {
-                            throw new \RuntimeException(
-                                'PrincipalService not wired — could not materialise a user-principal.'
+                            throw new RuntimeException(
+                                'PrincipalService not wired — could not materialise a user-principal.',
                             );
                         }
                     }
@@ -279,7 +280,7 @@ final class AgentService implements AgentServiceInterface
     public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent
     {
         if ($this->principalService === null) {
-            throw new \RuntimeException('PrincipalService not wired into AgentService — cannot transfer.');
+            throw new RuntimeException('PrincipalService not wired into AgentService — cannot transfer.');
         }
         return $this->principalService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
     }
@@ -293,7 +294,7 @@ final class AgentService implements AgentServiceInterface
     {
         if ($this->principalResolver === null) {
             // Test path — find the user's user-principal directly.
-            $principal = \Spora\Models\Principal::where('type', 'user')
+            $principal = Principal::where('type', 'user')
                 ->where('user_id', $userId)
                 ->first();
             if ($principal === null) {

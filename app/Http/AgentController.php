@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use InvalidArgumentException;
 use JsonException;
+use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
@@ -13,6 +14,7 @@ use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\Exceptions\UnauthorizedTransferException;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\ToolIconResolver;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -47,6 +49,7 @@ final class AgentController
         private readonly ?ToolIconResolver $toolIconResolver = null,
         private readonly ?AgentPictureService $pictureService = null,
         private readonly ?PrincipalService $principalService = null,
+        private readonly ?PrincipalResolver $principalResolver = null,
     ) {}
 
     /**
@@ -72,7 +75,18 @@ final class AgentController
             // else is silently dropped so future schema additions don't leak.
             $columns = array_values(array_intersect($requested, self::SELECTABLE_COLUMNS));
             if ($columns !== []) {
-                $agents = Agent::where('user_id', $userId)
+                $principalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+                if ($principalIds === []) {
+                    // Caller has no principals — likely a freshly-registered
+                    // user whose principal hasn't been materialised yet.
+                    // Materialise the user-principal on the fly so the picker
+                    // doesn't render empty even though ownership will work
+                    // going forward.
+                    if ($this->principalService !== null) {
+                        $principalIds = [(int) $this->principalService->ensureUserPrincipal($userId)->id];
+                    }
+                }
+                $agents = Agent::whereIn('principal_id', $principalIds)
                     ->orderBy('name')
                     ->get($columns)
                     ->all();
@@ -443,7 +457,7 @@ final class AgentController
             $agent = $this->agentService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
         } catch (UnauthorizedTransferException $e) {
             return $this->forbidden('FORBIDDEN', $e->getMessage());
-        } catch (\RuntimeException $e) {
+        } catch (RuntimeException $e) {
             return $this->notFound('NOT_FOUND', $e->getMessage());
         }
 

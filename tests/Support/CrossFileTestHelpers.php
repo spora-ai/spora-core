@@ -48,8 +48,7 @@ if (!function_exists('createTestConfig')) {
             return createTestGlobalConfig($name, $driverClass, $settings, $isDefault, $llmConfigService);
         }
 
-        $resolvedUserId = $userId ?? ($_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID] ?? 1);
-        $principalId = createUserPrincipalPublic((int) $resolvedUserId);
+        $principalId = createUserPrincipalPublic($userId);
 
         $config = new Spora\Models\LLMDriverConfiguration();
         $config->principal_id = $principalId;
@@ -99,7 +98,7 @@ if (!function_exists('createUserPrincipalPublic')) {
     /**
      * Materialise the user-principal row for $userId and return its id.
      *
-     * Wraps the same logic as {@see \Tests\Concerns\CreatesPrincipal::createUserPrincipal()}
+     * Wraps the same logic as {@see Tests\Concerns\CreatesPrincipal::createUserPrincipal()}
      * so functions defined in this preloaded helper file (which run before
      * Pest's per-test class binding wires in traits) can still satisfy the
      * FK on `principal_id`.
@@ -141,13 +140,13 @@ if (!function_exists('createUserPrincipalPublic')) {
                 'created_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
-        } catch (\PDOException) {
+        } catch (PDOException) {
             $existing = Illuminate\Database\Capsule\Manager::table('principals')
                 ->where('type', 'user')->where('user_id', $userId)->value('id');
             if ($existing !== null) {
                 return (int) $existing;
             }
-            throw new \RuntimeException("Failed to materialise user-principal for user {$userId}");
+            throw new RuntimeException("Failed to materialise user-principal for user {$userId}");
         }
     }
 }

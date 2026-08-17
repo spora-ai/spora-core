@@ -89,7 +89,7 @@ describe('UserInfoTool', function (): void {
         simulateLoggedInSession($userId, 'userinfo4@example.com');
 
         Spora\Models\UserLocation::create([
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'name'   => 'Home',
             'address' => '123 Main St',
             'is_default' => true,

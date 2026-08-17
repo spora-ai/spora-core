@@ -31,8 +31,7 @@ final readonly class PrincipalContext
         public string $type,
         public ?int   $ownerUserId,
         public ?int   $runnerUserId,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{

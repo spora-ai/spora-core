@@ -52,8 +52,10 @@ final class ToolConfigSchemaInspector
      *                                             or accept the snapshot's
      *                                             staleness window.
      */
-    public function __construct(array $skillsByName = [])
-    {
+    public function __construct(
+        array $skillsByName = [],
+        private readonly ?PrincipalResolver $principalResolver = null,
+    ) {
         $this->skillsByName = $skillsByName;
     }
 
@@ -314,7 +316,19 @@ final class ToolConfigSchemaInspector
             return [];
         }
 
-        $names = Agent::where('user_id', $userId)
+        // Migration 0067 cut `agents.user_id`; the agent is owned by a
+        // principal. We resolve via the caller's visible principals so
+        // shared/group-owned agents are resolvable when the caller is a
+        // group member — without this a multi-select value pointing at a
+        // shared agent would resolve to "#id" with no name.
+        if ($this->principalResolver === null) {
+            return [];
+        }
+        $principalIds = $this->principalResolver->visiblePrincipalIds($userId);
+        if ($principalIds === []) {
+            return [];
+        }
+        $names = Agent::whereIn('principal_id', $principalIds)
             ->whereIn('id', array_values($ids))
             ->get(['id', 'name']);
 

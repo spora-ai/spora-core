@@ -99,6 +99,7 @@ use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\EmailTemplateLoader;
+use Spora\Services\GroupService;
 use Spora\Services\HandoverService;
 use Spora\Services\HandoverServiceInterface;
 use Spora\Services\LLMConfigPreferences;
@@ -131,6 +132,8 @@ use Spora\Services\NotificationServiceInterface;
 use Spora\Services\PluginCatalogService;
 use Spora\Services\PluginMetadataExtractor;
 use Spora\Services\PluginsService;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\PromptTemplateService;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunService;
@@ -147,10 +150,6 @@ use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
-use Spora\Services\GroupService;
-use Spora\Services\PrincipalContext;
-use Spora\Services\PrincipalResolver;
-use Spora\Services\PrincipalService;
 use Spora\Skills\SkillScanner;
 use Spora\Tools\AgentTool;
 use Spora\Tools\CalculatorTool;
@@ -951,6 +950,7 @@ final class ContainerDefinitions
                     $c->get(ToolIconResolver::class),
                     $c->get(AgentPictureService::class),
                     $c->get(PrincipalService::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -1084,6 +1084,7 @@ final class ContainerDefinitions
                     $c->get(OrchestratorInterface::class),
                     $c->get(MercurePublisherInterface::class),
                     $c->get(ToolCallSerializer::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -1401,7 +1402,12 @@ final class ContainerDefinitions
 
             AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
 
-            ToolConfigSchemaInspector::class => static fn(): ToolConfigSchemaInspector => new ToolConfigSchemaInspector(),
+            ToolConfigSchemaInspector::class => static function (ContainerInterface $c): ToolConfigSchemaInspector {
+                return new ToolConfigSchemaInspector(
+                    [],
+                    $c->get(PrincipalResolver::class),
+                );
+            },
 
             // Skills are scanned in priority order: project, then framework,
             // then each plugin. The `source` label on each root is what

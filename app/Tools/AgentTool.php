@@ -250,6 +250,7 @@ final class AgentTool extends AbstractTool
     private readonly AgentTargetResolver $targetResolver;
 
     private readonly PrincipalService $principalService;
+    private readonly PrincipalResolver $principalResolver;
 
     public function __construct(
         private readonly AgentServiceInterface $agentService,
@@ -260,6 +261,7 @@ final class AgentTool extends AbstractTool
         private readonly ?AuthService $authService = null,
         ?PrincipalService $principalService = null,
     ) {
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
         $principalResolver ??= new PrincipalResolver();
         $collaborators      ??= new AgentToolCollaborators();
         $this->principalService   = $principalService ?? new PrincipalService($principalResolver);
@@ -402,7 +404,7 @@ final class AgentTool extends AbstractTool
             return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
-        $resolver = $this->principalResolver ?? new PrincipalResolver();
+        $resolver = $this->principalResolver;
         if ($context === null) {
             $context = $resolver->resolveForToolExecute($agentId);
         }
@@ -472,7 +474,7 @@ final class AgentTool extends AbstractTool
             return $data;
         }
 
-        $resolver = $this->principalResolver ?? new PrincipalResolver();
+        $resolver = $this->principalResolver;
         if ($context === null) {
             $context = $resolver->resolveForToolExecute($callingAgentId);
         }
@@ -562,7 +564,7 @@ final class AgentTool extends AbstractTool
     {
         // Migration 0067: an agent is owned by a principal, not a user.
         // Re-read by id and verify the caller controls its principal.
-        $fresh = Agent::query()->where('id', $agentId)->first();
+        $fresh = Agent::where('id', $agentId)->first();
         if ($fresh === null) {
             return ToolResult::fail(self::AGENT_NOT_FOUND);
         }

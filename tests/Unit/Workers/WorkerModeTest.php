@@ -105,7 +105,7 @@ describe('WorkerModeTest', function (): void {
         $task = Task::create([
             'agent_id' => $this->agent->id,
             'principal_id' => createUserPrincipalPublic($this->userId),
-        'user_id'     => $this->userId,
+            'user_id'     => $this->userId,
             'status' => 'QUEUED',
             'user_prompt' => 'Should not run',
             'step_count' => 0,

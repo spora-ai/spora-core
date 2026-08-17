@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use PDOException;
+use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Models\Group;
 use Spora\Models\Principal;
@@ -31,8 +33,7 @@ final class PrincipalService
 {
     public function __construct(
         private readonly PrincipalResolver $resolver,
-    ) {
-    }
+    ) {}
 
     /**
      * Get the principal for the given user, creating the row if missing.
@@ -68,7 +69,7 @@ final class PrincipalService
                     'created_at' => date('Y-m-d H:i:s'),
                     'updated_at' => date('Y-m-d H:i:s'),
                 ]);
-            } catch (\PDOException) {
+            } catch (PDOException) {
                 // Already inserted between our check and insert — fine.
             }
         }
@@ -84,14 +85,14 @@ final class PrincipalService
                 'created_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
-        } catch (\PDOException) {
+        } catch (PDOException) {
             $existing = Principal::where('type', Principal::TYPE_USER)
                 ->where('user_id', $userId)
                 ->first();
             if ($existing !== null) {
                 return $existing;
             }
-            throw new \RuntimeException("Failed to materialise user-principal for user {$userId}");
+            throw new RuntimeException("Failed to materialise user-principal for user {$userId}");
         }
 
         return Principal::findOrFail($id);
@@ -119,14 +120,14 @@ final class PrincipalService
                 'created_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
             ]);
-        } catch (\PDOException) {
+        } catch (PDOException) {
             $existing = Principal::where('type', Principal::TYPE_GROUP)
                 ->where('group_id', $groupId)
                 ->first();
             if ($existing !== null) {
                 return $existing;
             }
-            throw new \RuntimeException("Failed to materialise group-principal for group {$groupId}");
+            throw new RuntimeException("Failed to materialise group-principal for group {$groupId}");
         }
 
         return Principal::findOrFail($id);
@@ -153,23 +154,23 @@ final class PrincipalService
             function () use ($agentId, $targetPrincipalId, $callerUserId): Agent {
                 $agent = Agent::where('id', $agentId)->lockForUpdate()->first();
                 if ($agent === null) {
-                    throw new \RuntimeException("Agent {$agentId} not found");
+                    throw new RuntimeException("Agent {$agentId} not found");
                 }
 
                 $sourcePrincipalId = (int) $agent->principal_id;
                 $targetPrincipal = Principal::find($targetPrincipalId);
                 if ($targetPrincipal === null) {
-                    throw new \RuntimeException("Target principal {$targetPrincipalId} not found");
+                    throw new RuntimeException("Target principal {$targetPrincipalId} not found");
                 }
 
                 if (!$this->callerControlsPrincipal($callerUserId, $sourcePrincipalId)) {
                     throw new UnauthorizedTransferException(
-                        "Caller {$callerUserId} does not control source principal {$sourcePrincipalId}"
+                        "Caller {$callerUserId} does not control source principal {$sourcePrincipalId}",
                     );
                 }
                 if (!$this->callerControlsPrincipal($callerUserId, $targetPrincipalId)) {
                     throw new UnauthorizedTransferException(
-                        "Caller {$callerUserId} does not control target principal {$targetPrincipalId}"
+                        "Caller {$callerUserId} does not control target principal {$targetPrincipalId}",
                     );
                 }
 

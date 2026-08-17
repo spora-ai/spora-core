@@ -26,8 +26,7 @@ final class StubFailingTool implements ToolInterface
         ?int $userId = null,
         ?int $taskId = null,
         ?\Spora\Services\PrincipalContext $context = null,
-    ): ToolResult
-    {
+    ): ToolResult {
         return $this->run($arguments, $agentId);
     }
 

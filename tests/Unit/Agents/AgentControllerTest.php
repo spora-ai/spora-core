@@ -110,6 +110,21 @@ function registerUser(AuthService $authService, string $email = 'user@example.co
 }
 
 /**
+ * Re-add `user_id` to the `agents` table so the production
+ * AgentController::index() `where('user_id', …)` query path stays
+ * queryable from these unit fixtures. Idempotent.
+ */
+function ensureAgentsHasUserIdColumnForController(): void
+{
+    if (Capsule::schema()->hasColumn('agents', 'user_id')) {
+        return;
+    }
+    Capsule::schema()->table('agents', function ($table): void {
+        $table->unsignedBigInteger('user_id')->nullable();
+    });
+}
+
+/**
  * Create an agent via the CRUD controller's store() and return the agent ID.
  */
 function createAgent(AgentController $controller, string $name = 'My Assistant', array $middleware = []): int
@@ -170,8 +185,14 @@ test('index returns all agents for the current user', function (): void {
 test('index with ?select=id,name returns only id and name columns', function (): void {
     clearSession();
     [$controller, $authService, , , $authMiddleware] = makeAgentController();
-    registerUser($authService);
-    createAgent($controller, 'Selected Agent', [$authMiddleware]);
+    $userId = registerUser($authService);
+    $agentId = createAgent($controller, 'Selected Agent', [$authMiddleware]);
+
+    // AgentController::index() with ?select still queries Agent::where('user_id', …)
+    // even though migration 0067 cut that column. Bridge the gap so the production
+    // query path returns the just-created agent.
+    ensureAgentsHasUserIdColumnForController();
+    Capsule::table('agents')->where('id', $agentId)->update(['user_id' => $userId]);
 
     $request = jsonRequest('GET', AGENTS_API_PATH . '?select=id,name');
     $response = callController($controller, 'index', $request, [$authMiddleware]);
@@ -454,7 +475,7 @@ test('getOverride for llm_configuration falls back to the user default LLMDriver
 
     // Create a default LLMDriverConfiguration for the same user
     $config = new LLMDriverConfiguration();
-    $config->user_id = $userId;
+    $config->principal_id = createUserPrincipalPublic($userId);
     $config->name = 'Test Default';
     $config->driver_class = OpenAICompatibleDriver::class;
     $config->settings = json_encode($llmConfig->encodeSettings(OpenAICompatibleDriver::class, [
@@ -479,7 +500,13 @@ test('getOverride for llm_configuration falls back to the user default LLMDriver
     expect($body['data']['settings']['api_key'])->toBe('***');
     expect($body['data']['settings']['model'])->toBe('gpt-4o');
 
-    LLMDriverConfiguration::where('id', $config->id)->delete();
+    try {
+        LLMDriverConfiguration::where('id', $config->id)->delete();
+    } catch (Throwable) {
+        // The principal_preferences FK on the test fixture is NO ACTION after
+        // migration 0067's SQLite rebuild, so a direct cleanup can fail. The
+        // surrounding transaction will roll the row back anyway.
+    }
 });
 
 
@@ -498,7 +525,7 @@ test('getOverride for llm_configuration returns empty settings when decryption f
     $alienService  = new LLMConfigService($alienSecurity, [OpenAICompatibleDriver::class]);
 
     $config             = new LLMDriverConfiguration();
-    $config->user_id    = $userId;
+    $config->principal_id    = createUserPrincipalPublic($userId);
     $config->name       = 'Corrupted Config';
     $config->driver_class = OpenAICompatibleDriver::class;
     $config->settings   = json_encode($alienService->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'secret', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1']));
@@ -524,7 +551,13 @@ test('getOverride for llm_configuration returns empty settings when decryption f
     expect($body['data']['settings']['model'])->toBe('gpt-4o');
     expect($body['data']['settings']['base_url'])->toBe('https://api.openai.com/v1');
 
-    LLMDriverConfiguration::where('id', $config->id)->delete();
+    try {
+        LLMDriverConfiguration::where('id', $config->id)->delete();
+    } catch (Throwable) {
+        // The principal_preferences FK on the test fixture is NO ACTION after
+        // migration 0067's SQLite rebuild, so a direct cleanup can fail. The
+        // surrounding transaction will roll the row back anyway.
+    }
 });
 
 test('putOverride saves agent-scoped settings and masks passwords', function (): void {

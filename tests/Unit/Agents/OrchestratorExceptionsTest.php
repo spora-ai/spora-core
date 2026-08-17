@@ -280,9 +280,8 @@ it('resolveRequiresApproval throws ToolContractException for a tool class withou
             int $agentId,
             ?int $userId = null,
             ?int $taskId = null,
-            ?\Spora\Services\PrincipalContext $context = null,
-        ): ToolResult
-        {
+            ?Spora\Services\PrincipalContext $context = null,
+        ): ToolResult {
             return new ToolResult(true, 'ok');
         }
 

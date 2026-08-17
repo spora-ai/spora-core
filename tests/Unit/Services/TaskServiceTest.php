@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\TaskService;
 
 function makeTaskService(): TaskService
@@ -14,7 +16,24 @@ function makeTaskService(): TaskService
     $mercure->allows('publish')->andReturn(true);
     $mercure->allows('publishToUser')->andReturn(true);
 
-    return new TaskService($orchestrator, $mercure);
+    return new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+}
+
+function ensureAgentsHasPrincipalId(int $agentId, int $userId): void
+{
+    $principalId = Spora\Models\Principal::where('type', 'user')
+        ->where('user_id', $userId)
+        ->value('id');
+    if ($principalId === null) {
+        $principalId = Capsule::table('principals')->insertGetId([
+            'type'       => 'user',
+            'user_id'    => $userId,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+    }
+    Capsule::table('agents')->where('id', $agentId)
+        ->update(['principal_id' => (int) $principalId]);
 }
 
 describe('TaskService — getTasksForUser', function (): void {
@@ -37,7 +56,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'  => $agent->id,
             'status'    => 'COMPLETED',
             'user_prompt' => 'Test prompt',
@@ -74,7 +93,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'  => $agent->id,
             'status'    => 'RUNNING',
             'user_prompt' => 'Run me',
@@ -134,7 +153,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         $oldTask = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'  => $agent->id,
             'status'    => 'COMPLETED',
             'user_prompt' => 'Old task',
@@ -145,7 +164,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         $newTask = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'  => $agent->id,
             'status'    => 'RUNNING',
             'user_prompt' => 'New task',
@@ -317,6 +336,7 @@ describe('TaskService — startTask', function (): void {
             'max_steps'    => 7,
             'is_active'    => true,
         ]);
+        ensureAgentsHasPrincipalId($agent->id, $userId);
 
         $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
         $mercure      = Mockery::mock(MercurePublisherInterface::class);
@@ -328,7 +348,7 @@ describe('TaskService — startTask', function (): void {
             ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, ?int $runId, array $mediaIds) use ($userId): Task {
                 return Task::create([
                     'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+                    'user_id'     => $userId,
                     'agent_id'    => $agentId,
                     'status'      => 'RUNNING',
                     'user_prompt' => $prompt,
@@ -337,7 +357,7 @@ describe('TaskService — startTask', function (): void {
                 ]);
             });
 
-        $service = new TaskService($orchestrator, $mercure);
+        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
         $result  = $service->startTask($userId, $agent->id, 'do the thing');
 
         expect($result['agent_id'])->toBe($agent->id);
@@ -356,6 +376,7 @@ describe('TaskService — startTask', function (): void {
             'max_steps' => 12,
             'is_active' => true,
         ]);
+        ensureAgentsHasPrincipalId($agent->id, $userId);
 
         $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
         $mercure      = Mockery::mock(MercurePublisherInterface::class);
@@ -369,7 +390,7 @@ describe('TaskService — startTask', function (): void {
                 'user_prompt' => $p, 'max_steps' => $m, 'step_count' => 0,
             ]));
 
-        $service = new TaskService($orchestrator, $mercure);
+        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
         $service->startTask($userId, $agent->id, 'p', null);
     });
 
@@ -395,6 +416,7 @@ describe('TaskService — startTask', function (): void {
         $agent = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ParentAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
+        ensureAgentsHasPrincipalId($agent->id, $userId);
 
         $service = makeTaskService();
         $service->startTask($userId, $agent->id, 'continue me', null, 9999);
@@ -422,7 +444,7 @@ describe('TaskService — getTask', function (): void {
         ]);
         $taskA = Task::create([
             'principal_id' => createUserPrincipalPublic($userA),
-        'user_id'     => $userA,
+            'user_id'     => $userA,
             'agent_id'    => $agentA->id,
             'status'      => 'COMPLETED',
             'user_prompt' => 'private',
@@ -443,7 +465,7 @@ describe('TaskService — getTask', function (): void {
         ]);
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'hi',
@@ -480,7 +502,7 @@ describe('TaskService — getTaskWithHistory', function (): void {
         ]);
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'with history',
@@ -529,7 +551,7 @@ describe('TaskService — getTaskWithHistory', function (): void {
         ]);
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'with history',
@@ -562,7 +584,7 @@ describe('TaskService — getTaskWithHistory', function (): void {
         ]);
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'COMPLETED',
             'user_prompt' => 'handover please',
@@ -613,7 +635,7 @@ describe('TaskService — getTaskWithHistory', function (): void {
         ]);
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'COMPLETED',
             'user_prompt' => 'shape parity',
@@ -699,7 +721,7 @@ describe('TaskService — approveTask', function (): void {
                 Task::where('id', $task->id)->update(['status' => 'RUNNING']);
             });
 
-        $service = new TaskService($orchestrator, $mercure);
+        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
         $result  = $service->approveTask($task->id, $userId, [
             ['provider_call_id' => 'c1', 'decision' => 'approve', 'arguments' => ['x' => 1]],
         ]);
@@ -760,7 +782,7 @@ describe('TaskService — rejectTask', function (): void {
                 Task::where('id', $task->id)->update(['status' => 'FAILED']);
             });
 
-        $service = new TaskService($orchestrator, $mercure);
+        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
         $result  = $service->rejectTask($task->id, $userId, 'unsafe');
 
         expect($result['status'])->toBe('FAILED');
@@ -805,7 +827,7 @@ describe('TaskService — retryTask', function (): void {
         ]);
         $original = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'FAILED',
             'user_prompt' => 'please try again',
@@ -832,7 +854,7 @@ describe('TaskService — retryTask', function (): void {
                 return $original->fresh();
             });
 
-        $service = new TaskService($orchestrator, $mercure);
+        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
         $result  = $service->retryTask($original->id, $userId);
 
         expect($result['user_prompt'])->toBe('please try again');
@@ -909,7 +931,7 @@ describe('TaskService — continueTask', function (): void {
             ->andReturnUsing(function (int $taskId, string $prompt, ?int $steps, array $mediaIds) use ($userId): Task {
                 return Task::create([
                     'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+                    'user_id'     => $userId,
                     'agent_id'    => 1,
                     'status'      => 'RUNNING',
                     'user_prompt' => 'more please',
@@ -918,7 +940,7 @@ describe('TaskService — continueTask', function (): void {
                 ]);
             });
 
-        $service = new TaskService($orchestrator, $mercure);
+        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
         $result  = $service->continueTask($task->id, $userId, 'more please', 10);
 
         expect($result['user_prompt'])->toBe('more please');
@@ -973,7 +995,7 @@ describe('TaskService — deleteTask', function (): void {
         ]);
         $child = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'       => $agent->id,
             'status'         => 'QUEUED',
             'user_prompt'    => 'retry',
@@ -1001,7 +1023,7 @@ describe('TaskService — deleteTask', function (): void {
         ]);
         $childOfOther = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'       => $agent->id,
             'status'         => 'QUEUED',
             'user_prompt'    => 'unrelated retry',
@@ -1057,7 +1079,7 @@ describe('TaskService — cancelRetryChain', function (): void {
         // itself and retry_after set in the future.
         $failed = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'FAILED',
             'user_prompt' => 'orig',
@@ -1066,7 +1088,7 @@ describe('TaskService — cancelRetryChain', function (): void {
         ]);
         $failed->retry_of_task_id = $failed->id;
         $failed->save();
-        Illuminate\Database\Capsule\Manager::table('tasks')
+        Capsule::table('tasks')
             ->where('id', $failed->id)
             ->update(['retry_after' => date('Y-m-d H:i:s', time() + 600)]);
 

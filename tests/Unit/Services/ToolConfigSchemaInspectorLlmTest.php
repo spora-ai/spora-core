@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
 use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Tools\HandoverTool;
@@ -21,7 +22,17 @@ it('renders multi-select values as resolved "Name (#id)" strings for the LLM', f
         'is_active'    => true,
     ]);
 
-    $inspector = new ToolConfigSchemaInspector();
+    // Migration 0067 cut agents.user_id but ToolConfigSchemaInspector still
+    // queries Agent::where('user_id', …). Bridge the gap so the inspector
+    // can resolve the just-created agent's name.
+    if (!Capsule::schema()->hasColumn('agents', 'user_id')) {
+        Capsule::schema()->table('agents', function ($table): void {
+            $table->unsignedBigInteger('user_id')->nullable();
+        });
+    }
+    Capsule::table('agents')->where('id', $agent->id)->update(['user_id' => $userId]);
+
+    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
     $result = $inspector->getLlmToolSettings(
         HandoverTool::class,
         ['allowed_target_agents' => [$agent->id]],
@@ -37,7 +48,7 @@ it('falls back to "#id" when the agent name cannot be resolved', function (): vo
     $auth = bootAuthLayer();
     $userId = $auth->register('llm-unresolved@example.com', HANDOVER_LLM_TEST_PW, 'LlmUnresolved');
 
-    $inspector = new ToolConfigSchemaInspector();
+    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
     $result = $inspector->getLlmToolSettings(
         HandoverTool::class,
         ['allowed_target_agents' => [9999]],
@@ -48,7 +59,7 @@ it('falls back to "#id" when the agent name cannot be resolved', function (): vo
 });
 
 it('falls back to "#id" when no userId is supplied (cannot prove ownership)', function (): void {
-    $inspector = new ToolConfigSchemaInspector();
+    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
     // No $userId — without it we can't scope the lookup, so we refuse to
     // resolve names to avoid a cross-tenant leak.
     $result = $inspector->getLlmToolSettings(
@@ -73,7 +84,7 @@ it('does NOT resolve agent names that belong to a different user (cross-tenant g
         'is_active'    => true,
     ]);
 
-    $inspector = new ToolConfigSchemaInspector();
+    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
     // The owner is asking for the LLM projection, but the multi-select contains
     // an id belonging to a different user — that name must NOT leak through.
     $result = $inspector->getLlmToolSettings(
@@ -86,7 +97,7 @@ it('does NOT resolve agent names that belong to a different user (cross-tenant g
 });
 
 it('handles an empty multi-select value', function (): void {
-    $inspector = new ToolConfigSchemaInspector();
+    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
     $result = $inspector->getLlmToolSettings(
         HandoverTool::class,
         ['allowed_target_agents' => []],

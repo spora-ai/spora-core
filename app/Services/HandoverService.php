@@ -9,8 +9,6 @@ use InvalidArgumentException;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Agent;
 use Spora\Models\Task;
-use Spora\Services\PrincipalResolver;
-use Spora\Services\PrincipalService;
 
 /**
  * Default {@see HandoverServiceInterface} implementation.

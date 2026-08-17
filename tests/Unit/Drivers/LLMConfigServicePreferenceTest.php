@@ -41,7 +41,7 @@ function makePreferenceService(): array
 function createConfigForService(LLMConfigService $service, string $name, int $userId, bool $isGlobal = false): LLMDriverConfiguration
 {
     $config = new LLMDriverConfiguration();
-    $config->user_id = $isGlobal ? null : $userId;
+    $config->principal_id = $isGlobal ? null : createUserPrincipalPublic($userId);
     $config->name = $name;
     $config->driver_class = OpenAICompatibleDriver::class;
     $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, [
@@ -190,10 +190,11 @@ test('getEffectiveConfigForAgent uses preferred_llm_config_id for tier-2 fallbac
         'created_at' => date(PREF_TEST_TIMESTAMP_FORMAT),
         'updated_at' => date(PREF_TEST_TIMESTAMP_FORMAT),
     ]);
+    $principalId = createUserPrincipalPublic($userId);
 
     // Config that has is_default=true but is NOT the preferred one
     $defaultConfig = new LLMDriverConfiguration();
-    $defaultConfig->user_id = $userId;
+    $defaultConfig->principal_id = $principalId;
     $defaultConfig->name = 'Should Not Use';
     $defaultConfig->driver_class = AnthropicCompatibleDriver::class;
     $defaultConfig->settings = json_encode(['api_key' => 'test', 'model' => 'claude']);
@@ -202,20 +203,20 @@ test('getEffectiveConfigForAgent uses preferred_llm_config_id for tier-2 fallbac
 
     // Preferred config (different from is_default)
     $preferredConfig = new LLMDriverConfiguration();
-    $preferredConfig->user_id = $userId;
+    $preferredConfig->principal_id = $principalId;
     $preferredConfig->name = 'Should Use This';
     $preferredConfig->driver_class = OpenAICompatibleDriver::class;
     $preferredConfig->settings = json_encode(['api_key' => 'test', 'model' => 'gpt-4o']);
     $preferredConfig->save();
 
     PrincipalPreference::create([
-        'principal_id' => createUserPrincipalPublic($userId),
+        'principal_id' => $principalId,
         'preferred_llm_config_id' => $preferredConfig->id,
     ]);
 
     $agent = new Agent();
     $agent->id = 999;
-    $agent->user_id = $userId;
+    $agent->principal_id = $principalId;
     $agent->llm_driver_config_id = null;
 
     $result = $service->getEffectiveConfigForAgent($agent);
@@ -236,10 +237,11 @@ test('getEffectiveConfigForAgent prefers agent config over user preferred config
         'created_at' => date(PREF_TEST_TIMESTAMP_FORMAT),
         'updated_at' => date(PREF_TEST_TIMESTAMP_FORMAT),
     ]);
+    $principalId = createUserPrincipalPublic($userId);
 
     // Agent-specific config (should be used - Tier 1)
     $agentConfig = new LLMDriverConfiguration();
-    $agentConfig->user_id = $userId;
+    $agentConfig->principal_id = $principalId;
     $agentConfig->name = 'Agent Override';
     $agentConfig->driver_class = AnthropicCompatibleDriver::class;
     $agentConfig->settings = json_encode(['api_key' => 'test', 'model' => 'claude']);
@@ -247,20 +249,20 @@ test('getEffectiveConfigForAgent prefers agent config over user preferred config
 
     // User preferred config (should NOT be used because agent has its own)
     $preferredConfig = new LLMDriverConfiguration();
-    $preferredConfig->user_id = $userId;
+    $preferredConfig->principal_id = $principalId;
     $preferredConfig->name = 'User Preferred';
     $preferredConfig->driver_class = OpenAICompatibleDriver::class;
     $preferredConfig->settings = json_encode(['api_key' => 'test', 'model' => 'gpt-4o']);
     $preferredConfig->save();
 
     PrincipalPreference::create([
-        'principal_id' => createUserPrincipalPublic($userId),
+        'principal_id' => $principalId,
         'preferred_llm_config_id' => $preferredConfig->id,
     ]);
 
     $agent = new Agent();
     $agent->id = 1000;
-    $agent->user_id = $userId;
+    $agent->principal_id = $principalId;
     $agent->llm_driver_config_id = $agentConfig->id;
 
     $result = $service->getEffectiveConfigForAgent($agent);
@@ -326,17 +328,19 @@ test('unsetUserPreferredConfig is a no-op when called for a non-preferred user',
 
     // A different user has a preference — the no-op call must not affect it
     $otherUser = $authService->register('unsetpref-other@example.com', PREF_TEST_USER_PASSWORD, 'UnsetprefOther');
+    $otherPrincipalId = createUserPrincipalPublic($otherUser);
     $otherConfig = createConfigForService($service, 'Other User Config', $otherUser);
     PrincipalPreference::create([
-        'principal_id' => createUserPrincipalPublic($otherUser),
+        'principal_id' => $otherPrincipalId,
         'preferred_llm_config_id' => (int) $otherConfig->getKey(),
     ]);
 
     // Should not throw and should not delete the other user's preference
     $service->unsetUserPreferredConfig($userId);
 
-    expect(PrincipalPreference::where('principal_id', $userId)->first())->toBeNull()
-        ->and(PrincipalPreference::where('principal_id', $otherUser)->first())->not->toBeNull()
-        ->and(PrincipalPreference::where('principal_id', $otherUser)->first()->preferred_llm_config_id)
+    $userPrincipalId = createUserPrincipalPublic($userId);
+    expect(PrincipalPreference::where('principal_id', $userPrincipalId)->first())->toBeNull()
+        ->and(PrincipalPreference::where('principal_id', $otherPrincipalId)->first())->not->toBeNull()
+        ->and(PrincipalPreference::where('principal_id', $otherPrincipalId)->first()->preferred_llm_config_id)
         ->toBe((int) $otherConfig->getKey());
 });

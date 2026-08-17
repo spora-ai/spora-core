@@ -30,8 +30,7 @@ final class SpySafeExecuteTool implements ToolInterface
         ?int $userId = null,
         ?int $taskId = null,
         ?\Spora\Services\PrincipalContext $context = null,
-    ): ToolResult
-    {
+    ): ToolResult {
         self::$lastUserId = $userId;
         self::$lastTaskId = $taskId;
         return new ToolResult(true, 'ok');

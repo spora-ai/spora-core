@@ -21,10 +21,10 @@ use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\MediaAsset;
+use Spora\Models\PrincipalPreference;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
-use Spora\Models\PrincipalPreference;
 use Spora\Plugins\PluginInterface;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\MercurePublisherInterface;
@@ -573,9 +573,8 @@ it('keeps the task status as PENDING_APPROVAL during tool execution to prevent a
             int $agentId,
             ?int $userId = null,
             ?int $taskId = null,
-            ?\Spora\Services\PrincipalContext $context = null,
-        ): ToolResult
-        {
+            ?Spora\Services\PrincipalContext $context = null,
+        ): ToolResult {
             // Task status should still be PENDING_APPROVAL while the tool is heavily executing
             $task = Task::find($this->taskId);
             $this->statusInsideTool = $task->status;
@@ -3093,9 +3092,8 @@ it('buildToolDefinitions emits a definition for a tool without HasOperations tra
             int $agentId,
             ?int $userId = null,
             ?int $taskId = null,
-            ?\Spora\Services\PrincipalContext $context = null,
-        ): ToolResult
-        {
+            ?Spora\Services\PrincipalContext $context = null,
+        ): ToolResult {
             return new ToolResult(true, 'plain result');
         }
         public function describeAction(array $arguments): string
@@ -3204,9 +3202,8 @@ it('qualifiedToolName prepends the plugin slug when the tool belongs to a regist
             int $agentId,
             ?int $userId = null,
             ?int $taskId = null,
-            ?\Spora\Services\PrincipalContext $context = null,
-        ): ToolResult
-        {
+            ?Spora\Services\PrincipalContext $context = null,
+        ): ToolResult {
             return new ToolResult(true, 'plugin result');
         }
         public function describeAction(array $arguments): string

@@ -296,7 +296,7 @@ test('GET /api/v1/assets/{uuid} lets the owning user through', function (): void
         ]);
         $task = \Spora\Models\Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+            'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'test',

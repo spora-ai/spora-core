@@ -30,8 +30,7 @@ final class TestCalendarTool implements ToolInterface
         ?int $userId = null,
         ?int $taskId = null,
         ?\Spora\Services\PrincipalContext $context = null,
-    ): ToolResult
-    {
+    ): ToolResult {
         return new ToolResult(true, 'noop');
     }
 

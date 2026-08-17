@@ -31,7 +31,7 @@ use Tests\Fixtures\StubOutputToolWithSchema;
 
 /**
  * @param list<string> $providerCallIds
- * @return array{controller: TaskController, task: Task, user_id: int, observed_statuses: array<int, string>}
+ * @return array{controller: TaskController, task: Task, principal_id: int, observed_statuses: array<int, string>}
  */
 function approvalFeatureHarness(
     array $providerCallIds,

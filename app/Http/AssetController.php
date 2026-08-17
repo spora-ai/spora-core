@@ -33,7 +33,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * Admins bypass. Non-owners get a 404 to avoid leaking UUID existence.
  *
  * Migration 0067 cut `agents.user_id` and routed ownership through
- * `PrincipalResolver::ownerUserId()`. {@see \Spora\Models\Agent}'s
+ * `PrincipalResolver::ownerUserId()`. {@see Agent}'s
  * legacy `getUserIdAttribute()` is a shim only — this controller goes
  * straight to the resolver so the principals-and-groups model is
  * explicit (the legacy accessor would still work for user-principals,
