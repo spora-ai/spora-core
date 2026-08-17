@@ -33,7 +33,7 @@ it('allows mass assignment of status and due_at', function (): void {
     ]);
     $run = ScheduledRun::create([
         'agent_id'  => $agent->id,
-        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id' => $userId,
         'timezone'  => 'UTC',
         'is_active' => true,
     ]);
@@ -60,7 +60,7 @@ it('casts date columns to Carbon', function (): void {
     ]);
     $run = ScheduledRun::create([
         'agent_id'  => $agent->id,
-        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id' => $userId,
         'timezone'  => 'UTC',
         'is_active' => true,
     ]);
@@ -90,7 +90,7 @@ it('belongs to a scheduled run', function (): void {
     ]);
     $run = ScheduledRun::create([
         'agent_id'  => $agent->id,
-        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id' => $userId,
         'timezone'  => 'UTC',
         'is_active' => true,
     ]);

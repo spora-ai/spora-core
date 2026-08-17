@@ -27,7 +27,7 @@ it('casts is_active to bool and date columns to Carbon', function (): void {
 
     $run = ScheduledRun::create([
         'agent_id'        => $agent->id,
-        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id' => $userId,
         'timezone'        => 'UTC',
         'is_active'       => true,
         'last_run_at'     => '2099-01-01 00:00:00',
@@ -53,7 +53,7 @@ it('belongs to an agent and a template', function (): void {
     ]);
     $run = ScheduledRun::create([
         'agent_id'  => $agent->id,
-        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id' => $userId,
         'timezone'  => 'UTC',
         'is_active' => true,
     ]);
@@ -75,7 +75,7 @@ it('has many next run entries ordered by due_at', function (): void {
     ]);
     $run = ScheduledRun::create([
         'agent_id'  => $agent->id,
-        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id' => $userId,
         'timezone'  => 'UTC',
         'is_active' => true,
     ]);
