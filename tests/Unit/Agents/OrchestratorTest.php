@@ -1368,6 +1368,9 @@ test('resolveLlmConfig prefers user preference over global default', function ()
 
     // Cleanup
     PrincipalPreference::where('principal_id', $userId)->delete();
+    // Detach references first (FK from principal_preferences.preferred_llm_config_id).
+    PrincipalPreference::whereIn('preferred_llm_config_id', [$globalConfig->id, $prefConfig->id])->delete();
+
     LLMDriverConfiguration::whereIn('id', [$globalConfig->id, $prefConfig->id])->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -1417,6 +1420,10 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
 
     // Cleanup
     PrincipalPreference::where('principal_id', $userId)->delete();
+    // Detach references before deleting LLMDriverConfigurations (FK from
+    // principal_preferences.preferred_llm_config_id and from agents.llm_driver_config_id).
+    PrincipalPreference::whereIn('preferred_llm_config_id', [$prefConfig->id, $agentConfig->id])->delete();
+    Agent::where('id', $agentId)->update(['llm_driver_config_id' => null]);
     LLMDriverConfiguration::whereIn('id', [$prefConfig->id, $agentConfig->id])->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -1493,7 +1500,10 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     expect($taskB->status)->toBe('COMPLETED');
 
     // Cleanup
-    PrincipalPreference::whereIn('user_id', [$userA, $userB])->delete();
+    PrincipalPreference::whereIn('principal_id', [$userA, $userB])->delete();
+    // Detach references first (FK from principal_preferences.preferred_llm_config_id).
+    PrincipalPreference::whereIn('preferred_llm_config_id', [$configA->id, $configB->id])->delete();
+
     LLMDriverConfiguration::whereIn('id', [$configA->id, $configB->id])->delete();
     Agent::whereIn('id', [$agentA->id, $agentB->id])->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
@@ -1870,7 +1880,7 @@ it('buildToolDefinitions only queries operation overrides for enabled tool class
     $method = $reflection->getMethod('buildToolDefinitions');
 
     // Call it with only StubInputTool enabled
-    $method->invoke($orch, [StubInputTool::class], $agentId, $userId);
+    $method->invoke($orch, [StubInputTool::class], $agentId, null);
 
     $logs = Capsule::connection()->getQueryLog();
     Capsule::connection()->disableQueryLog();
