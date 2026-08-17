@@ -25,6 +25,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class UserPreferenceController
 {
+    use JsonControllerHelpers;
+
     private readonly PrincipalResolver $resolver;
     private readonly PrincipalService $principalService;
 
@@ -47,15 +49,11 @@ final class UserPreferenceController
      */
     public function show(Request $request): JsonResponse
     {
-        $userId = $this->authService->currentUserId();
-        if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+        $resolved = $this->resolveUserAndPrincipal($request);
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
         }
-
-        $principalId = $this->resolvePrincipalId($request, $userId);
-        if ($principalId === null) {
-            return $this->error('FORBIDDEN', 'Caller does not control the requested principal.', Response::HTTP_FORBIDDEN);
-        }
+        $principalId = $resolved;
 
         $config = $this->llmConfigService->getPrincipalPreferredConfig($principalId);
 
@@ -74,15 +72,11 @@ final class UserPreferenceController
      */
     public function update(Request $request): JsonResponse
     {
-        $userId = $this->authService->currentUserId();
-        if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+        $resolved = $this->resolveUserAndPrincipal($request);
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
         }
-
-        $principalId = $this->resolvePrincipalId($request, $userId);
-        if ($principalId === null) {
-            return $this->error('FORBIDDEN', 'Caller does not control the requested principal.', Response::HTTP_FORBIDDEN);
-        }
+        $principalId = $resolved;
 
         $body = $this->decodeBodyOrFail($request);
         if ($body instanceof JsonResponse) {
@@ -90,12 +84,31 @@ final class UserPreferenceController
         }
 
         $configId = $body['config_id'] ?? null;
+        $userId = (int) $this->authService->currentUserId();
 
         if ($configId === null) {
             return $this->clearPreference($principalId);
         }
 
         return $this->setPreference($principalId, $userId, $configId);
+    }
+
+    /**
+     * @return int|JsonResponse
+     */
+    private function resolveUserAndPrincipal(Request $request): int|JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            return $this->unauthenticated();
+        }
+
+        $principalId = $this->resolvePrincipalId($request, (int) $userId);
+        if ($principalId === null) {
+            return $this->forbidden('FORBIDDEN', 'Caller does not control the requested principal.');
+        }
+
+        return $principalId;
     }
 
     private function clearPreference(int $principalId): JsonResponse

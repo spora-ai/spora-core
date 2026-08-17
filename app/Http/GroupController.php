@@ -51,13 +51,14 @@ final class GroupController
      */
     public function index(): JsonResponse
     {
-        $userId = $this->authService->currentUserId();
-        if ($userId === null) {
-            return $this->unauthenticated();
+        $userId = $this->requireUserOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
         }
 
-        $isAdmin = $this->authService->isAdmin();
-        $groups = $isAdmin ? $this->listAllGroups() : $this->listGroupsForMember($userId);
+        $groups = $this->authService->isAdmin()
+            ? $this->listAllGroups()
+            : $this->listGroupsForMember((int) $userId);
 
         return new JsonResponse(['data' => ['groups' => $groups]]);
     }
@@ -67,25 +68,17 @@ final class GroupController
      */
     public function show(int $id): JsonResponse
     {
-        $userId = $this->authService->currentUserId();
-        if ($userId === null) {
-            return $this->unauthenticated();
+        $userId = $this->requireUserOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
         }
 
         $group = Group::find($id);
-        if ($group === null) {
+        if ($group === null || !$this->callerCanSeeGroup($id, (int) $userId)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
-        $isAdmin = $this->authService->isAdmin();
-        $isMember = GroupMembership::where('group_id', $id)
-            ->where('user_id', $userId)
-            ->exists();
-        if (!$isAdmin && !$isMember) {
-            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
-        }
-
-        return new JsonResponse(['data' => ['group' => $this->groupResource($group, $userId)]]);
+        return new JsonResponse(['data' => ['group' => $this->groupResource($group, (int) $userId)]]);
     }
 
     /**
@@ -97,30 +90,26 @@ final class GroupController
      */
     public function store(Request $request): JsonResponse
     {
-        $userId = $this->authService->currentUserId();
-        if ($userId === null) {
-            return $this->unauthenticated();
+        $userId = $this->requireUserOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
         }
 
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
         }
 
-        $name = trim((string) ($body['name'] ?? ''));
-        if ($name === '') {
-            return $this->unprocessable('VALIDATION_ERROR', 'name is required.');
+        $validated = $this->validateCreateBody($body);
+        if ($validated instanceof JsonResponse) {
+            return $validated;
         }
-        $description = isset($body['description']) ? trim((string) $body['description']) : null;
-        if ($description === '') {
-            $description = null;
-        }
+        [$name, $description] = $validated;
 
-        $group = $this->groupService->createGroup($userId, $name, $description);
+        $group = $this->groupService->createGroup((int) $userId, $name, $description);
 
         return new JsonResponse(
-            ['data' => ['group' => $this->groupResource($group, $userId)]],
+            ['data' => ['group' => $this->groupResource($group, (int) $userId)]],
             Response::HTTP_CREATED,
         );
     }
@@ -137,35 +126,26 @@ final class GroupController
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
         }
 
-        $update = [];
-        if (array_key_exists('name', $body)) {
-            $name = trim((string) $body['name']);
-            if ($name === '') {
-                return $this->unprocessable('VALIDATION_ERROR', 'name cannot be empty.');
-            }
-            $update['name'] = $name;
-        }
-        if (array_key_exists('description', $body)) {
-            $description = $body['description'] === null ? null : trim((string) $body['description']);
-            $update['description'] = ($description === '') ? null : $description;
+        $updates = $this->buildUpdatePayload($body);
+        if ($updates instanceof JsonResponse) {
+            return $updates;
         }
 
-        if ($update !== []) {
-            $update['updated_at'] = date('Y-m-d H:i:s');
+        if ($updates !== []) {
+            $updates['updated_at'] = date('Y-m-d H:i:s');
             \Illuminate\Database\Capsule\Manager::table('groups')
                 ->where('id', $id)
-                ->update($update);
+                ->update($updates);
             $group = Group::findOrFail($id);
         }
 
-        $userId = $this->authService->currentUserId();
-        return new JsonResponse(['data' => ['group' => $this->groupResource($group, $userId ?? 0)]]);
+        $userId = $this->authService->currentUserId() ?? 0;
+        return new JsonResponse(['data' => ['group' => $this->groupResource($group, $userId)]]);
     }
 
     /**
@@ -177,13 +157,13 @@ final class GroupController
      */
     public function destroy(int $id): JsonResponse
     {
-        $userId = $this->authService->currentUserId();
-        if ($userId === null) {
-            return $this->unauthenticated();
+        $userId = $this->requireUserOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
         }
 
         try {
-            $this->groupService->deleteGroup($id, $userId);
+            $this->groupService->deleteGroup($id, (int) $userId);
         } catch (GroupMembershipRuleException $e) {
             return $this->forbidden('FORBIDDEN', $e->getMessage());
         } catch (PrincipalHasDependentsException $e) {
@@ -213,6 +193,82 @@ final class GroupController
             ],
             Response::HTTP_CONFLICT,
         );
+    }
+
+    /**
+     * Returns the authenticated user id (as int) or a 401 JsonResponse
+     * if no user is logged in. The nullable return is intentional: we
+     * want callers to be able to short-circuit on failure in one line.
+     *
+     * @return int|JsonResponse
+     */
+    private function requireUserOrFail(): int|JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            return $this->unauthenticated();
+        }
+        return (int) $userId;
+    }
+
+    /**
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function safeDecodeJson(Request $request): array|JsonResponse
+    {
+        try {
+            return $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed> $body
+     * @return array{0: string, 1: ?string}|JsonResponse
+     */
+    private function validateCreateBody(array $body): array|JsonResponse
+    {
+        $name = trim((string) ($body['name'] ?? ''));
+        if ($name === '') {
+            return $this->unprocessable('VALIDATION_ERROR', 'name is required.');
+        }
+        $description = isset($body['description']) ? trim((string) $body['description']) : null;
+        if ($description === '') {
+            $description = null;
+        }
+        return [$name, $description];
+    }
+
+    /**
+     * @param  array<string, mixed> $body
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function buildUpdatePayload(array $body): array|JsonResponse
+    {
+        $update = [];
+        if (array_key_exists('name', $body)) {
+            $name = trim((string) $body['name']);
+            if ($name === '') {
+                return $this->unprocessable('VALIDATION_ERROR', 'name cannot be empty.');
+            }
+            $update['name'] = $name;
+        }
+        if (array_key_exists('description', $body)) {
+            $description = $body['description'] === null ? null : trim((string) $body['description']);
+            $update['description'] = ($description === '') ? null : $description;
+        }
+        return $update;
+    }
+
+    private function callerCanSeeGroup(int $groupId, int $userId): bool
+    {
+        if ($this->authService->isAdmin()) {
+            return true;
+        }
+        return GroupMembership::where('group_id', $groupId)
+            ->where('user_id', $userId)
+            ->exists();
     }
 
     /**

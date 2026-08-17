@@ -50,30 +50,16 @@ final class GroupMemberController
             return $this->unauthenticated();
         }
 
-        $group = $this->loadGroupOrNotFound($groupId);
-        if ($group instanceof JsonResponse) {
-            return $group;
+        $groupOrError = $this->loadGroupOrNotFound($groupId);
+        if ($groupOrError instanceof JsonResponse) {
+            return $groupOrError;
         }
 
-        $role = GroupService::fetchCallerRole($groupId, $userId);
-        if (!$this->authService->isAdmin() && $role === null) {
+        if (!$this->callerCanReadGroup($groupId, $userId)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
-        $rows = GroupMembership::where('group_id', $groupId)
-            ->orderBy('id')
-            ->get();
-
-        $members = array_map(
-            static fn(GroupMembership $m): array => [
-                'user_id'   => (int) $m->user_id,
-                'role'      => (string) $m->role,
-                'joined_at' => $m->joined_at?->format(DateTimeInterface::ATOM),
-            ],
-            $rows->all(),
-        );
-
-        return new JsonResponse(['data' => ['members' => $members]]);
+        return new JsonResponse(['data' => ['members' => $this->memberRows($groupId)]]);
     }
 
     /**
@@ -81,44 +67,31 @@ final class GroupMemberController
      */
     public function store(int $groupId, Request $request): JsonResponse
     {
-        $userId = $this->authService->currentUserId();
-        if ($userId === null) {
-            return $this->unauthenticated();
+        $auth = $this->requireCallerAndWriteAccess($groupId);
+        if ($auth instanceof JsonResponse) {
+            return $auth;
+        }
+        [$callerUserId] = $auth;
+
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
         }
 
-        $authError = $this->authoriseMemberWrite($groupId, $userId);
-        if ($authError !== null) {
-            return $authError;
+        $validated = $this->validateAddMemberBody($body);
+        if ($validated instanceof JsonResponse) {
+            return $validated;
         }
-
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
-        }
-
-        $targetUserId = (int) ($body['user_id'] ?? 0);
-        if ($targetUserId <= 0) {
-            return $this->unprocessable('VALIDATION_ERROR', 'user_id is required.');
-        }
-        $role = (string) ($body['role'] ?? GroupMembership::ROLE_MEMBER);
-        if (!in_array($role, [GroupMembership::ROLE_OWNER, GroupMembership::ROLE_ADMIN, GroupMembership::ROLE_MEMBER], true)) {
-            return $this->unprocessable('VALIDATION_ERROR', "Unknown role: {$role}");
-        }
+        [$targetUserId, $role] = $validated;
 
         try {
-            $this->groupService->addMember($groupId, $targetUserId, $role, $userId);
+            $this->groupService->addMember($groupId, $targetUserId, $role, $callerUserId);
         } catch (GroupMembershipRuleException $e) {
             return $this->forbidden('FORBIDDEN', $e->getMessage());
         }
 
         return new JsonResponse(
-            ['data' => [
-                'member' => [
-                    'user_id' => $targetUserId,
-                    'role'    => $role,
-                ],
-            ]],
+            ['data' => ['member' => ['user_id' => $targetUserId, 'role' => $role]]],
             Response::HTTP_CREATED,
         );
     }
@@ -128,25 +101,20 @@ final class GroupMemberController
      */
     public function update(int $groupId, int $userId, Request $request): JsonResponse
     {
-        $callerUserId = $this->authService->currentUserId();
-        if ($callerUserId === null) {
-            return $this->unauthenticated();
+        $auth = $this->requireCallerAndWriteAccess($groupId);
+        if ($auth instanceof JsonResponse) {
+            return $auth;
+        }
+        [$callerUserId] = $auth;
+
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
         }
 
-        $authError = $this->authoriseMemberWrite($groupId, $callerUserId);
-        if ($authError !== null) {
-            return $authError;
-        }
-
-        try {
-            $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
-        }
-
-        $newRole = (string) ($body['role'] ?? '');
-        if (!in_array($newRole, [GroupMembership::ROLE_OWNER, GroupMembership::ROLE_ADMIN, GroupMembership::ROLE_MEMBER], true)) {
-            return $this->unprocessable('VALIDATION_ERROR', "Unknown role: {$newRole}");
+        $newRole = $this->validateRole($body);
+        if ($newRole instanceof JsonResponse) {
+            return $newRole;
         }
 
         try {
@@ -161,12 +129,7 @@ final class GroupMemberController
             );
         }
 
-        return new JsonResponse(['data' => [
-            'member' => [
-                'user_id' => $userId,
-                'role'    => $newRole,
-            ],
-        ]]);
+        return new JsonResponse(['data' => ['member' => ['user_id' => $userId, 'role' => $newRole]]]);
     }
 
     /**
@@ -174,15 +137,11 @@ final class GroupMemberController
      */
     public function destroy(int $groupId, int $userId): JsonResponse
     {
-        $callerUserId = $this->authService->currentUserId();
-        if ($callerUserId === null) {
-            return $this->unauthenticated();
+        $auth = $this->requireCallerAndWriteAccess($groupId);
+        if ($auth instanceof JsonResponse) {
+            return $auth;
         }
-
-        $authError = $this->authoriseMemberWrite($groupId, $callerUserId);
-        if ($authError !== null) {
-            return $authError;
-        }
+        [$callerUserId] = $auth;
 
         try {
             $this->groupService->removeMember($groupId, $userId, $callerUserId);
@@ -197,14 +156,103 @@ final class GroupMemberController
     }
 
     /**
+     * @return list<array<string, mixed>>
+     */
+    private function memberRows(int $groupId): array
+    {
+        return array_map(
+            static fn(GroupMembership $m): array => [
+                'user_id'   => (int) $m->user_id,
+                'role'      => (string) $m->role,
+                'joined_at' => $m->joined_at?->format(DateTimeInterface::ATOM),
+            ],
+            GroupMembership::where('group_id', $groupId)->orderBy('id')->get()->all(),
+        );
+    }
+
+    private function callerCanReadGroup(int $groupId, int $userId): bool
+    {
+        if ($this->authService->isAdmin()) {
+            return true;
+        }
+        return GroupService::fetchCallerRole($groupId, $userId) !== null;
+    }
+
+    /**
+     * Common preamble for store/update/destroy: returns [callerUserId]
+     * when both checks pass; or a JsonResponse to short-circuit.
+     *
+     * @return array{0: int}|JsonResponse
+     */
+    private function requireCallerAndWriteAccess(int $groupId): array|JsonResponse
+    {
+        $callerUserId = $this->authService->currentUserId();
+        if ($callerUserId === null) {
+            return $this->unauthenticated();
+        }
+
+        $authError = $this->authoriseMemberWrite($groupId, $callerUserId);
+        if ($authError !== null) {
+            return $authError;
+        }
+
+        return [$callerUserId];
+    }
+
+    /**
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function safeDecodeJson(Request $request): array|JsonResponse
+    {
+        try {
+            return $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed> $body
+     * @return array{0: int, 1: string}|JsonResponse
+     */
+    private function validateAddMemberBody(array $body): array|JsonResponse
+    {
+        $targetUserId = (int) ($body['user_id'] ?? 0);
+        if ($targetUserId <= 0) {
+            return $this->unprocessable('VALIDATION_ERROR', 'user_id is required.');
+        }
+
+        $role = (string) ($body['role'] ?? GroupMembership::ROLE_MEMBER);
+        $roleError = $this->validateRole(['role' => $role]);
+        if ($roleError instanceof JsonResponse) {
+            return $roleError;
+        }
+
+        return [$targetUserId, $roleError];
+    }
+
+    /**
+     * @param  array<string, mixed> $body
+     * @return string|JsonResponse (the validated role, or an error envelope)
+     */
+    private function validateRole(array $body): string|JsonResponse
+    {
+        $role = (string) ($body['role'] ?? '');
+        if (!in_array($role, [GroupMembership::ROLE_OWNER, GroupMembership::ROLE_ADMIN, GroupMembership::ROLE_MEMBER], true)) {
+            return $this->unprocessable('VALIDATION_ERROR', "Unknown role: {$role}");
+        }
+        return $role;
+    }
+
+    /**
      * Authorisation: caller must be admin OR owner of the group.
      * Returns the 403/404 envelope on failure, or null on success.
      */
     private function authoriseMemberWrite(int $groupId, int $callerUserId): ?JsonResponse
     {
-        $group = $this->loadGroupOrNotFound($groupId);
-        if ($group instanceof JsonResponse) {
-            return $group;
+        $groupOrError = $this->loadGroupOrNotFound($groupId);
+        if ($groupOrError instanceof JsonResponse) {
+            return $groupOrError;
         }
 
         if ($this->authService->isAdmin()) {

@@ -453,13 +453,11 @@ final class AgentController
             return $this->unauthenticated();
         }
 
-        try {
-            $agent = $this->agentService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
-        } catch (UnauthorizedTransferException $e) {
-            return $this->forbidden('FORBIDDEN', $e->getMessage());
-        } catch (RuntimeException $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
+        $transferResult = $this->runTransfer($agentId, $targetPrincipalId, $callerUserId);
+        if ($transferResult instanceof JsonResponse) {
+            return $transferResult;
         }
+        $agent = $transferResult;
 
         return new JsonResponse([
             'data' => [
@@ -471,6 +469,20 @@ final class AgentController
                 ),
             ],
         ]);
+    }
+
+    /**
+     * @return Agent|JsonResponse
+     */
+    private function runTransfer(int $agentId, int $targetPrincipalId, int $callerUserId): Agent|JsonResponse
+    {
+        try {
+            return $this->agentService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
+        } catch (UnauthorizedTransferException $e) {
+            return $this->forbidden('FORBIDDEN', $e->getMessage());
+        } catch (RuntimeException $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
+        }
     }
 
     private function resolveSupportsImageInput(Agent $agent): bool
