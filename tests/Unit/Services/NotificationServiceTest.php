@@ -67,8 +67,8 @@ describe('NotificationService::getNotifications', function (): void {
         $auth = bootAuthLayer();
         $otherUserId = bootAuth($auth, 'notif-other@example.com', NOTIF_TEST_PASSWORD);
 
-        Notification::create(['principal_id' => createUserPrincipalPublic($userId),     'type' => 'task_completed', 'title' => 'Mine',   'created_at' => '2025-01-01 00:00:00']);
-        Notification::create(['principal_id' => createUserPrincipalPublic($otherUserId), 'type' => 'task_completed', 'title' => 'Theirs', 'created_at' => '2025-01-02 00:00:00']);
+        Notification::create(['user_id' => $userId,     'type' => 'task_completed', 'title' => 'Mine',   'created_at' => '2025-01-01 00:00:00']);
+        Notification::create(['user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Theirs', 'created_at' => '2025-01-02 00:00:00']);
 
         $result = $service->getNotifications($userId, 10, false);
         expect($result['data'])->toHaveCount(1);
@@ -78,8 +78,8 @@ describe('NotificationService::getNotifications', function (): void {
     it('filters unread-only when requested', function (): void {
         [$service, , $userId] = makeNotificationServiceWithUser();
 
-        Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'Read',   'read_at' => '2025-01-01 00:00:00']);
-        Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'Unread', 'read_at' => null]);
+        Notification::create(['user_id' => $userId, 'type' => 'task_completed', 'title' => 'Read',   'read_at' => '2025-01-01 00:00:00']);
+        Notification::create(['user_id' => $userId, 'type' => 'task_completed', 'title' => 'Unread', 'read_at' => null]);
 
         $result = $service->getNotifications($userId, 10, true);
         expect($result['data'])->toHaveCount(1);
@@ -100,7 +100,7 @@ describe('NotificationService::markAsRead', function (): void {
         $auth = bootAuthLayer();
         $otherUserId = bootAuth($auth, 'notif-mark@example.com', NOTIF_TEST_PASSWORD);
 
-        $n = Notification::create(['principal_id' => createUserPrincipalPublic($otherUserId), 'type' => 'task_completed', 'title' => 'Foreign']);
+        $n = Notification::create(['user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Foreign']);
 
         expect($service->markAsRead($n->id, $userId))->toBeNull();
     });
@@ -108,7 +108,7 @@ describe('NotificationService::markAsRead', function (): void {
     it('marks the notification as read and returns the resource', function (): void {
         [$service, , $userId] = makeNotificationServiceWithUser();
 
-        $n = Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'Read me']);
+        $n = Notification::create(['user_id' => $userId, 'type' => 'task_completed', 'title' => 'Read me']);
 
         $result = $service->markAsRead($n->id, $userId);
         expect($result)->not->toBeNull();
@@ -121,8 +121,8 @@ describe('NotificationService::markAllAsRead', function (): void {
     it('marks all of the user’s unread notifications as read', function (): void {
         [$service, , $userId] = makeNotificationServiceWithUser();
 
-        Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'A', 'read_at' => null]);
-        Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'B', 'read_at' => null]);
+        Notification::create(['user_id' => $userId, 'type' => 'task_completed', 'title' => 'A', 'read_at' => null]);
+        Notification::create(['user_id' => $userId, 'type' => 'task_completed', 'title' => 'B', 'read_at' => null]);
 
         $service->markAllAsRead($userId);
 
@@ -143,7 +143,7 @@ describe('NotificationService::deleteNotification', function (): void {
 
         $auth = bootAuthLayer();
         $otherUserId = bootAuth($auth, 'notif-del@example.com', NOTIF_TEST_PASSWORD);
-        $n = Notification::create(['principal_id' => createUserPrincipalPublic($otherUserId), 'type' => 'task_completed', 'title' => 'Theirs']);
+        $n = Notification::create(['user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Theirs']);
 
         expect($service->deleteNotification($n->id, $userId))->toBeFalse();
     });
@@ -151,7 +151,7 @@ describe('NotificationService::deleteNotification', function (): void {
     it('deletes the notification and returns true', function (): void {
         [$service, , $userId] = makeNotificationServiceWithUser();
 
-        $n = Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'Delete me']);
+        $n = Notification::create(['user_id' => $userId, 'type' => 'task_completed', 'title' => 'Delete me']);
         expect($service->deleteNotification($n->id, $userId))->toBeTrue();
         expect(Notification::find($n->id))->toBeNull();
     });
@@ -165,8 +165,8 @@ describe('NotificationService::deleteAllForUser', function (): void {
         $auth = bootAuthLayer();
         $otherUserId = bootAuth($auth, 'notif-delall@example.com', NOTIF_TEST_PASSWORD);
 
-        Notification::create(['principal_id' => createUserPrincipalPublic($userId),     'type' => 'task_completed', 'title' => 'Mine']);
-        Notification::create(['principal_id' => createUserPrincipalPublic($otherUserId), 'type' => 'task_completed', 'title' => 'Theirs']);
+        Notification::create(['user_id' => $userId,     'type' => 'task_completed', 'title' => 'Mine']);
+        Notification::create(['user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Theirs']);
 
         $service->deleteAllForUser($userId);
 

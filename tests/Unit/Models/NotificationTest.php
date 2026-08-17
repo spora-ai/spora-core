@@ -20,8 +20,8 @@ it('disables Eloquent timestamps (created_at managed by hook)', function (): voi
 it('allows mass assignment and creation without created_at', function (): void {
     $userId = bootAuthLayer()->register('notif@example.com', NOTIFICATION_TEST_PASSWORD, 'Notif');
 
-    $notification = Notification::create([
-        'principal_id' => createUserPrincipalPublic($userId),
+    $notification = ([
+        'user_id' => $userId,
         'type'    => 'TASK_COMPLETED',
         'title'   => 'Task done',
         'body'    => 'Your task is done',
@@ -36,8 +36,8 @@ it('allows mass assignment and creation without created_at', function (): void {
 it('casts data to array and read_at to Carbon', function (): void {
     $userId = bootAuthLayer()->register('notif-cast@example.com', NOTIFICATION_TEST_PASSWORD, 'NotifCast');
 
-    $notification = Notification::create([
-        'principal_id' => createUserPrincipalPublic($userId),
+    $notification = ([
+        'user_id' => $userId,
         'type'    => 'TASK_FAILED',
         'title'   => 'Oops',
         'data'    => ['code' => 500],
@@ -51,8 +51,8 @@ it('casts data to array and read_at to Carbon', function (): void {
 
 it('belongs to a user', function (): void {
     $userId = bootAuthLayer()->register('notif-rel@example.com', NOTIFICATION_TEST_PASSWORD, 'NotifRel');
-    $notification = Notification::create([
-        'principal_id' => createUserPrincipalPublic($userId),
+    $notification = ([
+        'user_id' => $userId,
         'type'    => 'INFO',
         'title'   => 'Hi',
     ]);

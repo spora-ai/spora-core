@@ -179,14 +179,14 @@ describe('NotificationService', function (): void {
     it('notifications are ordered newest first', function (): void {
         [$userId] = seedUserAndAgentForNotification();
 
-        $older = Notification::create([
-            'principal_id' => createUserPrincipalPublic($userId),
+        $older = ([
+            'user_id' => $userId,
             'type'       => 'task_completed',
             'title'      => 'First',
             'created_at' => date(TEST_TIMESTAMP_FORMAT, strtotime('-2 hours')),
         ]);
-        $newer = Notification::create([
-            'principal_id' => createUserPrincipalPublic($userId),
+        $newer = ([
+            'user_id' => $userId,
             'type'       => 'task_failed',
             'title'      => 'Second',
             'created_at' => date(TEST_TIMESTAMP_FORMAT, strtotime('-1 hour')),
@@ -203,8 +203,8 @@ describe('NotificationController', function (): void {
     it('index returns paginated notifications for the logged-in user', function (): void {
         [$userId, , $authService] = seedUserAndAgentForNotification();
 
-        Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'Notif 1']);
-        Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_failed', 'title' => 'Notif 2']);
+        (['user_id' => $userId, 'type' => 'task_completed', 'title' => 'Notif 1']);
+        (['user_id' => $userId, 'type' => 'task_failed', 'title' => 'Notif 2']);
 
         $controller = new NotificationController($authService, makeNotificationService());
         $request = jsonRequest('GET', '/api/v1/notifications');
@@ -219,12 +219,12 @@ describe('NotificationController', function (): void {
     it('index returns only unread notifications with unread_only=true', function (): void {
         [$userId] = seedUserAndAgentForNotification();
 
-        Notification::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'Read',
+        ([
+            'user_id' => $userId, 'type' => 'task_completed', 'title' => 'Read',
             'read_at' => date(TEST_TIMESTAMP_FORMAT),
         ]);
-        Notification::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'Unread',
+        ([
+            'user_id' => $userId, 'type' => 'task_completed', 'title' => 'Unread',
         ]);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
@@ -239,8 +239,8 @@ describe('NotificationController', function (): void {
     it('markRead marks a notification as read', function (): void {
         [$userId] = seedUserAndAgentForNotification();
 
-        $notif = Notification::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'To Read',
+        $notif = ([
+            'user_id' => $userId, 'type' => 'task_completed', 'title' => 'To Read',
         ]);
         expect($notif->read_at)->toBeNull();
 
@@ -258,8 +258,8 @@ describe('NotificationController', function (): void {
         seedUserAndAgentForNotification();
         $otherUserId = bootAuthLayer()->register('other@example.com', TEST_PASSWORD, 'Other');
 
-        $notif = Notification::create([
-            'principal_id' => createUserPrincipalPublic($otherUserId), 'type' => 'task_completed', 'title' => 'Other',
+        $notif = ([
+            'user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Other',
         ]);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
@@ -272,8 +272,8 @@ describe('NotificationController', function (): void {
     it('markAllRead marks all unread notifications as read', function (): void {
         [$userId] = seedUserAndAgentForNotification();
 
-        Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'A']);
-        Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'B']);
+        (['user_id' => $userId, 'type' => 'task_completed', 'title' => 'A']);
+        (['user_id' => $userId, 'type' => 'task_completed', 'title' => 'B']);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
         $response = $controller->markAllRead();
@@ -286,8 +286,8 @@ describe('NotificationController', function (): void {
     it('destroy deletes a notification and returns 204 with no body', function (): void {
         [$userId] = seedUserAndAgentForNotification();
 
-        $notif = Notification::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'To Delete',
+        $notif = ([
+            'user_id' => $userId, 'type' => 'task_completed', 'title' => 'To Delete',
         ]);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
@@ -305,8 +305,8 @@ describe('NotificationController', function (): void {
         seedUserAndAgentForNotification();
         $otherUserId = bootAuthLayer()->register('other@example.com', TEST_PASSWORD, 'Other');
 
-        $notif = Notification::create([
-            'principal_id' => createUserPrincipalPublic($otherUserId), 'type' => 'task_completed', 'title' => 'Other',
+        $notif = ([
+            'user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Other',
         ]);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());

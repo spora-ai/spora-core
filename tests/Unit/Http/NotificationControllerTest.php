@@ -48,8 +48,8 @@ function seedNotificationUserUnit(Spora\Auth\AuthService $authService, string $e
 
 function createNotificationForUnit(int $userId, string $type = 'task_completed', ?string $readAt = null): Notification
 {
-    return Notification::create([
-        'principal_id' => createUserPrincipalPublic($userId),
+    return ([
+        'user_id' => createUserPrincipalPublic($userId),
         'type'    => $type,
         'title'   => 'A notification',
         'body'    => 'body',

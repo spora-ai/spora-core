@@ -155,7 +155,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Daily check',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -187,7 +187,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Future task',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -219,7 +219,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Recurring task',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -258,7 +258,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Recurring from last_run',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -301,7 +301,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Deactivated task',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -333,7 +333,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Berlin daily at 09:00',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'Europe/Berlin',
@@ -371,7 +371,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Concurrent test',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -428,7 +428,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $runA = ScheduledRun::create([
             'agent_id'        => $agentA->id,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Stale run',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -438,7 +438,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $runB = ScheduledRun::create([
             'agent_id'        => $agentB->id,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Live run',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -528,7 +528,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Daily briefing',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -570,7 +570,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Atomic test',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -634,7 +634,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
             $run = ScheduledRun::create([
                 'agent_id'        => $agentId,
-                'principal_id' => createUserPrincipalPublic($userId),
+                'user_id' => $userId,
                 'raw_prompt'      => 'UTC-poll test',
                 'cron_expression' => DAILY_9AM_CRON,
                 'timezone'        => 'UTC',
@@ -695,7 +695,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'Recurring with throwing orchestrator',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -763,7 +763,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id' => $userId,
             'raw_prompt'      => 'One-shot with throwing orchestrator',
             'cron_expression' => null,
             'run_at'          => WORKER_TEST_PAST_DUE_AT,
