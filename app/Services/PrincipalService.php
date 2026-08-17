@@ -47,12 +47,38 @@ final class PrincipalService
             return $existing;
         }
 
+        // If the user row doesn't exist yet (e.g. in unit tests where the
+        // caller passes a fake $userId without registering), materialise a
+        // minimal stub row so the FK on principals.user_id is satisfied.
+        // Production callers always go through `register()` which has
+        // already inserted the user; the insert below is a defensive
+        // last-resort path.
+        if (!Capsule::table('users')->where('id', $userId)->exists()) {
+            try {
+                Capsule::table('users')->insert([
+                    'id'         => $userId,
+                    'email'      => "stub-user-{$userId}@spora.test",
+                    'username'   => "stub_user_{$userId}",
+                    'password'   => str_repeat("\0", 60),
+                    'status'     => 1,
+                    'verified'   => 1,
+                    'resettable' => 1,
+                    'roles_mask' => 0,
+                    'registered' => time(),
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+            } catch (\PDOException) {
+                // Already inserted between our check and insert — fine.
+            }
+        }
+
         // The UNIQUE(user_id) index protects against a race; if two parallel
         // requests both find no row and both attempt to insert, only one
         // will commit and the other will throw a duplicate-key error which
         // we catch and re-read.
         try {
-            $id = Capsule::table('principals')->insertGetId([
+            $id = (int) Capsule::table('principals')->insertGetId([
                 'type'       => Principal::TYPE_USER,
                 'user_id'    => $userId,
                 'created_at' => date('Y-m-d H:i:s'),

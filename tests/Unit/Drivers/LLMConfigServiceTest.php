@@ -246,7 +246,7 @@ test('getEffectiveConfigForAgent returns tier-1 agent-specific config', function
     ]);
 
     $agentConfig = new LLMDriverConfiguration();
-    $agentConfig->user_id = $userId;
+    $agentConfig->principal_id = createUserPrincipalPublic($userId);
     $agentConfig->name = 'Agent Config';
     $agentConfig->driver_class = OpenAICompatibleDriver::class;
     $agentConfig->settings = json_encode([]);
@@ -254,7 +254,7 @@ test('getEffectiveConfigForAgent returns tier-1 agent-specific config', function
     $agentConfig->save();
 
     $userDefault = new LLMDriverConfiguration();
-    $userDefault->user_id = $userId;
+    $userDefault->principal_id = createUserPrincipalPublic($userId);
     $userDefault->name = TEST_USER_DEFAULT_NAME;
     $userDefault->driver_class = OpenAICompatibleDriver::class;
     $userDefault->settings = json_encode([]);
@@ -263,7 +263,7 @@ test('getEffectiveConfigForAgent returns tier-1 agent-specific config', function
 
     $agent = new Agent();
     $agent->id = 999;
-    $agent->user_id = $userId;
+    $agent->principal_id = createUserPrincipalPublic($userId);
     $agent->llm_driver_config_id = $agentConfig->id;
 
     $result = $service->getEffectiveConfigForAgent($agent);
@@ -286,7 +286,7 @@ test('getEffectiveConfigForAgent falls back to tier-2 user default when no agent
     ]);
 
     $userDefault = new LLMDriverConfiguration();
-    $userDefault->user_id = $userId;
+    $userDefault->principal_id = createUserPrincipalPublic($userId);
     $userDefault->name = TEST_USER_DEFAULT_NAME;
     $userDefault->driver_class = OpenAICompatibleDriver::class;
     $userDefault->settings = json_encode([]);
@@ -299,7 +299,7 @@ test('getEffectiveConfigForAgent falls back to tier-2 user default when no agent
 
     $agent = new Agent();
     $agent->id = 998;
-    $agent->user_id = $userId;
+    $agent->principal_id = createUserPrincipalPublic($userId);
     $agent->llm_driver_config_id = null;
 
     $result = $service->getEffectiveConfigForAgent($agent);
@@ -322,7 +322,7 @@ test('getEffectiveConfigForAgent falls back to tier-3 global default when no use
     ]);
 
     $globalDefault = new LLMDriverConfiguration();
-    $globalDefault->user_id = null;
+    $globalDefault->principal_id = null;
     $globalDefault->name = 'Global Default';
     $globalDefault->driver_class = OpenAICompatibleDriver::class;
     $globalDefault->settings = json_encode([]);
@@ -332,7 +332,7 @@ test('getEffectiveConfigForAgent falls back to tier-3 global default when no use
 
     $agent = new Agent();
     $agent->id = 997;
-    $agent->user_id = $userId;
+    $agent->principal_id = createUserPrincipalPublic($userId);
     $agent->llm_driver_config_id = null;
 
     $result = $service->getEffectiveConfigForAgent($agent);
@@ -356,7 +356,7 @@ test('getEffectiveConfigForAgent returns null when no config at any tier', funct
 
     $agent = new Agent();
     $agent->id = 996;
-    $agent->user_id = $userId;
+    $agent->principal_id = createUserPrincipalPublic($userId);
     $agent->llm_driver_config_id = null;
 
     $result = $service->getEffectiveConfigForAgent($agent);
@@ -469,7 +469,7 @@ describe('LLMConfigService::applyConfigurationUpdates', function (): void {
         ]);
 
         $config = new LLMDriverConfiguration();
-        $config->user_id = $userId;
+        $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'Original Name';
         $config->driver_class = OpenAICompatibleDriver::class;
         $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, [
@@ -506,7 +506,7 @@ describe('LLMConfigService::applyConfigurationUpdates', function (): void {
         ]);
 
         $config = new LLMDriverConfiguration();
-        $config->user_id = $userId;
+        $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'Original';
         $config->driver_class = OpenAICompatibleDriver::class;
         $config->settings = json_encode([]);
@@ -536,7 +536,7 @@ describe('LLMConfigService::applyConfigurationUpdates', function (): void {
         ]);
 
         $config = new LLMDriverConfiguration();
-        $config->user_id = $userId;
+        $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'Untouched';
         $config->driver_class = OpenAICompatibleDriver::class;
         $config->settings = json_encode([]);
@@ -573,7 +573,7 @@ describe('LLMConfigService::loadDefaultableConfiguration', function (): void {
         ]);
 
         $config = new LLMDriverConfiguration();
-        $config->user_id = $userId;
+        $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'Personal';
         $config->driver_class = OpenAICompatibleDriver::class;
         $config->settings = json_encode([]);
@@ -590,7 +590,7 @@ describe('LLMConfigService::loadDefaultableConfiguration', function (): void {
         $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
         $config = new LLMDriverConfiguration();
-        $config->user_id = null;
+        $config->principal_id = null;
         $config->name = 'Global';
         $config->driver_class = OpenAICompatibleDriver::class;
         $config->settings = json_encode([]);
@@ -607,7 +607,7 @@ describe('LLMConfigService::loadDefaultableConfiguration', function (): void {
         $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
         $config = new LLMDriverConfiguration();
-        $config->user_id = null;
+        $config->principal_id = null;
         $config->name = 'Global Default';
         $config->driver_class = OpenAICompatibleDriver::class;
         $config->settings = json_encode([]);
@@ -637,14 +637,14 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
         ]);
 
         $agentConfig = new LLMDriverConfiguration();
-        $agentConfig->user_id = $userId;
+        $agentConfig->principal_id = createUserPrincipalPublic($userId);
         $agentConfig->name = 'Agent Specific';
         $agentConfig->driver_class = OpenAICompatibleDriver::class;
         $agentConfig->settings = json_encode([]);
         $agentConfig->save();
 
         $preferred = new LLMDriverConfiguration();
-        $preferred->user_id = $userId;
+        $preferred->principal_id = createUserPrincipalPublic($userId);
         $preferred->name = 'User Preferred';
         $preferred->driver_class = OpenAICompatibleDriver::class;
         $preferred->settings = json_encode([]);
@@ -655,7 +655,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
         ]);
 
         $globalDefault = new LLMDriverConfiguration();
-        $globalDefault->user_id = null;
+        $globalDefault->principal_id = null;
         $globalDefault->name = 'Global Default';
         $globalDefault->driver_class = OpenAICompatibleDriver::class;
         $globalDefault->settings = json_encode([]);
@@ -665,7 +665,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
 
         $agent = new Agent();
         $agent->id = 901;
-        $agent->user_id = $userId;
+        $agent->principal_id = createUserPrincipalPublic($userId);
         $agent->llm_driver_config_id = (int) $agentConfig->getKey();
 
         $result = $service->getEffectiveConfigForAgent($agent);
@@ -688,7 +688,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
         ]);
 
         $preferred = new LLMDriverConfiguration();
-        $preferred->user_id = $userId;
+        $preferred->principal_id = createUserPrincipalPublic($userId);
         $preferred->name = 'Preferred';
         $preferred->driver_class = OpenAICompatibleDriver::class;
         $preferred->settings = json_encode([]);
@@ -699,7 +699,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
         ]);
 
         $globalDefault = new LLMDriverConfiguration();
-        $globalDefault->user_id = null;
+        $globalDefault->principal_id = null;
         $globalDefault->name = 'Global';
         $globalDefault->driver_class = OpenAICompatibleDriver::class;
         $globalDefault->settings = json_encode([]);
@@ -709,7 +709,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
 
         $agent = new Agent();
         $agent->id = 902;
-        $agent->user_id = $userId;
+        $agent->principal_id = createUserPrincipalPublic($userId);
         $agent->llm_driver_config_id = null;
 
         $result = $service->getEffectiveConfigForAgent($agent);
@@ -733,7 +733,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
 
         $agent = new Agent();
         $agent->id = 903;
-        $agent->user_id = $userId;
+        $agent->principal_id = createUserPrincipalPublic($userId);
         $agent->llm_driver_config_id = null;
 
         $result = $service->getEffectiveConfigForAgent($agent);
@@ -754,7 +754,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
         ]);
 
         $globalDefault = new LLMDriverConfiguration();
-        $globalDefault->user_id = null;
+        $globalDefault->principal_id = null;
         $globalDefault->name = 'Global Default';
         $globalDefault->driver_class = OpenAICompatibleDriver::class;
         $globalDefault->settings = json_encode([]);
@@ -764,7 +764,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
 
         $agent = new Agent();
         $agent->id = 904;
-        $agent->user_id = $userId;
+        $agent->principal_id = createUserPrincipalPublic($userId);
         $agent->llm_driver_config_id = null;
 
         $result = $service->getEffectiveConfigForAgent($agent);
