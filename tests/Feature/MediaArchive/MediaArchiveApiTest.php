@@ -607,7 +607,7 @@ describe('MediaArchiveController', function (): void {
 
             // Two agents (one per user) so tool rows surface only when the current user owns that agent.
             $agentA = Agent::create([
-                'user_id'      => $userA,
+                'principal_id' => createUserPrincipalPublic($userA),
                 'name'         => 'Agent A',
                 'llm_provider' => 'mock',
                 'llm_model'    => 'mock',
@@ -615,7 +615,7 @@ describe('MediaArchiveController', function (): void {
                 'is_active'    => true,
             ]);
             $agentB = Agent::create([
-                'user_id'      => $userB,
+                'principal_id' => createUserPrincipalPublic($userB),
                 'name'         => 'Agent B',
                 'llm_provider' => 'mock',
                 'llm_model'    => 'mock',
@@ -676,7 +676,7 @@ describe('MediaArchiveController', function (): void {
             $userB = $authService->register('media-owner-up-b@example.com', 'ValidPass1!', 'OwnerUpB');
 
             $agentA = Agent::create([
-                'user_id'      => $userA,
+                'principal_id' => createUserPrincipalPublic($userA),
                 'name'         => 'Agent A',
                 'llm_provider' => 'mock',
                 'llm_model'    => 'mock',
@@ -731,7 +731,7 @@ describe('MediaArchiveController', function (): void {
             $userB = $authService->register('media-owner-tool-b@example.com', 'ValidPass1!', 'OwnerToolB');
 
             $agentA = Agent::create([
-                'user_id'      => $userA,
+                'principal_id' => createUserPrincipalPublic($userA),
                 'name'         => 'Agent A',
                 'llm_provider' => 'mock',
                 'llm_model'    => 'mock',
@@ -739,7 +739,7 @@ describe('MediaArchiveController', function (): void {
                 'is_active'    => true,
             ]);
             $agentB = Agent::create([
-                'user_id'      => $userB,
+                'principal_id' => createUserPrincipalPublic($userB),
                 'name'         => 'Agent B',
                 'llm_provider' => 'mock',
                 'llm_model'    => 'mock',

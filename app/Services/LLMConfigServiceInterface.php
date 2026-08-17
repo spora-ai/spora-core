@@ -39,6 +39,24 @@ interface LLMConfigServiceInterface
     public function unsetUserPreferredConfig(int $userId): void;
 
     /**
+     * Read a principal's preferred LLM configuration. Direct principal
+     * key — prefers the controller's already-resolved principal_id over
+     * the caller user-id shim {@see self::getUserPreferredConfig()}.
+     */
+    public function getPrincipalPreferredConfig(int $principalId): ?LLMDriverConfiguration;
+
+    /**
+     * Persist a principal's preferred LLM configuration. The caller
+     * must own the principal; admins short-circuit.
+     */
+    public function setPrincipalPreferredConfig(int $principalId, int $configId, int $callerUserId): bool;
+
+    /**
+     * Clear a principal's preferred LLM configuration.
+     */
+    public function unsetPrincipalPreferredConfig(int $principalId): void;
+
+    /**
      * Find a configuration by ID (for authorization checks).
      */
     public function findConfiguration(int $configId): ?LLMDriverConfiguration;

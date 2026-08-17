@@ -22,7 +22,7 @@ beforeEach(function (): void {
     $this->service = new AgentPictureService();
     $this->userId = bootAuth(bootAuthLayer());
     Capsule::table('agents')->insert([
-        'id' => 1, 'user_id' => $this->userId, 'name' => 'Test', 'max_steps' => 10,
+        'id' => 1, 'principal_id' => createUserPrincipalPublic($this->userId), 'name' => 'Test', 'max_steps' => 10,
         'is_active' => 1, 'allow_followup' => 1, 'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
@@ -216,7 +216,7 @@ function seedMediaAsset(?int $userId): MediaAsset
         'id' => $id,
         'asset_url' => "/api/v1/assets/{$id}.png",
         'storage_mode' => 'local',
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'upload_source' => 'avatar',
         'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),

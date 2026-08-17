@@ -289,13 +289,14 @@ test('GET /api/v1/assets/{uuid} lets the owning user through', function (): void
         $userId = \bootAuthLayer()->register('asset-owner@example.com', 'Password1!', 'Owner');
 
         $agent = \Spora\Models\Agent::create([
-            'user_id'   => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'asset-owner-test',
             'max_steps' => 5,
             'is_active' => true,
         ]);
         $task = \Spora\Models\Task::create([
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'test',
@@ -361,7 +362,7 @@ test('GET /api/v1/assets/{uuid} lets a non-admin user fetch media produced by an
 
     try {
         $agent = \Spora\Models\Agent::create([
-            'user_id'   => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'agent-owner-test',
             'max_steps' => 5,
             'is_active' => true,

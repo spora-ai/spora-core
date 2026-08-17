@@ -59,6 +59,8 @@ use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
 use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\DecisionsRequestValidator;
+use Spora\Http\GroupController;
+use Spora\Http\GroupMemberController;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -71,6 +73,7 @@ use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\NotificationController;
 use Spora\Http\PluginsController;
+use Spora\Http\PrincipalController;
 use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
 use Spora\Http\ScheduledRunController;
@@ -98,6 +101,7 @@ use Spora\Services\DataUrlAssetStore;
 use Spora\Services\EmailTemplateLoader;
 use Spora\Services\HandoverService;
 use Spora\Services\HandoverServiceInterface;
+use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
@@ -143,6 +147,10 @@ use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
+use Spora\Services\GroupService;
+use Spora\Services\PrincipalContext;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Skills\SkillScanner;
 use Spora\Tools\AgentTool;
 use Spora\Tools\CalculatorTool;
@@ -473,6 +481,20 @@ final class ContainerDefinitions
                 );
             },
 
+            PrincipalResolver::class => static fn(): PrincipalResolver => new PrincipalResolver(),
+
+            PrincipalService::class => static function (ContainerInterface $c): PrincipalService {
+                return new PrincipalService(
+                    $c->get(PrincipalResolver::class),
+                );
+            },
+
+            GroupService::class => static function (ContainerInterface $c): GroupService {
+                return new GroupService(
+                    $c->get(PrincipalService::class),
+                );
+            },
+
             HttpClientInterface::class => static function (): HttpClientInterface {
                 return HttpClient::create();
             },
@@ -766,6 +788,11 @@ final class ContainerDefinitions
                 return new LLMConfigService(
                     $c->get(SecurityManagerInterface::class),
                     $c->get('llm_driver_classes_merged'),
+                    null,
+                    null,
+                    null,
+                    $c->get(PrincipalResolver::class),
+                    $c->get(PrincipalService::class),
                 );
             },
 
@@ -773,10 +800,16 @@ final class ContainerDefinitions
                 return $c->get(LLMConfigService::class);
             },
 
+            LLMConfigPreferences::class => static function (ContainerInterface $c): LLMConfigPreferences {
+                return new LLMConfigPreferences($c->get(PrincipalService::class));
+            },
+
             AgentServiceInterface::class => static function (ContainerInterface $c): AgentServiceInterface {
                 return new AgentService(
                     $c->get(ToolIconResolver::class),
                     $c->get(AgentPictureService::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -789,6 +822,7 @@ final class ContainerDefinitions
                 return new AgentToolSettingsService(
                     $c->get(ToolConfigService::class),
                     $c->get(LLMConfigService::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -796,6 +830,7 @@ final class ContainerDefinitions
                 return new AgentManifest(
                     $c->get(AgentToolSettingsServiceInterface::class),
                     $c->get(ToolIconResolver::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -833,12 +868,15 @@ final class ContainerDefinitions
                     $c->get(AuthService::class),
                     $c->get(LLMConfigServiceInterface::class),
                     $c->get(LlmConfigValidator::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
             LlmConfigValidator::class => static function (ContainerInterface $c): LlmConfigValidator {
                 return new LlmConfigValidator(
                     $c->get(LLMConfigServiceInterface::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -846,6 +884,8 @@ final class ContainerDefinitions
                 return new UserPreferenceController(
                     $c->get(AuthService::class),
                     $c->get(LLMConfigServiceInterface::class),
+                    $c->get(PrincipalResolver::class),
+                    $c->get(PrincipalService::class),
                 );
             },
 
@@ -910,6 +950,29 @@ final class ContainerDefinitions
                     $c->get(DriverFactory::class),
                     $c->get(ToolIconResolver::class),
                     $c->get(AgentPictureService::class),
+                    $c->get(PrincipalService::class),
+                );
+            },
+
+            GroupController::class => static function (ContainerInterface $c): GroupController {
+                return new GroupController(
+                    $c->get(AuthService::class),
+                    $c->get(GroupService::class),
+                    $c->get(PrincipalService::class),
+                );
+            },
+
+            GroupMemberController::class => static function (ContainerInterface $c): GroupMemberController {
+                return new GroupMemberController(
+                    $c->get(AuthService::class),
+                    $c->get(GroupService::class),
+                );
+            },
+
+            PrincipalController::class => static function (ContainerInterface $c): PrincipalController {
+                return new PrincipalController(
+                    $c->get(AuthService::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -1149,7 +1212,10 @@ final class ContainerDefinitions
                     new AgentTool\AgentToolCollaborators(
                         pluginLoader: $c->has(PluginLoader::class) ? $c->get(PluginLoader::class) : null,
                         iconResolver: $c->has(ToolIconResolver::class) ? $c->get(ToolIconResolver::class) : null,
+                        principalResolver: $c->get(PrincipalResolver::class),
                     ),
+                    $c->get(PrincipalResolver::class),
+                    $c->get(AuthService::class),
                 );
             },
 
@@ -1258,7 +1324,10 @@ final class ContainerDefinitions
                         toolConfigService: $c->get(ToolConfigService::class),
                         toolCallSerializer: $c->get(ToolCallSerializer::class),
                         agentService: $c->get(AgentServiceInterface::class),
+                        principalPreferences: $c->get(LLMConfigPreferences::class),
                     ),
+                    $c->get(PrincipalResolver::class),
+                    $c->get(AuthService::class),
                 );
             },
 
@@ -1387,6 +1456,7 @@ final class ContainerDefinitions
                 $c->get(PluginLoader::class),
                 $c->get(ToolConfigService::class),
                 $c->get(ToolConfigSchemaInspector::class),
+                $c->get(PrincipalResolver::class),
             ),
 
             MailTemplateServiceInterface::class => static function (ContainerInterface $c): MailTemplateServiceInterface {

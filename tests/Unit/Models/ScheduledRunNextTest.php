@@ -24,7 +24,7 @@ it('exposes the four status constants', function (): void {
 it('allows mass assignment of status and due_at', function (): void {
     $userId = bootAuthLayer()->register('schednext@example.com', SCHEDULED_RUN_NEXT_TEST_PASSWORD, 'SchedNext');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Sched Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -33,7 +33,7 @@ it('allows mass assignment of status and due_at', function (): void {
     ]);
     $run = ScheduledRun::create([
         'agent_id'  => $agent->id,
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'timezone'  => 'UTC',
         'is_active' => true,
     ]);
@@ -51,7 +51,7 @@ it('allows mass assignment of status and due_at', function (): void {
 it('casts date columns to Carbon', function (): void {
     $userId = bootAuthLayer()->register('schedcast@example.com', SCHEDULED_RUN_NEXT_TEST_PASSWORD, 'SchedCast');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Cast Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -60,7 +60,7 @@ it('casts date columns to Carbon', function (): void {
     ]);
     $run = ScheduledRun::create([
         'agent_id'  => $agent->id,
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'timezone'  => 'UTC',
         'is_active' => true,
     ]);
@@ -81,7 +81,7 @@ it('casts date columns to Carbon', function (): void {
 it('belongs to a scheduled run', function (): void {
     $userId = bootAuthLayer()->register('schedrel@example.com', SCHEDULED_RUN_NEXT_TEST_PASSWORD, 'SchedRel');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Rel Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -90,7 +90,7 @@ it('belongs to a scheduled run', function (): void {
     ]);
     $run = ScheduledRun::create([
         'agent_id'  => $agent->id,
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'timezone'  => 'UTC',
         'is_active' => true,
     ]);

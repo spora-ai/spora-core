@@ -15,7 +15,13 @@ final class AbstractToolTestWithDi extends AbstractTool
 {
     public function __construct(private readonly string $prefix) {}
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
+    public function execute(
+        array $arguments,
+        int $agentId,
+        ?int $userId = null,
+        ?int $taskId = null,
+        ?\Spora\Services\PrincipalContext $context = null,
+    ): ToolResult
     {
         return new ToolResult(true, "{$this->prefix}: ok");
     }

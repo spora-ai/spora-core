@@ -91,7 +91,7 @@ test('decodeSettings returns an empty array for null and empty input', function 
 test('createConfiguration rejects empty name and returns null', function (): void {
     $persistence = makePersistence();
 
-    $result = $persistence->createConfiguration(1, [
+    $result = $persistence->createConfiguration(1, 1, [
         'name' => '   ',
         'driver_class' => OpenAICompatibleDriver::class,
         'settings' => [],
@@ -103,7 +103,7 @@ test('createConfiguration rejects empty name and returns null', function (): voi
 test('createConfiguration rejects non-admin trying to create a global config', function (): void {
     $persistence = makePersistence();
 
-    $result = $persistence->createConfiguration(1, [
+    $result = $persistence->createConfiguration(1, 1, [
         'name' => 'Global',
         'driver_class' => OpenAICompatibleDriver::class,
         'settings' => ['api_key' => 'sk'],
@@ -116,7 +116,7 @@ test('createConfiguration rejects non-admin trying to create a global config', f
 test('createConfiguration rejects unknown driver class', function (): void {
     $persistence = makePersistence();
 
-    $result = $persistence->createConfiguration(1, [
+    $result = $persistence->createConfiguration(1, 1, [
         'name' => 'Bogus',
         'driver_class' => 'Spora\\Drivers\\MissingDriver',
         'settings' => [],
@@ -136,7 +136,10 @@ test('createConfiguration persists a new config and clears existing defaults', f
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
 
-    $first = $persistence->createConfiguration($userId, [
+    $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
+    $principalId = $principalService->ensureUserPrincipal($userId)->id;
+
+    $first = $persistence->createConfiguration($principalId, $userId, [
         'name' => 'First',
         'driver_class' => OpenAICompatibleDriver::class,
         'settings' => ['api_key' => 'sk-1', 'model' => 'gpt-4o'],
@@ -145,9 +148,9 @@ test('createConfiguration persists a new config and clears existing defaults', f
 
     expect($first)->not->toBeNull()
         ->and($first->is_default)->toBeTrue()
-        ->and($first->user_id)->toBe($userId);
+        ->and((int) $first->principal_id)->toBe($principalId);
 
-    $second = $persistence->createConfiguration($userId, [
+    $second = $persistence->createConfiguration($principalId, $userId, [
         'name' => 'Second',
         'driver_class' => OpenAICompatibleDriver::class,
         'settings' => ['api_key' => 'sk-2', 'model' => 'gpt-4o-mini'],
@@ -202,7 +205,9 @@ test('updateConfiguration prunes stale keys from the settings blob on save', fun
     ]);
 
     // Create with stale keys already in the blob (simulates a pre-#203 row)
-    $created = $persistence->createConfiguration($userId, [
+    $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
+    $principalId = $principalService->ensureUserPrincipal($userId)->id;
+    $created = $persistence->createConfiguration($principalId, $userId, [
         'name' => 'Prune Target',
         'driver_class' => OpenAICompatibleDriver::class,
         'settings' => [

@@ -38,7 +38,7 @@ function seedMediaToolAgent(string $name = 'Test Agent'): int
     $userId = (int) $pdo->lastInsertId();
 
     return Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'      => $name,
         'is_active' => true,
     ])->id;
@@ -66,7 +66,7 @@ function seedMediaAsset(
         'media_type'                    => 'image',
         'byte_size'                     => 1024,
         'agent_id'                      => $agentId,
-        'user_id'                       => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'plugin_slug'                   => $pluginSlug,
         'asset_token'                   => bin2hex(random_bytes(16)),
         'public_access_token'           => $publicToken,

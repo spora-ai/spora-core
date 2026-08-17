@@ -17,7 +17,7 @@ it('uses the agent_tool_overrides table', function (): void {
 it('allows mass assignment of agent_id, tool_class, settings', function (): void {
     $userId = bootAuthLayer()->register('override@example.com', AGENT_TOOL_OVERRIDE_TEST_PASSWORD, 'Override');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Override Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -45,7 +45,7 @@ it('throws LogicException when settings attribute is accessed directly', functio
 it('belongs to an agent', function (): void {
     $userId = bootAuthLayer()->register('override2@example.com', AGENT_TOOL_OVERRIDE_TEST_PASSWORD, 'Override 2');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Override Agent 2',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',

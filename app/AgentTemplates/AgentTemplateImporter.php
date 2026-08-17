@@ -15,6 +15,8 @@ use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentPictures\AgentPictureService;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
@@ -57,7 +59,7 @@ final class AgentTemplateImporter
      *
      * @throws AgentTemplateNotFoundException when the template id is unknown.
      */
-    public function applyTemplate(int $userId, string $templateId): ImportResult
+    public function applyTemplate(int $userId, string $templateId, ?int $principalId = null): ImportResult
     {
         $scanner = new AgentTemplateScanner(
             directories: $this->collectDirectories(),
@@ -65,7 +67,7 @@ final class AgentTemplateImporter
 
         foreach ($scanner->scan() as $template) {
             if ($template->id() === $templateId) {
-                return $this->apply($userId, $template);
+                return $this->apply($userId, $template, $principalId);
             }
         }
 
@@ -78,10 +80,10 @@ final class AgentTemplateImporter
      *
      * @param array<string, mixed> $raw
      */
-    public function importPayload(int $userId, array $raw): ImportResult
+    public function importPayload(int $userId, array $raw, ?int $principalId = null): ImportResult
     {
         $template = new AgentTemplate(raw: $raw, source: 'uploaded');
-        return $this->apply($userId, $template);
+        return $this->apply($userId, $template, $principalId);
     }
 
     /**
@@ -91,12 +93,14 @@ final class AgentTemplateImporter
      *
      * @throws AgentImportFailedException when the post-insert sanity check fails.
      */
-    private function apply(int $userId, AgentTemplate $template): ImportResult
+    private function apply(int $userId, AgentTemplate $template, ?int $principalId = null): ImportResult
     {
         $warnings = $template->warnings();
         $registeredTools = $this->toolConfig->getRegisteredToolClasses();
 
         $this->collectPluginWarnings($template, $warnings);
+
+        $resolvedPrincipalId = $this->resolvePrincipalId($userId, $principalId);
 
         // The closure returns a tuple (agentId, toolsEnabled) so the
         // outer scope can unpack both without a by-ref parameter on
@@ -104,8 +108,8 @@ final class AgentTemplateImporter
         // has no `tools` block — the LLM-facing create_agent flow runs
         // this path and applies the toolset separately via configure_tools.
         [$agentId, $toolsEnabled] = Capsule::connection()->transaction(
-            function () use ($userId, $template, $registeredTools, &$warnings): array {
-                $agentId = $this->createAgent($userId, $template);
+            function () use ($resolvedPrincipalId, $template, $registeredTools, &$warnings): array {
+                $agentId = $this->createAgent($resolvedPrincipalId, $template);
                 $toolsEnabled = array_key_exists('tools', $template->raw())
                     ? $this->applyTools($agentId, $template, $registeredTools, $warnings)
                     : [];
@@ -125,6 +129,24 @@ final class AgentTemplateImporter
             toolsEnabled: $toolsEnabled,
             warnings: $warnings,
         );
+    }
+
+    /**
+     * Resolve the principal id for a new agent. When the caller
+     * passes an explicit principalId, use it directly; otherwise
+     * materialise the operator's user-principal so the import
+     * succeeds even on a fresh install whose seed step hasn't yet
+     * run.
+     */
+    private function resolvePrincipalId(int $userId, ?int $principalId): int
+    {
+        if ($principalId !== null && $principalId > 0) {
+            return $principalId;
+        }
+
+        return (int) (new PrincipalService(new PrincipalResolver()))
+            ->ensureUserPrincipal($userId)
+            ->id;
     }
 
     /**
@@ -445,14 +467,14 @@ final class AgentTemplateImporter
         AgentToolOperationOverride::updateOrCreate($row, $update);
     }
 
-    private function createAgent(int $userId, AgentTemplate $template): int
+    private function createAgent(int $principalId, AgentTemplate $template): int
     {
         $agent = $template->agent();
         $now = date(self::DATETIME_FORMAT);
         $allowFollowup = (bool) ($agent['allow_followup'] ?? true);
 
         return Capsule::table('agents')->insertGetId([
-            'user_id'             => $userId,
+            'principal_id'        => $principalId,
             'name'                => $this->resolveAgentName($template),
             'description'         => $this->nullIfEmpty($agent['description'] ?? null),
             'system_prompt'       => $this->nullIfEmpty($agent['system_prompt'] ?? null),

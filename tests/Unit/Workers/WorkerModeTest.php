@@ -36,7 +36,7 @@ describe('WorkerModeTest', function (): void {
 
         // Create a global LLM config for tests (tests mock the DriverFactory, so credentials don't matter)
         $config = LLMDriverConfiguration::create([
-            'user_id'       => null,
+            'principal_id' => null,
             'name'          => 'Test Global Config',
             'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
             'settings'      => json_encode(['api_key' => 'test']),
@@ -47,7 +47,7 @@ describe('WorkerModeTest', function (): void {
         ]);
 
         $this->agent = Agent::create([
-            'user_id'              => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
             'name'                 => 'Mode Test Agent',
             'llm_driver_config_id' => $config->id,
             'max_steps'            => 10,
@@ -104,7 +104,8 @@ describe('WorkerModeTest', function (): void {
 
         $task = Task::create([
             'agent_id' => $this->agent->id,
-            'user_id' => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
+        'user_id'     => $this->userId,
             'status' => 'QUEUED',
             'user_prompt' => 'Should not run',
             'step_count' => 0,

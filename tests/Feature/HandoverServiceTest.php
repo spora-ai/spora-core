@@ -37,7 +37,7 @@ function makeHandoverFixture(): array
     );
 
     $sourceAgent = Agent::create([
-        'user_id'        => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'           => 'Source Agent',
         'llm_provider'   => 'mock',
         'llm_model'      => 'mock',
@@ -45,7 +45,7 @@ function makeHandoverFixture(): array
         'is_active'      => true,
     ]);
     $targetAgent = Agent::create([
-        'user_id'        => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'           => 'Target Agent',
         'llm_provider'   => 'mock',
         'llm_model'      => 'mock',
@@ -63,7 +63,8 @@ describe('HandoverService::handover', function (): void {
         [$userId, $sourceAgentId, $targetAgentId] = makeHandoverFixture();
 
         $source = Task::create([
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'    => $sourceAgentId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Original prompt',
@@ -108,7 +109,8 @@ describe('HandoverService::handover', function (): void {
         $otherUserId = $otherAuth->register('handover-other@example.com', 'Password1!', 'Other');
 
         $foreignSource = Task::create([
-            'user_id'     => $otherUserId,
+            'principal_id' => createUserPrincipalPublic($otherUserId),
+        'user_id'     => $otherUserId,
             'agent_id'    => $sourceAgentId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Foreign prompt',
@@ -132,7 +134,7 @@ describe('HandoverService::handover', function (): void {
         $otherAuth = bootAuthLayer();
         $otherUserId = $otherAuth->register('handover-other2@example.com', 'Password1!', 'Other2');
         $foreignAgent = Agent::create([
-            'user_id'      => $otherUserId,
+            'principal_id' => createUserPrincipalPublic($otherUserId),
             'name'         => 'Foreign Agent',
             'llm_provider' => 'mock',
             'llm_model'    => 'mock',
@@ -141,7 +143,8 @@ describe('HandoverService::handover', function (): void {
         ]);
 
         $source = Task::create([
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'    => $sourceAgentId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Original',
@@ -163,7 +166,8 @@ describe('HandoverService::handover', function (): void {
         [$userId, $sourceAgentId, $targetAgentId] = makeHandoverFixture();
 
         $source = Task::create([
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'    => $sourceAgentId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Original',

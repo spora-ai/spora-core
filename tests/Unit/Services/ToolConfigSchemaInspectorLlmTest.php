@@ -13,7 +13,7 @@ it('renders multi-select values as resolved "Name (#id)" strings for the LLM', f
     $userId = $auth->register('llm-render@example.com', HANDOVER_LLM_TEST_PW, 'LlmRender');
 
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Legal Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -65,7 +65,7 @@ it('does NOT resolve agent names that belong to a different user (cross-tenant g
     $strangerId = $auth->register('stranger@example.com', HANDOVER_LLM_TEST_PW, 'Stranger');
 
     $strangerAgent = Agent::create([
-        'user_id'      => $strangerId,
+        'principal_id' => createUserPrincipalPublic($strangerId),
         'name'         => 'Stranger Secret Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',

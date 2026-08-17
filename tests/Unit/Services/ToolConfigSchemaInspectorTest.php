@@ -150,7 +150,7 @@ test('multi-select: getLlmToolSettings resolves non-empty IDs to "Name (#id)" st
     $inspector = new ToolConfigSchemaInspector();
 
     $agentA = Spora\Models\Agent::create([
-        'user_id'        => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'           => 'Legal Agent',
         'llm_provider'   => 'mock',
         'llm_model'      => 'mock',
@@ -158,7 +158,7 @@ test('multi-select: getLlmToolSettings resolves non-empty IDs to "Name (#id)" st
         'is_active'      => true,
     ]);
     $agentB = Spora\Models\Agent::create([
-        'user_id'        => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'           => 'Sales Agent',
         'llm_provider'   => 'mock',
         'llm_model'      => 'mock',

@@ -6,7 +6,7 @@ use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
-use Spora\Models\UserPreference;
+use Spora\Models\PrincipalPreference;
 use Spora\Services\LLMConfigService;
 
 const PREF_TEST_USER_PASSWORD = 'Password1!';
@@ -67,7 +67,7 @@ test('setUserPreferredConfig creates preference row', function (): void {
 
     expect($result)->toBeTrue();
 
-    $pref = UserPreference::where('user_id', $userId)->first();
+    $pref = PrincipalPreference::where('principal_id', $userId)->first();
     expect($pref)->not()->toBeNull()
         ->and($pref->preferred_llm_config_id)->toBe($config->id);
 });
@@ -82,18 +82,18 @@ test('setUserPreferredConfig updates existing preference', function (): void {
 
     // Set first preference
     $service->setUserPreferredConfig($userId, $config1->id);
-    $pref1 = UserPreference::where('user_id', $userId)->first();
+    $pref1 = PrincipalPreference::where('principal_id', $userId)->first();
     expect($pref1->preferred_llm_config_id)->toBe($config1->id);
 
     // Update to second preference
     $result = $service->setUserPreferredConfig($userId, $config2->id);
     expect($result)->toBeTrue();
 
-    $pref2 = UserPreference::where('user_id', $userId)->first();
+    $pref2 = PrincipalPreference::where('principal_id', $userId)->first();
     expect($pref2->preferred_llm_config_id)->toBe($config2->id);
 
     // Should still be only one preference row
-    expect(UserPreference::where('user_id', $userId)->count())->toBe(1);
+    expect(PrincipalPreference::where('principal_id', $userId)->count())->toBe(1);
 });
 
 test('setUserPreferredConfig rejects config belonging to another user', function (): void {
@@ -110,7 +110,7 @@ test('setUserPreferredConfig rejects config belonging to another user', function
     expect($result)->toBeFalse();
 
     // User B should have no preference
-    $pref = UserPreference::where('user_id', $userB)->first();
+    $pref = PrincipalPreference::where('principal_id', $userB)->first();
     expect($pref)->toBeNull();
 });
 
@@ -126,7 +126,7 @@ test('setUserPreferredConfig allows global config', function (): void {
 
     expect($result)->toBeTrue();
 
-    $pref = UserPreference::where('user_id', $userId)->first();
+    $pref = PrincipalPreference::where('principal_id', $userId)->first();
     expect($pref->preferred_llm_config_id)->toBe($globalConfig->id);
 });
 
@@ -148,8 +148,8 @@ test('getUserPreferredConfig returns the preferred config', function (): void {
     $userId = $authService->register('getpref2@example.com', PREF_TEST_USER_PASSWORD, 'Getpref2');
 
     $config = createConfigForService($service, 'My Preferred Config', $userId);
-    UserPreference::create([
-        'user_id' => $userId,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'preferred_llm_config_id' => $config->id,
     ]);
 
@@ -167,8 +167,8 @@ test('getUserPreferredConfig respects user isolation', function (): void {
     $userB = $authService->register('getpref3b@example.com', PREF_TEST_USER_PASSWORD, 'Getpref3b');
 
     $configA = createConfigForService($service, 'User A Config', $userA);
-    UserPreference::create([
-        'user_id' => $userA,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userA),
         'preferred_llm_config_id' => $configA->id,
     ]);
 
@@ -208,8 +208,8 @@ test('getEffectiveConfigForAgent uses preferred_llm_config_id for tier-2 fallbac
     $preferredConfig->settings = json_encode(['api_key' => 'test', 'model' => 'gpt-4o']);
     $preferredConfig->save();
 
-    UserPreference::create([
-        'user_id' => $userId,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'preferred_llm_config_id' => $preferredConfig->id,
     ]);
 
@@ -253,8 +253,8 @@ test('getEffectiveConfigForAgent prefers agent config over user preferred config
     $preferredConfig->settings = json_encode(['api_key' => 'test', 'model' => 'gpt-4o']);
     $preferredConfig->save();
 
-    UserPreference::create([
-        'user_id' => $userId,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'preferred_llm_config_id' => $preferredConfig->id,
     ]);
 
@@ -278,14 +278,14 @@ test('unsetUserPreferredConfig deletes the row', function (): void {
     $userId = $authService->register('unsetpref1@example.com', PREF_TEST_USER_PASSWORD, 'Unsetpref1');
 
     $config = createConfigForService($service, 'To Remove', $userId);
-    UserPreference::create([
-        'user_id' => $userId,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'preferred_llm_config_id' => $config->id,
     ]);
 
     $service->unsetUserPreferredConfig($userId);
 
-    $pref = UserPreference::where('user_id', $userId)->first();
+    $pref = PrincipalPreference::where('principal_id', $userId)->first();
     expect($pref)->toBeNull();
 });
 
@@ -297,7 +297,7 @@ test('unsetUserPreferredConfig does nothing when no preference exists', function
     // Should not throw
     $service->unsetUserPreferredConfig($userId);
 
-    $pref = UserPreference::where('user_id', $userId)->first();
+    $pref = PrincipalPreference::where('principal_id', $userId)->first();
     expect($pref)->toBeNull();
 });
 
@@ -313,9 +313,9 @@ test('setUserPreferredConfig with the same config twice does not duplicate the p
 
     expect($first)->toBeTrue()
         ->and($second)->toBeTrue()
-        ->and(UserPreference::where('user_id', $userId)->count())->toBe(1);
+        ->and(PrincipalPreference::where('principal_id', $userId)->count())->toBe(1);
 
-    $pref = UserPreference::where('user_id', $userId)->first();
+    $pref = PrincipalPreference::where('principal_id', $userId)->first();
     expect($pref->preferred_llm_config_id)->toBe((int) $config->getKey());
 });
 
@@ -327,16 +327,16 @@ test('unsetUserPreferredConfig is a no-op when called for a non-preferred user',
     // A different user has a preference — the no-op call must not affect it
     $otherUser = $authService->register('unsetpref-other@example.com', PREF_TEST_USER_PASSWORD, 'UnsetprefOther');
     $otherConfig = createConfigForService($service, 'Other User Config', $otherUser);
-    UserPreference::create([
-        'user_id' => $otherUser,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($otherUser),
         'preferred_llm_config_id' => (int) $otherConfig->getKey(),
     ]);
 
     // Should not throw and should not delete the other user's preference
     $service->unsetUserPreferredConfig($userId);
 
-    expect(UserPreference::where('user_id', $userId)->first())->toBeNull()
-        ->and(UserPreference::where('user_id', $otherUser)->first())->not->toBeNull()
-        ->and(UserPreference::where('user_id', $otherUser)->first()->preferred_llm_config_id)
+    expect(PrincipalPreference::where('principal_id', $userId)->first())->toBeNull()
+        ->and(PrincipalPreference::where('principal_id', $otherUser)->first())->not->toBeNull()
+        ->and(PrincipalPreference::where('principal_id', $otherUser)->first()->preferred_llm_config_id)
         ->toBe((int) $otherConfig->getKey());
 });

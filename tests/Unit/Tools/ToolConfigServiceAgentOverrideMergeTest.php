@@ -311,7 +311,7 @@ function makeToolConfigServiceForMerge(): ToolConfigService
 function createAgentForMerge(int $userId): int
 {
     $agent = new Agent();
-    $agent->user_id = $userId;
+    $agent->principal_id = createUserPrincipalPublic($userId);
     $agent->name = 'Test Agent for Merge';
     $agent->save();
 

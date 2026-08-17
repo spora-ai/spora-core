@@ -159,7 +159,7 @@ describe('AgentToolOverrideResolver::extractOverrideFlag', function (): void {
     it('returns 1 or 0 for a row with a value, and null when the value is null', function (): void {
         $auth = bootAuthLayer();
         $userId = bootAuth($auth, 'agent-collab-extract@example.com', AGENT_COLLABORATORS_TEST_PASSWORD);
-        $agent = Agent::create(['user_id' => $userId, 'name' => 'X', 'max_steps' => 5, 'is_active' => true]);
+        $agent = Agent::create(['principal_id' => $this->createUserPrincipal($userId), 'name' => 'X', 'max_steps' => 5, 'is_active' => true]);
 
         // Insert with a value
         $row = AgentToolOperationOverride::create([
@@ -199,7 +199,7 @@ describe('AgentToolOperationsResolver::getToolsOperations', function (): void {
         // so a plugin rename doesn't require a manual DB migration.
         $userId = bootAuthLayer()->register('op-rename@example.com', AGENT_COLLABORATORS_TEST_PASSWORD, 'Op Rename');
         $agent  = Agent::create([
-            'user_id'      => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'Rename Agent',
             'llm_provider' => 'mock',
             'llm_model'    => 'mock',

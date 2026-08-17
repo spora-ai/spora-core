@@ -10,6 +10,7 @@ use Spora\Models\AgentPicture;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
@@ -32,11 +33,16 @@ final class AgentTemplateExporter
      */
     public const SCHEMA_URL = 'https://docs.spora-ai.com/schemas/agent-template.schema.json';
 
+    private readonly PrincipalResolver $resolver;
+
     public function __construct(
         private readonly PluginLoader $pluginLoader,
         private readonly ToolConfigService $toolConfig,
         private readonly ToolConfigSchemaInspector $schemaInspector,
-    ) {}
+        ?PrincipalResolver $resolver = null,
+    ) {
+        $this->resolver = $resolver ?? new PrincipalResolver();
+    }
 
     /**
      * @return array{
@@ -50,6 +56,7 @@ final class AgentTemplateExporter
         [$tools, $settingsCount, $settingsTools] = $this->buildToolsSection($agent, $includeSettings);
         $agentBlock = $this->buildAgentBlock($agent);
         $metadata = $this->buildMetadata($agent);
+        $principal = $this->buildPrincipalBlock($agent);
 
         $raw = [
             '$schema'  => self::SCHEMA_URL,
@@ -60,6 +67,7 @@ final class AgentTemplateExporter
             'tools'    => $tools,
             'required_plugins' => $this->buildRequiredPlugins($tools),
             'metadata' => $metadata,
+            'principal' => $principal,
         ];
 
         if ($agent->description !== null && $agent->description !== '') {
@@ -85,6 +93,36 @@ final class AgentTemplateExporter
             $result['inline_warning'] = AgentTemplateImporter::SETTINGS_NOT_EXPORTED_WARNING;
         }
         return $result;
+    }
+
+    /**
+     * Build the `principal` block — minimal info so the importer knows
+     * which target principal the export belongs to. The principal_id
+     * is portable across a fresh install (the importer materialises the
+     * target principal on demand), but the importer falls back to the
+     * operator's user-principal when no principal info is present —
+     * keeping the block explicit avoids the "imported as my private
+     * agent, was meant to be shared" surprise. The `owner_user_id` is
+     * resolved through PrincipalResolver so a group-principal-export
+     * points at the group's first owner (the user the dashboard tools
+     * prefer to surface as the "creator" of a shared agent).
+     *
+     * @return array<string, mixed>
+     */
+    private function buildPrincipalBlock(Agent $agent): array
+    {
+        $principalId = (int) $agent->principal_id;
+        $principal = \Spora\Models\Principal::find($principalId);
+
+        $block = ['principal_id' => $principalId];
+        if ($principal !== null) {
+            $block['type']         = (string) $principal->type;
+            $block['user_id']      = $principal->user_id !== null ? (int) $principal->user_id : null;
+            $block['group_id']     = $principal->group_id !== null ? (int) $principal->group_id : null;
+            $block['owner_user_id'] = $this->resolver->ownerUserId($principalId);
+        }
+
+        return $block;
     }
 
     /**

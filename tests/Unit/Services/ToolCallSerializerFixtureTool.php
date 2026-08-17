@@ -21,7 +21,13 @@ final class ToolCallSerializerFixtureTool implements ToolInterface
     use HasOperations;
     use HasParameterSchema;
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
+    public function execute(
+        array $arguments,
+        int $agentId,
+        ?int $userId = null,
+        ?int $taskId = null,
+        ?\Spora\Services\PrincipalContext $context = null,
+    ): ToolResult
     {
         return new ToolResult(true, 'ok');
     }

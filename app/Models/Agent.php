@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Models;
 
 use DateTimeInterface;
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -14,8 +15,8 @@ use Throwable;
 
 /**
  * @property int $id
- * @property int|null $user_id
- * @property-read User|null $user
+ * @property int $principal_id
+ * @property-read Principal|null $principal
  * @property string $name
  * @property string|null $description
  * @property string|null $system_prompt
@@ -31,13 +32,22 @@ use Throwable;
  * @property string|null $notes
  * @property DateTimeInterface|null $created_at
  * @property DateTimeInterface|null $updated_at
+ *
+ * Migration 0067 dropped `agents.user_id` and replaced it with
+ * `principal_id`. Consumer code that still reads `$agent->user_id`
+ * hits `getUserIdAttribute()` below, which resolves via the principal.
+ * Kept temporarily so downstream consumers can be refactored in their
+ * own PRs. New code must use `principal_id` (or
+ * `PrincipalResolver::ownerUserId()` / `AgentManifest` etc.).
+ *
+ * @property-read int|null $user_id Legacy alias for the principal's owner user id.
  */
 final class Agent extends Model
 {
     protected $table = 'agents';
 
     protected $fillable = [
-        'user_id',
+        'principal_id',
         'name',
         'description',
         'system_prompt',
@@ -56,6 +66,7 @@ final class Agent extends Model
     protected $casts = [
         'is_active' => 'boolean',
         'max_steps' => 'integer',
+        'principal_id' => 'integer',
         'llm_driver_config_id' => 'integer',
         'allow_followup' => 'boolean',
         'is_pinned' => 'boolean',
@@ -65,9 +76,55 @@ final class Agent extends Model
         'updated_at' => 'datetime',
     ];
 
-    public function user(): BelongsTo
+    public function principal(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(Principal::class);
+    }
+
+    /**
+     * Legacy `user` relation — migration 0067 routed ownership through
+     * the principal table, so the direct `User` FK is gone. The accessor
+     * resolves the principal's user; for a group-principal it returns
+     * the first `owner` user so legacy code paths still get a User
+     * instance. Kept temporarily while downstream consumers are
+     * migrated in their own PRs.
+     */
+    public function user(): ?BelongsTo
+    {
+        $principal = Principal::find($this->principal_id);
+        if ($principal === null) {
+            return null;
+        }
+
+        if ($principal->type === Principal::TYPE_USER) {
+            return $this->belongsTo(User::class, 'principal_id', 'id')
+                ->where('id', $principal->user_id);
+        }
+
+        $ownerUserId = Capsule::table('group_memberships')
+            ->where('group_id', $principal->group_id)
+            ->where('role', GroupMembership::ROLE_OWNER)
+            ->orderBy('id')
+            ->value('user_id');
+
+        return $ownerUserId !== null
+            ? $this->belongsTo(User::class, 'principal_id', 'id')->where('id', $ownerUserId)
+            : null;
+    }
+
+    /**
+     * Legacy accessor for `$agent->user` — returns the resolved User
+     * model (or null) for dynamic-property access patterns. Equivalent
+     * to calling the `user()` relation.
+     */
+    public function getUserAttribute(): ?User
+    {
+        $relation = $this->user();
+        if ($relation === null) {
+            return null;
+        }
+        $user = $relation->first();
+        return $user instanceof User ? $user : null;
     }
 
     public function tasks(): HasMany
@@ -93,6 +150,36 @@ final class Agent extends Model
     public function profilePicture(): HasOne
     {
         return $this->hasOne(AgentPicture::class, 'agent_id');
+    }
+
+    /**
+     * Legacy alias for `$agent->user_id`. Migration 0067 cut the column
+     * but downstream consumers (controllers, tools, workers) still read
+     * it. The accessor resolves through the principal: a user-principal
+     * returns its `user_id`; a group-principal returns the group's first
+     * `owner` user id. Returns null for an unloaded principal.
+     *
+     * Read-only. New code must use {@see PrincipalResolver::ownerUserId()}
+     * directly so the principals-and-groups model is explicit.
+     */
+    public function getUserIdAttribute(): ?int
+    {
+        $principal = Principal::find($this->principal_id);
+        if ($principal === null) {
+            return null;
+        }
+
+        if ($principal->type === Principal::TYPE_USER) {
+            return (int) $principal->user_id;
+        }
+
+        $ownerUserId = Capsule::table('group_memberships')
+            ->where('group_id', $principal->group_id)
+            ->where('role', GroupMembership::ROLE_OWNER)
+            ->orderBy('id')
+            ->value('user_id');
+
+        return $ownerUserId !== null ? (int) $ownerUserId : null;
     }
 
     /**

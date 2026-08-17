@@ -62,7 +62,7 @@ function handoverE2eSeedAgents(): array
     );
 
     $llmConfig = LLMDriverConfiguration::create([
-        'user_id'          => null,
+        'principal_id' => null,
         'name'             => 'HandoverE2e Global Config',
         'driver_class'     => OpenAICompatibleDriver::class,
         'settings'         => json_encode(['api_key' => 'test']),
@@ -73,14 +73,14 @@ function handoverE2eSeedAgents(): array
     ]);
 
     $sourceAgent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'                 => 'Source Agent',
         'llm_driver_config_id' => $llmConfig->id,
         'max_steps'            => 10,
         'is_active'            => true,
     ]);
     $targetAgent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'                 => 'Target Agent',
         'llm_driver_config_id' => $llmConfig->id,
         'max_steps'            => 7,

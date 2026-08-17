@@ -86,7 +86,7 @@ it('renders a real HandoverTool LLM projection end-to-end', function (): void {
     $userId = $auth->register('orch-llm@example.com', 'Password1!', 'OrchLlm');
 
     $agent = Spora\Models\Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Legal Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',

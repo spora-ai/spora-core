@@ -35,9 +35,17 @@ final class LlmConfigValidator
     private const MAX_CONTEXT_WINDOW = 1_000_000;
     private const MAX_OUTPUT_TOKENS = 1_000_000;
 
+    private readonly PrincipalService $principalService;
+    private readonly PrincipalResolver $principalResolver;
+
     public function __construct(
         private readonly LLMConfigServiceInterface $service,
-    ) {}
+        ?PrincipalService $principalService = null,
+        ?PrincipalResolver $principalResolver = null,
+    ) {
+        $this->principalService  = $principalService ?? new PrincipalService(new PrincipalResolver());
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+    }
 
     // ---------------------------------------------------------------------
     // POST /llm-configs (create)
@@ -183,7 +191,7 @@ final class LlmConfigValidator
      * @param array<string, mixed> $body
      * @return array<string, mixed>
      */
-    public function prepareStoreData(array $body): array
+    public function prepareStoreData(array $body, int $callerUserId, bool $isAdmin): array
     {
         $data = $body;
         $data['name'] = trim((string) ($body['name'] ?? ''));
@@ -199,7 +207,37 @@ final class LlmConfigValidator
             $data['max_tokens_output'] = (int) $body['max_tokens_output'];
         }
 
+        // Default principal_id to the caller's user-principal. Admin
+        // callers can target any group; non-admins can only target their
+        // own user-principal (or, by extension, a group they're an
+        // owner/admin of).
+        if (isset($body['principal_id']) && is_int($body['principal_id'])) {
+            $requestedPrincipalId = $body['principal_id'];
+            if (!$this->callerMayTargetPrincipal($callerUserId, $isAdmin, $requestedPrincipalId)) {
+                $data['principal_id'] = $this->principalService->ensureUserPrincipal($callerUserId)->id;
+            } else {
+                $data['principal_id'] = $requestedPrincipalId;
+            }
+        } else {
+            $data['principal_id'] = $this->principalService->ensureUserPrincipal($callerUserId)->id;
+        }
+
         return $data;
+    }
+
+    /**
+     * Auth gate for "who is allowed to write a config under principal X":
+     * admin always; otherwise the requested principal is the caller's
+     * own user-principal, or the caller is an owner/admin of the underlying
+     * group. The controller is responsible for the admin flag; this method
+     * only models the principal axis.
+     */
+    private function callerMayTargetPrincipal(int $callerUserId, bool $isAdmin, int $principalId): bool
+    {
+        if ($isAdmin) {
+            return true;
+        }
+        return $this->principalResolver->isPrincipalOwner($callerUserId, $principalId);
     }
 
     /**
@@ -242,7 +280,7 @@ final class LlmConfigValidator
         if (!$isAdmin && $config->is_global) {
             return $this->forbidden();
         }
-        if ($config->user_id !== null && $config->user_id !== $userId) {
+        if ($config->principal_id !== null && ($userId === null || !$this->principalResolver->isPrincipalOwner($userId, (int) $config->principal_id))) {
             return $this->notFound();
         }
 

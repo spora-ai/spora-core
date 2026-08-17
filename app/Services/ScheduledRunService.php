@@ -18,6 +18,7 @@ use Spora\Models\User;
 use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\Exceptions\PromptTemplateMissingException;
 use Spora\Services\Exceptions\ScheduledRunNotFoundException;
+use Spora\Services\PrincipalResolver;
 use Throwable;
 
 /**
@@ -31,7 +32,12 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
     public function __construct(
         private readonly OrchestratorInterface $orchestrator,
         private readonly MercurePublisherInterface $mercure,
-    ) {}
+        ?PrincipalService $principalService = null,
+    ) {
+        $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+    }
+
+    private readonly PrincipalService $principalService;
 
     public function getRunsForAgent(int $agentId, int $userId): ?array
     {
@@ -352,7 +358,16 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
     private function findAgent(int $id, int $userId): ?Agent
     {
-        return Agent::where('id', $id)->where('user_id', $userId)->first();
+        // Migration 0067: an agent is owned by a principal, not a user.
+        // We accept the agent if the caller can act as one of its principals.
+        $agent = Agent::find($id);
+        if ($agent === null) {
+            return null;
+        }
+        if (!$this->principalService->callerControlsPrincipal($userId, (int) $agent->principal_id)) {
+            return null;
+        }
+        return $agent;
     }
 
     private function findRun(int $id, int $agentId): ?ScheduledRun
@@ -508,7 +523,12 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         }
 
         // $key === 'user_name'
-        $user = User::find($agent->user_id);
+        $resolver = new PrincipalResolver();
+        $ownerUserId = $resolver->ownerUserId((int) $agent->principal_id);
+        if ($ownerUserId === null) {
+            return $key;
+        }
+        $user = User::find($ownerUserId);
         return $user instanceof User ? ($user->username ?? $key) : $key;
     }
 }

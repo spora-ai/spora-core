@@ -16,7 +16,7 @@ it('allows mass assignment of user_id, tool_class, settings', function (): void 
     $userId = bootAuthLayer()->register('usersetting@example.com', TOOL_USER_SETTING_TEST_PASSWORD, 'US');
 
     $setting = ToolUserSetting::create([
-        'user_id'    => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'tool_class' => 'Spora\Tools\StubOutputTool',
         'settings'   => 'encrypted-blob',
     ]);

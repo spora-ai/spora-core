@@ -13,6 +13,8 @@ use Spora\Http\AppsController;
 use Spora\Http\AssetController;
 use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
+use Spora\Http\GroupController;
+use Spora\Http\GroupMemberController;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -25,6 +27,7 @@ use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\NotificationController;
 use Spora\Http\PluginsController;
+use Spora\Http\PrincipalController;
 use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
 use Spora\Http\ScheduledRunController;
@@ -95,6 +98,23 @@ final class RouteDefinitions
         $r->addRoute('GET', self::ROUTE_AGENTS_ID, [AgentController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PATCH', self::ROUTE_AGENTS_ID, [AgentController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_AGENTS_ID, [AgentController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/agents/{id}/transfer', [AgentController::class, 'transferPrincipal'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // Groups + members + principal-discovery. Group writes are admin-only;
+        // member writes accept admin OR group-owner (the controller enforces
+        // the owner branch via GroupService::fetchCallerRole).
+        $r->addRoute('POST', '/api/v1/groups', [GroupController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/groups', [GroupController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/groups/{id}', [GroupController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', '/api/v1/groups/{id}', [GroupController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        $r->addRoute('DELETE', '/api/v1/groups/{id}', [GroupController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+
+        $r->addRoute('GET', '/api/v1/groups/{id}/members', [GroupMemberController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/groups/{id}/members', [GroupMemberController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', '/api/v1/groups/{id}/members/{uid}', [GroupMemberController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', '/api/v1/groups/{id}/members/{uid}', [GroupMemberController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        $r->addRoute('GET', '/api/v1/principals/me', [PrincipalController::class, 'currentForUser'], [AuthMiddleware::class]);
 
         // Agent picture — image upload + delete. Avatar-only fields
         // (archetype/variant_key/palette_key) ride on PATCH /api/v1/agents/{id}

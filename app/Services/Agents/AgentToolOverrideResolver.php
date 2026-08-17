@@ -8,6 +8,7 @@ use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\LLMConfigService;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\ToolConfigService;
 use Throwable;
 
@@ -17,18 +18,23 @@ use Throwable;
  */
 final class AgentToolOverrideResolver
 {
+    private readonly PrincipalResolver $principalResolver;
+
     public function __construct(
         private readonly ToolConfigService $toolConfig,
         private readonly LLMConfigService $llmConfig,
         private readonly AgentToolInstanceResolver $instanceResolver,
-    ) {}
+        ?PrincipalResolver $principalResolver = null,
+    ) {
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+    }
 
     /**
      * @return array<string, mixed>|array<string, array{value: mixed, source: string}>
      */
     public function getOverride(int $agentId, int $userId, string $toolClass, bool $rawOnly = false): array
     {
-        $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
+        $agent = $this->loadAgentVisibleTo($agentId, $userId);
         if ($agent === null) {
             return [];
         }
@@ -47,7 +53,7 @@ final class AgentToolOverrideResolver
      */
     public function putOverride(int $agentId, int $userId, string $toolClass, array $settings): array
     {
-        $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
+        $agent = $this->loadAgentVisibleTo($agentId, $userId);
         if ($agent === null) {
             return [];
         }
@@ -60,12 +66,24 @@ final class AgentToolOverrideResolver
 
     public function deleteOverride(int $agentId, int $userId, string $toolClass): void
     {
-        $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
+        $agent = $this->loadAgentVisibleTo($agentId, $userId);
         if ($agent === null) {
             return;
         }
 
         $this->toolConfig->deleteAgentOverride($toolClass, $agentId);
+    }
+
+    /**
+     * Single owner/visibility check: agents no longer have a `user_id`
+     * column, so the legacy `where('user_id', $userId)` predicate is
+     * replaced by "is this agent's principal one the caller acts as?"
+     */
+    private function loadAgentVisibleTo(int $agentId, int $userId): ?Agent
+    {
+        return Agent::where('id', $agentId)
+            ->whereIn('principal_id', $this->principalResolver->visiblePrincipalIds($userId))
+            ->first();
     }
 
     /**

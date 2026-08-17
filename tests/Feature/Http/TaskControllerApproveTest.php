@@ -44,7 +44,7 @@ function approvalFeatureHarness(
     simulateLoggedInSession($userId, 'approval-feature@example.com');
 
     $config = LLMDriverConfiguration::create([
-        'user_id' => null,
+        'principal_id' => null,
         'name' => 'Approval Feature Config',
         'driver_class' => Spora\Drivers\OpenAICompatibleDriver::class,
         'settings' => json_encode(['api_key' => 'test'], JSON_THROW_ON_ERROR),
@@ -54,7 +54,7 @@ function approvalFeatureHarness(
         'max_tokens_output' => 4096,
     ]);
     $agent = Agent::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name' => 'Approval Feature Agent',
         'llm_driver_config_id' => $config->id,
         'max_steps' => 10,
@@ -70,7 +70,8 @@ function approvalFeatureHarness(
 
     $task = Task::create([
         'agent_id' => $agent->id,
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'status' => 'PENDING_APPROVAL',
         'user_prompt' => 'Review these actions',
         'step_count' => 1,
@@ -151,7 +152,7 @@ function approvalFeatureHarness(
     return [
         'controller' => $controller,
         'task' => $task,
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'observed_statuses' => &$observedStatuses,
     ];
 }

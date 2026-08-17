@@ -127,7 +127,7 @@ test('exportAgent returns 404 for an agent owned by another user', function (): 
 
 test('exportAgent returns the template payload + inline_warning for an owned agent', function (): void {
     $agent = Agent::create([
-        'user_id'   => $this->userId,
+        'principal_id' => createUserPrincipalPublic($this->userId),
         'name'      => 'Owned',
         'max_steps' => 5,
         'is_active' => true,

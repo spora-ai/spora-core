@@ -16,7 +16,7 @@ it('uses the agent_prompt_templates table', function (): void {
 it('allows mass assignment of template fields', function (): void {
     $userId = bootAuthLayer()->register('template@example.com', AGENT_PROMPT_TEMPLATE_TEST_PASSWORD, 'Template');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Template Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -43,7 +43,7 @@ it('allows mass assignment of template fields', function (): void {
 it('casts variables to array, is_active to bool, max_steps to int', function (): void {
     $userId = bootAuthLayer()->register('cast-tpl@example.com', AGENT_PROMPT_TEMPLATE_TEST_PASSWORD, 'Cast');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Cast Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -68,7 +68,7 @@ it('casts variables to array, is_active to bool, max_steps to int', function ():
 it('belongs to an agent', function (): void {
     $userId = bootAuthLayer()->register('tpl-rel@example.com', AGENT_PROMPT_TEMPLATE_TEST_PASSWORD, 'TplRel');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'TplRel Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',

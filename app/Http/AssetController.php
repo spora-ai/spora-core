@@ -11,6 +11,7 @@ use Spora\Services\AssetStorageException;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\PrincipalResolver;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -31,6 +32,15 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * agent the caller owns (`media_assets.agent_id -> agents.user_id`).
  * Admins bypass. Non-owners get a 404 to avoid leaking UUID existence.
  *
+ * Migration 0067 cut `agents.user_id` and routed ownership through
+ * `PrincipalResolver::ownerUserId()`. {@see \Spora\Models\Agent}'s
+ * legacy `getUserIdAttribute()` is a shim only — this controller goes
+ * straight to the resolver so the principals-and-groups model is
+ * explicit (the legacy accessor would still work for user-principals,
+ * but resolve wrongly for group-principals because the first
+ * `owner`-of-the-group fallback is not the "ownership" the asset
+ * controller wants).
+ *
  * Pre-refactor rows whose URL was returned to the LLM in the legacy
  * `<token>.<ext>` HMAC form skip the ownership check — they were minted
  * under the "URL is the token" model and predate this control.
@@ -45,6 +55,7 @@ final class AssetController
         private readonly DatabaseAssetStore $database,
         private readonly LocalAssetStore $local,
         private readonly AuthService $auth,
+        private readonly ?PrincipalResolver $resolver = null,
     ) {}
 
     public function show(string $filename): Response
@@ -99,10 +110,11 @@ final class AssetController
     /**
      * Admins bypass; everyone else must own the asset either directly
      * (`user_id == me`) or via the agent that produced it
-     * (`agent.user_id == me`). Mirrors {@see MediaArchiveService::list()}'s
-     * ownership union so the asset bytes are reachable for every row the
-     * listing endpoint surfaces — including direct uploads that have no
-     * `task_id` and no `agent_id` of their own.
+     * (`agent.principal_id -> principals.ownerUserId() == me`). Mirrors
+     * {@see MediaArchiveService::list()}'s ownership union so the asset
+     * bytes are reachable for every row the listing endpoint surfaces
+     * — including direct uploads that have no `task_id` and no
+     * `agent_id` of their own.
      */
     private function canAccessAsset(MediaAsset $asset): bool
     {
@@ -128,7 +140,12 @@ final class AssetController
             return false;
         }
         $agent = (new Agent())->find($asset->agent_id);
-        return $agent !== null && (int) $agent->user_id === $userId;
+        if ($agent === null) {
+            return false;
+        }
+        $resolver = $this->resolver ?? new PrincipalResolver();
+        $ownerUserId = $resolver->ownerUserId((int) $agent->principal_id);
+        return $ownerUserId !== null && $ownerUserId === $userId;
     }
 
     private function streamAsset(MediaAsset $asset): Response

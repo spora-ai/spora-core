@@ -20,7 +20,13 @@ final class StubFailingTool implements ToolInterface
         private readonly string $errorMessage = 'Stub tool failure',
     ) {}
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
+    public function execute(
+        array $arguments,
+        int $agentId,
+        ?int $userId = null,
+        ?int $taskId = null,
+        ?\Spora\Services\PrincipalContext $context = null,
+    ): ToolResult
     {
         return $this->run($arguments, $agentId);
     }

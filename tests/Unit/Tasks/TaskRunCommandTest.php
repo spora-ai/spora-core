@@ -91,7 +91,7 @@ describe('TaskRunCommand — task claiming', function (): void {
 
         // Create a global LLM config for tests (tests mock the DriverFactory, so credentials don't matter)
         $this->llmConfig = LLMDriverConfiguration::create([
-            'user_id'       => null,
+            'principal_id' => null,
             'name'          => TEST_GLOBAL_CONFIG_NAME,
             'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
             'settings'      => json_encode(['api_key' => 'test']),
@@ -104,7 +104,7 @@ describe('TaskRunCommand — task claiming', function (): void {
 
     it('transitions a QUEUED task to RUNNING when claimed', function (): void {
         $agent = Agent::create([
-            'user_id'   => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
             'name'      => 'TestAgent',
             'max_steps' => 10,
             'is_active' => true,
@@ -112,7 +112,8 @@ describe('TaskRunCommand — task claiming', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
-            'user_id'     => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
+        'user_id'     => $this->userId,
             'status'      => 'QUEUED',
             'user_prompt' => 'Hello',
             'max_steps'   => 10,
@@ -180,7 +181,7 @@ describe('TaskRunCommand — task claiming', function (): void {
 
     it('executes and requests LLMConfigService from the container', function (): void {
         $agent = Agent::create([
-            'user_id'   => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
             'name'      => 'TestAgentTester',
             'max_steps' => 10,
             'is_active' => true,
@@ -188,7 +189,8 @@ describe('TaskRunCommand — task claiming', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
-            'user_id'     => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
+        'user_id'     => $this->userId,
             'status'      => 'QUEUED',
             'user_prompt' => 'Hello',
             'max_steps'   => 10,
@@ -255,7 +257,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         // worker mode (worker:run) never woke up its AWAITING_SUB_AGENTS
         // parent.
         $agent = Agent::create([
-            'user_id'   => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
             'name'      => 'TestAgentSubAgent',
             'max_steps' => 10,
             'is_active' => true,
@@ -263,7 +265,8 @@ describe('TaskRunCommand — task claiming', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
-            'user_id'     => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
+        'user_id'     => $this->userId,
             'status'      => 'QUEUED',
             'user_prompt' => 'Hello',
             'max_steps'   => 10,
@@ -327,7 +330,7 @@ describe('TaskRunCommand — task claiming', function (): void {
 
     it('returns null when the task is not QUEUED', function (): void {
         $agent = Agent::create([
-            'user_id'   => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
             'name'      => 'TestAgent2',
             'max_steps' => 10,
             'is_active' => true,
@@ -335,7 +338,8 @@ describe('TaskRunCommand — task claiming', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
-            'user_id'     => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
+        'user_id'     => $this->userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Already running',
             'max_steps'   => 10,
@@ -409,7 +413,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
 
         // Create a global LLM config for tests (tests mock the DriverFactory, so credentials don't matter)
         $this->llmConfig = LLMDriverConfiguration::create([
-            'user_id'       => null,
+            'principal_id' => null,
             'name'          => TEST_GLOBAL_CONFIG_NAME,
             'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
             'settings'      => json_encode(['api_key' => 'test']),
@@ -422,7 +426,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
 
     it('completes a task when the LLM returns a text response', function (): void {
         $agent = Agent::create([
-            'user_id'              => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
             'name'                 => 'TestAgent3',
             'llm_driver_config_id' => $this->llmConfig->id,
             'max_steps'            => 10,
@@ -431,7 +435,8 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
-            'user_id'     => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
+        'user_id'     => $this->userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Hello',
             'max_steps'   => 10,
@@ -486,7 +491,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
     it('marks a task FAILED when the LLM throws', function (): void {
         // Create a global LLM config in the same DB the agent will use
         $llmConfig = LLMDriverConfiguration::create([
-            'user_id'       => null,
+            'principal_id' => null,
             'name'          => TEST_GLOBAL_CONFIG_NAME,
             'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
             'settings'      => json_encode(['api_key' => 'test']),
@@ -497,7 +502,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         ]);
 
         $agent = Agent::create([
-            'user_id'              => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
             'name'                 => 'TestAgent4',
             'llm_driver_config_id' => $llmConfig->id,
             'max_steps'            => 10,
@@ -506,7 +511,8 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
-            'user_id'     => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
+        'user_id'     => $this->userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Fail me',
             'max_steps'   => 10,
@@ -567,7 +573,7 @@ describe('TaskRunCommand — tool config injection', function (): void {
 
         // Create a global LLM config
         $this->llmConfig = LLMDriverConfiguration::create([
-            'user_id'       => null,
+            'principal_id' => null,
             'name'          => TEST_GLOBAL_CONFIG_NAME,
             'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
             'settings'      => json_encode(['api_key' => 'test']),
@@ -597,7 +603,7 @@ describe('TaskRunCommand — tool config injection', function (): void {
 
         // Set up LLM config for the agent
         $this->agent = Agent::create([
-            'user_id'              => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
             'name'                 => 'ToolConfigAgent',
             'llm_driver_config_id' => $this->llmConfig->id,
             'max_steps'            => 10,
@@ -651,7 +657,8 @@ describe('TaskRunCommand — tool config injection', function (): void {
 
         $task = Task::create([
             'agent_id'    => $this->agent->id,
-            'user_id'     => $this->userId,
+            'principal_id' => createUserPrincipalPublic($this->userId),
+        'user_id'     => $this->userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'What can you do?',
             'max_steps'   => 10,
@@ -663,7 +670,7 @@ describe('TaskRunCommand — tool config injection', function (): void {
         // Verify the email tool description includes the config block
         $reflection = new ReflectionClass($orchestrator);
         $method = $reflection->getMethod('buildToolDefinitions');
-        $defs = $method->invoke($orchestrator, [Tests\Fixtures\TestTool::class], $this->agent->id, $this->userId);
+        $defs = $method->invoke($orchestrator, [Tests\Fixtures\TestTool::class], $this->agent->id, new Spora\Services\PrincipalContext($this->agent->principal_id, 'user', $this->userId, $this->userId));
 
         $emailDef = collect($defs)->firstWhere('function.name', 'test_tool');
         expect($emailDef)->not->toBeNull();
@@ -710,7 +717,7 @@ describe('TaskRunCommand — tool config injection', function (): void {
 
         $reflection = new ReflectionClass($orchestrator);
         $method = $reflection->getMethod('buildToolDefinitions');
-        $defs = $method->invoke($orchestrator, [Tests\Fixtures\TestTool::class], $this->agent->id, $this->userId);
+        $defs = $method->invoke($orchestrator, [Tests\Fixtures\TestTool::class], $this->agent->id, new Spora\Services\PrincipalContext($this->agent->principal_id, 'user', $this->userId, $this->userId));
 
         $emailDef = collect($defs)->firstWhere('function.name', 'test_tool');
         expect($emailDef)->not->toBeNull();

@@ -6,12 +6,16 @@ namespace Spora\Agents;
 
 use Spora\Agents\Exceptions\LlmConfigurationMissingException;
 use Spora\Models\Agent;
-use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
-use Throwable;
 
 /**
  * Resolves the effective LLM driver configuration for a given agent.
+ *
+ * Thin wrapper around {@see LLMConfigPreferences::getEffectiveConfigForAgent()}
+ * that adds the LLM-specific shape the orchestrator expects (context_window,
+ * max_tokens_output, temperature with the defaults from the legacy resolver).
+ * Delegation keeps the principal-aware resolution logic in one place.
  *
  * Package-private collaborator: constructed and called only by
  * {@see Orchestrator}.
@@ -19,6 +23,7 @@ use Throwable;
 final class LlmConfigResolver
 {
     public function __construct(
+        private readonly LLMConfigPreferences $preferences,
         private readonly ?LLMConfigService $llmConfigService = null,
     ) {}
 
@@ -28,57 +33,35 @@ final class LlmConfigResolver
     public function resolveLlmConfig(Agent $agent): array
     {
         $defaults = [
-            'context_window' => 128000,
+            'context_window'    => 128000,
             'max_tokens_output' => 16384,
-            'temperature' => 0.7,
+            'temperature'       => 0.7,
         ];
 
-        $configId = $agent->llm_driver_config_id;
-
-        if ($configId !== null) {
-            $config = LLMDriverConfiguration::find($configId);
-            if ($config !== null) {
-                return [
-                    'context_window' => $config->context_window ?? $defaults['context_window'],
-                    'max_tokens_output' => $config->max_tokens_output ?? $defaults['max_tokens_output'],
-                    'temperature' => $this->getTemperatureFromSettings($config, $defaults['temperature']),
-                ];
-            }
+        $config = $this->preferences->getEffectiveConfigForAgent($agent);
+        if ($config === null) {
+            throw new LlmConfigurationMissingException('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
         }
 
-        // Fall back to user preference — in async context, agent->user_id is the user context
-        $preference = LLMDriverConfiguration::whereHas('userPreference', static fn($q) => $q->where('user_id', $agent->user_id))->first();
-        if ($preference !== null) {
-            return [
-                'context_window' => $preference->context_window ?? $defaults['context_window'],
-                'max_tokens_output' => $preference->max_tokens_output ?? $defaults['max_tokens_output'],
-                'temperature' => $this->getTemperatureFromSettings($preference, $defaults['temperature']),
-            ];
-        }
-
-        $globalDefault = LLMDriverConfiguration::where('is_global', true)
-            ->where('is_default', true)
-            ->first();
-
-        if ($globalDefault !== null) {
-            return [
-                'context_window' => $globalDefault->context_window ?? $defaults['context_window'],
-                'max_tokens_output' => $globalDefault->max_tokens_output ?? $defaults['max_tokens_output'],
-                'temperature' => $this->getTemperatureFromSettings($globalDefault, $defaults['temperature']),
-            ];
-        }
-
-        throw new LlmConfigurationMissingException('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
+        return [
+            'context_window'    => $config->context_window ?? $defaults['context_window'],
+            'max_tokens_output' => $config->max_tokens_output ?? $defaults['max_tokens_output'],
+            'temperature'       => $this->getTemperatureFromSettings($config, $defaults['temperature']),
+        ];
     }
 
-    private function getTemperatureFromSettings(LLMDriverConfiguration $config, float $default): float
+    private function getTemperatureFromSettings(\Spora\Models\LLMDriverConfiguration $config, float $default): float
     {
+        if ($this->llmConfigService === null) {
+            return $default;
+        }
+
         try {
             $settings = $this->llmConfigService->decryptSettings($config->driver_class, $config->settings ?? '');
             return isset($settings['temperature']) && $settings['temperature'] !== ''
                 ? (float) $settings['temperature']
                 : $default;
-        } catch (Throwable) {
+        } catch (\Throwable) {
             return $default;
         }
     }

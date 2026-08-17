@@ -18,6 +18,12 @@ use Spora\Services\Exceptions\AgentNotFoundException;
  * Tool enablement, per-agent settings overrides, and per-operation overrides
  * moved to {@see AgentToolSettingsService} so this umbrella service stays
  * under SonarCloud's 20-method-per-class ceiling (S1448).
+ *
+ * Principals-and-groups (migration 0067) re-keyed the ownership column from
+ * `agents.user_id` to `agents.principal_id`. Every user-scoped read or
+ * mutation matches on the union of principals the user can act as, so the
+ * shared-agent model is transparent to controllers that still think in
+ * terms of "user owns agent".
  */
 final class AgentService implements AgentServiceInterface
 {
@@ -26,7 +32,7 @@ final class AgentService implements AgentServiceInterface
     /**
      * Editable agent columns the service will write through updateAgent()
      * and updateAgentByAgentId(). Keep in sync with AgentController::$allowed
-     * (minus internal-only fields like user_id / llm_driver_config_id) so
+     * (minus internal-only fields like principal_id / llm_driver_config_id) so
      * the operator-facing PATCH and the in-tool update_agent stay on the
      * same allowlist.
      *
@@ -50,7 +56,10 @@ final class AgentService implements AgentServiceInterface
     public function __construct(
         private readonly ?ToolIconResolver $toolIconResolver = null,
         private readonly ?AgentPictureService $pictureService = null,
-    ) {}
+        private readonly ?PrincipalService $principalService = null,
+        private readonly ?PrincipalResolver $principalResolver = null,
+    ) {
+    }
 
 
     public function getAgentsForUser(int $userId): array
@@ -61,7 +70,7 @@ final class AgentService implements AgentServiceInterface
         // eager-load avoids an N+1 chain when AgentResource serializes
         // the per-agent picture (one query per agent for the picture row,
         // plus one per agent for the uploaded image's media_assets row).
-        return Agent::where('user_id', $userId)
+        return $this->newVisibleForUserQuery($userId)
             ->with(['agentTools', 'profilePicture.mediaAsset'])
             ->orderByDesc('created_at')
             ->get()
@@ -69,16 +78,38 @@ final class AgentService implements AgentServiceInterface
             ->all();
     }
 
-    public function createAgent(int $userId, array $data): Agent
+    public function createAgent(int $userId, array $data, ?int $principalId = null): Agent
     {
         // Whitelist the inbound data to the editable columns so a
         // caller can't smuggle non-Agent columns (notes, required_plugins,
         // etc.) into the insert.
         $allowed = array_intersect_key($data, array_flip(self::EDITABLE_AGENT_FIELDS));
+
+        if ($principalId === null) {
+            // Default: target the caller's user-principal. Materialise if
+            // missing so a brand-new user (whose first action is to create
+            // an agent) gets a principal without a separate registration step.
+            if ($this->principalService !== null) {
+                $principalId = (int) $this->principalService
+                    ->ensureUserPrincipal($userId)
+                    ->id;
+            } else {
+                // Defensive fallback for tests that instantiate AgentService
+                // directly without wiring PrincipalService. Look up; if
+                // missing, fall back to the bare agents-table owner insert
+                // path — but the new schema requires principal_id, so a
+                // missing principal surfaces as a save failure rather than
+                // a silent wrong-table write.
+                throw new \RuntimeException(
+                    'PrincipalService not wired — cannot ensure a user-principal.'
+                );
+            }
+        }
+
         return Capsule::connection()->transaction(
-            function () use ($userId, $allowed): Agent {
+            function () use ($allowed, $principalId): Agent {
                 $id = Capsule::table('agents')->insertGetId([
-                    'user_id'                => $userId,
+                    'principal_id'           => $principalId,
                     'name'                   => $allowed['name'],
                     'description'            => $allowed['description'] ?? null,
                     'system_prompt'          => $allowed['system_prompt'] ?? null,
@@ -113,7 +144,9 @@ final class AgentService implements AgentServiceInterface
 
     public function getAgent(int $agentId, int $userId): ?Agent
     {
-        return Agent::where('id', $agentId)->where('user_id', $userId)->first();
+        return $this->newVisibleForUserQuery($userId)
+            ->where('id', $agentId)
+            ->first();
     }
 
     public function updateAgent(int $agentId, int $userId, array $data): ?Agent
@@ -135,7 +168,7 @@ final class AgentService implements AgentServiceInterface
 
         // No user-ownership check — the orchestrator has pinned the agent
         // id. EDITABLE_AGENT_FIELDS still gates the columns, so the tool
-        // cannot escalate to user_id / llm_driver_config_id.
+        // cannot escalate to principal_id / llm_driver_config_id.
         return $this->applyAgentPatch($agentId, $agent, $data);
     }
 
@@ -195,7 +228,7 @@ final class AgentService implements AgentServiceInterface
     }
 
     /**
-     * Shared flip-a-boolean-column path for setPinned / setArchived.
+     * Share flip-a-boolean-column path for setPinned / setArchived.
      * Centralises the user-scoped ownership check + updated_at stamp so
      * the public methods stay one-liners and the SQL shape stays in one place.
      */
@@ -216,6 +249,40 @@ final class AgentService implements AgentServiceInterface
         $agent->refresh();
 
         return $agent;
+    }
+
+    public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent
+    {
+        if ($this->principalService === null) {
+            throw new \RuntimeException('PrincipalService not wired into AgentService — cannot transfer.');
+        }
+        return $this->principalService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
+    }
+
+    /**
+     * Reusable Eloquent query builder scoped to agents the user can see.
+     * Uses the principal resolver when wired (production); falls back to
+     * a direct user-principal lookup otherwise so legacy tests don't break.
+     */
+    private function newVisibleForUserQuery(int $userId)
+    {
+        if ($this->principalResolver === null) {
+            // Test path — find the user's user-principal directly.
+            $principal = \Spora\Models\Principal::where('type', 'user')
+                ->where('user_id', $userId)
+                ->first();
+            if ($principal === null) {
+                // Return a query that matches no rows; the calling method
+                // will treat that as "no agents" rather than "all agents".
+                return Agent::whereRaw('1 = 0');
+            }
+            return Agent::where('principal_id', $principal->id);
+        }
+        $ids = $this->principalResolver->visiblePrincipalIds($userId);
+        if ($ids === []) {
+            return Agent::whereRaw('1 = 0');
+        }
+        return Agent::whereIn('principal_id', $ids);
     }
 
 

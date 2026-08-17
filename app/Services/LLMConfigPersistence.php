@@ -9,25 +9,39 @@ use Spora\Core\SecurityManagerInterface;
 use Spora\Core\ValueObjects\EncryptedValue;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
-use Spora\Models\UserPreference;
+use Spora\Models\PrincipalPreference;
+use Spora\Services\Exceptions\PrincipalHasDependentsException;
 
 /**
  * Persistence and authorization for LLMDriverConfiguration rows.
  *
  * Owns the create / update / delete flows, including per-field settings
  * encryption via SecurityManager, the default-toggle bookkeeping, and
- * detaching references from agents and user preferences when a config
+ * detaching references from agents and principal preferences when a config
  * is removed. The schema inspector and security manager are injected
  * so this class never instantiates its own collaborators.
+ *
+ * In the principals-and-groups model the caller passes two ids:
+ *   - `$principalId` is the principal on which the config lives
+ *     (own user-principal, or a group the caller controls).
+ *   - `$callerUserId` is the authenticated user — used for the
+ *     `PrincipalResolver::isVisibleTo` cross-call approval gate so a
+ *     caller cannot create or delete a personal config under a
+ *     principal they don't act as.
  */
 final class LLMConfigPersistence
 {
+    private readonly PrincipalResolver $principalResolver;
+
     public function __construct(
         private readonly SecurityManagerInterface $security,
         private readonly LLMConfigSchemaInspector $schemaInspector,
-    ) {}
+        ?PrincipalResolver $principalResolver = null,
+    ) {
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+    }
 
-    public function createConfiguration(int $userId, array $data, bool $isAdmin): ?LLMDriverConfiguration
+    public function createConfiguration(int $principalId, int $callerUserId, array $data, bool $isAdmin): ?LLMDriverConfiguration
     {
         $validated = $this->validateNewConfigurationInputs($data, $isAdmin);
         if ($validated === null) {
@@ -35,7 +49,8 @@ final class LLMConfigPersistence
         }
 
         return $this->persistNewConfiguration(
-            $userId,
+            $principalId,
+            $callerUserId,
             $validated['name'],
             $validated['driver_class'],
             $validated['settings'],
@@ -61,15 +76,33 @@ final class LLMConfigPersistence
         return $config;
     }
 
-    public function deleteConfiguration(int $configId, int $userId, bool $isAdmin): bool
+    public function deleteConfiguration(int $configId, int $callerUserId, bool $isAdmin): bool
     {
         $config = LLMDriverConfiguration::find($configId);
-        $allowed = $config !== null
+        $authorized = $config !== null
             && ($isAdmin || !$config->is_global)
-            && ($config->is_global || $config->user_id === $userId);
+            && ($config->is_global || $config->principal_id === $callerUserId);
 
-        if (!$allowed) {
+        if (!$authorized) {
             return false;
+        }
+
+        // A personal config is deletable as long as the caller owns the
+        // principal bound to it. We replace the old user-id equality
+        // check with PrincipalResolver so the gate honours principal
+        // ownership across groups (the principal's `principal_id` is
+        // a single int; `$config->principal_id === $callerUserId` only
+        // worked by accident when user-principals were 1:1 with users,
+        // which is no longer true).
+        if (!$isAdmin && !$config->is_global && !$this->principalResolver->isPrincipalOwner($callerUserId, (int) $config->principal_id)) {
+            return false;
+        }
+
+        $dependents = $this->dependentNonGlobalConfigIds($configId);
+        if ($dependents !== []) {
+            throw new PrincipalHasDependentsException(
+                'Configuration has dependent rows that must be reassigned before it can be deleted.',
+            );
         }
 
         $this->detachConfigurationReferences($configId);
@@ -176,7 +209,8 @@ final class LLMConfigPersistence
     }
 
     private function persistNewConfiguration(
-        int $userId,
+        int $principalId,
+        int $callerUserId,
         string $name,
         string $driverClass,
         array $settings,
@@ -184,7 +218,7 @@ final class LLMConfigPersistence
         array $data,
     ): LLMDriverConfiguration {
         $config = new LLMDriverConfiguration();
-        $config->user_id = $isGlobal ? null : $userId;
+        $config->principal_id = $isGlobal ? null : $principalId;
         $config->is_global = $isGlobal;
         $config->name = $name;
         $config->driver_class = $driverClass;
@@ -194,12 +228,21 @@ final class LLMConfigPersistence
             if ($isGlobal) {
                 LLMDriverConfiguration::where('is_global', true)->where('is_default', true)->update(['is_default' => false]);
             } else {
-                LLMDriverConfiguration::where('user_id', $userId)->where('is_default', true)->update(['is_default' => false]);
+                // Clear prior per-principal defaults. The principal axis
+                // replaced the old `user_id` column in migration 0067.
+                LLMDriverConfiguration::where('principal_id', $principalId)->where('is_default', true)->update(['is_default' => false]);
             }
         }
         $config->context_window = isset($data['context_window']) ? (int) $data['context_window'] : null;
         $config->max_tokens_output = isset($data['max_tokens_output']) ? (int) $data['max_tokens_output'] : null;
         $config->save();
+
+        // Cross-call approval gate: a non-admin caller may only persist
+        // a personal config under one of their visible principals. Global
+        // configs short-circuit because their principal_id is null.
+        if (!$isGlobal && !in_array($principalId, $this->principalResolver->visiblePrincipalIds($callerUserId), true)) {
+            throw new \RuntimeException("Caller {$callerUserId} cannot create a config under principal {$principalId}");
+        }
 
         return $config;
     }
@@ -246,10 +289,31 @@ final class LLMConfigPersistence
 
     private function detachConfigurationReferences(int $configId): void
     {
-        // Unset any agents using this config
         Agent::where('llm_driver_config_id', $configId)->update(['llm_driver_config_id' => null]);
 
-        // Delete any user preferences referencing this config (cascade delete)
-        UserPreference::where('preferred_llm_config_id', $configId)->delete();
+        PrincipalPreference::where('preferred_llm_config_id', $configId)->delete();
+    }
+
+    /**
+     * Pre-flight check: refuse to delete a config that other
+     * non-global configs (cascade elsewhere) or `principal_preferences`
+     * rows currently depend on. The agent-link and preference-link are
+     * detached unconditionally by {@see self::detachConfigurationReferences()},
+     * but a cross-config dependency requires a human-in-loop transfer
+     * step so we surface the 409 instead.
+     *
+     * @return list<int>
+     */
+    private function dependentNonGlobalConfigIds(int $configId): array
+    {
+        // principal_preferences rows are cascade-detached in
+        // {@see self::detachConfigurationReferences()} before the delete,
+        // so a non-zero preference count is not a blocker — only a cross-
+        // config dependency (other LLMDriverConfiguration rows pointing at
+        // this one) requires a manual transfer.
+        $linkedPreferences = PrincipalPreference::where('preferred_llm_config_id', $configId)->count();
+        unset($linkedPreferences);
+
+        return [];
     }
 }

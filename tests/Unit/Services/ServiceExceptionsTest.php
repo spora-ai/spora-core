@@ -32,7 +32,7 @@ function createServiceExceptionUserAgent(string $email): array
     $userId = bootAuth($auth, "{$seq}{$email}", 'Password1!');
 
     $agentId = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'      => 'ExceptionTestAgent',
         'max_steps' => 10,
         'is_active' => true,
@@ -159,7 +159,7 @@ describe('ScheduledRunService throws typed exceptions', function (): void {
             'registered' => time(),
         ]);
         $agentId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id'   => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'OrphanAgent',
             'max_steps' => 10,
             'is_active' => 1,
@@ -174,7 +174,7 @@ describe('ScheduledRunService throws typed exceptions', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'    => $agentId,
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'template_id' => $templateId,
             'timezone'    => 'UTC',
             'is_active'   => true,

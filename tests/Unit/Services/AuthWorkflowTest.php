@@ -117,7 +117,7 @@ test('performEmailChangeRequest does not leak the orphan row when the SMTP callb
         'registered' => time(),
     ]);
     DB::table('users_confirmations')->insert([
-        'user_id'  => $unrelatedUserId,
+        'principal_id' => createUserPrincipalPublic($unrelatedUserId),
         'email'    => 'unrelated@example.com',
         'selector' => 'unrelated-sel',
         'token'    => 'unrelated-token',
@@ -195,7 +195,7 @@ test('cleanup is scoped to the failing user when two users target the same email
     // throttle window). His row must survive Alice's failed request.
     $sharedEmail = 'shared-target@example.com';
     DB::table('users_confirmations')->insert([
-        'user_id'  => $bobId,
+        'principal_id' => createUserPrincipalPublic($bobId),
         'email'    => $sharedEmail,
         'selector' => 'bob-sel-shared',
         'token'    => 'bob-token-shared',

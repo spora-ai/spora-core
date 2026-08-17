@@ -179,7 +179,7 @@ final class ApprovedBatchExecutorOperationMapTest extends TestCase
         );
 
         $agent = Spora\Models\Agent::create([
-            'user_id'              => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'                 => 'Op Map Agent',
             'llm_driver_config_id' => null,
             'max_steps'            => 10,
@@ -188,7 +188,8 @@ final class ApprovedBatchExecutorOperationMapTest extends TestCase
 
         $task = Task::create([
             'agent_id'    => $agent->id,
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'status'      => 'PENDING_APPROVAL',
             'user_prompt' => 'op map test',
             'step_count'  => 0,

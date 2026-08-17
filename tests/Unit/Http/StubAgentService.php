@@ -17,7 +17,7 @@ class StubAgentService implements AgentServiceInterface
     {
         return [[
             'id'                     => 1,
-            'user_id'                => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'name'                   => 'Stub Agent',
             'description'            => null,
             'system_prompt'          => null,
@@ -32,11 +32,11 @@ class StubAgentService implements AgentServiceInterface
         ]];
     }
 
-    public function createAgent(int $userId, array $data): Agent
+    public function createAgent(int $userId, array $data, ?int $principalId = null): Agent
     {
         $agent = new Agent();
         $agent->id = 99;
-        $agent->user_id = $userId;
+        $agent->principal_id = $principalId ?? 0;
         $agent->name = $data['name'] ?? 'New';
         $agent->description = $data['description'] ?? null;
         $agent->system_prompt = $data['system_prompt'] ?? null;
@@ -54,7 +54,7 @@ class StubAgentService implements AgentServiceInterface
         }
         $agent = new Agent();
         $agent->id = $agentId;
-        $agent->user_id = $userId;
+        $agent->principal_id = 0;
         $agent->name = 'Stub Agent';
         $agent->description = null;
         $agent->system_prompt = null;
@@ -87,7 +87,7 @@ class StubAgentService implements AgentServiceInterface
         // Mirror updateAgent() for the agent-scoped path the AgentTool uses.
         $agent = new Agent();
         $agent->id = $agentId;
-        $agent->user_id = 0;
+        $agent->principal_id = 0;
         $agent->name = 'Stub Agent';
         $agent->description = null;
         $agent->system_prompt = null;
@@ -99,6 +99,16 @@ class StubAgentService implements AgentServiceInterface
             $agent->notes = (string) $data['notes'];
         }
 
+        return $agent;
+    }
+
+    public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent
+    {
+        $agent = $this->getAgent($agentId, $callerUserId);
+        if ($agent === null) {
+            throw new RuntimeException("Agent {$agentId} not found");
+        }
+        $agent->principal_id = $targetPrincipalId;
         return $agent;
     }
 

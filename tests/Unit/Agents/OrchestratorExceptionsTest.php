@@ -87,7 +87,7 @@ function seedRunningTask(): int
     $userId      = $authService->register('excs@example.com', TEST_PASSWORD, 'Excs');
 
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'                 => 'Exception Test Agent',
         'llm_driver_config_id' => null,
         'max_steps'            => 5,
@@ -96,6 +96,7 @@ function seedRunningTask(): int
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'in progress',
@@ -115,7 +116,7 @@ it('continue() throws InvalidTaskTransitionException when task is in a rejected 
     $userId      = $authService->register('excs@example.com', TEST_PASSWORD, 'Excs');
 
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'                 => 'Exception Test Agent',
         'llm_driver_config_id' => null,
         'max_steps'            => 5,
@@ -124,6 +125,7 @@ it('continue() throws InvalidTaskTransitionException when task is in a rejected 
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'PENDING_APPROVAL',
         'user_prompt' => 'in approval',
@@ -211,7 +213,7 @@ it('handleToolCalls throws ToolNotEnabledException when LLM calls a tool that is
     $userId      = $authService->register('tool-exc@example.com', TEST_PASSWORD, 'Tool');
 
     $config = Spora\Models\LLMDriverConfiguration::create([
-        'user_id'             => null,
+        'principal_id' => null,
         'name'                => 'Test Global Config',
         'driver_class'        => Spora\Drivers\OpenAICompatibleDriver::class,
         'settings'            => json_encode(['api_key' => 'test']),
@@ -221,7 +223,7 @@ it('handleToolCalls throws ToolNotEnabledException when LLM calls a tool that is
         'max_tokens_output'   => 4096,
     ]);
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'                 => 'Tool Agent',
         'llm_driver_config_id' => $config->id,
         'max_steps'            => 5,
@@ -273,7 +275,13 @@ it('resolveRequiresApproval throws ToolContractException for a tool class withou
             return 'Plain tool with no HasOperations';
         }
 
-        public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
+        public function execute(
+            array $arguments,
+            int $agentId,
+            ?int $userId = null,
+            ?int $taskId = null,
+            ?\Spora\Services\PrincipalContext $context = null,
+        ): ToolResult
         {
             return new ToolResult(true, 'ok');
         }
@@ -317,7 +325,7 @@ it('start() throws LlmConfigurationMissingException when no config and no global
     $authService = bootAuthLayer();
     $userId      = $authService->register('llm-exc@example.com', TEST_PASSWORD, 'Llm');
     $agent       = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'                 => 'No Config Agent',
         'llm_driver_config_id' => null,
         'max_steps'            => 5,

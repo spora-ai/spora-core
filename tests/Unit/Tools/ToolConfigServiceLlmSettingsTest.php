@@ -30,7 +30,7 @@ function makeAgentWithLlm(mixed $authService): int
     $userId = $authService->register($email, 'Password1!', ucfirst(explode('@', $email)[0]));
 
     return Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'         => 'LLM Test Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',

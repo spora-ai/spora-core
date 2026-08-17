@@ -101,7 +101,7 @@ test('makeFromAgent falls back to global default when agent has no config', func
 
     $agent = new Agent();
     $agent->id = 2;
-    $agent->user_id = 999;
+    $agent->principal_id = createUserPrincipalPublic(999);
     $agent->name = 'Test';
     $agent->llm_driver_config_id = null;
 
@@ -268,7 +268,7 @@ test('makeFromAgent handles decryption failure gracefully — api_key null, othe
     $factory  = new DriverFactory(new NullLogger(), $serviceB);
 
     $agent                    = new Agent();
-    $agent->user_id           = 1;
+    $agent->principal_id = createUserPrincipalPublic(1);
     $agent->llm_driver_config_id = $config->id;
 
     // Must NOT throw — decodeSettings catches the error and returns partial settings
@@ -297,7 +297,7 @@ test('makeFromAgent gracefully handles wrong key — partial settings returned, 
     $factory  = new DriverFactory(new NullLogger(), $serviceB);
 
     $agent                    = new Agent();
-    $agent->user_id           = 1;
+    $agent->principal_id = createUserPrincipalPublic(1);
     $agent->llm_driver_config_id = $config->id;
 
     // No exception — partial settings returned, api_key empty, model/base_url readable
@@ -323,7 +323,7 @@ test('makeFromAgent returns a driver instance for a valid registered class', fun
     );
 
     $agent = new Agent();
-    $agent->user_id = 1;
+    $agent->principal_id = createUserPrincipalPublic(1);
     $agent->llm_driver_config_id = $config->id;
 
     $factory = new DriverFactory(new NullLogger(), $service, 300);
@@ -347,7 +347,7 @@ test('makeFromAgent throws DriverClassNotFoundException when the driver class is
     );
 
     $agent = new Agent();
-    $agent->user_id = 1;
+    $agent->principal_id = createUserPrincipalPublic(1);
     $agent->llm_driver_config_id = $config->id;
 
     $factory = new DriverFactory(new NullLogger(), $service, 300);

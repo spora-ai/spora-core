@@ -102,8 +102,13 @@ final class HandoverTool extends AbstractTool
         private readonly ToolConfigServiceInterface $config,
     ) {}
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
-    {
+    public function execute(
+        array $arguments,
+        int $agentId,
+        ?int $userId = null,
+        ?int $taskId = null,
+        ?\Spora\Services\PrincipalContext $context = null,
+    ): ToolResult {
         $op = $this->getOperationName($arguments);
 
         return match ($op) {

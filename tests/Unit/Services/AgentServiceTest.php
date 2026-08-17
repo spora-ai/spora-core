@@ -82,12 +82,12 @@ describe('AgentService::getAgentsForUser', function (): void {
     it('returns only the agents owned by the requested user', function (): void {
         [$service, $userIdA] = makeAgentServiceWithUser();
 
-        Agent::create(['user_id' => $userIdA, 'name' => 'A1', 'max_steps' => 10, 'is_active' => true]);
-        Agent::create(['user_id' => $userIdA, 'name' => 'A2', 'max_steps' => 5,  'is_active' => true]);
+        Agent::create(['principal_id' => $this->createUserPrincipal($userIdA), 'name' => 'A1', 'max_steps' => 10, 'is_active' => true]);
+        Agent::create(['principal_id' => $this->createUserPrincipal($userIdA), 'name' => 'A2', 'max_steps' => 5,  'is_active' => true]);
 
         $auth = bootAuthLayer();
         $userIdB = bootAuth($auth, 'agent-svc-other@example.com', AGENT_TEST_PASSWORD);
-        Agent::create(['user_id' => $userIdB, 'name' => 'B1', 'max_steps' => 10, 'is_active' => true]);
+        Agent::create(['principal_id' => $this->createUserPrincipal($userIdB), 'name' => 'B1', 'max_steps' => 10, 'is_active' => true]);
 
         $result = $service->getAgentsForUser($userIdA);
         expect($result)->toHaveCount(2);
@@ -394,7 +394,7 @@ describe('AgentService private helpers (now on collaborators)', function (): voi
         $meth = $ref->getMethod('maskLlmConfig');
 
         $config = LLMDriverConfiguration::create([
-            'user_id'      => null,
+            'principal_id' => null,
             'name'         => 'Mask target',
             'driver_class' => OpenAICompatibleDriver::class,
             // Plain JSON, NOT a wholesale-encrypted blob, so decodeSettings
@@ -429,7 +429,7 @@ describe('AgentService::maskLlmConfig via public API', function (): void {
         [$service, $userId] = makeAgentServiceWithLlmDriver();
 
         $config = LLMDriverConfiguration::create([
-            'user_id'      => null,
+            'principal_id' => null,
             'name'         => 'Public API mask',
             'driver_class' => OpenAICompatibleDriver::class,
             'settings'     => json_encode([

@@ -48,7 +48,7 @@ final class BuildMessagesSummaryTest extends TestCase
     private static function createAgent(int $userId): int
     {
         $agent = Agent::create([
-            'user_id' => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name' => 'Test Agent',
             'llm_provider' => 'openai_compatible',
             'llm_model' => 'gpt-4o',
@@ -62,7 +62,8 @@ final class BuildMessagesSummaryTest extends TestCase
     {
         return Task::create([
             'agent_id' => $agentId,
-            'user_id' => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'status' => 'RUNNING',
             'user_prompt' => 'Test',
             'step_count' => 0,

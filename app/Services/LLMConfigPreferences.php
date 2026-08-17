@@ -6,22 +6,35 @@ namespace Spora\Services;
 
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
-use Spora\Models\UserPreference;
+use Spora\Models\PrincipalPreference;
 
 /**
- * Default-resolution and user-preference logic for LLM configurations.
+ * Default-resolution and principal-preference logic for LLM configurations.
  *
  * Owns the three-tier fallback that decides which LLMDriverConfiguration
- * an agent should use (agent-specific → user preferred → global default),
- * the user-preference CRUD that backs tier 2, and the admin-only
+ * an agent should use (agent-specific → principal preferred → global default),
+ * the principal-preference CRUD that backs tier 2, and the admin-only
  * "set the global default" flow that backs tier 3.
  *
- * The preferences path crosses user/agent boundaries, so this is the
+ * The preferences path crosses principal/agent boundaries, so this is the
  * highest-risk collaborator in the split: tests must keep the
  * tier-1/2/3 resolution working end-to-end.
+ *
+ * Migration 0067 renamed `user_preferences` to `principal_preferences` and
+ * re-keyed the FK from `users` to `principals`. Methods keyed on the old
+ * `userId` axis now pass through PrincipalService so the same identity
+ * guarantee applies (callers may pass their own user-principal id).
  */
 final class LLMConfigPreferences
 {
+    private readonly PrincipalService $principalService;
+
+    public function __construct(
+        ?PrincipalService $principalService = null,
+    ) {
+        $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+    }
+
     public function setDefaultConfiguration(int $configId, bool $isAdmin): ?LLMDriverConfiguration
     {
         $config = $this->loadDefaultableConfiguration($configId, $isAdmin);
@@ -42,19 +55,18 @@ final class LLMConfigPreferences
      */
     public function getDefaultConfiguration(int $userId): ?LLMDriverConfiguration
     {
-        return $this->getUserPreferredConfig($userId);
+        return $this->getPrincipalPreferredConfig($this->principalService->ensureUserPrincipal($userId)->id);
     }
 
     /**
      * Resolves the effective LLMDriverConfiguration for an agent using three-tier fallback.
      *
      * Tier 1: Agent-specific config     (agent.llm_driver_config_id)
-     * Tier 2: User's preferred config   (user_preferences.preferred_llm_config_id)
+     * Tier 2: Principal preferred config (principal_preferences.preferred_llm_config_id)
      * Tier 3: Global default           (is_global=true, is_default=true)
      */
     public function getEffectiveConfigForAgent(Agent $agent): ?LLMDriverConfiguration
     {
-        // Tier 1: agent-specific
         if ($agent->llm_driver_config_id !== null) {
             $config = LLMDriverConfiguration::find($agent->llm_driver_config_id);
             if ($config !== null) {
@@ -62,23 +74,19 @@ final class LLMConfigPreferences
             }
         }
 
-        // Tier 2: user preferred config (via user_preferences)
-        if ($agent->user_id !== null) {
-            $config = $this->getUserPreferredConfig($agent->user_id);
-            if ($config !== null) {
-                return $config;
-            }
+        $config = $this->getPrincipalPreferredConfig($agent->principal_id);
+        if ($config !== null) {
+            return $config;
         }
 
-        // Tier 3: global default
         return LLMDriverConfiguration::where('is_global', true)
             ->where('is_default', true)
             ->first();
     }
 
-    public function getUserPreferredConfig(int $userId): ?LLMDriverConfiguration
+    public function getPrincipalPreferredConfig(int $principalId): ?LLMDriverConfiguration
     {
-        $preference = UserPreference::where('user_id', $userId)->first();
+        $preference = PrincipalPreference::where('principal_id', $principalId)->first();
         if ($preference === null || $preference->preferred_llm_config_id === null) {
             return null;
         }
@@ -86,34 +94,46 @@ final class LLMConfigPreferences
         return LLMDriverConfiguration::find($preference->preferred_llm_config_id);
     }
 
-    public function setUserPreferredConfig(int $userId, int $configId): bool
+    /**
+     * Persist a principal's preferred LLM config. The target config must
+     * either be global (shared with everyone) or belong to the same
+     * principal — cross-principal pointers would surface the wrong
+     * config when the agent runs.
+     */
+    public function setPrincipalPreferredConfig(int $principalId, int $configId, int $callerUserId): bool
     {
         $config = LLMDriverConfiguration::find($configId);
         if ($config === null) {
             return false;
         }
 
-        // Config must belong to user OR be global
-        if (!$config->is_global && $config->user_id !== $userId) {
+        // Auth gate: a caller cannot write a preference for a principal
+        // they don't act as. Admin short-circuits; otherwise the caller
+        // must own the principal (own user-principal or owner of the
+        // underlying group).
+        if (!$this->principalService->callerControlsPrincipal($callerUserId, $principalId)) {
             return false;
         }
 
-        $preference = UserPreference::firstOrCreate(['user_id' => $userId]);
+        if (!$config->is_global && (int) $config->principal_id !== $principalId) {
+            return false;
+        }
+
+        $preference = PrincipalPreference::firstOrCreate(['principal_id' => $principalId]);
         $preference->preferred_llm_config_id = $configId;
         $preference->save();
 
         return true;
     }
 
-    public function unsetUserPreferredConfig(int $userId): void
+    public function unsetPrincipalPreferredConfig(int $principalId): void
     {
-        UserPreference::where('user_id', $userId)->delete();
+        PrincipalPreference::where('principal_id', $principalId)->delete();
     }
 
     private function loadDefaultableConfiguration(int $configId, bool $isAdmin): ?LLMDriverConfiguration
     {
         $config = LLMDriverConfiguration::find($configId);
-        // Restrict to global configs only — personal default is now set via user preferences
         $eligible = $config !== null && $config->is_global && $isAdmin;
 
         if (!$eligible) {

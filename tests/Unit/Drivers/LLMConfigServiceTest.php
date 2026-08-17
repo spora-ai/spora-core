@@ -14,7 +14,7 @@ use Spora\Drivers\LLMDriverConfigInterface;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
-use Spora\Models\UserPreference;
+use Spora\Models\PrincipalPreference;
 use Spora\Services\LLMConfigSchemaInspector;
 use Spora\Services\LLMConfigService;
 
@@ -292,8 +292,8 @@ test('getEffectiveConfigForAgent falls back to tier-2 user default when no agent
     $userDefault->settings = json_encode([]);
     $userDefault->save();
 
-    UserPreference::create([
-        'user_id' => $userId,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'preferred_llm_config_id' => $userDefault->id,
     ]);
 
@@ -649,8 +649,8 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
         $preferred->driver_class = OpenAICompatibleDriver::class;
         $preferred->settings = json_encode([]);
         $preferred->save();
-        UserPreference::create([
-            'user_id' => $userId,
+        PrincipalPreference::create([
+            'principal_id' => createUserPrincipalPublic($userId),
             'preferred_llm_config_id' => (int) $preferred->getKey(),
         ]);
 
@@ -693,8 +693,8 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
         $preferred->driver_class = OpenAICompatibleDriver::class;
         $preferred->settings = json_encode([]);
         $preferred->save();
-        UserPreference::create([
-            'user_id' => $userId,
+        PrincipalPreference::create([
+            'principal_id' => createUserPrincipalPublic($userId),
             'preferred_llm_config_id' => (int) $preferred->getKey(),
         ]);
 

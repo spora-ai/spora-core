@@ -25,7 +25,7 @@ function seedCompactionTask(string $systemPrompt = 'You are a helpful AI assista
 {
     $userId = bootAuthLayer()->register('cwr@example.com', TEST_PASSWORD, 'CWR');
     $config = LLMDriverConfiguration::create([
-        'user_id'           => null,
+        'principal_id' => null,
         'name'              => 'CWR Test Config',
         'driver_class'      => Spora\Drivers\OpenAICompatibleDriver::class,
         'settings'          => json_encode(['api_key' => 'test']),
@@ -35,7 +35,7 @@ function seedCompactionTask(string $systemPrompt = 'You are a helpful AI assista
         'max_tokens_output' => 4096,
     ]);
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'                 => 'CWR Test Agent',
         'llm_driver_config_id' => $config->id,
         'system_prompt'        => $systemPrompt,
@@ -44,6 +44,7 @@ function seedCompactionTask(string $systemPrompt = 'You are a helpful AI assista
     ]);
 
     $task = Task::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'agent_id'    => $agent->id,
         'status'      => 'RUNNING',

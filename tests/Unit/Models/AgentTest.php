@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
+use Spora\Models\Principal;
 use Spora\Models\Task;
 use Spora\Models\ToolCall;
-use Spora\Models\User;
 
 const AGENT_TEST_PASSWORD = 'Password1!';
 
@@ -20,7 +20,7 @@ it('casts boolean and integer fields', function (): void {
     $userId = bootAuthLayer()->register('agent-cast@example.com', AGENT_TEST_PASSWORD, 'Agent');
 
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'                 => 'Cast Agent',
         'llm_provider'         => 'mock',
         'llm_model'            => 'mock',
@@ -34,10 +34,11 @@ it('casts boolean and integer fields', function (): void {
         ->and($agent->max_steps)->toBeInt();
 });
 
-it('belongs to a user', function (): void {
-    $userId = bootAuthLayer()->register('agent-user@example.com', AGENT_TEST_PASSWORD, 'AgentUser');
+it('belongs to a principal', function (): void {
+    $userId = bootAuthLayer()->register('agent-principal@example.com', AGENT_TEST_PASSWORD, 'AgentPrincipal');
+    $principalId = $this->createUserPrincipal($userId);
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $principalId,
         'name'         => 'Owner Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -45,14 +46,14 @@ it('belongs to a user', function (): void {
         'is_active'    => true,
     ]);
 
-    expect($agent->user)->toBeInstanceOf(User::class)
-        ->and((int) $agent->user->getKey())->toBe($userId);
+    expect($agent->principal)->toBeInstanceOf(Principal::class)
+        ->and((int) $agent->principal->getKey())->toBe($principalId);
 });
 
 it('has many tasks, agent tools, and tool calls', function (): void {
     $userId = bootAuthLayer()->register('agent-hasmany@example.com', AGENT_TEST_PASSWORD, 'HasMany');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'HasMany Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -62,6 +63,7 @@ it('has many tasks, agent tools, and tool calls', function (): void {
 
     Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'hi',
@@ -75,6 +77,7 @@ it('has many tasks, agent tools, and tool calls', function (): void {
     ]);
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'hi',

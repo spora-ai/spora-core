@@ -83,7 +83,7 @@ it('skips seeding on a second run when users and agents exist', function (): voi
     $userId = $auth->register('existing@example.com', 'Password1!', 'Existing');
 
     Spora\Models\Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'      => 'Existing Agent',
         'max_steps' => 5,
         'is_active' => true,

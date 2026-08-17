@@ -17,7 +17,7 @@ it('uses the agent_tools table', function (): void {
 it('allows mass assignment of agent_id, tool_class, tool_name', function (): void {
     $userId = bootAuthLayer()->register('modeltest@example.com', AGENT_TOOL_TEST_PASSWORD, 'Model Test');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Test Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -39,7 +39,7 @@ it('allows mass assignment of agent_id, tool_class, tool_name', function (): voi
 it('belongs to an agent', function (): void {
     $userId = bootAuthLayer()->register('relation@example.com', AGENT_TOOL_TEST_PASSWORD, 'Relation');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Relation Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',

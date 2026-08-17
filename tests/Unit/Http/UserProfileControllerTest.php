@@ -151,13 +151,13 @@ test('getLocations returns user locations', function (): void {
     simulateLoggedInSession($userId, 'profile6@example.com');
 
     UserLocation::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'   => 'Home',
         'address' => USERPROFILE_ADDRESS_HOME,
         'is_default' => true,
     ]);
     UserLocation::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'   => 'Work',
         'address' => USERPROFILE_ADDRESS_OFFICE,
         'is_default' => false,
@@ -231,7 +231,7 @@ test('postLocation sets is_default and unsets other defaults', function (): void
     simulateLoggedInSession($userId, 'profile10@example.com');
 
     UserLocation::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'   => 'Existing',
         'address' => USERPROFILE_ADDRESS_HOME,
         'is_default' => true,
@@ -266,7 +266,7 @@ test('putLocation updates own location', function (): void {
     simulateLoggedInSession($userId, 'profile11@example.com');
 
     $loc = UserLocation::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'   => 'Old Name',
         'address' => USERPROFILE_ADDRESS_HOME,
         'is_default' => false,
@@ -292,7 +292,7 @@ test('putLocation returns 404 for another users location', function (): void {
     simulateLoggedInSession($userId, 'profile12@example.com');
 
     $loc = UserLocation::create([
-        'user_id' => $otherUserId,
+        'principal_id' => createUserPrincipalPublic($otherUserId),
         'name'   => 'Other Home',
         'address' => USERPROFILE_ADDRESS_HOME,
     ]);
@@ -321,7 +321,7 @@ test('deleteLocation deletes own location', function (): void {
     simulateLoggedInSession($userId, 'profile13@example.com');
 
     $loc = UserLocation::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'   => 'To Delete',
         'address' => USERPROFILE_ADDRESS_HOME,
     ]);
@@ -341,7 +341,7 @@ test('deleteLocation returns 404 for another users location', function (): void 
     simulateLoggedInSession($userId, 'profile14@example.com');
 
     $loc = UserLocation::create([
-        'user_id' => $otherUserId,
+        'principal_id' => createUserPrincipalPublic($otherUserId),
         'name'   => 'Other Location',
         'address' => USERPROFILE_ADDRESS_HOME,
     ]);
@@ -496,7 +496,7 @@ test('putLocation returns 400 on invalid JSON', function (): void {
     simulateLoggedInSession($userId, 'badjsonputloc@example.com');
 
     $loc = UserLocation::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'    => 'Home',
         'address' => USERPROFILE_ADDRESS_HOME,
     ]);
@@ -524,7 +524,7 @@ test('putLocation returns 422 when name is empty string', function (): void {
     simulateLoggedInSession($userId, 'emptynameput@example.com');
 
     $loc = UserLocation::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'    => 'Original',
         'address' => USERPROFILE_ADDRESS_HOME,
     ]);
@@ -548,7 +548,7 @@ test('putLocation returns 422 when address is empty string', function (): void {
     simulateLoggedInSession($userId, 'emptyaddrput@example.com');
 
     $loc = UserLocation::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'    => 'Original',
         'address' => USERPROFILE_ADDRESS_HOME,
     ]);

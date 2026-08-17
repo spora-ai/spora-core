@@ -174,7 +174,7 @@ test('opt-in export settings round-trip through the importer without secrets', f
         $toolConfig,
         new Spora\Services\ToolConfigSchemaInspector(),
     );
-    $source = Agent::create(['user_id' => $this->userId, 'name' => 'Settings Source', 'max_steps' => 5, 'is_active' => true]);
+    $source = Agent::create(['principal_id' => createUserPrincipalPublic($this->userId), 'name' => 'Settings Source', 'max_steps' => 5, 'is_active' => true]);
     AgentTool::create(['agent_id' => $source->id, 'tool_class' => Tests\Fixtures\TestTool::class, 'tool_name' => 'test']);
     $toolConfig->putAgentOverride(Tests\Fixtures\TestTool::class, (int) $source->id, [
         'api_key' => 'secret',

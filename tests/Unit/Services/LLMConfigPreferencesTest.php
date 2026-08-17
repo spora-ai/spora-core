@@ -6,7 +6,7 @@ use Spora\Core\SecurityManager;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
-use Spora\Models\UserPreference;
+use Spora\Models\PrincipalPreference;
 use Spora\Services\LLMConfigPreferences;
 
 beforeEach(function (): void {
@@ -62,7 +62,7 @@ test('setUserPreferredConfig creates a preference row for a global config', func
 
     expect($ok)->toBeTrue();
 
-    $row = UserPreference::where('user_id', $userId)->first();
+    $row = PrincipalPreference::where('principal_id', $userId)->first();
     expect($row)->not->toBeNull()
         ->and($row->preferred_llm_config_id)->toBe($config->id);
 });
@@ -88,7 +88,7 @@ test('setUserPreferredConfig rejects a config that belongs to another user', fun
 
     expect($preferences->setUserPreferredConfig($userB, $configA->id))->toBeFalse();
 
-    $row = UserPreference::where('user_id', $userB)->first();
+    $row = PrincipalPreference::where('principal_id', $userB)->first();
     expect($row)->toBeNull();
 });
 
@@ -100,7 +100,7 @@ test('unsetUserPreferredConfig deletes the row when one exists', function (): vo
     $preferences->setUserPreferredConfig($userId, $config->id);
     $preferences->unsetUserPreferredConfig($userId);
 
-    $row = UserPreference::where('user_id', $userId)->first();
+    $row = PrincipalPreference::where('principal_id', $userId)->first();
     expect($row)->toBeNull();
 });
 
@@ -111,7 +111,7 @@ test('unsetUserPreferredConfig is a no-op when no preference exists', function (
     // Should not throw
     $preferences->unsetUserPreferredConfig($userId);
 
-    $row = UserPreference::where('user_id', $userId)->first();
+    $row = PrincipalPreference::where('principal_id', $userId)->first();
     expect($row)->toBeNull();
 });
 

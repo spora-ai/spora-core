@@ -56,7 +56,7 @@ function registerAndGetAgentForScheduledRun(): array
     simulateLoggedInSession($userId, 'scheduled@example.com');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'      => 'ScheduledTestAgent',
         'max_steps' => 10,
         'is_active' => true,
@@ -80,7 +80,7 @@ describe('ScheduledRunController', function (): void {
 
         ScheduledRun::create([
             'agent_id'    => $agentId,
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'template_id' => null,
             'raw_prompt'  => 'Run me daily',
             'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
@@ -118,7 +118,7 @@ describe('ScheduledRunController', function (): void {
         simulateLoggedInSession($otherUserId, 'other@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'    => 'OtherUserAgent',
             'max_steps' => 10,
             'is_active' => true,
@@ -214,7 +214,7 @@ describe('ScheduledRunController', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'      => $agentId,
-            'user_id'       => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'raw_prompt'    => 'Show run',
             'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'      => 'UTC',
@@ -235,14 +235,14 @@ describe('ScheduledRunController', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
 
         $otherAgent = Agent::create([
-            'user_id' => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'    => 'OtherAgent',
             'max_steps' => 10,
             'is_active' => true,
         ]);
         $run = ScheduledRun::create([
             'agent_id'      => $otherAgent->id,
-            'user_id'       => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'raw_prompt'    => 'Other run',
             'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'      => 'UTC',
@@ -262,7 +262,7 @@ describe('ScheduledRunController', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'      => $agentId,
-            'user_id'       => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'raw_prompt'    => 'Original prompt',
             'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'      => 'UTC',
@@ -288,7 +288,7 @@ describe('ScheduledRunController', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'      => $agentId,
-            'user_id'       => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'raw_prompt'    => 'To delete',
             'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'      => 'UTC',
@@ -312,7 +312,7 @@ describe('ScheduledRunController', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'      => $agentId,
-            'user_id'       => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'raw_prompt'    => 'Trigger me',
             'cron_expression' => null,
             'run_at'        => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
@@ -357,7 +357,7 @@ describe('ScheduledRunController', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'      => $agentId,
-            'user_id'       => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'template_id'   => $template->id,
             'raw_prompt'    => null,
             'cron_expression' => null,
@@ -501,7 +501,7 @@ describe('ScheduledRunController', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'      => $agentId,
-            'user_id'       => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'raw_prompt'    => 'Trigger me',
             'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'run_at'        => null,
@@ -546,7 +546,7 @@ describe('ScheduledRunController', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'      => $agentId,
-            'user_id'       => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'raw_prompt'    => 'One-shot task',
             'cron_expression' => null,
             'run_at'        => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),
@@ -589,7 +589,7 @@ describe('ScheduledRunController', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'      => $agentId,
-            'user_id'       => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'raw_prompt'    => 'Show me',
             'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'      => 'UTC',
@@ -763,7 +763,7 @@ describe('ScheduledRunController', function (): void {
         [$userId, $agentId] = registerAndGetAgentForScheduledRun();
         $run = ScheduledRun::create([
             'agent_id'      => $agentId,
-            'user_id'       => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'raw_prompt'    => 'Test',
             'cron_expression' => SCHEDULED_CRON_DAILY_9AM,
             'timezone'      => 'UTC',
@@ -830,7 +830,7 @@ describe('ScheduledRunController', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'      => $agentId,
-            'user_id'       => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'raw_prompt'    => 'Trigger me',
             'cron_expression' => null,
             'run_at'        => date(SCHEDULED_TIMESTAMP_FORMAT, strtotime(SCHEDULED_RUN_OFFSET_HOUR)),

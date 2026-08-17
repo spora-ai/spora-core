@@ -22,7 +22,7 @@ describe('UserInfoTool', function (): void {
 
         $tool = new UserInfoTool();
 
-        $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
+        $agentId = Spora\Models\Agent::create(['principal_id' => $this->createUserPrincipal($userId), 'name' => 'Agent', 'is_active' => true])->id;
         $result = $tool->execute(['action' => 'get_base_data'], agentId: $agentId);
 
         expect($result->success)->toBeTrue();
@@ -43,7 +43,7 @@ describe('UserInfoTool', function (): void {
         $user->save();
 
         $tool = new UserInfoTool();
-        $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
+        $agentId = Spora\Models\Agent::create(['principal_id' => $this->createUserPrincipal($userId), 'name' => 'Agent', 'is_active' => true])->id;
         $result = $tool->execute(['action' => 'get_base_data'], agentId: $agentId);
 
         expect($result->success)->toBeTrue();
@@ -76,7 +76,7 @@ describe('UserInfoTool', function (): void {
         simulateLoggedInSession($userId, 'userinfo3@example.com');
 
         $tool = new UserInfoTool();
-        $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
+        $agentId = Spora\Models\Agent::create(['principal_id' => $this->createUserPrincipal($userId), 'name' => 'Agent', 'is_active' => true])->id;
         $result = $tool->execute(['action' => 'get_locations'], agentId: $agentId);
 
         expect($result->success)->toBeTrue();
@@ -89,14 +89,14 @@ describe('UserInfoTool', function (): void {
         simulateLoggedInSession($userId, 'userinfo4@example.com');
 
         Spora\Models\UserLocation::create([
-            'user_id' => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'name'   => 'Home',
             'address' => '123 Main St',
             'is_default' => true,
         ]);
 
         $tool = new UserInfoTool();
-        $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
+        $agentId = Spora\Models\Agent::create(['principal_id' => $this->createUserPrincipal($userId), 'name' => 'Agent', 'is_active' => true])->id;
         $result = $tool->execute(['action' => 'get_locations'], agentId: $agentId);
 
         expect($result->success)->toBeTrue();
@@ -116,7 +116,7 @@ describe('UserInfoTool', function (): void {
         $user->save();
 
         $tool = new UserInfoTool();
-        $agentId = Spora\Models\Agent::create(['user_id' => $userId, 'name' => 'Agent', 'is_active' => true])->id;
+        $agentId = Spora\Models\Agent::create(['principal_id' => $this->createUserPrincipal($userId), 'name' => 'Agent', 'is_active' => true])->id;
         $result = $tool->execute(['action' => 'get_health_data'], agentId: $agentId);
 
         expect($result->success)->toBeTrue();

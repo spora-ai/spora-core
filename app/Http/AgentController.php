@@ -12,6 +12,8 @@ use Spora\Models\Agent;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\Exceptions\UnauthorizedTransferException;
+use Spora\Services\PrincipalService;
 use Spora\Services\ToolIconResolver;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -44,6 +46,7 @@ final class AgentController
         private readonly ?DriverFactory $driverFactory = null,
         private readonly ?ToolIconResolver $toolIconResolver = null,
         private readonly ?AgentPictureService $pictureService = null,
+        private readonly ?PrincipalService $principalService = null,
     ) {}
 
     /**
@@ -100,6 +103,8 @@ final class AgentController
             return $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $principalId = $this->resolvePrincipalIdForCreate($userId, $body);
+
         $data = [
             'name'          => $name,
             'description'   => trim((string) ($body['description'] ?? '')) ?: null,
@@ -114,12 +119,49 @@ final class AgentController
             'allow_followup' => array_key_exists('allow_followup', $body) ? (bool) $body['allow_followup'] : true,
         ];
 
-        $agent = $this->agentService->createAgent($userId, $data);
+        $agent = $this->agentService->createAgent($userId, $data, $principalId);
 
         return new JsonResponse(
             ['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]],
             Response::HTTP_CREATED,
         );
+    }
+
+    /**
+     * Resolve the owning principal for {@see store()}. Accepts an
+     * explicit `principal_id` in the body when the caller is admin or
+     * owns the target principal; otherwise defaults to the caller's
+     * user-principal. Returns null when the field is omitted and no
+     * PrincipalService is wired (legacy test path).
+     *
+     * @param  array<string, mixed> $body
+     */
+    private function resolvePrincipalIdForCreate(int $userId, array $body): ?int
+    {
+        if (!array_key_exists('principal_id', $body) || $body['principal_id'] === null) {
+            return null;
+        }
+
+        $requested = (int) $body['principal_id'];
+        if ($requested <= 0) {
+            return $this->authService->isAdmin() ? null : null;
+        }
+
+        if ($this->authService->isAdmin()) {
+            return $requested;
+        }
+
+        if ($this->principalService === null) {
+            return null;
+        }
+
+        if (!$this->principalService->callerControlsPrincipal($userId, $requested)) {
+            return $this->authService->currentUserId() !== null
+                ? (int) $this->principalService->ensureUserPrincipal($userId)->id
+                : null;
+        }
+
+        return $requested;
     }
 
     /**
@@ -370,6 +412,51 @@ final class AgentController
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);
+    }
+
+    /**
+     * POST /api/v1/agents/{id}/transfer
+     *
+     * Body: { "principal_id": int }
+     *
+     * Transfers agent ownership to a different principal. The
+     * authorization gate is enforced in {@see PrincipalService::transferAgent()}
+     * — the caller must control both the source and target principal.
+     * Admins short-circuit. The 409 conflict response is reserved for
+     * `PrincipalHasDependentsException`; here, the only failure modes
+     * are 403 (caller does not control source/target) and 404 (agent
+     * or target principal not found).
+     */
+    public function transferPrincipal(int $agentId, Request $request): JsonResponse
+    {
+        $targetPrincipalId = (int) ($request->request->get('principal_id') ?? 0);
+        if ($targetPrincipalId <= 0) {
+            return $this->error('VALIDATION_ERROR', 'principal_id is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $callerUserId = $this->authService->currentUserId();
+        if ($callerUserId === null) {
+            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+        }
+
+        try {
+            $agent = $this->agentService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
+        } catch (UnauthorizedTransferException $e) {
+            return $this->forbidden('FORBIDDEN', $e->getMessage());
+        } catch (\RuntimeException $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
+        }
+
+        return new JsonResponse([
+            'data' => [
+                'agent' => AgentResource::toArray(
+                    $agent,
+                    $this->resolveSupportsImageInput($agent),
+                    $this->toolIconResolver,
+                    $this->pictureService,
+                ),
+            ],
+        ]);
     }
 
     private function resolveSupportsImageInput(Agent $agent): bool

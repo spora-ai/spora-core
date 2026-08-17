@@ -20,6 +20,14 @@ use Spora\Services\Agents\AgentToolOverrideResolver;
  * existence + ownership check is inlined (a one-line Eloquent where)
  * rather than calling back into AgentService, which would create a
  * circular constructor dependency.
+ *
+ * In the principals-and-groups model the caller passes an explicit
+ * `PrincipalResolver` and we route visibility checks through it. The
+ * public method surface still takes `int $userId` so the legacy
+ * controller layer (refactored separately) keeps working; internally
+ * each gate routes through `PrincipalResolver::isPrincipalOwner()` or
+ * `visiblePrincipalIds()` instead of the old `where('user_id', $userId)`
+ * predicate.
  */
 final class AgentToolSettingsService implements AgentToolSettingsServiceInterface
 {
@@ -28,19 +36,22 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
     private readonly AgentToolInstanceResolver $instanceResolver;
     private readonly AgentToolOverrideResolver $overrideResolver;
     private readonly AgentToolOperationsResolver $operationsResolver;
+    private readonly PrincipalResolver $principalResolver;
 
     public function __construct(
         private readonly ToolConfigService $toolConfig,
         LLMConfigService $llmConfig,
+        ?PrincipalResolver $principalResolver = null,
     ) {
+        $this->principalResolver  = $principalResolver ?? new PrincipalResolver();
         $this->instanceResolver   = new AgentToolInstanceResolver();
-        $this->overrideResolver   = new AgentToolOverrideResolver($toolConfig, $llmConfig, $this->instanceResolver);
-        $this->operationsResolver = new AgentToolOperationsResolver($this->instanceResolver, $this->overrideResolver);
+        $this->overrideResolver   = new AgentToolOverrideResolver($toolConfig, $llmConfig, $this->instanceResolver, $this->principalResolver);
+        $this->operationsResolver = new AgentToolOperationsResolver($this->instanceResolver, $this->overrideResolver, $this->principalResolver);
     }
 
     public function enableTool(int $agentId, int $userId, string $toolClass): array
     {
-        if (Agent::where('id', $agentId)->where('user_id', $userId)->first() === null) {
+        if (!$this->isAgentVisibleTo($agentId, $userId)) {
             return ['error' => 'NOT_FOUND'];
         }
 
@@ -67,7 +78,6 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
             'updated_at' => date(self::DATETIME_FORMAT),
         ]);
 
-        // Seed schema defaults if no global config AND no agent override exists
         $globalSettings = $this->toolConfig->getGlobalSettings($toolClass);
         $hasAgentOverride = AgentToolOverride::where('agent_id', $agentId)
             ->where('tool_class', $toolClass)
@@ -82,7 +92,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
 
         $tool = AgentTool::where('agent_id', $agentId)->where('tool_class', $toolClass)->first();
 
-        $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId);
+        $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId, $userId, null);
         $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
 
         $result = [
@@ -101,7 +111,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
 
     public function disableTool(int $agentId, int $userId, string $toolClass): void
     {
-        if (Agent::where('id', $agentId)->where('user_id', $userId)->first() === null) {
+        if (!$this->isAgentVisibleTo($agentId, $userId)) {
             return;
         }
 
@@ -112,7 +122,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
 
     public function getToolStatus(int $agentId, int $userId, string $toolClass): ?array
     {
-        if (Agent::where('id', $agentId)->where('user_id', $userId)->first() === null) {
+        if (!$this->isAgentVisibleTo($agentId, $userId)) {
             return null;
         }
 
@@ -120,7 +130,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
             ->where('tool_class', $toolClass)
             ->exists();
 
-        $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId, $userId);
+        $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId, $userId, null);
         $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
 
         return [
@@ -134,7 +144,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
 
     public function getAllToolsStatus(int $agentId, int $userId): ?array
     {
-        if (Agent::where('id', $agentId)->where('user_id', $userId)->first() === null) {
+        if (!$this->isAgentVisibleTo($agentId, $userId)) {
             return null;
         }
 
@@ -148,7 +158,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
 
         foreach ($toolClasses as $toolClass) {
             $isEnabled = isset($enabledTools[$toolClass]);
-            $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId, $userId);
+            $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId, $userId, null);
             $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
 
             $statuses[] = [
@@ -193,4 +203,15 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
         return $this->operationsResolver->patchOperationOverride($agentId, $userId, $toolClass, $operation, $data);
     }
 
+    /**
+     * Single seam for "can this user see this agent?" — the principals
+     * axis means visibility tracks every principal the caller can act
+     * as (own user-principal + group-principals for their groups).
+     */
+    private function isAgentVisibleTo(int $agentId, int $userId): bool
+    {
+        return Agent::where('id', $agentId)
+            ->whereIn('principal_id', $this->principalResolver->visiblePrincipalIds($userId))
+            ->exists();
+    }
 }

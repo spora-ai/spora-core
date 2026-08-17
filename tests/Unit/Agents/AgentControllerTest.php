@@ -14,11 +14,13 @@ use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Models\LLMDriverConfiguration;
-use Spora\Models\UserPreference;
+use Spora\Models\PrincipalPreference;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentService;
 use Spora\Services\AgentToolSettingsService;
 use Spora\Services\LLMConfigService;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\HttpFoundation\Request;
 use Tests\Fixtures\TestTool;
@@ -54,11 +56,12 @@ function makeAgentControllers(): array
     $logger     = new Monolog\Logger('test');
     $toolConfig = new ToolConfigService($security, $logger, [TestTool::class]);
     $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class]);
-    $agentService = new AgentService();
+    $principalService = new PrincipalService(new PrincipalResolver());
+    $agentService = new AgentService(null, null, $principalService, new PrincipalResolver());
     // Tool enablement / overrides / operations moved to AgentToolSettingsService
     // when AgentService was split to satisfy SonarCloud S1448.
     $toolSettings = new AgentToolSettingsService($toolConfig, $llmConfig);
-    $crudController      = new AgentController($authService, $agentService);
+    $crudController      = new AgentController($authService, $agentService, null, null, null, $principalService);
     $toolController      = new AgentToolController($authService, $toolSettings, $toolConfig);
     $overrideController  = new AgentOverrideController($authService, $toolSettings, $toolConfig);
     $authMiddleware = new AuthMiddleware($authService);
@@ -460,8 +463,8 @@ test('getOverride for llm_configuration falls back to the user default LLMDriver
     ]));
     $config->save();
 
-    UserPreference::create([
-        'user_id' => $userId,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'preferred_llm_config_id' => $config->id,
     ]);
 
@@ -501,8 +504,8 @@ test('getOverride for llm_configuration returns empty settings when decryption f
     $config->settings   = json_encode($alienService->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'secret', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1']));
     $config->save();
 
-    UserPreference::create([
-        'user_id' => $userId,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'preferred_llm_config_id' => $config->id,
     ]);
 

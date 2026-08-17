@@ -165,7 +165,7 @@ function callController(object $controller, string $method, Symfony\Component\Ht
     return $next();
 }
 
-uses()
+uses(Tests\Concerns\CreatesPrincipal::class)
     ->beforeEach(function () {
         Spora\Core\Database::resetBootState();
         $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);

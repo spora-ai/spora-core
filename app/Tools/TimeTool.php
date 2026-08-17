@@ -54,8 +54,13 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(name: 'format', type: 'string', description: 'Output format: "iso8601" (default), "rfc2822", or "human" ("2026-07-26 14:32:00 UTC"). Only used when action is "format".', required: false, default: 'iso8601', enum: ['iso8601', 'rfc2822', 'human'])]
 final class TimeTool extends AbstractTool
 {
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
-    {
+    public function execute(
+        array $arguments,
+        int $agentId,
+        ?int $userId = null,
+        ?int $taskId = null,
+        ?\Spora\Services\PrincipalContext $context = null,
+    ): ToolResult {
         return match ($this->getOperationName($arguments)) {
             'now'    => $this->doNow(),
             'format' => $this->doFormat($arguments),

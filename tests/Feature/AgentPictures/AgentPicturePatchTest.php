@@ -27,7 +27,7 @@ function buildProfilePictureAgentController(): AgentController
         {
             return [];
         }
-        public function createAgent(int $userId, array $data): \Spora\Models\Agent
+        public function createAgent(int $userId, array $data, ?int $principalId = null): \Spora\Models\Agent
         {
             throw new RuntimeException('not implemented in test');
         }
@@ -65,6 +65,10 @@ function buildProfilePictureAgentController(): AgentController
         public function setArchived(int $userId, int $agentId, bool $archived): \Spora\Models\Agent
         {
             return \Spora\Models\Agent::query()->find($agentId) ?? throw new RuntimeException('not found');
+        }
+        public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): \Spora\Models\Agent
+        {
+            throw new RuntimeException('not implemented in test');
         }
     };
     $toolSettings = new class implements AgentToolSettingsServiceInterface {
@@ -125,7 +129,7 @@ function seedProfilePictureAgent(int $id, int $userId): void
 {
     \Spora\Models\Agent::query()->insert([
         'id' => $id,
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name' => "agent-{$id}",
         'description' => '',
         'system_prompt' => '',

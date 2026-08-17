@@ -45,7 +45,7 @@ function seedUserAndAgentForNotification(): array
     simulateLoggedInSession($userId, 'notify@example.com');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'      => 'NotifTestAgent',
         'max_steps' => 10,
         'is_active' => true,
@@ -72,7 +72,8 @@ describe('NotificationService', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'status'      => 'COMPLETED',
             'user_prompt' => 'Hello',
             'max_steps'   => 10,
@@ -101,7 +102,8 @@ describe('NotificationService', function (): void {
 
         $task = Task::create([
             'agent_id'       => $agent->id,
-            'user_id'        => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'status'         => 'FAILED',
             'user_prompt'    => 'Fail me',
             'max_steps'      => 10,
@@ -133,7 +135,8 @@ describe('NotificationService', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'status'      => 'PENDING_APPROVAL',
             'user_prompt' => 'Approve me',
             'max_steps'   => 10,
@@ -157,7 +160,8 @@ describe('NotificationService', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'status'      => 'COMPLETED',
             'user_prompt' => 'Scheduled task',
             'max_steps'   => 10,
@@ -176,13 +180,13 @@ describe('NotificationService', function (): void {
         [$userId] = seedUserAndAgentForNotification();
 
         $older = Notification::create([
-            'user_id'    => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'type'       => 'task_completed',
             'title'      => 'First',
             'created_at' => date(TEST_TIMESTAMP_FORMAT, strtotime('-2 hours')),
         ]);
         $newer = Notification::create([
-            'user_id'    => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'type'       => 'task_failed',
             'title'      => 'Second',
             'created_at' => date(TEST_TIMESTAMP_FORMAT, strtotime('-1 hour')),
@@ -199,8 +203,8 @@ describe('NotificationController', function (): void {
     it('index returns paginated notifications for the logged-in user', function (): void {
         [$userId, , $authService] = seedUserAndAgentForNotification();
 
-        Notification::create(['user_id' => $userId, 'type' => 'task_completed', 'title' => 'Notif 1']);
-        Notification::create(['user_id' => $userId, 'type' => 'task_failed', 'title' => 'Notif 2']);
+        Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'Notif 1']);
+        Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_failed', 'title' => 'Notif 2']);
 
         $controller = new NotificationController($authService, makeNotificationService());
         $request = jsonRequest('GET', '/api/v1/notifications');
@@ -216,11 +220,11 @@ describe('NotificationController', function (): void {
         [$userId] = seedUserAndAgentForNotification();
 
         Notification::create([
-            'user_id' => $userId, 'type' => 'task_completed', 'title' => 'Read',
+            'principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'Read',
             'read_at' => date(TEST_TIMESTAMP_FORMAT),
         ]);
         Notification::create([
-            'user_id' => $userId, 'type' => 'task_completed', 'title' => 'Unread',
+            'principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'Unread',
         ]);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
@@ -236,7 +240,7 @@ describe('NotificationController', function (): void {
         [$userId] = seedUserAndAgentForNotification();
 
         $notif = Notification::create([
-            'user_id' => $userId, 'type' => 'task_completed', 'title' => 'To Read',
+            'principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'To Read',
         ]);
         expect($notif->read_at)->toBeNull();
 
@@ -255,7 +259,7 @@ describe('NotificationController', function (): void {
         $otherUserId = bootAuthLayer()->register('other@example.com', TEST_PASSWORD, 'Other');
 
         $notif = Notification::create([
-            'user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Other',
+            'principal_id' => createUserPrincipalPublic($otherUserId), 'type' => 'task_completed', 'title' => 'Other',
         ]);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
@@ -268,8 +272,8 @@ describe('NotificationController', function (): void {
     it('markAllRead marks all unread notifications as read', function (): void {
         [$userId] = seedUserAndAgentForNotification();
 
-        Notification::create(['user_id' => $userId, 'type' => 'task_completed', 'title' => 'A']);
-        Notification::create(['user_id' => $userId, 'type' => 'task_completed', 'title' => 'B']);
+        Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'A']);
+        Notification::create(['principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'B']);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
         $response = $controller->markAllRead();
@@ -283,7 +287,7 @@ describe('NotificationController', function (): void {
         [$userId] = seedUserAndAgentForNotification();
 
         $notif = Notification::create([
-            'user_id' => $userId, 'type' => 'task_completed', 'title' => 'To Delete',
+            'principal_id' => createUserPrincipalPublic($userId), 'type' => 'task_completed', 'title' => 'To Delete',
         ]);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());
@@ -302,7 +306,7 @@ describe('NotificationController', function (): void {
         $otherUserId = bootAuthLayer()->register('other@example.com', TEST_PASSWORD, 'Other');
 
         $notif = Notification::create([
-            'user_id' => $otherUserId, 'type' => 'task_completed', 'title' => 'Other',
+            'principal_id' => createUserPrincipalPublic($otherUserId), 'type' => 'task_completed', 'title' => 'Other',
         ]);
 
         $controller = new NotificationController(bootAuthLayer(), makeNotificationService());

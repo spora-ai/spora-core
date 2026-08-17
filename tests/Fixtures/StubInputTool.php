@@ -20,7 +20,13 @@ final class StubInputTool implements ToolInterface
         private readonly string $resultContent = 'input_result',
     ) {}
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
+    public function execute(
+        array $arguments,
+        int $agentId,
+        ?int $userId = null,
+        ?int $taskId = null,
+        ?\Spora\Services\PrincipalContext $context = null,
+    ): ToolResult
     {
         return $this->run($arguments, $agentId);
     }

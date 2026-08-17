@@ -25,7 +25,7 @@ describe('TaskService — getTasksForUser', function (): void {
         simulateLoggedInSession($userId, 'list@example.com');
 
         $agent = Agent::create([
-            'user_id'      => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'ListTestAgent',
             'llm_provider' => 'mock',
             'llm_model'    => 'mock',
@@ -36,7 +36,8 @@ describe('TaskService — getTasksForUser', function (): void {
         ]);
 
         $task = Task::create([
-            'user_id'   => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'  => $agent->id,
             'status'    => 'COMPLETED',
             'user_prompt' => 'Test prompt',
@@ -61,7 +62,7 @@ describe('TaskService — getTasksForUser', function (): void {
         simulateLoggedInSession($userId, 'agentrel@example.com');
 
         $agent = Agent::create([
-            'user_id'      => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'AgentRelAgent',
             'llm_provider' => 'mock',
             'llm_model'    => 'mock',
@@ -72,7 +73,8 @@ describe('TaskService — getTasksForUser', function (): void {
         ]);
 
         Task::create([
-            'user_id'   => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'  => $agent->id,
             'status'    => 'RUNNING',
             'user_prompt' => 'Run me',
@@ -93,18 +95,18 @@ describe('TaskService — getTasksForUser', function (): void {
         simulateLoggedInSession($userId, 'filter@example.com');
 
         $agent1 = Agent::create([
-            'user_id' => $userId, 'name' => 'Agent1',
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'Agent1',
             'llm_provider' => 'mock', 'llm_model' => 'mock',
             'max_steps' => 5, 'is_active' => true,
         ]);
         $agent2 = Agent::create([
-            'user_id' => $userId, 'name' => 'Agent2',
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'Agent2',
             'llm_provider' => 'mock', 'llm_model' => 'mock',
             'max_steps' => 5, 'is_active' => true,
         ]);
 
-        Task::create(['user_id' => $userId, 'agent_id' => $agent1->id, 'status' => 'COMPLETED', 'user_prompt' => 'A1', 'max_steps' => 5]);
-        Task::create(['user_id' => $userId, 'agent_id' => $agent2->id, 'status' => 'RUNNING', 'user_prompt' => 'A2', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent1->id, 'status' => 'COMPLETED', 'user_prompt' => 'A1', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent2->id, 'status' => 'RUNNING', 'user_prompt' => 'A2', 'max_steps' => 5]);
 
         $service = makeTaskService();
 
@@ -122,7 +124,7 @@ describe('TaskService — getTasksForUser', function (): void {
         simulateLoggedInSession($userId, 'since@example.com');
 
         $agent = Agent::create([
-            'user_id'      => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'SinceAgent',
             'llm_provider' => 'mock',
             'llm_model'    => 'mock',
@@ -131,7 +133,8 @@ describe('TaskService — getTasksForUser', function (): void {
         ]);
 
         $oldTask = Task::create([
-            'user_id'   => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'  => $agent->id,
             'status'    => 'COMPLETED',
             'user_prompt' => 'Old task',
@@ -141,7 +144,8 @@ describe('TaskService — getTasksForUser', function (): void {
         Task::where('id', $oldTask->id)->update(['updated_at' => '2024-01-01 00:00:00']);
 
         $newTask = Task::create([
-            'user_id'   => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'  => $agent->id,
             'status'    => 'RUNNING',
             'user_prompt' => 'New task',
@@ -169,7 +173,7 @@ describe('TaskService — getTasksForUser', function (): void {
         simulateLoggedInSession($userId, 'nocsince@example.com');
 
         $agent = Agent::create([
-            'user_id'      => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'NoSinceAgent',
             'llm_provider' => 'mock',
             'llm_model'    => 'mock',
@@ -177,8 +181,8 @@ describe('TaskService — getTasksForUser', function (): void {
             'is_active'    => true,
         ]);
 
-        Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task 1', 'max_steps' => 5]);
-        Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Task 2', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task 1', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Task 2', 'max_steps' => 5]);
 
         $service = makeTaskService();
         $result = $service->getTasksForUser($userId);
@@ -192,7 +196,7 @@ describe('TaskService — getTasksForUser', function (): void {
         simulateLoggedInSession($userId, 'futuresince@example.com');
 
         $agent = Agent::create([
-            'user_id'      => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'FutureSinceAgent',
             'llm_provider' => 'mock',
             'llm_model'    => 'mock',
@@ -200,7 +204,7 @@ describe('TaskService — getTasksForUser', function (): void {
             'is_active'    => true,
         ]);
 
-        Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task', 'max_steps' => 5]);
 
         $service = makeTaskService();
         $result = $service->getTasksForUser($userId, null, '2099-01-01T00:00:00Z');
@@ -214,7 +218,7 @@ describe('TaskService — getTasksForUser', function (): void {
         simulateLoggedInSession($userId, 'order@example.com');
 
         $agent = Agent::create([
-            'user_id'      => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'OrderAgent',
             'llm_provider' => 'mock',
             'llm_model'    => 'mock',
@@ -222,13 +226,13 @@ describe('TaskService — getTasksForUser', function (): void {
             'is_active'    => true,
         ]);
 
-        $task1 = Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'First', 'max_steps' => 5]);
+        $task1 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'First', 'max_steps' => 5]);
         Task::where('id', $task1->id)->update(['updated_at' => '2025-01-01 00:00:00']);
 
-        $task2 = Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Second', 'max_steps' => 5]);
+        $task2 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Second', 'max_steps' => 5]);
         Task::where('id', $task2->id)->update(['updated_at' => '2025-06-01 00:00:00']);
 
-        $task3 = Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING', 'user_prompt' => 'Third', 'max_steps' => 5]);
+        $task3 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'PENDING', 'user_prompt' => 'Third', 'max_steps' => 5]);
         Task::where('id', $task3->id)->update(['updated_at' => '2025-03-01 00:00:00']);
 
         $service = makeTaskService();
@@ -247,7 +251,7 @@ describe('TaskService — getTasksForUser', function (): void {
         simulateLoggedInSession($userId, 'paged@example.com');
 
         $agent = Agent::create([
-            'user_id'      => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'PagedAgent',
             'llm_provider' => 'mock',
             'llm_model'    => 'mock',
@@ -257,7 +261,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         // Create 5 tasks
         for ($i = 1; $i <= 5; $i++) {
-            Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
+            Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
         }
 
         $service = makeTaskService();
@@ -280,7 +284,7 @@ describe('TaskService — getTasksForUser', function (): void {
         simulateLoggedInSession($userId, 'page2@example.com');
 
         $agent = Agent::create([
-            'user_id'      => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'Page2Agent',
             'llm_provider' => 'mock',
             'llm_model'    => 'mock',
@@ -289,7 +293,7 @@ describe('TaskService — getTasksForUser', function (): void {
         ]);
 
         for ($i = 1; $i <= 5; $i++) {
-            Task::create(['user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
+            Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
         }
 
         $service = makeTaskService();
@@ -308,7 +312,7 @@ describe('TaskService — startTask', function (): void {
         simulateLoggedInSession($userId, 'start@example.com');
 
         $agent = Agent::create([
-            'user_id'      => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'StartAgent',
             'max_steps'    => 7,
             'is_active'    => true,
@@ -323,7 +327,8 @@ describe('TaskService — startTask', function (): void {
             ->with($agent->id, 'do the thing', 7, null, null, [])
             ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, ?int $runId, array $mediaIds) use ($userId): Task {
                 return Task::create([
-                    'user_id'     => $userId,
+                    'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
                     'agent_id'    => $agentId,
                     'status'      => 'RUNNING',
                     'user_prompt' => $prompt,
@@ -346,7 +351,7 @@ describe('TaskService — startTask', function (): void {
         simulateLoggedInSession($userId, 'start-default@example.com');
 
         $agent = Agent::create([
-            'user_id'   => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'StartDefaultAgent',
             'max_steps' => 12,
             'is_active' => true,
@@ -360,7 +365,7 @@ describe('TaskService — startTask', function (): void {
             ->once()
             ->with($agent->id, 'p', 12, null, null, []) // 12 = agent.max_steps
             ->andReturnUsing(fn(int $a, string $p, int $m, ?int $parent, ?int $runId, array $mediaIds) => Task::create([
-                'user_id' => $userId, 'agent_id' => $a, 'status' => 'RUNNING',
+                'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $a, 'status' => 'RUNNING',
                 'user_prompt' => $p, 'max_steps' => $m, 'step_count' => 0,
             ]));
 
@@ -375,7 +380,7 @@ describe('TaskService — startTask', function (): void {
         simulateLoggedInSession($userB, 'ownerb@example.com');
 
         $agentOfA = Agent::create([
-            'user_id' => $userA, 'name' => 'A', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => createUserPrincipalPublic($userA), 'name' => 'A', 'max_steps' => 5, 'is_active' => true,
         ]);
 
         $service = makeTaskService();
@@ -388,7 +393,7 @@ describe('TaskService — startTask', function (): void {
         simulateLoggedInSession($userId, 'parentinvalid@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'ParentAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ParentAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
 
         $service = makeTaskService();
@@ -413,10 +418,11 @@ describe('TaskService — getTask', function (): void {
         $userB = $authService->register('getownb@example.com', 'Password1!', 'B');
 
         $agentA = Agent::create([
-            'user_id' => $userA, 'name' => 'A', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => createUserPrincipalPublic($userA), 'name' => 'A', 'max_steps' => 5, 'is_active' => true,
         ]);
         $taskA = Task::create([
-            'user_id'     => $userA,
+            'principal_id' => createUserPrincipalPublic($userA),
+        'user_id'     => $userA,
             'agent_id'    => $agentA->id,
             'status'      => 'COMPLETED',
             'user_prompt' => 'private',
@@ -433,10 +439,11 @@ describe('TaskService — getTask', function (): void {
         simulateLoggedInSession($userId, 'getok@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'GetAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'GetAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'hi',
@@ -469,10 +476,11 @@ describe('TaskService — getTaskWithHistory', function (): void {
         simulateLoggedInSession($userId, 'histok@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'HistAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'HistAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'with history',
@@ -517,10 +525,11 @@ describe('TaskService — getTaskWithHistory', function (): void {
         simulateLoggedInSession($userId, 'histsince@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'HistSinceAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'HistSinceAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'with history',
@@ -549,10 +558,11 @@ describe('TaskService — getTaskWithHistory', function (): void {
         simulateLoggedInSession($userId, 'resultdata@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'ResultDataAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ResultDataAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'COMPLETED',
             'user_prompt' => 'handover please',
@@ -599,10 +609,11 @@ describe('TaskService — getTaskWithHistory', function (): void {
         simulateLoggedInSession($userId, 'shapeparity@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'ShapeParityAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ShapeParityAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'COMPLETED',
             'user_prompt' => 'shape parity',
@@ -653,10 +664,10 @@ describe('TaskService — approveTask', function (): void {
         simulateLoggedInSession($userId, 'approvebad@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'AppBadAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'AppBadAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING',
+            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'RUNNING',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -670,10 +681,10 @@ describe('TaskService — approveTask', function (): void {
         simulateLoggedInSession($userId, 'approveok@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'AppOkAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'AppOkAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
+            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -714,10 +725,10 @@ describe('TaskService — rejectTask', function (): void {
         simulateLoggedInSession($userId, 'rejbad@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'RejBadAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'RejBadAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'FAILED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -731,10 +742,10 @@ describe('TaskService — rejectTask', function (): void {
         simulateLoggedInSession($userId, 'rejok@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'RejOkAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'RejOkAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
+            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -773,10 +784,10 @@ describe('TaskService — retryTask', function (): void {
         simulateLoggedInSession($userId, 'retrybad@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'RetBadAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'RetBadAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
+            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -790,10 +801,11 @@ describe('TaskService — retryTask', function (): void {
         simulateLoggedInSession($userId, 'retryok@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'RetOkAgent', 'max_steps' => 8, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'RetOkAgent', 'max_steps' => 8, 'is_active' => true,
         ]);
         $original = Task::create([
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'FAILED',
             'user_prompt' => 'please try again',
@@ -846,10 +858,10 @@ describe('TaskService — continueTask', function (): void {
         simulateLoggedInSession($userId, 'contpa@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'ContPaAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ContPaAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
+            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -863,10 +875,10 @@ describe('TaskService — continueTask', function (): void {
         simulateLoggedInSession($userId, 'contbadsteps@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'ContStepsAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ContStepsAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
+            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -880,10 +892,10 @@ describe('TaskService — continueTask', function (): void {
         simulateLoggedInSession($userId, 'contok@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'ContOkAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ContOkAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
+            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -896,7 +908,8 @@ describe('TaskService — continueTask', function (): void {
             ->with($task->id, 'more please', 10, [])
             ->andReturnUsing(function (int $taskId, string $prompt, ?int $steps, array $mediaIds) use ($userId): Task {
                 return Task::create([
-                    'user_id'     => $userId,
+                    'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
                     'agent_id'    => 1,
                     'status'      => 'RUNNING',
                     'user_prompt' => 'more please',
@@ -930,10 +943,10 @@ describe('TaskService — deleteTask', function (): void {
         simulateLoggedInSession($userId, 'delok@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'DelAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'DelAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
+            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
         Spora\Models\TaskHistory::create([
@@ -952,14 +965,15 @@ describe('TaskService — deleteTask', function (): void {
         simulateLoggedInSession($userId, 'delparent@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'DelParAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'DelParAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $parent = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'FAILED',
             'user_prompt' => 'orig', 'max_steps' => 5,
         ]);
         $child = Task::create([
-            'user_id'        => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'       => $agent->id,
             'status'         => 'QUEUED',
             'user_prompt'    => 'retry',
@@ -979,14 +993,15 @@ describe('TaskService — deleteTask', function (): void {
         simulateLoggedInSession($userId, 'delnonparent@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'DelNPAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'DelNPAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $parent = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'FAILED',
             'user_prompt' => 'orig', 'max_steps' => 5,
         ]);
         $childOfOther = Task::create([
-            'user_id'        => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'       => $agent->id,
             'status'         => 'QUEUED',
             'user_prompt'    => 'unrelated retry',
@@ -1018,10 +1033,10 @@ describe('TaskService — cancelRetryChain', function (): void {
         simulateLoggedInSession($userId, 'cancelnoretry@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'CancelNRAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'CancelNRAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'FAILED',
             'user_prompt' => 'p', 'max_steps' => 5, 'retry_of_task_id' => null,
         ]);
 
@@ -1035,13 +1050,14 @@ describe('TaskService — cancelRetryChain', function (): void {
         simulateLoggedInSession($userId, 'cancelok@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'CancelOkAgent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'CancelOkAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         // In-place retry: the failed task itself is the chain head. The
         // chain "member" is the same row, with retry_of_task_id pointing to
         // itself and retry_after set in the future.
         $failed = Task::create([
-            'user_id'     => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'FAILED',
             'user_prompt' => 'orig',

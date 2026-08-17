@@ -31,7 +31,7 @@ function registerAndGetAgentId(AuthService $authService): array
     simulateLoggedInSession($userId, 'template@example.com');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'      => 'TemplateTestAgent',
         'max_steps' => 10,
         'is_active' => true,
@@ -87,7 +87,7 @@ describe('PromptTemplateController', function (): void {
         simulateLoggedInSession($otherUserId, 'other@example.com');
 
         $agent = Agent::create([
-            'user_id' => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'    => 'OtherUserAgent',
             'max_steps' => 10,
             'is_active' => true,
@@ -175,7 +175,7 @@ describe('PromptTemplateController', function (): void {
         [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
         $otherAgent = Agent::create([
-            'user_id' => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'    => 'OtherAgent',
             'max_steps' => 10,
             'is_active' => true,
@@ -249,7 +249,7 @@ describe('PromptTemplateController', function (): void {
         [$userId, $agentId] = registerAndGetAgentId(bootAuthLayer());
 
         $otherAgent = Agent::create([
-            'user_id' => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'    => 'OtherAgent',
             'max_steps' => 10,
             'is_active' => true,

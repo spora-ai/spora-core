@@ -10,6 +10,8 @@ use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Auth\AuthService;
 use Spora\Models\User;
 use Spora\Services\Mail\MailTemplateSyncService;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 
 /**
  * Seeds the database with a default Admin user and an integrated Agent.
@@ -34,6 +36,7 @@ final class DatabaseSeeder
         private readonly AuthService $authService,
         private readonly MailTemplateSyncService $mailTemplateSync,
         private readonly AgentTemplateImporter $templateImporter,
+        private readonly ?PrincipalService $principalService = null,
     ) {}
 
     public function run(): void
@@ -65,15 +68,23 @@ final class DatabaseSeeder
             echo "Admin user already exists.\n";
         }
 
+        // Materialise the admin's user-principal so the Spora Core Agent
+        // can be created against an existing principal id. Migration 0067
+        // dropped the agents.user_id column; the importer (and the
+        // createAgent path) now require principal_id. The principal row
+        // is idempotent so the seeder can be re-run safely.
+        $principalService = $this->principalService ?? new PrincipalService(new PrincipalResolver());
+        $adminPrincipalId = (int) $principalService->ensureUserPrincipal($userId)->id;
+
         // 3. Install the Spora Core Agent from the built-in template if missing.
         //    Keyed on agent name so a template id rename leaves the agent in place.
-        $existing = \Spora\Models\Agent::where('user_id', $userId)
+        $existing = \Spora\Models\Agent::where('principal_id', $adminPrincipalId)
             ->where('name', 'Spora Core Agent')
             ->first();
 
         if ($existing === null) {
             try {
-                $result = $this->templateImporter->applyTemplate($userId, self::CORE_AGENT_TEMPLATE_ID);
+                $result = $this->templateImporter->applyTemplate($userId, self::CORE_AGENT_TEMPLATE_ID, $adminPrincipalId);
                 echo "Created Spora Core Agent from '" . self::CORE_AGENT_TEMPLATE_ID . "' template with "
                     . count($result->toolsEnabled) . " tools.\n";
                 foreach ($result->warnings as $w) {

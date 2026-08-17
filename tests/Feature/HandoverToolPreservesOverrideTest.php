@@ -19,7 +19,7 @@ it('does not modify the agent_tool_overrides row when the HandoverTool is invoke
     $userId = $auth->register('preserve@example.com', 'Password1!', 'Preserve');
 
     $sourceAgent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Source',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -27,7 +27,7 @@ it('does not modify the agent_tool_overrides row when the HandoverTool is invoke
         'is_active'    => true,
     ]);
     $targetAgent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Target',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -63,6 +63,7 @@ it('does not modify the agent_tool_overrides row when the HandoverTool is invoke
     $tool = new HandoverTool($handoverService, $subAgentService, $configService);
 
     $source = Task::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'agent_id'    => $sourceAgent->id,
         'status'      => 'RUNNING',
@@ -89,7 +90,7 @@ it('does not wipe the allowlist when the handover is rejected (target not in all
     $userId = $auth->register('preserve2@example.com', 'Password1!', 'Preserve2');
 
     $sourceAgent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Source',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -97,7 +98,7 @@ it('does not wipe the allowlist when the handover is rejected (target not in all
         'is_active'    => true,
     ]);
     $allowedAgent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Allowed',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -129,6 +130,7 @@ it('does not wipe the allowlist when the handover is rejected (target not in all
     $tool = new HandoverTool($handoverService, $subAgentService, $configService);
 
     $source = Task::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'agent_id'    => $sourceAgent->id,
         'status'      => 'RUNNING',
