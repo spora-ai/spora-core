@@ -49,11 +49,11 @@ final class GroupController
      *
      * Members see the groups they belong to; admins see every group.
      */
-    public function index(Request $request): JsonResponse
+    public function index(): JsonResponse
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->unauthenticated();
         }
 
         $isAdmin = $this->authService->isAdmin();
@@ -69,7 +69,7 @@ final class GroupController
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->unauthenticated();
         }
 
         $group = Group::find($id);
@@ -85,7 +85,7 @@ final class GroupController
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['group' => $this->groupResource($group, $userId, $isAdmin)]]);
+        return new JsonResponse(['data' => ['group' => $this->groupResource($group, $userId)]]);
     }
 
     /**
@@ -99,7 +99,7 @@ final class GroupController
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->unauthenticated();
         }
 
         try {
@@ -120,7 +120,7 @@ final class GroupController
         $group = $this->groupService->createGroup($userId, $name, $description);
 
         return new JsonResponse(
-            ['data' => ['group' => $this->groupResource($group, $userId, true)]],
+            ['data' => ['group' => $this->groupResource($group, $userId)]],
             Response::HTTP_CREATED,
         );
     }
@@ -165,7 +165,7 @@ final class GroupController
         }
 
         $userId = $this->authService->currentUserId();
-        return new JsonResponse(['data' => ['group' => $this->groupResource($group, $userId ?? 0, true)]]);
+        return new JsonResponse(['data' => ['group' => $this->groupResource($group, $userId ?? 0)]]);
     }
 
     /**
@@ -179,7 +179,7 @@ final class GroupController
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->unauthenticated();
         }
 
         try {
@@ -187,7 +187,7 @@ final class GroupController
         } catch (GroupMembershipRuleException $e) {
             return $this->forbidden('FORBIDDEN', $e->getMessage());
         } catch (PrincipalHasDependentsException $e) {
-            return $this->conflictWithDependents($e->getMessage(), $id, $e->agentIds);
+            return $this->conflictWithDependents($e->getMessage(), $e->agentIds);
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);
@@ -200,7 +200,7 @@ final class GroupController
      *
      * @param  list<int> $agentIds
      */
-    private function conflictWithDependents(string $message, int $groupId, array $agentIds): JsonResponse
+    private function conflictWithDependents(string $message, array $agentIds): JsonResponse
     {
         return new JsonResponse(
             [
@@ -208,7 +208,7 @@ final class GroupController
                     'code'    => 'GROUP_HAS_AGENTS',
                     'message' => $message,
                     'agent_ids' => $agentIds,
-                    'reassign_endpoint' => "/api/v1/agents/{id}/transfer",
+                    'reassign_endpoint' => \Spora\Core\RouteDefinitions::ROUTE_AGENTS_TRANSFER,
                 ],
             ],
             Response::HTTP_CONFLICT,
@@ -223,7 +223,7 @@ final class GroupController
      *
      * @return array<string, mixed>
      */
-    private function groupResource(Group $group, int $callerUserId, bool $isAdmin): array
+    private function groupResource(Group $group, int $callerUserId): array
     {
         $principal = $this->principalService->principalForGroup((int) $group->id);
         $role = GroupMembership::where('group_id', $group->id)
@@ -250,7 +250,7 @@ final class GroupController
         $rows = Group::orderBy('name')->get();
         $userId = $this->authService->currentUserId() ?? 0;
         return array_map(
-            fn(Group $g): array => $this->groupResource($g, $userId, true),
+            fn(Group $g): array => $this->groupResource($g, $userId),
             $rows->all(),
         );
     }
@@ -266,7 +266,7 @@ final class GroupController
         }
         $rows = Group::whereIn('id', $groupIds)->orderBy('name')->get();
         return array_map(
-            fn(Group $g): array => $this->groupResource($g, $userId, false),
+            fn(Group $g): array => $this->groupResource($g, $userId),
             $rows->all(),
         );
     }

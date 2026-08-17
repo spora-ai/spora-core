@@ -35,6 +35,8 @@ use Spora\Services\Exceptions\PrincipalHasDependentsException;
  */
 final class GroupService
 {
+    private const DB_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
+
     public function __construct(
         private readonly PrincipalService $principalService,
     ) {}
@@ -53,17 +55,17 @@ final class GroupService
                     'name'              => $name,
                     'description'       => $description,
                     'created_by_user_id' => $creatorUserId,
-                    'created_at'        => date('Y-m-d H:i:s'),
-                    'updated_at'        => date('Y-m-d H:i:s'),
+                    'created_at'        => date(self::DB_TIMESTAMP_FORMAT),
+                    'updated_at'        => date(self::DB_TIMESTAMP_FORMAT),
                 ]);
 
                 Capsule::table('group_memberships')->insert([
                     'group_id'   => $groupId,
                     'user_id'    => $creatorUserId,
                     'role'       => GroupMembership::ROLE_OWNER,
-                    'joined_at'  => date('Y-m-d H:i:s'),
-                    'created_at' => date('Y-m-d H:i:s'),
-                    'updated_at' => date('Y-m-d H:i:s'),
+                    'joined_at'  => date(self::DB_TIMESTAMP_FORMAT),
+                    'created_at' => date(self::DB_TIMESTAMP_FORMAT),
+                    'updated_at' => date(self::DB_TIMESTAMP_FORMAT),
                 ]);
 
                 // Materialise the principal immediately so the group can
@@ -122,9 +124,9 @@ final class GroupService
                     'group_id'   => $groupId,
                     'user_id'    => $userIdToAdd,
                     'role'       => $role,
-                    'joined_at'  => date('Y-m-d H:i:s'),
-                    'created_at' => date('Y-m-d H:i:s'),
-                    'updated_at' => date('Y-m-d H:i:s'),
+                    'joined_at'  => date(self::DB_TIMESTAMP_FORMAT),
+                    'created_at' => date(self::DB_TIMESTAMP_FORMAT),
+                    'updated_at' => date(self::DB_TIMESTAMP_FORMAT),
                 ]);
             },
         );
@@ -192,7 +194,7 @@ final class GroupService
                     ->where('user_id', $memberUserId)
                     ->update([
                         'role'       => $newRole,
-                        'updated_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date(self::DB_TIMESTAMP_FORMAT),
                     ]);
             },
         );

@@ -47,7 +47,7 @@ final class GroupMemberController
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->unauthenticated();
         }
 
         $group = $this->loadGroupOrNotFound($groupId);
@@ -83,7 +83,7 @@ final class GroupMemberController
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->unauthenticated();
         }
 
         $authError = $this->authoriseMemberWrite($groupId, $userId);
@@ -130,7 +130,7 @@ final class GroupMemberController
     {
         $callerUserId = $this->authService->currentUserId();
         if ($callerUserId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->unauthenticated();
         }
 
         $authError = $this->authoriseMemberWrite($groupId, $callerUserId);
@@ -176,7 +176,7 @@ final class GroupMemberController
     {
         $callerUserId = $this->authService->currentUserId();
         if ($callerUserId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->unauthenticated();
         }
 
         $authError = $this->authoriseMemberWrite($groupId, $callerUserId);

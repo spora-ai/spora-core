@@ -45,6 +45,7 @@ final class RouteDefinitions
     public const ROUTE_MEDIA_ITEM = '/api/v1/media/{id}';
 
     public const ROUTE_AGENTS_ID = '/api/v1/agents/{id}';
+    public const ROUTE_AGENTS_TRANSFER = '/api/v1/agents/{id}/transfer';
     public const ROUTE_AGENTS_TOOL_OVERRIDE = '/api/v1/agents/{id}/tools/{toolId}/override';
     public const ROUTE_TOOLS_SETTINGS = '/api/v1/tools/{toolId}/settings';
     public const ROUTE_TOOLS_USER_SETTINGS = '/api/v1/tools/{toolId}/user-settings';
@@ -54,6 +55,10 @@ final class RouteDefinitions
     public const ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID = '/api/v1/agents/{id}/templates/{templateId}';
     public const ROUTE_AGENTS_SCHEDULED_RUNS_RUN_ID = '/api/v1/agents/{id}/scheduled-runs/{runId}';
     public const ROUTE_SKILLS_SLUG = '/api/v1/skills/{slug}';
+    public const ROUTE_GROUPS = '/api/v1/groups';
+    public const ROUTE_GROUPS_ID = '/api/v1/groups/{id}';
+    public const ROUTE_GROUPS_ID_MEMBERS = '/api/v1/groups/{id}/members';
+    public const ROUTE_GROUPS_ID_MEMBERS_UID = '/api/v1/groups/{id}/members/{uid}';
 
     public static function register(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
@@ -98,21 +103,21 @@ final class RouteDefinitions
         $r->addRoute('GET', self::ROUTE_AGENTS_ID, [AgentController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PATCH', self::ROUTE_AGENTS_ID, [AgentController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_AGENTS_ID, [AgentController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('POST', '/api/v1/agents/{id}/transfer', [AgentController::class, 'transferPrincipal'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_AGENTS_TRANSFER, [AgentController::class, 'transferPrincipal'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         // Groups + members + principal-discovery. Group writes are admin-only;
         // member writes accept admin OR group-owner (the controller enforces
         // the owner branch via GroupService::fetchCallerRole).
-        $r->addRoute('POST', '/api/v1/groups', [GroupController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
-        $r->addRoute('GET', '/api/v1/groups', [GroupController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', '/api/v1/groups/{id}', [GroupController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PATCH', '/api/v1/groups/{id}', [GroupController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
-        $r->addRoute('DELETE', '/api/v1/groups/{id}', [GroupController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_GROUPS, [GroupController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        $r->addRoute('GET', self::ROUTE_GROUPS, [GroupController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID, [GroupController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', self::ROUTE_GROUPS_ID, [GroupController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_GROUPS_ID, [GroupController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
 
-        $r->addRoute('GET', '/api/v1/groups/{id}/members', [GroupMemberController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('POST', '/api/v1/groups/{id}/members', [GroupMemberController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PATCH', '/api/v1/groups/{id}/members/{uid}', [GroupMemberController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('DELETE', '/api/v1/groups/{id}/members/{uid}', [GroupMemberController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID_MEMBERS, [GroupMemberController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_GROUPS_ID_MEMBERS, [GroupMemberController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', self::ROUTE_GROUPS_ID_MEMBERS_UID, [GroupMemberController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_MEMBERS_UID, [GroupMemberController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', '/api/v1/principals/me', [PrincipalController::class, 'currentForUser'], [AuthMiddleware::class]);
 

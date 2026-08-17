@@ -26,6 +26,7 @@ final class AgentTargetResolver
     private const READ_AGENT_ERR_PREFIX      = 'read_agent: ';
     private const WRITE_AGENT_ERR_PREFIX     = 'update_agent: ';
     private const AGENT_ID_POSITIVE_INTEGER_MSG  = '`agent_id` must be a positive integer.';
+    private const AGENT_NOT_OWNED_MSG = 'agent not found or not owned by this user.';
 
     private readonly PrincipalService $principalService;
 
@@ -66,10 +67,10 @@ final class AgentTargetResolver
 
         $agent = Agent::query()->where('id', $resolvedId)->first();
         if ($agent === null) {
-            return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
+            return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_NOT_OWNED_MSG);
         }
         if (!$this->principalService->callerControlsPrincipal($userId, (int) $agent->principal_id)) {
-            return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
+            return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_NOT_OWNED_MSG);
         }
         return $agent;
     }
@@ -135,10 +136,10 @@ final class AgentTargetResolver
         // Migration 0067: agent ownership is via principal, not user_id.
         $agent = Agent::query()->where('id', $agentId)->first();
         if ($agent === null) {
-            return ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
+            return ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . self::AGENT_NOT_OWNED_MSG);
         }
         if (!$this->principalService->callerControlsPrincipal($userId, (int) $agent->principal_id)) {
-            return ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
+            return ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . self::AGENT_NOT_OWNED_MSG);
         }
         return $agentId;
     }

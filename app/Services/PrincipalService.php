@@ -6,11 +6,12 @@ namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use PDOException;
-use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Models\Group;
 use Spora\Models\Principal;
 use Spora\Services\Exceptions\PrincipalHasDependentsException;
+use Spora\Services\Exceptions\PrincipalMaterialisationException;
+use Spora\Services\Exceptions\TransferTargetNotFoundException;
 use Spora\Services\Exceptions\UnauthorizedTransferException;
 
 /**
@@ -31,6 +32,8 @@ use Spora\Services\Exceptions\UnauthorizedTransferException;
  */
 final class PrincipalService
 {
+    private const DB_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
+
     public function __construct(
         private readonly PrincipalResolver $resolver,
     ) {}
@@ -66,8 +69,8 @@ final class PrincipalService
                     'resettable' => 1,
                     'roles_mask' => 0,
                     'registered' => time(),
-                    'created_at' => date('Y-m-d H:i:s'),
-                    'updated_at' => date('Y-m-d H:i:s'),
+                    'created_at' => date(self::DB_TIMESTAMP_FORMAT),
+                    'updated_at' => date(self::DB_TIMESTAMP_FORMAT),
                 ]);
             } catch (PDOException) {
                 // Already inserted between our check and insert — fine.
@@ -82,8 +85,8 @@ final class PrincipalService
             $id = (int) Capsule::table('principals')->insertGetId([
                 'type'       => Principal::TYPE_USER,
                 'user_id'    => $userId,
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
+                'created_at' => date(self::DB_TIMESTAMP_FORMAT),
+                'updated_at' => date(self::DB_TIMESTAMP_FORMAT),
             ]);
         } catch (PDOException) {
             $existing = Principal::where('type', Principal::TYPE_USER)
@@ -92,7 +95,7 @@ final class PrincipalService
             if ($existing !== null) {
                 return $existing;
             }
-            throw new RuntimeException("Failed to materialise user-principal for user {$userId}");
+            throw new PrincipalMaterialisationException("Failed to materialise user-principal for user {$userId}");
         }
 
         return Principal::findOrFail($id);
@@ -117,8 +120,8 @@ final class PrincipalService
             $id = Capsule::table('principals')->insertGetId([
                 'type'       => Principal::TYPE_GROUP,
                 'group_id'   => $groupId,
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
+                'created_at' => date(self::DB_TIMESTAMP_FORMAT),
+                'updated_at' => date(self::DB_TIMESTAMP_FORMAT),
             ]);
         } catch (PDOException) {
             $existing = Principal::where('type', Principal::TYPE_GROUP)
@@ -127,7 +130,7 @@ final class PrincipalService
             if ($existing !== null) {
                 return $existing;
             }
-            throw new RuntimeException("Failed to materialise group-principal for group {$groupId}");
+            throw new PrincipalMaterialisationException("Failed to materialise group-principal for group {$groupId}");
         }
 
         return Principal::findOrFail($id);
@@ -154,13 +157,13 @@ final class PrincipalService
             function () use ($agentId, $targetPrincipalId, $callerUserId): Agent {
                 $agent = Agent::where('id', $agentId)->lockForUpdate()->first();
                 if ($agent === null) {
-                    throw new RuntimeException("Agent {$agentId} not found");
+                    throw new TransferTargetNotFoundException("Agent {$agentId} not found");
                 }
 
                 $sourcePrincipalId = (int) $agent->principal_id;
                 $targetPrincipal = Principal::find($targetPrincipalId);
                 if ($targetPrincipal === null) {
-                    throw new RuntimeException("Target principal {$targetPrincipalId} not found");
+                    throw new TransferTargetNotFoundException("Target principal {$targetPrincipalId} not found");
                 }
 
                 if (!$this->callerControlsPrincipal($callerUserId, $sourcePrincipalId)) {

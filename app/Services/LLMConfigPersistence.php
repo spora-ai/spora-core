@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-use RuntimeException;
 use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Core\ValueObjects\EncryptedValue;
@@ -12,6 +11,7 @@ use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\PrincipalPreference;
 use Spora\Services\Exceptions\PrincipalHasDependentsException;
+use Spora\Services\Exceptions\PrincipalNotAccessibleException;
 
 /**
  * Persistence and authorization for LLMDriverConfiguration rows.
@@ -242,7 +242,7 @@ final class LLMConfigPersistence
         // a personal config under one of their visible principals. Global
         // configs short-circuit because their principal_id is null.
         if (!$isGlobal && !in_array($principalId, $this->principalResolver->visiblePrincipalIds($callerUserId), true)) {
-            throw new RuntimeException("Caller {$callerUserId} cannot create a config under principal {$principalId}");
+            throw new PrincipalNotAccessibleException("Caller {$callerUserId} cannot create a config under principal {$principalId}");
         }
 
         return $config;

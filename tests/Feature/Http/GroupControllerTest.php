@@ -20,9 +20,17 @@ function makeGroupController(): array
 }
 
 describe('GroupController error paths', function (): void {
+    beforeEach(function (): void {
+        clearSession();
+    });
+
+    afterEach(function (): void {
+        clearSession();
+    });
+
     it('returns 401 when no user is logged in for index', function (): void {
         [$controller] = makeGroupController();
-        $response = $controller->index(jsonRequest('GET', '/api/v1/groups'));
+        $response = $controller->index();
         expect($response->getStatusCode())->toBe(401);
     });
 
@@ -119,6 +127,14 @@ describe('GroupController error paths', function (): void {
 });
 
 describe('GroupController success paths', function (): void {
+    beforeEach(function (): void {
+        clearSession();
+    });
+
+    afterEach(function (): void {
+        clearSession();
+    });
+
     it('store creates a group and returns 201', function (): void {
         [$controller, $auth] = makeGroupController();
         $userId = bootAuth($auth, 'gc4a@example.com', GROUPCONTROLLER_TEST_PASSWORD);

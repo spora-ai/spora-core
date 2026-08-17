@@ -22,6 +22,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class PrincipalController
 {
+    use JsonControllerHelpers;
+
     private PrincipalResolver $resolver;
 
     public function __construct(
@@ -44,7 +46,7 @@ final class PrincipalController
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->unauthenticated();
         }
 
         $principalIds = $this->resolver->visiblePrincipalIds($userId);
@@ -69,10 +71,5 @@ final class PrincipalController
         })->values()->all();
 
         return new JsonResponse(['data' => ['principals' => $payload]]);
-    }
-
-    private function error(string $code, string $message, int $status): JsonResponse
-    {
-        return new JsonResponse(['error' => ['code' => $code, 'message' => $message]], $status);
     }
 }

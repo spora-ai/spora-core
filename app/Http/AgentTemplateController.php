@@ -32,8 +32,6 @@ final class AgentTemplateController
 {
     use JsonControllerHelpers;
 
-    private const MSG_AUTH_REQUIRED = 'Authentication required.';
-
     public function __construct(
         private readonly AuthService $auth,
         private readonly AgentTemplateScanner $scanner,
@@ -212,7 +210,7 @@ final class AgentTemplateController
 
     private function unauthenticated(): JsonResponse
     {
-        return $this->unprocessable('UNAUTHENTICATED', self::MSG_AUTH_REQUIRED);
+        return $this->unauthenticated();
     }
 
     private function invalidJson(): JsonResponse

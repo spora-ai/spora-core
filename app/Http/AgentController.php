@@ -450,7 +450,7 @@ final class AgentController
 
         $callerUserId = $this->authService->currentUserId();
         if ($callerUserId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->unauthenticated();
         }
 
         try {

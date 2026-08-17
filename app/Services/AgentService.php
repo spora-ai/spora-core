@@ -6,7 +6,6 @@ namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use PDOException;
-use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\MediaAsset;
@@ -14,6 +13,8 @@ use Spora\Models\Principal;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\Exceptions\AgentCreateLostException;
 use Spora\Services\Exceptions\AgentNotFoundException;
+use Spora\Services\Exceptions\DependencyNotWiredException;
+use Spora\Services\Exceptions\PrincipalMaterialisationException;
 
 /**
  * Service for agent lifecycle + flag management.
@@ -123,7 +124,7 @@ final class AgentService implements AgentServiceInterface
                         if ($existing !== null) {
                             $principalId = (int) $existing;
                         } else {
-                            throw new RuntimeException(
+                            throw new PrincipalMaterialisationException(
                                 'PrincipalService not wired — could not materialise a user-principal.',
                             );
                         }
@@ -280,7 +281,7 @@ final class AgentService implements AgentServiceInterface
     public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent
     {
         if ($this->principalService === null) {
-            throw new RuntimeException('PrincipalService not wired into AgentService — cannot transfer.');
+            throw new DependencyNotWiredException('PrincipalService not wired into AgentService — cannot transfer.');
         }
         return $this->principalService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
     }
