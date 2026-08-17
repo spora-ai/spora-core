@@ -131,7 +131,7 @@ final class Orchestrator implements OrchestratorInterface
 
     public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = []): Task
     {
-        $agent = Agent::findOrFail($agentId);
+        Agent::findOrFail($agentId);
 
         $taskData = $runId !== null ? ['run_id' => $runId] : [];
 

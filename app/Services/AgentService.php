@@ -83,90 +83,88 @@ final class AgentService implements AgentServiceInterface
 
     public function createAgent(int $userId, array $data, ?int $principalId = null): Agent
     {
-        // Whitelist the inbound data to the editable columns so a
-        // caller can't smuggle non-Agent columns (notes, required_plugins,
-        // etc.) into the insert.
         $allowed = array_intersect_key($data, array_flip(self::EDITABLE_AGENT_FIELDS));
-
-        if ($principalId === null) {
-            // Default: target the caller's user-principal. Materialise if
-            // missing so a brand-new user (whose first action is to create
-            // an agent) gets a principal without a separate registration step.
-            if ($this->principalService !== null) {
-                $principalId = (int) $this->principalService
-                    ->ensureUserPrincipal($userId)
-                    ->id;
-            } else {
-                // Defensive fallback for tests that instantiate AgentService
-                // directly without wiring PrincipalService. We materialise
-                // the user-principal inline using the same idempotent path
-                // — UNIQUE(user_id) protects against parallel inserts — so
-                // a missing wiring doesn't block the test.
-                $existing = Capsule::table('principals')
-                    ->where('type', Principal::TYPE_USER)
-                    ->where('user_id', $userId)
-                    ->value('id');
-                if ($existing !== null) {
-                    $principalId = (int) $existing;
-                } else {
-                    try {
-                        $principalId = (int) Capsule::table('principals')->insertGetId([
-                            'type'       => Principal::TYPE_USER,
-                            'user_id'    => $userId,
-                            'created_at' => date(self::DATETIME_FORMAT),
-                            'updated_at' => date(self::DATETIME_FORMAT),
-                        ]);
-                    } catch (PDOException) {
-                        $existing = Capsule::table('principals')
-                            ->where('type', Principal::TYPE_USER)
-                            ->where('user_id', $userId)
-                            ->value('id');
-                        if ($existing !== null) {
-                            $principalId = (int) $existing;
-                        } else {
-                            throw new PrincipalMaterialisationException(
-                                'PrincipalService not wired — could not materialise a user-principal.',
-                            );
-                        }
-                    }
-                }
-            }
-        }
+        $principalId ??= $this->resolveDefaultPrincipalId($userId);
 
         return Capsule::connection()->transaction(
-            function () use ($allowed, $principalId): Agent {
-                $id = Capsule::table('agents')->insertGetId([
-                    'principal_id'           => $principalId,
-                    'name'                   => $allowed['name'],
-                    'description'            => $allowed['description'] ?? null,
-                    'system_prompt'          => $allowed['system_prompt'] ?? null,
-                    'llm_driver_config_id'   => $allowed['llm_driver_config_id'] ?? null,
-                    'max_steps'              => (int) ($allowed['max_steps'] ?? 10),
-                    'allow_followup'         => (bool) ($allowed['allow_followup'] ?? true) ? 1 : 0,
-                    'retry_after_minutes'    => (int) ($allowed['retry_after_minutes'] ?? 0),
-                    'max_retries'            => (int) ($allowed['max_retries'] ?? 0),
-                    'is_active'              => 1,
-                    'created_at'             => date(self::DATETIME_FORMAT),
-                    'updated_at'             => date(self::DATETIME_FORMAT),
-                ]);
-
-                // Persist the default agent_pictures row in the same
-                // transaction so a brand-new agent always has a
-                // `profile_picture` (deterministic default avatar) on
-                // the very next read. Without this, the dashboard
-                // rendered initials for new agents until the operator
-                // touched the picker.
-                if ($this->pictureService !== null) {
-                    $this->pictureService->createDefaultPicture($id);
-                }
-
-                $created = Agent::find($id);
-                if ($created === null) {
-                    throw AgentCreateLostException::forId($id);
-                }
-                return $created;
-            },
+            fn(): Agent => $this->persistNewAgent($allowed, $principalId),
         );
+    }
+
+    /**
+     * Resolve the principal id for a new agent when the caller did not
+     * supply one explicitly. Prefers the wired `PrincipalService`; falls
+     * back to an inline idempotent insert for legacy test paths that
+     * construct {@see AgentService} directly without DI.
+     */
+    private function resolveDefaultPrincipalId(int $userId): int
+    {
+        if ($this->principalService !== null) {
+            return (int) $this->principalService->ensureUserPrincipal($userId)->id;
+        }
+
+        $existing = Capsule::table('principals')
+            ->where('type', Principal::TYPE_USER)
+            ->where('user_id', $userId)
+            ->value('id');
+        if ($existing !== null) {
+            return (int) $existing;
+        }
+
+        try {
+            return (int) Capsule::table('principals')->insertGetId([
+                'type'       => Principal::TYPE_USER,
+                'user_id'    => $userId,
+                'created_at' => date(self::DATETIME_FORMAT),
+                'updated_at' => date(self::DATETIME_FORMAT),
+            ]);
+        } catch (PDOException) {
+            $existing = Capsule::table('principals')
+                ->where('type', Principal::TYPE_USER)
+                ->where('user_id', $userId)
+                ->value('id');
+            if ($existing !== null) {
+                return (int) $existing;
+            }
+            throw new PrincipalMaterialisationException(
+                'PrincipalService not wired — could not materialise a user-principal.',
+            );
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $allowed
+     */
+    private function persistNewAgent(array $allowed, int $principalId): Agent
+    {
+        $id = Capsule::table('agents')->insertGetId([
+            'principal_id'           => $principalId,
+            'name'                   => $allowed['name'],
+            'description'            => $allowed['description'] ?? null,
+            'system_prompt'          => $allowed['system_prompt'] ?? null,
+            'llm_driver_config_id'   => $allowed['llm_driver_config_id'] ?? null,
+            'max_steps'              => (int) ($allowed['max_steps'] ?? 10),
+            'allow_followup'         => (bool) ($allowed['allow_followup'] ?? true) ? 1 : 0,
+            'retry_after_minutes'    => (int) ($allowed['retry_after_minutes'] ?? 0),
+            'max_retries'            => (int) ($allowed['max_retries'] ?? 0),
+            'is_active'              => 1,
+            'created_at'             => date(self::DATETIME_FORMAT),
+            'updated_at'             => date(self::DATETIME_FORMAT),
+        ]);
+
+        // Persist the default agent_pictures row in the same transaction
+        // so a brand-new agent always has a `profile_picture` on the
+        // very next read. The dashboard relies on this to render an
+        // avatar instead of initials for brand-new agents.
+        if ($this->pictureService !== null) {
+            $this->pictureService->createDefaultPicture($id);
+        }
+
+        $created = Agent::find($id);
+        if ($created === null) {
+            throw AgentCreateLostException::forId($id);
+        }
+        return $created;
     }
 
     public function getAgent(int $agentId, int $userId): ?Agent
@@ -293,23 +291,35 @@ final class AgentService implements AgentServiceInterface
      */
     private function newVisibleForUserQuery(int $userId)
     {
-        if ($this->principalResolver === null) {
-            // Test path — find the user's user-principal directly.
-            $principal = Principal::where('type', 'user')
-                ->where('user_id', $userId)
-                ->first();
-            if ($principal === null) {
-                // Return a query that matches no rows; the calling method
-                // will treat that as "no agents" rather than "all agents".
-                return Agent::whereRaw('1 = 0');
-            }
-            return Agent::where('principal_id', $principal->id);
+        if ($this->principalResolver !== null) {
+            return $this->queryFromVisiblePrincipalIds($userId);
         }
+        return $this->legacyQueryFromUserPrincipal($userId);
+    }
+
+    private function queryFromVisiblePrincipalIds(int $userId)
+    {
         $ids = $this->principalResolver->visiblePrincipalIds($userId);
         if ($ids === []) {
             return Agent::whereRaw('1 = 0');
         }
         return Agent::whereIn('principal_id', $ids);
+    }
+
+    /**
+     * Test path: the resolver is unwired, so resolve the user's
+     * user-principal directly. A missing principal returns an empty
+     * query so callers treat it as "no agents" rather than "all agents".
+     */
+    private function legacyQueryFromUserPrincipal(int $userId)
+    {
+        $principal = Principal::where('type', 'user')
+            ->where('user_id', $userId)
+            ->first();
+        if ($principal === null) {
+            return Agent::whereRaw('1 = 0');
+        }
+        return Agent::where('principal_id', $principal->id);
     }
 
 

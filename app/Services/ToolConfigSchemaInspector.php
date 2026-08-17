@@ -287,40 +287,58 @@ final class ToolConfigSchemaInspector
     private function resolveAgentNames(array $effectiveSettings, array $multiKeys, array $resolveAsByKey, ?int $userId): array
     {
         // Multi-select values are user-controlled, so an unscoped lookup would
-        // happily resolve another tenant's agent name and leak it to the LLM
-        // (and downstream into the tool-call render). Without a user we can
-        // never prove ownership — fall back to "#id" by returning no names.
+        // happily resolve another tenant's agent name and leak it to the LLM.
+        // Without a user we can never prove ownership — fall back to "#id" by
+        // returning no names.
         if ($multiKeys === [] || $userId === null) {
             return [];
         }
 
-        $ids = [];
-        foreach ($multiKeys as $key => $_) {
-            // Only resolve agent-typed multi-selects; other resolveAs branches
-            // (skill, raw) don't have integer IDs.
-            if (($resolveAsByKey[$key] ?? 'agent') !== 'agent') {
-                continue;
-            }
-            $value = $effectiveSettings[$key] ?? null;
-            if (is_array($value)) {
-                foreach ($value as $id) {
-                    $intId = (int) $id;
-                    if ($intId > 0) {
-                        $ids[$intId] = $intId;
-                    }
-                }
-            }
-        }
-
+        $ids = $this->collectAgentIds($effectiveSettings, $multiKeys, $resolveAsByKey);
         if ($ids === []) {
             return [];
         }
 
-        // Migration 0067 cut `agents.user_id`; the agent is owned by a
-        // principal. We resolve via the caller's visible principals so
-        // shared/group-owned agents are resolvable when the caller is a
-        // group member — without this a multi-select value pointing at a
-        // shared agent would resolve to "#id" with no name.
+        return $this->fetchAgentNameMap($userId, $ids);
+    }
+
+    /**
+     * @return array<int, int> id => id (de-duplicated)
+     */
+    private function collectAgentIds(array $effectiveSettings, array $multiKeys, array $resolveAsByKey): array
+    {
+        $ids = [];
+        foreach ($multiKeys as $key => $_) {
+            // Only resolve agent-typed multi-selects; skill / raw resolveAs
+            // branches don't have integer IDs.
+            if (($resolveAsByKey[$key] ?? 'agent') !== 'agent') {
+                continue;
+            }
+            $value = $effectiveSettings[$key] ?? null;
+            if (!is_array($value)) {
+                continue;
+            }
+            foreach ($value as $id) {
+                $intId = (int) $id;
+                if ($intId > 0) {
+                    $ids[$intId] = $intId;
+                }
+            }
+        }
+        return $ids;
+    }
+
+    /**
+     * Migration 0067 cut `agents.user_id`; the agent is owned by a
+     * principal. We resolve via the caller's visible principals so
+     * shared/group-owned agents are still resolvable when the caller
+     * is a group member.
+     *
+     * @param  array<int, int> $ids
+     * @return array<int, string>
+     */
+    private function fetchAgentNameMap(int $userId, array $ids): array
+    {
         if ($this->principalResolver === null) {
             return [];
         }
@@ -328,11 +346,11 @@ final class ToolConfigSchemaInspector
         if ($principalIds === []) {
             return [];
         }
-        $names = Agent::whereIn('principal_id', $principalIds)
+        return Agent::whereIn('principal_id', $principalIds)
             ->whereIn('id', array_values($ids))
-            ->get(['id', 'name']);
-
-        return $names->mapWithKeys(static fn(Agent $a) => [(int) $a->id => (string) $a->name])->all();
+            ->get(['id', 'name'])
+            ->mapWithKeys(static fn(Agent $a) => [(int) $a->id => (string) $a->name])
+            ->all();
     }
 
     /**

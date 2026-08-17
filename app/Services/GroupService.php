@@ -156,15 +156,7 @@ final class GroupService
                     throw new GroupMembershipRuleException('Caller is not a member of the group.');
                 }
 
-                if ($newRole === GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_OWNER) {
-                    throw new GroupMembershipRuleException('Only owners can promote to owner.');
-                }
-
-                if ($callerRole !== GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_ADMIN) {
-                    throw new GroupMembershipRuleException(
-                        'Caller must be owner or admin to change roles.',
-                    );
-                }
+                static::assertCallerCanChangeRole($callerRole, $newRole);
 
                 $existing = Capsule::table('group_memberships')
                     ->where('group_id', $groupId)
@@ -176,18 +168,7 @@ final class GroupService
                     );
                 }
 
-                // Refuse to demote the last owner.
-                if ($existing->role === GroupMembership::ROLE_OWNER && $newRole !== GroupMembership::ROLE_OWNER) {
-                    $ownerCount = Capsule::table('group_memberships')
-                        ->where('group_id', $groupId)
-                        ->where('role', GroupMembership::ROLE_OWNER)
-                        ->count();
-                    if ($ownerCount <= 1) {
-                        throw new GroupMembershipRuleException(
-                            'Cannot demote the last owner of the group.',
-                        );
-                    }
-                }
+                static::assertNotDemotingLastOwner($groupId, $existing->role, $newRole);
 
                 Capsule::table('group_memberships')
                     ->where('group_id', $groupId)
@@ -198,6 +179,34 @@ final class GroupService
                     ]);
             },
         );
+    }
+
+    private static function assertCallerCanChangeRole(string $callerRole, string $newRole): void
+    {
+        if ($newRole === GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_OWNER) {
+            throw new GroupMembershipRuleException('Only owners can promote to owner.');
+        }
+        if ($callerRole !== GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_ADMIN) {
+            throw new GroupMembershipRuleException(
+                'Caller must be owner or admin to change roles.',
+            );
+        }
+    }
+
+    private static function assertNotDemotingLastOwner(int $groupId, string $currentRole, string $newRole): void
+    {
+        if ($currentRole !== GroupMembership::ROLE_OWNER || $newRole === GroupMembership::ROLE_OWNER) {
+            return;
+        }
+        $ownerCount = Capsule::table('group_memberships')
+            ->where('group_id', $groupId)
+            ->where('role', GroupMembership::ROLE_OWNER)
+            ->count();
+        if ($ownerCount <= 1) {
+            throw new GroupMembershipRuleException(
+                'Cannot demote the last owner of the group.',
+            );
+        }
     }
 
     /**

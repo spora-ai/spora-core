@@ -65,14 +65,7 @@ final class AgentTargetResolver
             return $resolvedId;
         }
 
-        $agent = Agent::query()->where('id', $resolvedId)->first();
-        if ($agent === null) {
-            return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_NOT_OWNED_MSG);
-        }
-        if (!$this->principalService->callerControlsPrincipal($userId, (int) $agent->principal_id)) {
-            return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_NOT_OWNED_MSG);
-        }
-        return $agent;
+        return $this->loadAgentForCaller($userId, $resolvedId);
     }
 
     public function resolvePositiveAgentId(array $arguments, int $callingAgentId): int|ToolResult
@@ -95,6 +88,26 @@ final class AgentTargetResolver
         }
         $n = (int) $raw;
         return $n > 0 ? $n : ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_ID_POSITIVE_INTEGER_MSG);
+    }
+
+    /**
+     * Migration 0067 cut `agents.user_id`; ownership is now expressed
+     * via `principal_id`. We accept the agent iff the caller controls
+     * the agent's principal (their user-principal, or a group-principal
+     * they admin or own).
+     *
+     * @return Agent|ToolResult
+     */
+    private function loadAgentForCaller(int $userId, int $resolvedAgentId): Agent|ToolResult
+    {
+        $agent = Agent::query()->where('id', $resolvedAgentId)->first();
+        if ($agent === null) {
+            return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_NOT_OWNED_MSG);
+        }
+        if (!$this->principalService->callerControlsPrincipal($userId, (int) $agent->principal_id)) {
+            return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_NOT_OWNED_MSG);
+        }
+        return $agent;
     }
 
     /**

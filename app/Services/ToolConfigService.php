@@ -393,6 +393,9 @@ class ToolConfigService implements ToolConfigServiceInterface
 
     /**
      * Resolve a tool identifier (from #[Tool(name:)]) to its fully-qualified PHP class name.
+     *
+     * @deprecated use the injected {@see ToolConfigService::nameResolver}
+     *             directly via its own injection point.
      */
     public function resolveToolClass(string $toolName): ?string
     {
@@ -403,6 +406,8 @@ class ToolConfigService implements ToolConfigServiceInterface
      * Return all registered tool class names.
      *
      * @return list<string>
+     *
+     * @deprecated see {@see ToolConfigService::resolveToolClass()}
      */
     public function getRegisteredToolClasses(): array
     {
