@@ -798,7 +798,7 @@ describe('AgentTool::execute — create_agent', function (): void {
         $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7, name: 'Caller'));
         $service->shouldReceive('createAgent')
             ->once()
-            ->withArgs(function (int $userIdArg, array $data): bool {
+            ->withArgs(function (int $userIdArg, array $data, ?int $principalIdArg = null): bool {
                 return $userIdArg === 99
                     && $data['retry_after_minutes'] === 30
                     && $data['max_retries'] === 2;
@@ -837,11 +837,12 @@ describe('AgentTool::execute — create_agent', function (): void {
         $agent->max_steps = 12;
         $service->shouldReceive('createAgent')
             ->once()
-            ->with(99, Mockery::on(static function (array $data): bool {
-                return ($data['name'] ?? null) === 'New Agent'
+            ->withArgs(function (int $userIdArg, array $data, ?int $principalIdArg = null): bool {
+                return $userIdArg === 99
+                    && ($data['name'] ?? null) === 'New Agent'
                     && ($data['max_steps'] ?? null) === 12
                     && ($data['allow_followup'] ?? null) === true;
-            }))
+            })
             ->andReturn($agent);
         // AgentManifest reads the per-agent status + ops; empty lists
         // are fine when the test is asserting shape, not tool contents.

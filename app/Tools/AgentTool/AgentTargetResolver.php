@@ -132,11 +132,14 @@ final class AgentTargetResolver
 
     private function ensureAgentOwnedByUser(int $userId, int $agentId): int|ToolResult
     {
-        return Agent::query()
-            ->where('user_id', $userId)
-            ->where('id', $agentId)
-            ->exists()
-                ? $agentId
-                : ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
+        // Migration 0067: agent ownership is via principal, not user_id.
+        $agent = Agent::query()->where('id', $agentId)->first();
+        if ($agent === null) {
+            return ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
+        }
+        if (!$this->principalService->callerControlsPrincipal($userId, (int) $agent->principal_id)) {
+            return ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
+        }
+        return $agentId;
     }
 }
