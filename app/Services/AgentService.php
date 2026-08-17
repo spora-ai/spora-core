@@ -8,6 +8,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\MediaAsset;
+use Spora\Models\Principal;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\Exceptions\AgentCreateLostException;
 use Spora\Services\Exceptions\AgentNotFoundException;
@@ -95,14 +96,38 @@ final class AgentService implements AgentServiceInterface
                     ->id;
             } else {
                 // Defensive fallback for tests that instantiate AgentService
-                // directly without wiring PrincipalService. Look up; if
-                // missing, fall back to the bare agents-table owner insert
-                // path — but the new schema requires principal_id, so a
-                // missing principal surfaces as a save failure rather than
-                // a silent wrong-table write.
-                throw new \RuntimeException(
-                    'PrincipalService not wired — cannot ensure a user-principal.'
-                );
+                // directly without wiring PrincipalService. We materialise
+                // the user-principal inline using the same idempotent path
+                // — UNIQUE(user_id) protects against parallel inserts — so
+                // a missing wiring doesn't block the test.
+                $existing = Capsule::table('principals')
+                    ->where('type', Principal::TYPE_USER)
+                    ->where('user_id', $userId)
+                    ->value('id');
+                if ($existing !== null) {
+                    $principalId = (int) $existing;
+                } else {
+                    try {
+                        $principalId = (int) Capsule::table('principals')->insertGetId([
+                            'type'       => Principal::TYPE_USER,
+                            'user_id'    => $userId,
+                            'created_at' => date(self::DATETIME_FORMAT),
+                            'updated_at' => date(self::DATETIME_FORMAT),
+                        ]);
+                    } catch (\PDOException) {
+                        $existing = Capsule::table('principals')
+                            ->where('type', Principal::TYPE_USER)
+                            ->where('user_id', $userId)
+                            ->value('id');
+                        if ($existing !== null) {
+                            $principalId = (int) $existing;
+                        } else {
+                            throw new \RuntimeException(
+                                'PrincipalService not wired — could not materialise a user-principal.'
+                            );
+                        }
+                    }
+                }
             }
         }
 

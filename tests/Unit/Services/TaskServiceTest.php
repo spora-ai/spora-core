@@ -105,8 +105,8 @@ describe('TaskService — getTasksForUser', function (): void {
             'max_steps' => 5, 'is_active' => true,
         ]);
 
-        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent1->id, 'status' => 'COMPLETED', 'user_prompt' => 'A1', 'max_steps' => 5]);
-        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent2->id, 'status' => 'RUNNING', 'user_prompt' => 'A2', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent1->id, 'status' => 'COMPLETED', 'user_prompt' => 'A1', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent2->id, 'status' => 'RUNNING', 'user_prompt' => 'A2', 'max_steps' => 5]);
 
         $service = makeTaskService();
 
@@ -181,8 +181,8 @@ describe('TaskService — getTasksForUser', function (): void {
             'is_active'    => true,
         ]);
 
-        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task 1', 'max_steps' => 5]);
-        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Task 2', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task 1', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Task 2', 'max_steps' => 5]);
 
         $service = makeTaskService();
         $result = $service->getTasksForUser($userId);
@@ -204,7 +204,7 @@ describe('TaskService — getTasksForUser', function (): void {
             'is_active'    => true,
         ]);
 
-        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task', 'max_steps' => 5]);
 
         $service = makeTaskService();
         $result = $service->getTasksForUser($userId, null, '2099-01-01T00:00:00Z');
@@ -226,13 +226,13 @@ describe('TaskService — getTasksForUser', function (): void {
             'is_active'    => true,
         ]);
 
-        $task1 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'First', 'max_steps' => 5]);
+        $task1 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'First', 'max_steps' => 5]);
         Task::where('id', $task1->id)->update(['updated_at' => '2025-01-01 00:00:00']);
 
-        $task2 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Second', 'max_steps' => 5]);
+        $task2 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Second', 'max_steps' => 5]);
         Task::where('id', $task2->id)->update(['updated_at' => '2025-06-01 00:00:00']);
 
-        $task3 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'PENDING', 'user_prompt' => 'Third', 'max_steps' => 5]);
+        $task3 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING', 'user_prompt' => 'Third', 'max_steps' => 5]);
         Task::where('id', $task3->id)->update(['updated_at' => '2025-03-01 00:00:00']);
 
         $service = makeTaskService();
@@ -261,7 +261,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         // Create 5 tasks
         for ($i = 1; $i <= 5; $i++) {
-            Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
+            Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
         }
 
         $service = makeTaskService();
@@ -293,7 +293,7 @@ describe('TaskService — getTasksForUser', function (): void {
         ]);
 
         for ($i = 1; $i <= 5; $i++) {
-            Task::create(['principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
+            Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
         }
 
         $service = makeTaskService();
@@ -365,7 +365,7 @@ describe('TaskService — startTask', function (): void {
             ->once()
             ->with($agent->id, 'p', 12, null, null, []) // 12 = agent.max_steps
             ->andReturnUsing(fn(int $a, string $p, int $m, ?int $parent, ?int $runId, array $mediaIds) => Task::create([
-                'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $a, 'status' => 'RUNNING',
+                'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $a, 'status' => 'RUNNING',
                 'user_prompt' => $p, 'max_steps' => $m, 'step_count' => 0,
             ]));
 
@@ -667,7 +667,7 @@ describe('TaskService — approveTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'AppBadAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'RUNNING',
+            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -684,7 +684,7 @@ describe('TaskService — approveTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'AppOkAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
+            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -728,7 +728,7 @@ describe('TaskService — rejectTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'RejBadAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -745,7 +745,7 @@ describe('TaskService — rejectTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'RejOkAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
+            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -787,7 +787,7 @@ describe('TaskService — retryTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'RetBadAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED',
+            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -861,7 +861,7 @@ describe('TaskService — continueTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ContPaAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
+            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -878,7 +878,7 @@ describe('TaskService — continueTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ContStepsAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED',
+            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -895,7 +895,7 @@ describe('TaskService — continueTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ContOkAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED',
+            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -946,7 +946,7 @@ describe('TaskService — deleteTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'DelAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'COMPLETED',
+            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
         Spora\Models\TaskHistory::create([
@@ -968,7 +968,7 @@ describe('TaskService — deleteTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'DelParAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $parent = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
             'user_prompt' => 'orig', 'max_steps' => 5,
         ]);
         $child = Task::create([
@@ -996,7 +996,7 @@ describe('TaskService — deleteTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'DelNPAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $parent = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
             'user_prompt' => 'orig', 'max_steps' => 5,
         ]);
         $childOfOther = Task::create([
@@ -1036,7 +1036,7 @@ describe('TaskService — cancelRetryChain', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'CancelNRAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
             'user_prompt' => 'p', 'max_steps' => 5, 'retry_of_task_id' => null,
         ]);
 

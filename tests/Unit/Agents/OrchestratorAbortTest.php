@@ -59,7 +59,7 @@ function seedTaskWithStatus(string $status, array $data = []): int
 
     $task = Task::create(array_merge([
         'agent_id'    => $agent->id,
-        'principal_id' => createUserPrincipalPublic($userId),
+        'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId,
         'status'      => $status,
         'user_prompt' => 'orig',
         'step_count'  => 0,

@@ -11,6 +11,7 @@ use Spora\Services\AgentManifestRenderer;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Tools\AgentTool\AgentTargetResolver;
 use Spora\Tools\AgentTool\AgentToolCollaborators;
 use Spora\Tools\AgentTool\CatalogPresenter;
@@ -248,15 +249,20 @@ final class AgentTool extends AbstractTool
 
     private readonly AgentTargetResolver $targetResolver;
 
+    private readonly PrincipalService $principalService;
+
     public function __construct(
         private readonly AgentServiceInterface $agentService,
         \Spora\Services\AgentToolSettingsServiceInterface $toolSettings,
         private readonly AgentManifest $manifest,
         ?AgentToolCollaborators $collaborators = null,
-        private readonly ?PrincipalResolver $principalResolver = null,
+        ?PrincipalResolver $principalResolver = null,
         private readonly ?AuthService $authService = null,
+        ?PrincipalService $principalService = null,
     ) {
+        $principalResolver ??= new PrincipalResolver();
         $collaborators      ??= new AgentToolCollaborators();
+        $this->principalService   = $principalService ?? new PrincipalService($principalResolver);
         $this->notesHandler      = $collaborators->notesHandler($agentService);
         $this->catalogPresenter  = $collaborators->catalogPresenter(
             $agentService,
@@ -554,13 +560,13 @@ final class AgentTool extends AbstractTool
 
     private function renderFreshAgentAfterConfigure(int $userId, int $agentId): ToolResult
     {
-        // User-scoped re-read so the manifest sees the same row the
-        // resolver already validated.
-        $fresh = Agent::query()
-            ->where('user_id', $userId)
-            ->where('id', $agentId)
-            ->first();
+        // Migration 0067: an agent is owned by a principal, not a user.
+        // Re-read by id and verify the caller controls its principal.
+        $fresh = Agent::query()->where('id', $agentId)->first();
         if ($fresh === null) {
+            return ToolResult::fail(self::AGENT_NOT_FOUND);
+        }
+        if (!$this->principalService->callerControlsPrincipal($userId, (int) $fresh->principal_id)) {
             return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
         return $this->renderManifestResult($fresh);

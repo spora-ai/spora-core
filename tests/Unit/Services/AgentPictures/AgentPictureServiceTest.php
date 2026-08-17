@@ -216,7 +216,7 @@ function seedMediaAsset(?int $userId): MediaAsset
         'id' => $id,
         'asset_url' => "/api/v1/assets/{$id}.png",
         'storage_mode' => 'local',
-        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id' => $userId,
         'upload_source' => 'avatar',
         'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),
