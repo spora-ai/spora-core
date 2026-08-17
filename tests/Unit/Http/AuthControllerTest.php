@@ -733,7 +733,7 @@ describe('AuthController::verify', function (): void {
 
         // Confirmation row pointing at a new email (different from users.email)
         DB::table('users_confirmations')->insert([
-            'principal_id' => $this->createUserPrincipal($userId),
+            'user_id'  => (int) $userId,
             'email'    => 'verify-change-new@example.com',
             'selector' => $selector,
             'token'    => $hashedToken,
@@ -774,7 +774,7 @@ describe('AuthController::verify', function (): void {
 
         // Confirmation row targeting A (not B).
         DB::table('users_confirmations')->insert([
-            'principal_id' => createUserPrincipalPublic($targetUserId),
+            'user_id'  => (int) $targetUserId,
             'email'    => 'verify-cross-target-new@example.com',
             'selector' => $selector,
             'token'    => $hashedToken,
@@ -860,7 +860,7 @@ describe('AuthController::verify', function (): void {
 
         // The subject's pending confirmation points at the target's email
         DB::table('users_confirmations')->insert([
-            'principal_id' => createUserPrincipalPublic($subjectId),
+            'user_id'  => (int) $subjectId,
             'email'    => 'verify-target@example.com',
             'selector' => $selector,
             'token'    => $hashedToken,
