@@ -8,6 +8,8 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Services\Exceptions\AgentNotFoundException;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 
 /**
  * Service for prompt template management.
@@ -15,6 +17,12 @@ use Spora\Services\Exceptions\AgentNotFoundException;
  */
 final class PromptTemplateService implements PromptTemplateServiceInterface
 {
+    private readonly PrincipalService $principalService;
+
+    public function __construct(?PrincipalService $principalService = null)
+    {
+        $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+    }
     private const DATE_FORMAT = 'Y-m-d H:i:s';
 
     public function getTemplatesForAgent(int $agentId, int $userId): ?array
@@ -121,7 +129,16 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
 
     private function findAgent(int $id, int $userId): ?Agent
     {
-        return Agent::where('id', $id)->where('user_id', $userId)->first();
+        // Migration 0067: agent ownership is via principal, not user_id.
+        // Accept the agent if the caller controls its principal.
+        $agent = Agent::find($id);
+        if ($agent === null) {
+            return null;
+        }
+        if (!$this->principalService->callerControlsPrincipal($userId, (int) $agent->principal_id)) {
+            return null;
+        }
+        return $agent;
     }
 
     private function resolveIsActive(mixed $value): int

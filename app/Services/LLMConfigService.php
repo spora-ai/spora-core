@@ -175,11 +175,17 @@ final class LLMConfigService implements LLMConfigServiceInterface
         if (!$isAdmin) {
             $principalIds = $this->principalResolver->visiblePrincipalIds($userId);
             $query->where(static function ($q) use ($principalIds): void {
+                // A global config is always visible. A principal-scoped
+                // config is only visible when its principal is one the
+                // caller can act as. WHERE 1 = 0 in the whereIn() branch
+                // short-circuits to "globals only" when the caller has
+                // no principal memberships (e.g. a fresh account).
                 if ($principalIds === []) {
                     $q->whereRaw('1 = 0');
-                    return;
+                } else {
+                    $q->whereIn('principal_id', $principalIds);
                 }
-                $q->whereIn('principal_id', $principalIds)->orWhere('is_global', true);
+                $q->orWhere('is_global', true);
             });
         }
         return $query->first();
