@@ -18,6 +18,8 @@ use Spora\Models\User;
  */
 final class BuildMessagesSummaryTest extends TestCase
 {
+    use \Tests\Concerns\CreatesPrincipal;
+
     public static function setUpBeforeClass(): void
     {
         require 'vendor/autoload.php';
@@ -48,7 +50,7 @@ final class BuildMessagesSummaryTest extends TestCase
     private static function createAgent(int $userId): int
     {
         $agent = Agent::create([
-            'principal_id' => $this->createUserPrincipal($userId),
+            'principal_id' => createUserPrincipalPublic($userId),
             'name' => 'Test Agent',
             'llm_provider' => 'openai_compatible',
             'llm_model' => 'gpt-4o',

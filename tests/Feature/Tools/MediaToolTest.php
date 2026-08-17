@@ -66,7 +66,7 @@ function seedMediaAsset(
         'media_type'                    => 'image',
         'byte_size'                     => 1024,
         'agent_id'                      => $agentId,
-        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id' => (int) $userId,
         'plugin_slug'                   => $pluginSlug,
         'asset_token'                   => bin2hex(random_bytes(16)),
         'public_access_token'           => $publicToken,
