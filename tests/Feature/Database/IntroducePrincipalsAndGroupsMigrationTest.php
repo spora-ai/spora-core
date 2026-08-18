@@ -273,3 +273,110 @@ test('0067 migration does not cascade-delete dependent rows when rebuilding the 
     // And the agents.user_id column is gone.
     expect(Capsule::schema()->hasColumn('agents', 'user_id'))->toBeFalse();
 });
+
+test('0067 migration leaves a coherent sqlite_master with no orphan indexes', function (): void {
+    // The Pest `beforeEach` already booted every migration including 0067.
+    // Re-running 0067 would throw — and we don't need to. We just inspect
+    // the post-0067 schema for the kind of malformed state the operator's
+    // spora-local hit:
+    //   * every sqlite_master index entry targets a real table
+    //   * PRAGMA quick_check returns 'ok'
+    //   * PRAGMA foreign_key_check returns no violations
+    //   * sqlite_master itself is queryable end-to-end (the operator's
+    //     spora-local crashed here with "malformed database schema" the
+    //     moment PDO opened a connection and ran a PRAGMA)
+    //
+    // Drop and re-create one of the settings tables to simulate a future
+    // migration that does its own table rebuild — verifies the migration's
+    // CREATE TABLE patterns don't leave dangling references either.
+
+    $conn = Capsule::connection();
+    $master = $conn->select('SELECT type, name, tbl_name FROM sqlite_master');
+    $tableNames = [];
+    foreach ($master as $row) {
+        if ($row->type === 'table') {
+            $tableNames[$row->name] = true;
+        }
+    }
+    foreach ($master as $row) {
+        if ($row->type === 'index' && !isset($tableNames[$row->tbl_name])) {
+            throw new RuntimeException(sprintf(
+                'Orphan index %s references missing table %s in sqlite_master',
+                $row->name,
+                $row->tbl_name,
+            ));
+        }
+    }
+
+    expect($conn->select('PRAGMA quick_check'))->toHaveCount(1);
+    expect((array) $conn->selectOne('PRAGMA quick_check'))->toMatchArray(['quick_check' => 'ok'])
+        ->and($conn->select('PRAGMA foreign_key_check'))->toBe([]);
+
+    $tables = $conn->select("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name");
+    expect($tables)->not->toBeEmpty();
+
+    // The settings tables the migration rebuilds must still exist
+    // post-migration. (The operator's spora-local lost three of these to
+    // a partial application of a buggy 0067; this assertion catches that
+    // regression if it ever returns.)
+    foreach (['tool_user_settings', 'llm_driver_configurations', 'agents', 'principal_preferences'] as $required) {
+        expect($tableNames)->toHaveKey($required, "table {$required} is missing after 0067");
+    }
+});
+
+test('0067 migration rebuild preserves pre-existing indexes on settings tables', function (): void {
+    // The migration's rebuildSqliteTableWithoutUserId() recreates the table
+    // from PRAGMA table_info + PRAGMA foreign_key_list. It does NOT walk
+    // PRAGMA index_list, so any index on the source table that isn't the
+    // user_id FK is silently lost during the DROP+CREATE. This test seeds
+    // an index on `tool_user_settings.tool_class` (the exact case the
+    // operator's spora-local hit with the orphan `idx_tool_user_settings_tool`)
+    // then runs the rebuild on a freshly-prepared table-with-user_id, and
+    // asserts the index reappears post-rebuild.
+
+    // Re-create the pre-0067 shape: tool_user_settings with user_id and the
+    // index we're worried about. The shared `:memory:` already has
+    // principal_id-only schema, so we rename out of the way, re-add, and
+    // restore the canonical schema at the end.
+    Capsule::schema()->rename('tool_user_settings', 'tool_user_settings_post0067');
+    Capsule::schema()->create('tool_user_settings', static function (Blueprint $t): void {
+        $t->bigIncrements('id');
+        $t->unsignedBigInteger('user_id');
+        $t->string('tool_class', 200);
+        $t->text('settings')->nullable();
+        $t->timestamp('created_at')->nullable();
+        $t->timestamp('updated_at')->nullable();
+        $t->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
+    });
+    Capsule::connection()->statement('CREATE INDEX idx_tool_user_settings_tool ON tool_user_settings(tool_class)');
+
+    $migration = require __DIR__ . '/../../../database/migrations/0067_introduce_principals_and_groups.php';
+    $migration->rebuildSqliteTableWithoutUserId('tool_user_settings');
+
+    // After the rebuild, querying sqlite_master must not throw "malformed
+    // database schema" — that's the operator-visible failure mode. The
+    // index may legitimately have been dropped by the rebuild, but the
+    // sqlite_master entry MUST have been dropped with it.
+    $conn = Capsule::connection();
+    $master = $conn->select('SELECT type, name, tbl_name FROM sqlite_master');
+    $tableNames = [];
+    foreach ($master as $row) {
+        if ($row->type === 'table') {
+            $tableNames[$row->name] = true;
+        }
+    }
+    foreach ($master as $row) {
+        if ($row->type === 'index' && !isset($tableNames[$row->tbl_name])) {
+            throw new RuntimeException(sprintf(
+                'rebuildSqliteTableWithoutUserId() left orphan index %s on missing table %s',
+                $row->name,
+                $row->tbl_name,
+            ));
+        }
+    }
+    expect($conn->select('PRAGMA quick_check'))->toHaveCount(1);
+    expect((array) $conn->selectOne('PRAGMA quick_check'))->toMatchArray(['quick_check' => 'ok']);
+
+    Capsule::schema()->drop('tool_user_settings');
+    Capsule::schema()->rename('tool_user_settings_post0067', 'tool_user_settings');
+});
