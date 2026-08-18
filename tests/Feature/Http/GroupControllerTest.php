@@ -175,4 +175,163 @@ describe('GroupController success paths', function (): void {
         $body = json_decode($response->getContent(), true);
         expect($body['data']['deleted'])->toBe(true);
     });
+
+    it('index returns 200 with caller\'s groups for a non-admin member', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $userId = bootAuth($auth, 'gc5a@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($userId, 'gc5a@example.com');
+        $groupService->createGroup($userId, 'Mine');
+
+        $response = $controller->index();
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['groups'])->not->toBeEmpty();
+        expect(array_column($body['data']['groups'], 'name'))->toContain('Mine');
+    });
+
+    it('index returns 200 with all groups for an admin caller', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $adminId = bootAuth($auth, 'gc5b@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+        simulateLoggedInSession($adminId, 'gc5b@example.com');
+        $ownerId = bootAuth($auth, 'gc5b-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $groupService->createGroup($ownerId, 'Elsewhere');
+
+        $response = $controller->index();
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect(array_column($body['data']['groups'], 'name'))->toContain('Elsewhere');
+    });
+
+    it('show returns 404 for a group the caller cannot see', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc5c-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'Private');
+        $callerId = bootAuth($auth, 'gc5c@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($callerId, 'gc5c@example.com');
+
+        $response = $controller->show($group->id);
+        expect($response->getStatusCode())->toBe(404);
+    });
+
+    it('update accepts a description change and returns 200', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $userId = bootAuth($auth, 'gc5d@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($userId, 'gc5d@example.com');
+        $group = $groupService->createGroup($userId, 'D2');
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'description' => 'fresh desc',
+        ]));
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['group']['description'])->toBe('fresh desc');
+    });
+
+    it('update treats empty description as null', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $userId = bootAuth($auth, 'gc5e@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($userId, 'gc5e@example.com');
+        $group = $groupService->createGroup($userId, 'D3');
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'description' => '   ',
+        ]));
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['group']['description'])->toBeNull();
+    });
+
+    it('update accepts explicit null description to clear it', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $userId = bootAuth($auth, 'gc5f@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($userId, 'gc5f@example.com');
+        $group = $groupService->createGroup($userId, 'D4', 'initial');
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'description' => null,
+        ]));
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['group']['description'])->toBeNull();
+    });
+
+    it('update with empty body returns the unchanged group at 200', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $userId = bootAuth($auth, 'gc5g@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($userId, 'gc5g@example.com');
+        $group = $groupService->createGroup($userId, 'D5');
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, []));
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['group']['name'])->toBe('D5');
+    });
+
+    it('store accepts a null description and stores it as null', function (): void {
+        [$controller, $auth] = makeGroupController();
+        $userId = bootAuth($auth, 'gc5h@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($userId, 'gc5h@example.com');
+
+        $response = $controller->store(jsonRequest('POST', '/api/v1/groups', [
+            'name'        => 'ND',
+            'description' => null,
+        ]));
+        expect($response->getStatusCode())->toBe(201);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['group']['description'])->toBeNull();
+    });
+
+    it('store rejects missing name with 422', function (): void {
+        [$controller, $auth] = makeGroupController();
+        $userId = bootAuth($auth, 'gc5i@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($userId, 'gc5i@example.com');
+
+        $response = $controller->store(jsonRequest('POST', '/api/v1/groups', [
+            'description' => 'no name',
+        ]));
+        expect($response->getStatusCode())->toBe(422);
+    });
+
+    it('destroy returns 403 for a non-owner caller', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc5j@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'Foreign');
+        $otherId = bootAuth($auth, 'gc5j-other@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($otherId, 'gc5j-other@example.com');
+
+        $response = $controller->destroy($group->id);
+        expect($response->getStatusCode())->toBe(403);
+    });
+
+    it('destroy returns 409 with reassign_endpoint when the group still owns agents', function (): void {
+        [$controller, $auth, $groupService, $ps] = makeGroupController();
+        $userId = bootAuth($auth, 'gc5k@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($userId, 'gc5k@example.com');
+        $group = $groupService->createGroup($userId, 'Busy');
+        $ps->ensureGroupPrincipal((int) $group->id);
+        Illuminate\Database\Capsule\Manager::table('agents')->insert([
+            'principal_id'           => (int) $ps->principalForGroup((int) $group->id)->id,
+            'name'                   => 'Still Attached',
+            'description'            => null,
+            'llm_driver_config_id'   => null,
+            'max_steps'              => 10,
+            'is_active'              => 1,
+            'created_at'             => date('Y-m-d H:i:s'),
+            'updated_at'             => date('Y-m-d H:i:s'),
+        ]);
+
+        $response = $controller->destroy($group->id);
+        expect($response->getStatusCode())->toBe(409);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('GROUP_HAS_AGENTS');
+        expect($body['error']['agent_ids'])->not->toBeEmpty();
+        expect($body['error']['reassign_endpoint'])->toBe('/api/v1/agents/{id}/transfer');
+    });
+
+    it('destroy returns 401 when no user is logged in', function (): void {
+        [$controller] = makeGroupController();
+        $response = $controller->destroy(1);
+        expect($response->getStatusCode())->toBe(401);
+    });
 });
