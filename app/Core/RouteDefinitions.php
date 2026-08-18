@@ -9,6 +9,7 @@ use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentPictureController;
 use Spora\Http\AgentTemplateController;
 use Spora\Http\AgentToolController;
+use Spora\Http\AgentTransferController;
 use Spora\Http\AppsController;
 use Spora\Http\AssetController;
 use Spora\Http\AuthController;
@@ -103,7 +104,7 @@ final class RouteDefinitions
         $r->addRoute('GET', self::ROUTE_AGENTS_ID, [AgentController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PATCH', self::ROUTE_AGENTS_ID, [AgentController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_AGENTS_ID, [AgentController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('POST', self::ROUTE_AGENTS_TRANSFER, [AgentController::class, 'transferPrincipal'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_AGENTS_TRANSFER, [AgentTransferController::class, 'transferPrincipal'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         // Groups + members + principal-discovery. Group writes are admin-only;
         // member writes accept admin OR group-owner (the controller enforces

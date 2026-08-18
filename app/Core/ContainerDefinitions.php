@@ -56,6 +56,7 @@ use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentPictureController;
 use Spora\Http\AgentTemplateController;
 use Spora\Http\AgentToolController;
+use Spora\Http\AgentTransferController;
 use Spora\Http\AppsController;
 use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
@@ -90,6 +91,7 @@ use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentManifest;
 use Spora\Services\AgentPictures\AgentPictureService;
+use Spora\Services\AgentPrincipalService;
 use Spora\Services\AgentService;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsService;
@@ -810,12 +812,21 @@ final class ContainerDefinitions
                 return new AgentService(
                     $c->get(ToolIconResolver::class),
                     $c->get(AgentPictureService::class),
-                    $c->get(PrincipalService::class),
                     $c->get(PrincipalResolver::class),
+                    $c->get(AgentPrincipalService::class),
                 );
             },
 
             AgentPictureService::class => static fn(): AgentPictureService => new AgentPictureService(),
+
+            // Principal materialisation + agent-transfer path. Split out of
+            // AgentService so the umbrella stays under the SonarCloud
+            // S1448 20-method-per-class ceiling.
+            AgentPrincipalService::class => static function (ContainerInterface $c): AgentPrincipalService {
+                return new AgentPrincipalService(
+                    $c->get(PrincipalService::class),
+                );
+            },
 
             // Tool enablement, settings overrides, and operation overrides
             // moved here from AgentService so the umbrella stays under the
@@ -954,6 +965,20 @@ final class ContainerDefinitions
                     $c->get(AgentPictureService::class),
                     $c->get(PrincipalService::class),
                     $c->get(PrincipalResolver::class),
+                );
+            },
+
+            // Transfer split out so AgentController stays under the
+            // SonarCloud S1448 20-method-per-class ceiling. Talks to
+            // AgentPrincipalService (not AgentService) so the principal
+            // axis stays on its own.
+            AgentTransferController::class => static function (ContainerInterface $c): AgentTransferController {
+                return new AgentTransferController(
+                    $c->get(AuthService::class),
+                    $c->get(AgentPrincipalService::class),
+                    $c->get(DriverFactory::class),
+                    $c->get(ToolIconResolver::class),
+                    $c->get(AgentPictureService::class),
                 );
             },
 

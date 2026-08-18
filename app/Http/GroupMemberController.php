@@ -45,40 +45,19 @@ final class GroupMemberController
      */
     public function index(int $groupId): JsonResponse
     {
-        $userId = $this->requireCallerOrFail();
-        if ($userId instanceof JsonResponse) {
-            return $userId;
-        }
-
-        $accessError = $this->assertCallerCanReadGroup($groupId, (int) $userId);
-        if ($accessError !== null) {
-            return $accessError;
-        }
-
-        return new JsonResponse(['data' => ['members' => $this->memberRows($groupId)]]);
-    }
-
-    private function requireCallerOrFail(): int|JsonResponse
-    {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
             return $this->unauthenticated();
         }
-        return (int) $userId;
-    }
 
-    private function assertCallerCanReadGroup(int $groupId, int $userId): ?JsonResponse
-    {
-        if ($this->callerCanReadGroup($groupId, $userId)) {
-            return null;
+        if (!$this->callerCanReadGroup($groupId, (int) $userId)) {
+            // 404 whether the group exists or not — the response is
+            // intentionally non-distinguishing so a stranger can't
+            // probe group ids.
+            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
-        $groupOrError = $this->loadGroupOrNotFound($groupId);
-        if ($groupOrError instanceof JsonResponse) {
-            return $groupOrError;
-        }
-
-        return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
+        return new JsonResponse(['data' => ['members' => $this->memberRows($groupId)]]);
     }
 
     /**
@@ -90,8 +69,16 @@ final class GroupMemberController
         if ($auth instanceof JsonResponse) {
             return $auth;
         }
-        [$callerUserId] = $auth;
+        return $this->addMemberAfterAuth($groupId, $request, $auth[0]);
+    }
 
+    /**
+     * Add a member after the caller has been authorised by
+     * {@see requireCallerAndWriteAccess()}. The split keeps the public
+     * `store()` method under the S1142 3-return ceiling.
+     */
+    private function addMemberAfterAuth(int $groupId, Request $request, int $callerUserId): JsonResponse
+    {
         $parsed = $this->parseAddMemberRequest($request);
         if ($parsed instanceof JsonResponse) {
             return $parsed;
@@ -141,8 +128,16 @@ final class GroupMemberController
         if ($auth instanceof JsonResponse) {
             return $auth;
         }
-        [$callerUserId] = $auth;
+        return $this->changeMemberRoleAfterAuth($groupId, $userId, $request, $auth[0]);
+    }
 
+    /**
+     * Change a member's role after the caller has been authorised by
+     * {@see requireCallerAndWriteAccess()}. The split keeps the public
+     * `update()` method under the S1142 3-return ceiling.
+     */
+    private function changeMemberRoleAfterAuth(int $groupId, int $userId, Request $request, int $callerUserId): JsonResponse
+    {
         $newRole = $this->parseNewRole($request);
         if ($newRole instanceof JsonResponse) {
             return $newRole;

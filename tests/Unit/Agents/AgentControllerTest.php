@@ -57,7 +57,7 @@ function makeAgentControllers(): array
     $toolConfig = new ToolConfigService($security, $logger, [TestTool::class]);
     $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class]);
     $principalService = new PrincipalService(new PrincipalResolver());
-    $agentService = new AgentService(null, null, $principalService, new PrincipalResolver());
+    $agentService = new AgentService(null, null, new PrincipalResolver(), new Spora\Services\AgentPrincipalService($principalService));
     // Tool enablement / overrides / operations moved to AgentToolSettingsService
     // when AgentService was split to satisfy SonarCloud S1448.
     $toolSettings = new AgentToolSettingsService($toolConfig, $llmConfig);

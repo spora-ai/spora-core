@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use PDOException;
 use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\MediaAsset;
@@ -13,8 +12,6 @@ use Spora\Models\Principal;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\Exceptions\AgentCreateLostException;
 use Spora\Services\Exceptions\AgentNotFoundException;
-use Spora\Services\Exceptions\DependencyNotWiredException;
-use Spora\Services\Exceptions\PrincipalMaterialisationException;
 
 /**
  * Service for agent lifecycle + flag management.
@@ -22,6 +19,11 @@ use Spora\Services\Exceptions\PrincipalMaterialisationException;
  * Tool enablement, per-agent settings overrides, and per-operation overrides
  * moved to {@see AgentToolSettingsService} so this umbrella service stays
  * under SonarCloud's 20-method-per-class ceiling (S1448).
+ *
+ * Principal materialisation and ownership transfer moved to
+ * {@see AgentPrincipalService} for the same reason — the principal axis
+ * is a self-contained responsibility (talks to `principals` and
+ * `PrincipalService::transferAgent()` only) and earns its own class.
  *
  * Principals-and-groups (migration 0067) re-keyed the ownership column from
  * `agents.user_id` to `agents.principal_id`. Every user-scoped read or
@@ -60,8 +62,8 @@ final class AgentService implements AgentServiceInterface
     public function __construct(
         private readonly ?ToolIconResolver $toolIconResolver = null,
         private readonly ?AgentPictureService $pictureService = null,
-        private readonly ?PrincipalService $principalService = null,
         private readonly ?PrincipalResolver $principalResolver = null,
+        private readonly ?AgentPrincipalServiceInterface $principalService = null,
     ) {}
 
 
@@ -84,7 +86,10 @@ final class AgentService implements AgentServiceInterface
     public function createAgent(int $userId, array $data, ?int $principalId = null): Agent
     {
         $allowed = array_intersect_key($data, array_flip(self::EDITABLE_AGENT_FIELDS));
-        $principalId ??= $this->resolveDefaultPrincipalId($userId);
+        if ($principalId === null) {
+            $principalId = $this->principalService?->resolveDefaultPrincipalId($userId)
+                ?? $this->resolveDefaultPrincipalIdFallback($userId);
+        }
 
         return Capsule::connection()->transaction(
             fn(): Agent => $this->persistNewAgent($allowed, $principalId),
@@ -92,63 +97,27 @@ final class AgentService implements AgentServiceInterface
     }
 
     /**
-     * Resolve the principal id for a new agent when the caller did not
-     * supply one explicitly. Prefers the wired `PrincipalService`; falls
-     * back to an inline idempotent insert for legacy test paths that
-     * construct {@see AgentService} directly without DI.
+     * Last-resort principal materialisation for legacy test paths that
+     * construct {@see AgentService} directly without DI wiring
+     * {@see AgentPrincipalService}. Production callers always wire the
+     * service via the DI container; this branch only fires in
+     * `new AgentService()`-style test fixtures.
      */
-    private function resolveDefaultPrincipalId(int $userId): int
-    {
-        if ($this->principalService !== null) {
-            return (int) $this->principalService->ensureUserPrincipal($userId)->id;
-        }
-
-        return $this->materialiseLegacyUserPrincipal($userId);
-    }
-
-    private function materialiseLegacyUserPrincipal(int $userId): int
-    {
-        $existing = $this->findLegacyUserPrincipal($userId);
-        if ($existing !== null) {
-            return $existing;
-        }
-
-        try {
-            return $this->insertLegacyUserPrincipal($userId);
-        } catch (PDOException) {
-            return $this->recoverLegacyUserPrincipal($userId);
-        }
-    }
-
-    private function findLegacyUserPrincipal(int $userId): ?int
+    private function resolveDefaultPrincipalIdFallback(int $userId): int
     {
         $existing = Capsule::table('principals')
             ->where('type', Principal::TYPE_USER)
             ->where('user_id', $userId)
             ->value('id');
-
-        return $existing !== null ? (int) $existing : null;
-    }
-
-    private function insertLegacyUserPrincipal(int $userId): int
-    {
+        if ($existing !== null) {
+            return (int) $existing;
+        }
         return (int) Capsule::table('principals')->insertGetId([
             'type'       => Principal::TYPE_USER,
             'user_id'    => $userId,
             'created_at' => date(self::DATETIME_FORMAT),
             'updated_at' => date(self::DATETIME_FORMAT),
         ]);
-    }
-
-    private function recoverLegacyUserPrincipal(int $userId): int
-    {
-        $existing = $this->findLegacyUserPrincipal($userId);
-        if ($existing !== null) {
-            return $existing;
-        }
-        throw new PrincipalMaterialisationException(
-            'PrincipalService not wired — could not materialise a user-principal.',
-        );
     }
 
     /**
@@ -298,7 +267,7 @@ final class AgentService implements AgentServiceInterface
     public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent
     {
         if ($this->principalService === null) {
-            throw new DependencyNotWiredException('PrincipalService not wired into AgentService — cannot transfer.');
+            throw new Exceptions\DependencyNotWiredException('AgentPrincipalService not wired into AgentService — cannot transfer.');
         }
         return $this->principalService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
     }

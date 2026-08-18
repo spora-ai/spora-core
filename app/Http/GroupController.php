@@ -95,7 +95,7 @@ final class GroupController
             return $userId;
         }
 
-        $created = $this->createGroupFromRequest($request, (int) $userId);
+        $created = $this->createGroupFromRequest($request);
         if ($created instanceof JsonResponse) {
             return $created;
         }
@@ -112,7 +112,7 @@ final class GroupController
     /**
      * @return array{0: string, 1: ?string}|JsonResponse
      */
-    private function createGroupFromRequest(Request $request, int $userId): array|JsonResponse
+    private function createGroupFromRequest(Request $request): array|JsonResponse
     {
         $body = $this->safeDecodeJson($request);
         if ($body instanceof JsonResponse) {
@@ -136,7 +136,7 @@ final class GroupController
         [$group, $updates] = $resolved;
 
         if ($updates !== []) {
-            $group = $this->applyGroupRowUpdate($id, $group, $updates);
+            $group = $this->applyGroupRowUpdate($id, $updates);
         }
 
         $userId = $this->authService->currentUserId() ?? 0;
@@ -177,7 +177,7 @@ final class GroupController
     /**
      * @param array<string, mixed> $updates
      */
-    private function applyGroupRowUpdate(int $id, Group $group, array $updates): Group
+    private function applyGroupRowUpdate(int $id, array $updates): Group
     {
         $updates['updated_at'] = date('Y-m-d H:i:s');
         \Illuminate\Database\Capsule\Manager::table('groups')

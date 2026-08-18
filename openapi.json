@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.17.0-16-g801a2e7"
+        "version": "0.17.0-31-g2196df0"
     },
     "servers": [
         {
@@ -560,7 +560,7 @@
                 "tags": [
                     "Agents"
                 ],
-                "summary": "TransferPrincipal Agent",
+                "summary": "TransferPrincipal AgentTransfer",
                 "parameters": [
                     {
                         "name": "id",
