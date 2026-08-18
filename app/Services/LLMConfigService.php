@@ -69,15 +69,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
     // ---------------------------------------------------------------------
 
     /**
-     * @param array<string, mixed> $settings
-     * @return array<string, mixed>
-     */
-    public function encodeSettings(string $driverClass, array $settings): array
-    {
-        return $this->persistence->encodeSettings($driverClass, $settings);
-    }
-
-    /**
      * @return array<string, mixed>
      */
     public function decodeSettings(string $driverClass, ?string $raw): array
@@ -124,14 +115,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
     // ---------------------------------------------------------------------
 
     /**
-     * @return list<array>
-     */
-    public function getConfigurationsForUser(int $userId): array
-    {
-        return $this->getConfigurationsVisibleTo($userId);
-    }
-
-    /**
      * Union of every principal-scoped config the user can see plus every
      * global config. Controllers use this in place of the old
      * `where('user_id', $userId)->orWhere('is_global', true)` query so a
@@ -139,7 +122,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
      *
      * @return list<array>
      */
-    public function getConfigurationsVisibleTo(int $userId): array
+    public function getConfigurationsForUser(int $userId): array
     {
         $principalIds = $this->principalResolver->visiblePrincipalIds($userId);
 
@@ -241,41 +224,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
     public function getDefaultConfiguration(int $userId): ?LLMDriverConfiguration
     {
         return $this->preferences->getDefaultConfiguration($userId);
-    }
-
-    public function getEffectiveConfigForAgent(\Spora\Models\Agent $agent): ?LLMDriverConfiguration
-    {
-        return $this->preferences->getEffectiveConfigForAgent($agent);
-    }
-
-    /**
-     * Backwards-compatible alias for code paths that still key on
-     * user_id. Resolves the caller's user-principal and looks up the
-     * preference on its principal_id.
-     */
-    public function getUserPreferredConfig(int $userId): ?LLMDriverConfiguration
-    {
-        $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
-
-        return $this->preferences->getPrincipalPreferredConfig($principalId);
-    }
-
-    /**
-     * Backwards-compatible alias. Resolves the user's principal, then
-     * delegates to the principal-aware setter.
-     */
-    public function setUserPreferredConfig(int $userId, int $configId): bool
-    {
-        $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
-
-        return $this->preferences->setPrincipalPreferredConfig($principalId, $configId, $userId);
-    }
-
-    public function unsetUserPreferredConfig(int $userId): void
-    {
-        $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
-
-        $this->preferences->unsetPrincipalPreferredConfig($principalId);
     }
 
     public function getPrincipalPreferredConfig(int $principalId): ?LLMDriverConfiguration

@@ -45,9 +45,32 @@ final class GroupMemberController
      */
     public function index(int $groupId): JsonResponse
     {
+        $userId = $this->requireCallerOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
+        }
+
+        $accessError = $this->assertCallerCanReadGroup($groupId, (int) $userId);
+        if ($accessError !== null) {
+            return $accessError;
+        }
+
+        return new JsonResponse(['data' => ['members' => $this->memberRows($groupId)]]);
+    }
+
+    private function requireCallerOrFail(): int|JsonResponse
+    {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
             return $this->unauthenticated();
+        }
+        return (int) $userId;
+    }
+
+    private function assertCallerCanReadGroup(int $groupId, int $userId): ?JsonResponse
+    {
+        if ($this->callerCanReadGroup($groupId, $userId)) {
+            return null;
         }
 
         $groupOrError = $this->loadGroupOrNotFound($groupId);
@@ -55,11 +78,7 @@ final class GroupMemberController
             return $groupOrError;
         }
 
-        if (!$this->callerCanReadGroup($groupId, $userId)) {
-            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
-        }
-
-        return new JsonResponse(['data' => ['members' => $this->memberRows($groupId)]]);
+        return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
     }
 
     /**
@@ -73,27 +92,44 @@ final class GroupMemberController
         }
         [$callerUserId] = $auth;
 
-        $body = $this->safeDecodeJson($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
+        $parsed = $this->parseAddMemberRequest($request);
+        if ($parsed instanceof JsonResponse) {
+            return $parsed;
         }
+        [$targetUserId, $role] = $parsed;
 
-        $validated = $this->validateAddMemberBody($body);
-        if ($validated instanceof JsonResponse) {
-            return $validated;
-        }
-        [$targetUserId, $role] = $validated;
-
-        try {
-            $this->groupService->addMember($groupId, $targetUserId, $role, $callerUserId);
-        } catch (GroupMembershipRuleException $e) {
-            return $this->forbidden('FORBIDDEN', $e->getMessage());
+        $error = $this->attemptAddMember($groupId, $targetUserId, $role, $callerUserId);
+        if ($error !== null) {
+            return $error;
         }
 
         return new JsonResponse(
             ['data' => ['member' => ['user_id' => $targetUserId, 'role' => $role]]],
             Response::HTTP_CREATED,
         );
+    }
+
+    /**
+     * @return array{0: int, 1: string}|JsonResponse
+     */
+    private function parseAddMemberRequest(Request $request): array|JsonResponse
+    {
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
+
+        return $this->validateAddMemberBody($body);
+    }
+
+    private function attemptAddMember(int $groupId, int $targetUserId, string $role, int $callerUserId): ?JsonResponse
+    {
+        try {
+            $this->groupService->addMember($groupId, $targetUserId, $role, $callerUserId);
+        } catch (GroupMembershipRuleException $e) {
+            return $this->forbidden('FORBIDDEN', $e->getMessage());
+        }
+        return null;
     }
 
     /**
@@ -107,16 +143,31 @@ final class GroupMemberController
         }
         [$callerUserId] = $auth;
 
+        $newRole = $this->parseNewRole($request);
+        if ($newRole instanceof JsonResponse) {
+            return $newRole;
+        }
+
+        $error = $this->attemptRoleChange($groupId, $userId, $newRole, $callerUserId);
+        if ($error !== null) {
+            return $error;
+        }
+
+        return new JsonResponse(['data' => ['member' => ['user_id' => $userId, 'role' => $newRole]]]);
+    }
+
+    private function parseNewRole(Request $request): string|JsonResponse
+    {
         $body = $this->safeDecodeJson($request);
         if ($body instanceof JsonResponse) {
             return $body;
         }
 
-        $newRole = $this->validateRole($body);
-        if ($newRole instanceof JsonResponse) {
-            return $newRole;
-        }
+        return $this->validateRole($body);
+    }
 
+    private function attemptRoleChange(int $groupId, int $userId, string $newRole, int $callerUserId): ?JsonResponse
+    {
         try {
             $this->groupService->changeMemberRole($groupId, $userId, $newRole, $callerUserId);
         } catch (GroupMembershipRuleException $e) {
@@ -128,8 +179,7 @@ final class GroupMemberController
                 Response::HTTP_CONFLICT,
             );
         }
-
-        return new JsonResponse(['data' => ['member' => ['user_id' => $userId, 'role' => $newRole]]]);
+        return null;
     }
 
     /**
@@ -255,16 +305,19 @@ final class GroupMemberController
             return $groupOrError;
         }
 
-        if ($this->authService->isAdmin()) {
+        if ($this->callerMayManageMembers($groupId, $callerUserId)) {
             return null;
         }
 
-        $role = GroupService::fetchCallerRole($groupId, $callerUserId);
-        if ($role !== GroupMembership::ROLE_OWNER) {
-            return $this->forbidden('FORBIDDEN', 'Only group owners or admins can manage members.');
-        }
+        return $this->forbidden('FORBIDDEN', 'Only group owners or admins can manage members.');
+    }
 
-        return null;
+    private function callerMayManageMembers(int $groupId, int $callerUserId): bool
+    {
+        if ($this->authService->isAdmin()) {
+            return true;
+        }
+        return GroupService::fetchCallerRole($groupId, $callerUserId) === GroupMembership::ROLE_OWNER;
     }
 
     private function loadGroupOrNotFound(int $groupId): Group|JsonResponse

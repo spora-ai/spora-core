@@ -15,8 +15,11 @@ use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\PrincipalPreference;
+use Spora\Services\LLMConfigPersistence;
+use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigSchemaInspector;
 use Spora\Services\LLMConfigService;
+use Spora\Services\PrincipalResolver;
 
 const TEST_API_BASE_URL = 'https://api.example.com';
 const TEST_USER_PASSWORD = 'Password1!';
@@ -100,10 +103,9 @@ test('getDrivers returns settings_schema for each driver', function (): void {
 test('encodeSettings encrypts only password fields and stores others as plain strings', function (): void {
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new SecurityManager($key);
+    $persistence = new LLMConfigPersistence($security, new LLMConfigSchemaInspector(), new PrincipalResolver());
 
-    $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
-
-    $result = $service->encodeSettings(OpenAICompatibleDriver::class, [
+    $result = $persistence->encodeSettings(OpenAICompatibleDriver::class, [
         'api_key' => 'sk-test-key',
         'base_url' => TEST_API_BASE_URL,
         'model' => 'gpt-4o',
@@ -120,9 +122,9 @@ test('encodeSettings encrypts only password fields and stores others as plain st
 test('encodeSettings handles empty password field', function (): void {
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new SecurityManager($key);
-    $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+    $persistence = new LLMConfigPersistence($security, new LLMConfigSchemaInspector(), new PrincipalResolver());
 
-    $result = $service->encodeSettings(OpenAICompatibleDriver::class, [
+    $result = $persistence->encodeSettings(OpenAICompatibleDriver::class, [
         'api_key' => '',
         'base_url' => TEST_API_BASE_URL,
     ]);
@@ -135,9 +137,10 @@ test('encodeSettings handles empty password field', function (): void {
 test('decodeSettings decrypts per-field format correctly', function (): void {
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new SecurityManager($key);
+    $persistence = new LLMConfigPersistence($security, new LLMConfigSchemaInspector(), new PrincipalResolver());
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
-    $encoded = $service->encodeSettings(OpenAICompatibleDriver::class, [
+    $encoded = $persistence->encodeSettings(OpenAICompatibleDriver::class, [
         'api_key' => 'sk-secret-key',
         'base_url' => TEST_API_BASE_URL,
     ]);
@@ -175,6 +178,7 @@ test('decodeSettings returns empty array for null/empty input', function (): voi
 test('encodeSettings + decodeSettings is a lossless round-trip', function (): void {
     $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
     $security = new SecurityManager($key);
+    $persistence = new LLMConfigPersistence($security, new LLMConfigSchemaInspector(), new PrincipalResolver());
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
 
     $original = [
@@ -184,7 +188,7 @@ test('encodeSettings + decodeSettings is a lossless round-trip', function (): vo
         'timeout' => '120',
     ];
 
-    $encoded = $service->encodeSettings(OpenAICompatibleDriver::class, $original);
+    $encoded = $persistence->encodeSettings(OpenAICompatibleDriver::class, $original);
     $json = json_encode($encoded);
     $decoded = $service->decodeSettings(OpenAICompatibleDriver::class, $json);
 
@@ -236,6 +240,7 @@ test('maskForApi leaves empty password fields unchanged', function (): void {
 test('getEffectiveConfigForAgent returns tier-1 agent-specific config', function (): void {
     $security = Mockery::mock(SecurityManagerInterface::class);
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+    $preferences = new LLMConfigPreferences();
 
     $userId = Capsule::table('users')->insertGetId([
         'email'    => 'agent-test@example.com',
@@ -266,7 +271,7 @@ test('getEffectiveConfigForAgent returns tier-1 agent-specific config', function
     $agent->principal_id = createUserPrincipalPublic($userId);
     $agent->llm_driver_config_id = $agentConfig->id;
 
-    $result = $service->getEffectiveConfigForAgent($agent);
+    $result = $preferences->getEffectiveConfigForAgent($agent);
 
     expect($result)->not->toBeNull()
         ->and($result->id)->toBe($agentConfig->id)
@@ -276,6 +281,7 @@ test('getEffectiveConfigForAgent returns tier-1 agent-specific config', function
 test('getEffectiveConfigForAgent falls back to tier-2 user default when no agent config', function (): void {
     $security = Mockery::mock(SecurityManagerInterface::class);
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+    $preferences = new LLMConfigPreferences();
 
     $userId = Capsule::table('users')->insertGetId([
         'email'    => 'user-default-test@example.com',
@@ -302,7 +308,7 @@ test('getEffectiveConfigForAgent falls back to tier-2 user default when no agent
     $agent->principal_id = createUserPrincipalPublic($userId);
     $agent->llm_driver_config_id = null;
 
-    $result = $service->getEffectiveConfigForAgent($agent);
+    $result = $preferences->getEffectiveConfigForAgent($agent);
 
     expect($result)->not->toBeNull()
         ->and($result->id)->toBe($userDefault->id)
@@ -312,6 +318,7 @@ test('getEffectiveConfigForAgent falls back to tier-2 user default when no agent
 test('getEffectiveConfigForAgent falls back to tier-3 global default when no user default', function (): void {
     $security = Mockery::mock(SecurityManagerInterface::class);
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+    $preferences = new LLMConfigPreferences();
 
     $userId = Capsule::table('users')->insertGetId([
         'email'    => 'global-default-test@example.com',
@@ -335,7 +342,7 @@ test('getEffectiveConfigForAgent falls back to tier-3 global default when no use
     $agent->principal_id = createUserPrincipalPublic($userId);
     $agent->llm_driver_config_id = null;
 
-    $result = $service->getEffectiveConfigForAgent($agent);
+    $result = $preferences->getEffectiveConfigForAgent($agent);
 
     expect($result)->not->toBeNull()
         ->and($result->id)->toBe($globalDefault->id)
@@ -345,6 +352,7 @@ test('getEffectiveConfigForAgent falls back to tier-3 global default when no use
 test('getEffectiveConfigForAgent returns null when no config at any tier', function (): void {
     $security = Mockery::mock(SecurityManagerInterface::class);
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+    $preferences = new LLMConfigPreferences();
 
     $userId = Capsule::table('users')->insertGetId([
         'email'    => 'no-config-test@example.com',
@@ -359,7 +367,7 @@ test('getEffectiveConfigForAgent returns null when no config at any tier', funct
     $agent->principal_id = createUserPrincipalPublic($userId);
     $agent->llm_driver_config_id = null;
 
-    $result = $service->getEffectiveConfigForAgent($agent);
+    $result = $preferences->getEffectiveConfigForAgent($agent);
 
     expect($result)->toBeNull();
 });
@@ -459,6 +467,7 @@ describe('LLMConfigService::applyConfigurationUpdates', function (): void {
         $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
         $security = new SecurityManager($key);
         $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+        $persistence = new LLMConfigPersistence($security, new LLMConfigSchemaInspector(), new PrincipalResolver());
 
         $userId = Capsule::table('users')->insertGetId([
             'email'    => 'apply-updates-settings@example.com',
@@ -472,7 +481,7 @@ describe('LLMConfigService::applyConfigurationUpdates', function (): void {
         $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'Original Name';
         $config->driver_class = OpenAICompatibleDriver::class;
-        $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, [
+        $config->settings = json_encode($persistence->encodeSettings(OpenAICompatibleDriver::class, [
             'api_key' => 'sk-original',
             'model' => 'gpt-4o',
         ]));
@@ -627,6 +636,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
     test('agent-specific config wins over user preference and global default', function (): void {
         $security = Mockery::mock(SecurityManagerInterface::class);
         $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+        $preferences = new LLMConfigPreferences();
 
         $userId = Capsule::table('users')->insertGetId([
             'email'    => 'eff-tier1-wins@example.com',
@@ -668,7 +678,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
         $agent->principal_id = createUserPrincipalPublic($userId);
         $agent->llm_driver_config_id = (int) $agentConfig->getKey();
 
-        $result = $service->getEffectiveConfigForAgent($agent);
+        $result = $preferences->getEffectiveConfigForAgent($agent);
 
         expect($result)->not->toBeNull()
             ->and((int) $result->getKey())->toBe((int) $agentConfig->getKey())
@@ -678,6 +688,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
     test('user preference wins over global default when no agent config', function (): void {
         $security = Mockery::mock(SecurityManagerInterface::class);
         $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+        $preferences = new LLMConfigPreferences();
 
         $userId = Capsule::table('users')->insertGetId([
             'email'    => 'eff-tier2-wins@example.com',
@@ -712,7 +723,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
         $agent->principal_id = createUserPrincipalPublic($userId);
         $agent->llm_driver_config_id = null;
 
-        $result = $service->getEffectiveConfigForAgent($agent);
+        $result = $preferences->getEffectiveConfigForAgent($agent);
 
         expect($result)->not->toBeNull()
             ->and((int) $result->getKey())->toBe((int) $preferred->getKey())
@@ -722,6 +733,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
     test('returns null when no configuration exists at any tier', function (): void {
         $security = Mockery::mock(SecurityManagerInterface::class);
         $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+        $preferences = new LLMConfigPreferences();
 
         $userId = Capsule::table('users')->insertGetId([
             'email'    => 'eff-none@example.com',
@@ -736,7 +748,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
         $agent->principal_id = createUserPrincipalPublic($userId);
         $agent->llm_driver_config_id = null;
 
-        $result = $service->getEffectiveConfigForAgent($agent);
+        $result = $preferences->getEffectiveConfigForAgent($agent);
 
         expect($result)->toBeNull();
     });
@@ -744,6 +756,7 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
     test('uses the global default as the last-resort tier-3 fallback', function (): void {
         $security = Mockery::mock(SecurityManagerInterface::class);
         $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+        $preferences = new LLMConfigPreferences();
 
         $userId = Capsule::table('users')->insertGetId([
             'email'    => 'eff-tier3-fallback@example.com',
@@ -767,9 +780,9 @@ describe('LLMConfigService::getEffectiveConfigForAgent', function (): void {
         $agent->principal_id = createUserPrincipalPublic($userId);
         $agent->llm_driver_config_id = null;
 
-        $result = $service->getEffectiveConfigForAgent($agent);
+        $result = $preferences->getEffectiveConfigForAgent($agent);
 
-        expect($result)->not->toBeNull()
+        expect($result)->not()->toBeNull()
             ->and((int) $result->getKey())->toBe((int) $globalDefault->getKey())
             ->and($result->name)->toBe('Global Default');
     });

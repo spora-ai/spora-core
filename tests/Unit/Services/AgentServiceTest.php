@@ -13,6 +13,7 @@ use Spora\Services\Agents\AgentToolOverrideResolver;
 use Spora\Services\AgentService;
 use Spora\Services\AgentToolSettingsService;
 use Spora\Services\Exceptions\AgentNotFoundException;
+use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
@@ -306,6 +307,7 @@ describe('AgentService private helpers (now on collaborators)', function (): voi
         return new AgentToolOverrideResolver(
             $toolConfig,
             $llmConfig,
+            new LLMConfigPreferences(),
             new AgentToolInstanceResolver(),
         );
     }
@@ -388,6 +390,7 @@ describe('AgentService private helpers (now on collaborators)', function (): voi
         $resolver = new AgentToolOverrideResolver(
             $toolConfig,
             $llmConfig,
+            new LLMConfigPreferences(),
             new AgentToolInstanceResolver(),
         );
         $ref  = new ReflectionClass(AgentToolOverrideResolver::class);

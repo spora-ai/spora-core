@@ -39,21 +39,22 @@ final class PrincipalResolver
             return null;
         }
 
-        if ($principal->type === Principal::TYPE_USER) {
-            return (int) $principal->user_id;
-        }
+        return match ($principal->type) {
+            Principal::TYPE_USER  => (int) $principal->user_id,
+            Principal::TYPE_GROUP => $this->groupOwnerUserId((int) $principal->group_id),
+            default               => null,
+        };
+    }
 
-        if ($principal->type === Principal::TYPE_GROUP) {
-            $ownerUserId = Capsule::table('group_memberships')
-                ->where('group_id', $principal->group_id)
-                ->where('role', GroupMembership::ROLE_OWNER)
-                ->orderBy('id')
-                ->value('user_id');
+    private function groupOwnerUserId(int $groupId): ?int
+    {
+        $ownerUserId = Capsule::table('group_memberships')
+            ->where('group_id', $groupId)
+            ->where('role', GroupMembership::ROLE_OWNER)
+            ->orderBy('id')
+            ->value('user_id');
 
-            return $ownerUserId !== null ? (int) $ownerUserId : null;
-        }
-
-        return null;
+        return $ownerUserId !== null ? (int) $ownerUserId : null;
     }
 
     /**

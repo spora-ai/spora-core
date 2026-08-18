@@ -149,20 +149,6 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
-     * Backwards-compatible shim for callers (controllers, tests) that
-     * still index tool settings by user-id. Resolves the caller's
-     * user-principal on the fly and delegates.
-     *
-     * @return array<string, mixed>
-     */
-    public function getUserSettings(string $toolClass, int $userId): array
-    {
-        $principalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
-
-        return $this->getPrincipalSettings($toolClass, $principalId);
-    }
-
-    /**
      * Persist principal-scoped settings for a tool class.
      *
      * @return array<string, mixed> Decrypted settings (for immediate use)
@@ -207,20 +193,6 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
-     * Backwards-compatible shim: legacy controller/test code path that
-     * still passes a `userId`. Resolves the user's principal and
-     * delegates to {@see self::putPrincipalSettings()}.
-     *
-     * @return array<string, mixed> Decrypted settings (for immediate use)
-     */
-    public function putUserSettings(string $toolClass, int $userId, array $settings): array
-    {
-        $principalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
-
-        return $this->putPrincipalSettings($toolClass, $principalId, $settings);
-    }
-
-    /**
      * Return effective settings: global defaults merged with principal
      * settings and agent-specific overrides.
      *
@@ -237,7 +209,13 @@ class ToolConfigService implements ToolConfigServiceInterface
      */
     public function getEffectiveSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
-        $principalId = $this->resolvePrincipalId($userId, $context);
+        if ($context !== null) {
+            $principalId = $context->principalId;
+        } elseif ($userId !== null) {
+            $principalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
+        } else {
+            $principalId = null;
+        }
 
         $merged = $this->getGlobalSettings($toolClass);
 
@@ -360,17 +338,6 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
-     * Backwards-compatible shim: legacy callers indexed tool settings
-     * by `userId`. Resolves the principal and delegates.
-     */
-    public function deleteUserSettings(string $toolClass, int $userId): void
-    {
-        $principalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
-
-        $this->deletePrincipalSettings($toolClass, $principalId);
-    }
-
-    /**
      * Encrypt a settings array to a storage string.
      * Only password fields are encrypted per-field; all other fields are stored as plain JSON.
      *
@@ -448,7 +415,13 @@ class ToolConfigService implements ToolConfigServiceInterface
      */
     public function getEffectiveSettingsWithSource(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
-        $principalId = $this->resolvePrincipalId($userId, $context);
+        if ($context !== null) {
+            $principalId = $context->principalId;
+        } elseif ($userId !== null) {
+            $principalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
+        } else {
+            $principalId = null;
+        }
 
         $global = $this->getGlobalSettings($toolClass);
         $result = [];
@@ -519,21 +492,5 @@ class ToolConfigService implements ToolConfigServiceInterface
         $effective = $this->getEffectiveSettings($toolClass, $agentId, $userId, $context);
 
         return $this->schema->getLlmToolSettings($toolClass, $effective, $userId);
-    }
-
-    /**
-     * Centralises the user-id → principal-id translation. A
-     * `PrincipalContext` (preferred) wins; a legacy `userId` resolves
-     * to the caller's user-principal on the fly.
-     */
-    private function resolvePrincipalId(?int $userId, ?PrincipalContext $context): ?int
-    {
-        if ($context !== null) {
-            return $context->principalId;
-        }
-        if ($userId === null) {
-            return null;
-        }
-        return (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
     }
 }

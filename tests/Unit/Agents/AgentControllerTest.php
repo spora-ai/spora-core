@@ -478,10 +478,10 @@ test('getOverride for llm_configuration falls back to the user default LLMDriver
     $config->principal_id = createUserPrincipalPublic($userId);
     $config->name = 'Test Default';
     $config->driver_class = OpenAICompatibleDriver::class;
-    $config->settings = json_encode($llmConfig->encodeSettings(OpenAICompatibleDriver::class, [
+    $config->settings = encodeLlmSettingsForTest(OpenAICompatibleDriver::class, [
         'api_key' => 'sk-test-secret',
         'model' => 'gpt-4o',
-    ]));
+    ]);
     $config->save();
 
     PrincipalPreference::create([
@@ -528,7 +528,7 @@ test('getOverride for llm_configuration returns empty settings when decryption f
     $config->principal_id    = createUserPrincipalPublic($userId);
     $config->name       = 'Corrupted Config';
     $config->driver_class = OpenAICompatibleDriver::class;
-    $config->settings   = json_encode($alienService->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'secret', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1']));
+    $config->settings   = encodeLlmSettingsForTest(OpenAICompatibleDriver::class, ['api_key' => 'secret', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1']);
     $config->save();
 
     PrincipalPreference::create([

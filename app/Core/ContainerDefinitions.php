@@ -20,10 +20,12 @@ use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
+use Spora\AgentTemplates\AgentTemplateAgentCreator;
 use Spora\AgentTemplates\AgentTemplateExporter;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateSettingsApplier;
+use Spora\AgentTemplates\AgentTemplateToolsApplier;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Apps\AppRegistry;
 use Spora\Apps\PluginsApp;
@@ -506,6 +508,7 @@ final class ContainerDefinitions
                     $c->get(LoggerInterface::class),
                     $c->get(LLMConfigServiceInterface::class),
                     (int) ($c->get('config')['llm_timeout'] ?? 300),
+                    $c->get(LLMConfigPreferences::class),
                 );
             },
 
@@ -1446,10 +1449,20 @@ final class ContainerDefinitions
                     $c->get(ToolConfigService::class),
                     $c->get(PluginLoader::class),
                     $c->get(Paths::class),
+                    $c->get(AgentTemplateToolsApplier::class),
+                    $c->get(AgentTemplateAgentCreator::class),
                     $c->get(AgentPictureService::class),
+                );
+            },
+
+            AgentTemplateToolsApplier::class => static function (ContainerInterface $c): AgentTemplateToolsApplier {
+                return new AgentTemplateToolsApplier(
+                    $c->get(ToolConfigService::class),
                     $c->get(AgentTemplateSettingsApplier::class),
                 );
             },
+
+            AgentTemplateAgentCreator::class => static fn(): AgentTemplateAgentCreator => new AgentTemplateAgentCreator(),
 
             AgentTemplateSettingsApplier::class => static function (ContainerInterface $c): AgentTemplateSettingsApplier {
                 return new AgentTemplateSettingsApplier(

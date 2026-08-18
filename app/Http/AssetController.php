@@ -133,19 +133,34 @@ final class AssetController
      */
     private function ownsAsset(MediaAsset $asset, int $userId): bool
     {
-        if ($asset->user_id !== null && (int) $asset->user_id === $userId) {
+        if ($this->ownsDirectly($asset, $userId)) {
             return true;
         }
+        return $this->ownsViaAgent($asset, $userId);
+    }
+
+    private function ownsDirectly(MediaAsset $asset, int $userId): bool
+    {
+        return $asset->user_id !== null && (int) $asset->user_id === $userId;
+    }
+
+    private function ownsViaAgent(MediaAsset $asset, int $userId): bool
+    {
+        $ownerUserId = $this->agentOwnerUserId($asset);
+        return $ownerUserId !== null && $ownerUserId === $userId;
+    }
+
+    private function agentOwnerUserId(MediaAsset $asset): ?int
+    {
         if ($asset->agent_id === null) {
-            return false;
+            return null;
         }
         $agent = (new Agent())->find($asset->agent_id);
         if ($agent === null) {
-            return false;
+            return null;
         }
         $resolver = $this->resolver ?? new PrincipalResolver();
-        $ownerUserId = $resolver->ownerUserId((int) $agent->principal_id);
-        return $ownerUserId !== null && $ownerUserId === $userId;
+        return $resolver->ownerUserId((int) $agent->principal_id);
     }
 
     private function streamAsset(MediaAsset $asset): Response

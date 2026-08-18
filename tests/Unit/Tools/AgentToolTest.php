@@ -23,13 +23,16 @@ function makeAgentTool(): array
     // AgentTemplateImporter + AgentTemplateValidator are final and cannot
     // be mocked directly; use real instances. Validator is parameter-less,
     // importer needs a real ToolConfigService + PluginLoader + Paths.
+    $toolConfig = new Spora\Services\ToolConfigService(
+        new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+        new Psr\Log\NullLogger(),
+    );
     $importer = new AgentTemplateImporter(
-        new Spora\Services\ToolConfigService(
-            new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
-            new Psr\Log\NullLogger(),
-        ),
+        $toolConfig,
         new Spora\Plugins\PluginLoader([], null),
         new Spora\Core\Paths(BASE_PATH),
+        new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
+        new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
     $validator = new AgentTemplateValidator();
     /** @var AgentServiceInterface&MockInterface $agentService */
@@ -61,13 +64,16 @@ function makeAgentTool(): array
  */
 function makeAgentToolWithPlugins(): array
 {
+    $toolConfig = new Spora\Services\ToolConfigService(
+        new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+        new Psr\Log\NullLogger(),
+    );
     $importer = new AgentTemplateImporter(
-        new Spora\Services\ToolConfigService(
-            new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
-            new Psr\Log\NullLogger(),
-        ),
+        $toolConfig,
         new Spora\Plugins\PluginLoader([], null),
         new Spora\Core\Paths(BASE_PATH),
+        new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
+        new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
     $validator = new AgentTemplateValidator();
     /** @var AgentServiceInterface&MockInterface $service */

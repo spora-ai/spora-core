@@ -42,10 +42,18 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
         private readonly ToolConfigService $toolConfig,
         LLMConfigService $llmConfig,
         ?PrincipalResolver $principalResolver = null,
+        ?LLMConfigPreferences $preferences = null,
     ) {
         $this->principalResolver  = $principalResolver ?? new PrincipalResolver();
         $this->instanceResolver   = new AgentToolInstanceResolver();
-        $this->overrideResolver   = new AgentToolOverrideResolver($toolConfig, $llmConfig, $this->instanceResolver, $this->principalResolver);
+        $preferences             = $preferences ?? new LLMConfigPreferences();
+        $this->overrideResolver   = new AgentToolOverrideResolver(
+            $toolConfig,
+            $llmConfig,
+            $preferences,
+            $this->instanceResolver,
+            $this->principalResolver,
+        );
         $this->operationsResolver = new AgentToolOperationsResolver($this->instanceResolver, $this->overrideResolver, $this->principalResolver);
     }
 

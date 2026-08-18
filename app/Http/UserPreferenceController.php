@@ -83,14 +83,15 @@ final class UserPreferenceController
             return $body;
         }
 
-        $configId = $body['config_id'] ?? null;
-        $userId = (int) $this->authService->currentUserId();
+        return $this->applyConfigChange($principalId, $body['config_id'] ?? null);
+    }
 
+    private function applyConfigChange(int $principalId, mixed $configId): JsonResponse
+    {
         if ($configId === null) {
             return $this->clearPreference($principalId);
         }
-
-        return $this->setPreference($principalId, $userId, $configId);
+        return $this->setPreference($principalId, (int) $this->authService->currentUserId(), $configId);
     }
 
     /**
@@ -151,25 +152,39 @@ final class UserPreferenceController
      */
     private function resolvePrincipalId(Request $request, int $userId): ?int
     {
-        $raw = $request->query->get('principal_id');
-        if ($raw === null || $raw === '') {
-            return (int) $this->principalService->ensureUserPrincipal($userId)->id;
+        $principalId = $this->requestedPrincipalId($request);
+        if ($principalId === null) {
+            return $this->defaultPrincipalId($userId);
         }
 
-        $principalId = (int) $raw;
-        if ($principalId <= 0) {
-            return (int) $this->principalService->ensureUserPrincipal($userId)->id;
-        }
-
-        if ($this->authService->isAdmin()) {
-            return $principalId;
-        }
-
-        if (!$this->principalService->callerControlsPrincipal($userId, $principalId)) {
+        if (!$this->callerMayActOnPrincipal($userId, $principalId)) {
             return null;
         }
 
         return $principalId;
+    }
+
+    private function requestedPrincipalId(Request $request): ?int
+    {
+        $raw = $request->query->get('principal_id');
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        $principalId = (int) $raw;
+        return $principalId > 0 ? $principalId : null;
+    }
+
+    private function defaultPrincipalId(int $userId): int
+    {
+        return (int) $this->principalService->ensureUserPrincipal($userId)->id;
+    }
+
+    private function callerMayActOnPrincipal(int $userId, int $principalId): bool
+    {
+        if ($this->authService->isAdmin()) {
+            return true;
+        }
+        return $this->principalService->callerControlsPrincipal($userId, $principalId);
     }
 
     /**

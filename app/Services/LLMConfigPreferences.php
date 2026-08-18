@@ -102,6 +102,19 @@ final class LLMConfigPreferences
      */
     public function setPrincipalPreferredConfig(int $principalId, int $configId, int $callerUserId): bool
     {
+        if (!$this->isConfigEligibleForPrincipal($configId, $principalId, $callerUserId)) {
+            return false;
+        }
+
+        PrincipalPreference::firstOrCreate(['principal_id' => $principalId])
+            ->fill(['preferred_llm_config_id' => $configId])
+            ->save();
+
+        return true;
+    }
+
+    private function isConfigEligibleForPrincipal(int $configId, int $principalId, int $callerUserId): bool
+    {
         $config = LLMDriverConfiguration::find($configId);
         if ($config === null) {
             return false;
@@ -115,20 +128,42 @@ final class LLMConfigPreferences
             return false;
         }
 
-        if (!$config->is_global && (int) $config->principal_id !== $principalId) {
-            return false;
-        }
-
-        $preference = PrincipalPreference::firstOrCreate(['principal_id' => $principalId]);
-        $preference->preferred_llm_config_id = $configId;
-        $preference->save();
-
-        return true;
+        return $config->is_global || (int) $config->principal_id === $principalId;
     }
 
     public function unsetPrincipalPreferredConfig(int $principalId): void
     {
         PrincipalPreference::where('principal_id', $principalId)->delete();
+    }
+
+    /**
+     * Backwards-compatible shim: legacy callers indexed LLM preferences
+     * by `userId`. Resolves the caller's user-principal and delegates.
+     * Moved from {@see LLMConfigService} so the main service stays under
+     * the SonarCloud 20-method-per-class ceiling (S1448).
+     */
+    public function getUserPreferredConfig(int $userId): ?LLMDriverConfiguration
+    {
+        $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
+        return $this->getPrincipalPreferredConfig($principalId);
+    }
+
+    /**
+     * Backwards-compatible shim — see {@see self::getUserPreferredConfig()}.
+     */
+    public function setUserPreferredConfig(int $userId, int $configId): bool
+    {
+        $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
+        return $this->setPrincipalPreferredConfig($principalId, $configId, $userId);
+    }
+
+    /**
+     * Backwards-compatible shim — see {@see self::getUserPreferredConfig()}.
+     */
+    public function unsetUserPreferredConfig(int $userId): void
+    {
+        $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
+        $this->unsetPrincipalPreferredConfig($principalId);
     }
 
     private function loadDefaultableConfiguration(int $configId, bool $isAdmin): ?LLMDriverConfiguration

@@ -20,6 +20,50 @@ if (!function_exists('makeAdmin')) {
     }
 }
 
+if (!function_exists('encodeLlmSettingsForTest')) {
+    /**
+     * Test helper: encode LLM settings using a freshly-wired
+     * {@see Spora\Services\LLMConfigPersistence}. The production code
+     * path moved encodeSettings off {@see Spora\Services\LLMConfigService}
+     * during the S1448 split; tests that need the raw encryption use
+     * this helper to avoid re-implementing the constructor signature.
+     */
+    function encodeLlmSettingsForTest(string $driverClass, array $settings): string
+    {
+        $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $security = new Spora\Core\SecurityManager($key);
+        $persistence = new Spora\Services\LLMConfigPersistence(
+            $security,
+            new Spora\Services\LLMConfigSchemaInspector(),
+            new Spora\Services\PrincipalResolver(),
+        );
+        return json_encode($persistence->encodeSettings($driverClass, $settings));
+    }
+}
+
+if (!function_exists('makeLlmPersistenceForService')) {
+    /**
+     * Build a {@see Spora\Services\LLMConfigPersistence} that shares its
+     * SecurityManager with the supplied {@see Spora\Services\LLMConfigService},
+     * so encode/decode round-trips against the same key. Used by helpers that
+     * need to write settings the service can later decrypt.
+     */
+    function makeLlmPersistenceForService(Spora\Services\LLMConfigService $llmConfigService): Spora\Services\LLMConfigPersistence
+    {
+        $inspector = (new ReflectionClass($llmConfigService))->getProperty('schemaInspector')
+            ->getValue($llmConfigService);
+        $persistence = (new ReflectionClass($llmConfigService))->getProperty('persistence')
+            ->getValue($llmConfigService);
+        $security = (new ReflectionClass($persistence))->getProperty('security')
+            ->getValue($persistence);
+
+        return new Spora\Services\LLMConfigPersistence(
+            $security,
+            $inspector,
+        );
+    }
+}
+
 if (!function_exists('createTestConfig')) {
     function createTestConfig(
         string $name,
@@ -38,6 +82,7 @@ if (!function_exists('createTestConfig')) {
             ]);
         }
 
+        $persistence = makeLlmPersistenceForService($llmConfigService);
         $isGlobal = $userId === null;
 
         // The migration's NOT NULL constraint on `principal_id` blocks the
@@ -45,7 +90,7 @@ if (!function_exists('createTestConfig')) {
         // principal_id = null ⇔ is_global = true). Insert global rows via
         // the query builder to skip the model-level XOR check.
         if ($isGlobal) {
-            return createTestGlobalConfig($name, $driverClass, $settings, $isDefault, $llmConfigService);
+            return createTestGlobalConfig($name, $driverClass, $settings, $isDefault, $persistence);
         }
 
         $principalId = createUserPrincipalPublic($userId);
@@ -54,7 +99,7 @@ if (!function_exists('createTestConfig')) {
         $config->principal_id = $principalId;
         $config->name = $name;
         $config->driver_class = $driverClass;
-        $config->settings = json_encode($llmConfigService->encodeSettings($driverClass, $settings));
+        $config->settings = json_encode($persistence->encodeSettings($driverClass, $settings));
         $config->is_default = $isDefault;
         $config->is_global = false;
         $config->save();
@@ -77,13 +122,19 @@ if (!function_exists('createTestGlobalConfig')) {
         string $driverClass,
         array $settings,
         bool $isDefault,
-        Spora\Services\LLMConfigService $llmConfigService,
+        ?Spora\Services\LLMConfigPersistence $persistence = null,
     ): Spora\Models\LLMDriverConfiguration {
+        if ($persistence === null) {
+            $persistence = new Spora\Services\LLMConfigPersistence(
+                new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+                new Spora\Services\LLMConfigSchemaInspector(),
+            );
+        }
         $id = (int) Illuminate\Database\Capsule\Manager::table('llm_driver_configurations')->insertGetId([
             'principal_id' => null,
             'name'         => $name,
             'driver_class' => $driverClass,
-            'settings'     => json_encode($llmConfigService->encodeSettings($driverClass, $settings)),
+            'settings'     => json_encode($persistence->encodeSettings($driverClass, $settings)),
             'is_default'   => $isDefault,
             'is_global'    => true,
             'created_at'   => date('Y-m-d H:i:s'),

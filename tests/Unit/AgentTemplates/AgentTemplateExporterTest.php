@@ -408,7 +408,13 @@ test('export() then importPayload() round-trips on the same loader with zero PLU
         [Spora\Tools\TimeTool::class, Spora\Tools\CalculatorTool::class, TestTool::class],
     );
     $paths = new Spora\Core\Paths(BASE_PATH);
-    $importer = new AgentTemplateImporter($toolConfig, $loader, $paths);
+    $importer = new AgentTemplateImporter(
+        $toolConfig,
+        $loader,
+        $paths,
+        new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
+        new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+    );
 
     $validation = (new Spora\AgentTemplates\AgentTemplateValidator())->validate($payload);
     // Migration 0067 introduced a top-level `principal` block on the wire

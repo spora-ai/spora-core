@@ -44,6 +44,8 @@ function makeSetupTester(): CommandTester
         $toolConfig,
         new PluginLoader([]),
         new Paths(BASE_PATH),
+        new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
+        new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
 
     $command = new SetupCommand(

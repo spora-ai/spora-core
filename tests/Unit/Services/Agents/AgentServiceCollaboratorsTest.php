@@ -14,6 +14,7 @@ use Spora\Services\Agents\AgentToolOperationsResolver;
 use Spora\Services\Agents\AgentToolOverrideResolver;
 use Spora\Services\AgentService;
 use Spora\Services\AgentToolSettingsService;
+use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\CalculatorTool;
@@ -33,7 +34,7 @@ function makeAgentServiceWithCollaborators(): array
     $llmConfig  = new LLMConfigService($security, []);
 
     $instanceResolver    = new AgentToolInstanceResolver();
-    $overrideResolver    = new AgentToolOverrideResolver($toolConfig, $llmConfig, $instanceResolver);
+    $overrideResolver    = new AgentToolOverrideResolver($toolConfig, $llmConfig, new LLMConfigPreferences(), $instanceResolver);
     $operationsResolver  = new AgentToolOperationsResolver($instanceResolver, $overrideResolver);
 
     // ToolSettings service consumes the same three collaborators — kept on
@@ -111,6 +112,7 @@ describe('AgentToolOverrideResolver::parseOverrideFlag', function (): void {
         $fresh = new AgentToolOverrideResolver(
             new ToolConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new NullLogger(), []),
             new LLMConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), []),
+            new LLMConfigPreferences(),
             new AgentToolInstanceResolver(),
         );
 
@@ -122,6 +124,7 @@ describe('AgentToolOverrideResolver::parseOverrideFlag', function (): void {
         $fresh = new AgentToolOverrideResolver(
             new ToolConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new NullLogger(), []),
             new LLMConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), []),
+            new LLMConfigPreferences(),
             new AgentToolInstanceResolver(),
         );
         expect($fresh->parseOverrideFlag(['enabled' => null], 'enabled'))->toBeNull();
@@ -131,6 +134,7 @@ describe('AgentToolOverrideResolver::parseOverrideFlag', function (): void {
         $fresh = new AgentToolOverrideResolver(
             new ToolConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new NullLogger(), []),
             new LLMConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), []),
+            new LLMConfigPreferences(),
             new AgentToolInstanceResolver(),
         );
 
@@ -150,6 +154,7 @@ describe('AgentToolOverrideResolver::extractOverrideFlag', function (): void {
         $fresh = new AgentToolOverrideResolver(
             new ToolConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new NullLogger(), []),
             new LLMConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), []),
+            new LLMConfigPreferences(),
             new AgentToolInstanceResolver(),
         );
 
@@ -173,6 +178,7 @@ describe('AgentToolOverrideResolver::extractOverrideFlag', function (): void {
         $fresh = new AgentToolOverrideResolver(
             new ToolConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new NullLogger(), []),
             new LLMConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), []),
+            new LLMConfigPreferences(),
             new AgentToolInstanceResolver(),
         );
 
@@ -216,6 +222,7 @@ describe('AgentToolOperationsResolver::getToolsOperations', function (): void {
         $overrideResolver   = new AgentToolOverrideResolver(
             new ToolConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new NullLogger(), []),
             new LLMConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), []),
+            new LLMConfigPreferences(),
             $instanceResolver,
         );
         $operationsResolver = new AgentToolOperationsResolver($instanceResolver, $overrideResolver);

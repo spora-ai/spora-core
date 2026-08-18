@@ -464,11 +464,43 @@ final class AgentTool extends AbstractTool
      */
     private function createAgent(int $callingAgentId, array $arguments, ?PrincipalContext $context): ToolResult
     {
+        $prepared = $this->prepareCreateAgentInputs($callingAgentId, $arguments, $context);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
+        }
+        [$userId, $principalId, $data] = $prepared;
+
+        $agent = $this->agentService->createAgent($userId, $data, $principalId);
+        $intro = "Created agent #{$agent->id} ('{$agent->name}'). "
+               . "Configure tools next with `configure_tools(agent_id: {$agent->id}, tools: [...])` "
+               . "and verify with `read_agent(agent_id: {$agent->id})`.";
+        $manifest = $this->manifest->toArray($agent);
+        return ToolResult::ok(
+            $intro . "\n\n" . AgentManifestRenderer::markdown($manifest),
+            $manifest,
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     * @return array{0: int, 1: int, 2: array<string, mixed>}|ToolResult
+     */
+    private function prepareCreateAgentInputs(int $callingAgentId, array $arguments, ?PrincipalContext $context): array|ToolResult
+    {
         $callingAgent = $this->agentService->getAgentByAgentId($callingAgentId);
         if ($callingAgent === null) {
             return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
+        return $this->resolveCreateAgentInputs($callingAgent, $callingAgentId, $arguments, $context);
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     * @return array{0: int, 1: int, 2: array<string, mixed>}|ToolResult
+     */
+    private function resolveCreateAgentInputs(Agent $callingAgent, int $callingAgentId, array $arguments, ?PrincipalContext $context): array|ToolResult
+    {
         $data = $this->payloadValidator->validateCreateAgentPayload($arguments);
         if ($data instanceof ToolResult) {
             return $data;
@@ -488,15 +520,7 @@ final class AgentTool extends AbstractTool
             return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
-        $agent = $this->agentService->createAgent($userId, $data, $principalId);
-        $intro = "Created agent #{$agent->id} ('{$agent->name}'). "
-               . "Configure tools next with `configure_tools(agent_id: {$agent->id}, tools: [...])` "
-               . "and verify with `read_agent(agent_id: {$agent->id})`.";
-        $manifest = $this->manifest->toArray($agent);
-        return ToolResult::ok(
-            $intro . "\n\n" . AgentManifestRenderer::markdown($manifest),
-            $manifest,
-        );
+        return [$userId, $principalId, $data];
     }
 
     /**

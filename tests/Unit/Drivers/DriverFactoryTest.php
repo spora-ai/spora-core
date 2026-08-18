@@ -36,7 +36,7 @@ function createConfigForTest(
     $config->principal_id = $isGlobal ? null : createUserPrincipalPublic($userId);
     $config->name = $name;
     $config->driver_class = $driverClass;
-    $config->settings = json_encode($service->encodeSettings($driverClass, $settings));
+    $config->settings = encodeLlmSettingsForTest($driverClass, $settings);
     $config->is_default = $isDefault;
     $config->is_global = $isGlobal;
     $config->save();

@@ -7,7 +7,7 @@ use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\PrincipalPreference;
-use Spora\Services\LLMConfigService;
+use Spora\Services\LLMConfigPreferences;
 
 const PREF_TEST_USER_PASSWORD = 'Password1!';
 const PREF_TEST_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
@@ -28,26 +28,21 @@ afterEach(function (): void {
 
 function makePreferenceService(): array
 {
-    $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-    $security = new Spora\Core\SecurityManager($key);
-    $service = new LLMConfigService($security, [
-        OpenAICompatibleDriver::class,
-        AnthropicCompatibleDriver::class,
-    ]);
+    $preferences = new LLMConfigPreferences();
 
-    return [$service, $security];
+    return [$preferences];
 }
 
-function createConfigForService(LLMConfigService $service, string $name, int $userId, bool $isGlobal = false): LLMDriverConfiguration
+function createConfigForService(LLMConfigPreferences $preferences, string $name, int $userId, bool $isGlobal = false): LLMDriverConfiguration
 {
     $config = new LLMDriverConfiguration();
     $config->principal_id = $isGlobal ? null : createUserPrincipalPublic($userId);
     $config->name = $name;
     $config->driver_class = OpenAICompatibleDriver::class;
-    $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, [
+    $config->settings = encodeLlmSettingsForTest(OpenAICompatibleDriver::class, [
         'api_key' => 'sk-test-' . uniqid(),
         'model' => 'gpt-4o',
-    ]));
+    ]);
     $config->is_global = $isGlobal;
     $config->save();
 

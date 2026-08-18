@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Spora\Core\SecurityManager;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
@@ -33,19 +32,15 @@ function makePreferencesService(): array
 
 function makeGlobalDefaultConfig(string $name): LLMDriverConfiguration
 {
-    $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
-    $security = new SecurityManager($key);
-    $service = new Spora\Services\LLMConfigService($security, [OpenAICompatibleDriver::class]);
-
     $config = new LLMDriverConfiguration();
     $config->principal_id = null;
     $config->is_global = true;
     $config->name = $name;
     $config->driver_class = OpenAICompatibleDriver::class;
-    $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, [
+    $config->settings = encodeLlmSettingsForTest(OpenAICompatibleDriver::class, [
         'api_key' => 'sk-' . uniqid(),
         'model' => 'gpt-4o',
-    ]));
+    ]);
     $config->save();
 
     return $config;

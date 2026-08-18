@@ -75,7 +75,7 @@ describe('LLMConfigController::show', function (): void {
         $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'Showable Config';
         $config->driver_class = OpenAICompatibleDriver::class;
-        $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'm']));
+        $config->settings = encodeLlmSettingsForTest(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'm']);
         $config->save();
 
         $response = $controller->show((int) $config->id);
@@ -165,7 +165,7 @@ describe('LLMConfigController::update', function (): void {
         $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'Old Name';
         $config->driver_class = OpenAICompatibleDriver::class;
-        $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']));
+        $config->settings = encodeLlmSettingsForTest(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']);
         $config->save();
 
         $request = jsonRequest('PUT', "/api/v1/llm-configs/{$config->id}", ['name' => 'New Name']);
@@ -194,7 +194,7 @@ describe('LLMConfigController::update', function (): void {
         $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'For Update Bad JSON';
         $config->driver_class = OpenAICompatibleDriver::class;
-        $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']));
+        $config->settings = encodeLlmSettingsForTest(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']);
         $config->save();
 
         $request = Request::create("/api/v1/llm-configs/{$config->id}", 'PUT', [], [], [], ['CONTENT_TYPE' => 'application/json'], 'not json');
@@ -213,7 +213,7 @@ describe('LLMConfigController::destroy', function (): void {
         $config->principal_id = createUserPrincipalPublic($userId);
         $config->name = 'ToDelete';
         $config->driver_class = OpenAICompatibleDriver::class;
-        $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']));
+        $config->settings = encodeLlmSettingsForTest(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']);
         $config->save();
 
         $response = $controller->destroy((int) $config->id);
@@ -244,7 +244,7 @@ describe('LLMConfigController::setDefault', function (): void {
         $config->is_global = true;
         $config->name = 'Default Global Config';
         $config->driver_class = OpenAICompatibleDriver::class;
-        $config->settings = json_encode($service->encodeSettings(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']));
+        $config->settings = encodeLlmSettingsForTest(OpenAICompatibleDriver::class, ['api_key' => 'k', 'model' => 'gpt-4o']);
         $config->save();
 
         $response = $controller->setDefault((int) $config->id);

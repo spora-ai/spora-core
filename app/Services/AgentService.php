@@ -103,33 +103,52 @@ final class AgentService implements AgentServiceInterface
             return (int) $this->principalService->ensureUserPrincipal($userId)->id;
         }
 
+        return $this->materialiseLegacyUserPrincipal($userId);
+    }
+
+    private function materialiseLegacyUserPrincipal(int $userId): int
+    {
+        $existing = $this->findLegacyUserPrincipal($userId);
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        try {
+            return $this->insertLegacyUserPrincipal($userId);
+        } catch (PDOException) {
+            return $this->recoverLegacyUserPrincipal($userId);
+        }
+    }
+
+    private function findLegacyUserPrincipal(int $userId): ?int
+    {
         $existing = Capsule::table('principals')
             ->where('type', Principal::TYPE_USER)
             ->where('user_id', $userId)
             ->value('id');
-        if ($existing !== null) {
-            return (int) $existing;
-        }
 
-        try {
-            return (int) Capsule::table('principals')->insertGetId([
-                'type'       => Principal::TYPE_USER,
-                'user_id'    => $userId,
-                'created_at' => date(self::DATETIME_FORMAT),
-                'updated_at' => date(self::DATETIME_FORMAT),
-            ]);
-        } catch (PDOException) {
-            $existing = Capsule::table('principals')
-                ->where('type', Principal::TYPE_USER)
-                ->where('user_id', $userId)
-                ->value('id');
-            if ($existing !== null) {
-                return (int) $existing;
-            }
-            throw new PrincipalMaterialisationException(
-                'PrincipalService not wired — could not materialise a user-principal.',
-            );
+        return $existing !== null ? (int) $existing : null;
+    }
+
+    private function insertLegacyUserPrincipal(int $userId): int
+    {
+        return (int) Capsule::table('principals')->insertGetId([
+            'type'       => Principal::TYPE_USER,
+            'user_id'    => $userId,
+            'created_at' => date(self::DATETIME_FORMAT),
+            'updated_at' => date(self::DATETIME_FORMAT),
+        ]);
+    }
+
+    private function recoverLegacyUserPrincipal(int $userId): int
+    {
+        $existing = $this->findLegacyUserPrincipal($userId);
+        if ($existing !== null) {
+            return $existing;
         }
+        throw new PrincipalMaterialisationException(
+            'PrincipalService not wired — could not materialise a user-principal.',
+        );
     }
 
     /**

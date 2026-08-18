@@ -82,7 +82,8 @@ test('getLlmToolSettings respects user-specific settings cascade', function (): 
 
     // Set user-level override
     $agent = Agent::find($agentId);
-    $service->putUserSettings(TestTool::class, $agent->user_id, [
+    $userAdapter = makeUserAdapter($service);
+    $userAdapter->putUserSettings(TestTool::class, $agent->user_id, [
         'allowed_target_agents' => ['user-override-agent'],
     ]);
 

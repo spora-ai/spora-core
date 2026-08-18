@@ -44,20 +44,21 @@ test('putGlobalSettings preserves password field when sentinel *** is sent', fun
 
 test('putUserSettings preserves password field when sentinel *** is sent', function () {
     [$service, $authService] = makeServiceForSentinel();
+    $userAdapter = makeUserAdapter($service);
     $userId = $authService->register('sentinel-user@example.com', 'Password1!', 'Sentinel User');
 
     // Initial save with real password
-    $service->putUserSettings(TestTool::class, $userId, [
+    $userAdapter->putUserSettings(TestTool::class, $userId, [
         'api_key' => 'real-user-secret',
     ]);
 
     // Update with sentinel
-    $service->putUserSettings(TestTool::class, $userId, [
+    $userAdapter->putUserSettings(TestTool::class, $userId, [
         'api_key' => '***',
     ]);
 
     // Should be preserved
-    $saved = $service->getUserSettings(TestTool::class, $userId);
+    $saved = $userAdapter->getUserSettings(TestTool::class, $userId);
     expect($saved['api_key'])->toBe('real-user-secret');
 });
 

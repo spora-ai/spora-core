@@ -95,16 +95,11 @@ final class GroupController
             return $userId;
         }
 
-        $body = $this->safeDecodeJson($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
+        $created = $this->createGroupFromRequest($request, (int) $userId);
+        if ($created instanceof JsonResponse) {
+            return $created;
         }
-
-        $validated = $this->validateCreateBody($body);
-        if ($validated instanceof JsonResponse) {
-            return $validated;
-        }
-        [$name, $description] = $validated;
+        [$name, $description] = $created;
 
         $group = $this->groupService->createGroup((int) $userId, $name, $description);
 
@@ -115,37 +110,80 @@ final class GroupController
     }
 
     /**
+     * @return array{0: string, 1: ?string}|JsonResponse
+     */
+    private function createGroupFromRequest(Request $request, int $userId): array|JsonResponse
+    {
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
+
+        return $this->validateCreateBody($body);
+    }
+
+    /**
      * PATCH /api/v1/groups/{id}
      *
      * Admin-only via middleware.
      */
     public function update(int $id, Request $request): JsonResponse
     {
+        $resolved = $this->resolveGroupUpdate($id, $request);
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
+        }
+        [$group, $updates] = $resolved;
+
+        if ($updates !== []) {
+            $group = $this->applyGroupRowUpdate($id, $group, $updates);
+        }
+
+        $userId = $this->authService->currentUserId() ?? 0;
+        return new JsonResponse(['data' => ['group' => $this->groupResource($group, $userId)]]);
+    }
+
+    /**
+     * @return array{0: Group, 1: array<string, mixed>}|JsonResponse
+     */
+    private function resolveGroupUpdate(int $id, Request $request): array|JsonResponse
+    {
         $group = Group::find($id);
         if ($group === null) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
+        $changes = $this->resolveGroupUpdateChanges($request);
+        if ($changes instanceof JsonResponse) {
+            return $changes;
+        }
+
+        return [$group, $changes];
+    }
+
+    /**
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function resolveGroupUpdateChanges(Request $request): array|JsonResponse
+    {
         $body = $this->safeDecodeJson($request);
         if ($body instanceof JsonResponse) {
             return $body;
         }
 
-        $updates = $this->buildUpdatePayload($body);
-        if ($updates instanceof JsonResponse) {
-            return $updates;
-        }
+        return $this->buildUpdatePayload($body);
+    }
 
-        if ($updates !== []) {
-            $updates['updated_at'] = date('Y-m-d H:i:s');
-            \Illuminate\Database\Capsule\Manager::table('groups')
-                ->where('id', $id)
-                ->update($updates);
-            $group = Group::findOrFail($id);
-        }
-
-        $userId = $this->authService->currentUserId() ?? 0;
-        return new JsonResponse(['data' => ['group' => $this->groupResource($group, $userId)]]);
+    /**
+     * @param array<string, mixed> $updates
+     */
+    private function applyGroupRowUpdate(int $id, Group $group, array $updates): Group
+    {
+        $updates['updated_at'] = date('Y-m-d H:i:s');
+        \Illuminate\Database\Capsule\Manager::table('groups')
+            ->where('id', $id)
+            ->update($updates);
+        return Group::findOrFail($id);
     }
 
     /**
@@ -162,15 +200,24 @@ final class GroupController
             return $userId;
         }
 
+        $error = $this->attemptDelete($id, (int) $userId);
+        if ($error !== null) {
+            return $error;
+        }
+
+        return new JsonResponse(['data' => ['deleted' => true]]);
+    }
+
+    private function attemptDelete(int $id, int $userId): ?JsonResponse
+    {
         try {
-            $this->groupService->deleteGroup($id, (int) $userId);
+            $this->groupService->deleteGroup($id, $userId);
         } catch (GroupMembershipRuleException $e) {
             return $this->forbidden('FORBIDDEN', $e->getMessage());
         } catch (PrincipalHasDependentsException $e) {
             return $this->conflictWithDependents($e->getMessage(), $e->agentIds);
         }
-
-        return new JsonResponse(['data' => ['deleted' => true]]);
+        return null;
     }
 
     /**

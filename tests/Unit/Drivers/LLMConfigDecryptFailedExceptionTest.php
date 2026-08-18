@@ -53,10 +53,10 @@ function makeBrokenDecryptConfigId(): int
     $config->principal_id    = createUserPrincipalPublic(1);
     $config->name            = 'Broken Config';
     $config->driver_class    = OpenAICompatibleDriver::class;
-    $config->settings        = json_encode($serviceA->encodeSettings(
+    $config->settings        = encodeLlmSettingsForTest(
         OpenAICompatibleDriver::class,
         ['api_key' => 'sk-key', 'model' => 'gpt-4o', 'base_url' => 'https://api.openai.com/v1'],
-    ));
+    );
     $config->is_default = false;
     $config->is_global  = false;
     $config->save();

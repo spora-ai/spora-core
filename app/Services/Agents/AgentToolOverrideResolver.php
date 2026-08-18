@@ -7,6 +7,7 @@ namespace Spora\Services\Agents;
 use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\ToolConfigService;
@@ -23,6 +24,7 @@ final class AgentToolOverrideResolver
     public function __construct(
         private readonly ToolConfigService $toolConfig,
         private readonly LLMConfigService $llmConfig,
+        private readonly LLMConfigPreferences $preferences,
         private readonly AgentToolInstanceResolver $instanceResolver,
         ?PrincipalResolver $principalResolver = null,
     ) {
@@ -91,7 +93,7 @@ final class AgentToolOverrideResolver
      */
     private function resolveLlmConfigurationOverride(Agent $agent): array
     {
-        $config = $this->llmConfig->getEffectiveConfigForAgent($agent);
+        $config = $this->preferences->getEffectiveConfigForAgent($agent);
         return $config !== null ? $this->maskLlmConfig($config) : [];
     }
 

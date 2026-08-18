@@ -165,9 +165,10 @@ test('agent override takes precedence over user settings', function () {
     $userId = $authService->register('agent-v-user@example.com', 'Password1!', 'Agent V User');
 
     $toolConfig = makeToolConfigServiceForMerge();
+    $userAdapter = makeUserAdapter($toolConfig);
     $agentId = createAgentForMerge($userId);
 
-    $toolConfig->putUserSettings(TestTool::class, $userId, [
+    $userAdapter->putUserSettings(TestTool::class, $userId, [
         'api_key' => 'user-value',
     ]);
 
@@ -203,13 +204,14 @@ test('user settings take precedence over global settings', function () {
     $userId = $authService->register('user-v-global@example.com', 'Password1!', 'User V Global');
 
     $toolConfig = makeToolConfigServiceForMerge();
+    $userAdapter = makeUserAdapter($toolConfig);
     $agentId = createAgentForMerge($userId);
 
     $toolConfig->putGlobalSettings(TestTool::class, [
         'api_key' => 'global-value',
     ]);
 
-    $toolConfig->putUserSettings(TestTool::class, $userId, [
+    $userAdapter->putUserSettings(TestTool::class, $userId, [
         'api_key' => 'user-value',
     ]);
 
@@ -234,9 +236,10 @@ test('agent override falls back to user when global not set', function () {
     $userId = $authService->register('fallback-user@example.com', 'Password1!', 'Fallback User');
 
     $toolConfig = makeToolConfigServiceForMerge();
+    $userAdapter = makeUserAdapter($toolConfig);
     $agentId = createAgentForMerge($userId);
 
-    $toolConfig->putUserSettings(TestTool::class, $userId, [
+    $userAdapter->putUserSettings(TestTool::class, $userId, [
         'api_key' => 'user-value',
     ]);
 

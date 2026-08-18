@@ -76,15 +76,12 @@ final class AgentController
             $columns = array_values(array_intersect($requested, self::SELECTABLE_COLUMNS));
             if ($columns !== []) {
                 $principalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
-                if ($principalIds === []) {
-                    // Caller has no principals — likely a freshly-registered
-                    // user whose principal hasn't been materialised yet.
-                    // Materialise the user-principal on the fly so the picker
-                    // doesn't render empty even though ownership will work
-                    // going forward.
-                    if ($this->principalService !== null) {
-                        $principalIds = [(int) $this->principalService->ensureUserPrincipal($userId)->id];
-                    }
+                // Caller may have no principals — likely a freshly-registered
+                // user whose principal hasn't been materialised yet. Materialise
+                // the user-principal on the fly so the picker doesn't render
+                // empty even though ownership will work going forward.
+                if ($principalIds === [] && $this->principalService !== null) {
+                    $principalIds = [(int) $this->principalService->ensureUserPrincipal($userId)->id];
                 }
                 $agents = Agent::whereIn('principal_id', $principalIds)
                     ->orderBy('name')
@@ -152,30 +149,53 @@ final class AgentController
      */
     private function resolvePrincipalIdForCreate(int $userId, array $body): ?int
     {
+        $requested = $this->requestedPrincipalId($body);
+        if ($requested === null) {
+            return null;
+        }
+
+        return $this->authoriseRequestedPrincipalId($userId, $requested);
+    }
+
+    /**
+     * @param  array<string, mixed> $body
+     */
+    private function requestedPrincipalId(array $body): ?int
+    {
         if (!array_key_exists('principal_id', $body) || $body['principal_id'] === null) {
             return null;
         }
-
         $requested = (int) $body['principal_id'];
-        if ($requested <= 0) {
-            return null;
-        }
+        return $requested > 0 ? $requested : null;
+    }
 
-        if ($this->authService->isAdmin()) {
-            return $requested;
-        }
-
+    private function authoriseRequestedPrincipalId(int $userId, int $requested): ?int
+    {
         if ($this->principalService === null) {
             return null;
         }
 
-        if (!$this->principalService->callerControlsPrincipal($userId, $requested)) {
-            return $this->authService->currentUserId() !== null
-                ? (int) $this->principalService->ensureUserPrincipal($userId)->id
-                : null;
+        if ($this->callerMayTargetPrincipal($userId, $requested)) {
+            return $requested;
         }
 
-        return $requested;
+        return $this->fallbackPrincipalId($userId);
+    }
+
+    private function callerMayTargetPrincipal(int $userId, int $principalId): bool
+    {
+        if ($this->authService->isAdmin()) {
+            return true;
+        }
+        return $this->principalService->callerControlsPrincipal($userId, $principalId);
+    }
+
+    private function fallbackPrincipalId(int $userId): ?int
+    {
+        if ($this->authService->currentUserId() === null) {
+            return null;
+        }
+        return (int) $this->principalService->ensureUserPrincipal($userId)->id;
     }
 
     /**
@@ -443,15 +463,11 @@ final class AgentController
      */
     public function transferPrincipal(int $agentId, Request $request): JsonResponse
     {
-        $targetPrincipalId = (int) ($request->request->get('principal_id') ?? 0);
-        if ($targetPrincipalId <= 0) {
-            return $this->error('VALIDATION_ERROR', 'principal_id is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        $setup = $this->resolveTransferSetup($agentId, $request);
+        if ($setup instanceof JsonResponse) {
+            return $setup;
         }
-
-        $callerUserId = $this->authService->currentUserId();
-        if ($callerUserId === null) {
-            return $this->unauthenticated();
-        }
+        [$targetPrincipalId, $callerUserId] = $setup;
 
         $transferResult = $this->runTransfer($agentId, $targetPrincipalId, $callerUserId);
         if ($transferResult instanceof JsonResponse) {
@@ -469,6 +485,24 @@ final class AgentController
                 ),
             ],
         ]);
+    }
+
+    /**
+     * @return array{0: int, 1: int}|JsonResponse
+     */
+    private function resolveTransferSetup(int $agentId, Request $request): array|JsonResponse
+    {
+        $targetPrincipalId = (int) ($request->request->get('principal_id') ?? 0);
+        if ($targetPrincipalId <= 0) {
+            return $this->error('VALIDATION_ERROR', 'principal_id is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $callerUserId = $this->authService->currentUserId();
+        if ($callerUserId === null) {
+            return $this->unauthenticated();
+        }
+
+        return [$targetPrincipalId, $callerUserId];
     }
 
     /**
