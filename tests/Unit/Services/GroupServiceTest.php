@@ -163,3 +163,175 @@ describe('GroupService::groupForPrincipal', function (): void {
         expect(true)->toBeTrue();
     });
 });
+
+describe('GroupService::addMember extended paths', function (): void {
+    it('rejects owner-promotion by an admin caller', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'GP1');
+        $admin = bootAuth($auth, 'gp-admin@example.com', GROUP_TEST_PASSWORD);
+        $invitee = bootAuth($auth, 'gp-invitee@example.com', GROUP_TEST_PASSWORD);
+        $service->addMember($group->id, $admin, 'admin', $ownerId);
+
+        expect(fn() => $service->addMember($group->id, $invitee, 'owner', $admin))
+            ->toThrow(GroupMembershipRuleException::class);
+    });
+
+    it('rejects adding a user who is already a member', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'GP2');
+        $invitee = bootAuth($auth, 'gp-invitee2@example.com', GROUP_TEST_PASSWORD);
+        $service->addMember($group->id, $invitee, 'member', $ownerId);
+
+        expect(fn() => $service->addMember($group->id, $invitee, 'admin', $ownerId))
+            ->toThrow(GroupMembershipRuleException::class);
+    });
+
+    it('rejects an unknown role', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'GP3');
+        $invitee = bootAuth($auth, 'gp-invitee3@example.com', GROUP_TEST_PASSWORD);
+
+        expect(fn() => $service->addMember($group->id, $invitee, 'queen', $ownerId))
+            ->toThrow(InvalidArgumentException::class);
+    });
+
+    it('allows an admin to add a member', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'GP4');
+        $admin = bootAuth($auth, 'gp-admin4@example.com', GROUP_TEST_PASSWORD);
+        $invitee = bootAuth($auth, 'gp-invitee4@example.com', GROUP_TEST_PASSWORD);
+        $service->addMember($group->id, $admin, 'admin', $ownerId);
+
+        $service->addMember($group->id, $invitee, 'member', $admin);
+
+        $membership = GroupMembership::where('group_id', $group->id)->where('user_id', $invitee)->first();
+        expect($membership->role)->toBe('member');
+    });
+});
+
+describe('GroupService::changeMemberRole extended paths', function (): void {
+    it('rejects an unknown new role', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'CR1');
+        $target = bootAuth($auth, 'cr-target@example.com', GROUP_TEST_PASSWORD);
+        $service->addMember($group->id, $target, 'member', $ownerId);
+
+        expect(fn() => $service->changeMemberRole($group->id, $target, 'queen', $ownerId))
+            ->toThrow(InvalidArgumentException::class);
+    });
+
+    it('rejects a non-member caller', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'CR2');
+        $target = bootAuth($auth, 'cr-target2@example.com', GROUP_TEST_PASSWORD);
+        $stranger = bootAuth($auth, 'cr-stranger@example.com', GROUP_TEST_PASSWORD);
+        $service->addMember($group->id, $target, 'member', $ownerId);
+
+        expect(fn() => $service->changeMemberRole($group->id, $target, 'admin', $stranger))
+            ->toThrow(GroupMembershipRuleException::class);
+    });
+
+    it('rejects a non-existent target member', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'CR3');
+        $stranger = bootAuth($auth, 'cr-stranger3@example.com', GROUP_TEST_PASSWORD);
+
+        expect(fn() => $service->changeMemberRole($group->id, $stranger, 'admin', $ownerId))
+            ->toThrow(GroupMembershipRuleException::class);
+    });
+
+    it('rejects demoting the last owner', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'CR4');
+
+        expect(fn() => $service->changeMemberRole($group->id, $ownerId, 'admin', $ownerId))
+            ->toThrow(GroupMembershipRuleException::class);
+    });
+
+    it('lets an admin demote another member but not touch owners', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'CR5');
+        $admin = bootAuth($auth, 'cr-admin@example.com', GROUP_TEST_PASSWORD);
+        $target = bootAuth($auth, 'cr-target5@example.com', GROUP_TEST_PASSWORD);
+        $service->addMember($group->id, $admin, 'admin', $ownerId);
+        $service->addMember($group->id, $target, 'admin', $ownerId);
+
+        $service->changeMemberRole($group->id, $target, 'member', $admin);
+        expect((string) GroupMembership::where('group_id', $group->id)->where('user_id', $target)->value('role'))->toBe('member');
+    });
+});
+
+describe('GroupService::removeMember extended paths', function (): void {
+    it('is idempotent when the target is not a member', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'RM1');
+        $stranger = bootAuth($auth, 'rm-stranger@example.com', GROUP_TEST_PASSWORD);
+
+        $service->removeMember($group->id, $stranger, $ownerId);
+        expect(GroupMembership::where('group_id', $group->id)->where('user_id', $stranger)->count())->toBe(0);
+    });
+
+    it('rejects a non-member caller', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'RM2');
+        $target = bootAuth($auth, 'rm-target@example.com', GROUP_TEST_PASSWORD);
+        $stranger = bootAuth($auth, 'rm-stranger2@example.com', GROUP_TEST_PASSWORD);
+        $service->addMember($group->id, $target, 'member', $ownerId);
+
+        expect(fn() => $service->removeMember($group->id, $target, $stranger))
+            ->toThrow(GroupMembershipRuleException::class);
+    });
+
+    it('rejects removing the last owner', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'RM3');
+
+        expect(fn() => $service->removeMember($group->id, $ownerId, $ownerId))
+            ->toThrow(GroupMembershipRuleException::class);
+    });
+
+    it('lets an admin remove a member', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'RM4');
+        $admin = bootAuth($auth, 'rm-admin@example.com', GROUP_TEST_PASSWORD);
+        $target = bootAuth($auth, 'rm-target4@example.com', GROUP_TEST_PASSWORD);
+        $service->addMember($group->id, $admin, 'admin', $ownerId);
+        $service->addMember($group->id, $target, 'member', $ownerId);
+
+        $service->removeMember($group->id, $target, $admin);
+        expect(GroupMembership::where('group_id', $group->id)->where('user_id', $target)->count())->toBe(0);
+    });
+});
+
+describe('GroupService::deleteGroup extended paths', function (): void {
+    it('drops the group without the principal row when no principal exists', function (): void {
+        [$service, $principalService, $ownerId] = makeGroupServiceWithOwner();
+        $auth = bootAuthLayer();
+        $ownerId2 = bootAuth($auth, 'dg-no-p-owner@example.com', GROUP_TEST_PASSWORD);
+        $group = $service->createGroup($ownerId2, 'DG-NP');
+        Capsule::table('principals')->where('group_id', $group->id)->delete();
+
+        $service->deleteGroup($group->id, $ownerId2);
+        expect(Capsule::table('groups')->where('id', $group->id)->count())->toBe(0);
+    });
+
+    it('throws PrincipalHasDependentsException when the group still owns agents', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $ownerId2 = bootAuth($auth, 'dg-busy-owner@example.com', GROUP_TEST_PASSWORD);
+        $group = $service->createGroup($ownerId2, 'DG-BUSY');
+        $principal = $principalService->ensureGroupPrincipal((int) $group->id);
+        Capsule::table('agents')->insert([
+            'principal_id'         => (int) $principal->id,
+            'name'                 => 'Stuck',
+            'description'          => null,
+            'llm_driver_config_id' => null,
+            'max_steps'            => 10,
+            'is_active'            => 1,
+            'created_at'           => date('Y-m-d H:i:s'),
+            'updated_at'           => date('Y-m-d H:i:s'),
+        ]);
+
+        expect(fn() => $service->deleteGroup($group->id, $ownerId2))
+            ->toThrow(Spora\Services\Exceptions\PrincipalHasDependentsException::class);
+    });
+});
