@@ -366,7 +366,62 @@ describe('AgentOverrideController::getOperationOverride / patchOperationOverride
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
     });
+});
 
+describe('AgentController::transferPrincipal', function (): void {
+    test('returns 422 when principal_id is missing', function (): void {
+        [$controller, , , $authService] = makeAgentControllers();
+        bootAuth($authService);
+
+        $request = new Request([], [], [], [], [], ['CONTENT_TYPE' => 'application/x-www-form-urlencoded'], '');
+        $response = $controller->transferPrincipal(1, $request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+    });
+
+    test('returns 422 when principal_id is zero', function (): void {
+        [$controller, , , $authService] = makeAgentControllers();
+        bootAuth($authService);
+
+        $request = new Request([], ['principal_id' => '0'], [], [], [], ['CONTENT_TYPE' => 'application/x-www-form-urlencoded'], 'principal_id=0');
+        $response = $controller->transferPrincipal(1, $request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+    });
+
+    test('returns 401 when caller is not logged in', function (): void {
+        [$controller] = makeAgentControllers();
+
+        $request = new Request([], ['principal_id' => '7'], [], [], [], ['CONTENT_TYPE' => 'application/x-www-form-urlencoded'], 'principal_id=7');
+        $response = $controller->transferPrincipal(1, $request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+    });
+
+    test('returns 404 when the agent does not exist', function (): void {
+        [$controller, , , $authService] = makeAgentControllers();
+        bootAuth($authService);
+
+        $request = new Request([], ['principal_id' => '7'], [], [], [], ['CONTENT_TYPE' => 'application/x-www-form-urlencoded'], 'principal_id=7');
+        $response = $controller->transferPrincipal(999999, $request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
+    });
+
+    test('returns 200 with the transferred agent', function (): void {
+        [$controller, , , $authService] = makeAgentControllers();
+        bootAuth($authService);
+
+        $request = new Request([], ['principal_id' => '7'], [], [], [], ['CONTENT_TYPE' => 'application/x-www-form-urlencoded'], 'principal_id=7');
+        $response = $controller->transferPrincipal(1, $request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['agent']['id'])->toBe(1);
+    });
+});
+
+describe('AgentController::patchOperationOverride', function (): void {
     test('patchOperationOverride returns 400 on invalid JSON', function (): void {
         [, , $controller, $authService] = makeAgentControllers();
         bootAuth($authService);
