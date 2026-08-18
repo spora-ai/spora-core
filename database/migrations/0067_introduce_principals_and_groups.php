@@ -27,15 +27,29 @@ use Illuminate\Database\Schema\Blueprint;
  *      (deleting a principal does not cascade-orphan agents; controllers do
  *      a pre-flight and surface a structured 409).
  *
- * Why two phases (DDL outside transaction + DML inside):
+ * Why three phases (DDL outside transaction + DML inside + column swap
+ * outside transaction):
  *
- *   SQLite cannot `ALTER TABLE … ADD FOREIGN KEY` inside a transaction
- *   (`PRAGMA foreign_keys` is a no-op inside transactions; Laravel's
- *   SQLiteGrammar detects `foreign`/`dropForeign` commands and rebuilds
- *   the affected table, which fails when FK state is being toggled
- *   transactionally). The DDL steps run outside any transaction;
- *   the DML backfills run inside a single transaction so a partial
- *   backfill cannot leave the database in an inconsistent state.
+ *   Phase 1 (new tables) and Phase 3 (the `user_id → principal_id` column
+ *   swap on the settings tables and on `agents`) run **outside** any
+ *   transaction. Phase 2 (DML backfill of `user_id` to `principal_id`)
+ *   runs inside a single transaction so a partial backfill cannot leave
+ *   the database in an inconsistent state.
+ *
+ *   The reason Phase 3 cannot be in a transaction: SQLite documents that
+ *   `PRAGMA foreign_keys = OFF` is a **no-op inside a transaction** (see
+ *   https://sqlite.org/pragma.html#pragma_foreign_keys — "This pragma is
+ *   a no-op within a transaction; foreign key constraint enforcement may
+ *   only be enabled or disabled when there is no pending BEGIN or
+ *   SAVEPOINT"). The original implementation of this migration wrapped
+ *   the rebuild in the same `Capsule::connection()->transaction(...)`
+ *   block as the DML backfill, so the `PRAGMA foreign_keys = OFF` it used
+ *   to suppress cascade during `DROP TABLE agents` was a no-op — every
+ *   table that held `FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE
+ *   CASCADE` (`tasks`, `task_history`, `tool_calls`, `agent_tools`, and the
+ *   override / scheduled-run / usage / picture tables) was cascade-deleted
+ *   alongside the agents. Phase 3 here explicitly runs without a
+ *   transaction so the PRAGMA takes effect and the dependent rows survive.
  *
  * Forward-only rationale:
  *
@@ -106,10 +120,14 @@ return new class extends Migration
         }
 
         // ── Phase 2: DML backfill (transactional) ───────────────────────────
+        //
+        // Only the user → principal_id inserts run inside the transaction.
+        // The settings tables and agents user_id → principal_id column swap
+        // happens in Phase 3 (outside the transaction) so the
+        // `PRAGMA foreign_keys = OFF` it relies on actually takes effect.
 
-        Capsule::connection()->transaction(function () use ($schema, $driver): void {
-            // 2a) Bulk-insert one user-principal per existing user.
-            if ($driver === 'mysql' || $driver === 'mariadb') {
+        Capsule::connection()->transaction(static function (): void {
+            if (Capsule::connection()->getDriverName() === 'mysql' || Capsule::connection()->getDriverName() === 'mariadb') {
                 Capsule::statement(
                     'INSERT IGNORE INTO principals (type, user_id, created_at, updated_at) '
                     . "SELECT 'user', id, NOW(), NOW() FROM users"
@@ -120,316 +138,275 @@ return new class extends Migration
                     . "SELECT 'user', id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM users"
                 );
             }
+        });
 
-            // 2b) Settings tables: add principal_id (nullable), backfill,
-            //     promote to NOT NULL, add FK. We process in a fixed order
-            //     — renaming user_preferences happens in the third step.
-            $settingsTables = [
-                'llm_driver_configurations',
-                'tool_user_settings',
-                'principal_preferences',
-                'user_preferences',
-            ];
+        // Rename user_preferences → principal_preferences first, so the
+        // settings-tables loop below can address the table by its new name.
+        if ($schema->hasTable('user_preferences') && !$schema->hasTable('principal_preferences')) {
+            $schema->rename('user_preferences', 'principal_preferences');
+        }
 
-            // Rename FIRST if it hasn't been renamed yet. After rename we
-            // work with principal_preferences; the user_preferences entry
-            // in the list above is then a no-op because the table won't
-            // exist when we reach the iteration.
-            if ($schema->hasTable('user_preferences') && !$schema->hasTable('principal_preferences')) {
-                $schema->rename('user_preferences', 'principal_preferences');
+        // ── Phase 3: Column swap (no transaction; PRAGMA needs to take effect)
+        //
+        // For each settings table, and finally for `agents`:
+        //   1. ADD COLUMN principal_id (nullable) + index
+        //   2. UPDATE principal_id = user-principal (backfill, idempotent)
+        //   3. Promote principal_id to NOT NULL (except llm_driver_configurations)
+        //   4. Add FK to principals (on principal_id)
+        //   5. Drop the `user_id` column + its FK via a SQLite table-rebuild
+        //      (snapshot → DROP → CREATE → INSERT) wrapped in
+        //      `PRAGMA foreign_keys = OFF/ON`. The PRAGMA only takes effect
+        //      outside a transaction; doing this in Phase 2 would be a no-op
+        //      and the DROP would cascade-delete every dependent row.
+
+        $swapSettingsTables = ['llm_driver_configurations', 'tool_user_settings', 'principal_preferences'];
+
+        foreach ($swapSettingsTables as $effective) {
+            if (!$schema->hasTable($effective)) {
+                continue;
             }
+            $hasUserId = $schema->hasColumn($effective, 'user_id');
 
-            // 2c) For each effective settings table, add principal_id if
-            //     missing, backfill, set NOT NULL, add FK.
-            $processed = [];
-            foreach (['llm_driver_configurations', 'tool_user_settings', 'principal_preferences'] as $effective) {
-                if ($processed[$effective] ?? false) {
-                    continue;
-                }
-                if (!$schema->hasTable($effective)) {
-                    continue;
-                }
-
-                // Some settings tables (e.g. global LLM configs) have
-                // nullable user_id; skip them gracefully if so.
-                $hasUserId = $schema->hasColumn($effective, 'user_id');
-
-                // Add principal_id column nullable.
-                if (!$schema->hasColumn($effective, 'principal_id')) {
-                    $idxName = "idx_{$effective}_principal_id";
-                    $schema->table($effective, static function (Blueprint $t) use ($idxName): void {
-                        $t->unsignedBigInteger('principal_id')->nullable()->after('id');
-                        $t->index('principal_id', $idxName);
-                    });
-                }
-
-                // Backfill principal_id for rows whose user_id points at a
-                // user-principal. NULL user_id rows (e.g. global configs)
-                // keep principal_id NULL — promoted rows will be checked
-                // against the backend's XOR rule (`Principal::saving` event).
-                if ($hasUserId) {
-                    $pairs = Capsule::table('principals')
-                        ->where('type', 'user')
-                        ->pluck('id', 'user_id')
-                        ->all();
-                    foreach ($pairs as $userId => $principalId) {
-                        Capsule::table($effective)
-                            ->where('user_id', $userId)
-                            ->update(['principal_id' => $principalId]);
-                    }
-                }
-
-                // Promote principal_id to NOT NULL + add FK. If any non-null
-                // rows remain without a principal, the FK creation will fail
-                // with a "FOREIGN KEY constraint failed" error which the
-                // operator must address before re-running the migration.
-                // EXCEPT llm_driver_configurations — the global-config row
-                // (the unique `is_global = true` config) must keep
-                // `principal_id = null` per the model XOR invariant
-                // (LLMDriverConfiguration::validateGlobalXor).
-                if ($effective !== 'llm_driver_configurations') {
-                    $schema->table($effective, static function (Blueprint $t) use ($effective): void {
-                        $t->unsignedBigInteger('principal_id')->nullable(false)->change();
-                    });
-                }
-
-                $fkName = "fk_{$effective}_principal_id";
-                $schema->table($effective, static function (Blueprint $t) use ($effective, $fkName): void {
-                    $t->foreign('principal_id', $fkName)
-                        ->references('id')->on('principals')
-                        ->cascadeOnDelete();
-                });
-
-                // Drop the old user_id column to keep the schema clean. The
-                // settings cascade (ToolConfigService, LLMConfigPersistence)
-                // has already been updated to key on principal_id, so no
-                // join against user_id is needed.
-                if ($hasUserId) {
-                    if ($driver === 'mysql' || $driver === 'mariadb') {
-                        Capsule::statement("ALTER TABLE {$effective} DROP FOREIGN KEY fk_{$effective}_user_id");
-                        Capsule::statement("ALTER TABLE {$effective} DROP INDEX fk_{$effective}_user_id");
-                    } else {
-                        // SQLite: rebuild the table manually so both the FK
-                        // and the column can be dropped in a single atomic
-                        // operation. Laravel's schema builder can't drop
-                        // an FK without knowing its name; the easier path
-                        // here is to do a table rebuild with the column
-                        // omitted.
-
-                        // 1. Snapshot all rows.
-                        $rows = Capsule::table($effective)->get()->all();
-
-                        // 2. Map column list excluding user_id. Each column
-                        //    def includes its PRIMARY KEY clause inline so the
-                        //    composite CREATE TABLE stays valid SQL.
-                        $originalColumns = Capsule::select(
-                            "PRAGMA table_info('{$effective}')"
-                        );
-                        $columnsToKeep = [];
-                        $columnDefs = [];
-                        foreach ($originalColumns as $col) {
-                            if ($col->name === 'user_id') {
-                                continue;
-                            }
-                            $columnsToKeep[] = $col->name;
-                            $isPk = ((int) $col->pk) > 0;
-                            $dflt = '';
-                            if ($col->dflt_value !== null && strtoupper((string) $col->dflt_value) !== 'NULL') {
-                                $dflt = ' DEFAULT ' . $col->dflt_value;
-                            }
-                            $columnDefs[] = sprintf(
-                                '"%s" %s%s%s%s',
-                                $col->name,
-                                $col->type,
-                                ($col->notnull && !$isPk ? ' NOT NULL' : ''),
-                                $dflt,
-                                ($isPk ? ' PRIMARY KEY' : '')
-                            );
-                        }
-                        // Pull FKs excluding user_id references, regrouped by id.
-                        $originalFks = Capsule::select("PRAGMA foreign_key_list('{$effective}')");
-                        $fkDefs = [];
-                        foreach ($originalFks as $fk) {
-                            if ($fk->from === 'user_id') {
-                                continue;
-                            }
-                            $key = $fk->id;
-                            if (!isset($fkDefs[$key])) {
-                                $fkDefs[$key] = [
-                                    'table' => $fk->table,
-                                    'columns' => [],
-                                    'references' => [],
-                                ];
-                            }
-                            $fkDefs[$key]['columns'][] = $fk->from;
-                            $fkDefs[$key]['references'][] = $fk->to;
-                        }
-
-                        // 3. Build the new CREATE TABLE statement.
-                        $sql = "CREATE TABLE {$effective} (\n  ";
-                        $sql .= implode(",\n  ", $columnDefs);
-                        foreach ($fkDefs as $def) {
-                            $cols = implode(', ', array_map(static fn($c) => "\"{$c}\"", $def['columns']));
-                            $refs = implode(', ', array_map(static fn($r) => "\"{$r}\"", $def['references']));
-                            $sql .= ",\n  FOREIGN KEY ({$cols}) REFERENCES \"{$def['table']}\" ({$refs})";
-                        }
-                        $sql .= "\n)";
-
-                        Capsule::statement('PRAGMA foreign_keys = OFF');
-                        Capsule::statement("DROP TABLE {$effective}");
-                        Capsule::statement($sql);
-                        $colsList = implode(', ', array_map(static fn($c) => "\"{$c}\"", $columnsToKeep));
-                        // Re-insert preserved rows.
-                        if ($rows !== []) {
-                            // We assemble the values via a manual INSERT.
-                            $insertSql = "INSERT INTO {$effective} ({$colsList}) VALUES ";
-                            $valueRows = [];
-                            $bindings = [];
-                            foreach ($rows as $row) {
-                                $placeholders = [];
-                                foreach ($columnsToKeep as $c) {
-                                    $placeholders[] = '?';
-                                    $bindings[] = $row->{$c} ?? null;
-                                }
-                                $valueRows[] = '(' . implode(',', $placeholders) . ')';
-                            }
-                            $insertSql .= implode(',', $valueRows);
-                            Capsule::insert($insertSql, $bindings);
-                        }
-                        Capsule::statement('PRAGMA foreign_keys = ON');
-                    }
-                }
-
-                $processed[$effective] = true;
-                unset($processed);
-            }
-
-            // 2d) Agents: add principal_id, backfill, NOT NULL, drop
-            //     user_id FK + column, add principal_id FK with RESTRICT.
-            if (!$schema->hasColumn('agents', 'principal_id')) {
-                $schema->table('agents', static function (Blueprint $t): void {
+            // 1) Add principal_id column nullable.
+            if (!$schema->hasColumn($effective, 'principal_id')) {
+                $idxName = "idx_{$effective}_principal_id";
+                $schema->table($effective, static function (Blueprint $t) use ($idxName): void {
                     $t->unsignedBigInteger('principal_id')->nullable()->after('id');
-                    $t->index('principal_id', 'idx_agents_principal_id');
+                    $t->index('principal_id', $idxName);
                 });
             }
 
-            // Backfill: every agent's principal_id = its user-principal's id. We
-            // iterate the principal map rather than emitting a single JOIN-
-            // UPDATE because Eloquent's SQLite UPDATE-with-join path emits
-            // unquoted identifiers that strict engines reject.
-            $userPrincipals = Capsule::table('principals')
-                ->where('type', 'user')
-                ->pluck('id', 'user_id')
-                ->all();
-            foreach ($userPrincipals as $userId => $principalId) {
-                Capsule::table('agents')
-                    ->where('user_id', $userId)
-                    ->update(['principal_id' => $principalId]);
+            // 2) Backfill principal_id from user-principals. Rows with a
+            //    NULL user_id (e.g. global LLM configs) keep principal_id NULL.
+            if ($hasUserId) {
+                $pairs = Capsule::table('principals')
+                    ->where('type', 'user')
+                    ->pluck('id', 'user_id')
+                    ->all();
+                foreach ($pairs as $userId => $principalId) {
+                    Capsule::table($effective)
+                        ->where('user_id', $userId)
+                        ->update(['principal_id' => $principalId]);
+                }
             }
 
-            $missing = (int) Capsule::table('agents')->whereNull('principal_id')->count();
-            if ($missing > 0) {
-                throw new \RuntimeException(
-                    "principal_id backfill left {$missing} agent row(s) orphaned — "
-                    . 'every agents.user_id must resolve to a principal.user_id before this '
-                    . 'migration can proceed.'
-                );
+            // 3) Promote principal_id to NOT NULL — except llm_driver_configurations
+            //    which holds the global config row (is_global = true) and must
+            //    keep principal_id = null per LLMDriverConfiguration::validateGlobalXor.
+            if ($effective !== 'llm_driver_configurations') {
+                $schema->table($effective, static function (Blueprint $t): void {
+                    $t->unsignedBigInteger('principal_id')->nullable(false)->change();
+                });
             }
 
-            $schema->table('agents', static function (Blueprint $t): void {
-                $t->unsignedBigInteger('principal_id')->nullable(false)->change();
+            // 4) Add the principal_id FK. Done BEFORE the table rebuild so
+            //    Phase 5's CREATE TABLE re-emits this FK alongside the
+            //    backfilled data.
+            $fkName = "fk_{$effective}_principal_id";
+            $schema->table($effective, static function (Blueprint $t) use ($fkName): void {
+                $t->foreign('principal_id', $fkName)
+                    ->references('id')->on('principals')
+                    ->cascadeOnDelete();
             });
 
-            if ($schema->hasColumn('agents', 'user_id')) {
+            // 5) Drop the user_id column + its FK. For SQLite, the column
+            //    appears in a foreign key definition (`fk_…_user_id`) and
+            //    `ALTER TABLE … DROP COLUMN` refuses to drop a column that's
+            //    referenced by a FK; the only way is to rebuild the table
+            //    via DROP + CREATE. For MySQL/MariaDB we drop the FK + index
+            //    by name and then drop the column.
+            if ($hasUserId) {
                 if ($driver === 'mysql' || $driver === 'mariadb') {
-                    Capsule::statement('ALTER TABLE agents DROP FOREIGN KEY fk_agents_user_id');
-                    Capsule::statement('ALTER TABLE agents DROP INDEX fk_agents_user_id');
-                    $schema->table('agents', static function (Blueprint $t): void {
+                    Capsule::statement("ALTER TABLE {$effective} DROP FOREIGN KEY fk_{$effective}_user_id");
+                    Capsule::statement("ALTER TABLE {$effective} DROP INDEX fk_{$effective}_user_id");
+                    $schema->table($effective, static function (Blueprint $t): void {
                         $t->dropColumn('user_id');
                     });
                 } else {
-                    // Same SQLite manual table-rebuild as the settings
-                    // tables above: snapshot rows, rebuild without the
-                    // column (and the FK that references it), restore.
-                    $effective = 'agents';
-                    $rows = Capsule::table($effective)->get()->all();
-                    $originalColumns = Capsule::select("PRAGMA table_info('{$effective}')");
-                    $columnsToKeep = [];
-                    $columnDefs = [];
-                    foreach ($originalColumns as $col) {
-                        if ($col->name === 'user_id') {
-                            continue;
-                        }
-                        $columnsToKeep[] = $col->name;
-                        $isPk = ((int) $col->pk) > 0;
-                        $dflt = '';
-                        if ($col->dflt_value !== null && strtoupper((string) $col->dflt_value) !== 'NULL') {
-                            $dflt = ' DEFAULT ' . $col->dflt_value;
-                        }
-                        $columnDefs[] = sprintf(
-                            '"%s" %s%s%s%s',
-                            $col->name,
-                            $col->type,
-                            ($col->notnull && !$isPk ? ' NOT NULL' : ''),
-                            $dflt,
-                            ($isPk ? ' PRIMARY KEY' : '')
-                        );
-                    }
-                    $originalFks = Capsule::select("PRAGMA foreign_key_list('{$effective}')");
-                    $fkDefs = [];
-                    foreach ($originalFks as $fk) {
-                        if ($fk->from === 'user_id') {
-                            continue;
-                        }
-                        $key = $fk->id;
-                        if (!isset($fkDefs[$key])) {
-                            $fkDefs[$key] = [
-                                'table' => $fk->table,
-                                'columns' => [],
-                                'references' => [],
-                            ];
-                        }
-                        $fkDefs[$key]['columns'][] = $fk->from;
-                        $fkDefs[$key]['references'][] = $fk->to;
-                    }
-                    $sql = "CREATE TABLE {$effective} (\n  ";
-                    $sql .= implode(",\n  ", $columnDefs);
-                    foreach ($fkDefs as $def) {
-                        $cols = implode(', ', array_map(static fn($c) => "\"{$c}\"", $def['columns']));
-                        $refs = implode(', ', array_map(static fn($r) => "\"{$r}\"", $def['references']));
-                        $sql .= ",\n  FOREIGN KEY ({$cols}) REFERENCES \"{$def['table']}\" ({$refs})";
-                    }
-                    $sql .= "\n)";
-
-                    Capsule::statement('PRAGMA foreign_keys = OFF');
-                    Capsule::statement("DROP TABLE {$effective}");
-                    Capsule::statement($sql);
-                    if ($rows !== []) {
-                        $colsList = implode(', ', array_map(static fn($c) => "\"{$c}\"", $columnsToKeep));
-                        $insertSql = "INSERT INTO {$effective} ({$colsList}) VALUES ";
-                        $valueRows = [];
-                        $bindings = [];
-                        foreach ($rows as $row) {
-                            $placeholders = [];
-                            foreach ($columnsToKeep as $c) {
-                                $placeholders[] = '?';
-                                $bindings[] = $row->{$c} ?? null;
-                            }
-                            $valueRows[] = '(' . implode(',', $placeholders) . ')';
-                        }
-                        $insertSql .= implode(',', $valueRows);
-                        Capsule::insert($insertSql, $bindings);
-                    }
-                    Capsule::statement('PRAGMA foreign_keys = ON');
+                    $this->rebuildSqliteTableWithoutUserId($effective);
                 }
             }
+        }
 
+        // ── Phase 3b: agents table — same dance as the settings tables ─────
+        if (!$schema->hasColumn('agents', 'principal_id')) {
             $schema->table('agents', static function (Blueprint $t): void {
-                $t->foreign('principal_id', 'fk_agents_principal_id')
-                    ->references('id')->on('principals')
-                    ->restrictOnDelete();
+                $t->unsignedBigInteger('principal_id')->nullable()->after('id');
+                $t->index('principal_id', 'idx_agents_principal_id');
             });
+        }
+
+        $userPrincipals = Capsule::table('principals')
+            ->where('type', 'user')
+            ->pluck('id', 'user_id')
+            ->all();
+        foreach ($userPrincipals as $userId => $principalId) {
+            Capsule::table('agents')
+                ->where('user_id', $userId)
+                ->update(['principal_id' => $principalId]);
+        }
+
+        $missing = (int) Capsule::table('agents')->whereNull('principal_id')->count();
+        if ($missing > 0) {
+            throw new \RuntimeException(
+                "principal_id backfill left {$missing} agent row(s) orphaned — "
+                . 'every agents.user_id must resolve to a principal.user_id before this '
+                . 'migration can proceed.'
+            );
+        }
+
+        $schema->table('agents', static function (Blueprint $t): void {
+            $t->unsignedBigInteger('principal_id')->nullable(false)->change();
         });
+
+        if ($schema->hasColumn('agents', 'user_id')) {
+            if ($driver === 'mysql' || $driver === 'mariadb') {
+                Capsule::statement('ALTER TABLE agents DROP FOREIGN KEY fk_agents_user_id');
+                Capsule::statement('ALTER TABLE agents DROP INDEX fk_agents_user_id');
+                $schema->table('agents', static function (Blueprint $t): void {
+                    $t->dropColumn('user_id');
+                });
+            } else {
+                $this->rebuildSqliteTableWithoutUserId('agents');
+            }
+        }
+
+        $schema->table('agents', static function (Blueprint $t): void {
+            $t->foreign('principal_id', 'fk_agents_principal_id')
+                ->references('id')->on('principals')
+                ->restrictOnDelete();
+        });
+    }
+
+    /**
+     * Rebuild a SQLite table without its `user_id` column. The table is
+     * snapshotted, dropped, re-created (the `user_id` column and the FK
+     * that references `users.id` are omitted), and the snapshot is
+     * INSERTed back.
+     *
+     * This MUST be called with no active transaction. SQLite documents
+     * `PRAGMA foreign_keys = OFF` as a no-op inside a transaction
+     * (https://sqlite.org/pragma.html pragma_foreign_keys) — without
+     * that pragma taking effect, the DROP TABLE would cascade-delete
+     * every row in tables that hold `FOREIGN KEY (…_id) REFERENCES
+     * {$thisTable}(id) ON DELETE CASCADE` (for `agents`, that is `tasks`,
+     * `task_history`, `tool_calls`, `agent_tools`, the override tables,
+     * `scheduled_runs`, `scheduled_runs_next`, `agent_prompt_templates`,
+     * `agent_pictures`, and `usage` — operator data destroyed in the
+     * original implementation).
+     *
+     * The PRAGMA state is verified immediately after `OFF` and after
+     * `ON`; if either pragma is silently ignored (e.g. the connection
+     * pool gave us a different connection than the one we set the
+     * pragma on) the method throws so the operator sees the failure
+     * before the DROP fires rather than after a silent data loss.
+     *
+     * Public so {@see \Tests\Feature\Database\IntroducePrincipalsAndGroupsMigrationTest}
+     * can drive a regression test that creates a `users` ↔ `agents` ↔
+     * `tasks` chain with a CASCADE FK from `tasks.agent_id` to `agents.id`,
+     * invokes this method on a fresh SQLite db, and asserts the
+     * `tasks` row survives the rebuild.
+     */
+    public function rebuildSqliteTableWithoutUserId(string $effective): void
+    {
+        $rows = Capsule::table($effective)->get()->all();
+
+        $originalColumns = Capsule::select("PRAGMA table_info('{$effective}')");
+        $columnsToKeep = [];
+        $columnDefs = [];
+        foreach ($originalColumns as $col) {
+            if ($col->name === 'user_id') {
+                continue;
+            }
+            $columnsToKeep[] = $col->name;
+            $isPk = ((int) $col->pk) > 0;
+            $dflt = '';
+            if ($col->dflt_value !== null && strtoupper((string) $col->dflt_value) !== 'NULL') {
+                $dflt = ' DEFAULT ' . $col->dflt_value;
+            }
+            $columnDefs[] = sprintf(
+                '"%s" %s%s%s%s',
+                $col->name,
+                $col->type,
+                ($col->notnull && !$isPk ? ' NOT NULL' : ''),
+                $dflt,
+                ($isPk ? ' PRIMARY KEY' : '')
+            );
+        }
+
+        $originalFks = Capsule::select("PRAGMA foreign_key_list('{$effective}')");
+        $fkDefs = [];
+        foreach ($originalFks as $fk) {
+            if ($fk->from === 'user_id') {
+                continue;
+            }
+            $key = $fk->id;
+            if (!isset($fkDefs[$key])) {
+                $fkDefs[$key] = [
+                    'table' => $fk->table,
+                    'columns' => [],
+                    'references' => [],
+                ];
+            }
+            $fkDefs[$key]['columns'][] = $fk->from;
+            $fkDefs[$key]['references'][] = $fk->to;
+        }
+
+        $sql = "CREATE TABLE {$effective} (\n  ";
+        $sql .= implode(",\n  ", $columnDefs);
+        foreach ($fkDefs as $def) {
+            $cols = implode(', ', array_map(static fn($c) => "\"{$c}\"", $def['columns']));
+            $refs = implode(', ', array_map(static fn($r) => "\"{$r}\"", $def['references']));
+            $sql .= ",\n  FOREIGN KEY ({$cols}) REFERENCES \"{$def['table']}\" ({$refs})";
+        }
+        $sql .= "\n)";
+
+        Capsule::statement('PRAGMA foreign_keys = OFF');
+        $actual = (int) Capsule::selectOne('PRAGMA foreign_keys')->foreign_keys;
+        if ($actual !== 0) {
+            throw new \RuntimeException(sprintf(
+                'PRAGMA foreign_keys = OFF did not take effect on the %s connection '
+                . '(read back %d, expected 0). The DROP TABLE in the next step would '
+                . 'cascade-delete dependent rows; aborting the migration rather than '
+                . 'risk silent data loss. This usually means Capsule handed a different '
+                . 'connection to the PRAGMA and the DROP — file an issue with the full '
+                . 'stack trace.',
+                $effective,
+                $actual,
+            ));
+        }
+
+        Capsule::statement("DROP TABLE {$effective}");
+        Capsule::statement($sql);
+
+        if ($rows !== []) {
+            $colsList = implode(', ', array_map(static fn($c) => "\"{$c}\"", $columnsToKeep));
+            $insertSql = "INSERT INTO {$effective} ({$colsList}) VALUES ";
+            $valueRows = [];
+            $bindings = [];
+            foreach ($rows as $row) {
+                $placeholders = [];
+                foreach ($columnsToKeep as $c) {
+                    $placeholders[] = '?';
+                    $bindings[] = $row->{$c} ?? null;
+                }
+                $valueRows[] = '(' . implode(',', $placeholders) . ')';
+            }
+            $insertSql .= implode(',', $valueRows);
+            Capsule::insert($insertSql, $bindings);
+        }
+
+        Capsule::statement('PRAGMA foreign_keys = ON');
+        $actual = (int) Capsule::selectOne('PRAGMA foreign_keys')->foreign_keys;
+        if ($actual !== 1) {
+            throw new \RuntimeException(sprintf(
+                'PRAGMA foreign_keys = ON did not take effect on the %s connection '
+                . '(read back %d, expected 1). Aborting the migration; re-run after the '
+                . 'connection-pool issue is resolved.',
+                $effective,
+                $actual,
+            ));
+        }
     }
 
     public function down(): void
