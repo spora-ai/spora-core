@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use DateTimeInterface;
+use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
 use Spora\Auth\AuthService;
+use Spora\Models\Agent;
 use Spora\Models\Group;
 use Spora\Models\GroupMembership;
+use Spora\Models\Principal;
+use Spora\Services\AgentResource;
 use Spora\Services\Exceptions\GroupMembershipRuleException;
 use Spora\Services\Exceptions\PrincipalHasDependentsException;
 use Spora\Services\GroupService;
@@ -34,6 +38,7 @@ use Symfony\Component\HttpFoundation\Response;
 final class GroupController
 {
     use JsonControllerHelpers;
+    use GroupAuthorizationTrait;
 
     private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
     private const MSG_GROUP_NOT_FOUND = 'Group not found.';
@@ -180,7 +185,7 @@ final class GroupController
     private function applyGroupRowUpdate(int $id, array $updates): Group
     {
         $updates['updated_at'] = date('Y-m-d H:i:s');
-        \Illuminate\Database\Capsule\Manager::table('groups')
+        Capsule::table('groups')
             ->where('id', $id)
             ->update($updates);
         return Group::findOrFail($id);
@@ -206,6 +211,47 @@ final class GroupController
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);
+    }
+
+    /**
+     * GET /api/v1/groups/{id}/agents
+     *
+     * Lists every agent whose `principal_id` matches the group's
+     * group-principal. The principal axis is the bug-prone bit — the
+     * caller's user-principal id (`PrincipalResolver::principalForUser`)
+     * must NOT be used here, or the response would leak the caller's
+     * own agents under the group's url.
+     */
+    public function agents(int $id): JsonResponse
+    {
+        $userId = $this->requireUserOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
+        }
+
+        $group = Group::find($id);
+        if ($group === null || !$this->callerCanSeeGroup($id, (int) $userId)) {
+            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
+        }
+
+        $principal = $this->principalService->principalForGroup($id);
+        if ($principal === null) {
+            return new JsonResponse(['data' => ['agents' => [], 'total' => 0]]);
+        }
+
+        $rows = Agent::where('principal_id', (int) $principal->id)
+            ->orderByDesc('created_at')
+            ->get();
+
+        return new JsonResponse([
+            'data' => [
+                'agents' => array_map(
+                    static fn(Agent $a): array => AgentResource::toArray($a),
+                    $rows->all(),
+                ),
+                'total' => $rows->count(),
+            ],
+        ]);
     }
 
     private function attemptDelete(int $id, int $userId): ?JsonResponse
@@ -322,7 +368,10 @@ final class GroupController
      * Wire-format group row. The `principal_id` is included so the
      * dashboard can hand it back to the agent transfer endpoint;
      * `role` is the caller's role in this group (or null when not a
-     * member).
+     * member). The four `*_count` fields back the overview cards on
+     * the group's settings landing page; they read against the group's
+     * principal so an admin's global config rows don't leak into the
+     * group's `llm_config_count`.
      *
      * @return array<string, mixed>
      */
@@ -342,9 +391,28 @@ final class GroupController
             'principal_id'        => $principal !== null ? (int) $principal->id : null,
             'caller_role'         => $role !== null ? (string) $role : null,
             'member_count'        => $memberCount,
+            'agent_count'         => $this->countForPrincipal($principal, 'agents', 'principal_id'),
+            'llm_config_count'    => $this->countForPrincipal($principal, 'llm_driver_configurations', 'principal_id'),
+            'tool_setting_count'  => $this->countForPrincipal($principal, 'tool_user_settings', 'principal_id'),
             'created_at'          => $group->created_at->format(DateTimeInterface::ATOM),
             'updated_at'          => $group->updated_at->format(DateTimeInterface::ATOM),
         ];
+    }
+
+    /**
+     * Count rows for the group-principal on one of the settings tables
+     * (or `agents`). Returns 0 when the principal has not been
+     * materialised yet so a freshly-created group with no principal row
+     * doesn't 500. The single `where('principal_id', …)->count()` runs
+     * against a covering index (`idx_{table}_principal_id` per
+     * migration 0067), so four calls per `show()` are O(1) per group.
+     */
+    private function countForPrincipal(?Principal $principal, string $table, string $column): int
+    {
+        if ($principal === null) {
+            return 0;
+        }
+        return (int) Capsule::table($table)->where($column, (int) $principal->id)->count();
     }
 
     /**

@@ -63,7 +63,10 @@ use Spora\Http\ConfigController;
 use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\GroupController;
+use Spora\Http\GroupLlmConfigsController;
 use Spora\Http\GroupMemberController;
+use Spora\Http\GroupPreferencesController;
+use Spora\Http\GroupToolsController;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -999,6 +1002,30 @@ final class ContainerDefinitions
                 return new GroupMemberController(
                     $c->get(AuthService::class),
                     $c->get(GroupService::class),
+                );
+            },
+
+            GroupPreferencesController::class => static function (ContainerInterface $c): GroupPreferencesController {
+                return new GroupPreferencesController(
+                    $c->get(AuthService::class),
+                    $c->get(PrincipalService::class),
+                );
+            },
+
+            GroupToolsController::class => static function (ContainerInterface $c): GroupToolsController {
+                return new GroupToolsController(
+                    $c->get(AuthService::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(ToolConfigService::class),
+                );
+            },
+
+            GroupLlmConfigsController::class => static function (ContainerInterface $c): GroupLlmConfigsController {
+                return new GroupLlmConfigsController(
+                    $c->get(AuthService::class),
+                    $c->get(LLMConfigServiceInterface::class),
+                    $c->get(LlmConfigValidator::class),
+                    $c->get(PrincipalService::class),
                 );
             },
 
