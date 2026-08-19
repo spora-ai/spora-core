@@ -1129,6 +1129,7 @@ final class ContainerDefinitions
                     $c->get(AgentTemplateImporter::class),
                     $c->get(AgentTemplateExporter::class),
                     $c->get(AgentServiceInterface::class),
+                    $c->get(PrincipalService::class),
                 );
             },
 

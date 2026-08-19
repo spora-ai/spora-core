@@ -13,6 +13,7 @@ use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Auth\AuthService;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -39,6 +40,7 @@ final class AgentTemplateController
         private readonly AgentTemplateImporter $importer,
         private readonly AgentTemplateExporter $exporter,
         private readonly AgentServiceInterface $agentService,
+        private readonly ?PrincipalService $principalService = null,
     ) {}
 
     /**
@@ -128,7 +130,7 @@ final class AgentTemplateController
             } else {
                 $validation = $this->validator->validate($body);
                 $response = $validation->isValid()
-                    ? $this->buildImportSuccess($userId, $body)
+                    ? $this->buildImportSuccess($userId, $body, $this->resolvePrincipalIdForImport($userId, $body))
                     : $this->buildImportValidationError($validation);
             }
         }
@@ -139,9 +141,9 @@ final class AgentTemplateController
     /**
      * @param array<string, mixed> $body
      */
-    private function buildImportSuccess(int $userId, array $body): JsonResponse
+    private function buildImportSuccess(int $userId, array $body, ?int $principalId = null): JsonResponse
     {
-        $import = $this->importer->importPayload($userId, $body);
+        $import = $this->importer->importPayload($userId, $body, $principalId);
         return new JsonResponse(
             [
                 'data' => [
@@ -152,6 +154,36 @@ final class AgentTemplateController
             ],
             Response::HTTP_CREATED,
         );
+    }
+
+    /**
+     * Authorise the `principal_id` field on an import request the same way
+     * {@see AgentController::resolvePrincipalIdForCreate()} does for
+     * direct agent creation: caller must be admin OR control the named
+     * principal. Falls back to the caller's user-principal when the
+     * PrincipalService is unwired (legacy test path) or the caller
+     * fails the authorisation check.
+     *
+     * @param  array<string, mixed> $body
+     */
+    private function resolvePrincipalIdForImport(int $userId, array $body): ?int
+    {
+        $requested = $body['principal_id'] ?? null;
+        if ($requested === null || (int) $requested <= 0) {
+            return null;
+        }
+        $requested = (int) $requested;
+
+        if ($this->principalService === null) {
+            return null;
+        }
+
+        if ($this->auth->isAdmin()
+            || $this->principalService->callerControlsPrincipal($userId, $requested)) {
+            return $requested;
+        }
+
+        return (int) $this->principalService->ensureUserPrincipal($userId)->id;
     }
 
     private function buildImportValidationError(\Spora\AgentTemplates\ValidationResult $validation): JsonResponse
